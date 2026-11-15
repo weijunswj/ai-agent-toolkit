@@ -421,6 +421,31 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   assert.doesNotMatch(evaluate(enabled), /Checkpoint:/, 'gone after a later good checkpoint');
 });
 
+// Claude Code keeps a session-start text only up to 10,000 characters (else a 2,000-character
+// preview), and one Checkpoint line per failed session has no bound: the rules must stay whole.
+test('E3: many failed Checkpoint lines are counted, not listed, so the session line keeps the governed rules within the host limit', () => {
+  const root = tmp();
+  const sessionsDir = tmp();
+  const programmeDeps = { attentionDir: tmp(), sessionsDir, home: tmp(), mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => '2026-10-28T10:00:00.000Z' };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
+  const evaluate = () => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
+  const rules = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
+  for (let index = 0; index < 60; index += 1) {
+    const hash = checkpoint.sessionHash(`exec-${index}`);
+    checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: `g1-${index}`, repo_root: root, bound_at: 'x' }, { sessionsDir });
+    checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir });
+  }
+  const line = evaluate();
+  assert.equal(gate.SESSION_TEXT_LIMIT, 10000);
+  assert.ok(Buffer.byteLength(line, 'utf8') <= gate.SESSION_TEXT_LIMIT, `${Buffer.byteLength(line, 'utf8')} bytes`);
+  assert.equal(line.split(rules).length, 2, 'the whole governed rules text, once');
+  assert.match(line, /^Toolkit governance: ENABLED[^]*Attention: /);
+  const listed = (line.match(/Checkpoint: last turn's record failed/g) || []).length;
+  const more = Number((/Checkpoint: (\d+) more sessions here also failed their last turn's record \(left out to keep this text within the host's session-start limit\)/.exec(line) || [])[1]);
+  assert.ok(listed > 0, 'the first ones are still listed');
+  assert.equal(listed + more, 60, 'every failed session is listed or counted');
+});
+
 test('E3: sessionLine never reads the retired Windows task registry, whatever an old sweep task recorded', () => {
   const root = tmp();
   const home = tmp();

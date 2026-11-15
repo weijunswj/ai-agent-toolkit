@@ -125,7 +125,9 @@ function respond(event, input, options = {}) {
     if (cloud) {
       // The start folder's repository, or each repository cloned directly under it (a Projects
       // thread starts in /home/user); the governed rules come once for the ENABLED ones.
-      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding });
+      // The whole text, this cloud line included, stays within the host's session-start limit.
+      const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`${CLOUD_LINE}\n\n`, 'utf8');
+      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit });
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
