@@ -578,7 +578,7 @@ test('the generated CURRENT summary is slim: work in progress with its PR, gate 
     '',
     '**In progress**',
     '- #1 Task 1 · PR #541 · G1',
-    '- #2 Task 2 · PR #543 · G1 · waiting on you: your UAT on PR #543',
+    '- #2 Task 2 · PR #543 · G1 · then your UAT on PR #543', // the active G1 is the current step; the owed UAT comes after it
     '- #3 Task 3 · waiting on you: your decision',
     '- #4 Task 4 · waiting on you: blocked: needs the key',
     '',
