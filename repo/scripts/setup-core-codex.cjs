@@ -6,7 +6,7 @@
 // never requires the core back.
 
 const path = require('node:path');
-const readline = require('node:readline/promises');
+const ownerTerminal = require('./owner-terminal.cjs');
 const delegation = require('./codex-delegation-config.cjs');
 const { describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { CodexToolkitInstall, describeHookStates } = require('./toolkit-codex-install-state.cjs');
@@ -96,13 +96,9 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     if (preview.requires_user_confirmation && !args.approveCodexConfigProposal) {
       let answer = '';
       if (questionBank.remaining_input.length) answer = String(questionBank.remaining_input.shift()).trim().toLowerCase();
-      else if (process.stdin.isTTY) {
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        try { answer = (await rl.question('Type apply to approve this exact Codex configuration proposal: ')).trim().toLowerCase(); }
-        finally { rl.close(); }
-      }
+      else if (process.stdin.isTTY && await ownerTerminal.pressEnter('apply this exact Codex configuration proposal')) answer = 'apply';
       if (answer !== 'apply') {
-        throw new Error('Selected helper setting remains unapplied. Required action: review the exact technical proposal and answer `apply`, or pass --approve-codex-config-proposal.');
+        throw new Error('Selected helper setting remains unapplied. Required action: review the exact technical proposal, then press Enter at its prompt in your own terminal, answer `apply`, or pass --approve-codex-config-proposal.');
       }
       args.approveCodexConfigProposal = true;
     }

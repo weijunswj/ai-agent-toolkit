@@ -5,6 +5,8 @@
 // and saves its Client ID and private key on the repository.
 //
 //   node repo/scripts/toolkit-governance-app-setup.cjs --repo <owner/name> [--store <owner/name>]
+//   node repo/scripts/toolkit-governance-app-setup.cjs --repo <owner/name> --save both|variable|secret
+//        [--client-id <Client ID>] [--key-file <key file>.pem] [--replace]
 //
 // The owner types this in their own PowerShell or terminal, with gh signed in. It uses GitHub's App
 // manifest flow: it serves a one-page form on this computer's loopback address, the browser posts it
@@ -14,44 +16,64 @@
 // straight into the repository secret, then opens the App's install page and checks the
 // installation with the key. The key lives only in this process's memory: it is never printed,
 // written to disk or shown to an agent. Agents never run it:
-//   - it refuses in a shell a coding agent started (the markers `toolkit permissions --apply` uses);
-//   - it needs a terminal on stdin and stdout and the typed word; a pipe or file never answers.
+//   - it refuses in a shell a coding agent started (owner-terminal.cjs AGENT_MARKERS);
+//   - it needs a terminal on stdin and stdout and a fresh Enter; a pipe, a file or a pasted blank
+//     line never answers.
 // It stops, changing nothing, when the repository already holds the App's variable or secret:
 // `toolkit governance check` shows how to finish or replace an existing App.
+//
+// --save is the by-hand App's save step: it saves the Client ID and the key file's whole key on the
+// repository, the key piped into the secret on stdin, and reads both names back. It overwrites a
+// name already there only with --replace, which `toolkit governance check` prints only on its
+// replace route, after the agent has shown the owner what would be replaced.
 //
 // Exit codes: 0 set up and installed, 1 stopped or not yet installed, 2 usage.
 
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const http = require('node:http');
-const readline = require('node:readline');
+const fs = require('node:fs');
 const app = require('./toolkit-governance-app.cjs');
-const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
+const ownerTerminal = require('./owner-terminal.cjs');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
-const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT']);
-const CONFIRM = 'create';
+const { AGENT_MARKERS } = ownerTerminal;
+const CLIENT_ID = /^[A-Za-z0-9._-]{1,100}$/;
+const SAVES = Object.freeze(['both', 'variable', 'secret']);
 const SLUG = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
 const CODE = /^[A-Za-z0-9_-]{1,200}$/;
 // GitHub's code lasts one hour; the owner gets most of it to click Create.
 const WAIT_MS = 45 * 60 * 1000;
-const USAGE = 'Usage: node toolkit-governance-app-setup.cjs --repo <owner/name> [--store <owner/name>]';
+const USAGE = 'Usage: node toolkit-governance-app-setup.cjs --repo <owner/name> [--store <owner/name>], or --repo <owner/name> --save both|variable|secret [--client-id <Client ID>] [--key-file <key file>.pem] [--replace]';
 
 class SetupStop extends Error {
-  constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; }
+  constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); Object.assign(this, { stopped, next, exitCode }); }
 }
 
+const FLAGS = Object.freeze({
+  '--repo': ['repo', value => SLUG.test(value)],
+  '--store': ['store', value => SLUG.test(value)],
+  '--save': ['save', value => SAVES.includes(value)],
+  '--client-id': ['clientId', value => CLIENT_ID.test(value)],
+  '--key-file': ['keyFile', value => value.length > 0 && !value.startsWith('--')],
+});
+
 function parseArgs(argv) {
-  const options = { repo: null, store: null };
-  for (let index = 0; index < argv.length; index += 2) {
+  const options = { repo: null, store: null, save: null, clientId: null, keyFile: null, replace: false };
+  for (let index = 0; index < argv.length; index += 1) {
     const [flag, value] = [argv[index], argv[index + 1]];
-    const key = flag === '--repo' ? 'repo' : flag === '--store' ? 'store' : null;
-    if (!key || options[key] !== null || typeof value !== 'string' || !SLUG.test(value)) {
-      throw new SetupStop(`${JSON.stringify(flag)} is not --repo or --store with an owner/name.`, USAGE, 2);
-    }
+    if (flag === '--replace' && !options.replace) { options.replace = true; continue; }
+    const [key, valid] = FLAGS[flag] || [];
+    if (!key) throw new SetupStop(`${JSON.stringify(flag)} is not one of the flags below.`, USAGE, 2);
+    if (options[key] !== null) throw new SetupStop(`${flag} is given twice.`, USAGE, 2);
+    if (typeof value !== 'string' || !valid(value)) throw new SetupStop(`${flag} ${value === undefined ? 'has no value' : `has a value that does not fit: ${JSON.stringify(value)}`}.`, USAGE, 2);
     options[key] = value;
+    index += 1;
   }
   if (!options.repo) throw new SetupStop('--repo is missing.', USAGE, 2);
+  const wants = { clientId: ['both', 'variable'].includes(options.save), keyFile: ['both', 'secret'].includes(options.save) };
+  const extra = !options.save ? (options.clientId || options.keyFile || options.replace) : (options.store || Boolean(options.clientId) !== wants.clientId || Boolean(options.keyFile) !== wants.keyFile);
+  if (extra) throw new SetupStop('--save takes --client-id for the variable and --key-file for the secret, and no --store; --client-id, --key-file and --replace go only with --save.', USAGE, 2);
   return options;
 }
 
@@ -137,38 +159,67 @@ async function installed(slug, token, fetcher) {
   } catch { return null; }
 }
 
-// One question on the owner's terminal.
-function terminalAsk(question) {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    let answered = false;
-    rl.question(question, (answer) => { answered = true; resolve(answer); rl.close(); });
-    rl.on('close', () => { if (!answered) resolve(''); });
-  });
+// The by-hand App's save step: the Client ID and the key file's key on the repository, read back.
+async function saveValues(options, { read, spawn, say, confirm, look }) {
+  const { repo, save, clientId, keyFile, replace } = options;
+  const writes = save === 'both' ? ['variable', 'secret'] : [save];
+  const before = app.presence(repo, read);
+  if (before.variable === 'unverified' || before.secret === 'unverified') throw new SetupStop(`the variable and secret names on ${repo} could not be read.`, 'check gh is signed in as an account that administers it, then run this again. Nothing changed.');
+  const taken = writes.filter(key => before[key] === 'found');
+  if (taken.length && !replace) {
+    throw new SetupStop(`${repo} already has ${taken.map(key => app.APP[key]).join(' and ')}, so its App was kept.`, `ask your agent to run toolkit governance check in ${repo} and show you what would be replaced; only then run this again with --replace. Nothing changed.`);
+  }
+  let pem = null;
+  if (keyFile) {
+    try { pem = fs.readFileSync(keyFile, 'utf8'); } catch { pem = null; }
+    if (!pem || !pem.includes('PRIVATE KEY')) throw new SetupStop(`${keyFile} is not a readable private key file.`, 'give the .pem file the App\'s page downloaded. Nothing changed.');
+  }
+  say(ownerTerminal.title(`Save the governance App on ${repo}`, look));
+  say(ownerTerminal.facts(writes.map(key => [key === 'variable' ? 'Client ID' : 'Private key', `${app.APP[key]}${before[key] === 'found' ? ' (replaces the saved one)' : ''}${key === 'secret' ? `, from ${keyFile}` : ''}`]), look));
+  const verb = taken.length ? 'replace' : 'save';
+  if (await confirm(`${verb} ${writes.length === 2 ? 'both' : 'it'} on ${repo}`) !== true) throw new SetupStop('Enter was not pressed.', 'run it again when you are ready. Nothing changed.');
+  const variable = writes.includes('variable') ? ghRun(['variable', 'set', app.APP.variable, '--repo', repo, '--body', clientId], { spawn }) : { ok: true };
+  const secret = variable.ok && writes.includes('secret') ? ghRun(['secret', 'set', app.APP.secret, '--repo', repo], { spawn, input: pem }) : { ok: variable.ok };
+  const after = app.presence(repo, read);
+  if (!variable.ok || !secret.ok || writes.some(key => after[key] !== 'found')) {
+    throw new SetupStop(`the App's values did not read back on ${repo} (variable ${after.variable}, secret ${after.secret}).`, `run toolkit governance check in ${repo}, then run this again.`);
+  }
+  say(ownerTerminal.ok(`Saved on ${repo}: ${writes.map(key => app.APP[key]).join(' and ')}, read back.`, look));
+  if (keyFile) say(ownerTerminal.say(`Delete ${keyFile} now: it is the App's password and never expires.`, look));
+  if (taken.length) say(ownerTerminal.say('Then remove this repository from the old App\'s installation (Installed GitHub Apps, Configure, Repository access).', look));
+  return 0;
 }
 
 async function setup(argv, deps = {}) {
   const {
     environment = process.env, tty = () => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }),
-    ask = terminalAsk, say = line => process.stdout.write(`${line}\n`), spawn = childProcess.spawnSync,
+    say = line => process.stdout.write(`${line}\n`), spawn = childProcess.spawnSync,
     serve = serveLoopback, open = openInBrowser, fetcher = globalThis.fetch, wait = WAIT_MS, now = Date.now,
   } = deps;
-  const { repo, store } = parseArgs(argv);
-  const marker = AGENT_MARKERS.find(name => Boolean(environment[name]));
-  if (marker) throw new SetupStop(`this shell was started by a coding agent (${marker}). Agents never set up the governance App.`, 'the owner runs this in their own PowerShell or terminal, outside any agent. Nothing changed.');
-  const terminal = tty();
-  if (!terminal.stdin || !terminal.stdout) throw new SetupStop('this needs your own terminal (no pipe or file).', 'run it in your own PowerShell or terminal. Nothing changed.');
+  const confirm = deps.confirm || (effect => ownerTerminal.pressEnter(effect, { output: process.stdout, environment }));
+  const look = { stream: deps.say ? null : process.stdout, environment };
+  const options = parseArgs(argv);
+  const { repo, store } = options;
+  const refused = ownerTerminal.refusal({ environment, tty: tty() });
+  if (refused) throw new SetupStop(refused.stopped, refused.next);
   const read = { reader: args => app.ghReader(args, { spawn }) };
   const owner = app.ownerType(repo, read);
   if (!owner) throw new SetupStop(`gh could not read ${repo}.`, 'sign gh in (gh auth login) as an account that administers it, then run this again. Nothing changed.');
+  if (options.save) return saveValues(options, { read, spawn, say, confirm, look });
   const before = app.presence(repo, read);
   if (before.variable !== 'missing' || before.secret !== 'missing') {
     throw new SetupStop(`${repo} already holds part of an App setup, or its names could not be read (variable ${before.variable}, secret ${before.secret}).`, `run toolkit governance check in ${repo}: it shows how to finish or replace that App. Nothing changed.`);
   }
   const repositories = store ? `${repo} and ${store}` : repo;
-  say(`This makes ${repo}'s own governance GitHub App, ${app.appName(repo)}, with ${app.permissionText()} (webhook off, installable only on this account), saves its Client ID as ${app.APP.variable} and its private key as ${app.APP.secret} on ${repo}, then opens its install page for ${repositories}.`);
-  say('Your browser opens GitHub\'s Create GitHub App page with all of this filled in; you only click Create. The key goes straight from GitHub to the repository secret: it is never shown or saved on this computer.');
-  if (String(await ask(`Type ${CONFIRM} to go on: `)).trim() !== CONFIRM) throw new SetupStop(`you did not type ${CONFIRM}.`, 'run it again when you are ready. Nothing changed.');
+  say(ownerTerminal.title(`Set up ${repo}'s governance GitHub App`, look));
+  say(ownerTerminal.facts([
+    ['App', app.appName(repo)],
+    ['Permissions', `${app.permissionText()}; webhook off; this account only`],
+    ['Saves on repo', `${app.APP.variable} and ${app.APP.secret}`],
+    ['Installs on', repositories],
+  ], look));
+  say(ownerTerminal.say('Your browser opens GitHub with all of this filled in: you only click Create. The key goes straight to the repository secret and is never shown or saved here.', look));
+  if (await confirm('open GitHub and create the App') !== true) throw new SetupStop('Enter was not pressed.', 'run it again when you are ready. Nothing changed.');
 
   const state = crypto.randomBytes(16).toString('hex');
   const create = owner === 'Organization' ? `https://github.com/organizations/${repo.split('/')[0]}/settings/apps/new` : 'https://github.com/settings/apps/new';
@@ -211,12 +262,12 @@ async function setup(argv, deps = {}) {
   if (!variable.ok || !secret.ok || after.variable !== 'found' || after.secret !== 'found') {
     throw new SetupStop(`the App's values did not read back on ${repo} (variable ${after.variable}, secret ${after.secret}).`, `delete the App (${settings}, Advanced) and anything saved on ${repo}, then run this again.`);
   }
-  say(`Saved on ${repo}: ${app.APP.variable} and ${app.APP.secret}, read back.`);
+  say(ownerTerminal.ok(`Saved on ${repo}: ${app.APP.variable} and ${app.APP.secret}, read back.`, look));
 
   const install = `${appPage}/installations/new`;
   open(install);
-  say(`Install the App: on ${install} choose Only select repositories, pick ${repositories}, then Install.`);
-  await ask('Press Enter once it is installed: ');
+  say(ownerTerminal.say(`Install the App: on ${install} choose Only select repositories, pick ${repositories}, then Install.`, look));
+  if (await confirm('check the installation') !== true) throw new SetupStop('the installation was not checked.', `run toolkit governance check in ${repo} once the App is installed.`);
   const token = appToken(made.id, pem, now());
   const lines = [];
   let missing = false;
@@ -226,7 +277,7 @@ async function setup(argv, deps = {}) {
     lines.push(`${slug}: ${result === true ? 'installed' : result === false ? `not installed yet; add it on ${install}` : 'could not be checked'}.`);
   }
   lines.forEach(line => say(line));
-  say(missing ? `Not finished: add the missing repository on ${install}, then run toolkit governance check in ${repo}.` : `Done. Run toolkit governance check in ${repo} to see the App reported as set.`);
+  say(missing ? `Not finished: add the missing repository on ${install}, then run toolkit governance check in ${repo}.` : ownerTerminal.ok(`Done. Run toolkit governance check in ${repo} to see the App reported as set.`, look));
   return missing ? 1 : 0;
 }
 
@@ -234,11 +285,11 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   const say = deps.say || (line => process.stdout.write(`${line}\n`));
   try { return await setup(argv, { ...deps, say }); } catch (error) {
     if (!(error instanceof SetupStop)) throw error;
-    say(error.message);
+    say(ownerTerminal.stop(error.stopped, error.next, { stream: deps.say ? null : process.stdout, environment: deps.environment || process.env }));
     return error.exitCode;
   }
 }
 
 if (require.main === module) main().then((code) => { process.exitCode = code; });
 
-module.exports = Object.freeze({ CONFIRM, SetupStop, parseArgs, manifest, formPage, serveLoopback, openInBrowser, appToken, installed, setup, main });
+module.exports = Object.freeze({ SetupStop, parseArgs, manifest, formPage, serveLoopback, openInBrowser, appToken, installed, setup, main });

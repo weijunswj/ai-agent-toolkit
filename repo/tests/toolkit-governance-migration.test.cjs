@@ -44,18 +44,18 @@ test('protection maintenance keeps its own approval/readback and never reads lap
   recordAbsent(root, { registryPath: old });
   let created = false, reads = 0;
   const make = answer => new runtime.GovernanceMaintenance({ stdout: { write() {} }, interactive: true, registryOptions: options,
-    ask: async () => answer,
+    confirm: async () => answer,
     rulesetReader() { reads++; return { ok: true, rulesets: created ? [require('../scripts/toolkit-governance-ruleset.cjs').noForcePushRulesetBody()] : [] }; },
     rulesetCreator() { created = true; return { ok: true }; },
     protectionReader: () => ({ ok: false, reason: 'offline' }), securityReader: () => ({ ok: false, reason: 'offline' }),
     protectionWriter() { throw Error('unreadable protection cannot be changed'); }, securityWriter() { throw Error('unreadable security cannot be changed'); },
   });
-  await make('yes').run([root]);
+  await make(true).run([root]);
   assert.equal(reads, 0, 'pending governance cannot run maintenance');
   seedMerged(root, 'enable', { registryOptions: { registryPath: old, testOnly: true } });
-  await make('no').run([root]);
+  await make(false).run([root]);
   assert.equal(created, false, 'declined protection approval changes nothing');
-  await make('yes').run([root]);
+  await make(true).run([root]);
   assert.equal(created, true, 'approved protection remains available');
   assert.ok(reads >= 3, 'creation is read back independently');
   assert.equal(governance.governanceState(root, options).state, 'ENABLED');
