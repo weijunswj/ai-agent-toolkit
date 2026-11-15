@@ -18,7 +18,8 @@
 //   fix_pr      the pull request number that fixed it, or null until fixed
 //   test        the repository path of the test that now catches it, or null until there is one
 //
-// The reader is default-deny: the whole file must be printable ASCII with LF line ends, every line
+// The reader is default-deny: the whole file must be printable ASCII with LF line ends (or CRLF on
+// every line, as a Windows checkout with core.autocrlf=true holds; writes are always LF), every line
 // the exact canonical form this script writes (so no other spacing, key order, duplicate key or
 // escape), every key known and every value of its type and shape. Text that holds a local path, a
 // secret-shaped value, personal data or an AI footer is refused. One bad line refuses the whole
@@ -167,6 +168,13 @@ function readLedger(bytes, today = utcToday()) {
     return refuse(null, null, 'not-utf8');
   }
   if (text === '') return { ok: true, entries: [], errors: [] };
+  // A Windows checkout with core.autocrlf=true holds CRLF line ends: read that as LF when every
+  // line ends so. Any other CR (mixed ends, a lone CR) is refused.
+  if (text.includes('\r')) {
+    const crlf = text.split('\r\n').length - 1;
+    if (crlf === text.split('\r').length - 1 && crlf === text.split('\n').length - 1) text = text.split('\r\n').join('\n');
+    else return refuse(text.slice(0, text.search(/\r(?!\n)|(?<!\r)\n/)).split('\n').length, null, 'mixed-line-ends');
+  }
   if (!FILE_TEXT.test(text)) {
     const at = text.search(/[^\x20-\x7e\n]/);
     return refuse(text.slice(0, at).split('\n').length, null, 'not-printable-ascii');
@@ -191,8 +199,18 @@ function readLedger(bytes, today = utcToday()) {
   return errors.length ? { ok: false, entries: [], errors } : { ok: true, entries, errors: [] };
 }
 
+// Plain reasons for refusals of the whole file, shown after the rule name.
+const FILE_REASONS = Object.freeze({
+  'mixed-line-ends': 'lines must all end in LF, or all in CRLF; this file mixes them or has a lone CR',
+  'not-printable-ascii': 'the file holds a character outside printable ASCII (a byte order mark, tab or other invisible character)',
+  'no-final-newline': 'the last line has no line end',
+  'not-utf8': 'the file is not UTF-8 text',
+  'too-large': `the file is over ${MAX_FILE_BYTES} bytes`,
+});
+
 function formatError(error) {
-  return [error.line === null || error.line === undefined ? null : `line ${error.line}`, error.field, error.rule].filter(Boolean).join(': ');
+  const reason = error.field ? null : FILE_REASONS[error.rule];
+  return [error.line === null || error.line === undefined ? null : `line ${error.line}`, error.field, error.rule].filter(Boolean).join(': ') + (reason ? `: ${reason}` : '');
 }
 
 // state/<owner>/<repo>/escapes.jsonl under the store, with the names as given (the binding's

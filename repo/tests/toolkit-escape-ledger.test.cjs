@@ -210,7 +210,7 @@ test('E2-b: mixed or lone-CR line ends are refused with a plain reason', () => {
     const read = ledger.readLedger(Buffer.from(text, 'utf8'));
     assert.equal(read.ok, false, name);
     assert.deepEqual(read.errors.map(error => error.rule), ['mixed-line-ends'], name);
-    assert.match(ledger.formatError(read.errors[0]), /mixed-line-ends: .*CRLF.*LF/, name);
+    assert.match(ledger.formatError(read.errors[0]), /mixed-line-ends: .*LF.*CRLF/, name);
   }
 });
 
