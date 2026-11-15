@@ -138,16 +138,25 @@ class LeftoverScan {
     }
   }
 
-  // A cloud sweep workflow copy whose first line is the Toolkit's marker for that same workflow. A
-  // same-named workflow without it may be the owner's, so it is not listed.
+  // A Toolkit workflow copy (the sweep, its gate, the test shards workflow or Shard Timings) whose first
+  // line is the Toolkit's marker for a copy that may sit at that path; the test shards copy is found at
+  // whatever name its shard list chose. A workflow without the marker may be the owner's, so it is not
+  // listed.
   #workflows(root, result) {
-    for (const { id, file } of cloud.WORKFLOWS) {
+    // Each candidate is read through readInside, which refuses links at every level, so a linked
+    // folder only lists names that are then skipped.
+    let names = null;
+    try { names = fs.readdirSync(path.join(root, '.github', 'workflows')); } catch { names = null; }
+    const fixed = new Set([...cloud.WORKFLOWS, ...cloud.SHARD_WORKFLOWS].map(row => row.file));
+    for (const file of cloud.copyCandidates(names)) {
       const read = readInside(root, file);
       if (!read) continue;
-      if (read.skipped) { result.unproven.push({ file, reason: read.skipped }); continue; }
+      // Only a fixed copy path is worth naming when it cannot be read; any other workflow may be the owner's.
+      if (read.skipped) { if (fixed.has(file)) result.unproven.push({ file, reason: read.skipped }); continue; }
       const text = unix(read.text), marker = cloud.MARKER.exec(text);
-      if (!marker || text.indexOf(marker[0]) !== 0 || marker[1] !== id) continue;
-      result.files.push({ file, kind: 'workflow', proof: 'Toolkit marker', edited: cloud.bodyHash(text.slice(marker[0].length + 1)) !== marker[3] });
+      const id = cloud.copyIdAt(file, text);
+      if (!id) continue;
+      result.files.push({ file, kind: 'workflow', ...(id.startsWith('programme-sweep') ? {} : { copy: id }), proof: 'Toolkit marker', edited: cloud.bodyHash(text.slice(marker[0].length + 1)) !== marker[3] });
     }
   }
 
@@ -166,6 +175,7 @@ class LeftoverScan {
 function describeFile(item) {
   if (item.kind === 'block') return `- ${item.file}: Toolkit block ${item.block} inside the file${item.edited ? ', edited by hand since' : ''}. The rest of the file is yours.`;
   if (item.kind === 'check') return `- ${item.file}: a Toolkit check copy. It keeps working without governance; removing it is your choice, together with its workflow and settings.`;
+  if (item.kind === 'workflow' && item.copy) return `- ${item.file}: a Toolkit ${item.copy === 'test-shards' ? 'test shards workflow' : 'Shard Timings'} copy${item.edited ? ', edited by hand since' : ''}. Governance is off, so nothing refreshes it any more and removing it is suggested.`;
   if (item.kind === 'workflow') return `- ${item.file}: a Toolkit cloud sweep copy${item.edited ? ', edited by hand since' : ''}. With governance off it writes nothing, but its runs still start on GitHub, so removing it is suggested.`;
   return `- ${item.file}: ${item.proof}.`;
 }
