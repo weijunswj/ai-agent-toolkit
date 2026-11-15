@@ -332,6 +332,15 @@ test('check reports cloud sweep copies left behind once governance is off, and o
   assert.equal(found[0].severity, 'info');
   assert.ok(found[0].message.includes(sweep) && !found[0].message.includes(gate));
   assert.equal(conformance.checkConformance(repo, options).exit_code, 0, 'a left-over copy never changes the exit code');
+  // The test shards copy is found by its marker at the name its shard list chose, and Shard Timings too.
+  const marked = id => `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`;
+  fs.writeFileSync(path.join(repo, '.github', 'workflows', 'shards.yml'), marked('test-shards'));
+  fs.writeFileSync(path.join(repo, '.github', 'workflows', 'toolkit-shard-timings.yml'), marked('shard-timings'));
+  fs.writeFileSync(path.join(repo, '.github', 'workflows', 'ci.yml'), marked('programme-sweep'));
+  const all = left();
+  assert.equal(all.length, 1);
+  for (const file of [sweep, '.github/workflows/shards.yml', '.github/workflows/toolkit-shard-timings.yml']) assert.ok(all[0].message.includes(file), file);
+  assert.ok(!all[0].message.includes('ci.yml'), 'a sweep marker at another name is not a copy');
 });
 
 test('an organisation-owned repository gets the organisation App page; a personal one the personal page; unknown shows both', () => {

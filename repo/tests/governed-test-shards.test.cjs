@@ -177,3 +177,70 @@ test('run-tests.cjs hands --repo-root runs to the governed runner and keeps its 
   assert.equal(manifest.schema, 'toolkit-test-shards/v1');
   assert.deepEqual(v1.manifestErrors(manifest, v1.discoverTestFiles()), []);
 });
+
+// The gate check behind the copied workflow's "Toolkit test shards" job.
+const COMMIT = 'c'.repeat(40);
+function verifyRepo(t) {
+  return repo(t, { 'tests/a.test.js': PASS, 'tests/b.test.js': PASS, 'tests/c.test.js': PASS },
+    nodeList([{ id: `${SYSTEM}-1`, files: ['tests/a.test.js'] }, { id: `${SYSTEM}-2`, rest: true }]));
+}
+const entry = (file, passed = 1) => ({ file, tests: 1, passed, failed: 1 - passed, skipped: 0, todo: 0, cancelled: 0, seconds: 0.1 });
+const shardSummary = (shard, files, extra = {}) => ({ schema: v1.SUMMARY_SCHEMA, system: SYSTEM, shard: `${SYSTEM}-${shard}`, exit_code: 0, command_mode: true, files: files.map((file) => entry(file)), missing: [], commit: COMMIT, run_attempt: 1, ...extra });
+
+test('verify: every discovered file ran exactly once on this commit and passed, or the gate names what did not', (t) => {
+  const root = verifyRepo(t);
+  const manifest = governed.loadManifest(root);
+  const discovered = governed.discoverAll(root, manifest);
+  const check = (summaries) => governed.verifySummaries({ manifest, discovered, summaries, commit: COMMIT }).errors;
+  const good = [shardSummary(1, ['tests/a.test.js']), shardSummary(2, ['tests/b.test.js', 'tests/c.test.js'])];
+  assert.deepEqual(check(good), []);
+  assert.deepEqual(governed.verifySummaries({ manifest, discovered, summaries: good, commit: COMMIT }).totals, { [SYSTEM]: { files: 3, passed: 3, failed: 0 } });
+  assert.match(check([good[0]]).join('\n'), new RegExp(`${SYSTEM} shard ${SYSTEM}-2 has no summary[^]*tests/b\\.test\\.js was not run by any shard`));
+  assert.match(check([good[0], shardSummary(2, ['tests/b.test.js'])]).join('\n'), /tests\/c\.test\.js has no result in [a-z]+-2[^]*tests\/c\.test\.js was not run by any shard/);
+  assert.match(check([good[0], shardSummary(2, ['tests/b.test.js', 'tests/c.test.js', 'tests/c.test.js'])]).join('\n'), /tests\/c\.test\.js ran 2 times/);
+  assert.match(check([shardSummary(1, ['tests/a.test.js', 'tests/b.test.js']), good[1]]).join('\n'), /ran tests\/b\.test\.js, which the shard list does not give it/);
+  const failed = { ...good[1], exit_code: 1, files: [entry('tests/b.test.js'), { ...entry('tests/c.test.js', 0), error: 'exit code 1' }] };
+  assert.match(check([good[0], failed]).join('\n'), /exited with 1[^]*tests\/c\.test\.js failed \(exit code 1\)/);
+  assert.match(check([good[0], { ...good[1], commit: 'd'.repeat(40) }]).join('\n'), /tested commit dddddddddddd, not cccccccccccc/);
+  assert.match(check([...good, shardSummary(3, [])]).join('\n'), /shard [a-z]+-3 is not in the shard list/);
+  assert.match(check([...good, { ...good[1] }]).join('\n'), /reported twice/);
+  assert.match(check([...good, { ...good[0], command_mode: undefined }]).join('\n'), /was not written by the shard list's command/);
+  assert.match(check([...good, { schema: 'other' }]).join('\n'), /does not use toolkit-test-summary\/v1/);
+  // A re-run of a failed shard replaces it.
+  assert.deepEqual(check([good[0], { ...failed, run_attempt: 1 }, { ...good[1], run_attempt: 2 }]), []);
+  // Outside GitHub Actions no commit is named, so the check does not ask for one.
+  assert.deepEqual(governed.verifySummaries({ manifest, discovered, summaries: good.map(({ commit, ...rest }) => rest) }).errors, []);
+});
+
+test('verify: the --verify mode reads a folder of summaries and fails on any gap', async (t) => {
+  const root = verifyRepo(t);
+  const dir = path.join(root, 'summaries');
+  fs.mkdirSync(path.join(dir, 'nested'), { recursive: true });
+  const env = { GITHUB_ACTIONS: 'true', GITHUB_SHA: COMMIT };
+  fs.writeFileSync(path.join(dir, 'one.json'), JSON.stringify(shardSummary(1, ['tests/a.test.js'])));
+  const out = sink(), err = sink();
+  assert.equal(await governed.main(['--repo-root', root, '--verify', dir], { out, err, env }), 1);
+  assert.match(err.text, /do not prove every test file passed[^]*has no summary/);
+  const handed = sink();
+  assert.equal(await runTests.main(['--repo-root', root, '--verify', dir], { out: sink(), err: handed }), 1, 'run-tests.cjs hands --verify to the governed runner');
+  assert.match(handed.text, /has no summary/);
+  fs.writeFileSync(path.join(dir, 'nested', 'two.json'), JSON.stringify(shardSummary(2, ['tests/b.test.js', 'tests/c.test.js'])));
+  const ok = sink();
+  assert.equal(await governed.main(['--repo-root', root, '--verify', dir], { out: ok, err: sink(), env }), 0, ok.text);
+  assert.match(ok.text, /3 file\(s\): 3 passed, 0 failed[^]*ran each discovered test file exactly once/);
+  fs.writeFileSync(path.join(dir, 'broken.json'), '{');
+  assert.equal(await governed.main(['--repo-root', root, '--verify', dir], { out: sink(), err: sink(), env }), 1, 'an unreadable summary fails the gate');
+  assert.equal(await governed.main(['--repo-root', root, '--verify', path.join(root, 'none')], { out: sink(), err: sink(), env }), 1, 'no summaries at all fails');
+  assert.equal(await governed.main(['--repo-root', root, '--verify', dir, '--shard', `${SYSTEM}-1`], { out: sink(), err: sink(), env }), 2, '--verify does not go with --shard');
+});
+
+test('verify: summaries a real shard run writes pass the gate', async (t) => {
+  const root = verifyRepo(t);
+  const manifest = governed.loadManifest(root);
+  const summaries = [];
+  for (const id of [`${SYSTEM}-1`, `${SYSTEM}-2`]) summaries.push((await governed.runShard({ root, manifest, system: SYSTEM, shardId: id, out: sink() })).summary);
+  assert.deepEqual(governed.verifySummaries({ manifest, discovered: governed.discoverAll(root, manifest), summaries }).errors, []);
+  assert.deepEqual(governed.shardIds(manifest), { [SYSTEM]: [`${SYSTEM}-1`, `${SYSTEM}-2`] });
+  assert.equal(governed.listState(root).state, 'valid');
+  assert.equal(governed.listState(path.join(root, 'tests')).state, 'missing');
+});

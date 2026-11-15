@@ -53,10 +53,17 @@ function bindingV2(binding) {
 }
 
 // Only the instruction skill's prepared surfaces join the binding. Product files and backups do not.
-function adoptionFiles(cwd, text, cloud = { files: {} }) {
+// `rendered` holds the governed rules the governance bank rendered from the templates for a fresh
+// repository (toolkit-governance-adopt.cjs); they take the place of the working tree's copies.
+function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
   const governance = require('./toolkit-governance-state.cjs');
-  const block = governance.readGovernedBlock(cwd);
-  if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  if (rendered) {
+    const { blocks, errors } = require('./toolkit-managed-block.cjs').findBlocks(String(rendered['AGENTS.md'] || ''));
+    if (errors.length || !blocks.some(entry => entry.name === 'TOOLKIT-GOVERNED-RULES')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  } else {
+    const block = governance.readGovernedBlock(cwd);
+    if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  }
   const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md'));
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
@@ -64,6 +71,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }) {
     ...cloudFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
+    if (rendered && Object.hasOwn(rendered, name)) continue;
     const file = path.join(cwd, name);
     if (!fs.existsSync(file)) continue;
     let current = cwd;
@@ -75,7 +83,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }) {
     if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
-  return { ...files, ...cloud.files };
+  return { ...files, ...(rendered || {}), ...cloud.files };
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
@@ -229,7 +237,7 @@ class GovernanceProposals {
     if (!proposal || governance.bindingProblems(proposal, identity).length || (request.answer === 'yes' && proposal.governance === 'disabled')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     return { identity, request, repository, binding: proposal, text: `${JSON.stringify(proposal, null, 2)}\n` };
   }
-  publish(cwd, run, binding = null) {
+  publish(cwd, run, binding = null, rendered = null) {
     this.prepare(cwd, run, binding);
     if (!this.#transport) fail('PROPOSAL_TRANSPORT_UNAVAILABLE');
     const checked = this.refresh(cwd);
@@ -241,7 +249,7 @@ class GovernanceProposals {
     if (checked.proposals.some(item => item.answer !== prepared.request.answer) || matches.length > 1) fail('PROPOSAL_CONFLICT');
     const cloud = prepared.request.answer === 'yes' && !matches[0] ? this.#cloudWorkflows(cwd) : { files: {}, warning: null };
     const proposal = matches[0] || this.#transport.publish(prepared.repository, prepared.binding,
-      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud) : { [cache.BINDING_PATH]: prepared.text });
+      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text });
     const readback = this.#transport.read(prepared.repository, proposal.number);
     if (!validProposal(readback, prepared.repository) || readback.head !== proposal.head || readback.answer !== prepared.request.answer) fail('PROPOSAL_PUBLISH_READBACK_FAILED');
     this.#update(prepared.identity.repository_id, value => {
@@ -284,12 +292,16 @@ class GitHubProposalTransport {
     try { return this.#api(endpoint); }
     catch (error) { if (error.code === 'PROPOSAL_NOT_FOUND') return null; throw error; }
   }
-  // The cloud sweep copies on the default branch at `ref` that carry the Toolkit's rendered-copy marker.
+  // The Toolkit's cloud workflow copies on the default branch at `ref`: each workflow file that starts
+  // with the rendered-copy marker of a copy that may sit at its path (the sweep, its gate, Shard Timings,
+  // and the test shards copy at whatever name its shard list chose).
   #cloudCopies(repository, ref) {
-    const { MARKER: COPY } = require('./toolkit-cloud-workflows-render.cjs');
-    return cloudFiles().filter(name => {
+    const workflows = require('./toolkit-cloud-workflows.cjs');
+    const listing = this.#optional(`repos/${repository}/contents/.github/workflows?ref=${ref}`);
+    const names = Array.isArray(listing) ? listing.filter(entry => entry && entry.type === 'file' && typeof entry.name === 'string').map(entry => entry.name) : null;
+    return workflows.copyCandidates(names).filter(name => {
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${ref}`);
-      return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && COPY.test(Buffer.from(file.content, 'base64').toString('utf8').replace(/\r\n/g, '\n')));
+      return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && workflows.copyIdAt(name, Buffer.from(file.content, 'base64').toString('utf8')));
     });
   }
   #auth() {
@@ -339,10 +351,10 @@ class GitHubProposalTransport {
     // need the owner's merge approval.
     if (binding.governance === 'disabled') {
       const files = this.#api(`repos/${repository}/pulls/${number}/files?per_page=100`);
-      const cloud = cloudFiles();
+      // Removals are workflow files only; each must also be a marked copy where the PR started (below).
       const valid = Array.isArray(files) && pr.changed_files === files.length
         && files.filter(file => file.filename === cache.BINDING_PATH && ['added', 'modified'].includes(file.status)).length === 1
-        && files.every(file => file.filename === cache.BINDING_PATH || (cloud.includes(file.filename) && file.status === 'removed'));
+        && files.every(file => file.filename === cache.BINDING_PATH || (/^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(file.filename) && file.status === 'removed'));
       if (!valid) fail('PROPOSAL_SCOPE_INVALID');
       // A removed sweep path must have been the Toolkit's own marked copy where the PR started.
       const removed = files.filter(file => file.status === 'removed').map(file => file.filename);
@@ -428,7 +440,7 @@ class GitHubProposalTransport {
       }
       if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
     }
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud sweep copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
     return { number: pr.number, head: headSha };
   }
 }
