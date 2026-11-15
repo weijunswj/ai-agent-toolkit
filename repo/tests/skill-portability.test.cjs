@@ -39,8 +39,10 @@ function tempCopy() {
   return target;
 }
 
+// Without DIFF_BASE, so a base commit set for the CI run never leaks into a fixture without git.
 function runAudit(cwd) {
-  return spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  const { DIFF_BASE, ...env } = process.env;
+  return spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8', env });
 }
 
 test('skill portability audit passes the published skill folders', () => {
