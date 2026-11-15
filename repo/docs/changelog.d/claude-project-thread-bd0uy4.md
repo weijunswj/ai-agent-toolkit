@@ -8,4 +8,4 @@ Title: periodic runs hand GitHub steps to a thread with the repos and recover sk
 
 ### Changed
 
-- The Source Watch PR Notifier can now also be started by hand, on `main` only (a manual run on any other branch does nothing), so a skipped scheduled run can be recovered without waiting for the next schedule. Validation now requires every scheduled workflow in the repository to take `workflow_dispatch`.
+- The Source Watch PR Notifier can now also be started by hand, on `main` only (a manual run on any other branch does nothing), so a skipped scheduled run can be recovered without waiting for the next schedule. A test now requires every scheduled workflow in the repository to take `workflow_dispatch`.
