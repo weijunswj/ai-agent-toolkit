@@ -929,7 +929,7 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
         ['sync time from the host manifest, renewed every start', [/`stat -c %Y <bucket>\/manifest\.json`/, /rewrites at every container start, even when no plugin changed/]],
         ['never a folder or plugin file time', [/Never use a plugin file's mtime \(synced files read 1980-01-01\) or the copy folder's own birth or change time as the sync time: an unchanged copy keeps its folder from an earlier start/]],
         ['folder birth time only as a lower bound', [/earlier than the copy folder's birth time \(`stat -c %W <copy>`, when above 0\), use that birth time instead/]],
-        ['never the session start or other clocks', [/never this session's start, which stays old while the container re-syncs the copy/, /never the coordinator's thread, the trigger creation time/]],
+        ['never the session start or other clocks', [/Never use this session's start, which stays old while the container re-syncs the copy/, /never the coordinator's thread, the trigger creation time/]],
         ['valid non-future time in UTC', [/Accept only a whole number of seconds above 0 that is not in the future/, /date -u -d @<seconds> \+%FT%TZ/]],
         ['newest of several copies, the others with version and sync time', [/Several copies: use the one with the newest sync time, read its version and list each other copy under \*\*Plugin:\*\* with its version and sync time/]],
         ['historical first-parent baseline', [/git -C TK rev-list -1 --first-parent --before=<sync time> HEAD/, /git -C TK show B:\.claude-plugin\/plugin\.json/]],
