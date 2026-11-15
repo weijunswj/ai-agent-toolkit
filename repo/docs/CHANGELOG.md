@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.113.0 (governed repositories can shard tests in any language)
+
+### Fixed
+
+- The cloud sweep gate no longer counts a green sweep run that made no pass (queued behind another sweep's lease, main moved, or off the default branch) as the last sweep, so changes and the six-hour refresh are measured from the last pass that did work and the hourly start picks changes up. Activity still waits an hour after the newest run, so a lease held elsewhere never starts a run per edit. A run paused at GitHub's hourly App limit still counts, so the wait for the reset holds.
+
+### Added
+
+- A governed repository can keep its own test shard list at `.github/toolkit-test-shards.json` (schema `toolkit-test-shards/v2`): Toolkit's shard list plus, per system, a `discover` glob and a `command` with one `{files}` argument. `run-tests.cjs --repo-root <dir> --shard <id> --os <system>` runs the command once per file with no shell, three at a time, stops a file that runs past `file_timeout_seconds` (default 900), times each file and writes the same shard summary as Toolkit's own shards. `--check` and `--plan` read the list without running anything.
+- The programme binding accepts a `ci_shards` key (`answer` yes, not-now or never, and `offered_at`) for the sharded CI offer. This release only reads it; nothing writes or acts on it yet, so every copy knows the key before a later release sets it.
+
 ## 3.112.0 (Projects tasks load their instructions every run; design principles; governance question bank)
 
 ### Changed
