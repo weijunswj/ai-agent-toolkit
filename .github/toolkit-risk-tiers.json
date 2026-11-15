@@ -46,7 +46,7 @@
     "repo/tests/toolkit-test-editor-preload.cjs",
     "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/*.env.example",
     "repo/docs/*-baseline.json",
-    "repo/source-watch/**/*.json",
+    "repo/source-watch/**",
     "repo/contracts/ci/**",
     "repo/contracts/plain-references/**",
     "repo/contracts/host-qualification/**",

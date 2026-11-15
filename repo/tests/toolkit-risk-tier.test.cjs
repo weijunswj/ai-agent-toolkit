@@ -61,6 +61,12 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
   }
 });
 
+test('the source-watch notice report is RISKY, not a LIGHT .md file', () => {
+  // RISKY code names it by path; it exists only on the notifier's branch, so it is read from the notifier.
+  const { report } = require('../scripts/check-project-source-updates.cjs').parseArgs([]);
+  assert.equal(tierOf(report), 'RISKY', report);
+});
+
 test('the controller takeover playbook is RISKY while other playbooks stay NORMAL', () => {
   assert.equal(tierOf('repo/docs/agent-playbooks/controller-takeover.md'), 'RISKY');
   assert.equal(tierOf('repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
