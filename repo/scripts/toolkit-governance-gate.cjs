@@ -924,6 +924,10 @@ const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click 
 
 // What the agent is told once the user's own answer is on record, or once they said "later".
 const LATER_CONTEXT = 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
+// The user's yes: show the governance question bank, exactly as `toolkit governance` does.
+function enableContext() {
+  return `The user answered yes to turning on Toolkit's GitHub governance. Nothing is written yet: the governance question bank comes next, and its one setup pull request is made by Toolkit's own script. Build nothing by hand (no programme file, rules files, parent issue or evidence store), and run no other governance subcommand. ${require('./toolkit-commands.cjs').bankGuide()} Its governance row recommends Turn on, so \`all recommended\` turns it on.`;
+}
 const ANSWERED_CONTEXT = 'Toolkit: the user answered the governance question. Its proposal is pending; governance stays as merged on the default branch.';
 
 // The one folder a reply ticket covers, named so the user knows which.
@@ -1320,6 +1324,9 @@ ${NEVER_OWNER}` };
     if (this.#launched(sessionId)) return { action: 'block', reason: LAUNCHED_TEXT };
     // "Later" records nothing: the run is already noted as asked, and the next session asks again.
     if (command === 'not-now') return { action: 'pass', context: LATER_CONTEXT };
+    // Yes records nothing either: it opens the governance question bank, whose answer is the one
+    // setup pull request Toolkit's own script makes. Nothing is built by hand.
+    if (command === 'enable') return { action: 'pass', context: enableContext() };
     let decided;
     try {
       const proposals = new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: this.#registryOptions, now: this.#now });

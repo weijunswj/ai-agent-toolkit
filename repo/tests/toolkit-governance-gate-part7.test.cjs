@@ -1,5 +1,5 @@
 'use strict';
-const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone } = require('./toolkit-governance-gate-support.cjs');
+const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone, assertAnswered } = require('./toolkit-governance-gate-support.cjs');
 
 // Split to keep the per-file time budget.
 test('repository mark failure cannot delete a newly revoked session mark', t => {
@@ -66,8 +66,9 @@ test('a mark that can be neither replaced nor removed fails safe: an asked run f
     assert.match(start(`new-id-${index}`, 'resume', continued), /^[a-f0-9]{32}$/);
     const next = raw().decide({ cwd: continued, prompt: reply, sessionId: `B${index}` });
     assert.equal(asksIn(next), false, reply);
-    if (index === 0) assert.equal(raw().answerTicket(ticketOf(next.context), 'yes').ok, true);
-    assert.match(pending(continued, `B${index}`), /yes is pending/, reply);
+    if (index === 0) assert.match(raw().answerTicket(ticketOf(next.context), 'yes').text, /question bank/);
+    else assert.match(next.context, /answered yes[\s\S]*question bank/, reply);
+    assertAnswered(pending(continued, `B${index}`), 'yes', reply);
     assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   }
   // After the reply window, the same start leaves the full answer counting too.
@@ -77,7 +78,7 @@ test('a mark that can be neither replaced nor removed fails safe: an asked run f
   assert.ok(ticketOf(raw().decide({ cwd: later, prompt: 'later', sessionId: 'L' }).context));
   locked.add(markFile('r', stateOf(ctx, later).repository_id));
   start('agent-run', 'startup', later);
-  assert.match(raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' }).context, /yes is pending/);
+  assert.match(raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' }).context, /answered yes[\s\S]*question bank/);
   assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
 });
 
@@ -229,7 +230,8 @@ test('a damaged asked-runs file never stops work: the question is asked, the fil
     assert.ok(JSON.parse(fs.readFileSync(askedPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].sessions.s1, 'the damaged file is replaced');
     const answered = hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);
-    if (word) assert.match(pending(repo), new RegExp(`${word} is pending`));
+    if (word === 'yes') assert.match(answered.context, /answered yes[\s\S]*question bank/, reply);
+    if (word) assertAnswered(pending(repo), word);
     else assert.ok(ticketOf(answered.context));
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   }

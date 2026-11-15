@@ -1,5 +1,5 @@
 'use strict';
-const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone } = require('./toolkit-governance-gate-support.cjs');
+const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone, assertAnswered } = require('./toolkit-governance-gate-support.cjs');
 
 // Split to keep the per-file time budget.
 test('session authority closure: repeated starts never raise origin or clear negative marks', t => {
@@ -171,7 +171,7 @@ test('session marks: a later process that resumes the session is asked again and
     // The user's own run still answers once it was shown the question.
     const own = gitRepo(ctx, `own-${host}`, { remote: `https://github.com/example-owner/own-${host}.git` });
     assert.ok(asks(send({ cwd: own, session_id: `own-${host}`, prompt: 'fix the bug' }, 'startup')));
-    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'toolkit governance enable' }).context, /yes is pending/, host);
+    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'toolkit governance enable' }).context, /answered yes[\s\S]*question bank/, host);
   }
 });
 
@@ -208,7 +208,7 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
     assert.equal(asksIn(reply), false, source);
     const answered = raw().decide({ cwd: kept, prompt: 'toolkit governance enable', sessionId: `k-${source}` });
     assert.equal(answered.action, 'pass', source);
-    assert.match(answered.context, /yes is pending/, source);
+    assert.match(answered.context, /answered yes[\s\S]*question bank/, source);
   }
   // A /clear that comes with no mark yet starts one.
   const cleared = gitRepo(ctx, 'cleared', { remote: 'https://github.com/example-owner/cleared.git' });
@@ -224,8 +224,8 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   assert.ok(asksIn(again), 'the whole question is shown again');
   assert.equal(ticketOf(again.context), undefined, 'a yes from before this run\'s question is no reply');
   const reply = raw().decide({ cwd: own, prompt: 'yes', sessionId: 'o1' });
-  assert.equal(raw().answerTicket(ticketOf(reply.context), 'yes').ok, true);
-  assert.match(pending(own, 'o1'), /yes is pending/);
+  assert.match(raw().answerTicket(ticketOf(reply.context), 'yes').text, /question bank/);
+  assertAnswered(pending(own, 'o1'), 'yes');
   // After the reply, the same run carries on; a resumed run is asked again and its full answer does not count.
   const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
   start('l1', 'startup');
@@ -293,8 +293,9 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
     // The user's next reply counts.
     const next = raw().decide({ cwd: continued, prompt: reply, sessionId: `first-${index}` });
     assert.equal(next.action, 'pass');
-    if (index === 0) assert.equal(raw().answerTicket(ticketOf(next.context), 'yes').ok, true);
-    assert.match(pending(continued, `first-${index}`), /yes is pending/, reply);
+    if (index === 0) assert.match(raw().answerTicket(ticketOf(next.context), 'yes').text, /question bank/);
+    else assert.match(next.context, /answered yes[\s\S]*question bank/, reply);
+    assertAnswered(pending(continued, `first-${index}`), 'yes', reply);
     assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   }
 });

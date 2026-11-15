@@ -215,7 +215,10 @@ test('hosts: the Codex helper hook lets prompts and tools through in an undecide
   assert.equal(allowed.status, 0, allowed.stdout);
   const recorded = childProcess.spawnSync(process.execPath, [gate.ANSWER_SCRIPT, 'yes', ticket], { env, encoding: 'utf8' });
   assert.equal(recorded.status, 0, recorded.stdout);
+  // A yes opens the governance bank; it records nothing for an agent to publish by hand.
+  assert.match(recorded.stdout, /question bank/);
   const after = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
   assert.equal(after.status, 0);
-  assert.match(contextOf(after), /yes is pending/);
+  assert.doesNotMatch(contextOf(after) || '', /is pending|ANSWER/);
+  assert.equal(governance.governanceState(repo, homeRegistry).state, 'UNDECIDED');
 });

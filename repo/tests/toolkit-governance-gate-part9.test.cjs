@@ -1,5 +1,5 @@
 'use strict';
-const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone } = require('./toolkit-governance-gate-support.cjs');
+const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone, assertAnswered } = require('./toolkit-governance-gate-support.cjs');
 
 const ticketOf = context => (/ ANSWER ([0-9a-f]{32})\n/.exec(context || '') || [])[1];
 const asksIn = result => result.action === 'pass' && String(result.context).includes(QUESTION_LINE);
@@ -48,7 +48,8 @@ test('no message is kept or handed to another session: every answer carries only
   };
   const answers = [
     // [label, how session A answers, what its session line then says]
-    ['yes', viaTicket('yes'), /yes is pending/],
+    // A yes opens the governance bank and leaves no receipt, so the line still reads undecided.
+    ['yes', viaTicket('yes'), /not decided yet/],
     ['no', viaTicket('no'), /no is pending/],
     ['later', viaTicket('later'), /not decided yet/],
     ['full answer', repo => hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance disable', sessionId: 'A' }), /no is pending/],
@@ -102,7 +103,8 @@ test('nested launches: a session started by another session or a launcher works 
   assert.ok(ticketOf(reply.context), 'the launched messages did not use up the reply');
   const answered = hold(ctx, { [gate.HOST_SESSION_VARIABLE]: 'A' }).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 'A' });
   assert.equal(answered.action, 'pass');
-  assert.match(pending('A'), /yes is pending/);
+  assert.match(answered.context, /answered yes[\s\S]*question bank/);
+  assertAnswered(pending('A'), 'yes');
   assert.doesNotMatch(answered.context, /INJECTED-B|PINEAPPLE|mine-A/);
   assert.doesNotMatch(userState(ctx), /INJECTED-B|PINEAPPLE|mine-A/);
   // The Claude hook exports the session's id for its shell commands, and a session started from one
@@ -186,7 +188,7 @@ test('B1: the full answer counts only in the session that was asked, on GitHub r
     // The session that was asked answers with it.
     const answered = hold(ctx).decide({ cwd: repo, prompt: answer, sessionId: 'user' });
     assert.equal(answered.action, 'pass', answer);
-    assert.match(pending('user'), new RegExp(`${word} is pending`), answer);
+    assertAnswered(pending('user'), word, answer);
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', answer);
     assert.doesNotMatch(answered.context, /^\d+\. toolkit governance/im, 'a nested session\'s answer never comes back to the user');
   }
