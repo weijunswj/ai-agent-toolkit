@@ -103,3 +103,15 @@ test('an executor session may write the handover file: it is evidence, not progr
   assert.equal(f.run(['--issue', '865', '--gate', 'G1', '--apply'], { environment: { TOOLKIT_GATE_ROLE: 'G1' } }).code, 0);
   assert.ok(f.github.files.has(FILE));
 });
+
+test('the parent has its own handover file: attention, findings and the parent decisions, for a controller taking over', () => {
+  const f = setup();
+  const { code, out } = f.run(['--issue', '421', '--gate', 'controller']);
+  assert.equal(code, 0);
+  assert.deepEqual([...out.matchAll(/^#{1,2} .*$/gm)].map(match => match[0]), [
+    '# HANDOVER #421: Issue 421', '## OPEN PRS', '## HOLDS AND FINDINGS', '## RECENT DECISIONS', '## PLAN', '## EVIDENCE']);
+  assert.ok(out.includes('- PATH: #421'), out);
+  assert.match(out, /^- Status: programme parent; Attention: (?:clear|\d+ new)/m);
+  assert.ok(out.includes('- Next action: Controller: read CURRENT, answer attention (`programme.cjs attention`), then run the queue'), out);
+  assert.ok(out.includes('- Full list: `programme.cjs trace 421`'));
+});
