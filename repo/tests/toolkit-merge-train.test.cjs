@@ -219,13 +219,6 @@ test('once the running train lands, catchup merges main into the stacked train, 
   const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, true, JSON.stringify(landing));
   assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /main is already inside the train/);
-  // A train that already carries its bump never takes a second one.
-  f.git('switch', '--quiet', 'main');
-  f.write('e.txt', 'e\n');
-  f.git('add', 'e.txt');
-  f.git('commit', '--quiet', '-m', 'main moves again');
-  f.git('switch', '--quiet', 'toolkit-train/two');
-  assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /already carries its bump: only a stacked train/);
 });
 
 test('a failed catch-up bump leaves the train at its pre-merge head, and verify refuses a train with no bump', t => {
