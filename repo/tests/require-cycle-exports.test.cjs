@@ -107,7 +107,8 @@ function pathOf(file, view, expression, depth = 0) {
     return { dir: path.posix.join(parts[0].dir, ...parts.slice(1).map(part => part.literal)) };
   }
   if (/^[A-Za-z_$][\w$]*$/.test(expression)) {
-    for (const match of view.bare.matchAll(new RegExp(`\\bconst\\s+${expression.replace(/\$/g, '\\$')}\\s*=\\s*`, 'g'))) {
+    for (const match of view.bare.matchAll(/(?<![\w$])const\s+([A-Za-z_$][\w$]*)\s*=\s*/g)) {
+      if (match[1] !== expression) continue;
       const from = match.index + match[0].length;
       const end = view.bare.slice(from).search(/;|\n/);
       const found = pathOf(file, view, view.code.slice(from, end < 0 ? undefined : from + end).trim(), depth + 1);
