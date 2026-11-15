@@ -5887,6 +5887,8 @@ class Reconciler {
       const existing = children.get(number)?.doc;
       const copy = clone(doc);
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
+      // A next action this pass sets counts as set now, as the write will stamp it.
+      drift().stampNextAction(existing || null, copy, this.now());
       return [number, copy];
     }));
     const blockHoldStart = holds.length;

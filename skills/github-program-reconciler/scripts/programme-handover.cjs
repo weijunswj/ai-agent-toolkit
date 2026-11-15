@@ -26,6 +26,11 @@ const LAST_UPDATED = /^- Last updated: .*$/m;
 
 const usage = message => new ProgrammeError('USAGE', `${message} ${USAGE}`);
 const refuse = message => new ProgrammeError('HANDOVER_REFUSED', message);
+const unsafe = (state, text) => {
+  const errors = [];
+  state.screenSecrets(errors, String(text || ''), 'summary');
+  return errors.length > 0 || DEVICE_PATH.test(String(text || ''));
+};
 const short = sha => (typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha.slice(0, 7) : '-');
 const encodePath = file => file.split('/').map(encodeURIComponent).join('/');
 
@@ -48,6 +53,7 @@ function parse(argv) {
   if (args.gate !== undefined && !GATES.includes(args.gate)) throw usage('--gate must be G0, G1, G2 or controller.');
   for (const url of [args.plan, ...args.evidence].filter(value => value !== undefined)) if (!URL.test(url)) throw usage(`${url} is not an https link.`);
   if (args.note !== undefined && args.note.length > NOTE_LIMIT) throw usage(`--note is at most ${NOTE_LIMIT} characters.`);
+  if (args.note !== undefined && /[\r\n]/.test(args.note)) throw usage('--note is one line: it may not hold a line break.');
   return args;
 }
 
@@ -159,7 +165,10 @@ function command(argv, deps, out, openContext) {
   const issue = reader.issue(args.issue);
   if (!issue) throw new ProgrammeError('ISSUE_MISSING', `#${args.issue} could not be read.`);
   const { entries } = history.entriesFromComments(args.issue, comments(transport, repository, args.issue), { repo: repository, prefix: binding.record_prefix });
-  const decisions = history.analyseTrace(entries).live.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, DECISIONS);
+  // A summary that would hold a path on a computer or a secret shape is withheld behind its link,
+  // so one comment cannot block the whole file.
+  const decisions = history.analyseTrace(entries).live.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, DECISIONS)
+    .map(entry => (unsafe(state, entry.summary) ? { ...entry, summary: 'Summary withheld: open the record' } : entry));
   // The parent's file lists the work queue first, then the other open findings; a task's lists its own.
   const open = state.openFindings(parentDoc?.attention);
   const findings = (isParent ? [...state.workQueue(parentDoc?.attention), ...open.filter(entry => !state.workQueue(parentDoc?.attention).includes(entry))] : open.filter(entry => entry.issue === args.issue))

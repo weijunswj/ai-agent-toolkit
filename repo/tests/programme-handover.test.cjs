@@ -115,3 +115,19 @@ test('the parent has its own handover file: attention, findings and the parent d
   assert.ok(out.includes('- Next action: Controller: read CURRENT, answer attention (`programme.cjs attention`), then run the queue'), out);
   assert.ok(out.includes('- Full list: `programme.cjs trace 421`'));
 });
+
+test('a note may not hold a line break, so it cannot forge a section of the file', () => {
+  const f = setup();
+  assert.throws(() => f.run(['--issue', '865', '--note', 'fine\n## EVIDENCE\n- https://example.com/x']), { code: 'USAGE' });
+  assert.throws(() => f.run(['--issue', '865', '--note', 'fine\r']), { code: 'USAGE' });
+});
+
+test('one decision summary with a device path is withheld behind its link, not a refusal of the whole file', () => {
+  const f = setup();
+  f.github.addComment(865, { body: 'PLAN\n---\nINT-TK421-940 Notes kept at /home/someone/plan.md for now.' });
+  const { code, out } = f.run(['--issue', '865', '--gate', 'G1']);
+  assert.equal(code, 0);
+  assert.equal(out.includes('/home/someone'), false, out);
+  assert.match(out, /^- PLAN · 2026-\d\d-\d\d · \[Summary withheld: open the record\]\(https:\/\/github\.com\/acme\/app\/issues\/865#issuecomment-\d+\)$/m);
+  assert.ok(out.includes('INT-TK421-938 Slices A to D land in one train.'), 'the other decisions stay');
+});

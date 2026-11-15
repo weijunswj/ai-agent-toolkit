@@ -136,3 +136,22 @@ test('a task whose PR merged after its next action was set raises NEXT_ACTION_ST
   f.reconciler().run({ apply: true });
   assert.deepEqual(f.open('NEXT_ACTION_STALE'), []);
 });
+
+test('a pass that sets a new next action after a merge reports no NEXT_ACTION_STALE for it, with no one-pass flicker', () => {
+  const f = setup();
+  f.reconciler().run({ apply: true });
+  const { doc, sha } = f.store.read('child', 806);
+  f.github.addPr(950, { head: SHA_A, merged: true, mergedAt: '2026-11-02T00:00:00Z', body: 'Refs #806' });
+  f.store.write('child', 806, { ...doc, pr: { number: 950, state: 'OPEN', head: SHA_A, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } } }, { sha, previous: doc });
+  f.time.now = Date.parse('2026-11-03T00:00:00Z');
+  const reconciler = f.reconciler();
+  const desiredChild = reconciler.desiredChild.bind(reconciler);
+  reconciler.desiredChild = (outcome, existing, observed) => {
+    const result = desiredChild(outcome, existing, observed);
+    if (outcome.issue === 806) result.doc.next_action = 'Controller: judge the done-when and close';
+    return result;
+  };
+  const report = reconciler.run({ apply: true });
+  assert.equal(codes(report).some(entry => entry.code === 'NEXT_ACTION_STALE'), false, JSON.stringify(codes(report)));
+  assert.deepEqual(f.open('NEXT_ACTION_STALE'), []);
+});
