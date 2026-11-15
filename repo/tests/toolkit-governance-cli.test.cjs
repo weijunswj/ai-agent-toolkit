@@ -90,6 +90,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
   const cli = new ToolkitGovernanceCli({
     stdout, stderr, cwd, interactive,
     ask: async (question) => { asked.push(question); return answer; },
+    confirm: async (effect) => { asked.push(effect); return answer === 'yes'; },
     registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' },
     // Fixture origins do not exist: discovery and the status refresh never reach GitHub here.
     discoveryGh: () => ({ ok: false, reason: 'offline' }),
@@ -193,7 +194,7 @@ test('interactive no publishes the off proposal without a laptop decision, decli
     const proposal = { repository: 'example-owner/example-repo', number: 1, head: 'a'.repeat(40), url: 'https://github.com/example-owner/example-repo/pull/1', state: 'open', answer: 'no' };
     const stdout = sink(), stderr = sink();
     const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true },
-      interactive: true, ask: async () => 'yes', stdout, stderr,
+      interactive: true, confirm: async () => true, stdout, stderr,
       proposalTransport: { list: () => open, publish() { writes++; open = [proposal]; return proposal; }, read: () => proposal } });
     assert.equal(await cli.main([command]), 0, stderr.text());
     assert.match(stdout.text(), /decision pending[\s\S]*merge this pull request now/);

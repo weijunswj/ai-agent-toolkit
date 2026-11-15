@@ -36,7 +36,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
 const processLaunch = require('./claude-process-launch.cjs');
-const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
+const ownerTerminal = require('./owner-terminal.cjs');
 const {
   EnvStoreError, MAX_VALUE_BYTES, PlatformStore, assertName, assertValue, nameProblem, supportReference,
 } = require('./toolkit-env-store.cjs');
@@ -68,8 +68,8 @@ const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
 const DUMP_COMMANDS = new Set(['env', 'printenv', 'set', 'export', 'declare', 'typeset', 'compgen']);
 const SHELLS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'fish']);
-// Set (non-empty) in shells that a coding agent starts: each app's exact markers, plus the generic AI_AGENT.
-const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT']);
+// Set (non-empty) in shells that a coding agent starts (owner-terminal.cjs holds the one list).
+const { AGENT_MARKERS } = ownerTerminal;
 
 function agentContext(environment) { return AGENT_MARKERS.some((name) => Boolean(environment[name])); }
 
@@ -681,8 +681,10 @@ class ToolkitEnv {
   #environment; #scriptPath; #tty; #clipboard; #findApp; #cleanCopies;
 
   // commandFor(binding) is the helper command an MCP entry runs; it is recorded with each connection.
-  // scriptPath is the script people are told to run. askTerminal reads one visible line from a
-  // terminal only, tty() says whether stdin and stdout are terminals, and clipboard(text) copies.
+  // scriptPath is the script people are told to run. ask(question, effect) resolves to the answer:
+  // "yes" read from a pipe (the agent passes on the owner's chat answer), or "yes" for a fresh Enter
+  // in the owner's own terminal. askTerminal(effect) resolves true only on a fresh Enter in a
+  // terminal, never from a pipe. tty() says whether stdin and stdout are terminals, and clipboard(text) copies.
   // findApp() gives the app that opens .env files ({ program, name }); cleanCopies({ keep }) removes
   // editors' saved copies of edit files other than `keep` and returns how many. Both do nothing
   // unless given (forUser gives the real ones).
@@ -918,7 +920,7 @@ class ToolkitEnv {
     const users = record.bindings.filter((binding) => asked.includes(binding.name))
       .map((binding) => `${this.#feeder(binding.harness)?.label || binding.harness} (${binding.server})`);
     const warning = users.length ? ` ${users.join(' and ')} will stop connecting until you add ${asked.length === 1 ? 'it' : 'them'} again.` : '';
-    const answer = String(await this.#ask(`Remove ${andList(asked)} from the Toolkit env store?${warning} Type yes to remove ${asked.length === 1 ? 'it' : 'them'}: `) || '').trim().toLowerCase();
+    const answer = String(await this.#ask(`Remove ${andList(asked)} from the Toolkit env store?${warning}`, `remove ${asked.length === 1 ? 'it' : 'them'}`) || '').trim().toLowerCase();
     const yes = answer === 'yes' || answer === 'y';
     return this.#edit.withLock(() => {
       const ready = this.#applyLatest([...first.out, ...this.#sweepEdits()]);
@@ -1175,7 +1177,7 @@ class ToolkitEnv {
     const users = this.#manifest.read().bindings.filter((binding) => binding.name === name)
       .map((binding) => `${this.#feeder(binding.harness)?.label || binding.harness} (${binding.server})`);
     const warning = users.length ? ` ${users.join(' and ')} will stop connecting until you add it again.` : '';
-    const answer = String(await this.#ask(`Remove ${name} from the Toolkit env store?${warning} Type yes to remove it: `) || '').trim().toLowerCase();
+    const answer = String(await this.#ask(`Remove ${name} from the Toolkit env store?${warning}`, 'remove it') || '').trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y') return { code: 0, out: [...out, `Kept ${name}.`], err: [] };
     this.#store.remove(name);
     this.#manifest.update((record) => { delete record.names[name]; record.layout = (record.layout || []).filter((entry) => entry !== name); });
@@ -1196,7 +1198,7 @@ class ToolkitEnv {
 
   // Shows one value to the owner in a terminal they opened themselves, or copies it. Every check
   // runs before the store is read: one name, no agent marker, a real terminal on both ends, the key
-  // exists, and the owner retypes its name. Nothing about it is recorded.
+  // exists, and the owner presses a fresh Enter. Nothing about it is recorded.
   async show(name, { copy = false } = {}) {
     assertName(name);
     if (agentContext(this.#environment)) {
@@ -1205,8 +1207,7 @@ class ToolkitEnv {
     const tty = this.#tty();
     if (!tty.stdin || !tty.stdout) throw new EnvError('show needs a terminal you type into; it does not read from a pipe or print into a file.');
     if (!this.#store.list().includes(name)) throw new EnvError(`${name} is not in the Toolkit env store.`);
-    const answer = await this.#askTerminal(`Type ${name} again to show its value: `);
-    if (answer !== name) return { code: 0, out: ['Not shown.'], err: [] };
+    if (await this.#askTerminal(`${copy ? 'copy' : 'show'} ${name} ${copy ? 'to the clipboard' : 'on screen'}`) !== true) return { code: 0, out: [copy ? 'Not copied.' : 'Not shown.'], err: [] };
     const value = this.#store.read(name);
     if (value === undefined) throw new EnvError(`${name} is not in the Toolkit env store.`);
     if (!copy) return { code: 0, out: [value], err: ['Shown once. Clear the window when done (Clear-Host) and don\'t paste it into a chat.'] };
@@ -1265,7 +1266,7 @@ class ToolkitEnv {
     const changes = plans.flatMap((entry) => entry.plan.changes);
     if (changes.length) {
       out.push('Toolkit will change:', ...changes.map((change) => `  ${change}`), `A backup of each entry is kept, and ${this.commandLine('revoke --feeders')} puts them back.`);
-      const answer = String(await this.#ask(`Connect ${server} to ${name} in ${plans.map((entry) => entry.feeder.label).join(' and ')}? Type yes to go ahead: `) || '').trim().toLowerCase();
+      const answer = String(await this.#ask(`Connect ${server} to ${name} in ${plans.map((entry) => entry.feeder.label).join(' and ')}?`, 'connect it') || '').trim().toLowerCase();
       if (answer !== 'yes' && answer !== 'y') return { code: 0, out: [...out, 'Nothing was changed.'], err: [] };
     }
     const backupDir = path.join(this.#paths.backupsDir, 'env-feeders', `${stamp(this.#now())}-${server}`);
@@ -1297,7 +1298,7 @@ class ToolkitEnv {
     const bindings = record.bindings.filter((binding) => !server || binding.server === server);
     if (!bindings.length) return { code: 0, out: ['No connected MCP entries to put back.'], err: [] };
     const listed = bindings.map((binding) => `${this.#feeder(binding.harness)?.label || binding.harness} ${binding.server}`);
-    const answer = String(await this.#ask(`Put ${listed.join(', ')} back as they were before Toolkit connected them? Type yes to go ahead: `) || '').trim().toLowerCase();
+    const answer = String(await this.#ask(`Put ${listed.join(', ')} back as they were before Toolkit connected them?`, 'put them back') || '').trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y') return { code: 0, out: ['Nothing was changed.'], err: [] };
     const out = [];
     let restart = false;
@@ -1436,7 +1437,7 @@ class ToolkitEnv {
       throw new EnvError(`Not retired. Codex still reads keys from its environment for: ${references.map((entry) => `${entry.server} (${entry.name})`).join(', ')}. Connect them first with ${this.commandLine('connect SERVER --name NAME')}.`);
     }
     const note = skipped.length ? ` Lines ${skipped.join(', ')} are not NAME=value with a valid key name and were not imported; check them first.` : '';
-    const answer = String(await this.#ask(`Move ${this.#paths.show(file)} into a private backup folder?${note} Type yes to go ahead: `) || '').trim().toLowerCase();
+    const answer = String(await this.#ask(`Move ${this.#paths.show(file)} into a private backup folder?${note}`, 'move it') || '').trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y') return { code: 0, out: ['Nothing was changed.'], err: [] };
     const text = fs.readFileSync(file, 'utf8');
     const layoutLines = this.#adoptLayout(text);
@@ -1585,42 +1586,48 @@ class ToolkitEnvCli {
   }
 }
 
-// Reads one line; on a terminal the typed text is hidden (for values).
-function terminalReader(hidden) {
-  return (question) => new Promise((resolve) => {
+// The secret value (hidden): real input, so it stays typed. From a pipe it reads the whole input.
+function hiddenReader(question) {
+  return new Promise((resolve) => {
     if (!process.stdin.isTTY) {
       const chunks = [];
       process.stdin.on('data', (chunk) => chunks.push(chunk));
-      process.stdin.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8');
-        resolve(hidden ? text.replace(/\r?\n$/, '') : text.split(/\r?\n/)[0]);
-      });
-      if (!hidden) process.stderr.write(question);
+      process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8').replace(/\r?\n$/, '')));
       return;
     }
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
-    if (hidden) {
-      rl._writeToOutput = (text) => { if (text.includes(question)) process.stderr.write(question); };
-    }
+    rl._writeToOutput = (text) => { if (text.includes(question)) process.stderr.write(question); };
     rl.question(question, (answer) => {
       rl.close();
-      if (hidden) process.stderr.write('\n');
+      process.stderr.write('\n');
       resolve(answer);
     });
   });
 }
 
-// Reads one visible line from a terminal only. Unlike terminalReader, it never reads a pipe.
-function ttyLine(question) {
-  if (!process.stdin.isTTY) return Promise.reject(new EnvError('show needs a terminal you type into; it does not read from a pipe or print into a file.'));
+// A yes or no: the first line of a pipe (the agent passes on the owner's chat answer), or a fresh
+// Enter in the owner's own terminal (owner-terminal.cjs), which reads as "yes".
+function confirmReader(question, effect) {
+  if (process.stdin.isTTY) {
+    process.stderr.write(`${ownerTerminal.say(question, { stream: process.stderr })}\n`);
+    return ownerTerminal.pressEnter(effect).then((yes) => (yes ? 'yes' : ''));
+  }
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
-    rl.question(question, (answer) => { rl.close(); resolve(answer); });
+    const chunks = [];
+    process.stdin.on('data', (chunk) => chunks.push(chunk));
+    process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8').split(/\r?\n/)[0]));
+    process.stderr.write(`${question} (yes or no): `);
   });
 }
 
+// A fresh Enter in a terminal only; it never reads a pipe.
+function terminalEnter(effect) {
+  if (!process.stdin.isTTY) return Promise.reject(new EnvError('show needs a terminal you type into; it does not read from a pipe or print into a file.'));
+  return ownerTerminal.pressEnter(effect);
+}
+
 if (require.main === module) {
-  const cli = new ToolkitEnvCli({ env: () => ToolkitEnv.forUser({ ask: terminalReader(false), askHidden: terminalReader(true), askTerminal: ttyLine }) });
+  const cli = new ToolkitEnvCli({ env: () => ToolkitEnv.forUser({ ask: confirmReader, askHidden: hiddenReader, askTerminal: terminalEnter }) });
   cli.main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
 

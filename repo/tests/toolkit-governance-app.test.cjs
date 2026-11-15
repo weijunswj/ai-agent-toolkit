@@ -7,7 +7,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const childProcess = require('node:child_process');
 const test = require('node:test');
 
 const app = require('../scripts/toolkit-governance-app.cjs');
@@ -61,9 +60,7 @@ test('setup names the link, the page checks, both repositories and the owner com
   assert.match(text, /Contents read and write, Issues read and write, Pull requests read and write, Checks read-only, Commit statuses read-only/);
   assert.match(text, /Workflows/);
   assert.ok(text.includes(SLUG) && text.includes(STORE));
-  assert.ok(text.includes(`gh variable set TOOLKIT_GOVERNANCE_APP_CLIENT_ID --repo ${SLUG} --body "<Client ID>"`));
-  assert.ok(text.includes(`Get-Content -Raw "<key file>.pem" | gh secret set TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY --repo ${SLUG}`));
-  assert.ok(text.includes(`gh secret set TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY --repo ${SLUG} < "<key file>.pem"`));
+  assert.ok(text.includes(`--repo ${SLUG} --save both --client-id "<Client ID>" --key-file "<key file>.pem"`));
   assert.match(text, /Create this repository's own App/);
   assert.match(text, /one App per governed repository/i);
   assert.match(text, /cannot tell whether two repositories share an App/);
@@ -161,7 +158,7 @@ test('a published disable proposal suggests the removal, naming other governed r
   const proposal = { repository: slug, number: 3, head: 'b'.repeat(40), url: `https://github.com/${slug}/pull/3`, state: 'open', answer: 'no' };
   let open = [];
   const reads = [], stdout = sink(), stderr = sink();
-  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true }, interactive: true, ask: async () => 'yes', stdout, stderr,
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true }, interactive: true, confirm: async () => true, stdout, stderr,
     proposalTransport: { list: () => open, publish() { open = [proposal]; return proposal; }, read: () => proposal },
     appReader: args => { reads.push(args); return answering(found)(args); } });
   assert.equal(await cli.main(['disable']), 0, stderr.text());
@@ -213,71 +210,22 @@ test('an existing setup is reused: no new App link, single-name commands for wha
     assert.ok(!text.includes(app.creationLink(SLUG)), 'no new App is offered over an existing one');
     assert.match(text, new RegExp(`To set only the missing ${missingName}`));
     for (const line of app.saveCommands(SLUG, missingName)) assert.ok(lines.includes(line), line);
-    assert.match(text, /type replace first/);
+    assert.match(text, /once you have seen in chat what would be replaced.*asks for Enter before it overwrites anything/);
     assert.match(text, /remove this repository from the old App's installation/);
+    // Only the replace route carries --replace.
+    assert.deepEqual(lines.filter(line => /--replace/.test(line)), app.saveCommands(SLUG, 'both', { replace: true }));
   }
-  // Every printed save step is guarded, whatever the state, and the names never change.
-  for (const state of [missing, { variable: 'unverified', secret: 'unverified', reason: 'offline' }, { variable: 'found', secret: 'missing' }]) {
-    const lines = app.setupLines(SLUG, STORE, state).filter(line => /gh (variable|secret) set/.test(line));
-    assert.ok(lines.length >= 2, JSON.stringify(state));
-    for (const line of lines) {
-      assert.match(line, /Type replace to overwrite it/);
-      assert.match(line, /Could not read the names\. Nothing changed\./);
-      for (const [name, write] of [['TOOLKIT_GOVERNANCE_APP_CLIENT_ID', 'gh variable set'], ['TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY', 'gh secret set']]) {
-        if (line.includes(write)) assert.ok(line.split(name).length >= 3, `${name} is checked before it is written`);
-      }
-      assert.ok(line.indexOf(' list --repo ') < line.indexOf(' set '), 'names are listed before anything is set');
-    }
+  // Every printed save step is the setup script's --save, never a pasted shell line, and a fresh
+  // repository's never overwrites.
+  for (const state of [missing, { variable: 'unverified', secret: 'unverified', reason: 'offline' }]) {
+    const lines = app.setupLines(SLUG, STORE, state).filter(line => /--save/.test(line));
+    assert.deepEqual(lines, app.saveCommands(SLUG), JSON.stringify(state));
+    assert.doesNotMatch(lines.join('\n'), /--replace|Read-Host|gh (variable|secret) set/);
   }
+  assert.match(app.saveCommands(SLUG)[0], /toolkit-governance-app-setup\.cjs" --repo example-owner\/example-repo --save both --client-id "<Client ID>" --key-file "<key file>\.pem"$/);
   // The single-name commands write only their own name.
-  assert.doesNotMatch(app.saveCommands(SLUG, 'secret').join('\n'), /gh variable set/);
-  assert.doesNotMatch(app.saveCommands(SLUG, 'variable').join('\n'), /gh secret set/);
-  // The POSIX line never uses read -p, which zsh and dash do not support.
-  for (const which of ['both', 'variable', 'secret']) assert.doesNotMatch(app.saveCommands(SLUG, which)[1], /read -r -p|read -p/);
-});
-
-const shells = ['bash', 'dash', 'zsh'].filter(shell => process.platform !== 'win32' && childProcess.spawnSync(shell, ['-c', 'exit 0']).status === 0);
-
-test('the macOS or Linux save command overwrites an existing setup only after a typed replace, and stops when names cannot be read', { skip: shells.length === 0 }, t => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-guard-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(dir, 'gh'), [
-    '#!/bin/sh',
-    'case "$1 $2" in',
-    '  "variable list") [ -n "$FAIL_VARIABLE_LIST" ] && exit 1; [ -n "$HAS_VARIABLE" ] && echo TOOLKIT_GOVERNANCE_APP_CLIENT_ID; echo OTHER_VARIABLE;;',
-    '  "secret list") [ -n "$FAIL_SECRET_LIST" ] && exit 1; [ -n "$HAS_SECRET" ] && echo TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY; echo OTHER_SECRET;;',
-    '  *) echo "$1 $2" >> "$WRITES"; cat > /dev/null;;',
-    'esac',
-    '',
-  ].join('\n'), { mode: 0o755 });
-  fs.writeFileSync(path.join(dir, '<key file>.pem'), 'not a key\n');
-  for (const shell of shells) {
-    const run = (which, answer, env) => {
-      const script = app.saveCommands(SLUG, which)[1].replace(/^\s*macOS or Linux: /, '');
-      const writes = path.join(dir, `writes-${Math.random().toString(16).slice(2)}`);
-      const result = childProcess.spawnSync(shell, ['-c', script], { cwd: dir, input: `${answer}\n`, encoding: 'utf8',
-        env: { ...process.env, ...env, WRITES: writes, PATH: `${dir}${path.delimiter}${process.env.PATH}` } });
-      assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
-      return { out: result.stdout, writes: fs.existsSync(writes) ? fs.readFileSync(writes, 'utf8').trim().split('\n') : [] };
-    };
-    assert.deepEqual(run('both', '', {}).writes, ['variable set', 'secret set'], `${shell}: a fresh repository is saved without a question`);
-    for (const env of [{ HAS_VARIABLE: '1' }, { HAS_SECRET: '1' }]) {
-      const kept = run('both', 'yes', env);
-      assert.deepEqual(kept.writes, [], `${shell} ${JSON.stringify(env)}`);
-      assert.match(kept.out, /Kept the existing App\. Nothing changed\./);
-      assert.deepEqual(run('both', 'replace', env).writes, ['variable set', 'secret set'], `${shell} ${JSON.stringify(env)}`);
-    }
-    assert.deepEqual(run('both', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: no answer, as from an agent, keeps the existing App`);
-    for (const env of [{ FAIL_VARIABLE_LIST: '1' }, { FAIL_SECRET_LIST: '1' }]) {
-      const unread = run('both', 'replace', env);
-      assert.deepEqual(unread.writes, [], `${shell} ${JSON.stringify(env)}`);
-      assert.match(unread.out, /Could not read the names\. Nothing changed\./);
-    }
-    // Filling in what is missing writes only that name, without a question, next to the other one.
-    assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1' }).writes, ['secret set'], shell);
-    assert.deepEqual(run('variable', '', { HAS_SECRET: '1' }).writes, ['variable set'], shell);
-    assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: an existing secret is kept`);
-  }
+  assert.doesNotMatch(app.saveCommands(SLUG, 'secret').join('\n'), /--client-id/);
+  assert.doesNotMatch(app.saveCommands(SLUG, 'variable').join('\n'), /--key-file/);
 });
 
 test('by-hand website steps lead every save and removal; the commands follow as the other way', () => {
@@ -293,8 +241,8 @@ test('by-hand website steps lead every save and removal; the commands follow as 
   // Each by-hand step stops on a name that is already there, so it never overwrites another App.
   for (const name of [app.APP.variable, app.APP.secret]) assert.ok(text.includes(`if ${name} is already listed, stop and reuse that App`), name);
   const byHand = fresh.findIndex(line => line.includes('By hand on GitHub'));
-  const commands = fresh.findIndex(line => /Or from the command line/.test(line));
-  const firstSet = fresh.findIndex(line => /gh (variable|secret) set/.test(line));
+  const commands = fresh.findIndex(line => /Or in your own terminal/.test(line));
+  const firstSet = fresh.findIndex(line => /--save/.test(line));
   assert.ok(byHand >= 0 && byHand < commands && commands < firstSet, 'by hand first, commands after');
   // A part setup gets by-hand steps for the missing name only.
   const half = app.setupLines(SLUG, STORE, { variable: 'found', secret: 'missing' }).join('\n');
