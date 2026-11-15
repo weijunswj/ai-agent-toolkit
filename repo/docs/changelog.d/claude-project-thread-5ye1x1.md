@@ -4,4 +4,4 @@
 
 ### Changed
 
-- The ui-ux-pro-max reviewed-through cursor moves to upstream `0e8d408`. The two new upstream commits change only the upstream CLI asset sync, its CI path filter, an upstream IME test and a gallery copy of an already tracked data file; no tracked file or licence changed, so the earlier recommendation of a separate data refresh stands.
+- The ui-ux-pro-max reviewed-through cursor moves to upstream `b6a7900`. The upstream commits in that range change the upstream CLI asset sync, its CI path filter, upstream tests, a gallery copy of an already tracked data file, the excluded README, and the adapted `design_system.py`, which gains a preview page writer and design token export. Toolkit's adapted generator is a smaller local-only subset with none of those writers, so nothing is adapted now; no exact-copy data file or licence changed, and the earlier recommendation of a separate data refresh stands.

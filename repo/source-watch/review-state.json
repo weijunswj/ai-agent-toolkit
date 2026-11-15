@@ -35,7 +35,7 @@
       "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json",
-      "reviewed_through_sha": "0e8d408204fdc66b8189960dd28cc20d71db188e",
+      "reviewed_through_sha": "b6a79003ad2b93c174590a4143a0ddbb2e4574e2",
       "reviewed_at": "2026-11-15",
       "disposition": "SEPARATE_IMPLEMENTATION_PR_RECOMMENDED",
       "owning_tracker": "#473"
