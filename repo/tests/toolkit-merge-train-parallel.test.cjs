@@ -193,7 +193,51 @@ for (const stacked of [false, true]) {
     const hand = { ...manifest, members: manifest.members.filter(entry => entry.pr !== 3), ejected: [{ pr: 3, head: three, bump: member.bump, reason: 'landed alone', merge: board, reverts: [{ commit: revert, of: board }] }] };
     const checked = train.verify(f.repo, train.checkManifest(hand), { main: 'main', head: 'HEAD' });
     assert.equal(checked.ok, false);
-    assert.ok(checked.problems.some(problem => /reverts the boarding of #3 after the train merged a main that already holds it/.test(problem)), checked.problems.join('\n'));
+    assert.ok(checked.problems.some(problem => /ejected #3 is already on main .* landing would undo #3 on main/.test(problem)), checked.problems.join('\n'));
+    assert.equal(f.git('show', 'main:x.txt'), 'x', '#3 is still on main');
+  });
+}
+
+// The other order: #3 is ejected while it is not on main, then lands by another route at the same
+// head. The catch-up keeps the eject revert over main's copy, so the train must never verify or land.
+function ejectedThenLanded(t, { stacked = false } = {}) {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const three = f.branch('pr-3', { 'x.txt': 'x\n' });
+  const out = path.join(f.root, 'held.json');
+  let running = null;
+  if (stacked) {
+    running = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }, 'running-in.json'), '--branch', 'toolkit-train/running', '--main', 'main', '--out', path.join(f.root, 'running.json')], f.repo, f.opts);
+    assert.equal(running.ok, true, JSON.stringify(running));
+  }
+  const members = stacked ? [f.member(2, two), f.member(3, three)] : [f.member(1, one), f.member(3, three)];
+  const held = train.run(['build', '--manifest', f.manifestFile({ members }, 'held-in.json'), '--branch', 'toolkit-train/held', '--main', 'main', ...(stacked ? ['--onto', running.head] : []), '--out', out], f.repo, f.opts);
+  assert.equal(held.ok, true, JSON.stringify(held));
+  const ejected = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'held for owner UAT', '--main', stacked ? running.head : 'main'], f.repo, f.opts);
+  assert.equal(ejected.ok, true, JSON.stringify(ejected));
+  // #3 then merges alone at the same head; then (stacked) the running train lands.
+  land(f, three);
+  if (stacked) land(f, running.head);
+  f.git('switch', '--quiet', 'toolkit-train/held');
+  const caught = train.catchup(f.repo, JSON.parse(fs.readFileSync(out, 'utf8')), { main: 'main', out });
+  assert.equal(caught.ok, true, JSON.stringify(caught));
+  return { f, out, three, caught };
+}
+
+for (const stacked of [false, true]) {
+  test(`an ejected member that lands on main by another route stops the train from verifying or landing (${stacked ? 'stacked' : 'side by side'})`, t => {
+    const { f, out, three, caught } = ejectedThenLanded(t, { stacked });
+    assert.throws(() => f.git('show', `${caught.head}:x.txt`), 'the caught-up train still reverts #3 over main\'s copy');
+    const checked = train.run(['verify', '--manifest', out, '--head', 'HEAD', '--main', 'main'], f.repo, f.opts);
+    assert.equal(checked.ok, false);
+    assert.ok(checked.problems.some(problem => /ejected #3 is already on main .* landing would undo #3 on main; rebuild the train on main from the other members/.test(problem)), checked.problems.join('\n'));
+    const manifest = JSON.parse(fs.readFileSync(out, 'utf8'));
+    const live = path.join(f.root, 'live.json');
+    fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head }, 3: { state: 'MERGED', head: three }, ...Object.fromEntries(manifest.members.map(member => [member.pr, { state: 'OPEN', head: member.head }])) }));
+    const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo, f.opts);
+    assert.equal(landing.ok, false);
+    assert.ok(landing.problems.some(problem => /ejected #3 is already on main/.test(problem)), landing.problems.join('\n'));
     assert.equal(f.git('show', 'main:x.txt'), 'x', '#3 is still on main');
   });
 }

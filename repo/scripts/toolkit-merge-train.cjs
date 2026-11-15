@@ -585,9 +585,6 @@ function verify(cwd, manifest, options) {
       const target = onBoard.get(revert.of);
       if (target && revert.bumpOnly) { problems.push(`${short} reverts the boarding of #${target.pr}, but it is recorded as a replaced bump`); return; }
       if (target && target !== revert.entry) { problems.push(`${short} reverts the boarding of #${target.pr}, but the revert is recorded for #${revert.entry.pr}`); return; }
-      // Once the train has merged a main that holds the member, reverting its boarding would undo it
-      // on main when the train lands.
-      if (target && isAncestor(cwd, target.head, base)) { problems.push(`${short} reverts the boarding of #${target.pr} after the train merged a main that already holds it: landing would undo #${target.pr} on main; rebuild the train on main without it`); return; }
       if (!target && !plain.includes(where)) { problems.push(`${short} reverts ${revert.of.slice(0, 12)}, which is neither a boarding merge nor a bump`); return; }
       reverted.add(revert.of);
       onBoard.delete(revert.of);
@@ -623,6 +620,10 @@ function verify(cwd, manifest, options) {
     if (!seenReverts.has(entry.revert)) problems.push(`replaced bump ${entry.bump.slice(0, 12)}: its recorded revert ${entry.revert.slice(0, 12)} is not on the train`);
   }
   for (const entry of left) {
+    // An ejected member that is on main (it landed by another route, before or after the eject) keeps
+    // its eject revert on the train, and a catch-up keeps that revert over main's copy: landing the
+    // train would undo it on main.
+    if (isAncestor(cwd, entry.head, main)) problems.push(`ejected #${entry.pr} is already on main (it landed by another route): the train still reverts its boarding, so landing would undo #${entry.pr} on main; rebuild the train on main from the other members`);
     if (!reverted.has(entry.merge)) problems.push(`ejected #${entry.pr}: its boarding merge ${entry.merge.slice(0, 12)} is not reverted on the train`);
     for (const revert of entry.reverts) {
       if (!seenReverts.has(revert.commit)) problems.push(`ejected #${entry.pr}: recorded revert ${revert.commit.slice(0, 12)} is not on the train`);
