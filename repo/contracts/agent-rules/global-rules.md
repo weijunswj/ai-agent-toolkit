@@ -140,4 +140,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. On long tasks, update briefly at real checkpoints, not per command. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly at real checkpoints, not per command. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
