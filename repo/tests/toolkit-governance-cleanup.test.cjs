@@ -115,6 +115,44 @@ test('min_toolkit goes into the programme file in its own layout, so the pull re
   assert.equal(read(older.root, '.github/toolkit-programme.json'), BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`), 'an older value is raised in place');
 });
 
+test('a sweep copy pinned to a Toolkit that does not know min_toolkit holds the cleanup, so the programme board keeps updating', t => {
+  const offer = require('../scripts/toolkit-ci-shards-offer.cjs');
+  // A copy pinned to a commit from before min_toolkit: its validator would read the cleaned binding as invalid.
+  const sweep = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${offer.CI_SHARDS_READER} sha256=000000000000\nname: Toolkit Programme Sweep\n`;
+  const pinned = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING, '.github/workflows/toolkit-programme-sweep.yml': sweep });
+  const held = cleanup.run({ root: pinned.root, write: true, governance: pinned.governance });
+  assert.equal(held.ok, false);
+  assert.equal(held.files, 1, 'the copies it would remove are still counted for the bank');
+  assert.match(held.held, /\.github\/workflows\/toolkit-programme-sweep\.yml run a Toolkit that does not know min_toolkit/);
+  assert.match(held.lines.join('\n'), /Nothing was changed: .+ Refresh them first \(toolkit-cloud-workflows\.cjs --repo <repository>/);
+  assert.equal(read(pinned.root, 'AGENTS.md'), `${BLOCK}\n\n# Own\n`);
+  assert.equal(read(pinned.root, '.github/toolkit-programme.json'), BINDING);
+  // Copies that read min_toolkit let it run; the check is skipped when min_toolkit is already current.
+  const ready = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
+  assert.equal(cleanup.run({ root: ready.root, write: true, governance: ready.governance, sweepReaders: () => [] }).ok, true);
+  const current = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`) });
+  assert.equal(cleanup.run({ root: current.root, write: false, governance: current.governance, sweepReaders: () => { throw new Error('not asked'); } }).ok, true);
+
+  // The bank shows the held cleanup as a status line, never a question to answer.
+  const bank = require('../scripts/toolkit-governance-bank.cjs');
+  const state = { state: 'ENABLED', repository: 'owner/app', root: '/x' };
+  const specs = bank.governanceBankSpecs({ state, task: 'off', merged: { store: { repository: 'owner/store' }, required_checks: [] }, permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, copies: { files: 1, held: held.held } });
+  const row = specs.find(spec => spec.id === 'instruction-copies');
+  assert.equal(row.report_only, true);
+  assert.equal(row.current, '1 file left, cleanup held');
+  assert.equal(bank.parseBankAnswer(`${bank.bankReference(specs)}: all recommended`, specs).instructionCopies, undefined);
+});
+
+test('a governed block edited by hand is named in the preview, because those edits go with it', t => {
+  const edited = BLOCK.replace(/(BEGIN TOOLKIT-GOVERNED-RULES[^\n]*-->\n)/, '$1Our own extra line.\n');
+  const r = repo(t, { 'AGENTS.md': `${edited}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
+  const preview = cleanup.run({ root: r.root, governance: r.governance, sweepReaders: () => [] });
+  assert.equal(preview.ok, true);
+  assert.match(preview.lines.join('\n'), /- AGENTS\.md: remove the Toolkit block, keeping the rest of the file \(the block was edited by hand since Toolkit wrote it, and those edits go with it\)\./);
+  const plain = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
+  assert.doesNotMatch(cleanup.run({ root: plain.root, governance: plain.governance, sweepReaders: () => [] }).lines.join('\n'), /edited by hand/);
+});
+
 // The cleanup is wired into refresh governance: the bank of a governed repository with copies asks
 // about them, and only the owner's ticketed Clean up writes the cleanup in the working tree.
 test('refresh governance asks about the copies; Keep current is recommended and Clean up writes the cleanup', async t => {

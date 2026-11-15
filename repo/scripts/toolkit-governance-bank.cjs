@@ -64,7 +64,8 @@ function statusRow({ id, section, title, current, text }) {
 // merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
 // minutes line, measured: the estimate or null }) where it is offered, or null, and `app` the governance
 // App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read), and
-// `copies` the instruction copies the cleanup route would remove ({ files }; null when not read).
+// `copies` the instruction copies the cleanup route would remove ({ files, held? }: `held` is why the
+// cleanup cannot run yet; null when not read).
 function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
@@ -200,7 +201,9 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   // The cleanup route (toolkit-governance-cleanup.cjs): asked only in a governed repository that still
   // has instruction copies. Removing files is the owner's own choice, so Keep current is recommended
   // and all recommended removes nothing.
-  if (governed && copies && copies.files > 0) {
+  if (governed && copies && copies.files > 0 && copies.held) {
+    specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${copies.files} ${copies.files === 1 ? 'file' : 'files'} left, cleanup held`, text: `Not offered yet: ${copies.held}. Refresh the cloud workflow copies first` }));
+  } else if (governed && copies && copies.files > 0) {
     specs.push(bank.resolvedQuestion({
       id: 'instruction-copies', key: 'instructionCopies', section, title: 'Toolkit instruction copies',
       whatThisControls: 'The governed rules block, playbooks and one-line shims older setups copied into this repository. The installed Toolkit now gives sessions these rules, so the copies are leftovers.',
@@ -276,7 +279,7 @@ function selectionsOf(parsed, specs) {
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
   const asked = specs.some(spec => spec.id === 'ci-shards' && !spec.report_only);
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}), ...(specs.some(spec => spec.id === 'instruction-copies') ? { instructionCopies: value('instruction-copies') } : {}) };
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}), ...(specs.some(spec => spec.id === 'instruction-copies' && !spec.report_only) ? { instructionCopies: value('instruction-copies') } : {}) };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {

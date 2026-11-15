@@ -120,20 +120,26 @@ function firstList(root, estimate = null) {
   return { ok: true, manifest, text: `${JSON.stringify(manifest, null, 2)}\n`, shards: shards.length };
 }
 
-// Whether every pinned Toolkit copy of the sweep in `root` reads ci_shards: { ok } or { ok: false,
-// reason } naming the step. A copy whose commit this Toolkit checkout does not have cannot be checked,
-// so it holds the answer too.
-function readersReady(root, toolkitRoot, { reader = CI_SHARDS_READER } = {}) {
+// The pinned Toolkit copies of the sweep in `root` whose commit cannot read a binding key: `reads(commit,
+// git)` says whether the Toolkit at that commit does. A copy whose commit this Toolkit checkout does not
+// have cannot be checked, so it counts as old too.
+function oldSweepCopies(root, toolkitRoot, reads) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
-  const copies = workflows.markedCopies(root).filter(copy => SWEEP_IDS.includes(copy.id));
+  const git = args => spawnSync('git', args, { cwd: toolkitRoot, windowsHide: true, shell: false, encoding: 'utf8' });
   const old = [];
-  for (const copy of copies) {
+  for (const copy of workflows.markedCopies(root).filter(entry => SWEEP_IDS.includes(entry.id))) {
     const text = readText(path.join(root, ...copy.file.split('/'))) || '';
     const commit = workflows.MARKER.exec(text.replace(/\r\n/g, '\n'))?.[2];
-    const known = commit && spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: toolkitRoot, windowsHide: true, shell: false }).status === 0;
-    const newer = known && spawnSync('git', ['merge-base', '--is-ancestor', reader, commit], { cwd: toolkitRoot, windowsHide: true, shell: false }).status === 0;
-    if (!newer) old.push(copy.file);
+    const known = commit && git(['cat-file', '-e', `${commit}^{commit}`]).status === 0;
+    if (!known || !reads(commit, git)) old.push(copy.file);
   }
+  return old;
+}
+
+// Whether every pinned Toolkit copy of the sweep in `root` reads ci_shards: { ok } or { ok: false,
+// reason } naming the step.
+function readersReady(root, toolkitRoot, { reader = CI_SHARDS_READER } = {}) {
+  const old = oldSweepCopies(root, toolkitRoot, (commit, git) => git(['merge-base', '--is-ancestor', reader, commit]).status === 0);
   if (!old.length) return { ok: true };
   return { ok: false, reason: `the pinned Toolkit copies ${old.join(', ')} run a Toolkit older than the one that reads ci_shards (3.113.0), and would read the binding as invalid. Refresh the repository rules first (merge their pull request), then answer again` };
 }
@@ -161,4 +167,4 @@ function ciShardsText(mergedText, parsed, value) {
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
 
-module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, detectNodeTests, estimateText, firstList, readEstimate, readersReady });
+module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, detectNodeTests, estimateText, firstList, oldSweepCopies, readEstimate, readersReady });
