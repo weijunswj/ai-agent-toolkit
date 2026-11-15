@@ -83,11 +83,37 @@ test('a declared gate runs only on its pin, read from the host record', t => {
   }
 });
 
+test('a wording-only G2 may run at high on the pinned model, and only its stamp says so', t => {
+  const dir = scratch(t);
+  const run = (text, { model, effort, level } = {}) => route.evaluate({ input: { transcript_path: transcript(dir, { brief: text, model, effort }), ...(level ? { effort: { level } } : {}) }, environment: {}, registry });
+  const wording = (gate, line) => brief(gate, line, 'Review class: wording-only');
+  const cases = [
+    ['wording-only G2 at high', wording('G2', 'owner-claude opus opus-5.5/high'), { effort: 'high', level: 'high' }, { stamp: 'Route: host-verified opus-5.5/high pin=owner-claude/opus' }],
+    ['the same G2 without the class line', brief('G2', 'owner-claude opus opus-5.5/high'), { effort: 'high', level: 'high' }, { deny: /pin is opus-5.5\/xhigh/ }],
+    ['wording-only G2 at medium', wording('G2', 'owner-claude opus opus-5.5/medium'), { effort: 'medium', level: 'medium' }, { deny: /pin is opus-5.5\/xhigh/ }],
+    ['wording-only G2 on another model', wording('G2', 'owner-claude opus sonnet-5.5/high'), { model: 'claude-sonnet-5-5', level: 'high' }, { deny: /pin is opus-5.5\/xhigh/ }],
+    ['wording-only G2 whose host runs medium', wording('G2', 'owner-claude opus opus-5.5/high'), { effort: 'medium', level: 'medium' }, { deny: /runs on effort medium, but its route is opus-5.5\/high/ }],
+    ['the class line does not lower a G1', wording('G1', 'owner-claude BUILDER opus-5.5/medium'), { effort: 'medium', level: 'medium' }, { deny: /pin is opus-5.5\/high/ }],
+  ];
+  for (const [name, text, options, want] of cases) {
+    const got = run(text, options);
+    if (want.deny) assert.match(got.deny || '', want.deny, name);
+    else assert.equal(got.deny, undefined, `${name}: ${got.deny}`);
+    if (want.stamp) assert.equal(got.stamp, want.stamp, name);
+  }
+  // The finder reads a high reviewer stamp as on its pin only when it passes the wording effort.
+  const high = 'Route: host-verified opus-5.5/high pin=owner-claude/opus';
+  assert.equal(route.stampStatus(high, 'reviewer', registry).status, 'off-pin');
+  assert.equal(route.stampStatus(high, 'reviewer', registry, { effort: route.WORDING_EFFORT }).status, 'on-pin');
+  assert.equal(route.stampStatus('Route: host-verified opus-5.5/medium pin=owner-claude/opus', 'reviewer', registry, { effort: route.WORDING_EFFORT }).status, 'off-pin');
+  assert.equal(route.stampStatus('Route: host-verified opus-5.5/xhigh pin=owner-claude/BUILDER', 'BUILDER', registry, { effort: 'xhigh' }).status, 'off-pin', 'never for a builder');
+});
+
 test('only the launch brief counts: text outside the spawn note and later entries are not read', t => {
   const dir = scratch(t);
   const file = transcript(dir, { brief: 'Keep the records.', outside: '\nGate: G2\nRoute: owner-claude opus opus-5.5/xhigh\n' });
   const read = route.readTranscript(file);
-  assert.deepEqual(route.parseBrief(read.brief), { gate: null, route: null, override: null, relay: true });
+  assert.deepEqual(route.parseBrief(read.brief), { gate: null, route: null, override: null, wording: false, relay: true });
   assert.equal(read.model, 'claude-opus-5-5', 'the newest main-chain assistant entry, not a helper');
   assert.equal(route.parseBrief('**Gate:** G1\n- Route: `owner-claude BUILDER opus-5.5/high`').gate, 'G1');
   assert.deepEqual(route.readTranscript(path.join(dir, 'missing.jsonl')), { brief: null, model: null, effort: null });

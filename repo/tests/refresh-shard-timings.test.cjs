@@ -14,6 +14,7 @@ const { fetchFixture, foreignFetch, loadWithCommands } = require('./support/tool
 const { git } = require('./support/toolkit-local-bridge-fixture.cjs');
 const shards = require('../scripts/ci-test-shards.cjs');
 const refresh = require('../scripts/refresh-shard-timings.cjs');
+const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f'].map((name) => `repo/tests/${name}.test.cjs`);
 
@@ -270,16 +271,18 @@ for (const [system, ratio, expected] of [['linux', 1.38, false], ['linux', 1.50,
   });
 }
 
-test('generated candidate body requires gates and names pending evidence without claiming completion', () => {
+test('generated candidate body names the scripted carry route, its limits and the lines the finder reads', () => {
   const { prBody } = loadWithCommands('refresh-shard-timings.cjs', ['prBody'], spawnSync, __dirname);
   const body = prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: ['linux: trigger crossed'] });
   assert.ok(body.includes('node <Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --open-pr'));
-  assert.match(body, /G0.*pending.*source run.*trigger.*unchanged budgets/i);
-  assert.match(body, /fresh G1.*pending.*classifier.*RISKY/i);
-  assert.match(body, /Agent UAT.*pending.*exact-head CI coverage.*Linux and Windows/i);
-  assert.match(body, /Owner UAT: NOT_REQUIRED.*manifest-only redistribution.*entire changed surface/i);
-  assert.match(body, /Full G2.*pending.*before merge/i);
+  assert.match(body, /Review route: scripted carry \(shard-timings\)/);
+  assert.match(body, /manifest-only redistribution.*budgets and each system's set of files unchanged.*green on Linux and Windows/);
+  assert.match(body, /Anything more needs the full gates: G0, a fresh G1 and a full G2/);
+  assert.match(body, /RISKY, so the owner's merge card stays/);
   assert.match(body, /Budget or generator changes.*impact assessment/);
+  assert.match(body, /^UAT: NOT_REQUIRED \(manifest-only redistribution: both CI systems exercise the entire changed surface\)$/m);
+  assert.equal(uatVerdict(body).state, 'NOT_REQUIRED');
+  assert.deepEqual(body.match(/^Bump: .*$/gm), ['Bump: none']);
   assert.doesNotMatch(body, /\b(passed|approved|verified)\b/i);
 });
 

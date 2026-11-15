@@ -15,7 +15,9 @@
 // DESIGN_CHALLENGE or REVIEWER for the profile's one reviewer, or a reviewer id; stamps name the
 // registry's own member). A temporary owner change is one more brief line, for that launch only:
 //   Route override: <member> <model>/<effort> owner=<rec N | cmsg_...>
-// citing the owner's record or message; without the citation the override is refused.
+// citing the owner's record or message; without the citation the override is refused. A G2 of a
+// wording-only docs pull request may add `Review class: wording-only` and run at high on the pinned
+// model; its stamp boards only a pull request whose every file is a LIGHT `.md` file.
 //
 // Proof, strongest first; a model's own answer about itself never counts:
 //   host-verified      the host's record shows both: effort from the hook input's effort level or
@@ -52,6 +54,9 @@ const path = require('node:path');
 const REGISTRY_PATH = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
 const EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 const ROLE_MEMBER = Object.freeze({ G0: 'DISCOVERY', G1: 'BUILDER', DESIGN_CHALLENGE: 'DESIGN_CHALLENGE' });
+// The effort a G2 brief with `Review class: wording-only` may run at on the reviewer's pinned model;
+// the merge train finder accepts its stamp only when every changed file is a LIGHT `.md` file.
+const WORDING_EFFORT = 'high';
 const HEAD_BYTES = 2 * 1024 * 1024;
 const TAIL_BYTES = 1024 * 1024;
 
@@ -103,7 +108,7 @@ const LINE = name => new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?(?:\\*\\*)?${name}:(?:\
 
 // The Gate, Route and Route override lines of a brief. Each is the first such line.
 function parseBrief(text) {
-  const out = { gate: null, route: null, override: null, relay: false };
+  const out = { gate: null, route: null, override: null, wording: false, relay: false };
   if (typeof text !== 'string') return out;
   const spawn = /<relay\b[^>]*\breason="spawn"[^>]*>[\s\S]*?<note>([\s\S]*?)<\/note>/.exec(text);
   out.relay = Boolean(spawn);
@@ -120,6 +125,8 @@ function parseBrief(text) {
     const match = /^`?([a-z0-9-]+) ([A-Za-z0-9_-]+) ([A-Za-z0-9._-]+)\/(low|medium|high|xhigh|max)`?$/.exec(route);
     out.route = match ? { profile: match[1], member: match[2], model: match[3], effort: match[4] } : { malformed: route };
   }
+  const reviewClass = first('Review class');
+  out.wording = reviewClass !== null && reviewClass.toLowerCase().replace(/[`*]/g, '').trim() === 'wording-only';
   const override = first('Route override');
   if (override !== null) {
     const match = /^`?([A-Za-z0-9_-]+) ([A-Za-z0-9._-]+)\/(low|medium|high|xhigh|max) owner=(?:(?:rec|record)[ -]?#?(\d+)|(cmsg_[A-Za-z0-9]+))`?$/i.exec(override);
@@ -219,6 +226,8 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   if (brief.override) {
     if (brief.override.malformed !== undefined || resolveMember(registry, profile, brief.override.member).member !== member) return refuse(gate, `the Route override line "${brief.override.malformed ?? brief.override.member}" is not \`Route override: ${member} <model>/<effort> owner=<rec N | cmsg_...>\` citing the owner's own record or message. Without that citation the registry pin stands.`);
     pin = { model: brief.override.model, effort: brief.override.effort, override: brief.override.owner };
+  } else if (gate === 'G2' && brief.wording && brief.route.model === pinned.model && brief.route.effort === WORDING_EFFORT) {
+    pin = { model: pinned.model, effort: WORDING_EFFORT, override: null };
   } else if (brief.route.model !== pinned.model || brief.route.effort !== pinned.effort) {
     return refuse(gate, `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin, or add a Route override line citing the owner's approval.`);
   }
@@ -376,7 +385,9 @@ function preToolUse(input, { environment = process.env, registry } = {}) {
 
 // One stamp line read against the registry: { status, stamp, override } where status is on-pin,
 // off-pin, unverified or missing. `want` is 'reviewer' (a G2 verdict) or 'BUILDER' (a G1 body).
-function stampStatus(line, want, registry) {
+// `options.effort` is one more effort a reviewer stamp may carry on the pinned model (the finder
+// passes the wording-only effort for a pull request of LIGHT `.md` files only).
+function stampStatus(line, want, registry, options = {}) {
   const match = typeof line === 'string' ? STAMP.exec(line.trim()) : null;
   if (!match) return { status: 'missing', stamp: null, override: null };
   const [, proof, model, effort, profile, member, override] = match;
@@ -386,7 +397,8 @@ function stampStatus(line, want, registry) {
   const rightMember = pinned && (want === 'reviewer' ? pinned.reviewer : !pinned.reviewer && member === want);
   if (!rightMember) return { status: 'off-pin', stamp: match[0], override: override || null };
   if (override) return { status: 'on-pin', stamp: match[0], override };
-  return { status: model === pinned.model && effort === pinned.effort ? 'on-pin' : 'off-pin', stamp: match[0], override: null };
+  const efforts = [pinned.effort, ...(pinned.reviewer && options.effort ? [options.effort] : [])];
+  return { status: model === pinned.model && efforts.includes(effort) ? 'on-pin' : 'off-pin', stamp: match[0], override: null };
 }
 
 // ---- Command line ----
@@ -417,4 +429,4 @@ function main(argv = process.argv.slice(2), environment = process.env, write = t
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ evaluate, loadRegistry, main, parseBrief, preToolUse, readTranscript, registryModel, stampLines, stampStatus });
+module.exports = Object.freeze({ WORDING_EFFORT, evaluate, loadRegistry, main, parseBrief, preToolUse, readTranscript, registryModel, stampLines, stampStatus });
