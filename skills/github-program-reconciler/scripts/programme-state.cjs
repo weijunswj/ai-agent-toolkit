@@ -399,7 +399,7 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
-  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a keep_open reason' },
+  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -933,23 +933,40 @@ function validateChild(doc) {
   return errors;
 }
 
-// A merged task the controller keeps open on purpose: why, and since when (the write stamps it). It
-// lives in the child's private part, which every Toolkit reader accepts, so no reader refuses a
-// document that carries it; this Toolkit shows it on the task page and leaves the task off the work
-// queue's TASK_MERGED_OPEN. Removed with {"private":{"keep_open":null}}.
+// A merged task the controller keeps open on purpose: why, since when, and the merged or closed PRs
+// it was set over (the write stamps both). It lives in the child's private part, which every Toolkit
+// reader accepts, so no reader refuses a document that carries it; this Toolkit shows it on the task
+// page and leaves the task off the work queue's TASK_MERGED_OPEN while the task's finished PRs are
+// the ones it covers. A later merge is a new condition: the mark lapses and the finding returns.
+// Removed with {"private":{"keep_open":null}}; set again with a new reason to cover a later merge.
 function validateKeepOpen(errors, keep) {
   check(errors, isObject(keep), 'private.keep_open must be an object with a reason');
   if (!isObject(keep)) return;
-  checkShape(errors, keep, { all: ['reason', 'at'], optional: ['at'] }, 'private.keep_open');
+  checkShape(errors, keep, { all: ['reason', 'at', 'covers'], optional: ['at', 'covers'] }, 'private.keep_open');
   check(errors, isText(keep.reason) && keep.reason.length <= ATTENTION_NOTE_LIMIT, `private.keep_open.reason must be text of at most ${ATTENTION_NOTE_LIMIT} characters`);
+  // The reason is drawn on the public task page, so it gets the public free-text screen.
+  if (isText(keep.reason)) {
+    for (const [held, what] of [['\\', 'a path'], ['@', 'an @ (an address or a mention)'], ['://', 'an address']]) check(errors, !keep.reason.includes(held), `private.keep_open.reason holds ${what}`);
+    check(errors, !HOST_LIKE.test(keep.reason), 'private.keep_open.reason holds something that reads as a host name');
+  }
   check(errors, keep.at === undefined || (isText(keep.at) && Number.isFinite(Date.parse(keep.at))), 'private.keep_open.at must be a date and time');
+  check(errors, keep.covers === undefined || (Array.isArray(keep.covers) && keep.covers.length <= KEEP_OPEN_COVERS && keep.covers.every(number => isInt(number, 1))
+    && new Set(keep.covers).size === keep.covers.length), `private.keep_open.covers must list at most ${KEEP_OPEN_COVERS} different PR numbers`);
 }
 
-// Stamps when a keep-open mark was set: on the write that adds it or changes its reason.
+// The task's merged or closed PR numbers, in order.
+const finishedPrs = doc => [...new Set([doc?.pr, ...(Array.isArray(doc?.prs) ? doc.prs : [])]
+  .filter(pr => isInt(pr?.number, 1) && ['MERGED', 'CLOSED'].includes(pr.state)).map(pr => pr.number))].sort((a, b) => a - b);
+
+// Stamps a keep-open mark on every write: one that adds it or changes its reason gets the write time
+// and the task's finished PRs; one that keeps the reason keeps both from the stored mark, whatever the
+// write supplied.
 function stampKeepOpen(previous, next, now) {
   const keep = next?.private?.keep_open;
-  if (!isObject(keep) || (keep.at && previous?.private?.keep_open?.reason === keep.reason)) return next;
-  next.private = { ...next.private, keep_open: { ...keep, at: now } };
+  if (!isObject(keep)) return next;
+  const before = previous?.private?.keep_open;
+  const kept = isObject(before) && before.reason === keep.reason && before.at && Array.isArray(before.covers);
+  next.private = { ...next.private, keep_open: { ...keep, at: kept ? before.at : now, covers: kept ? before.covers : finishedPrs(next).slice(-KEEP_OPEN_COVERS) } };
   return next;
 }
 
@@ -959,7 +976,13 @@ function stampChild(previous, next, now) {
   return stampKeepOpen(previous, next, now);
 }
 
-const keptOpen = doc => isObject(doc?.private?.keep_open) && isText(doc.private.keep_open.reason);
+// A mark holds while every finished PR on the task is one it was set over.
+const keptOpen = doc => {
+  const keep = doc?.private?.keep_open;
+  if (!isObject(keep) || !isText(keep.reason) || !Array.isArray(keep.covers)) return false;
+  const covered = new Set(keep.covers);
+  return finishedPrs(doc).every(number => covered.has(number));
+};
 const keptSince = doc => {
   const at = Date.parse(doc.private.keep_open.at || '');
   return Number.isFinite(at) ? ` (since ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')}Z)` : '';
@@ -2462,6 +2485,8 @@ const CHANGED_PAGES = 10;
 const LIST_PAGE_GUARD = 1000;
 // Pages of 100 read per issue link connection: 1,000 closing references or cross-references.
 const LINK_PAGES = 10;
+// The most merged or closed PRs one keep-open mark records as covered (the most link paging reads).
+const KEEP_OPEN_COVERS = 1000;
 const PR_NODE = 'number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner }';
 const LINK_FIELDS = Object.freeze({
   closing: `pageInfo { hasNextPage endCursor } nodes { ${PR_NODE} }`,
