@@ -385,7 +385,7 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   const stdout = [], answers = [];
   // The first answer's render carries shard files; the later answers no longer make them.
   const SHARDS = '.github/workflows/toolkit-test-shards.yml', LIST = '.github/toolkit-test-shards.json';
-  let rendered = { [SHARDS]: '# shard workflow\n' };
+  let rendered = { [SHARDS]: `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED test-shards toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: shards\n` };
   fs.writeFileSync(path.join(f.cwd, LIST), '{"shards":[]}\n');
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: rendered, warning: null }),
@@ -399,6 +399,10 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   assert.ok(github.read().files[SHARDS] && github.read().files[LIST], 'the first answer carries the shard files');
   rendered = {};
   fs.rmSync(path.join(f.cwd, LIST));
+  // A workflow someone else pushed to the turn-on branch is not Toolkit's copy, so it stays.
+  const MINE = '.github/workflows/mine.yml';
+  // GitHub also shows the earlier head for one read after the branch moves; the read-back waits for it.
+  fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...github.read(), lag: 1, files: { ...github.read().files, [MINE]: 'name: mine\n' } }));
   answers.push('1.2=B');
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
   const published = github.read();
@@ -410,6 +414,8 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   assert.equal(published.files[SHARDS], undefined, 'the shard workflow left the pull request');
   assert.equal(published.files[LIST], undefined, 'the shard list left the pull request');
   assert.match(published.pr.body, /No longer in this pull request[^]*toolkit-test-shards\.yml/);
+  assert.equal(published.files[MINE], 'name: mine\n', 'a workflow without the Toolkit marker is left on the branch');
+  assert.doesNotMatch(published.pr.body, /mine\.yml/);
   assert.match(stdout.join(''), /updated the open governance turn-on pull request with these answers: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
   // A branch that also holds a file Toolkit did not put there is not ours to change.
   fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...published, foreign: 'product.txt' }));

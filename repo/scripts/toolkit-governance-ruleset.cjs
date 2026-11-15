@@ -66,6 +66,8 @@ function ghJson(args, spawn, input = null) {
   if (result.status !== 0) {
     const stderr = String(result.stderr || '') + String(result.stdout || '');
     if (/HTTP 403/.test(stderr) && /upgrade to github pro|make this repository public/i.test(stderr)) return { ok: false, reason: 'plan-has-no-rulesets' };
+    // A 403 that is not a rate limit is a refusal for this account (for example not an admin).
+    if (/HTTP 403/.test(stderr) && !/rate limit/i.test(stderr)) return { ok: false, reason: 'forbidden' };
     return { ok: false, reason: /HTTP 404/.test(stderr) ? 'repository-not-visible' : 'gh-request-failed' };
   }
   try { return { ok: true, value: JSON.parse(result.stdout) }; } catch { return { ok: false, reason: 'gh-output-invalid' }; }

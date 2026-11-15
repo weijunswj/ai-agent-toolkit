@@ -21,6 +21,7 @@ function fail(code) { throw Object.assign(new Error(code), { code }); }
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file);
 // The dependency security files the turn-on adds where missing (toolkit-governance-adopt.cjs).
 const securityFiles = () => { const security = require('./toolkit-governance-security.cjs'); return [security.DEPENDABOT_REL, '.github/dependabot.yaml', security.WORKFLOW_REL]; };
+const READBACK_TRIES = 4, READBACK_WAIT_MS = 500;
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
 const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and rules itself.';
@@ -285,7 +286,13 @@ class GovernanceProposals {
     const files = matches[0] && !refresh ? null : yes ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text };
     const proposal = refresh ? this.#transport.update(prepared.repository, matches[0].number, prepared.binding, files)
       : matches[0] || this.#transport.publish(prepared.repository, prepared.binding, files);
-    const readback = this.#transport.read(prepared.repository, proposal.number);
+    let readback = this.#transport.read(prepared.repository, proposal.number);
+    // Right after its branch moves, GitHub can still show the pull request's earlier head for a moment,
+    // so an update is read again briefly before it counts as unverified.
+    for (let tries = 0; proposal.updated === true && readback.head !== proposal.head && tries < READBACK_TRIES; tries += 1) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, READBACK_WAIT_MS);
+      readback = this.#transport.read(prepared.repository, proposal.number);
+    }
     if (!validProposal(readback, prepared.repository) || readback.head !== proposal.head || readback.answer !== prepared.request.answer) fail('PROPOSAL_PUBLISH_READBACK_FAILED');
     this.#update(prepared.identity.repository_id, value => {
       value.requests = value.requests.map(item => item.run === run ? { ...item, proposal: readback.number, head: readback.head } : item);
@@ -549,8 +556,16 @@ class GitHubProposalTransport {
     });
     // A file an earlier answer added that the new answers no longer make (shard workflows and the
     // shard list after shards go from yes to not now) leaves the pull request: one it added is
-    // deleted, and one it changed goes back to the default branch's copy.
-    const dropped = diff.files.filter(file => !Object.hasOwn(files, file.filename) && file.status !== 'removed');
+    // deleted, and one it changed goes back to the default branch's copy. Only the shard list and a
+    // workflow carrying the Toolkit's rendered-copy marker on the branch are Toolkit's to drop; a
+    // workflow someone else pushed there stays as it is.
+    const workflows = require('./toolkit-cloud-workflows.cjs');
+    const ours = name => {
+      if (name === require('./governed-test-shards.cjs').MANIFEST_REL) return true;
+      const file = this.#optional(`repos/${repository}/contents/${name}?ref=${read.head}`);
+      return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && workflows.copyIdAt(name, Buffer.from(file.content, 'base64').toString('utf8')));
+    };
+    const dropped = diff.files.filter(file => !Object.hasOwn(files, file.filename) && file.status !== 'removed' && ours(file.filename));
     const restore = dropped.map(file => {
       if (file.status === 'added') return { path: file.filename, mode: '100644', type: 'blob', sha: null };
       const original = this.#optional(`repos/${repository}/contents/${file.filename}?ref=${diff.merge_base_commit?.sha || pr.base.sha}`);
