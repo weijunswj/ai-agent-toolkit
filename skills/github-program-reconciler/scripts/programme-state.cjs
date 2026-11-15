@@ -1780,7 +1780,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW, LATER by priority, ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: NOW, LATER by priority (optional tasks after the rest), ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2150,16 +2150,25 @@ function contextCommentId(comments) {
 }
 
 // The decision index the programme page links: every top-level index comment a person wrote (one
-// no other generated index lists), oldest first, so a directory stands for the parts under it. The
-// trust rules are the audit's own (traceEntries): bot and archive comments never count. An index
-// that links in a loop or too deep links nothing here; the audit reports it.
+// no other healthy generated index lists), oldest first, so a directory stands for the parts under
+// it. The trust rules are the audit's own: bot and archive comments never count. An index comment
+// that links in a loop or too deep is left out, and only it: the healthy ones stay linked, so the
+// body still reaches every record they list, and the pass names the faulty one in a
+// TRACE_INDEX_INVALID finding (decisionIndexFault).
 function decisionIndexIds(comments, repository, number) {
-  let trace;
-  try { trace = traceEntries(comments || [], null, repository, number); }
-  catch (error) { if (error.code !== 'TRACE_INDEX_INVALID') throw error; return []; }
+  const { linkableIndexRoots } = require('./decision-trace-audit.cjs');
   const created = new Map((comments || []).map(comment => [String(comment.id), String(comment.created_at || '')]));
-  return [...trace.directories, ...trace.indexes].map(entry => entry.id)
+  return linkableIndexRoots(comments || [], repository, number).roots.map(comment => String(comment.id))
     .sort((a, b) => (created.get(a) < created.get(b) ? -1 : created.get(a) > created.get(b) ? 1 : Number(a) - Number(b)));
+}
+
+// The report-only finding for a programme page whose decision index has a structural fault, or null.
+function decisionIndexFault(number, comments, repository) {
+  const { linkableIndexRoots } = require('./decision-trace-audit.cjs');
+  const { errors, faulty } = linkableIndexRoots(comments || [], repository, number);
+  if (!errors.length) return null;
+  const left = faulty.length ? ` The Decisions line leaves out index comment${faulty.length > 1 ? 's' : ''} ${faulty.join(', ')} until then; the other index comments stay linked.` : '';
+  return { code: 'TRACE_INDEX_INVALID', issue: number, detail: `${indexErrorText(errors)}${left}` };
 }
 
 // The AGENT CONTEXT block: one line. With one Agent context comment it links that comment; with
@@ -4509,10 +4518,12 @@ const EFFECT_TEXT = {
   edit_archive_comment: effect => `Update a registered programme archive comment on #${effect.target.issue}`,
 };
 
-// The parts of a body a block effect rewrites when its state block is already current.
+// The parts of a body a block effect rewrites when its state block is already current. The
+// programme page has no DECISIONS block: its decisions sit in AGENT CONTEXT, and an old block goes.
 function staleParts(effect) {
-  const names = [['trace', 'DECISIONS block'], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
-  if (!names.length) return 'DECISIONS block';
+  const decisions = effect.stale?.parent ? 'AGENT CONTEXT block' : 'DECISIONS block';
+  const names = [['trace', effect.stale?.parent ? 'AGENT CONTEXT block (the old DECISIONS block goes)' : decisions], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
+  if (!names.length) return decisions;
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
@@ -5671,6 +5682,8 @@ class Reconciler {
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traceBody ? 'an old DECISIONS block is still on the page' : !traced.block ? 'no DECISIONS block yet' : traced.block.tampered ? 'the DECISIONS block was edited by hand' : 'the DECISIONS block differs from the comments (an old comment trace is replaced here)' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
+      const indexFault = number === parent.parent_issue ? decisionIndexFault(number, comments, this.binding.repository) : null;
+      if (indexFault) findings.push(indexFault);
       let projected;
       const topicBudget = Math.max(0, MAX_TOPIC_COMMENTS_PER_PASS - effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory).reduce((count, effect) => count + effect.target.parts.length, 0));
       try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, number === parent.parent_issue ? MAX_TOPIC_COMMENTS_PER_PASS : topicBudget, { parent, only, traceTopicBudget: topicBudget, relay: relay.relay }); }
@@ -5717,7 +5730,7 @@ class Reconciler {
       for (const part of archiveEffects) effects.push({ kind: parent.page_archive?.some(entry => entry.key === part.key && entry.comment_id) ? 'edit_archive_comment' : 'post_archive_comment', target: { issue: number, key: part.key } });
       for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), ...(projected.traceBody ? { trace: blockDigest(projected.traceBody) } : {}), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
-        insert: !block, move: current && move && ordered, state: !current || move, relay: Boolean(projected.relaid && projected.moves), stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
+        insert: !block, move: current && move && ordered, state: !current || move, relay: Boolean(projected.relaid && projected.moves), stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent, ...(number === parent.parent_issue ? { parent: true } : {}) }, body, updated_at: issue.updated_at });
     }
   }
 
@@ -5882,7 +5895,7 @@ class Reconciler {
     const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next, now) };
     effects.push(effect);
     const number = parent.parent_issue;
-    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', ...PAGE_CODES]);
+    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'TRACE_INDEX_INVALID', 'MANAGED_BLOCK_BROKEN', ...PAGE_CODES]);
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
     const redraw = attention => {
       keep(effects, effect => ['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && effect.target.issue === number);

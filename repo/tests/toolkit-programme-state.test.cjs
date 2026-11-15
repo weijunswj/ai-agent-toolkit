@@ -416,8 +416,7 @@ test('an outcome pinned last sorts after every unpinned open outcome, even ones 
   const current = body => state.renderCurrentBlockBody(body, new Map(), new Map());
   const body = state.renderParentBlockBody(parent, new Map(), new Map());
   assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
-  assert.match(body, /Order: NOW, LATER by priority, tasks pinned last, then the latest 10 COMPLETED/);
-  assert.doesNotMatch(body, /optional/i, 'optional tasks show as LATER, so the order line does not name them');
+  assert.match(body, /Order: NOW, LATER by priority \(optional tasks after the rest\), tasks pinned last, then the latest 10 COMPLETED/);
   assert.equal(rows(body)[0], 2, 'the top unpinned task leads, so it starts next');
   assert.doesNotMatch(current(parent), /Start next/, 'CURRENT leaves what starts next to the graph');
   // A task added later takes the next order and still lands before the pinned one.

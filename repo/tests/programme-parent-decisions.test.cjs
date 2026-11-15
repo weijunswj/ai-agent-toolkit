@@ -23,7 +23,6 @@ test('the parent page has exactly CURRENT, PROGRAMME GRAPH and AGENT CONTEXT, wi
   assert.deepEqual(f.page().match(/^# [A-Z][A-Z ]+$/gm), ['# CURRENT', '# PROGRAMME GRAPH', '# AGENT CONTEXT']);
   assert.equal(state.findStateBlock(f.page(), 'TRACE').block, null, 'no TRACE block');
   assert.doesNotMatch(f.page(), /Newest:/, 'no newest-only link');
-  assert.doesNotMatch(f.page(), /optional tasks/i, 'the graph order line no longer names optional tasks');
   const writes = f.github.mutations();
   assert.equal(f.make().run({ apply: true }).summary, 'No changes');
   assert.equal(f.github.mutations(), writes);
@@ -78,4 +77,53 @@ test('records listed only in index comments stay linked from the body through th
   const stripped = f.page().replace(line, line.replace(/Decisions: .*? · `/, 'Decisions: `'));
   assert.notEqual(stripped, f.page());
   assert.deepEqual(audit(stripped).unlinked_decisions.map(entry => Number(entry.id)), records, 'without the generated links the records are unlinked');
+});
+
+// Anyone who can comment on the programme issue can post index comments, so a faulty one must never
+// cost the healthy ones their links: the healthy top-level indexes stay linked and a report-only
+// TRACE_INDEX_INVALID finding names the faulty comment.
+const indexFaultFixture = () => {
+  const f = pageFixture(state, { count: 1 });
+  const records = [1, 2, 3].map(n => f.github.addComment(12, { body: `Topic ${n}\n---\nTEST-00${n} decision.` }));
+  const healthy = f.github.addComment(12, { body: `${INDEX_COMMENT_MARKER}\n## Decision index\n${records.map(id => `- [r](${link(id)})`).join('\n')}` });
+  f.make().run({ apply: true });
+  const audit = () => auditDecisionTraces({ body: f.page(), comments: f.github.commentsOf(12), recordPrefix: 'TEST-', repository: REPO, issue: 12 });
+  assert.deepEqual(audit().unlinked_decisions, [], 'healthy start: every record is linked');
+  return { f, healthy, audit };
+};
+const generated = (intent, target) => `${INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=${intent} part=1/1 -->\n- [x](#issuecomment-${target})`;
+
+test('a looping pair of index comments leaves the healthy index linked and is named in a finding', () => {
+  const { f, healthy, audit } = indexFaultFixture();
+  const next = f.github.commentsOf(12).length ? Math.max(...f.github.commentsOf(12).map(comment => Number(comment.id))) + 2 : 2;
+  const a = f.github.addComment(12, { login: 'someone', body: generated('aa', next) });
+  const b = f.github.addComment(12, { login: 'someone', body: generated('bb', a) });
+  assert.equal(b, next, 'the second comment is the one the first links');
+  const report = f.make().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.ok(contextLine(f.page()).endsWith(` · Decisions: [index](${link(healthy)}) · \`programme.cjs trace 12\``), contextLine(f.page()));
+  assert.deepEqual(audit().unlinked_decisions, [], 'records in the healthy index stay linked');
+  const finding = report.findings.find(entry => entry.code === 'TRACE_INDEX_INVALID' && entry.issue === 12);
+  assert.ok(finding, JSON.stringify(report.findings.map(entry => entry.code)));
+  assert.match(finding.detail, new RegExp(`INDEX_CYCLE (${a}|${b})\\b`));
+  assert.match(finding.detail, /links in a loop or too deep; edit or delete the named index comment/);
+  assert.match(finding.detail, new RegExp(`leaves out index comments ${a}, ${b}`));
+  const writes = f.github.mutations();
+  assert.equal(f.make().run({ apply: true }).summary, 'No changes', 'the finding does not make the page flip');
+  assert.equal(f.github.mutations(), writes);
+});
+
+test('an index comment that adopts a healthy directory one hop too deep never unlinks it', () => {
+  const comments = [
+    person(1, 'Topic\n---\nTEST-001 decision.', '2026-11-01T00:00:00Z'),
+    person(81, `${INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=x part=1/1 -->\n- [d](#issuecomment-1)`, '2026-11-02T00:00:00Z'),
+    person(90, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n- **Topic:** [list 1](#issuecomment-81)`, '2026-11-03T00:00:00Z'),
+    // Another account's generated-looking index that lists the directory: directory then parts is one hop too deep.
+    person(95, generated('y', 90), '2026-11-04T00:00:00Z'),
+  ];
+  const line = state.renderContextBlockBody(12, comments, REPO).split('\n')[2];
+  assert.equal(line, `Agent context: none yet · Decisions: [index](${link(90)}) · \`programme.cjs trace 12\``);
+  const audit = auditDecisionTraces({ body: `[d](${link(90)})`, comments, recordPrefix: 'TEST-', repository: REPO, issue: 12 });
+  assert.deepEqual(audit.unlinked_decisions, []);
+  assert.deepEqual(audit.index_errors, []);
 });
