@@ -1,5 +1,44 @@
 # Toolkit Changelog
 
+## 3.132.0 (light CI after main moves; pull request body pre-flight; old scheduled-task code removed)
+
+### Programme sweep
+
+- **Busy tasks no longer stall the sweep:** a task with more than 100 closing references or cross-references now reads the rest of its PR links page by page (up to 1,000 a connection). Before, one such task made every pass incomplete, so the lease never recorded a finished pass, an earlier `PASS_STOPPED` never cleared and the task's PR history stopped updating. A pass that still cannot prove its read whole records `an incomplete read` as its reason instead of none.
+- **Keep a merged task open on purpose:** `update --patch` with `{"private":{"keep_open":{"reason":"<why>"}}}` keeps a task whose PRs have all merged off the work queue's `TASK_MERGED_OPEN` while its merged PRs are the ones the mark was set over; a later merge brings the task back until the mark is set again with a new reason. The write stamps the time and the PRs it covers, and the task page's STATUS line shows `Kept open: <reason> (since <time>)`. Older Toolkit copies still read the document.
+- **Null in an update patch:** `null` on a field a candidate, UAT or review must carry (such as `candidate.head`) now sets it to null instead of removing it, which could only end in a refused write. A refused state document now names its task.
+
+### CI
+
+- **Body edits stay light after main moves:** a pull request title or body edit used to rerun the whole Linux and Windows test matrix whenever `main` had moved since the last run, because the tested merge commit changed. The route job now also reuses an earlier run of the same head on an older base, but only when GitHub shows that run tested this head merged into a base commit today's base still contains, and the base moved no test file, shard manifest, workflow or dependency file. Only the newest run at the head that ran its tests can be reused: if it failed, the edit runs in full rather than reaching back to an older pass. The edit's run still checks the title, body and repository again. Any doubt runs in full.
+- **The summary checks follow the choice:** the gate job's legs step names the tested commit it reused (`TESTED_COMMIT`), and both `--verify-ci` checks require exactly that commit.
+- **Faster Toolkit validation:** the validator reads the topology policy once per run instead of once per checked review field, builds each retired-wording pattern once, and skips plain words when it looks for file paths. A full run takes about a quarter less time, which the copied-workspace tests feel on every case.
+- **Topology tests split in two:** the copied-workspace topology tests took up to about 109 s of their 120 s budget on Windows. The retired-wording cases now run in their own file, so both halves run side by side well inside the budget.
+
+### Pull request bodies
+
+- **Pre-flight before every write:** `node repo/scripts/toolkit-pr-body.cjs --body-file <draft> --title "<title>" --out <clean file>` removes every line holding an AI footer, a claude.ai session or project-thread link or the Projects attribution marker, then checks the cleaned body with the same personal-data guard CI runs, the UAT line rule and, in the Toolkit repository, the one `Bump:` line rule. In a repository with no guard config it uses a default with pull request text and AI attribution on and says so; a guard block whose report it cannot read counts as not ready. Builders run it before opening a pull request and before every body edit, so a body they write already passes the body checks instead of failing and costing a full run and a review round (a cloud create still gets the route's footer, which the update right after it removes).
+- **Footer-free writes from the cloud:** the PR review and git completion playbooks now say to write pull request bodies with the GitHub connector, never cloud `gh`, and to read them back; the footer a cloud create still gets is cleaned once with the connector's update call.
+- **Projects briefs:** every G1 brief asks for a body that passed the pre-flight; the merge card steps and the cloud hook parity table point at it.
+
+### Removed
+
+- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now fails to start; say `remove toolkit` to list and remove it after your OK.
+- Setup's retired `--scheduled-task-update` and `--remove-toolkit-tasks` options are gone. Setup still prints one line when old Toolkit tasks are recorded on a Windows computer, pointing to `remove toolkit`.
+- The permission ask rows for the old task commands are gone, since those commands no longer exist.
+
+### Changed
+
+- `remove toolkit` keeps a small legacy cleaner for old tasks. It removes a task only while it still carries Toolkit's marker (or the exact description an old launcher wrote when it disabled it) and still matches the definition Toolkit recorded. A task you made or that Toolkit only listed is never removed, and a Task Scheduler folder goes only when it is empty.
+- The `schedule_folder` binding key is retired: it is still accepted, so a binding that carries it stays valid, and nothing reads it.
+
+### Fixed
+
+- **Governance post-merge finish ends on a by-hand check:** a security check only a person can make, such as a CodeQL setup Toolkit cannot place, and dependency auto-merge waiting for protection that needs a fix by hand, now end the finish with the owner's step instead of retrying it every session.
+- **Clearer finish results:** a private repository on GitHub Free with no required checks names default-branch protection with what GitHub cannot enforce, not as a step; a write GitHub refuses keeps GitHub's answer in the reason, and a refusal for a non-admin account (forbidden) is held with the step to run `migrate` as an admin; the bank's required-checks row names the `migrate` step. A security read or write GitHub did not confirm, or a free setting Toolkit would still turn on, keeps being retried.
+- **CodeQL read limits:** more workflow files than Toolkit reads, or more than one workflow with CodeQL steps it cannot place, is named as a by-hand check instead of an unread result.
+- **Re-runs of the turn-on pull request:** a workflow someone else pushed to the turn-on branch stays; only Toolkit's marked copies and the shard list leave it. The read-back after an update waits briefly for GitHub to show the new head.
+
 ## 3.131.0
 
 ### Changed
