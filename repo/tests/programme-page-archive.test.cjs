@@ -238,11 +238,12 @@ test('B-T12: archive comments remain untagged and every decision stays reachable
   const decisionId = f.github.addComment(12, { body: 'Delivery\n---\nTEST-1\nA decision.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.parent().page_archive.length, 1, 'the graph part is archived');
-  const block = state.findStateBlock(f.page(), 'TRACE').block.body;
+  assert.equal(state.findStateBlock(f.page(), 'TRACE').block, null, 'the parent has no DECISIONS block');
+  const block = state.findStateBlock(f.page(), 'CONTEXT').block.body;
   const archived = f.github.commentsOf(12).find(entry => entry.body.startsWith('<!-- programme-page-archive'));
   assert.ok(archived, 'the archive comment exists');
-  assert.ok(block.includes(`#issuecomment-${decisionId})`), 'the newer archive comment never takes the decision link');
-  assert.equal(block.includes(String(archived.id)), false);
+  assert.doesNotMatch(block, /\[index/, 'an archive comment is never linked as a decision index');
+  assert.equal(block.includes(String(decisionId)), false, 'no single decision is linked as the newest');
 });
 
 test('archived quotations cannot introduce decision records, supersession or trace indexes', () => {
@@ -261,10 +262,11 @@ test('archived quotations cannot introduce decision records, supersession or tra
   assert.equal(f.parent().page_archive.length, 1);
   const comments = f.github.commentsOf(12);
   const audit = auditModule.auditDecisionTraces({ body: f.page(), comments, recordPrefix: 'TEST-', repository: f.github.repository, issue: 12 });
-  assert.deepEqual(audit.unlinked_decisions, []);
+  // Only the real record waits for an index entry: the archived quotation is no decision record.
+  assert.deepEqual(audit.unlinked_decisions.map(entry => entry.id), [String(original)]);
   assert.deepEqual(audit.unknown_supersedes, []);
   assert.deepEqual(audit.superseded_unmarked, []);
-  assert.doesNotMatch(state.findStateBlock(f.page(), 'TRACE').block.body, /replaced by/);
+  assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /replaced by|\[index/);
   const history = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/decision-history.cjs')).entriesFromComments(12, comments, { repo: f.github.repository, prefix: 'TEST-' });
   const moved = history.entries.find(entry => entry.id !== String(original));
   assert.equal(moved.tag, null); assert.equal(moved.record, null); assert.deepEqual(moved.supersedes, []);
@@ -548,7 +550,7 @@ test('a parent that still lists a legacy OPTIONAL graph part stays valid, and a 
 });
 
 for (const several of [false, true]) test(`N1: six alternating logins retain verified read-only parts, several=${several}`, () => {
-  const padding = 'Notes. '.repeat(several ? 6500 : 5700);
+  const padding = 'Notes. '.repeat(several ? 6560 : 5700);
   const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + padding });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const initial = f.parent().page_archive;
