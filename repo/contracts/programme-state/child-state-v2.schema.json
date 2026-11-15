@@ -487,6 +487,12 @@
               "null"
             ],
             "pattern": "^[0-9a-f]{40}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "The PR's title as last read, shown in the task's PR GRAPH."
           }
         }
       },

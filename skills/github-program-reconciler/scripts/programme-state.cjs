@@ -113,6 +113,8 @@ const INDEX_COMMENT_LIMIT = 60000;
 // Cap notifying topic comments across the pass; larger traces use directory pages directly.
 const MAX_TOPIC_COMMENTS_PER_PASS = 5;
 const TEXT_LIMIT = 200;
+// A PR's title as the task's PR GRAPH keeps it (GitHub allows 256 characters).
+const PR_TITLE_LIMIT = 256;
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 // Git's own blob id for a text (a SHA-1 repository): the id GitHub gives the blob it stores for it.
@@ -849,9 +851,10 @@ function validateChild(doc) {
       check(errors, Array.isArray(doc.prs), 'prs must be a list');
       const numbers = new Set();
       for (const pr of Array.isArray(doc.prs) ? doc.prs : []) {
-        checkShape(errors, pr, {all:['number','state','merge_sha']}, 'prs entry');
+        checkShape(errors, pr, {all:['number','state','merge_sha','title'], optional:['title']}, 'prs entry');
         check(errors, isObject(pr) && isInt(pr.number, 1) && !numbers.has(pr.number) && ['OPEN','MERGED','CLOSED'].includes(pr.state)
           && optional(pr.merge_sha, isSha) && (pr.state === 'MERGED' || pr.merge_sha === null), 'prs entries must have unique numbers, fixed states and a merge SHA or null');
+        check(errors, !isObject(pr) || pr.title === undefined || isText(pr.title) && pr.title.length <= PR_TITLE_LIMIT, `a prs entry title must be text of at most ${PR_TITLE_LIMIT} characters`);
         numbers.add(pr?.number);
       }
     }
@@ -1868,46 +1871,47 @@ function renderPrNavBlockBody(chains, pr) {
   return ['# PATH', '<!-- programme-nav -->', ...chains.map(chain => `${chains.length > 1 ? '- ' : ''}${chain.map(number => `#${number}`).join(' > ')} > PR #${pr}`)].join('\n');
 }
 
+// The UAT states that leave the owner's test still owed.
+const OWED_UAT_STATES = Object.freeze(['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED']);
+
 // The PR GRAPH of a task page: every open PR, then the latest finished ones, older ones on one line.
+// A row is the PR's title, its number, its status and its merge commit. The tracked PR's status
+// cell also carries the task's gate and, while the owner's test is owed, `UAT owed`; review,
+// release and the next action are in the task's handover file.
 const PR_GRAPH_FINISHED = 10;
 function prGraphLines(child) {
   const listed = child.prs || [];
   const tracked = child.pr?.number && !listed.some(pr => pr.number === child.pr.number)
     ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
   const all = [...tracked, ...listed];
-  if (!all.length) return ['None yet.'];
+  const owed = OWED_UAT_STATES.includes(child.uat?.state);
+  if (!all.length) return ['None yet.', ...(owed ? ['', 'UAT owed.'] : [])];
   const open = all.filter(pr => !['MERGED', 'CLOSED'].includes(pr.state));
   const finished = all.filter(pr => ['MERGED', 'CLOSED'].includes(pr.state));
-  const gate = pr => (pr.number === child.pr?.number ? [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ') : '') || '-';
+  const gate = [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ');
+  const status = pr => [pr.state, ...(pr.number === child.pr?.number ? [gate, owed ? 'UAT owed' : ''] : [])].filter(Boolean).join(' · ');
   const merged = pr => (pr.state === 'MERGED' && isSha(pr.merge_sha) ? `[${shortSha(pr.merge_sha)}](https://github.com/${child.repository}/commit/${pr.merge_sha})` : '-');
   const earlier = finished.slice(PR_GRAPH_FINISHED);
-  return ['| PR | Status | Gate | Merged |', '|---|---|---|---|',
-    ...[...open, ...finished.slice(0, PR_GRAPH_FINISHED)].map(pr => `|#${pr.number}|${pr.state}|${gate(pr)}|${merged(pr)}|`),
+  return ['| PR Task | PR # | Status | Merged SHA |', '|---|---|---|---|',
+    ...[...open, ...finished.slice(0, PR_GRAPH_FINISHED)].map(pr => `|${pr.title ? publicText(pr.title) : '-'}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
     ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : [])];
 }
 
-// The status block of a task page: its PR GRAPH and one STATUS line. The drawn revision stays in a
-// comment for the sweep's drift check. Section headings generated or required by Toolkit are in
-// capitals; a heading people add themselves keeps its own case.
+// The status block of a task page: its PR GRAPH. The drawn revision, the task status and the UAT
+// state stay in comments, out of sight: the sweep's drift check reads the revision, a closed page
+// is frozen once its status reads COMPLETED or RETIRED (frozenPage), and issue-closure.cjs owedUat
+// reads the ` · UAT: <state>` segment, so change those together. Section headings generated or
+// required by Toolkit are in capitals; a heading people add themselves is in Title Case.
 function renderChildBlockBody(child, outcome) {
   const status = outcome ? statusText(outcome, child) : '-';
-  const gate = [child.gate?.role, child.gate?.state].filter(Boolean).join(' ');
-  const wait = ownerWait(child);
-  // UAT and review show once recorded, marked STALE_HEAD when given at an older head. The UAT
-  // segment (` · UAT: <state>`) is read by issue-closure.cjs owedUat: change both together.
-  const line = [status, status === 'IN PROGRESS' && gate ? `Gate: ${publicText(gate)}` : null, wait ? `Waiting on you: ${wait}` : null,
-    child.uat?.state ? `UAT: ${publicText(uatText(child))}` : null, child.review?.state ? `Review: ${publicText(reviewText(child))}` : null,
-    child.next_action ? `Next: ${publicText(child.next_action)}` : null, child.release ? `Release: ${publicText(child.release)}` : null].filter(Boolean).join(' · ');
+  const uat = child.uat?.state ? ` · UAT: ${publicText(uatText(child))}` : '';
   return [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
     `<!-- State revision ${child.revision} (issue-${child.issue}.json) -->`,
+    `<!-- Task status: ${status}${uat} -->`,
     '# PR GRAPH',
     '',
     ...prGraphLines(child),
-    '',
-    '# STATUS',
-    '',
-    line,
   ].join('\n');
 }
 
@@ -1934,7 +1938,7 @@ function renderPrStatusBlockBody(pr, head, tasks) {
 // again, so a pass reads and writes only open tasks and the parent. A reopened task is drawn again.
 function frozenPage(issue, block) {
   return issue.state === 'closed' && !issue.is_pull_request && Boolean(block) && !block.tampered
-    && /^(?:- Status: )?(?:COMPLETED|RETIRED)\b/m.test(block.body);
+    && /^(?:- Status: |<!-- Task status: )?(?:COMPLETED|RETIRED)\b/m.test(block.body);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4002,11 +4006,11 @@ class ProgrammeGraphReader {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
       closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
+        pageInfo { hasNextPage } nodes { number title body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
       }
       timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
         pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
+          source { __typename ... on PullRequest { number title body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
         } }
       }
     }`).join('\n');
@@ -4426,7 +4430,8 @@ function graphPr(pr, repository) {
   if (merged && !Number.isFinite(Date.parse(pr.mergedAt || pr.merged_at))) return null;
   const head = typeof pr.head === 'string' ? pr.head : pr.head?.sha || pr.headRefOid || pr.head_sha || null;
   return {number:pr.number, state:state === 'DRAFT' ? 'OPEN' : state, merge_sha:merged ? mergeSha : null,
-    merged_at:pr.mergedAt || pr.merged_at || null, head, train:pr.train === undefined ? trainRows(pr.body) : pr.train};
+    merged_at:pr.mergedAt || pr.merged_at || null, head, train:pr.train === undefined ? trainRows(pr.body) : pr.train,
+    ...(typeof pr.title === 'string' && pr.title.trim() ? { title: pr.title.trim().slice(0, PR_TITLE_LIMIT) } : {})};
 }
 
 function prHistory(entries) {
@@ -4434,7 +4439,7 @@ function prHistory(entries) {
   const rank = {OPEN:0,MERGED:1,CLOSED:2};
   return [...unique.values()].sort((a,b) => rank[a.state]-rank[b.state]
     || (a.state === 'MERGED' ? Date.parse(b.merged_at)-Date.parse(a.merged_at) : 0) || b.number-a.number)
-    .map(({number,state,merge_sha}) => ({number,state,merge_sha}));
+    .map(({number,state,merge_sha,title}) => ({number,state,merge_sha,...(title ? {title} : {})}));
 }
 
 // Only refresh uses this transformation, from a complete issue observation in its own pass.
@@ -4477,7 +4482,7 @@ const EFFECT_TEXT = {
   detach: effect => `Detach finished #${effect.target.issue} from under #${effect.target.parent} (the task stays in the catalogue)`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, TASK, PR GRAPH and STATUS, AGENT CONTEXT, then More); its hand-written text moves, and a copy of the page is saved first`
+  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, TASK, PLAN, PR GRAPH, AGENT CONTEXT, then the hand-written text); its hand-written text moves, and a copy of the page is saved first`
     : effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Write the PATH and STATUS blocks at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,

@@ -74,8 +74,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main' } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }) });
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
@@ -403,7 +403,7 @@ class FakeGitHub {
       const repository = {};
       const node = value => typeof value === 'object' ? value : (() => {
         const pr = this.prs.get(value);
-        return { __typename: 'PullRequest', number: value, body: pr?.body || '', state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
+        return { __typename: 'PullRequest', number: value, title: pr?.title || '', body: pr?.body || '', state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
           mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
       const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
