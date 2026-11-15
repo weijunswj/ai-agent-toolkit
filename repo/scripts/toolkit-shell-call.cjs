@@ -440,9 +440,11 @@ function readScript(text, { powershell = false, interpolation = false, cmd = fal
   // A data command's block stays data, unless the block sits in a parenthesised group or is a
   // hash literal (@{...}), whose values PowerShell runs before the data command sees them.
   // Where PowerShell may run it, a script block followed by member access ({...}.Invoke(),
-  // {...}?.Invoke()) or piped on to an invoker (| % Invoke, | ForEach-Object { & $_ }) runs too.
+  // {...}?.Invoke()) or piped on to any further stage in the same statement runs too: a later stage
+  // can invoke it however it likes (| % Invoke, | Where-Object { $_.Invoke() }, | Out-String | iex).
+  // A pipe after a `;`, a line break, `&&` or `||` belongs to another statement.
   const scriptBlocks = powershell || uncertainShell || codexBash;
-  const invoked = end => scriptBlocks && (/^\??\./.test(source.slice(end + 1, end + 3)) || /^[^;\n]*\|[^;\n]*?(?:^|[\s|{])(?:%|foreach-object|invoke-command|icm|&)(?=[\s{]|$)/i.test(source.slice(end + 1)));
+  const invoked = end => scriptBlocks && (/^\??\./.test(source.slice(end + 1, end + 3)) || /^[^;\n|&]*\|(?!\|)/.test(source.slice(end + 1)));
   const runsGh = (prefix, body, at, end) => (!DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) || /\(/.test(prefix) || source[at - 1] === '@' || invoked(end)) && /\bgh\b/i.test(body);
   const escapes = c => !cmd && (c === '\\' && !powershell || c === '`');
   const emit = value => { chunks.push(value); if (prefixText.length < 64) prefixText += value.slice(0, 64 - prefixText.length); };
@@ -608,6 +610,35 @@ function startProcess(words, expanding, raw, offsets) {
   return { unreadableGh: !strict && hasGh, movesTarget };
 }
 
+// A -c script's positional parameters: $0 to $9, ${0} to ${9}, $@, $*, ${@} and ${*}.
+const POSITIONAL = /\$(?:\{([0-9@*])\}|([0-9@*]))/;
+// Whether some order of these words, glued together, spells a guarded gh write. Up to seven words
+// every order is tried; past that, any g, h and guarded noun among them counts.
+const SPELLED_WRITES = [/gh[\s\S]*issue[\s\S]*close/i, /gh[\s\S]*pr[\s\S]*(?:create|new|edit)/i, /gh[\s\S]*api/i];
+function spellsGuardedGh(words) {
+  const all = words.join('');
+  if (!/g/i.test(all) || !/h/i.test(all)) return false;
+  if (words.length > 7) return /issue|pr|api/i.test(all);
+  const order = [...words]; const counts = new Array(order.length).fill(0);
+  const spells = () => { const text = order.join(''); return SPELLED_WRITES.some(pattern => pattern.test(text)); };
+  if (spells()) return true;
+  // Heap's algorithm: every order once.
+  for (let i = 1; i < order.length;) {
+    if (counts[i] < i) {
+      const j = i % 2 ? counts[i] : 0; [order[i], order[j]] = [order[j], order[i]];
+      if (spells()) return true;
+      counts[i] += 1; i = 1;
+    } else { counts[i] = 0; i += 1; }
+  }
+  return false;
+}
+// Text that may hold a gh command's pieces: gh itself, a guarded noun, a character cast or a lone
+// quoted g. A built or substituted string that mentions none of these is not read as a gh command.
+const GH_PIECES = /\bgh\b|\b(?:issue|pr|api)\b|\[char\]|['"]g['"]/i;
+// PowerShell ways to make a script block from text: [scriptblock]::Create(...) and the
+// $ExecutionContext.InvokeCommand methods.
+const SCRIPT_FROM_TEXT = /scriptblock\]\s*::\s*create\b|\binvokecommand\s*\.\s*(?:invokescript|newscriptblock)\b/i;
+
 function scriptCommands(text, opts = {}) { return executableCommands(text, 0, opts); }
 // Readings where PowerShell may run the command: its own tool, an unknown shell, or Codex Bash.
 function powershellLike(context) { return Boolean(context.powershell || context.uncertainShell || context.codexBash); }
@@ -635,6 +666,11 @@ function executableCommands(text, depth = 0, context = {}) {
   const substitutions = [];
   const masked = clean.replace(/\$\((?:cat __heredoc_\d+__|__subst__)\)/g, value => { substitutions.push(value); return `__subword_${substitutions.length - 1}__`; });
   let movesTarget = Boolean(context.movesTarget); const result = [];
+  // A script block made from text runs that text wherever it is invoked later; where PowerShell may
+  // run the command, text that may hold gh pieces is refused.
+  if (powershellLike(context) && SCRIPT_FROM_TEXT.test(text) && GH_PIECES.test(text)) {
+    result.push({ words: ['gh'], expanding: [false], allWords: [], docs, movesTarget, unreadableGh: true, unreadableReason: 'This command makes a script block from text ([scriptblock]::Create or InvokeCommand), so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.', hidden: true });
+  }
   for (const command of shellCommands(masked, context)) {
     dropStopParsing(command, masked);
     command.words = command.words.map((word, i) => word.replace(/__subword_(\d+)__/g, (_, n) => { command.expanding[i] = true; return substitutions[n]; }));
@@ -684,15 +720,26 @@ function executableCommands(text, depth = 0, context = {}) {
       script = expression ? words.slice(1).join(' ') : index >= 0 ? (kind === 'posix' ? words[scriptAt] : [attachedScript, ...words.slice(index + 1)].filter(Boolean).join(' ')) : here >= 0 ? words[here].slice(3) || words[here + 1] : program === 'powershell' ? words.slice(1).join(' ') : null;
       // Words after a POSIX -c script are its $0, $1 ...; "$0" "$@" runs them as a command.
       if (kind === 'posix' && index >= 0) {
-        const extra = words.slice(scriptAt + 1); const at = extra.findIndex((_, n) => guardedGh(ghCommand(extra.slice(n))));
+        const extra = words.slice(scriptAt + 1); const at = extra.findIndex((_, n) => guardedGh(ghCommand(extra.slice(n, n + 8))));
         if (at >= 0) { result.push({ words: extra.slice(at), expanding: expanding.slice(scriptAt + 1 + at), allWords: words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden: true, offsets: command.offsets }); continue; }
         // A single word ('$1' x 'gh issue close 1', eval "$1") can hold the whole command.
         // ... or several words ($@, $*, $1 $2) can together: read them joined as well.
         if (extra.some(word => /\bgh\b/i.test(word))) for (const part of [...extra, extra.join(' ')]) result.push(...executableCommands(part, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
+        // A script that expands its positional parameters ($0 to $9, ${n}, $@, $*) can put them in any
+        // order or glue them together or to its own text: read the script with them put in place, and
+        // refuse when some order of the words spells a guarded gh write (set, shift and loops reorder).
+        const script = words[scriptAt];
+        if (extra.length && typeof script === 'string' && POSITIONAL.test(script)) {
+          const placed = script.replace(new RegExp(POSITIONAL.source, 'g'), (_, braced, bare) => { const n = braced ?? bare; return /\d/.test(n) ? extra[Number(n)] ?? '' : extra.slice(1).join(' '); });
+          result.push(...executableCommands(placed, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
+          if (spellsGuardedGh(extra)) { result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command builds a gh command from the words after its -c script, so Toolkit cannot tell what it runs and it was refused. Run the gh command as its own command.', hidden: true }); continue; }
+        }
       }
-      // iex with a string built by +, -f, -join, a method call or a cast: the command text is not literal.
-      if (powershellLike(context) && /^(?:iex|invoke-expression)$/.test(program) && (command.opensGroup || words.slice(1).some(word => word === '+' || /^-(?:f|format|join)$/i.test(word) || /::|^\[/.test(word))) && /\bgh\b/i.test(command.opensGroup ? text : words.slice(1).join(' '))) {
-        result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command builds the text it runs with iex from joined or formatted strings, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.', hidden });
+      // iex with a string built by +, -f, -join, a method call, a cast or a $(...) substitution: the
+      // command text is not literal, so text that may hold gh pieces is refused.
+      const built = command.opensGroup || words.slice(1).some(word => word === '+' || /^-(?:f|format|join)$/i.test(word) || /::|^\[|\[char\]|__subst__/i.test(word));
+      if (powershellLike(context) && /^(?:iex|invoke-expression)$/.test(program) && built && GH_PIECES.test(command.opensGroup || words.slice(1).some(word => /__subst__/.test(word)) ? text : words.slice(1).join(' '))) {
+        result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command builds the text it runs with iex from joined, formatted or substituted strings, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.', hidden });
         continue;
       }
       outerExpansion ||= expression ? expanding.slice(1).some(Boolean) : index >= 0 ? kind === 'posix' ? Boolean(expanding[scriptAt]) : expanding.slice(attachedScript ? index : index + 1).some(Boolean) : here >= 0 ? Boolean(expanding[here] || expanding[here + 1]) : program === 'powershell' && expanding.slice(1).some(Boolean);
@@ -740,10 +787,29 @@ function closureCommands(input, { host } = {}) {
   const commands = executableCommands(text, 0, context);
   if ((context.uncertainShell || context.codexBash) && /\\"/.test(text)) {
     const alternate = executableCommands(text, 0, { ...context, powershell: true });
-    const count = list => list.filter(command => command.unreadableGh || guardedGh(ghCommand(command.words))).length;
-    if (count(alternate) > count(commands)) throw Object.assign(new Error('The shell quoting around this GitHub write can be read two ways, so it was refused. Run the GitHub write as its own command, without backslash-escaped quotes around it.'), { complete: true });
+    const writes = list => list.filter(command => command.unreadableGh || guardedGh(ghCommand(command.words))).map(writeKey);
+    const judged = new Set(writes(commands)); const other = writes(alternate);
+    // The judged reading must see every write the other reading runs: as many, and each one by
+    // noun, verb and target. A write only the judged reading sees is judged as usual.
+    if (other.length > writes(commands).length || other.some(key => !judged.has(key))) throw Object.assign(new Error('The shell quoting around this GitHub write can be read two ways, so it was refused. Run the GitHub write as its own command, without backslash-escaped quotes around it.'), { complete: true });
   }
   return commands;
+}
+
+// One guarded write as noun, verb and target (repository, then the issue or PR number or the API
+// endpoint), for comparing what two readings of the same text would run.
+function writeKey(command) {
+  if (command.unreadableGh) return 'unreadable';
+  const gh = ghCommand(command.words);
+  if (gh.variable) return 'variable';
+  let repository = gh.inherited || ''; const targets = [];
+  for (let i = 0; i < gh.rest.length; i++) {
+    const word = gh.rest[i];
+    if (['-R', '--repo'].includes(word)) repository = gh.rest[++i] || '';
+    else if (/^(?:-R.|--repo=)/.test(word)) repository = word.replace(/^(?:-R|--repo=)/, '');
+    else if (gh.noun === 'api' ? /^(?:https:\/\/api\.github\.com\/)?\/?(?:repos\/|graphql$)/.test(word) : /^#?\d+$/.test(word)) targets.push(word.replace(/^#/, ''));
+  }
+  return JSON.stringify([gh.noun, gh.verb, repository.toLowerCase(), targets.slice(0, 1)]);
 }
 
 function ghCommand(words) {

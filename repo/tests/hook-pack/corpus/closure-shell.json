@@ -6092,6 +6092,550 @@
           "decision": "deny"
         }
       }
+    },
+    {
+      "id": "CLOSURE.779a-block-pipe-percent-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} |% Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-block-pipe-foreach-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} | foreach Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-block-pipe-where-exec",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} | Where-Object { $_.Invoke() }"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-block-pipe-outstring-iex-bash",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} | Out-String | iex"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Real bash cannot run this PowerShell shape; the Codex Bash reading may be PowerShell, where it runs.",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      }
+    },
+    {
+      "id": "CLOSURE.779a-pass-block-alone-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-reversed-bash",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -c '$2 $1' x 'issue close 1 -R toolkit-test-fixture/fixture' gh"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-glued-exec",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "sh -c '$1$2' x g 'h issue close 1 -R toolkit-test-fixture/fixture'"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-dollar-zero-bash",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -c '$0 issue close 1 -R toolkit-test-fixture/fixture' gh"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-script-glue-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "sh -c 'g$1 issue close 1 -R toolkit-test-fixture/fixture' x h"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-pass-sh-c-echo-bash",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -c 'echo $1' x hello"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-iex-subst-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "iex $('gh issue close 1 -R toolkit-test-fixture/fixture')"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-iex-subst-bash",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "iex $('gh issue close 1 -R toolkit-test-fixture/fixture')"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Real bash cannot run this PowerShell shape; the Codex Bash reading may be PowerShell, where it runs.",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      }
+    },
+    {
+      "id": "CLOSURE.779a-iex-char-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "iex ([char]103 + 'h issue close 1 -R toolkit-test-fixture/fixture')"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-iex-join-pieces-exec",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "iex (-join ('g','h issue close 1 -R toolkit-test-fixture/fixture'))"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-iex-insert-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "iex ('h issue close 1 -R toolkit-test-fixture/fixture'.Insert(0,'g'))"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-iex-string-subst-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "iex \"$('g')h issue close 1 -R toolkit-test-fixture/fixture\""
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-scriptblock-create-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "& ([scriptblock]::Create('gh issue close 1 -R toolkit-test-fixture/fixture'))"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-scriptblock-variable-exec",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "$sb = [scriptblock]::Create('gh issue close 1 -R toolkit-test-fixture/fixture'); & $sb"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-pass-iex-subst-ps",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "iex $('Get-Date')"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-two-readings-noun-bash",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \\\" ; gh issue close 2 -R toolkit-test-fixture/fixture ; echo \\\" ; echo \"a\\\" ; gh api -X PATCH repos/toolkit-test-fixture/fixture/issues/1 -f state=closed ; echo \\\"b\""
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Real bash runs only the close of leaf issue 2; a PowerShell reading of the Codex Bash call runs an API close of issue 1, which has an open child, instead.",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      }
+    },
+    {
+      "id": "CLOSURE.779a-two-readings-target-exec",
+      "source": "issue 779 slice A: piped script blocks, -c argument order, built iex text, script blocks from text, two-reading write sets",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "echo \\\" ; gh issue close 2 -R toolkit-test-fixture/fixture ; echo \\\" ; echo \"a\\\" ; gh issue close 1 -R toolkit-test-fixture/fixture ; echo \\\"b\""
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "One reading closes leaf issue 2, the other issue 1, which has an open child."
     }
   ]
 }

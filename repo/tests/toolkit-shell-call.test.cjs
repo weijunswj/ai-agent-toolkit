@@ -137,9 +137,10 @@ test('AT12: shipped matchers cover nested shell calls but not the outer code cel
   for (const tool of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) assert.ok(matchers.some(m => m.test(tool)), tool);
   for (const tool of ['exec', 'code_mode_exec', 'wait', 'write_stdin']) assert.equal(matchers.some(m => m.test(tool)), false, tool);
 });
-// Closure scans are linear (about the same time per character from 4K to 1M characters), but from
-// 16K to 64K the per-character cost still steps up, so on a busy runner a 5ms sample at 16K grew past
-// the 10x limit. Start at 16K, grow until the smaller sample takes 15ms, and keep the best of five.
+// Closure scans are linear. On a busy machine a short sample can fit inside one scheduler slice while
+// the larger one is preempted, which can read past the 10x limit. Longer samples reduce this but do not
+// remove it on an oversubscribed machine. Start at 16K, grow until the smaller sample takes 15ms, and
+// keep the best of five; the closing-reference timing in toolkit-issue-closure.test.cjs uses the same shape.
 // On a fast runner the growth reaches a 256K sample, so the larger sample is 1M characters: exactly
 // the reader's input bound (SCAN_BOUND). scanInput never builds past the size it is asked for, so no
 // timed input crosses the bound; the bound refusal itself is proven by its own test below.
@@ -483,6 +484,91 @@ test('attached blocks, comments and stop-parsing scans retain the hostile input 
       try { closureReader.scriptCommands(text,{powershell}); }
       catch (error) { assert.match(error.message,/bound exceeded/); }
     }, size => scanInput(size, unit, '', unit === 'f { ' ? '} ' : ''), SCAN_TIMING);
+    assert.ok(result.ok, `${unit}: ${result.message}`);
+  }
+});
+
+// Issue 779 remaining reader gaps, as the G0 closure matrix. Readings: PS is the PowerShell tool,
+// EXEC and CXB are where PowerShell may run the command (Codex exec_command and Codex Bash), CB is
+// Claude Bash (POSIX only). The guard allows every write it is shown, so each refusal below comes from
+// the reader itself; `judged` means the guard was shown the write.
+test('779 closure matrix: piped data blocks, -c argument order, built iex text and two-reading write sets', () => {
+  const closure = require('../scripts/toolkit-issue-closure.cjs');
+  const close = 'gh issue close 1 -R example.test/app';
+  const READINGS = { PS: ['PowerShell', 'claude'], EXEC: ['exec_command', 'codex'], CXB: ['Bash', 'codex'], CB: ['Bash', 'claude'] };
+  const decide = (reading, command) => {
+    const seen = [];
+    const guard = { assertClosable: n => { seen.push(`close ${n}`); return { status: 'allowed' }; }, checkTexts: () => { seen.push('texts'); return { status: 'allowed' }; }, checkEdit: () => { seen.push('edit'); return { status: 'allowed' }; } };
+    const [tool_name, host] = READINGS[reading];
+    const result = closure.issueClosureDecision({ tool_name, tool_input: { command } }, { host, guard });
+    return result?.deny ? 'refuse' : seen.length ? 'judged' : 'allow';
+  };
+  const AMB_ONLY = { PS: 'refuse', EXEC: 'refuse', CXB: 'refuse', CB: 'allow' };
+  const ALL = { PS: 'refuse', EXEC: 'refuse', CXB: 'refuse', CB: 'refuse' };
+  const NONE = { PS: 'allow', EXEC: 'allow', CXB: 'allow', CB: 'allow' };
+  const rows = [
+    // L4r: a data command's block piped on to any further stage may be invoked there.
+    ['L4r |% Invoke', `Write-Output {${close}} |% Invoke`, AMB_ONLY],
+    ['L4r | foreach Invoke', `Write-Output {${close}} | foreach Invoke`, AMB_ONLY],
+    ['L4r | Where-Object', `Write-Output {${close}} | Where-Object { $_.Invoke() }`, AMB_ONLY],
+    ['L4r | Select-Object', `echo {${close}} | Select-Object { $_.Invoke() }`, AMB_ONLY],
+    ['L4r | Select-Object @{e=...}', `Write-Output {${close}} | Select-Object @{e={$_.Invoke()}}`, AMB_ONLY],
+    ['L4r | Out-String | iex', `Write-Output {${close}} | Out-String | iex`, AMB_ONLY],
+    ['L4r attached |%{...} (attached gh refused everywhere)', `Write-Output{${close}}|%{$_.Invoke()}`, ALL],
+    ['L4r | Out-Null (accepted false refusal)', `Write-Output {${close}} | Out-Null`, AMB_ONLY],
+    ['L4r control: block alone', `Write-Output {${close}}`, NONE],
+    ['L4r control: pipe in a later statement', `Write-Output {${close}}; gh pr view 7 | Out-String`, NONE],
+    ['L4r control: chain operator', `Write-Output {${close}} || echo failed`, NONE],
+    // L7: positional parameters of a -c script, in any order or glued, including to the script's own text.
+    ['L7 $2 $1', `sh -c '$2 $1' x 'issue close 1 -R example.test/app' gh`, ALL],
+    ['L7 $1$2', `sh -c '$1$2' x g 'h issue close 1 -R example.test/app'`, ALL],
+    ['L7 ${2}${1}', `sh -c '\${2}\${1}' x 'h issue close 1 -R example.test/app' g`, ALL],
+    ['L7 $0', `sh -c '$0 issue close 1 -R example.test/app' gh`, ALL],
+    ['L7 glued to script text', `sh -c 'g$1 issue close 1 -R example.test/app' x h`, ALL],
+    ['L7 reordered by set', `bash -c 'set -- "$2" "$1"; "$@"' x 'issue close 1 -R example.test/app' gh`, ALL],
+    ['L7 control: echo $1', `sh -c 'echo $1' x hello`, NONE],
+    ['L7 control: read-only gh', `sh -c 'echo $1' x 'gh pr view 7'`, NONE],
+    // L8: iex of a substitution or a built string, and script blocks created from text.
+    ['L8 iex $()', `iex $('${close}')`, AMB_ONLY],
+    ['L8 Invoke-Expression $()', `Invoke-Expression $('${close}')`, AMB_ONLY],
+    ['L8 & scriptblock Create', `& ([scriptblock]::Create('${close}'))`, AMB_ONLY],
+    ['L8 . scriptblock Create', `. ([ScriptBlock]::Create('${close}'))`, AMB_ONLY],
+    ['L8 scriptblock in a variable', `$sb = [scriptblock]::Create('${close}'); & $sb`, AMB_ONLY],
+    ['L8 InvokeCommand.InvokeScript', `$ExecutionContext.InvokeCommand.InvokeScript('${close}')`, AMB_ONLY],
+    ['L8 char builder', `iex ([char]103 + 'h issue close 1 -R example.test/app')`, AMB_ONLY],
+    ['L8 -join', `iex (-join ('g','h issue close 1 -R example.test/app'))`, AMB_ONLY],
+    ['L8 Insert', `iex ('h issue close 1 -R example.test/app'.Insert(0,'g'))`, AMB_ONLY],
+    ['L8 subexpression in a string', `iex "$('g')h issue close 1 -R example.test/app"`, AMB_ONLY],
+    ['L8 control: iex of a substitution without gh', `iex $('Get-Date')`, NONE],
+    ['L8 control: script block without gh', `& ([scriptblock]::Create('Get-Date'))`, NONE],
+  ];
+  // 785-L1: two readings that see different writes (noun, verb or target) are refused where PowerShell
+  // may run the command; the same write in both readings is read as usual (clean Refs text needs no
+  // lookup), and a write only the judged reading sees is judged.
+  const H6 = String.raw`echo \" ; gh pr create --repo example.test/app --title T --body Refs ; echo \" ; echo "a\" ; ${close} ; echo \"b"`;
+  const target = String.raw`echo \" ; gh issue close 1 -R example.test/app ; echo \" ; echo "a\" ; gh issue close 2 -R example.test/app ; echo \"b"`;
+  rows.push(
+    ['785-L1 H6 noun differs', H6, { EXEC: 'refuse', CXB: 'refuse' }],
+    ['785-L1 target differs', target, { EXEC: 'refuse', CXB: 'refuse' }],
+    ['785-L1 control: one write, both readings', String.raw`gh pr create --title T --body "Refs #9001 \"quoted\"" -R example.test/app`, { EXEC: 'allow', CXB: 'allow' }],
+    ['785-L1 control: write only the judged reading sees', String.raw`echo "a\"b" ; ${close}`, { EXEC: 'judged', CXB: 'judged' }],
+  );
+  const wrong = [];
+  for (const [name, command, expected] of rows) for (const [reading, want] of Object.entries(expected)) {
+    const got = decide(reading, command);
+    if (got !== want) wrong.push(`${name} on ${reading}: ${got}, expected ${want}`);
+  }
+  assert.deepEqual(wrong, []);
+});
+
+test('779 new refusals hold under hostile suffixes and stay bounded', () => {
+  for (const [command, powershell] of [['Write-Output {gh issue close 1} |% Invoke', true], ["sh -c '$2 $1' x 'issue close 1' gh", false], ["iex $('gh issue close 1')", true]]) {
+    hostile.expectDefaultDeny(assert, text => {
+      try { return !closureReader.closureWriteCandidate({ tool_name: powershell ? 'PowerShell' : 'Bash', tool_input: { command: `${command} ${text}` } }); } catch { return false; }
+    }, hostile.cases(hostile.FAMILIES, ['shell']));
+  }
+  for (const [unit, powershell] of [['echo {gh} | ', true], ["sh -c '$1$2' x g h ", false], ['iex $(gh) ', true]]) {
+    const result = hostile.timing(text => { try { closureReader.scriptCommands(text, { powershell }); } catch (error) { assert.match(error.message, /bound exceeded/); } }, size => scanInput(size, unit), SCAN_TIMING);
     assert.ok(result.ok, `${unit}: ${result.message}`);
   }
 });
