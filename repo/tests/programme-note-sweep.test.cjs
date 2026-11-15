@@ -22,7 +22,7 @@ const noteEntries = f => (f.parent().page_archive || []).filter(entry => entry.k
 const context = f => state.findStateBlock(f.page(), 'CONTEXT').block.body;
 const unsafe = f => (f.parent().attention || []).filter(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE');
 const untrusted = f => (f.parent().attention || []).filter(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED');
-const hand = f => { const page = f.page(); return page.slice(0, page.indexOf('<!-- AI-AGENT-TOOLKIT')) + '|' + page.slice(page.lastIndexOf('END CONTEXT -->') + 'END CONTEXT -->'.length, page.indexOf('<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE')); };
+const hand = f => { const page = f.page(); return page.slice(0, page.indexOf('<!-- AI-AGENT-TOOLKIT')) + '|' + page.slice(page.lastIndexOf('END CONTEXT -->') + 'END CONTEXT -->'.length); };
 
 // ---- The reader -------------------------------------------------------------------------------
 
@@ -312,7 +312,7 @@ test('marked notes move byte for byte: saved copy first, verified comment, one c
   // The page: marked bytes gone, every unmarked byte and its order kept.
   assert.equal(f.page().includes('## Archive'), context(f).includes('## Archive'));
   assert.equal(f.page().includes('Keep every byte.'), false);
-  assert.equal(hand(f), '# Programme\n\n|\n\nOwner text that stays.  \n\n' + TAIL + '\n');
+  assert.equal(hand(f), '# Programme\n\n|\n\nOwner text that stays.  \n\n' + TAIL);
   assert.ok(context(f).endsWith(` · Notes: [Notes archived 2026-11-09 (part 1 of 1)](https://github.com/example.test/app/issues/12#issuecomment-${entry.comment_id}) · Decisions: \`programme.cjs trace 12\``), context(f));
   assert.deepEqual(unsafe(f), []);
   assert.deepEqual(state.validateParent(f.parent()), []);
