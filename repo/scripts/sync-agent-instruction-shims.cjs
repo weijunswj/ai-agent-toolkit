@@ -280,6 +280,20 @@ class InstructionProjectionOperation {
 
 function validateAndSync(options = {}) { return new InstructionProjectionOperation(options).run(); }
 
+// Every file this sync writes, for the merge train finder's generated-sync check: `blocks: null`
+// when the check above compares the whole file, else the block names it compares (the rest of the
+// file is hand-written). The repo-local shim templates are not here: their block body is a source.
+const PROJECTED_OUTPUTS = Object.freeze([
+  ...n8nDerivativePaths.map(file => ({ path: file, blocks: null })),
+  { path: n8nAdapterTemplatePath, blocks: null },
+  { path: `${templateRoot}/${MANAGED_TEMPLATE}`, blocks: null },
+  { path: `${publishedRoot}/${MANAGED_TEMPLATE}`, blocks: null },
+  { path: 'AGENTS.md', blocks: [...ROOT_REPLACED_BLOCKS] },
+  { path: `${publishedRoot}/${CLAUDE_SHIM.file}`, blocks: null },
+  { path: CLAUDE_SHIM.target, blocks: null },
+  ...SHIMS.flatMap(shim => [{ path: `${publishedRoot}/${shim.file}`, blocks: null }, { path: shim.target, blocks: [shim.name] }]),
+].map(Object.freeze));
+
 if (require.main === module) {
   const { errors } = validateAndSync();
   if (errors.length) {
@@ -291,5 +305,6 @@ if (require.main === module) {
 }
 
 module.exports = {
+  PROJECTED_OUTPUTS,
   validateAndSync
 };

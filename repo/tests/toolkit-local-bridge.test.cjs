@@ -2552,6 +2552,45 @@ test('SessionStart notice names a vendored Toolkit check that is older or missin
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
 });
 
+test('SessionStart notice compares the vendored checks of an ENABLED repository that carries no Toolkit block', () => {
+  // Turn-on writes no governed block now, so a governed repository's own AGENTS.md (or none) must not
+  // switch the vendored-check comparison off, and its own instruction files are not compared.
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
+  for (const syncSource of ['codex-plugin', 'claude-plugin']) {
+    for (const agents of ['# Project rules\n', null]) {
+      const root = tmpRoot();
+      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+      if (agents !== null) writeFile(path.join(root, 'AGENTS.md'), agents);
+      const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+      writeFile(copy, installer.vendoredText());
+      const label = `${syncSource}, ${agents === null ? 'no AGENTS.md' : 'own AGENTS.md'}`;
+      const options = { targetRoot: root, pluginRoot: repoRoot, state: {}, governanceEnabled: () => true };
+      const current = runAgentRulesPreflight({ hook: true, syncSource }, options);
+      assert.equal(current.status, 'ok', `${label}: a current copy is quiet and the repository's own files are not compared`);
+      writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
+      const before = snapshotTree(root);
+      // With no newer Toolkit known here, the checks are refreshed from the running copy.
+      const stale = runAgentRulesPreflight({ hook: true, syncSource }, options);
+      assert.equal(stale.status, 'needs-attention', label);
+      assert.equal(stale.direction, 'differs', label);
+      assert.deepEqual(stale.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*next step: refresh them with repository-agent-rules before this task ends\. No files were changed\.$/, label);
+      // With a newer Toolkit on record the copy may be the newer one, so the note says to refresh
+      // Toolkit, never to rewrite the checks from the older running copy.
+      const newerOnRecord = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      assert.equal(newerOnRecord.direction, 'newer', label);
+      assert.deepEqual(newerOnRecord.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      const newerMessage = formatAgentRulesPreflight(newerOnRecord);
+      assert.match(newerMessage, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) may come from a newer Toolkit \(99\.0\.0\) than the running copy \(.+\); next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/, label);
+      assert.doesNotMatch(newerMessage, /repository-agent-rules|repository rules/, label);
+      assert.doesNotMatch(newerMessage, NEVER_HALTING, label);
+      assert.deepEqual(snapshotTree(root), before, `${label}: read-only`);
+      assert.equal(runAgentRulesPreflight({ hook: true, syncSource }, { ...options, governanceEnabled: () => false }).status, 'not-managed', `${label}: not governed and no block is not managed`);
+    }
+  }
+});
+
 test('SessionStart notice says repository rules from a newer Toolkit are authoritative, at every session start, without writing', () => {
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();

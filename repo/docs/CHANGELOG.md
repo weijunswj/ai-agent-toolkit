@@ -1,5 +1,41 @@
 # Toolkit Changelog
 
+## 3.133.0 (turn-on writes only what the repository needs; scripted review carry; gate route check and route stamps)
+
+### Changed
+
+- Turning governance on now opens one pull request with only the programme file and the Toolkit CI checks (the plain-text check, plus the dependency security files and cloud sweep copies where they apply). It no longer writes the governed block into `AGENTS.md`, a `CLAUDE.md` shim, the Antigravity bootstrap or the playbooks: the installed Toolkit gives every session the governed rules, and the playbooks ship as the `toolkit-playbooks` skill.
+- A working tree is a prepared adoption when its programme file turns governance on; a governed block is no longer needed. A programme file that turns governance off is not taken as a prepared yes.
+- The governance discovery list no longer offers to reuse or refresh a governed block. A block an older setup left is listed as no longer needed, and the CI checks the turn-on adds are listed.
+- `repository-agent-rules` no longer installs or refreshes the governed block, the Antigravity bootstrap or playbook copies; it reports any it finds as leftovers and keeps the CI checks and the one-line `CLAUDE.md` shim.
+- The programme reconciler's instructions and the docs that summarise them now say governed issue writes follow the merged programme file turning governance on (ENABLED), with or without a governed block in `AGENTS.md`.
+- The session-start check of a governed repository's vendored Toolkit checks (the plain-text check and the personal-data guard) now runs when the repository carries no Toolkit block, so a stale or missing copy is still noted there. Only the checks are compared; the repository's own `AGENTS.md` and `CLAUDE.md` are left alone. When a newer Toolkit is on record on this computer, the note says the checks may come from that newer Toolkit and to refresh Toolkit, so an older copy never rewrites newer checks.
+- The n8n router no longer offers to install `AGENTS.md` with `repository-agent-rules`, which no longer does that; it offers the adapter-only `AGENTS.md` or none.
+
+### Merge trains
+
+- **Scripted review carry:** three kinds of pull request now board a merge train with no fresh G2, each only inside an exact check (`repo/scripts/toolkit-review-carry.cjs`), with green required checks, one `Bump:` line, an accepted `UAT:` line and no footer or other personal data in the title or body. Anything else, or any doubt, still needs the normal G2.
+  - **Body-only FAIL:** a G2 that failed a pull request only for its description adds `Carry: body-only uat=<state>` under its verdict's route stamp. Once the body is fixed, the same head boards on that verdict, as long as the body keeps that UAT state or makes it `OWNER_TEST_NEEDED`. A weaker UAT line needs a fresh G2.
+  - **Shard-timing refresh:** the bot's `toolkit/shard-timings-*` pull request that changes only the shard manifest, and only its measured times and the files each named shard lists (its normal rebalance included). Budgets, every other key and every shard must stay as they were; the rest shard runs any file a named shard drops, and CI proves each file ran once. Its body now carries `UAT:` and `Bump: none` lines and names this route.
+  - **Generated sync:** a pull request that changes only files the two instruction syncs write (each sync now lists them as `PROJECTED_OUTPUTS`): whole projected files, or managed blocks with the hand-written rest unchanged. Only where the Validate workflow runs both syncs' `--check` (the Toolkit repository), at the merge base and the head, since that check is what proves the generated text matches its sources; elsewhere it needs a G2.
+- **RISKY keeps the owner's card:** the shard manifest and instruction files are RISKY, so a carried pull request of those still waits for the owner's merge card.
+- **Wording-only docs:** a G2 brief with `Review class: wording-only` may run at high on the reviewer's pinned model, and the gate route check accepts it. `find` accepts that high stamp only when every changed file is a LIGHT `.md` file.
+- **Rules:** the gate rules name the carry and the wording-only route.
+
+### Gate routes
+
+- **Gate route check:** the governance hook now refuses a G0, G1 or G2 session's state-changing tools while the host's own record (the hook input's effort, `CLAUDE_EFFORT`, and the model the CLI wrote to the session transcript) is off its stack-registry pin. The session can still post why it stopped. A session is a gate when a Toolkit launcher marked it or its brief has a `Gate:` line; a brief-declared gate also carries `Route: <profile> <member> <model>/<effort>`, where the member is a role name (`DISCOVERY`, `BUILDER`, or `REVIEWER` for the profile's one reviewer) or a reviewer id. A helper inside a G0 or G1 is checked against its helper pin, never the gate's.
+- **Owner overrides:** a temporary owner change of a gate's model or effort is one brief line, `Route override: <member> <model>/<effort> owner=<rec N or cmsg id>`, for that launch only. Without the owner citation the registry pin stands.
+- **Route stamps:** G0 plans, G1 pull request bodies and G2 verdicts carry one `Route:` stamp line: `host-verified`, `launcher-attested` (the host shows no record, so the launcher's Route line stands in) or `UNVERIFIED`. `node repo/scripts/toolkit-gate-route.cjs stamp` prints a session's own stamp, and the hook refuses a verdict or G1 body whose stamp is not the session's own. A verdict is read only as the first line of a posted comment, so reads and quotes of verdict lines go through.
+- **Merge train acceptance:** `find` refuses a pull request whose G1 or G2 stamp is off its pin, and a RISKY one whose stamp is missing or `UNVERIFIED`.
+- **Rules:** the roles and routes page, the gates page, the gate rules' route proof and the Projects controller skill's gate launch line say so; the Projects line now says to set the model and effort pin explicitly on every gate launch.
+
+### Fixed
+
+- **Hourly nudge PR owners on quiet runs:** step 5 now takes each open PR's owner from the thread list step 2b reads on every run, instead of step 2's list, which a quiet run skips. A thread that takes the PR step over because the run could not read GitHub pages the thread list itself.
+- **Unowned evidence-store PRs:** the `PR UNOWNED` action keeps the owner's OK for closing a task-repository PR only. An evidence-store PR is merged or closed without asking, because the store is agent-managed with standing permission.
+- **Other projects' outdated tasks are report only:** the platform changes a scheduled task's prompt only from the thread that task posts into, so the Toolkit project's daily check-in and its `PROJECT TASKS OUTDATED` action now name the project and task for the owner and never call `update_trigger` across projects. Each project's own coordinator swaps its own tasks when its own check-in reports `TASKS OUTDATED`.
+
 ## 3.132.0 (light CI after main moves; pull request body pre-flight; old scheduled-task code removed)
 
 ### Programme sweep

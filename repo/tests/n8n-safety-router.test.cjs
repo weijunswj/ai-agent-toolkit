@@ -232,11 +232,12 @@ test('n8n-safety-router skill documents the adapter auto-check approval protocol
     assert.match(text, /read-only or no-modify tasks/i, relPath);
     assert.match(text, /Read-only\/no-modify blocks file writes and `--write`/i, relPath);
     assert.match(text, /does not block the adapter-target question/i, relPath);
-    assert.match(text, /Install or repair repo-local `AGENTS\.md` with `repository-agent-rules`/i, relPath);
+    // repository-agent-rules no longer installs a governed AGENTS.md, so it is not an option here.
+    assert.doesNotMatch(text, /repo-local `AGENTS\.md` with `repository-agent-rules`/i, relPath);
     assert.match(text, /Create or update only `AGENTS\.md` with the n8n adapter/i, relPath);
     assert.match(text, /`none`/i, relPath);
     assert.match(text, /The answer `none` is allowed and must be respected/i, relPath);
-    assert.match(text, /use `repository-agent-rules` to install or repair those shims/i, relPath);
+    assert.match(text, /use `repository-agent-rules` for that one-line shim/i, relPath);
     assert.doesNotMatch(text, /`CLAUDE\.md` for Claude Code/i, relPath);
     assert.doesNotMatch(text, /`GEMINI\.md` for Antigravity/i, relPath);
     assert.doesNotMatch(text, /\ball\b/i, relPath);
@@ -255,7 +256,7 @@ test('n8n-safety-router README tells agents to dry-run then ask before write', (
     assert.match(text, /canonical managed block sourced from `repo\/contracts\/agent-rules\/n8n-safety-router-adapter\.md`/i, relPath);
     assert.match(text, /must not append separate n8n adapter variants to `CLAUDE\.md` or `GEMINI\.md`/i, relPath);
     assert.match(text, /If no `AGENTS\.md` exists/i, relPath);
-    assert.match(text, /install or repair repo-local `AGENTS\.md` with `repository-agent-rules`/i, relPath);
+    assert.doesNotMatch(text, /repo-local `AGENTS\.md` with `repository-agent-rules`/i, relPath);
     assert.match(text, /create or update only `AGENTS\.md` with this adapter/i, relPath);
     assert.match(text, /read-only or no-modify tasks/i, relPath);
     assert.match(text, /does not block the adapter-target question/i, relPath);
@@ -439,7 +440,7 @@ test('adapter installer auto dry-run with no AGENTS.md asks for required target 
   assert.match(result.stdout, /No AGENTS\.md found for --target auto/i);
   assert.match(result.stdout, /No files would be created automatically/i);
   assert.match(result.stdout, /Required next step/i);
-  assert.match(result.stdout, /install or repair repo-local AGENTS\.md/i);
+  assert.doesNotMatch(result.stdout, /repo-local AGENTS\.md with repository-agent-rules/i);
   assert.match(result.stdout, /create\/update only AGENTS\.md/i);
   assert.match(result.stdout, /choose none/i);
   assert.match(result.stdout, /read-only or no-modify tasks/i);
