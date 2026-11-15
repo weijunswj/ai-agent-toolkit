@@ -1098,8 +1098,15 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   for (const required of ['- **Findings:** the controller owns every finding whoever raised it', 'Dispose only with a recorded reason',
     'the same finding on two runs in a row, goes to the owner once with the exact step', 'never a bare unknown',
     'Re-read owed lists (promises, Lows children, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
+  // Findings and leftovers go to their area's open child, not a new child per review.
+  assert.match(page, /add it to a lane's next slice or its area's open child, or ask the owner/);
+  assert.match(core, /extend\/reopen its area's child \(Lows and leftovers too\), else create\/attach a native child/);
+  for (const text of [page, core]) assert.doesNotMatch(text, /a tracked child|a follow-up child starts|extend\/reopen an owner/);
+  // The daily check-in catches a child opened beside an open one in the same area, whoever filed it.
+  const daily = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'tasks', 'daily-check-in.md'), 'utf8');
+  assert.match(daily, /\[parent\]   Fold check: for each issue opened under #\{\{parent_issue\}\} since LAST, look for an open child in the same area[^\n]*`\*\*Fold:\*\* #<new> into #<open> \(<area>\)`[^\n]*asks the owner once to close the new one as not planned/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
-  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
+  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on its area's open child, which joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
     "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child',
     'Before a merge record is written, the G2 report is archived to the evidence store and read back, and the record (and its brief) names that path and the PASS head.']) assert.ok(gates.includes(required), required);
   // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
