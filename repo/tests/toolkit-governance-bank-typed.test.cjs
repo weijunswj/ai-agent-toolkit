@@ -243,7 +243,8 @@ test('commands name the managed Toolkit checkout when this computer records one,
   const { managedScript } = require(path.join(scripts, 'toolkit-user-state.cjs'));
   const { bankTicketCommand } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
   const commands = require(path.join(scripts, 'toolkit-commands.cjs'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-managed-home-'));
+  // The long path: a Windows runner's temp folder can be an 8.3 short name, whose ~ no command line carries.
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-managed-home-')));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const own = path.join(scripts, 'toolkit-governance.cjs');
   assert.equal(managedScript('toolkit-governance.cjs', { userHome: home }), own, 'no recorded checkout: this copy');
@@ -252,9 +253,12 @@ test('commands name the managed Toolkit checkout when this computer records one,
   fs.mkdirSync(path.dirname(state), { recursive: true });
   fs.writeFileSync(state, JSON.stringify({ repo_path: checkout }));
   assert.equal(managedScript('toolkit-governance.cjs', { userHome: home }), own, 'a recorded folder without the script: this copy');
-  const managed = path.join(checkout, 'repo', 'scripts', 'toolkit-governance.cjs');
-  fs.mkdirSync(path.dirname(managed), { recursive: true });
-  fs.writeFileSync(managed, '');
+  fs.mkdirSync(path.join(checkout, 'repo', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, 'repo', 'scripts', 'toolkit-governance.cjs'), '');
+  // Byte for byte the path toolkit permissions pins its lines to: forward slashes on every system.
+  const { safePath } = require(path.join(scripts, 'toolkit-permissions.cjs'));
+  const managed = `${safePath(checkout, process.platform)}/repo/scripts/toolkit-governance.cjs`;
+  assert.doesNotMatch(managed, /\\/);
   assert.equal(managedScript('toolkit-governance.cjs', { userHome: home }), managed);
   fs.writeFileSync(state, JSON.stringify({ repo_path: path.join(home, '$x') }));
   assert.equal(managedScript('toolkit-governance.cjs', { userHome: home }), own, 'a path a shell could expand is never named');
