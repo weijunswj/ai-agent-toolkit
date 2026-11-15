@@ -25,8 +25,12 @@
 // strictSubsetProblem), and a workflow with any line outside it makes P3 and P4 unverified.
 //   P5 merge commits only: the default branch allows only merge commits (ruleset
 //      `allowed_merge_methods`, the most restrictive across rulesets, else the repository settings).
+//   P6 up to date: a required status checks rule (any active ruleset, or classic protection)
+//      requires the head to contain the default branch's tip before merging, so what was checked
+//      at the head is what lands; without it a merge onto a moved branch can bring back or drop
+//      changes no check saw (a merge train's eject revert can delete work that reached the branch).
 //
-// P1, P2 and P5 ask GitHub through the signed-in `gh` CLI (GET /repos/{slug}, the active rules for
+// P1, P2, P5 and P6 ask GitHub through the signed-in `gh` CLI (GET /repos/{slug}, the active rules for
 // the default branch, classic branch protection, which needs admin, and the repository's rulesets,
 // to find the one Toolkit names); P3 and P4 read the
 // checked-out workflow files. `--offline` checks P3 and P4 only. Nothing here writes, except
@@ -56,6 +60,8 @@ const MAX_OUTPUT = 1024 * 1024;
 const MAX_WORKFLOW_BYTES = 512 * 1024;
 const GITHUB_ACTIONS_APP_ID = 15368;
 const RULESET_NAME = 'Toolkit: protected default branch';
+// The checks read from GitHub's settings; P3 and P4 read the workflow files.
+const SETTINGS_CHECKS = Object.freeze(['P1', 'P2', 'P5', 'P6']);
 const PR_EVENTS = Object.freeze(['pull_request', 'pull_request_target']);
 // The declared aggregate command: this repository's own check that fails unless every needed job
 // succeeded, reading the needs results from TEST_LEGS. Other repositories have none yet, so a job
@@ -638,7 +644,7 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
   };
 }
 
-// ---- GitHub settings (P1, P2, P5) ---------------------------------------------------------------
+// ---- GitHub settings (P1, P2, P5, P6) ---------------------------------------------------------------
 
 function ghJson(args, spawn, input = null) {
   let result;
@@ -679,7 +685,7 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
   let classic = null;
   if (classicRead.ok) {
     const checks = classicRead.value && classicRead.value.required_status_checks;
-    classic = { checks: checks && Array.isArray(checks.checks) ? checks.checks.map(item => ({ context: item.context, app_id: item.app_id === undefined ? null : item.app_id })) : [] };
+    classic = { checks: checks && Array.isArray(checks.checks) ? checks.checks.map(item => ({ context: item.context, app_id: item.app_id === undefined ? null : item.app_id })) : [], strict: Boolean(checks && checks.strict === true) };
   } else if (classicRead.reason !== 'branch-not-protected') {
     return { ok: false, reason: classicRead.reason === 'plan-has-no-protection' ? 'plan-has-no-protection' : 'classic-protection-not-visible' };
   }
@@ -697,7 +703,8 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
 }
 
 // The ruleset Toolkit adds or updates: the default branch, no bypass, the binding's checks pinned to
-// GitHub Actions, and a pull request with merge commits only.
+// GitHub Actions and required at a head that contains the branch's tip, and a pull request with
+// merge commits only.
 function protectionRulesetBody(requiredChecks) {
   return {
     name: RULESET_NAME,
@@ -720,7 +727,7 @@ function protectionRulesetBody(requiredChecks) {
       {
         type: 'required_status_checks',
         parameters: {
-          strict_required_status_checks_policy: false,
+          strict_required_status_checks_policy: true,
           required_status_checks: [...requiredChecks].sort().map(context => ({ context, integration_id: GITHUB_ACTIONS_APP_ID })),
         },
       },
@@ -746,11 +753,13 @@ function settingsVerdict(requiredChecks, read) {
     required.set(context, entry);
   };
   let rulesetMethods = null;
+  let upToDate = Boolean(read.classic && read.classic.strict);
   for (const rule of read.rules) {
     if (!rule || !rule.parameters) continue;
     const source = rule.ruleset_id ? `ruleset ${rule.ruleset_id}` : 'a ruleset';
     if (rule.type === 'required_status_checks' && Array.isArray(rule.parameters.required_status_checks)) {
       for (const item of rule.parameters.required_status_checks) add(item && item.context, Boolean(item && Number.isInteger(item.integration_id)), source);
+      if (rule.parameters.strict_required_status_checks_policy === true) upToDate = true;
     }
     if (rule.type === 'pull_request' && Array.isArray(rule.parameters.allowed_merge_methods)) {
       const methods = rule.parameters.allowed_merge_methods;
@@ -773,6 +782,7 @@ function settingsVerdict(requiredChecks, read) {
     P1: { status: missing.length || extra.length ? 'drift' : 'ok', details: [...missing.map(check => `"${check}" is in the binding but not required`), ...extra.map(check => `"${check}" is required but not in the binding`)], missing, extra },
     P2: { status: unpinned.length ? 'drift' : 'ok', details: unpinned.map(item => `${item} is not pinned to an app`) },
     P5: { status: mergeOnly ? 'ok' : 'drift', details: mergeOnly ? [] : [`${read.default_branch} allows ${methods.length ? methods.join(', ') : 'no merge method'} (${rulesetMethods !== null ? 'rulesets' : 'repository settings'}); only merge commits are allowed`] },
+    P6: { status: upToDate ? 'ok' : 'drift', details: upToDate ? [] : [`${read.default_branch} does not require branches to be up to date before merging`] },
   };
 }
 
@@ -789,7 +799,7 @@ function localDefaultBranch(root) {
   return ref.startsWith('origin/') && ref.length > 'origin/'.length ? ref.slice('origin/'.length) : null;
 }
 
-// { status: conformant | drift | unverified | not-enforceable | not-applicable, reason, checks: { P1..P5 } }
+// { status: conformant | drift | unverified | not-enforceable | not-applicable, reason, checks: { P1..P6 } }
 // for the repository at `root`. Options: `requiredChecks` (from the binding), `offline`, `reader(slug)`
 // (tests).
 function defaultBranchProtection(root, { requiredChecks = [], offline = false, reader = ghProtectionReader } = {}) {
@@ -805,10 +815,10 @@ function defaultBranchProtection(root, { requiredChecks = [], offline = false, r
   const defaultBranch = read && read.ok ? read.default_branch : localDefaultBranch(root);
   const checks = { ...producerVerdict(requiredChecks, readWorkflows(root), defaultBranch) };
   if (offline) {
-    for (const id of ['P1', 'P2', 'P5']) checks[id] = { status: 'not-checked', details: ['offline'] };
+    for (const id of SETTINGS_CHECKS) checks[id] = { status: 'not-checked', details: ['offline'] };
   } else if (!read || read.ok !== true) {
     const reason = (read && read.reason) || 'reader-failed';
-    for (const id of ['P1', 'P2', 'P5']) checks[id] = { status: reason === 'plan-has-no-protection' ? 'not-enforceable' : 'unverified', details: [reason] };
+    for (const id of SETTINGS_CHECKS) checks[id] = { status: reason === 'plan-has-no-protection' ? 'not-enforceable' : 'unverified', details: [reason] };
     if (reason === 'plan-has-no-protection') return verdict('not-enforceable', reason, checks);
   } else {
     Object.assign(checks, settingsVerdict(requiredChecks, read));
@@ -820,6 +830,7 @@ function defaultBranchProtection(root, { requiredChecks = [], offline = false, r
 
 module.exports = Object.freeze({
   RULESET_NAME,
+  SETTINGS_CHECKS,
   GITHUB_ACTIONS_APP_ID,
   readWorkflow,
   producerVerdict,
