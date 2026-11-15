@@ -301,6 +301,15 @@ class ToolkitGovernanceCli {
       this.#print(json, { result: 'nothing' }, ['Nothing to finish here: no governance turn-on from the question bank is waiting for its post-merge setup.']);
       return 0;
     }
+    const lock = finishing.claim(this.#registryOptions, state.repository_id);
+    if (!lock) {
+      this.#print(json, { result: 'running' }, ['Another governance setup run is already working here. Nothing more was started.']);
+      return 0;
+    }
+    try { return await this.#finishLocked(json, state); } finally { lock.release(); }
+  }
+
+  async #finishLocked(json, state) {
     let said = '';
     const out = { write: text => { said += text; return true; } };
     const outcome = await new GovernanceMaintenance({
@@ -314,7 +323,7 @@ class ToolkitGovernanceCli {
       this.#print(json, { result: 'not-ready' }, ['Not finished yet: the turn-on pull request is not merged and read back here. Nothing was changed; the next session tries again.']);
       return 0;
     }
-    const recorded = finishing.record(this.#registryOptions, state.repository_id, outcome.result, outcome.reason ? [outcome.reason] : lines);
+    const recorded = finishing.record(this.#registryOptions, state.repository_id, outcome.result, outcome.reason ? [outcome.reason] : lines, { files: outcome.files || [] });
     this.#print(json, { result: outcome.result }, [...lines, recorded?.line || '']);
     return outcome.result === 'done' ? 0 : 2;
   }

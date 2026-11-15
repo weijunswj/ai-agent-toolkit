@@ -71,6 +71,11 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   const table = questionBank.renderCompactQuestionTable(undecided, true).join('\n');
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on: .* \| A\. Keep current<br>C\. Turn off \|/);
   assert.match(table, /\| 1\.2 \| Task auto-merge \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
+  // Turn on also covers the settings Toolkit adds on its own after the merge, so the shown bank names
+  // them before the owner answers.
+  const shown = bank.renderGovernanceBank(undecided);
+  assert.ok(shown.includes(`After the merge, Toolkit also turns on, without asking again: ${require('../scripts/toolkit-governance-finish.cjs').WHAT}.`), shown);
+  assert.match(shown, /default-branch protection[^|]*ruleset that blocks force pushes[^|]*security settings/);
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);

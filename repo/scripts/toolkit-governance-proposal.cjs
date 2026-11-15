@@ -547,14 +547,24 @@ class GitHubProposalTransport {
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${read.head}`);
       return !file || file.type !== 'file' || file.encoding !== 'base64' || Buffer.from(String(file.content), 'base64').toString('utf8') !== content;
     });
-    if (!changed.length) return { number, head: read.head, updated: false };
+    // A file an earlier answer added that the new answers no longer make (shard workflows and the
+    // shard list after shards go from yes to not now) leaves the pull request: one it added is
+    // deleted, and one it changed goes back to the default branch's copy.
+    const dropped = diff.files.filter(file => !Object.hasOwn(files, file.filename) && file.status !== 'removed');
+    const restore = dropped.map(file => {
+      if (file.status === 'added') return { path: file.filename, mode: '100644', type: 'blob', sha: null };
+      const original = this.#optional(`repos/${repository}/contents/${file.filename}?ref=${diff.merge_base_commit?.sha || pr.base.sha}`);
+      if (!original || original.type !== 'file' || !/^[0-9a-f]{40}$/.test(original.sha || '')) fail('PROPOSAL_BRANCH_CHANGED');
+      return { path: file.filename, mode: '100644', type: 'blob', sha: original.sha };
+    });
+    if (!changed.length && !restore.length) return { number, head: read.head, updated: false };
     const commit = this.#api(`repos/${repository}/git/commits/${read.head}`);
-    const tree = this.#api(`repos/${repository}/git/trees`, { base_tree: commit.tree.sha, tree: changed.map(([name, content]) => ({ path: name, mode: '100644', type: 'blob', content })) });
+    const tree = this.#api(`repos/${repository}/git/trees`, { base_tree: commit.tree.sha, tree: [...changed.map(([name, content]) => ({ path: name, mode: '100644', type: 'blob', content })), ...restore] });
     const result = this.#api(`repos/${repository}/git/commits`, { message: 'Update repository governance from the owner\'s new answers', tree: tree.sha, parents: [read.head] });
     if (!SHA.test(result.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
     // Not forced: a branch someone moved since it was read is refused by GitHub.
     this.#api(`repos/${repository}/git/refs/heads/${head}`, { sha: result.sha, force: false }, 'PATCH');
-    this.#api(`repos/${repository}/pulls/${number}`, { body: proposalBody(binding, files, []) }, 'PATCH');
+    this.#api(`repos/${repository}/pulls/${number}`, { body: proposalBody(binding, files, [], dropped.map(file => file.filename)) }, 'PATCH');
     return { number, head: result.sha, updated: true };
   }
 }
@@ -563,7 +573,7 @@ class GitHubProposalTransport {
 // workflows or a shard list that the new answer no longer renders.
 const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name), name => name === require('./governed-test-shards.cjs').MANIFEST_REL];
 
-function proposalBody(binding, files, removals) {
-  return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;
+function proposalBody(binding, files, removals, dropped = []) {
+  return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}${dropped.length ? `No longer in this pull request (the latest answers do not make them):\n${dropped.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;
 }
 module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingRules, requiredRules, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });

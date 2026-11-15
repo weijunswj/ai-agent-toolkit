@@ -98,3 +98,31 @@ test('a finished setup is shown once by the next session, then nothing more is s
   assert.deepEqual(finishing.sessionLines(state, ctx.registryOptions, deps), []);
   assert.equal(started.length, 0);
 });
+
+test('one finish at a time: a second run while one works starts nothing, and a run that died is started again with a note', async t => {
+  const ctx = governedRepo(t), created = [];
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  const held = finishing.claim(ctx.registryOptions, state.repository_id);
+  assert.ok(held);
+  assert.equal(finishing.claim(ctx.registryOptions, state.repository_id), null, 'a second claim waits');
+  const second = cli(ctx, [], created);
+  assert.equal(await second.run(), 0);
+  assert.match(second.out.join(''), /already working here/);
+  assert.deepEqual(created, [], 'the second run wrote nothing');
+  held.release();
+  // A start an hour ago that never recorded a result: the next session starts it again and says why.
+  const started = [], hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  finishing.sessionLines(state, ctx.registryOptions, { startFinish: () => started.push(1), now: () => hourAgo });
+  const lines = finishing.sessionLines(state, ctx.registryOptions, { startFinish: () => started.push(1) });
+  assert.equal(started.length, 2);
+  assert.match(lines.join(' '), /stopped without a result, so it was started again/);
+});
+
+test('the result names security files the finish wrote into the working tree', t => {
+  const ctx = governedRepo(t);
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  finishing.record(ctx.registryOptions, state.repository_id, 'done', [], { files: ['.github/dependabot.yml'] });
+  assert.match(finishing.entryFor(ctx.registryOptions, state.repository_id).line, /It also wrote \.github\/dependabot\.yml in this working tree; commit it through a pull request\./);
+});

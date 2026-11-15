@@ -6,7 +6,7 @@
 // publishes a turn-on pull request it notes the repository here as finish pending. Once that binding
 // is merged and read back, the session-start line starts the finish once in the background
 // (`toolkit-governance.cjs finish`, which asks nothing: the owner's yes in the bank covers these
-// settings and the bank listed them) and the next session shows its result in one line. A failed
+// settings and the bank listed them) and a later session shows its result in one line. A failed
 // finish stays pending and is tried again, at most once per FINISH_GAP_MS.
 //
 // The file holds only repository ids, proposal numbers, times and result lines, never a token.
@@ -23,7 +23,7 @@ const FINISH_GAP_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 32;
 const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // What the finish turns on, as the bank's end lines and the session line say it.
-const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only), a ruleset that blocks force pushes, and the free dependency and security settings';
+const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, and the free dependency and security settings';
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 
@@ -61,12 +61,28 @@ function markPending(registryOptions, repositoryId, { proposal = null, now = new
 function entryFor(registryOptions, repositoryId) { return read(registryOptions).repositories[repositoryId] || null; }
 
 // The finish result: 'done' is shown once by the next session and then dropped; 'failed' stays pending.
-function record(registryOptions, repositoryId, result, lines, { now = new Date() } = {}) {
+// `files` are security files the finish wrote into this working tree, which still need a pull request.
+function record(registryOptions, repositoryId, result, lines, { now = new Date(), files = [] } = {}) {
+  const wrote = files.length ? ` It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.` : '';
   return update(registryOptions, repositoryId, entry => entry && ({
     ...entry, status: result === 'done' ? 'done' : 'pending', finished_at: now.toISOString(),
-    line: result === 'done' ? `Toolkit: governance setup finished here: ${WHAT} are on and read back.`
-      : `Toolkit: governance setup could not finish here yet (${lines.filter(Boolean).slice(-1)[0] || 'GitHub could not be written'}); it is tried again in a later session.`,
+    line: result === 'done' ? `Toolkit: governance setup finished here: ${WHAT} are on and read back.${wrote}`
+      : `Toolkit: governance setup could not finish here yet (${lines.filter(Boolean).slice(-1)[0] || 'GitHub could not be written'}); it is tried again in a later session.${wrote}`,
   }));
+}
+
+// One finish at a time per repository on this computer: two sessions starting together start it
+// once. A lock older than FINISH_GAP_MS is from a finish that died and is taken over.
+function claim(registryOptions, repositoryId, { now = new Date() } = {}) {
+  const file = path.join(userStateDirectory(registryOptions), `governance-finish.${crypto.createHash('sha256').update(String(repositoryId)).digest('hex').slice(0, 16)}.lock`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    const age = now.getTime() - fs.statSync(file).mtimeMs;
+    if (age < FINISH_GAP_MS) return null;
+    fs.rmSync(file, { force: true });
+  } catch { /* no lock yet */ }
+  try { fs.writeFileSync(file, String(process.pid), { flag: 'wx', mode: 0o600 }); } catch { return null; }
+  return { release: () => fs.rmSync(file, { force: true }) };
 }
 
 function startFinish(root) {
@@ -90,12 +106,24 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
     const last = Date.parse(entry.started_at || '');
     if ((deps.startFinish || !offline) && !(Number.isFinite(last) && now.getTime() - last < FINISH_GAP_MS)) {
-      update(registryOptions, state.repository_id, current => current && ({ ...current, started_at: now.toISOString() }));
+      // A start with no result since then died before it could record one.
+      const silent = Number.isFinite(last) && !(Date.parse(entry.finished_at || '') >= last);
+      // Claimed here, so a second session starting at the same moment does not start it again.
+      let claimed = null;
+      update(registryOptions, state.repository_id, current => {
+        if (!current) return current;
+        const seen = Date.parse(current.started_at || '');
+        if (Number.isFinite(seen) && now.getTime() - seen < FINISH_GAP_MS) return current;
+        claimed = now.toISOString();
+        return { ...current, started_at: claimed };
+      });
+      if (!claimed) return lines;
       (deps.startFinish || startFinish)(state.root);
-      lines.push(`Toolkit: the governance turn-on is merged, so Toolkit is finishing its setup in the background: ${WHAT}. The next session here shows the result.`);
+      if (silent) lines.push('Toolkit: the last governance setup run here stopped without a result, so it was started again.');
+      lines.push(`Toolkit: the governance turn-on is merged, so Toolkit is finishing its setup in the background: ${WHAT}. A later session here shows the result.`);
     }
     return lines;
   } catch { return []; }
 }
 
-module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, entryFor, markPending, record, sessionLines, startFinish });
+module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, entryFor, markPending, record, sessionLines, startFinish });

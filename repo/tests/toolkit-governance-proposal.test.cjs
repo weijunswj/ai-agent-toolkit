@@ -382,8 +382,12 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   prepareAdoption(f);
   require('node:child_process').execFileSync('git', ['init', '--quiet', f.cwd], { stdio: 'ignore', windowsHide: true });
   const stdout = [], answers = [];
+  // The first answer's render carries shard files; the later answers no longer make them.
+  const SHARDS = '.github/workflows/toolkit-test-shards.yml', LIST = '.github/toolkit-test-shards.json';
+  let rendered = { [SHARDS]: '# shard workflow\n' };
+  fs.writeFileSync(path.join(f.cwd, LIST), '{"shards":[]}\n');
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
-  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
+  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: rendered, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stdout.push(text) },
     discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
@@ -391,6 +395,9 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   answers.push('all recommended');
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
   assert.equal(JSON.parse(github.read().files[governance.BINDING_FILE]).task_prs.auto_merge, 'off');
+  assert.ok(github.read().files[SHARDS] && github.read().files[LIST], 'the first answer carries the shard files');
+  rendered = {};
+  fs.rmSync(path.join(f.cwd, LIST));
   answers.push('1.2=B');
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
   const published = github.read();
@@ -398,6 +405,10 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   assert.equal(published.commits, 2, 'the new answer is one more commit on the same branch');
   assert.equal(JSON.parse(published.files[governance.BINDING_FILE]).task_prs.auto_merge, 'after-gates', 'the open pull request carries the new answer');
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
+  // Files the new answers no longer make leave the pull request, and its description says so.
+  assert.equal(published.files[SHARDS], undefined, 'the shard workflow left the pull request');
+  assert.equal(published.files[LIST], undefined, 'the shard list left the pull request');
+  assert.match(published.pr.body, /No longer in this pull request[^]*toolkit-test-shards\.yml/);
   assert.match(stdout.join(''), /updated the open governance turn-on pull request with these answers: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
   // A branch that also holds a file Toolkit did not put there is not ours to change.
   fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...published, foreign: 'product.txt' }));

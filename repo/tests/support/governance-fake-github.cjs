@@ -49,13 +49,13 @@ else if (endpoint?.startsWith('repo/contents/') && !input) {
   if (!args.includes('PATCH') || input.force !== false || input.sha !== (state.pr ? updated : head)) throw Error('unsafe branch update');
   state.branch.sha = input.sha;
   if (state.pr) state.pr.head.sha = input.sha;
-  for (const entry of state.prepared) state.files[entry.path] = entry.content;
+  for (const entry of state.prepared) { if (entry.sha === null) delete state.files[entry.path]; else state.files[entry.path] = entry.content; }
   result = { object: { sha: head } };
 } else if (endpoint === 'repo/pulls' && input) {
   if (!input.body.includes(marker) || state.branch.sha !== head) throw Error('unmarked or uncommitted proposal');
   state.pr = { number: 1, html_url: `https://github.com/${state.repository}/pull/1`, state: 'open', body: input.body, base: { ref: input.base, sha: base }, head: { ref: input.head, sha: head, repo: { full_name: state.repository } }, changed_files: Object.keys(state.files).length };
   result = state.pr;
-} else if (endpoint?.startsWith('repo/compare/')) result = { total_commits: 1, merge_base_commit: { sha: base }, files: [...Object.keys(state.files), ...(state.foreign ? [state.foreign] : [])].map(filename => ({ filename })) };
+} else if (endpoint?.startsWith('repo/compare/')) result = { total_commits: 1, merge_base_commit: { sha: base }, files: [...Object.keys(state.files), ...(state.foreign ? [state.foreign] : [])].map(filename => ({ filename, status: 'added' })) };
 else throw Error(`Unexpected offline GitHub call: ${args.join(' ')}`);
 fs.writeFileSync(file, JSON.stringify(state));
 if (state.delayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, state.delayMs);

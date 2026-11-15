@@ -27,6 +27,9 @@ const governance = require('./toolkit-governance-state.cjs');
 const bank = require('./toolkit-question-bank.cjs');
 
 const BANK_HOST = 'governance';
+// What a yes to Turn on also covers: the settings Toolkit adds on its own after the merge
+// (toolkit-governance-finish.cjs), named here so the owner sees them before answering.
+const AFTER_MERGE = `After the merge, Toolkit also turns on, without asking again: ${require('./toolkit-governance-finish.cjs').WHAT}.`;
 const BANK_TITLE = 'Toolkit governance choices';
 const TICKETS_BASENAME = 'governance-bank-tickets.v1.json';
 const TICKETS_SCHEMA = 'toolkit.governance-bank-tickets.v1';
@@ -75,10 +78,10 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     currentChoice: state.state === 'ENABLED' ? 'on' : state.state === 'DISABLED' ? 'off' : '',
     recommendation: decided
       ? { value: 'keep', outcome: 'Governance stays as merged.', reason: 'Nothing needs to change.' }
-      : { value: 'on', outcome: 'Toolkit prepares one pull request that turns governance on.', reason: 'Governance keeps records and evidence for every task in this repository.' },
+      : { value: 'on', outcome: `Toolkit prepares one pull request that turns governance on. ${AFTER_MERGE}`, reason: 'Governance keeps records and evidence for every task in this repository.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', decided ? 'Governance stays as merged.' : 'Nothing is decided; it counts as off and Toolkit asks again next session.'),
-      bank.wizardChoice('on', 'Turn on', 'Toolkit prepares one pull request that turns governance on. It applies only after you merge it.'),
+      bank.wizardChoice('on', 'Turn on', `Toolkit prepares one pull request that turns governance on. It applies only after you merge it. ${AFTER_MERGE}`),
       bank.wizardChoice('off', 'Turn off', 'Toolkit prepares one pull request that turns governance off. It applies only after you merge it.'),
     ],
   }));

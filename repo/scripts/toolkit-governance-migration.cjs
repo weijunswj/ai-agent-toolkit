@@ -126,8 +126,12 @@ class GovernanceMaintenance {
       if (!['present', 'not-enforceable'].includes(ruleset.noForcePushRuleset(rows[0].root, this.#rulesetReader ? { reader: this.#rulesetReader } : {}).status)) missing.push('the no-force-push ruleset is not read back');
       const guarded = this.#protectionFor(rows[0]);
       if (!guarded || !['conformant', 'not-enforceable'].includes(guarded.result.status)) missing.push('default-branch protection is not read back as set');
+      if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state
+        && !['present', 'not-enforceable'].includes(ruleset.keepStateRuleset(rows[0].root, this.#rulesetReader ? { reader: this.#rulesetReader } : {}).status)) missing.push('the ruleset that keeps the programme state branch is not read back');
       if (this.#securityFor(rows[0]).status === 'unverified') missing.push('the security settings could not be read back');
-      return missing.length ? { result: 'failed', reason: missing.join('; ') } : { result: 'done' };
+      // Security files written into this working tree still need a pull request; the result says so.
+      const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
+      return missing.length ? { result: 'failed', reason: missing.join('; '), files } : { result: 'done', files };
     } finally { this.#ask = ask; }
   }
 
