@@ -1,0 +1,4 @@
+### Fixed
+
+- **A new repository's first sweeps say what to do:** a cloud sweep held only because the repository has no programme state yet (`PARENT_STATE_MISSING`) now warns "No programme state yet; setup on first sweep only." and names the step, `programme.cjs init-parent --apply --controller`, for the parent issue. Three such runs in a row turn the hourly gate red with the same words instead of pointing at a programme page that does not exist yet. Every other hold keeps its general text.
+- **The require-cycle guard sees more requires:** it now follows `require(path.join(__dirname, ...))` and same-file path constants built that way, ignores comments, strings and regular expressions when finding requires, the CLI check and the exports line, and also scans the helper-script templates repositories copy and run. Requires of a function argument or a computed root stay out of reach and are named in the test as the accepted remainder.
