@@ -1,37 +1,5 @@
 # Toolkit Changelog
 
-## 3.131.0 (gate route check and route stamps)
-
-### Changed
-
-- **Setup question 2.1 (Claude Code agents):** the Current cell now says what the choice does in plain words, for example `Gates: Toolkit helpers only; elsewhere one subagent layer`, instead of `Root only; subagent limit 1`. With broader native behaviour it says Toolkit repos still keep one subagent layer. It adds the Claude Code subagent limit only when that limit is not the one the choice expects (your own value, not set yet, unknown, or Toolkit's limit still set under broader native behaviour).
-- **The programme page has three generated parts:** CURRENT, PROGRAMME GRAPH and AGENT CONTEXT, then the hand-written text. The DECISIONS block, which nothing read and which linked only the newest decision comment, is gone. A page that still has one reads as before and loses it on the next write, keeping the text around it byte for byte.
-- **AGENT CONTEXT links the full decision index:** its Decisions part now links every top-level decision index comment on the parent, oldest first (`index`, or `index 1` to `index n`; a directory comment stands for its parts), before `programme.cjs trace <n>`. Bot and archive comments never count, as in the trace audit. The body itself therefore reaches every record an index lists, so hand-written index links on the page can later move to an archive comment without leaving records unlinked.
-- **A faulty index comment costs only its own link:** an index comment on the parent that links in a loop, too deep or to too many pages is left out of the Decisions part, and the healthy ones stay linked, so their records stay reachable from the body. The pass names the faulty comment in a report-only `TRACE_INDEX_INVALID` finding with the step to fix it.
-- **Re-runs update the open setup pull request:** answering the bank again while the turn-on pull request is open adds one commit with the new answers to the same branch, never a second pull request. Toolkit changes only its own turn-on branch.
-- **Rendered from the managed checkout:** the turn-on and `toolkit governance check` render the cloud workflows with the managed Toolkit checkout's own installer, so a lagging plugin copy cannot render workflows that do not match their pinned commit.
-
-### Gate routes
-
-- **Gate route check:** the governance hook now refuses a G0, G1 or G2 session's state-changing tools while the host's own record (the hook input's effort, `CLAUDE_EFFORT`, and the model the CLI wrote to the session transcript) is off its stack-registry pin. The session can still post why it stopped. A session is a gate when a Toolkit launcher marked it or its brief has a `Gate:` line; a brief-declared gate also carries `Route: <profile> <member> <model>/<effort>`, where the member is a role name (`DISCOVERY`, `BUILDER`, or `REVIEWER` for the profile's one reviewer) or a reviewer id. A helper inside a G0 or G1 is checked against its helper pin, never the gate's.
-- **Owner overrides:** a temporary owner change of a gate's model or effort is one brief line, `Route override: <member> <model>/<effort> owner=<rec N or cmsg id>`, for that launch only. Without the owner citation the registry pin stands.
-- **Route stamps:** G0 plans, G1 pull request bodies and G2 verdicts carry one `Route:` stamp line: `host-verified`, `launcher-attested` (the host shows no record, so the launcher's Route line stands in) or `UNVERIFIED`. `node repo/scripts/toolkit-gate-route.cjs stamp` prints a session's own stamp, and the hook refuses a verdict or G1 body whose stamp is not the session's own. A verdict is read only as the first line of a posted comment, so reads and quotes of verdict lines go through.
-- **Merge train acceptance:** `find` refuses a pull request whose G1 or G2 stamp is off its pin, and a RISKY one whose stamp is missing or `UNVERIFIED`.
-- **Rules:** the roles and routes page, the gates page, the gate rules' route proof and the Projects controller skill's gate launch line say so; the Projects line now says to set the model and effort pin explicitly on every gate launch.
-
-### Added
-
-- **Governance post-merge finish:** after the question bank's turn-on pull request is merged, the next session starts `toolkit-governance.cjs finish` in the background. It adds default-branch protection, the ruleset that blocks force pushes and the free dependency and security settings without asking again, and the following session shows the result once, built from what actually happened: what is on, what GitHub cannot enforce on a private repository on GitHub Free, and any step left for the owner (such as adding required checks to a fresh repository before protection can be added). Only a setting GitHub could not confirm keeps it pending, with the reason, and it is tried again later. The bank names these settings whenever Turn on is offered, not only when it is recommended.
-- **One closing line for the turn-on:** the bank's setup pull request ends with a fixed summary (its link, what merging does, the files it holds, what finishes after the merge) and one line: "Merge <link>. Nothing else is needed from you."
-
-### Removed
-
-- **Shard timings `--fail-if-due`:** nothing used it; `--warn-if-due` stays.
-
-### Fixed
-
-- **Setup file wording:** the docs now say that an older Toolkit copy of the dependency auto-merge workflow is refreshed, instead of "existing files are never changed".
-
 ## 3.130.0 (periodic runs hand GitHub steps to a thread with the repos and recover skipped schedules)
 
 ### Fixed
