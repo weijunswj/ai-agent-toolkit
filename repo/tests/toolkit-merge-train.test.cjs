@@ -408,7 +408,7 @@ test('the controller, the changelog guide and the repo map describe the train th
   for (const command of ['build', 'verify', 'body', 'land', 'eject']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
   assert.match(guide, /\*\*Eject after boarding:\*\* .*It never rewrites the branch/);
   assert.match(guide, /\*\*Batches:\*\* several merge-ready pull requests land as one merge train that bumps once/);
-  assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`build`, `catchup`, `verify`, `body`, `split`, `land`, `eject`; never merges/);
+  assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`find` via `toolkit-merge-train-finder\.cjs`, `build`, `catchup`, `verify`, `body`, `split`, `land`, `eject`; never merges/);
   // Every controller type learns the train is its own default: CONTROLLER.md routes the merge step
   // to the page that holds it, the Projects skill puts it ahead of the one-PR bump route, and the
   // hourly nudge flags ready PRs that should ride together.
