@@ -355,6 +355,14 @@ function keyText(lines, entry, indent) {
   return [entry.value, ...lines.slice(entry.line + 1, blockEnd(lines, entry.line, indent))].join('\n');
 }
 
+// `needs:` as a list of job ids: one name, a flow list or a block list.
+function needsOf(text) {
+  if (text === null) return [];
+  const [inline, ...block] = text.split('\n');
+  if (inline.replace(/\s+#.*$/, '').trim()) return flowEntries(inline).map((entry) => entry.key);
+  return block.map((line) => line.replace(/\s+#.*$/, '').trim()).filter((line) => line.startsWith('-')).map((line) => unquote(line.slice(1)));
+}
+
 // `concurrency:` as its text and whether cancel-in-progress is a plain `true` (an expression such as
 // `${{ github.event_name == 'pull_request' }}` is a choice the author made, so it is not judged).
 function concurrencyOf(text) {
@@ -419,6 +427,7 @@ function parseWorkflow(rel, text) {
       line: job.line + 1,
       permissions: keys.some((entry) => entry.key === 'permissions'),
       if: keyText(lines, keys.find((entry) => entry.key === 'if'), jobIndent + 2) || '',
+      needs: needsOf(keyText(lines, keys.find((entry) => entry.key === 'needs'), jobIndent + 2)),
       concurrency: concurrencyOf(keyText(lines, keys.find((entry) => entry.key === 'concurrency'), jobIndent + 2)),
       continueOnError: keys.some((entry) => entry.key === 'continue-on-error' && !/^false$/i.test(unquote(entry.value))),
       matrix: /\bmatrix:/.test(body),
@@ -886,6 +895,25 @@ function recentRuns(root, runs, tools) {
   return { times, runJobs };
 }
 
+// Whether a title or body edit reruns heavy jobs. A job is light on an edit when its `if` reads
+// github.event.action, or when it reads an output of a job it needs (a route job that reads the event
+// and says whether the run is light). With route-gated jobs, the workflow is judged by its matrix
+// legs: each must be gated, and every job that needs a gated job must still run when it is skipped
+// (`!cancelled()` or `always()`), or the required aggregate skips on an edit.
+function checkEdits(workflow) {
+  const routeGated = (job) => job.needs.some((id) => new RegExp(`\\bneeds\\.${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.outputs\\.`).test(job.if));
+  const gated = (job) => /github\.event\.action/.test(job.if) || routeGated(job);
+  const heavy = workflow.jobs.filter((job) => !gated(job));
+  const advice = 'move the checks that read the title or body into a light workflow of their own and leave edited out of this one, or skip the heavy jobs when github.event.action is edited, or when a route job they need says the run is light';
+  const reruns = (jobs) => item('CHECK', 'speed.edits', workflow.rel, `an edit to the pull request title or body reruns ${jobs.length} jobs here${jobs.some((job) => job.matrix) ? ' (more with matrix legs)' : ''}, because edited is in the pull request types`, advice);
+  if (!workflow.jobs.some(routeGated)) return heavy.length >= 2 ? [reruns(heavy)] : [];
+  const legs = heavy.filter((job) => job.matrix);
+  if (legs.length) return [reruns(heavy)];
+  const skipIds = new Set(workflow.jobs.filter(routeGated).map((job) => job.id));
+  const skipped = workflow.jobs.filter((job) => job.needs.some((id) => skipIds.has(id)) && !/!\s*cancelled\(\)|\balways\(\)/.test(job.if));
+  return skipped.map((job) => item('CHECK', 'speed.edits', `${workflow.rel}:${job.line}`, `job ${job.id} needs a job a route skips on a light run and has no !cancelled() or always(), so it is skipped too and a required check on it never passes after an edit`, 'give it if: ${{ !cancelled() }} and have it check the results of the jobs it needs'));
+}
+
 // Delivery speed read from the workflow files alone: edits that rerun heavy jobs, and concurrency
 // that keeps stale runs or cancels useful ones. Every item is a CHECK: the agent judges the fix.
 const CANCEL_PR_COMMITS = "${{ startsWith(github.event_name, 'pull_request') && github.event.action != 'edited' }}";
@@ -893,8 +921,7 @@ function checkDelivery(workflows) {
   const items = [];
   for (const workflow of workflows) {
     const pr = workflow.events.some((event) => /^pull_request(_target)?$/.test(event));
-    const heavy = workflow.jobs.filter((job) => !/github\.event\.action/.test(job.if));
-    if (pr && workflow.prEdited && heavy.length >= 2) items.push(item('CHECK', 'speed.edits', workflow.rel, `an edit to the pull request title or body reruns ${heavy.length} jobs here${heavy.some((job) => job.matrix) ? ' (more with matrix legs)' : ''}, because edited is in the pull request types`, 'move the checks that read the title or body into a light workflow of their own and leave edited out of this one, or skip the heavy jobs when github.event.action is edited'));
+    if (pr && workflow.prEdited) items.push(...checkEdits(workflow));
     const grouped = workflow.concurrency || workflow.jobs.find((job) => job.concurrency);
     if (pr && !grouped) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'no concurrency group, so a run for an older commit keeps its job slots after a new push', `add concurrency with group \${{ github.workflow }}-\${{ github.event.pull_request.number || github.run_id }} and cancel-in-progress: ${CANCEL_PR_COMMITS}`));
     const top = workflow.concurrency;
