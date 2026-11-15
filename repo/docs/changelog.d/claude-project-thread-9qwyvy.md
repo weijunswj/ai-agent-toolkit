@@ -1,5 +1,0 @@
-### Fixed
-
-- **Governed rules could be cut off at session start:** Claude Code keeps a session-start text only up to 10,000 characters and shows a 2,000-character preview of a longer one, and the governed rules come last. A cloud session started above 12 or more enabled repositories, or a computer with many failed `Checkpoint:` lines, could pass that limit and lose the rules. The text now always stays within 10,000 bytes: failed `Checkpoint:` lines past what fits are counted instead of listed, and in a cloud session the last repositories' state lines shrink to their state word, then are counted, so the rules and the names of the repositories they bind stay whole. Tests pin the limit.
-- `programme.cjs mark-archive` keeps every repeated `--remove`, where it silently kept only the last one; any other option given twice is now refused instead of replaced.
-- The programme reconciler's README and skill no longer describe a Programme Graph PR column the graph dropped, and say that agents mark notes for archiving through a holder order's `mark-archive` write.
