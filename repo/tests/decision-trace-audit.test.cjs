@@ -128,7 +128,7 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
       if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
-        return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
+        return { status: 0, stdout: args.some(arg => arg.includes('/comments?')) ? '[]' : '{"body":""}' };
       } };
       return require(name);
     },
@@ -143,6 +143,48 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
     assert.equal(call.args[0], 'api');
     assert.equal(call.args.includes('--method'), false);
   }
+});
+
+// Runs the CLI against a stub gh that serves the given comment pages in order; returns the gh calls and output.
+function runPagedCli(pages) {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs'), 'utf8');
+  const calls = [];
+  const out = [];
+  const context = {
+    module: {}, process: { argv: ['node', 'audit', '--repo', 'acme/app', '--issue', '7'], stdout: { write(text) { out.push(text); } } },
+    console: { error(text) { out.push(String(text)); }, log(text) { out.push(String(text)); } },
+    require(name) {
+      if (name === './resolve-executable.cjs') return { resolveExecutable() { return 'gh'; } };
+      if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
+      if (name === 'node:child_process') return { spawnSync(executable, args) {
+        calls.push(args);
+        const match = args.find(arg => arg.includes('/comments?'))?.match(/[?&]page=(\d+)/);
+        if (!match) return { status: 0, stdout: '{"body":""}' };
+        const page = pages[Number(match[1]) - 1];
+        return { status: 0, stdout: typeof page === 'string' ? page : JSON.stringify(page || []) };
+      } };
+      return require(name);
+    },
+  };
+  context.require.main = context.module;
+  vm.runInNewContext(source, context);
+  return { calls, exitCode: context.process.exitCode, output: out.join('') };
+}
+
+test('the CLI reads comments in numbered pages until a short page, never with --paginate', () => {
+  const full = Array.from({ length: 100 }, (_, index) => person(index + 1, 'Note'));
+  const { calls, exitCode, output } = runPagedCli([full, [person(101, 'Note')]]);
+  assert.equal(exitCode, 0);
+  const pages = calls.map(args => args.find(arg => arg.includes('/comments?'))).filter(Boolean);
+  assert.deepEqual(pages, ['repos/acme/app/issues/7/comments?per_page=100&page=1', 'repos/acme/app/issues/7/comments?per_page=100&page=2']);
+  assert.equal(calls.some(args => args.includes('--paginate')), false);
+  assert.equal(JSON.parse(output).comments, 101);
+});
+
+test('the CLI refuses a comment page that is not a list', () => {
+  const { exitCode, output } = runPagedCli(['{"message":"Not Found"}']);
+  assert.notEqual(exitCode, 0);
+  assert.match(output, /comment page 1 of #7 was not a list/);
 });
 
 test('loading the audit before programme state preserves the shared body threshold', () => {
