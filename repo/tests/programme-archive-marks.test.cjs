@@ -150,6 +150,38 @@ test('a mark-archive write refuses a missing or repeated line, a PR page and a p
   assert.equal(f.copies(421).length, 0);
 });
 
+test('a mark-archive write marks an open task page, refuses a closed or outside task, and stops on a page that moves or reads back wrong', t => {
+  const f = setup(t);
+  const task = f.run(f.order([{ command: 'mark-archive', issue: 806, before: 'Kept.' }]));
+  assert.equal(task.report?.outcome, 'DONE', task.error?.message);
+  assert.equal(f.github.issues.get(806).body, TASK_PAGE.replace('Kept.', '## Archive\nKept.'));
+  f.github.addIssue(950, { body: 'Elsewhere.\n' });
+  const outside = f.run(f.order([{ command: 'mark-archive', issue: 950, before: 'Elsewhere.' }], { order_id: 'm-outside' }));
+  assert.equal(outside.report.results[0].code, 'ARCHIVE_MARK_REFUSED');
+  // A person edits the page after it was read: nothing is written over the edit.
+  f.github.intercept((call, github) => {
+    if (call.method === 'PUT' && call.path.includes('page-copies/issue-421/')) github.issues.get(421).body += '\nA late edit.\n';
+  });
+  const moved = f.run(f.order([{ command: 'mark-archive', issue: 421, before: 'Old note line.' }], { order_id: 'm-moved' }));
+  assert.equal(moved.report.results[0].code, 'BODY_MOVED');
+  assert.ok(f.github.issues.get(421).body.endsWith('A late edit.\n'));
+  assert.equal(f.bodyWrites(421).length, 0);
+  f.github.hooks = [];
+  // GitHub stores something other than what was written: the write is reported, never taken as done.
+  f.github.intercept((call, github) => {
+    if (call.method !== 'PATCH' || !call.path.endsWith('/issues/421')) return null;
+    const answer = github.route(call.method, call.path, call.body);
+    github.issues.get(421).body += 'x';
+    return answer;
+  });
+  const mismatch = f.run(f.order([{ command: 'mark-archive', issue: 421, before: 'Old note line.' }], { order_id: 'm-readback' }));
+  assert.equal(mismatch.report.results[0].code, 'BODY_READBACK_MISMATCH');
+  f.github.hooks = [];
+  f.github.issues.get(806).state = 'closed';
+  const closed = f.run(f.order([{ command: 'mark-archive', issue: 806, remove: ['[x]: y'] }], { order_id: 'm-closed' }));
+  assert.equal(closed.report.results[0].code, 'ARCHIVE_MARK_REFUSED', 'a closed task page keeps its text');
+});
+
 test('a dry run of a mark-archive order writes nothing, and the order needs exactly one of before or remove', t => {
   const f = setup(t);
   const dry = f.run(f.order([{ command: 'mark-archive', issue: 421, before: 'Old note line.' }]), ['--dry-run']);

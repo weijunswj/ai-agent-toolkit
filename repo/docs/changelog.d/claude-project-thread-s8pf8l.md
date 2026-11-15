@@ -6,6 +6,10 @@ Title: pages stay drawn and within budget
 - **`BLOCK_BEHIND` false alarms:** a task page drawn by an older Toolkit at the stored revision was reported as showing an older state. The check now compares the page's drawn state revision with the stored one, and only for pages in that pass.
 - **`BODY_OVER_BUDGET` next step:** it now names a step that clears it on each kind of page: a `mark-archive` holder order on the parent or a task page, and the builder trimming the description to the CHANGE shape on a PR page.
 
+### Changed
+
+- **Parent graph columns:** the graph is `Task | Child # | Status | Waiting on | Last Updated (SGT)`. The task name and its number are separate again, and the parent names no PRs (each task page lists every one). Status is `NOW · IN PROGRESS`, `NOW · QUEUED` for a task in progress whose state lists a blocker, `LATER` for every other open task (optional ones too), or `COMPLETED` and `RETIRED`.
+
 ### Added
 
 - **Marked notes on task pages:** old notes under one `## Archive` line on an open task page leave it when the page is laid out. The whole page is saved to the private store first, and one `Archived notes: [page copy](...)` line links that copy.
