@@ -96,9 +96,48 @@ test('cloud sessions are not asked about an undecided repository and write no go
   assert.equal(cloudPrompt.decision, undefined);
   assert.doesNotMatch(JSON.stringify(cloudPrompt), /no governance decision yet/);
   assert.deepEqual(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment }), {});
-  assert.equal(claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext, claudeHook.CLOUD_LINE);
-  assert.deepEqual(claudeHook.respond('SessionStart', { cwd: ctx.root, session_id: 's2', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }), {});
+  const started = claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext;
+  assert.ok(started.startsWith(`${claudeHook.CLOUD_LINE}\n\n`));
+  assert.match(started, /example-owner\/example-repo: Toolkit governance: not decided yet[^\n]*not asked the governance question/);
+  assert.doesNotMatch(started, /# Toolkit-Governed Repository Rules/);
   writesNothingIn(repo);
+});
+
+// A Claude Projects thread starts in /home/user, outside any repository, with each repository cloned
+// directly under it; without this scan it gets no governed rules once AGENTS.md carries none.
+test('a cloud session started above its repositories gets the governed rules once, for the enabled ones only', (t) => {
+  const ctx = scratch(t);
+  const options = { registryOptions: ctx.options };
+  const environment = { CLAUDE_CODE_REMOTE: 'true' };
+  const governed = gitRepo(ctx, 'governed', { remote: 'https://github.com/example-owner/governed.git' });
+  const store = gitRepo(ctx, 'store', { remote: 'https://github.com/example-owner/evidence-store.git' });
+  const plain = gitRepo(ctx, 'plain', { remote: 'https://github.com/example-owner/plain.git' });
+  const off = gitRepo(ctx, 'off', { remote: 'https://github.com/example-owner/off.git' });
+  const seed = require('./support/governance-observations.cjs').seedMerged;
+  seed(governed, 'enable', { registryOptions: ctx.options });
+  seed(off, 'disable', { registryOptions: ctx.options });
+  fs.mkdirSync(path.join(ctx.root, 'notes'));
+  const refreshed = [];
+  const start = cwd => claudeHook.respond('SessionStart', { cwd, session_id: 's1', source: 'startup' }, { ...options, environment, refreshBinding: folder => refreshed.push(folder) }).hookSpecificOutput?.additionalContext;
+  const rules = fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
+  const above = start(ctx.root);
+  assert.ok(above.startsWith(claudeHook.CLOUD_LINE));
+  assert.equal(above.split(rules).length, 2, 'the governed rules, once');
+  assert.match(above, /bind only example-owner\/governed\./);
+  assert.match(above, /example-owner\/governed: Toolkit governance: ENABLED/);
+  assert.match(above, /example-owner\/evidence-store: Toolkit governance: DISABLED here: this repository is an evidence store/);
+  assert.match(above, /example-owner\/off: Toolkit governance: DISABLED for this repository/);
+  assert.match(above, /example-owner\/plain: Toolkit governance: not decided yet/);
+  assert.deepEqual(refreshed.filter(folder => folder !== ctx.root).sort(), [governed, off, plain, store].sort(), 'each child repository is read again first');
+  for (const folder of [store, plain, off]) assert.doesNotMatch(start(folder), /# Toolkit-Governed Repository Rules/);
+  assert.equal(start(governed).split(rules).length, 2);
+  for (const folder of [governed, store, plain, off]) writesNothingIn(folder);
+});
+
+test('a cloud session with no repository at or under its start folder gets no governance text', (t) => {
+  const ctx = scratch(t);
+  fs.mkdirSync(path.join(ctx.root, 'empty'));
+  assert.deepEqual(claudeHook.respond('SessionStart', { cwd: path.join(ctx.root, 'empty'), session_id: 's1', source: 'startup' }, { registryOptions: ctx.options, environment: { CLAUDE_CODE_REMOTE: 'true' }, refreshBinding: () => {} }), {});
 });
 
 test('cloud closure unknowns advise, proven open descendants refuse, and local unknowns name gh', () => {

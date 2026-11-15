@@ -1484,9 +1484,11 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
   if (verdict.open) {
     return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
   }
-  const decided = decidedLine(state);
   const programme = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : [];
-  return [decided, ...programme].join(' ');
+  const line = [decidedLine(state), ...programme].join(' ');
+  // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
+  // delivers the governed rules, so a repository needs no copy of them.
+  return state.state === 'ENABLED' ? `${line}\n\n${governedRules()}` : line;
 }
 
 // For an ENABLED repository: the attention line from this computer's cache, a Programme sweep line
@@ -1531,16 +1533,81 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
 function decidedLine(state) {
   if (state.notes?.includes('could-not-check-governance')) return `Toolkit: couldn't check governance. The last repository decision was ${state.state.toLowerCase()}. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.`;
   if (state.rule === 'M2' && state.notes?.includes('merged-binding-stale')) return 'Toolkit: the last repository decision was disabled, read over 24 hours ago. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.';
-  if (state.rule === 'S1') return "Toolkit governance: DISABLED here: this repository is an evidence store (agent-managed, not governed). Follow the global rules; the evidence-store rules in the governed repository's AGENTS.md apply.";
+  if (state.rule === 'S1') return "Toolkit governance: DISABLED here: this repository is an evidence store (agent-managed, not governed). Follow the global rules and the evidence-store line of the Toolkit-governed rules (repo/contracts/agent-rules/toolkit-governed-rules.md in the installed Toolkit).";
   if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED automatically (it ${whereText(state)}, so GitHub governance cannot run here). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
   if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
-  const enabled = state.materials?.governed_block
-    ? 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).'
-    : 'Toolkit governance: ENABLED by the default branch, but AGENTS.md has no governed rules block. Follow the global rules and use repository-agent-rules to prepare the missing block through a pull request.';
+  const enabled = 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the Toolkit-governed rules below (GitHub governance: records and evidence).';
   return state.governed_effects_hold ? `${enabled} The binding merged on the default branch was last read over 24 hours ago, so programme records, gate admission and finality hold until it is read again online.` : enabled;
+}
+
+// The governed rules as this Toolkit copy ships them (repo/contracts/agent-rules/toolkit-governed-rules.md),
+// tagged with its version. They win over any older copy a repository still carries in AGENTS.md.
+const GOVERNED_RULES_FILE = path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md');
+const VERSION_FILE = path.join(__dirname, '..', 'contracts', 'toolkit-local-bridge', 'version.json');
+function governedRules() {
+  try {
+    const text = fs.readFileSync(GOVERNED_RULES_FILE, 'utf8').replace(/\r\n/g, '\n').trim();
+    const version = JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8')).version;
+    return `Toolkit-governed rules (Toolkit ${version}; these replace any TOOLKIT-GOVERNED-RULES block in AGENTS.md):\n\n${text}`;
+  } catch {
+    return 'Toolkit could not read its governed rules, so this session has none. Run `setup toolkit` to repair the plugin; until then hold programme records, gate admission and finality.';
+  }
+}
+
+// ---- cloud sessions --------------------------------------------------------------------------
+
+// A cloud session (a Claude Projects thread included) may start outside any repository, with each
+// cloned repository a direct child of its start folder (/home/user/<repo>). The repositories it can
+// work in are the start folder's own repository, or else those direct children, at most
+// CLOUD_SCAN_LIMIT of them; a deeper clone, or one past the limit, is not seen (an accepted gap: CI
+// stays the backstop). Hidden folders are skipped.
+const CLOUD_SCAN_LIMIT = 16;
+// States the session line words through the gate's verdict on a computer; a cloud session is never
+// asked the governance question.
+const CLOUD_OPEN = Object.freeze({
+  UNDECIDED: 'Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules, coding gates included; a cloud session is not asked the governance question.',
+  UNAVAILABLE: "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.",
+});
+function cloudRepositories(cwd) {
+  const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+  const own = governance.findGitRoot(start);
+  if (own) return { roots: [own], inside: true };
+  const roots = [];
+  let names = [];
+  try { names = fs.readdirSync(start, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name).sort(); } catch { names = []; }
+  for (const name of names) {
+    if (roots.length >= CLOUD_SCAN_LIMIT) break;
+    const folder = path.join(start, name);
+    if (fs.existsSync(path.join(folder, '.git'))) roots.push(folder);
+  }
+  return { roots, inside: false };
+}
+
+// The cloud session-start text: null when the start folder holds no repository. Each child
+// repository's merged binding is refreshed first (the start folder's own repository was refreshed by
+// startSession), all before any is judged, so an evidence store is seen as one whatever its order.
+// Each repository's decision comes from the binding merged on its default branch, as on a computer.
+// The governed rules are given once, naming the repositories they bind.
+function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000 } = {}) {
+  const { roots, inside } = cloudRepositories(cwd);
+  if (!roots.length) return null;
+  if (!inside) for (const root of roots) {
+    try { (refreshBinding || (folder => governance.refreshMergedBinding(folder, registryOptions, { deadline })))(root); } catch { /* offline keeps the last read */ }
+  }
+  const lines = [];
+  const enabled = [];
+  for (const root of roots) {
+    let state;
+    try { state = governance.governanceState(root, registryOptions); } catch { state = { state: 'UNAVAILABLE', notes: ['could-not-check-governance'] }; }
+    const name = state.repository || path.basename(root);
+    if (state.state === 'ENABLED') enabled.push(name);
+    lines.push(`- ${name}: ${CLOUD_OPEN[state.state] || decidedLine(state)}`);
+  }
+  const rules = enabled.length ? `\n\nThe Toolkit-governed rules below bind only ${enabled.join(', ')}.\n\n${governedRules()}` : '';
+  return `Repositories in this session:\n${lines.join('\n')}${rules}`;
 }
 
 // ---- fail-closed fallbacks --------------------------------------------------------------------
@@ -1578,6 +1645,7 @@ module.exports = Object.freeze({
   ToolGate,
   insideRepository,
   sessionLine,
+  cloudSessionText,
   terminalCommand,
   PICKER_INPUT,
   PICKER_QUESTION, QUESTION,

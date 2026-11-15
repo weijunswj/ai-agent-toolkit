@@ -31,7 +31,6 @@ const discovery = require('./toolkit-governance-discovery.cjs');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const TEMPLATES = path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
-const PLAYBOOKS = path.join(TEMPLATES, 'docs', 'agent-playbooks');
 const GH_TIMEOUT_MS = 15000;
 const STORE_README = '# Evidence store\n\nPrivate evidence for the governed repository REPOSITORY: plans, reviews and archives that agents keep here instead of in the task repository.\n';
 const PARENT_BODY = 'Programme parent for REPOSITORY. Toolkit opened it when governance was turned on from the governance question bank. Tasks join as native sub-issues; the controller keeps the tracker here.\n';
@@ -159,9 +158,7 @@ function renderedRules(root) {
   const claude = read('CLAUDE.md');
   if (claude === null) files['CLAUDE.md'] = '@AGENTS.md\n';
   else if (!/^@AGENTS\.md[ \t]*\r?$/m.test(claude)) files['CLAUDE.md'] = `@AGENTS.md\n\n${claude.replace(/\r\n/g, '\n')}`;
-  for (const name of fs.readdirSync(PLAYBOOKS).filter(entry => entry.endsWith('.md')).sort()) {
-    files[`docs/agent-playbooks/${name}`] = fs.readFileSync(path.join(PLAYBOOKS, name), 'utf8').replace(/\r\n/g, '\n');
-  }
+  for (const [name, text] of Object.entries(require('./toolkit-playbooks.cjs').repositoryPlaybooks())) files[`docs/agent-playbooks/${name}`] = text;
   return files;
 }
 

@@ -38,6 +38,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | Skill | Use |
 |---|---|
 | [Repository Agent Rules](skills/repository-agent-rules/) | Put a repository under Toolkit's rules, or check and repair them. |
+| [Toolkit Playbooks](skills/toolkit-playbooks/) | Pick the working playbook that applies (safety gates, git completion, decision traces, tests and more) before planning or editing. |
 | [Controller Bootstrap](skills/controller-bootstrap/) | Take over or recover an explicitly assigned Toolkit controller. |
 | [Toolkit Setup](skills/toolkit-setup/) | Set up, update, check or troubleshoot Toolkit itself. |
 | [Toolkit Env](skills/toolkit-env/) | Manage your API keys and tokens in Windows Credential Manager, kept out of chat. |
@@ -75,7 +76,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.126.0 sha256=a57c3a0c239c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.127.0 sha256=a57c3a0c239c -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

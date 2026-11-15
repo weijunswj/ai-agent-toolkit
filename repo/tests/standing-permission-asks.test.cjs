@@ -10,7 +10,7 @@ const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-const PLAYBOOKS = ['repo/docs/agent-playbooks/safety-gates.md', 'skills/repository-agent-rules/repo-local/docs/agent-playbooks/safety-gates.md'];
+const PLAYBOOKS = ['repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md'];
 const FIELDS = ['id', 'granted_at', 'decision', 'answer_ref', 'machine', 'scope', 'project', 'target', 'action',
   'checks_first', 'told_after', 'not_covered', 'native_rule', 'reviewed_at', 'review_by', 'revoked_at', 'status'];
 const HARD_STOPS = [

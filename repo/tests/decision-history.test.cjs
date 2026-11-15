@@ -223,9 +223,9 @@ test('the CLI only reads through gh, resolved to a full path with its window hid
 test('the G0 history step is routed from the rules, both playbook indexes, the Projects skill and CONTROLLER.md', () => {
   const root = path.resolve(__dirname, '../..');
   const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
-  const playbook = 'skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md';
+  const playbook = 'skills/toolkit-playbooks/decision-trace.md';
   assert.ok(fs.existsSync(path.join(root, playbook)));
-  assert.match(read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/INDEX.md'), /Before G0 plans a programme child[^\n]*\(decision-trace\.md\)/);
+  assert.match(read('skills/toolkit-playbooks/SKILL.md'), /Before G0 plans a programme child[^\n]*\(decision-trace\.md\)/);
   assert.ok(read('repo/docs/agent-playbooks/INDEX.md').includes(`Read: \`${playbook}\`.`));
   assert.match(read('repo/contracts/agent-rules/toolkit-governed-rules.md'), /Decision traces:[^\n]*parent and child traces never mix[^\n]*latest comment wins[^\n]*G0 reads both traces[^\n]*\(decision-trace playbook\)/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Every G0 brief for a programme child says to read the parent's and the child's decision traces first/);
@@ -253,7 +253,7 @@ test('programme.cjs trace <n> runs the decision history for that issue against t
 test('the decision-trace playbook and governed rules send agents to programme.cjs trace, not a body trace', () => {
   const root = path.resolve(__dirname, '../..');
   const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-  const playbook = read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md');
+  const playbook = read('skills/toolkit-playbooks/decision-trace.md');
   assert.ok(playbook.includes('programme.cjs trace <n>'));
   assert.doesNotMatch(playbook, /comment trace on each issue body is the ledger/);
   const rules = read('repo/contracts/agent-rules/toolkit-governed-rules.md');

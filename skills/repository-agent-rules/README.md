@@ -14,7 +14,7 @@ The skill folder carries ready-to-copy templates (a curated-source comment plus 
 | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) | `AGENTS.md` | After the user's yes; the block carries the governed rules |
 | [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) | `CLAUDE.md` | Claude Code; exactly the line `@AGENTS.md`, no markers |
 | [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) | `.agents/rules/00-agent-toolkit-bootstrap.md` | Antigravity |
-| [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) | `docs/agent-playbooks/` | The whole folder, so the governed block's links work |
+| [toolkit-playbooks](../toolkit-playbooks/) | `docs/agent-playbooks/` | The whole folder (`SKILL.md` as `INDEX.md`), so the governed block's links work |
 
 Install only the current platform's shim unless the user asks for all, and never a shim without `AGENTS.md`: shims only point to it. A target repository or explicit path is required. The Antigravity bootstrap points to `AGENTS.md` and does not import it; Antigravity reads `AGENTS.md` itself, so there is no `GEMINI.md` shim.
 
