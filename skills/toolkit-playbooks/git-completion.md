@@ -16,6 +16,8 @@ Use this for requested repo edits that should be committed, pushed, opened as a 
 
 Keep the PR body aligned with the full branch diff when you can update it directly.
 
+Before opening a PR or editing its body, run `node <Toolkit>/repo/scripts/toolkit-pr-body.cjs --body-file <draft> --title "<title>" --out <clean file>` from the repository's folder and write only a body it passed (exit 0). It removes AI footers, session links and attribution lines and checks the personal-data guard (a default config where the repository has none), the UAT line and the Bump line, so a body it passed meets CI's body checks. In a cloud session write the body with the GitHub connector, never cloud `gh`, and read it back (PR review playbook).
+
 ## UAT Line
 
 Every pull request body carries exactly one line that says whether the owner has to test the change. It starts at the beginning of a line, with no bullet, bold or quote:
