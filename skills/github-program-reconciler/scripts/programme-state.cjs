@@ -34,6 +34,10 @@ function pageLayout() {
 function archiveTools() {
   return require('./programme-page-archive.cjs');
 }
+// Drift checks run in reconcile passes and child writes only.
+function drift() {
+  return require('./programme-drift.cjs');
+}
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
@@ -403,6 +407,12 @@ const FINDING_CODES = Object.freeze({
   CLASS_LEGACY: { source: 'reconcile', next_action: 'Controller: migrate the old classes with the patch from reconcile --json' },
   ORDER_TIE: { source: 'reconcile', next_action: 'Controller: give the tied tasks distinct priorities' },
   DUPLICATE_HIERARCHY: { source: 'reconcile', next_action: 'Controller: decide which registered parent owns the issue; nothing was moved' },
+  // Drift: part of the programme fell behind its state with nothing to fix it (programme-drift.cjs).
+  CHILD_NOT_NATIVE: { source: 'reconcile', next_action: 'Controller: an open task PR names this closed issue, but it is not under the programme parent; attach it natively, mark it outside the programme, or dispose with a reason' },
+  BLOCKS_MISSING: { source: 'reconcile', next_action: 'Controller: this open task page has no generated blocks and nothing redraws it; run refresh, and if it stays, check what holds the page' },
+  BLOCK_BEHIND: { source: 'reconcile', next_action: 'Controller: this open task page shows an older state than the stored one and nothing redraws it; settle any effect left in flight (the pass report names it), then run refresh' },
+  PR_NAV_MISSING: { source: 'reconcile', next_action: 'Controller: this open task PR has no readable PATH block and nothing redraws it; repair or remove the broken markers on the PR page, then run refresh' },
+  NEXT_ACTION_STALE: { source: 'reconcile', next_action: "Controller: the task's next action was set before its latest merge or close; set the next step with update --patch" },
   // inventory source: open issues and registered parents.
   NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
   CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', next_action: 'Controller: reopen the parent, or move or close its open descendants' },
@@ -2906,6 +2916,7 @@ class StateStore {
     if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -3025,6 +3036,7 @@ class StateBatch {
       if (!entry.doc || (entry.base && sameState(entry.base, entry.doc))) continue;
       const doc = clone(entry.doc);
       if (entry.kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+      if (entry.kind === 'child') drift().stampNextAction(entry.base, doc, store.now());
       doc.revision = entry.base ? entry.base.revision + (contentDigest(entry.base) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
       doc.volatile = { written_at: store.now(), ...(store.toolkitVersion ? { toolkit: store.toolkitVersion } : {}) };
       assertValid(entry.kind, doc);
@@ -3614,6 +3626,7 @@ class BranchStateStore extends StateStore {
     }
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -5036,6 +5049,62 @@ class Reconciler {
     }
   }
 
+  // Drift (programme-drift.cjs): what fell behind its state with nothing in this pass to fix it. Open
+  // task pages and task PR pages are checked from the bodies this pass already holds; a task the
+  // sweep left queued for a later pass is not checked until it is read.
+  diffDrift(parent, docs, observed, effects, findings, holds) {
+    const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+    const queued = new Set([...(observed.sweep?.left || []), ...(observed.sweep?.failed || [])]);
+    const explained = number => holds.some(hold => hold.target === `#${number}`)
+      || findings.some(finding => finding.issue === number && drift().EXPLAINING_CODES.has(finding.code));
+    const planned = (kind, test) => effects.some(effect => effect.kind === kind && test(effect.target));
+    const inFlight = number => [parent, docs.get(number)].flatMap(doc => doc?.pending_effects || [])
+      .filter(effect => effect.state !== 'DONE' && effect.target?.issue === number).map(effect => effect.kind);
+    const pages = [];
+    for (const [number, doc] of docs) {
+      const outcome = outcomes.get(number);
+      const issue = observed.issues.get(number);
+      if (!outcome || !issue || issue.is_pull_request || issue.state !== 'open' || queued.has(number)) continue;
+      const found = findStateBlock(issue.body);
+      if (found.error) continue;
+      const block = !found.block ? 'missing'
+        : normalizeBlockBody(found.block.body) === normalizeBlockBody(renderChildBlockBody(doc, outcome)) && !found.block.tampered ? 'current' : 'behind';
+      pages.push({ number, block, planned: planned('replace_block', target => target.issue === number), explained: explained(number), holding: inFlight(number) });
+    }
+    findings.push(...drift().pageDrift(pages));
+    const taskPrs = this.prTasks(parent, docs, observed, null);
+    const prs = [];
+    for (const [pr] of taskPrs) {
+      const page = observed.prPages?.get(pr);
+      if (!page || !page.is_pull_request || page.state !== 'open') continue;
+      const nav = findStateBlock(page.body, NAV_BLOCK_NAME);
+      prs.push({ number: pr, nav: nav.error ? 'broken' : nav.block ? 'present' : 'missing', planned: planned('replace_pr_nav', target => target.pr === pr) });
+    }
+    findings.push(...drift().prNavDrift(prs));
+    const context = { parentIssue: parent.parent_issue, catalogued: new Set(outcomes.keys()), registered: new Set(registeredParents(this.binding)) };
+    const candidates = drift().referenceCandidates({ references: observed.references, taskPrs: new Set(taskPrs.keys()), knownPrs: new Set(observed.prPages?.keys() || []), ...context })
+      .slice(0, drift().REFERENCE_READS)
+      .map(candidate => ({ ...candidate, facts: observed.issues.get(candidate.number) || this.readReference(candidate.number) }));
+    findings.push(...drift().referenceDrift(candidates, context));
+    const tasks = [];
+    for (const [number, doc] of docs) {
+      const outcome = outcomes.get(number);
+      if (!outcome || isFinished(outcome, doc) || /^None:/.test(doc.next_action)) continue;
+      const pr = observed.prs.get(number);
+      const issue = observed.issues.get(number);
+      const events = [pr?.merged_at ? { at: pr.merged_at, what: `the merge of PR #${pr.number}` } : null, issue?.closed_at ? { at: issue.closed_at, what: 'the issue close' } : null]
+        .filter(Boolean).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+      tasks.push({ number, nextAction: doc.next_action, since: doc.private?.next_action_at || null, latest: events[0] || null });
+    }
+    findings.push(...drift().nextActionDrift(tasks));
+  }
+
+  // One issue a task PR names, read for the drift check; an issue that cannot be read is skipped.
+  readReference(number) {
+    try { return this.reader.issue(number); }
+    catch (error) { if (!error.code || error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; return null; }
+  }
+
   // Every journal file for a child; only the live assignment's journals are read in full.
   readJournals(doc) {
     const live = LIVE_GATE_STATES.includes(doc.gate.state) ? doc.gate.assignment?.id : null;
@@ -5825,6 +5894,7 @@ class Reconciler {
     const blockHolds = new Set(holds.slice(blockHoldStart));
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
+    if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
