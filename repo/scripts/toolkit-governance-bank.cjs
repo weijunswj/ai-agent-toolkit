@@ -501,7 +501,8 @@ function bankTicketContext(entry, ticket) {
 }
 
 // Whether a shell command is exactly the bank answer command with a live ticket of this session.
-// The script must be Toolkit's own path as written, and the line holds nothing a shell expands.
+// The script must be Toolkit's own path as written, and the line holds nothing a shell expands and
+// no curly quote, which PowerShell reads as a quote and so could end the answer early.
 const BANK_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,400})"[ \t]+--ticket[ \t]+([0-9a-f]{32})[ \t]*$/;
 // The script is this copy's or the managed checkout's (the one bankTicketContext names), exactly.
 function sameScript(written) {
@@ -512,7 +513,7 @@ function sameScript(written) {
 }
 function bankTicketCommand(text, sessionId, tickets) {
   const command = String(text || '');
-  if (/[$`%]/.test(command)) return false;
+  if (/[$`%\u2018-\u201f]/.test(command)) return false;
   const match = BANK_COMMAND.exec(command);
   if (!match || typeof sessionId !== 'string' || sessionId === '') return false;
   if (!sameScript(match[1] ?? match[2] ?? match[3])) return false;
