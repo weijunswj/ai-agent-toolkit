@@ -36,8 +36,8 @@ If meaningful host-harness drift is found, open a separate PR with evidence, rat
 - Source repo: `nextlevelbuilder/ui-ux-pro-max-skill`
 - Source ref: `main`
 - Adopted commit: `10d6ca310541d3ffeee6dceda0a29e373796f321`
-- Reviewed-through commit: `6ae86f61f520d6ca229d2f40e070410638c908c5`
-- Latest observed commit: `d643997c82e94742dd3bee43210b0198e8bbba3d`
+- Reviewed-through commit: `d643997c82e94742dd3bee43210b0198e8bbba3d`
+- Latest observed commit: `0e8d408204fdc66b8189960dd28cc20d71db188e`
 - Why a new review is required: The latest observed upstream commit differs from the human-reviewed-through commit.
 - Prior disposition: `SEPARATE_IMPLEMENTATION_PR_RECOMMENDED`
 - Tracker at last review (history; find the current owner at triage): `#473`
