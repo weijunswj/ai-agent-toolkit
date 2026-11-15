@@ -221,6 +221,12 @@ test('in GitHub Actions a shard summary records the tested commit and --legs pic
   assert.equal(runner.testedCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: COMMIT }), COMMIT);
   assert.equal(runner.testedCommit({ GITHUB_SHA: COMMIT }), null, 'only inside GitHub Actions');
   assert.equal(runner.testedCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: 'main' }), null, 'only a full commit SHA');
+  // A light run that reuses an older merge commit's summaries checks them against that commit,
+  // named by the gate's legs step; outside GitHub Actions or with no valid SHA nothing changes.
+  assert.equal(runner.verifyCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: COMMIT, TESTED_COMMIT: OTHER_COMMIT }), OTHER_COMMIT);
+  assert.equal(runner.verifyCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: COMMIT, TESTED_COMMIT: '' }), COMMIT);
+  assert.equal(runner.verifyCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: COMMIT, TESTED_COMMIT: 'main' }), COMMIT);
+  assert.equal(runner.verifyCommit({ GITHUB_SHA: COMMIT, TESTED_COMMIT: OTHER_COMMIT }), null);
   assert.equal(runner.parseArgs(['--verify-ci', 'x', '--legs', 'gate']).legs, 'gate');
   assert.equal(runner.parseArgs(['--verify-ci', 'x']).legs, undefined);
   assert.throws(() => runner.parseArgs(['--verify-ci', 'x', '--legs', 'all']), /--legs is one of validate, gate/);

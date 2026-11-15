@@ -488,6 +488,7 @@ const GATE_HEADER = [
   '    outputs:',
   '      legs_run_id: ${{ steps.legs.outputs.run_id }}',
   '      legs_reused: ${{ steps.legs.outputs.reused }}',
+  '      legs_tested: ${{ steps.legs.outputs.tested }}',
   '    steps:',
 ];
 
@@ -529,6 +530,7 @@ function gateJobText(commands) {
     '        env:',
     '          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}',
     '          TEST_LEGS: ${{ steps.legs.outputs.legs }}',
+    '          TESTED_COMMIT: ${{ steps.legs.outputs.tested }}',
     '          PR_BODY: ${{ github.event.pull_request.body }}',
     '        run: |',
     ...commands.map((command) => `          ${command}`),
@@ -565,6 +567,7 @@ const VALIDATE_JOB = [
   '      - name: Check every job passed',
   '        env:',
   '          TEST_LEGS: ${{ toJSON(needs) }}',
+  '          TESTED_COMMIT: ${{ needs.gate.outputs.legs_tested }}',
   '        run: |',
   `          ${VERIFY_COMMAND}`,
 ].join('\n');
@@ -612,9 +615,11 @@ const WORKFLOW_HEADER = [
   "  cancel-in-progress: ${{ github.event.action != 'edited' }}",
   '',
   '# The route job decides first (repo/scripts/ci-validate-route.cjs). A pull request title or body',
-  '# edit is a light run when an earlier run of this workflow tested exactly the same code: the same',
-  '# head, the same tested merge commit (named in its summary artifacts), every test and hook-pack job',
-  '# passed in its newest attempt, and its summaries still kept. A light run skips the test and',
+  '# edit is a light run when an earlier run of this workflow tested the same head: the same tested',
+  '# merge commit (named in its summary artifacts), or an older merge of that head into a base commit',
+  '# today\'s base contains when the base moved nothing that decides what the tests run (the required',
+  '# check is not strict, so the pull request already stood on those results); every test and',
+  '# hook-pack job passed in its newest attempt, and its summaries still kept. A light run skips the test and',
   '# hook-pack jobs and the gate job reuses that run\'s results. Every other event, and any doubt or',
   '# error, is a full run. The test files run in shards on Linux and Windows',
   '# (repo/contracts/ci/test-shards.json), and each summary records the commit it tested. The gate',
@@ -736,7 +741,7 @@ function workflowErrors(source, manifest) {
   const gate = jobs.get('gate');
   if (gate !== undefined) {
     const lines = gate.split('\n');
-    if (lines.slice(0, GATE_HEADER.length).join('\n') !== GATE_HEADER.join('\n')) errors.push(`the gate job must start with needs: [route, ${TEST_JOBS.join(', ')}], if: \${{ !cancelled() }}, runs-on: ubuntu-latest, timeout-minutes: 15, read-only permissions and its two outputs`);
+    if (lines.slice(0, GATE_HEADER.length).join('\n') !== GATE_HEADER.join('\n')) errors.push(`the gate job must start with needs: [route, ${TEST_JOBS.join(', ')}], if: \${{ !cancelled() }}, runs-on: ubuntu-latest, timeout-minutes: 15, read-only permissions and its three outputs`);
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== `Checkout|Set up Node|Find the test legs|Download test summaries|Set up Python|${GATE_STEP}`) errors.push(`the gate job steps must be Checkout, Set up Node, Find the test legs, Download test summaries, Set up Python, ${GATE_STEP}`);
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the gate job may have a condition');

@@ -13,9 +13,13 @@
 //   - it is a completed pull_request run of this workflow file, for the same head commit and head
 //     repository, and not this run;
 //   - in its newest attempt every test and hook-pack job (each matrix member) concluded success;
-//   - it kept a summary artifact for every shard whose name ends with this run's tested commit
-//     (GITHUB_SHA, the pull request merge commit), not expired. So a base that moved since, which
-//     gives a new merge commit, means a full run.
+//   - it kept a summary artifact for every shard whose name ends with one tested commit, not
+//     expired: this run's own (GITHUB_SHA, the pull request merge commit), or an older merge commit
+//     of the same head into a base commit that today's base still contains. The required check is
+//     not strict (a pull request merges on results from an older base), so before the edit the
+//     pull request already stood on those results; reusing them after a body edit keeps that, while
+//     the edit's own run checks the body and the repository checks again. A merge commit that is not
+//     the head merged into an ancestor of today's base, or any doubt reading it, means a full run.
 // The route job reads the event: only the `edited` action without a base change can be light. Any
 // other event, any doubt and any error is a full run, and the route job always exits 0, so it can
 // only ever choose more testing. The gate job checks the chosen run again before it reuses it; there
@@ -33,6 +37,8 @@ const SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const RUN_ID = /^[1-9][0-9]{0,19}$/;
 // How many earlier runs at the same head the route job looks at, newest first.
 const MAX_CANDIDATES = 5;
+// Files whose change on the base means an older base's results do not stand for today's run.
+const RUN_INPUTS = Object.freeze([/^repo\/tests\//, /^repo\/contracts\/ci\//, /^\.github\/workflows\//, /^package(?:-lock)?\.json$/, /^\.nvmrc$/]);
 
 class RouteError extends Error {}
 
@@ -42,7 +48,7 @@ function readEvent(env) {
 }
 
 // What the event allows: a light run only for a pull request title or body edit with no base change.
-// Returns { light: false, reason } or { light: true, head, headRepository, tested }.
+// Returns { light: false, reason } or { light: true, head, headRepository, tested, baseSha }.
 function eventVerdict(env, event) {
   if (env.GITHUB_EVENT_NAME !== 'pull_request') return { light: false, reason: `a ${env.GITHUB_EVENT_NAME || 'unknown'} event always runs in full` };
   if (!event || typeof event !== 'object') return { light: false, reason: 'the event could not be read' };
@@ -53,8 +59,9 @@ function eventVerdict(env, event) {
   const head = pr.head && pr.head.sha;
   const headRepository = pr.head && pr.head.repo && pr.head.repo.full_name;
   const tested = env.GITHUB_SHA;
+  const baseSha = pr.base && pr.base.sha;
   if (!SHA.test(head || '') || !SLUG.test(headRepository || '') || !SHA.test(tested || '')) return { light: false, reason: 'the event does not name the head, its repository or the tested commit' };
-  return { light: true, head, headRepository, tested };
+  return { light: true, head, headRepository, tested, ...(SHA.test(baseSha || '') ? { baseSha } : {}) };
 }
 
 function apiClient(env, fetchImpl) {
@@ -97,20 +104,51 @@ function reuseProblem({ run, jobs, artifacts, want, manifest }) {
     legs[job] = { result: 'success', outputs: {} };
   }
   const kept = new Set((Array.isArray(artifacts) ? artifacts : []).filter((artifact) => artifact && artifact.expired === false).map((artifact) => artifact.name));
-  for (const system of shards.SYSTEMS) {
-    for (const id of shards.shardIds(manifest, system)) {
-      const pattern = new RegExp(`^test-summary-${id}-attempt-[1-9][0-9]*-${want.tested}$`);
-      if (![...kept].some((name) => pattern.test(name))) return { problem: `it kept no ${id} summary for the tested commit ${want.tested.slice(0, 12)}` };
-    }
+  // The commits every shard kept a summary for; this run's own tested commit first.
+  const ids = shards.SYSTEMS.flatMap((system) => shards.shardIds(manifest, system));
+  const commitsOf = (id) => new Set([...kept].map((name) => new RegExp(`^test-summary-${id}-attempt-[1-9][0-9]*-([0-9a-f]{40})$`).exec(name)).filter(Boolean).map((match) => match[1]));
+  let common = null;
+  for (const id of ids) {
+    const found = commitsOf(id);
+    if (!found.size) return { problem: `it kept no ${id} summary for any tested commit` };
+    common = common === null ? found : new Set([...common].filter((commit) => found.has(commit)));
   }
-  return { problem: null, legs };
+  if (!common || !common.size) return { problem: 'its shards kept no summaries of one same tested commit' };
+  if (common.has(want.tested)) return { problem: null, legs, tested: want.tested };
+  if (common.size > 1) return { problem: 'its shard summaries name more than one older tested commit' };
+  return { problem: null, legs, tested: [...common][0], olderBase: true };
+}
+
+// Why the tested commit `tested` of an earlier run cannot stand for this run, or null: it must be
+// the head merged into a base commit that this run's base (`want.baseSha`) still contains.
+async function olderBaseProblem(call, tested, want) {
+  if (!want.baseSha) return 'the event does not name the base commit';
+  const commit = await call(`commits/${tested}`);
+  const parents = Array.isArray(commit && commit.parents) ? commit.parents.map((parent) => parent && parent.sha) : [];
+  if (parents.length !== 2 || !parents.every((sha) => SHA.test(sha || '')) || parents[1] !== want.head) return `its tested commit ${tested.slice(0, 12)} is not this head merged into a base commit`;
+  const base = parents[0];
+  if (base === want.baseSha) return null;
+  const compared = await call(`compare/${base}...${want.baseSha}`);
+  const mergeBase = compared && compared.merge_base_commit && compared.merge_base_commit.sha;
+  if (!compared || compared.status !== 'ahead' || mergeBase !== base) return `its tested base ${base.slice(0, 12)} is not inside today's base ${want.baseSha.slice(0, 12)}`;
+  // The gate checks the summaries against today's test files and workflow, so a base move that
+  // changed what runs (a test file, the shard manifest, the workflows or the dependencies) cannot
+  // reuse them. GitHub lists at most 300 files per compare; a longer list is not read as complete.
+  const files = Array.isArray(compared.files) ? compared.files.map((file) => file && file.filename) : null;
+  if (!files || files.length >= 300 || files.some((name) => typeof name !== 'string')) return 'the base moved too far to list what changed';
+  const runs = files.find((name) => RUN_INPUTS.some((pattern) => pattern.test(name)));
+  if (runs) return `the base moved a file that decides what the tests run (${runs})`;
+  return null;
 }
 
 async function checkRun(call, runId, want, manifest) {
   const run = await call(`actions/runs/${runId}`);
   const jobs = (await call(`actions/runs/${runId}/jobs?filter=latest&per_page=100`)).jobs;
   const artifacts = (await call(`actions/runs/${runId}/artifacts?per_page=100`)).artifacts;
-  return reuseProblem({ run, jobs, artifacts, want, manifest });
+  const checked = reuseProblem({ run, jobs, artifacts, want, manifest });
+  if (checked.problem || !checked.olderBase) return checked;
+  const problem = await olderBaseProblem(call, checked.tested, want);
+  return problem ? { problem } : checked;
 }
 
 // The route job's decision: { mode: 'full' | 'light', runId, reason }.
@@ -126,14 +164,15 @@ async function route({ env = process.env, fetchImpl = globalThis.fetch, manifest
     .slice(0, MAX_CANDIDATES);
   const reasons = [];
   for (const candidate of candidates) {
-    const { problem } = await checkRun(call, candidate.id, want, manifest);
-    if (!problem) return { mode: 'light', runId: String(candidate.id), reason: `run ${candidate.id} already tested this exact code` };
+    const { problem, olderBase } = await checkRun(call, candidate.id, want, manifest);
+    if (!problem) return { mode: 'light', runId: String(candidate.id), reason: olderBase ? `run ${candidate.id} already tested this head on an older base that today's base contains` : `run ${candidate.id} already tested this exact code` };
     reasons.push(`run ${candidate.id}: ${problem}`);
   }
   return { mode: 'full', runId: '', reason: reasons.length ? `no earlier run can be reused (${reasons.join('; ')})` : 'no earlier completed run at this head' };
 }
 
-// The gate job's legs: { legs, runId, reused }. A full run passes on its own test jobs' results (the
+// The gate job's legs: { legs, runId, reused, tested }: `tested` is the commit the shard summaries
+// must name. A full run passes on its own test jobs' results (the
 // route job's own result left out: a failed route job only means the run went full). A light run
 // checks the route job's chosen run again and takes its results.
 async function legs({ env = process.env, fetchImpl = globalThis.fetch, manifest = shards.loadManifest(), event = readEvent(env) } = {}) {
@@ -143,15 +182,15 @@ async function legs({ env = process.env, fetchImpl = globalThis.fetch, manifest 
     if (!needs || typeof needs !== 'object' || Array.isArray(needs)) throw new RouteError('NEEDS is not the toJSON(needs) object.');
     const own = Object.fromEntries(Object.entries(needs).filter(([job]) => job !== 'route'));
     if (!RUN_ID.test(env.GITHUB_RUN_ID || '')) throw new RouteError('GITHUB_RUN_ID is missing.');
-    return { legs: own, runId: env.GITHUB_RUN_ID, reused: false };
+    return { legs: own, runId: env.GITHUB_RUN_ID, reused: false, tested: env.GITHUB_SHA };
   }
   const verdict = eventVerdict(env, event);
   if (!verdict.light) throw new RouteError(`the route job chose a light run, but ${verdict.reason}`);
   if (!RUN_ID.test(env.ROUTE_RUN_ID || '')) throw new RouteError('the route job chose a light run without naming a run');
   const want = { ...verdict, currentRunId: env.GITHUB_RUN_ID };
-  const { problem, legs: reused } = await checkRun(apiClient(env, fetchImpl), env.ROUTE_RUN_ID, want, manifest);
+  const { problem, legs: reused, tested } = await checkRun(apiClient(env, fetchImpl), env.ROUTE_RUN_ID, want, manifest);
   if (problem) throw new RouteError(`run ${env.ROUTE_RUN_ID} cannot be reused: ${problem}`);
-  return { legs: reused, runId: env.ROUTE_RUN_ID, reused: true };
+  return { legs: reused, runId: env.ROUTE_RUN_ID, reused: true, tested };
 }
 
 function writeOutputs(env, values) {
@@ -172,8 +211,10 @@ async function main(argv = process.argv.slice(2), { env = process.env, fetchImpl
   }
   try {
     const result = await legs({ env, fetchImpl });
-    writeOutputs(env, { legs: JSON.stringify(result.legs), run_id: result.runId, reused: String(result.reused) });
-    out.write(result.reused ? `The test and hook-pack results come from run ${result.runId}, which tested this exact code.\n` : 'The test and hook-pack results come from this run.\n');
+    writeOutputs(env, { legs: JSON.stringify(result.legs), run_id: result.runId, reused: String(result.reused), tested: result.tested || '' });
+    out.write(!result.reused ? 'The test and hook-pack results come from this run.\n'
+      : result.tested === env.GITHUB_SHA ? `The test and hook-pack results come from run ${result.runId}, which tested this exact code.\n`
+        : `The test and hook-pack results come from run ${result.runId}, which tested this head merged into ${String(result.tested).slice(0, 12)}, on a base today's base contains.\n`);
     return 0;
   } catch (error) {
     err.write(`The test legs could not be found: ${error.message} Re-run this workflow run; a new commit runs in full.\n`);

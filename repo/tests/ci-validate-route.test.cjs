@@ -15,6 +15,8 @@ const MANIFEST = shards.loadManifest();
 const HEAD = '1111111111111111111111111111111111111111';
 const TESTED = '2222222222222222222222222222222222222222';
 const OTHER = '3333333333333333333333333333333333333333';
+const BASE = '4444444444444444444444444444444444444444';
+const OLD_BASE = '5555555555555555555555555555555555555555';
 const REPO = 'example/toolkit';
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -24,7 +26,7 @@ function sink() {
 }
 
 function editEvent(changes = { body: { from: 'old' } }) {
-  return { action: 'edited', changes, pull_request: { head: { sha: HEAD, repo: { full_name: REPO } } } };
+  return { action: 'edited', changes, pull_request: { head: { sha: HEAD, repo: { full_name: REPO } }, base: { sha: BASE } } };
 }
 
 function env(extra = {}) {
@@ -45,7 +47,7 @@ function fullRun(id, { createdAt = '2026-11-13T10:00:00Z', tested = TESTED } = {
 }
 
 // A fake GitHub answering for the given runs; `calls` records every route asked.
-function github(runs, { fail = null } = {}) {
+function github(runs, { fail = null, commits = {}, compares = {} } = {}) {
   const calls = [];
   const byId = new Map(runs.map((entry) => [String(entry.run.id), entry]));
   const fetchImpl = async (url, options) => {
@@ -56,6 +58,10 @@ function github(runs, { fail = null } = {}) {
     const answer = (body) => ({ ok: true, status: 200, json: async () => clone(body) });
     let match = route.match(/^actions\/workflows\/validate\.yml\/runs\?event=pull_request&status=completed&head_sha=([0-9a-f]{40})&per_page=20$/);
     if (match) return answer({ workflow_runs: runs.map((entry) => entry.run).filter((run) => run.head_sha === match[1]) });
+    match = route.match(/^commits\/([0-9a-f]{40})$/);
+    if (match && commits[match[1]]) return answer(commits[match[1]]);
+    match = route.match(/^compare\/([0-9a-f]{40}\.\.\.[0-9a-f]{40})$/);
+    if (match && compares[match[1]]) return answer(compares[match[1]]);
     match = route.match(/^actions\/runs\/(\d+)(\/jobs\?filter=latest&per_page=100|\/artifacts\?per_page=100)?$/);
     if (match && byId.has(match[1])) {
       const entry = byId.get(match[1]);
@@ -110,7 +116,8 @@ test('every way an earlier run differs from this code runs in full', async () =>
     ['a job still running', (r) => { Object.assign(r.jobs.find((job) => job.name === 'hook-pack (ubuntu-latest)'), { status: 'in_progress', conclusion: null }); }, /hook-pack \(ubuntu-latest\) finished as in_progress/],
     ['a missing shard job', (r) => { r.jobs = r.jobs.filter((job) => job.name !== 'tests-linux (linux-1)'); }, /no tests-linux \(linux-1\) job/],
     ['a duplicate job name with one failure', (r) => { r.jobs.push({ name: 'tests-linux (linux-1)', status: 'completed', conclusion: 'failure' }); }, /tests-linux \(linux-1\) finished as failure/],
-    ['summaries of another merge commit (main moved)', (r) => { r.artifacts = fullRun(1, { tested: OTHER }).artifacts; }, /kept no linux-1 summary for the tested commit 222222222222/],
+    ['shards that tested different commits', (r) => { r.artifacts = [...fullRun(1, { tested: OTHER }).artifacts.slice(0, 1), ...r.artifacts.slice(1)]; }, /no summaries of one same tested commit/],
+    ['two older tested commits', (r) => { r.artifacts = [...fullRun(1, { tested: OTHER }).artifacts, ...fullRun(1, { tested: OLD_BASE }).artifacts]; }, /more than one older tested commit/],
     ['an expired summary', (r) => { r.artifacts[0].expired = true; }, /kept no linux-1 summary/],
     ['a missing summary', (r) => { r.artifacts = r.artifacts.filter((artifact) => !artifact.name.includes('windows-3')); }, /kept no windows-3 summary/],
     ['a summary named without the commit', (r) => { r.artifacts = r.artifacts.map((artifact) => ({ ...artifact, name: artifact.name.replace(`-${TESTED}`, '') })); }, /kept no linux-1 summary/],
@@ -135,6 +142,69 @@ test('every way an earlier run differs from this code runs in full', async () =>
   const { fetchImpl } = github([]);
   const none = await route.route({ env: env(), fetchImpl, manifest: MANIFEST, event: editEvent() });
   assert.deepEqual([none.mode, none.reason], ['full', 'no earlier completed run at this head']);
+});
+
+// A run that tested this head merged into OLD_BASE, and a GitHub that answers for that merge commit
+// and the compare from OLD_BASE to today's base.
+function olderBase({ parents = [OLD_BASE, HEAD], status = 'ahead', mergeBase = OLD_BASE, files = ['repo/scripts/other.cjs', 'README.md'] } = {}) {
+  return {
+    entry: fullRun(401, { tested: OTHER }),
+    commits: { [OTHER]: { sha: OTHER, parents: parents.map((sha) => ({ sha })) } },
+    compares: { [`${OLD_BASE}...${BASE}`]: { status, merge_base_commit: { sha: mergeBase }, files: files.map((filename) => ({ filename })) } },
+  };
+}
+
+test('after main moves, an edit reuses a run that tested this head on a base today\'s base contains', async () => {
+  const { entry, commits, compares } = olderBase();
+  const { fetchImpl, calls } = github([entry], { commits, compares });
+  const decision = await route.route({ env: env(), fetchImpl, manifest: MANIFEST, event: editEvent() });
+  assert.deepEqual([decision.mode, decision.runId], ['light', '401']);
+  assert.match(decision.reason, /older base that today's base contains/);
+  assert.ok(calls.includes(`commits/${OTHER}`) && calls.includes(`compare/${OLD_BASE}...${BASE}`));
+  const light = await route.legs({ env: env({ ROUTE_MODE: 'light', ROUTE_RUN_ID: '401' }), fetchImpl, event: editEvent(), manifest: MANIFEST });
+  assert.deepEqual([light.runId, light.reused, light.tested], ['401', true, OTHER], 'the gate checks the summaries against the older merge commit');
+  // The same merge base as today's base needs no compare.
+  const same = olderBase({ parents: [BASE, HEAD] });
+  const sameGithub = github([same.entry], { commits: same.commits });
+  assert.equal((await route.route({ env: env(), fetchImpl: sameGithub.fetchImpl, manifest: MANIFEST, event: editEvent() })).mode, 'light');
+  assert.ok(!sameGithub.calls.some((call) => call.startsWith('compare/')));
+});
+
+test('an older base that today\'s base does not contain, or a base move that changes what runs, runs in full', async () => {
+  const cases = [
+    ['not this head', { parents: [OLD_BASE, OTHER] }, /is not this head merged into a base commit/],
+    ['head as the first parent', { parents: [HEAD, OLD_BASE] }, /is not this head merged into a base commit/],
+    ['not a merge', { parents: [HEAD] }, /is not this head merged into a base commit/],
+    ['a base that went another way', { status: 'diverged' }, /is not inside today's base/],
+    ['a base ahead of today', { status: 'behind' }, /is not inside today's base/],
+    ['a merge base that is not the old base', { mergeBase: OTHER }, /is not inside today's base/],
+    ['a new test file on the base', { files: ['repo/tests/new.test.cjs'] }, /decides what the tests run \(repo\/tests\/new\.test\.cjs\)/],
+    ['a shard manifest change', { files: ['repo/contracts/ci/test-shards.json'] }, /decides what the tests run/],
+    ['a workflow change', { files: ['.github/workflows/validate.yml'] }, /decides what the tests run/],
+    ['a dependency change', { files: ['package-lock.json'] }, /decides what the tests run/],
+    ['a move too long to list', { files: Array.from({ length: 300 }, (_, index) => `docs/${index}.md`) }, /moved too far to list/],
+  ];
+  for (const [label, options, reason] of cases) {
+    const { entry, commits, compares } = olderBase(options);
+    const decision = await route.route({ env: env(), fetchImpl: github([entry], { commits, compares }).fetchImpl, manifest: MANIFEST, event: editEvent() });
+    assert.equal(decision.mode, 'full', label);
+    assert.match(decision.reason, reason, label);
+  }
+  const { entry, commits, compares } = olderBase();
+  const noBase = editEvent();
+  delete noBase.pull_request.base;
+  assert.match((await route.route({ env: env(), fetchImpl: github([entry], { commits, compares }).fetchImpl, manifest: MANIFEST, event: noBase })).reason, /does not name the base commit/);
+  // The merge commit can no longer be read: the route job chooses a full run, the gate job fails.
+  await withFiles(async (dir) => {
+    const eventFile = path.join(dir, 'event.json');
+    fs.writeFileSync(eventFile, JSON.stringify(editEvent()));
+    const output = path.join(dir, 'out.txt');
+    const out = sink();
+    assert.equal(await route.main(['route'], { env: { ...env(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: output }, fetchImpl: github([entry]).fetchImpl, out, err: sink() }), 0);
+    assert.deepEqual(outputs(output), { mode: 'full', run_id: '' });
+    assert.match(out.text(), /could not read earlier runs \(GitHub answered 404 for commits/);
+  });
+  await assert.rejects(route.legs({ env: env({ ROUTE_MODE: 'light', ROUTE_RUN_ID: '401' }), fetchImpl: github([entry], { commits, compares: {} }).fetchImpl, event: editEvent(), manifest: MANIFEST }), /GitHub answered 404 for compare/);
 });
 
 test('this run never reuses itself, and the route looks at a bounded number of runs', async () => {
@@ -195,7 +265,7 @@ test('the gate job takes its own results on a full run and checks the chosen run
   const needs = { route: { result: 'failure', outputs: {} }, ...Object.fromEntries(shards.TEST_JOBS.map((job) => [job, { result: 'success', outputs: {} }])) };
   const full = await route.legs({ env: env({ ROUTE_MODE: '', NEEDS: JSON.stringify(needs) }), event: editEvent(), manifest: MANIFEST });
   assert.deepEqual(Object.keys(full.legs), shards.TEST_JOBS, 'the route job\'s own result is left out');
-  assert.deepEqual([full.runId, full.reused], ['900', false]);
+  assert.deepEqual([full.runId, full.reused, full.tested], ['900', false, TESTED]);
   const skipped = { ...needs, 'tests-linux': { result: 'skipped', outputs: {} } };
   assert.equal((await route.legs({ env: env({ ROUTE_MODE: 'full', NEEDS: JSON.stringify(skipped) }), event: editEvent(), manifest: MANIFEST })).legs['tests-linux'].result, 'skipped', 'a skipped leg is passed on for the summary check to fail');
   await assert.rejects(route.legs({ env: env({ NEEDS: 'not json' }), event: editEvent(), manifest: MANIFEST }), /NEEDS is not/);
@@ -218,7 +288,7 @@ test('the gate job takes its own results on a full run and checks the chosen run
     const ok = await route.main(['legs'], { env: { ...env({ ROUTE_MODE: 'light', ROUTE_RUN_ID: '102' }), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: output }, fetchImpl: github([fullRun(102)]).fetchImpl, out: sink(), err: sink() });
     assert.equal(ok, 0);
     const written = outputs(output);
-    assert.deepEqual([written.run_id, written.reused], ['102', 'true']);
+    assert.deepEqual([written.run_id, written.reused, written.tested], ['102', 'true', TESTED]);
     assert.deepEqual(Object.keys(JSON.parse(written.legs)), shards.TEST_JOBS);
     const err = sink();
     const failed = await route.main(['legs'], { env: { ...env({ ROUTE_MODE: 'light', ROUTE_RUN_ID: '102' }), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: path.join(dir, 'failed.txt') }, fetchImpl: github([changed]).fetchImpl, out: sink(), err });
@@ -236,4 +306,8 @@ test('the check run names the route expects are the ones validate.yml produces',
   assert.ok(workflow.includes(`families: [${shards.HOOK_PACK_WINDOWS_GROUPS.join(', ')}]`));
   assert.match(workflow, /os: \[ubuntu-latest\]/);
   assert.match(workflow, /name: test-summary-\$\{\{ matrix\.shard \}\}-attempt-\$\{\{ github\.run_attempt \}\}-\$\{\{ github\.sha \}\}/);
+  // Both summary checks require the commit the legs step chose.
+  assert.match(workflow, /legs_tested: \$\{\{ steps\.legs\.outputs\.tested \}\}/);
+  assert.match(workflow, /TESTED_COMMIT: \$\{\{ steps\.legs\.outputs\.tested \}\}/);
+  assert.match(workflow, /TESTED_COMMIT: \$\{\{ needs\.gate\.outputs\.legs_tested \}\}/);
 });
