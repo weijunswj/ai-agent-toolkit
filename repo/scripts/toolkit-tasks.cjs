@@ -113,4 +113,4 @@ function updateRegistry(home, change) {
   return next;
 }
 
-module.exports = { SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, readRegistry, writeRegistry, updateRegistry, looksSecret, safeText };
+module.exports = { ID, userStateDir, registryPath, readRegistry, writeRegistry, updateRegistry, safeText };

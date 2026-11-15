@@ -143,5 +143,4 @@ function enrolledDefinition(live) {
     triggers: live.triggers || [], logon_type: live.logon_type || null, principal: live.principal || null, settings: live.settings || null, definition_xml: live.definition_xml || null });
 }
 
-module.exports = { FOLDER, MARKER, DISABLED_DESCRIPTION, SCRIPTS, WindowsTasksError, nameProblem, parseMarker, runnersDir,
-  powerShellScheduler, runPowerShell, ordered, enrolledDefinition };
+module.exports = { DISABLED_DESCRIPTION, SCRIPTS, parseMarker, runnersDir, powerShellScheduler, enrolledDefinition };
