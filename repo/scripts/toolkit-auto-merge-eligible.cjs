@@ -46,8 +46,8 @@
 //   - the controller, global and gate rules, and the Approvals section of the Projects controller
 //     skill: they say when a controller may merge;
 //   - CI workflows: they decide what "every required check is green" means;
-//   - the permission-line pin test: a pasted line trusts the checks in the scripts it names, so a
-//     change to what those lines allow must touch this test and wait for the owner;
+//   - the permission-line pin test: a new command, subcommand or flag on a pasted line fails it,
+//     so that change waits for the owner (a changed check behind an existing flag relies on review);
 //   - a major version bump: a breaking release would go out unseen.
 // Hooks, setup, governance and the preference reader/writer also wait for a typed merge:
 // changing the enforcement or setup path must never authorise that same change.
