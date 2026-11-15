@@ -426,7 +426,9 @@ function main(argv = process.argv.slice(2), deps = {}) {
     for (const line of args.json ? [JSON.stringify(output, null, 2)] : args.command === 'plan' ? describePlan(output) : describeResult(output)) log(line);
     return args.command === 'apply' && !output.ok ? 1 : 0;
   } catch (error) {
-    (deps.error || console.error)(error instanceof RemovalError || error?.name === 'WindowsTasksError' || error?.name === 'TasksError' ? error.message : 'Toolkit removal could not be planned; nothing was removed.');
+    // The task modules' own errors can carry a native line (PowerShell's stderr), so it is screened.
+    const own = error?.name === 'WindowsTasksError' || error?.name === 'TasksError';
+    (deps.error || console.error)(error instanceof RemovalError ? error.message : own ? tasks.safeText(error.message, 1000) : 'Toolkit removal could not be planned; nothing was removed.');
     return error?.exitCode || 1;
   }
 }

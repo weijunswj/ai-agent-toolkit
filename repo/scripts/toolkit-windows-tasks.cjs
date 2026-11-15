@@ -11,8 +11,8 @@
 // exported definition is byte for byte the one the plan read. An empty Toolkit folder goes with its
 // last task. A task the owner made, or one Toolkit only listed (adopted), is never removed.
 //
-// Removal condition: delete this module and the task part of toolkit-remove.cjs once no supported
-// install can still carry an old Toolkit task (owner: the Toolkit controller).
+// Removal condition: delete this module and the task part of toolkit-remove.cjs in the first Toolkit
+// release on or after 1 March 2027 (owner: the Toolkit controller).
 
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -25,7 +25,7 @@ const MARKER = /\[toolkit-task v1 id=([a-z0-9][a-z0-9-]{0,79}) def=([0-9a-f]{12}
 const DISABLED_DESCRIPTION = 'Disabled: Toolkit removed. Delete this task or re-run setup toolkit.';
 
 class WindowsTasksError extends Error {
-  constructor(message, exitCode = 2) { super(message); this.exitCode = exitCode; }
+  constructor(message, exitCode = 2) { super(message); this.name = 'WindowsTasksError'; this.exitCode = exitCode; }
 }
 
 // Windows keeps each task as a file under System32\Tasks\<folder>\, so a name takes no character a

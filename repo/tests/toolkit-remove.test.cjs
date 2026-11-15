@@ -658,3 +658,92 @@ test('a task whose exported XML alone changes between the plan read and its remo
   assert.ok(e.live());
   assert.ok(tasks.readRegistry(w.home).tasks.some(entry => entry.id === e.entry.id));
 });
+
+test('a task whose exported XML alone was edited by hand is planned as changed and kept, and apply removes nothing', t => {
+  const w = world(t), e = enrol(t, w, 'widget');
+  withExportedXml(w, e);
+  // Every structured field still matches the record; only the exported XML differs.
+  e.live().definition_xml = '<Task version="1.4"><Actions><Exec>hand edit</Exec></Actions></Task>';
+  const plan = owner(w).plan();
+  assert.deepEqual(plan.tasks.map(item => [item.kind, item.action]), [['changed', 'keep']]);
+  const result = owner(w).apply(plan.code);
+  assert.deepEqual(result.tasks, []);
+  assert.deepEqual(w.scheduler.calls.filter(call => call[0].startsWith('unregister')), []);
+  assert.ok(e.live());
+  assert.ok(tasks.readRegistry(w.home).tasks.some(entry => entry.id === e.entry.id));
+  assert.equal(fs.existsSync(windows.runnersDir(w.home)), true, 'a kept marked task keeps the shared runner');
+});
+
+// The task record's own guards (toolkit-tasks.cjs). The record is written by hand here, so each test
+// shows one guard on its own. A secret-shaped value is built at run time, so none sits in this file.
+test.describe('the task record\'s own guards', () => {
+  const secret = () => ['gh', 'p_', 'A1b2C3d4E5'.repeat(4)].join('');
+  const entry = (extra = {}) => ({ id: 'demo-sweep', name: 'DEMO - SWEEP', host: 'windows', folder: 'DEMO', schedule: 'hourly', model: null, effort: null,
+    purpose: 'Removes the footer.', repository: 'example/demo', created: '2026-10-29T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', ...extra });
+  const record = (home, list) => {
+    fs.mkdirSync(path.dirname(tasks.registryPath(home)), { recursive: true });
+    fs.writeFileSync(tasks.registryPath(home), JSON.stringify({ schema: 'toolkit.tasks.v1', tasks: list }));
+  };
+  const readWith = (t, extra) => { const home = s.tempHome(t); record(home, [entry(extra)]); return tasks.readRegistry(home); };
+
+  test('the plain entry these tests start from reads as ok', t => {
+    assert.equal(readWith(t, {}).status, 'ok');
+    assert.equal(readWith(t, { checkout: 'C:\\GitHub\\demo', toolkit_root: 'C:\\Toolkit', stopped_by_owner: true, stopped_at: '2026-11-15T00:00:00.000Z' }).status, 'ok');
+  });
+
+  test('safeText replaces a secret-shaped line, and a plan part failing with one shows only the replacement', t => {
+    assert.equal(tasks.safeText(`login failed for ${secret()}`), '[removed: looked like a secret]');
+    assert.equal(tasks.safeText('plain\nreason'), 'plain reason');
+    const broken = { key: 'broken', title: 'Broken part', plan() { throw new Error(`token ${secret()} rejected`); }, apply() { throw new Error('must not run'); } };
+    const shown = removal.describePlan(new removal.ToolkitRemoval({ home: s.tempHome(t), parts: [broken] }).plan()).join('\n');
+    assert.match(shown, /Broken part: left alone, could not be read \(\[removed: looked like a secret\]\)/);
+    assert.equal(shown.includes(secret()), false);
+  });
+
+  test('an entry holding a secret-shaped value makes the record unreadable, and is never written', t => {
+    for (const extra of [{ purpose: `uses ${secret()}` }, { job: secret() }, { enrolled_note: { inner: secret() } }])
+      assert.deepEqual(readWith(t, extra), { status: 'unreadable', reason: 'an entry has a bad secret-shaped value' }, JSON.stringify(Object.keys(extra)));
+    const home = s.tempHome(t);
+    assert.throws(() => tasks.writeRegistry(home, [entry({ job: secret() })]), { name: 'TasksError', message: /refused to record a task with a bad secret-shaped value/ });
+    assert.equal(fs.existsSync(tasks.registryPath(home)), false);
+  });
+
+  test('the record is written with mode 600', { skip: process.platform === 'win32' ? 'Windows keeps no POSIX mode; the file is in the user profile' : false }, t => {
+    const home = s.tempHome(t);
+    tasks.writeRegistry(home, [entry()]);
+    assert.equal(fs.statSync(tasks.registryPath(home)).mode & 0o777, 0o600);
+    tasks.updateRegistry(home, list => list);
+    assert.equal(fs.statSync(tasks.registryPath(home)).mode & 0o777, 0o600, 'a rewrite keeps it');
+  });
+
+  test('a checkout or toolkit_root that is relative or holds a quote or control character makes the record unreadable', t => {
+    for (const key of ['checkout', 'toolkit_root'])
+      for (const value of ['GitHub\\demo', 'C:\\Git"Hub', 'C:\\Git\u0007Hub', 'C:\\Git\u2028Hub', 42])
+        assert.deepEqual(readWith(t, { [key]: value }), { status: 'unreadable', reason: `an entry has a bad ${key}` }, `${key}=${JSON.stringify(value)}`);
+  });
+
+  test('stopped_by_owner and stopped_at come together, and stopped_at is an exact UTC time', t => {
+    for (const extra of [{ stopped_by_owner: true }, { stopped_at: '2026-11-15T00:00:00.000Z' }, { stopped_by_owner: true, stopped_at: '2026-11-15' }, { stopped_by_owner: true, stopped_at: '2026-13-45T00:00:00.000Z' }])
+      assert.deepEqual(readWith(t, extra), { status: 'unreadable', reason: 'an entry has a bad stopped_at' }, JSON.stringify(extra));
+  });
+
+  test('updateRegistry refuses a record it could not read and leaves it byte for byte', t => {
+    const home = s.tempHome(t);
+    fs.mkdirSync(path.dirname(tasks.registryPath(home)), { recursive: true });
+    fs.writeFileSync(tasks.registryPath(home), '{broken');
+    let called = false;
+    assert.throws(() => tasks.updateRegistry(home, list => { called = true; return list; }), { name: 'TasksError', message: /could not be read \(not valid JSON\), so nothing was recorded/ });
+    assert.equal(called, false);
+    assert.equal(fs.readFileSync(tasks.registryPath(home), 'utf8'), '{broken');
+  });
+});
+
+test('remove toolkit prints a Task Scheduler error as it is, screened for secrets, and any other error as the plain line', t => {
+  const run = scheduler => { const out = [], err = []; const code = removal.main(['plan', '--app', 'all'], { home: s.tempHome(t), scheduler, rules: null, parts: [], plugins: () => ({}), log: line => out.push(line), error: line => err.push(line) }); return { code, err: err.join('\n') }; };
+  const denied = stderr => windows.powerShellScheduler({ run: () => ({ status: 1, stderr }) });
+  assert.deepEqual(run(denied('Access is denied.\nmore detail')), { code: 1, err: 'Access is denied.' });
+  const token = ['gh', 'p_', 'A1b2C3d4E5'.repeat(4)].join('');
+  assert.deepEqual(run(denied(`denied for ${token}`)), { code: 1, err: '[removed: looked like a secret]' });
+  const plain = { markedFolders() { throw new Error('internal detail'); }, list() { return []; } };
+  assert.deepEqual(run(plain), { code: 1, err: 'Toolkit removal could not be planned; nothing was removed.' });
+});
