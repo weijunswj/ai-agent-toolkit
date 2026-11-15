@@ -1,5 +1,50 @@
 # Toolkit Changelog
 
+## 3.123.0 (robust page refresh)
+
+### Changed
+
+- **Cloud sweep request cap:** a scheduled sweep on GitHub sends at most 1,500 requests, what fits in half its 50-minute budget at about a second a request, so a full pass leaves half its time for a slow GitHub. It still stops earlier when GitHub's remaining hourly count for the governance App reaches the safety margin. A pass stopped at the cap saves its place and starts its follow-up run at once, so a big board keeps draining. The run summary shows the cap as a number.
+
+### Fixed
+
+- **Two or more comments on one page in one pass:** GitHub moves an issue's update time to that of any comment posted or edited on it, so the page writer took its own archive or index comment for someone else's edit, stopped with `BODY_MOVED`, and left the page for the next pass. It now tells this pass's own comment times apart: a page whose body is unchanged and whose update time is exactly one of its own comments' times is written in the same pass. A person's comment or body edit in between still holds the page.
+
+### Added
+
+- **Refresh failure suite:** tests for GitHub slowness, the hour's allowance running out mid-run, a page edited mid-run, a stop in every queue phase and mid-way through the task pages, and two or more comments on one page. Each ends in a resumed run that completes every page, plus a loud finding or hold. The test fake now moves an issue's update time on every comment post and edit, as GitHub does.
+
+## 3.122.0 (parent page layout; task and PR page layout)
+
+### Changed
+
+- **Programme graph:** the parent's graph has the columns `Task | PRs | Status | Waiting on | Updated (SGT)`. The task cell starts with the child number. PRs shows the three newest, then a count of the rest. Status joins the group and the status, such as `NOW · IN PROGRESS`, or shows `COMPLETED` or `RETIRED`. Waiting on names the owner's decision or UAT, a blocker, or the gate the task is in.
+- **Completed and retired rows:** the parent keeps the latest 10 COMPLETED rows. Older completed rows and every RETIRED row sit in the graph archive comments, behind one `Earlier completed · Retired` link line under the table. Archive comments use the same columns.
+- **CURRENT:** the summary is slim. It keeps the board line, the tasks in progress with their PR, gate and any wait on the owner, and one line with the attention counts, the number of held tasks and the `programme.cjs attention` command. A stopped pass still shows in full. The Start next line and the finding lists are gone: the graph's order shows what starts next, and the attention command lists every finding.
+- **AGENT CONTEXT:** the block is one line: the Agent context comment, any archived notes and the `programme.cjs trace` command.
+- The hourly nudge reads the next task from the graph's LATER rows and each task's next action from its task page. When the state store cannot be read, it reports only the parent's Attention line and counts, and says the finding list needs the store or a shell.
+- **Task pages:** an open task page is laid out as PATH, then `# TASK` with `## WHAT`, `## WHY` (the problem, the fix and what happens if we skip it as bold labels), `## DONE WHEN` (with an optional not-in-scope label) and `## PLAN`, then the generated PR GRAPH and a one-line STATUS, then one AGENT CONTEXT line, then More. Older pages convert on their next lay-out without changing a word; a heading written inside a part stays in it, and text added under the blocks goes to More.
+- **PR GRAPH:** a task's PRs show as a table of PR, status, gate and merge commit: every open PR, the latest ten finished ones, then one `Earlier:` line. STATUS is one line with the status, gate, what waits on you, UAT and review (marked `STALE_HEAD` at an older head), the next action and the release. CI and head SHAs are left to the PR itself.
+- **PR pages:** an open PR that names a task keeps PATH at the top and gets STATUS (one line per task) and AGENT CONTEXT under the author's description. A description that ends inside an open code block, HTML block or details section keeps the status block under PATH.
+- **Frozen closed tasks:** a closed task page whose status already shows `COMPLETED` or `RETIRED` is never drawn again, so a pass writes only open tasks and the parent. A reopened task is drawn again, and a frozen page whose task moved under another parent gets its new PATH once.
+- **Page budgets:** each pass raises `BODY_OVER_BUDGET`, with the largest parts named, for a task page at 4,000 characters or more and an open PR page at 3,000 or more.
+
+### Added
+
+- **Parent budget:** a parent page of 10,000 characters or more raises `BODY_OVER_BUDGET` with the sizes of its largest parts. The page is still written, and the finding clears once the page is under budget.
+
+### Fixed
+
+- Whether a task page can be laid out is checked on its hand-written text with the blocks cut out, so a block marker that closes a comment left open above it no longer lets a held page flip into a new layout on the next pass.
+
+## 3.121.0
+
+### Changed
+
+- `toolkit governance` now shows its choices as one typed question bank in every app, Claude Code included, the same way as `setup toolkit`: the whole list at once, answered in one line such as `all recommended` or `1.4=B`. The governance bank no longer splits its rows over tap cards. The single yes or no governance card and the merge card stay.
+- The parallel CI shards question is now one short line, "Run tests in parallel CI jobs so they finish faster? It uses about the same CI minutes.", with the details, the minutes estimate and why Not now is recommended on one "More on" line under it.
+- **Programme Sweep gate:** a closed issue now starts the cloud sweep at once instead of waiting until an hour after the last sweep, so the programme board stops showing a closed task as open within minutes. A pass paused at GitHub's hourly App limit still waits for the reset, and a queued or running sweep is handled as for any other activity.
+
 ## 3.120.2
 
 ### Fixed

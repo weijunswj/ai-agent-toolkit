@@ -58,21 +58,179 @@ function setup({ outcomes = [{ issue: 806, class: 'COMMITTED', order: 1 }], bodi
   return { github, store, binding, reconciler, time, copies, bodyWrites };
 }
 
-test('a task page is laid out as PATH, STATUS, DECISIONS, the capital sections in their fixed order, then More', () => {
+// The task text between PATH and the generated blocks, and the generated blocks' names in order.
+const taskPart = body => body.slice(body.indexOf('-->', body.indexOf(':END NAV')) + 3, body.indexOf('<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'));
+const blockOrder = body => [...body.matchAll(/programme-state:BEGIN (\w+)/g)].map(match => match[1]);
+
+test('a task page is laid out as PATH, TASK with its capital parts, the PR GRAPH and STATUS, AGENT CONTEXT, then More', () => {
   const result = lay(OLD_PAGE);
-  assert.deepEqual([...result.body.matchAll(/programme-state:BEGIN (\w+)/g)].map(match => match[1]), ['NAV', 'STATE', 'TRACE']);
-  assert.equal(afterBlocks(result.body), [
+  assert.deepEqual(blockOrder(result.body), ['NAV', 'STATE', 'TRACE']);
+  assert.equal(taskPart(result.body), [
     '', '',
-    '# PROBLEM', '', 'Pages differ.', '',
-    '# FIX', '', 'One layout.', '', '```', '# PROBLEM inside code', '```', '',
-    '# IF WE SKIP', '', 'Nothing lines up.', '',
-    '# DONE WHEN', '', '- [ ] a', '',
-    '# NOT IN SCOPE', '', 'Closed tasks.', '',
-    '# More', '', '# Title', '', 'Intro.', '', '## Notes', '', 'Keep me.', '',
-  ].join('\n'), 'old labels and headings become the capital sections; everything else follows under More in its own order');
+    '# TASK', '',
+    '## WHY', '',
+    '**The problem:** Pages differ.', '',
+    '**The fix:** One layout.', '', '```', '# PROBLEM inside code', '```', '',
+    '**If we skip it:** Nothing lines up.', '',
+    '## DONE WHEN', '', '- [ ] a', '',
+    '**Not in scope:** Closed tasks.', '', '',
+  ].join('\n'), 'old labels and headings become the parts of TASK, in the fixed order');
+  assert.equal(afterBlocks(result.body), ['', '', '# More', '', '# Title', '', 'Intro.', '', '## Notes', '', 'Keep me.', ''].join('\n'),
+    'everything else follows under More in its own order');
   assert.deepEqual(result.sections, ['PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE']);
   assert.equal(result.moves, true);
   assert.equal(layout.MORE_HEADING, 'More', 'the optional heading is sentence case; generated and required ones are capitals');
+});
+
+test('TASK holds WHAT, WHY, DONE WHEN and PLAN in that order, whatever order they were written in', () => {
+  const page = '## Plan\n\nG0 plan link.\n\n## Done when\n\n- [ ] works\n\n## Why\n\n- **The problem:** slow.\n- **The fix:** fast.\n\n## What\n\nMake it fast.\n';
+  const result = lay(page);
+  assert.deepEqual(result.sections, ['PLAN', 'DONE WHEN', 'WHY', 'WHAT']);
+  assert.equal(taskPart(result.body), '\n\n# TASK\n\n## WHAT\n\nMake it fast.\n\n## WHY\n\n- **The problem:** slow.\n- **The fix:** fast.\n\n## DONE WHEN\n\n- [ ] works\n\n## PLAN\n\nG0 plan link.\n\n');
+  assert.equal(lay(result.body).body, result.body);
+  assert.equal(layout.inOrder(result.body), true);
+});
+
+test('a page with no task text gets no TASK heading', () => {
+  const result = lay('Just notes.\n');
+  assert.equal(result.body.includes('# TASK'), false);
+  assert.deepEqual(blockOrder(result.body), ['NAV', 'STATE', 'TRACE']);
+  assert.equal(afterBlocks(result.body), '\n\n# More\n\nJust notes.\n');
+});
+
+test('a heading people write inside a TASK part stays in that part when the page is laid out again', () => {
+  const first = lay('# PROBLEM\n\nA.\n\n## Detail\n\nStill the problem.\n\n# FIX\n\n- one\n- two\n');
+  assert.match(taskPart(first.body), /\*\*The problem:\*\* A\.\n\n## Detail\n\nStill the problem\.\n\n\*\*The fix:\*\*\n\n- one\n- two\n/);
+  assert.equal(lay(first.body).body, first.body, 'the second lay-out gives the same bytes');
+  assert.equal(lay(first.body).moves, false);
+});
+
+test('only the first line decides whether a part\'s words share its label line', () => {
+  const result = lay('# PROBLEM\n\n---\nAfter a rule.\n\n# FIX\n\n1. first\n2. second\n\n**If we skip it:** Plain words\n- then a list\n');
+  assert.match(taskPart(result.body), /\*\*The problem:\*\*\n\n---\nAfter a rule\.\n\n\*\*The fix:\*\*\n\n1\. first\n2\. second\n\n\*\*If we skip it:\*\* Plain words\n- then a list\n/);
+  assert.equal(lay(result.body).body, result.body);
+});
+
+test('text written under the generated blocks of a laid-out page goes to More, never into the last TASK part', () => {
+  const first = lay('## Plan\n\nThe plan.\n');
+  const second = lay(`${first.body}\nA note added at the bottom.\n`);
+  assert.match(taskPart(second.body), /## PLAN\n\nThe plan\.\n\n$/);
+  assert.equal(afterBlocks(second.body), '\n\n# More\n\nA note added at the bottom.\n');
+});
+
+const childDoc = (change = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: { issue: 806, class: 'COMMITTED' } }), revision: 4, ...change });
+const OUTCOME = { issue: 806, class: 'COMMITTED', order: 1 };
+
+test('the task status block is a PR GRAPH and a one-line STATUS', () => {
+  const finished = Array.from({ length: 12 }, (unused, index) => ({ number: 700 - index, state: index % 4 === 3 ? 'CLOSED' : 'MERGED', merge_sha: index % 4 === 3 ? null : SHA_A }));
+  const child = childDoc({
+    lifecycle: 'ACTIVE', release: '3.67.0', next_action: 'G2 recheck at 0420542',
+    gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] },
+    pr: { number: 852, state: 'OPEN', head: SHA_A, checks: { state: 'PASS', required_total: 1, required_passed: 1, at_head: SHA_A } },
+    prs: [{ number: 852, state: 'OPEN', merge_sha: null }, ...finished],
+  });
+  const body = state.renderChildBlockBody(child, OUTCOME);
+  const lines = body.split('\n');
+  assert.equal(lines[0], '<!-- programme-state child=806@4 -->');
+  assert.ok(lines.includes('<!-- State revision 4 (issue-806.json) -->'), 'the drawn revision stays on the page for drift checks, out of sight');
+  assert.equal(lines.filter(line => /^# /.test(line)).join(','), '# PR GRAPH,# STATUS');
+  assert.ok(lines.includes('| PR | Status | Gate | Merged |'));
+  const rows = lines.filter(line => /^\|#\d+\|/.test(line));
+  assert.equal(rows[0], '|#852|OPEN|G2 ACTIVE|-|', 'open PRs first, the tracked one with its gate');
+  assert.equal(rows.length, 11, 'the open PR, then up to ten finished ones');
+  assert.equal(rows[1], `|#700|MERGED|-|[aaaaaaa](https://github.com/acme/app/commit/${SHA_A})|`);
+  assert.ok(lines.includes('Earlier: #690, #689'), 'older finished PRs collapse to one line');
+  assert.equal(lines.at(-1), 'IN PROGRESS · Gate: G2 ACTIVE · Next: G2 recheck at 0420542 · Release: 3.67.0');
+  assert.equal(body.includes('CI at head'), false, 'GitHub shows CI on the PR itself');
+});
+
+test('a task with no PR yet and a wait on the owner says so on its STATUS line', () => {
+  const body = state.renderChildBlockBody(childDoc({ lifecycle: 'WAITING_OWNER' }), OUTCOME);
+  assert.match(body, /# PR GRAPH\n\nNone yet\.\n/);
+  assert.equal(body.split('\n').at(-1), 'IN PROGRESS · Waiting on you: your decision · Next: Controller: admit and plan this outcome');
+  assert.equal(state.renderChildBlockBody(childDoc({ lifecycle: 'DONE' }), { ...OUTCOME, class: 'COMPLETED' }).split('\n').at(-1), 'COMPLETED · Next: Controller: admit and plan this outcome');
+});
+
+test('a task page ends with one AGENT CONTEXT line; the programme page keeps its DECISIONS block', () => {
+  const comments = [{ id: 11, body: 'Scope\n---\nA decision', created_at: '2026-11-01T00:00:00Z', user: { login: 'owner' } }];
+  const task = state.renderTraceBlockBody(806, comments, 'acme/app');
+  assert.equal(task, ['# AGENT CONTEXT', '<!-- programme-trace issue=806 -->',
+    'Decisions: `programme.cjs trace 806` · Newest: [11](https://github.com/acme/app/issues/806#issuecomment-11)'].join('\n'));
+  assert.match(state.renderTraceBlockBody(806, [], 'acme/app'), /\nDecisions: `programme\.cjs trace 806` · None yet\.$/);
+  assert.match(state.renderTraceBlockBody(421, comments, 'acme/app', true), /^# DECISIONS\n/);
+});
+
+test('a PR page status names each task on one line, then one AGENT CONTEXT line', () => {
+  const one = state.renderPrStatusBlockBody(900, SHA_A, [{ issue: 806, child: childDoc({ gate: { role: 'G2', state: 'ACTIVE' }, review: { state: 'PASS', verdicts: [{ head: SHA_A, verdict: 'PASS' }] }, uat: { state: 'NOT_REQUIRED' }, release: '3.67.0' }) }]);
+  assert.equal(one, ['<!-- programme-pr-status pr=900 -->', '# STATUS', '', '#806: Gate G2 ACTIVE · Review PASS at aaaaaaa · UAT NOT_REQUIRED · Release 3.67.0', '',
+    '# AGENT CONTEXT', '', 'Decisions and handover live on the task: `programme.cjs trace 806`'].join('\n'));
+  const two = state.renderPrStatusBlockBody(900, SHA_A, [{ issue: 806, child: null }, { issue: 807, child: childDoc() }]);
+  assert.match(two, /\n- #806: no state yet\.\n- #807: Gate - · Review none yet · UAT - · Release -\n/);
+  assert.match(two, /`programme\.cjs trace 806`, `programme\.cjs trace 807`$/);
+});
+
+test('a PR page puts STATUS and AGENT CONTEXT under the description, and moves them back there when text is added below', () => {
+  const nav = state.renderBlock(state.renderPrNavBlockBody([[421, 806]], 900), VERSION, state.NAV_BLOCK_NAME);
+  const status = state.renderBlock(state.renderPrStatusBlockBody(900, SHA_A, [{ issue: 806, child: null }]), VERSION);
+  const first = state.upsertPrBlocks('**WHY**\n\nThe change.\n', nav, status);
+  assert.equal(first, `${nav}\n\n**WHY**\n\nThe change.\n\n${status}\n`);
+  assert.equal(state.upsertPrBlocks(first, nav, status), first, 'in place when already last');
+  const older = `${nav}\n\n${status}\n\n**WHY**\n\nThe change.\n`;
+  assert.equal(state.upsertPrBlocks(older, nav, status), first, 'a page from an older Toolkit gets its status moved under the description');
+  assert.equal(state.upsertPrBlocks(`${first}\nAdded later.\n`, nav, status), `${nav}\n\n**WHY**\n\nThe change.\n\nAdded later.\n\n${status}\n`);
+});
+
+test('a closed task page that already shows its finished status is frozen: never redrawn', () => {
+  const f = setup({ closed: [806] });
+  const parentDoc = f.store.read('parent', 421).doc;
+  f.reconciler().run({ apply: true });
+  f.store.mutate('child', 806, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'DONE', completed_at: '2026-11-01T00:00:00Z' }) });
+  f.store.mutate('parent', 421, { writer, change: doc => ({ ...doc, outcomes: doc.outcomes.map(outcome => (outcome.issue === 806 ? { ...outcome, class: 'COMPLETED' } : outcome)) }) });
+  f.reconciler().run({ apply: true });
+  const frozen = f.github.issues.get(806).body;
+  assert.match(state.findStateBlock(frozen, 'STATE').block.body, /\nCOMPLETED\b/, 'the closing redraw shows the finished status');
+  const writes = f.bodyWrites(806).length;
+  f.github.addComment(806, { body: 'Scope\n---\nA late decision' });
+  f.store.mutate('child', 806, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => ({ ...doc, next_action: 'None: completed later' }) });
+  const report = f.reconciler().run({ apply: true });
+  assert.equal(f.bodyWrites(806).length, writes, 'no write to a frozen page');
+  assert.equal(f.github.issues.get(806).body, frozen);
+  assert.equal(report.findings.some(entry => entry.issue === 806 && ['PROJECTION_STALE', 'TRACE_STALE'].includes(entry.code)), false);
+  f.github.issues.get(806).state = 'open';
+  assert.ok(f.reconciler().run().effects.some(effect => effect.target.issue === 806), 'a reopened task is drawn again');
+});
+
+test('a task page over 4,000 characters and a PR page over 3,000 raise BODY_OVER_BUDGET naming their largest parts', () => {
+  assert.deepEqual(state.PAGE_BUDGETS, { parent: 10000, child: 4000, pr: 3000 });
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], bodies: { 806: `## Plan\n\n${'p'.repeat(4200)}\n`, 807: '## Plan\n\nShort.\n' } });
+  f.github.addPr(900, { head: SHA_A, branch: 'feature', body: `${'w'.repeat(3100)}\n\nRefs #806` });
+  f.github.addPr(901, { head: SHA_A, branch: 'other', body: 'Short.\n\nRefs #807' });
+  const report = f.reconciler().run({ apply: true });
+  const over = report.findings.filter(entry => entry.code === 'BODY_OVER_BUDGET');
+  const task = over.find(entry => entry.issue === 806 && !entry.kind);
+  assert.ok(task && task.diagnostics.threshold === 4000 && task.diagnostics.largest_sections[0].kind === 'hand_written', JSON.stringify(over));
+  const pr = over.find(entry => entry.issue === 900 && entry.kind === 'pr');
+  assert.ok(pr && pr.diagnostics.threshold === 3000, JSON.stringify(over));
+  assert.equal(over.some(entry => [807, 901].includes(entry.issue)), false, 'pages within budget raise nothing');
+  assert.ok(f.reconciler().run().findings.some(entry => entry.code === 'BODY_OVER_BUDGET' && entry.issue === 806), 'a settled page over budget still raises it');
+});
+
+test('a frozen closed page whose task moved under another parent gets its new PATH once, then stays frozen', () => {
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], closed: [806] });
+  const parentDoc = () => f.store.read('parent', 421).doc;
+  f.reconciler().run({ apply: true });
+  f.store.mutate('child', 806, { writer, parentDoc: parentDoc(), change: doc => ({ ...doc, lifecycle: 'DONE', completed_at: '2026-11-01T00:00:00Z' }) });
+  f.store.mutate('parent', 421, { writer, change: doc => ({ ...doc, outcomes: doc.outcomes.map(outcome => (outcome.issue === 806 ? { ...outcome, class: 'COMPLETED' } : outcome)) }) });
+  f.reconciler().run({ apply: true });
+  assert.match(f.github.issues.get(806).body, /\n#421 > #806\n/);
+  f.store.mutate('parent', 421, { writer, change: doc => ({ ...doc, outcomes: doc.outcomes.map(outcome => (outcome.issue === 806 ? { ...outcome, parent: 807 } : outcome)) }) });
+  f.reconciler().run({ apply: true });
+  const moved = f.github.issues.get(806).body;
+  assert.match(moved, /\n#421 > #807 > #806\n/, 'the new path is drawn');
+  const writes = f.bodyWrites(806).length;
+  f.github.addComment(806, { body: 'Scope\n---\nA late decision' });
+  f.reconciler().run({ apply: true });
+  assert.equal(f.bodyWrites(806).length, writes, 'then the page is frozen again');
 });
 
 test('laying out twice gives the same bytes, and a newer version redraws the blocks without moving a word', () => {
@@ -102,10 +260,10 @@ test('no hand-written word is lost or changed, whatever shape the page has', () 
   for (const page of pages) {
     const result = lay(page);
     const words = text => text.split(/\s+/).filter(Boolean);
-    const kept = words(afterBlocks(result.body)).join(' ');
+    const kept = words(layout.withoutBlocks(result.body)).join(' ');
     for (const line of page.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
       // A label line becomes its heading; its words after the label stay.
-      const label = /^(?:\*\*[^*]+:\*\*|#{1,2} (?:the problem|the fix|done when|not in scope|if we skip(?: it)?))\s*(.*)$/i.exec(line);
+      const label = /^(?:\*\*[^*]+:\*\*|#{1,2} (?:the problem|problem|the fix|fix|done when|not in scope|if we skip(?: it)?))\s*(.*)$/i.exec(line);
       const text = label && result.sections.length ? label[1] : line;
       if (text) assert.ok(kept.includes(words(text).join(' ')) || kept.toUpperCase().includes(words(text).join(' ').toUpperCase()), `${JSON.stringify(text)} survives in ${JSON.stringify(page.slice(0, 30))}`);
     }
@@ -126,19 +284,22 @@ test('a comment that runs over several lines hides headings until it ends, at ei
     const page = `Lead.\n\n<!-- note\n# PROBLEM\nstill a comment ${end}\n\n# FIX\n\nReal.\n`;
     const result = lay(page);
     assert.deepEqual(result.sections, ['FIX'], end);
-    assert.equal(afterBlocks(result.body), `\n\n# FIX\n\nReal.\n\n# More\n\nLead.\n\n<!-- note\n# PROBLEM\nstill a comment ${end}\n`, end);
+    assert.equal(taskPart(result.body), '\n\n# TASK\n\n## WHY\n\n**The fix:** Real.\n\n', end);
+    assert.equal(afterBlocks(result.body), `\n\n# More\n\nLead.\n\n<!-- note\n# PROBLEM\nstill a comment ${end}\n`, end);
   }
 });
 
 test('a section runs to the next section; a heading of the same or a higher level that is not a section ends it', () => {
   const result = lay('## The problem\n\nA.\n\n### Detail\n\nStill the problem.\n\n## Other heading\n\nNot the problem.\n');
-  assert.equal(afterBlocks(result.body), '\n\n# PROBLEM\n\nA.\n\n### Detail\n\nStill the problem.\n\n# More\n\n## Other heading\n\nNot the problem.\n');
+  assert.equal(taskPart(result.body), '\n\n# TASK\n\n## WHY\n\n**The problem:** A.\n\n### Detail\n\nStill the problem.\n\n');
+  assert.equal(afterBlocks(result.body), '\n\n# More\n\n## Other heading\n\nNot the problem.\n');
 });
 
 test('a block that sits inside a section does not end the section', () => {
   const stateBlock = state.renderBlock(GENERATED[1][1], VERSION);
   const result = lay(`# PROBLEM\n\n${stateBlock}\n\nThe words of the problem.\n\n# FIX\n\nThe fix.\n`);
-  assert.equal(afterBlocks(result.body), '\n\n# PROBLEM\n\nThe words of the problem.\n\n# FIX\n\nThe fix.\n');
+  assert.equal(taskPart(result.body), '\n\n# TASK\n\n## WHY\n\n**The problem:** The words of the problem.\n\n**The fix:** The fix.\n\n');
+  assert.equal(afterBlocks(result.body), '\n');
 });
 
 for (const [name, page, reason] of [
@@ -176,7 +337,9 @@ test('an open task is re-laid only after a copy of its page is saved and read ba
   const body = f.github.issues.get(806).body;
   assert.equal(layout.inOrder(body), true);
   assert.match(body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n# PATH\n<!-- programme-nav -->\n#421 > #806\n/);
-  assert.match(body, /\n# PROBLEM\n\nPages differ\.\n\n# FIX\n/);
+  assert.match(body, /\n# TASK\n\n## WHY\n\n\*\*The problem:\*\* Pages differ\.\n\n\*\*The fix:\*\* /);
+  assert.match(state.findStateBlock(body, 'STATE').block.body, /^# PR GRAPH\n\nNone yet\.\n\n# STATUS\n\nQUEUED · /m);
+  assert.match(state.findStateBlock(body, 'TRACE').block.body, /^# AGENT CONTEXT\n/);
   assert.match(body, /\n# More\n\n# Title\n\nIntro\.\n\n## Notes\n\nKeep me\.\n$/);
   assert.equal(f.reconciler().run().summary, 'No changes');
 
@@ -259,10 +422,10 @@ test('a task adopted from a native sub-issue gets its blocks in the same pass', 
   const body = f.github.issues.get(900).body;
   assert.equal(layout.inOrder(body), true);
   assert.match(body, /#421 > #900/);
-  assert.match(body, /\n# PROBLEM\n\nNew\.\n$/);
+  assert.match(body, /\n# TASK\n\n## WHY\n\n\*\*The problem:\*\* New\.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE /);
 });
 
-test('every open PR that names a task gets PATH and STATUS on top; its description stays as written', () => {
+test('every open PR that names a task gets PATH on top and STATUS under its description, which stays as written', () => {
   const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });
   f.reconciler().run({ apply: true });
   f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Layout work.\n\nRefs #806\nRefs #807' });
@@ -275,8 +438,9 @@ test('every open PR that names a task gets PATH and STATUS on top; its descripti
   assert.match(body, /#421 > #806 > PR #900/);
   assert.match(body, /#421 > #807 > PR #900/);
   assert.match(body, /<!-- programme-pr-status pr=900 -->\n# STATUS\n/);
-  assert.match(body, /- Task #806: gate [^\n]*; review [^\n]*; UAT [^\n]*; release [^\n]*\n- Task #807: /);
-  assert.ok(body.endsWith('-->\n\nLayout work.\n\nRefs #806\nRefs #807'), 'the description below the blocks is byte for byte what was written');
+  assert.match(body, /- #806: Gate [^\n]* · Review [^\n]* · UAT [^\n]* · Release [^\n]*\n- #807: /);
+  assert.match(body, /\n# AGENT CONTEXT\n\n[^\n]*`programme\.cjs trace 806`/);
+  assert.ok(body.includes(':END NAV -->\n\nLayout work.\n\nRefs #806\nRefs #807\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE '), 'the description between the blocks is byte for byte what was written');
   assert.equal(f.github.prs.get(901).body, 'Closes #806', 'a merged PR is never edited');
   assert.equal(f.github.prs.get(902).body, 'Names no task.', 'a PR that names no task is left alone');
   assert.equal(f.reconciler().run().effects.filter(effect => effect.kind === 'replace_pr_nav').length, 0, 'the PR page settles');
@@ -422,13 +586,13 @@ test('a task blocked by another open task that is moving is not idle; behind a s
   assert.deepEqual(queue(), [806, 807], 'a stalled blocker surfaces, and so does the task behind it');
 });
 
-test('the parent page lists the work queue first and the graph says the shown PR merged', () => {
+test('the parent page counts the work queue and the graph says the shown PR merged', () => {
   const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   f.reconciler().run({ apply: true });
   const body = f.github.issues.get(421).body;
   assert.match(body, /Attention: \d+ new, 0 acknowledged, 1 in the work queue/);
-  assert.match(body, /\*\*Work queue\*\* \(the controller acts on each now\)\n- TASK_MERGED_OPEN #806/);
-  assert.match(body, /\|#806\|#900 merged\|NOW\|IN PROGRESS\|/);
+  assert.doesNotMatch(body, /\*\*Work queue\*\*/, 'CURRENT counts the work queue; the attention command lists it');
+  assert.match(body, /^\|#806[ |][^\n]*\|#900 merged\|NOW · IN PROGRESS\|/m);
 });
 
 // Blocks that are only shown: an example of a block inside a code fence, a quote, a list item or
@@ -446,18 +610,18 @@ const QUOTED = [
   'After the examples.',
 ].join('\n');
 
-test('a PR description that shows STATE and NAV blocks as examples keeps them byte for byte, and gets its own blocks on top', () => {
+test('a PR description that shows STATE and NAV blocks as examples keeps them byte for byte, and gets its own blocks around it', () => {
   const f = setup();
   f.reconciler().run({ apply: true });
   const description = `${QUOTED}\n\nRefs #806`;
   f.github.addPr(900, { head: SHA_A, branch: 'feature', body: description });
   assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
   const body = f.github.prs.get(900).body;
-  assert.ok(body.endsWith(`-->\n\n${description}`), 'the description, examples included, is exactly what was written');
   const nav = state.findStateBlock(body, 'NAV').block, status = state.findStateBlock(body, 'STATE').block;
+  assert.equal(body.slice(nav.end, status.start), `\n\n${description}\n\n`, 'the description, examples included, is exactly what was written');
   assert.match(nav.body, /#421 > #806 > PR #900/);
   assert.match(status.body, /programme-pr-status pr=900/);
-  assert.ok(nav.start === 0 && status.end < body.indexOf('Before and after'), 'the real blocks sit above the description');
+  assert.ok(nav.start === 0 && status.start > body.indexOf('After the examples.'), 'PATH sits above the description and STATUS below it');
   const pass = f.reconciler().run();
   assert.equal(pass.effects.filter(effect => effect.kind === 'replace_pr_nav').length, 0, 'the PR page settles');
   assert.equal(pass.findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false);
@@ -473,8 +637,9 @@ test('a PR page with real blocks is still updated in place, examples or not', ()
   assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
   const body = f.github.prs.get(900).body;
   assert.match(state.findStateBlock(body, 'NAV').block.body, /#421 > #807 > PR #900/);
-  assert.match(state.findStateBlock(body, 'STATE').block.body, /- Task #807: /);
-  assert.ok(body.endsWith(`-->\n\n${QUOTED}\n\nRefs #806\nRefs #807`), 'only the real blocks changed');
+  assert.match(state.findStateBlock(body, 'STATE').block.body, /- #807: /);
+  // The line added under the old STATUS block joins the description with one blank line between.
+  assert.ok(body.includes(`:END NAV -->\n\n${QUOTED}\n\nRefs #806\n\nRefs #807\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE `), 'only the real blocks changed, and STATUS moved back under the added line');
   assert.equal(body.split(':BEGIN NAV ').length - 1, 3, 'one real PATH block and the two examples: no second real block was added');
 });
 
@@ -538,7 +703,7 @@ test('a page that will be laid out says so in the plan, and its result names the
   const f = setup({ bodies: { 806: OLD_PAGE } });
   const dry = f.reconciler().run();
   const planned = dry.effects.find(effect => effect.kind === 'replace_block' && effect.target.issue === 806);
-  assert.equal(planned.text, "Lay out #806's page in the fixed order (PATH, STATUS, DECISIONS, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first");
+  assert.equal(planned.text, "Lay out #806's page in the fixed order (PATH, TASK, PR GRAPH and STATUS, AGENT CONTEXT, then More); its hand-written text moves, and a copy of the page is saved first");
   assert.ok(dry.findings.some(finding => finding.code === 'PROJECTION_STALE' && finding.issue === 806 && finding.detail === 'the page is not in the fixed section order'), 'the finding names the order on first contact too');
   const report = f.reconciler().run({ apply: true });
   const result = report.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === 806);
@@ -651,7 +816,11 @@ for (const [where, page] of Object.entries(ANCHORS)) {
     f.reconciler().run({ apply: true });
     f.github.addPr(900, { head: SHA_A, branch: 'feature', body: `${page}\nRefs #806` });
     threePasses(f, () => f.github.prs.get(900).body, { NAV: 1, STATE: 1 }, where);
-    assert.ok(f.github.prs.get(900).body.endsWith(`-->\n\n${page}\nRefs #806`), 'the description is exactly what was written');
+    const body = f.github.prs.get(900).body;
+    const description = `${page}\nRefs #806`;
+    // A description that ends inside an open block keeps STATUS on top, where no block can swallow it.
+    if (layout.markdownLines(description).unfinished) assert.ok(body.endsWith(`-->\n\n${description}`), 'the description is exactly what was written');
+    else assert.ok(body.includes(`:END NAV -->\n\n${description}\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE `) && body.endsWith(':END STATE -->\n'), 'the description is exactly what was written, between PATH and STATUS');
   });
 }
 
