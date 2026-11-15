@@ -85,3 +85,61 @@ test('only a governed repository is cleaned, and a broken or unreadable programm
   assert.equal(stopped.ok, false);
   assert.equal(read(broken.root, 'AGENTS.md'), BLOCK, 'nothing is removed when the programme file cannot be updated');
 });
+
+// The cleanup is wired into refresh governance: the bank of a governed repository with copies asks
+// about them, and only the owner's ticketed Clean up writes the cleanup in the working tree.
+test('refresh governance asks about the copies; Keep current is recommended and Clean up writes the cleanup', async t => {
+  const { makeGoverned, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const governance = require('../scripts/toolkit-governance-state.cjs');
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  const { BankTickets } = require('../scripts/toolkit-governance-bank.cjs');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-cleanup-bank-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const home = path.join(base, 'home');
+  const repoDir = makeGoverned(path.join(base, 'adopter'), 'adopter', { home });
+  const registryPath = path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
+  const registryOptions = { registryPath, testOnly: true };
+  const own = '# Adopter rules\n';
+  fs.writeFileSync(path.join(repoDir, 'AGENTS.md'), `${BLOCK}\n\n${own}`);
+  fs.mkdirSync(path.join(repoDir, 'docs', 'agent-playbooks'), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, 'docs', 'agent-playbooks', 'INDEX.md'), PLAYBOOKS['INDEX.md']);
+  const binding = `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/adopter', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }], store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
+    required_checks: ['validate'], ci_shards: { answer: 'never' } }, null, 2)}\n`;
+  fs.writeFileSync(path.join(repoDir, '.github', 'toolkit-programme.json'), binding);
+  recordMerged(repoDir, { registryPath, text: binding });
+  const SESSION = 'session-owner-cleanup';
+  const cli = async argv => {
+    let out = '', err = '';
+    const code = await new ToolkitGovernanceCli({
+      stdout: { write: text => { out += text; return true; } }, stderr: { write: text => { err += text; return true; } },
+      cwd: repoDir, interactive: false, registryOptions, ask: async () => '', refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
+      permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0, update: 'x', remove: 'y' }), environment: { TOOLKIT_HOST_SESSION: SESSION },
+    }).main(argv);
+    return { code, out, err };
+  };
+  const answer = async reply => {
+    new gate.SessionEpochs({ registryOptions }).start(SESSION, 'startup', governance.governanceState(repoDir, registryOptions).repository_id);
+    const shown = await cli(['setup']);
+    assert.equal(shown.code, 0, shown.err);
+    const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
+    const ticket = new BankTickets({ registryOptions }).issue(SESSION, new gate.SessionEpochs({ registryOptions }).get(SESSION));
+    return { shown, ...(await cli(['setup', '--answers', `${reference}: ${reply}`, '--ticket', ticket])) };
+  };
+
+  const kept = await answer('all recommended');
+  const row = /\| (1\.\d+) \| Toolkit instruction copies \| 2 files to clean up \| A\. Keep current \| B\. Clean up \|/.exec(kept.shown.out);
+  assert.ok(row, kept.shown.out);
+  assert.equal(kept.code, 0, kept.err);
+  assert.equal(read(repoDir, 'docs/agent-playbooks/INDEX.md'), PLAYBOOKS['INDEX.md'], 'all recommended removes nothing');
+
+  const cleaned = await answer(`${row[1]}=B`);
+  assert.equal(cleaned.code, 0, cleaned.err);
+  assert.equal(read(repoDir, 'AGENTS.md'), own, 'every byte outside the markers is kept');
+  assert.equal(read(repoDir, 'docs/agent-playbooks/INDEX.md'), null);
+  assert.equal(JSON.parse(read(repoDir, '.github/toolkit-programme.json')).min_toolkit, cleanup.MIN_TOOLKIT);
+  assert.match(cleaned.out, /Changed in .*:\n- AGENTS\.md: remove the Toolkit block/);
+  assert.match(cleaned.out, /one pull request for the owner to merge/);
+  assert.doesNotMatch((await cli(['setup'])).out, /Toolkit instruction copies \|/, 'nothing left to ask about');
+});

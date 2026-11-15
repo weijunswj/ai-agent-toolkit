@@ -63,8 +63,9 @@ function statusRow({ id, section, title, current, text }) {
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
 // merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
 // minutes line, measured: the estimate or null }) where it is offered, or null, and `app` the governance
-// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read).
-function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null }) {
+// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read), and
+// `copies` the instruction copies the cleanup route would remove ({ files }; null when not read).
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -196,6 +197,22 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       ],
     }));
   }
+  // The cleanup route (toolkit-governance-cleanup.cjs): asked only in a governed repository that still
+  // has instruction copies. Removing files is the owner's own choice, so Keep current is recommended
+  // and all recommended removes nothing.
+  if (governed && copies && copies.files > 0) {
+    specs.push(bank.resolvedQuestion({
+      id: 'instruction-copies', key: 'instructionCopies', section, title: 'Toolkit instruction copies',
+      whatThisControls: 'The governed rules block, playbooks and one-line shims older setups copied into this repository. The installed Toolkit now gives sessions these rules, so the copies are leftovers.',
+      current: `${copies.files} ${copies.files === 1 ? 'file' : 'files'} to clean up`,
+      currentChoice: '',
+      recommendation: { value: 'keep', outcome: 'The copies stay; Toolkit asks again at the next refresh.', reason: 'Removing files is your choice, made when you are ready to merge one cleanup pull request.' },
+      choices: [
+        bank.wizardChoice('keep', 'Keep current', 'The copies stay; Toolkit asks again at the next refresh.'),
+        bank.wizardChoice('clean', 'Clean up', 'Toolkit removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file. You merge the one pull request yourself.'),
+      ],
+    }));
+  }
   const appName = APP_NAMES[permissions.host] || 'this app';
   const missing = permissions.checked ? permissions.missing : null;
   const stale = permissions.checked ? permissions.stale || 0 : 0;
@@ -259,7 +276,7 @@ function selectionsOf(parsed, specs) {
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
   const asked = specs.some(spec => spec.id === 'ci-shards' && !spec.report_only);
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}) };
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}), ...(specs.some(spec => spec.id === 'instruction-copies') ? { instructionCopies: value('instruction-copies') } : {}) };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
@@ -273,6 +290,9 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
     if (chosen[name] === 'on' && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
       throw new Error(`${label} can be on only while governance is on: turn governance on in the same answer, or leave ${label.toLowerCase()} as it is.`);
     }
+  }
+  if (chosen.instructionCopies === 'clean' && chosen.governance === 'off') {
+    throw new Error('The instruction copies can be cleaned up only while governance stays on: leave governance as it is, or leave the copies as they are.');
   }
   if (['yes', 'never'].includes(chosen.ciShards) && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
     throw new Error('Parallel CI shards can be answered only while governance is on: turn governance on in the same answer, or leave them as not now.');
