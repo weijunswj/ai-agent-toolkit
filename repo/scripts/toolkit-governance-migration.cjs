@@ -124,20 +124,25 @@ class GovernanceMaintenance {
       if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
       const on = [], unavailable = [], held = [], retry = [];
       const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
-      // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats (such
-      // as an account that is not an admin) is not hidden behind "not read back".
+      // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
+      // hidden behind "not read back". A refusal for this account (forbidden: not an admin) does not
+      // change on its own, so it is held with the step instead of retried.
       const answered = entries => [...new Set(entries.filter(entry => entry.result === 'failed' && entry.reason).map(entry => entry.reason))];
       const because = reasons => (reasons.length ? ` (GitHub answered: ${reasons.join(', ')})` : '');
+      const forbidden = reasons => reasons.length > 0 && reasons.every(reason => reason === 'forbidden');
+      const admin = `GitHub refused the write for the account Toolkit used (forbidden): run \`${governance.governanceCommand('migrate')}\` in your own terminal from an account with admin rights on the repository.`;
       const rulesetEnd = (name, read, entries) => {
         if (read.status === 'present') on.push(name);
         else if (read.status === 'not-enforceable') unavailable.push(name);
+        else if (forbidden(answered(entries))) held.push({ name, step: admin });
         else retry.push(`${name} is not read back${because(answered(entries))}`);
       };
       const noForcePush = ruleset.noForcePushRuleset(rows[0].root, reader);
       rulesetEnd('the no-force-push ruleset', noForcePush, rulesets.filter(entry => !entry.ruleset));
       if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state) rulesetEnd('the ruleset that keeps the programme state branch', ruleset.keepStateRuleset(rows[0].root, reader), rulesets.filter(entry => entry.ruleset === 'keep-programme-state'));
       // A write that did not read back is retried; only what is left after a clean write is held.
-      if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
+      if (forbidden(answered(protections))) held.push({ name: 'default-branch protection', step: admin });
+      else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
       else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
       this.#securityEnd(rows[0], securities, { on, held, retry, because });
       // Security files written into this working tree still need a pull request; the result says so.
@@ -146,22 +151,31 @@ class GovernanceMaintenance {
     } finally { this.#confirm = confirm; }
   }
 
-  // Where the security settings ended. A check GitHub did not answer is retried. Drift Toolkit does
-  // not fix, a check only a person can make (by_hand) and dependency auto-merge waiting for held
-  // protection are held with the step: reading again would show the same thing.
+  // Where the security settings ended. A read or write GitHub did not confirm is retried, and so is a
+  // free setting Toolkit would still turn on itself. Drift Toolkit does not fix, a check only a person
+  // can make (by_hand) and dependency auto-merge waiting only for held protection are held with the
+  // step: reading again would show the same thing.
   #securityEnd(row, securities, { on, held, retry, because }) {
     const result = this.#securityFor(row);
     if (result.status === 'conformant') { on.push('the free dependency and security settings'); return; }
     if (result.status === 'not-applicable') return;
-    const refused = securities.flatMap(entry => (entry.result === 'failed' ? (entry.settings || []).filter(item => !item.ok && item.reason).map(item => item.reason) : []));
+    // Settings GitHub refused as not available here (plan or policy) are not failures and never retried.
+    const unavailable = new Set(securities.flatMap(entry => entry.unavailable || []));
+    const refused = securities.flatMap(entry => (entry.result === 'failed' ? (entry.settings || []).filter(item => !item.ok && item.reason && !unavailable.has(item.setting)).map(item => item.reason) : []));
     if (securities.some(entry => entry.result === 'failed')) { retry.push(`a security setting did not read back after the write${because([...new Set(refused)])}`); return; }
+    if (securities.some(entry => entry.result === 'unverified')) { retry.push('the security settings could not be read back'); return; }
+    if (Object.entries(result.fixes || {}).some(([setting, wanted]) => wanted && !unavailable.has(setting))) { retry.push('a free security setting Toolkit turns on is still off'); return; }
     const protectionHeld = held.some(entry => entry.name === 'default-branch protection');
+    // S7 waits only on protection when the auto-merge policy is known and allow auto-merge was read.
+    const waitsOnProtection = protectionHeld && ['default-branch', 'not-merged'].includes(result.policy_source)
+      && typeof result.settings?.allow_auto_merge === 'boolean';
     const steps = [];
     for (const [id, check] of Object.entries(result.checks || {})) {
       if (check.status === 'drift' || (check.status === 'unverified' && check.by_hand === true)) steps.push(...check.details);
-      else if (check.status === 'unverified' && id === 'S7' && protectionHeld) steps.push('dependency auto-merge waits until default-branch protection is set (its step is above)');
+      else if (check.status === 'unverified' && id === 'S7' && waitsOnProtection) steps.push('dependency auto-merge waits until default-branch protection is set (its step is above)');
       else if (check.status === 'unverified') { retry.push('the security settings could not be read back'); return; }
     }
+    if (!steps.length) { retry.push('the security settings could not be read back'); return; }
     held.push({ name: 'some dependency and security settings', step: `change by hand: ${steps.join('; ')}.` });
   }
 
@@ -342,7 +356,7 @@ class GovernanceMaintenance {
         writer: this.#securityWriter, fileWriter: this.#securityFileWriter, reread: () => this.#securityFor(row),
       });
       for (const line of security.describeOutcome(row.slug, row.root, result, outcome)) this.#say(line);
-      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, result: outcome.result });
+      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, unavailable: outcome.unavailable, result: outcome.result });
     }
     return results;
   }

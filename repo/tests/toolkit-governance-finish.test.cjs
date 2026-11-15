@@ -268,3 +268,63 @@ test('dependency auto-merge waiting on protection held for a by-hand fix is held
   assert.match(line, /Waiting for you, default-branch protection: change by hand: .*validate/);
   assert.match(line, /dependency auto-merge waits until default-branch protection is set \(its step is above\)/);
 });
+
+test('a security read or write GitHub did not confirm is retried, never held as a by-hand step', async t => {
+  const ctx = governedRepo(t, { requiredChecks: [] });
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  const alertsOff = () => ({ ...publicSecurity(ctx)(), alerts: 'disabled' });
+  // H: the first read fails (nothing is written), the final read shows a free setting off.
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  let reads = 0;
+  const firstFails = () => (reads++ === 0 ? { ok: false, reason: 'gh-unavailable' } : alertsOff());
+  assert.equal(await cli(ctx, [], [], { protectionReader: unprotected, securityReader: firstFails }).run(), 2);
+  let entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
+  assert.equal(entry.status, 'pending');
+  assert.match(entry.line, /could not finish here yet \(the security settings could not be read back\)/);
+  assert.doesNotMatch(entry.line, /Dependabot alerts is off/, 'not handed to the owner: Toolkit turns it on itself');
+  // G: the write is accepted but its read-back fails, then the final read shows it off.
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  reads = 0;
+  const readBackFails = () => (reads++ === 1 ? { ok: false, reason: 'gh-unavailable' } : alertsOff());
+  assert.equal(await cli(ctx, [], [], { protectionReader: unprotected, securityReader: readBackFails, securityWriter: (slug, plan) => Object.keys(plan).filter(key => plan[key]).map(setting => ({ setting, ok: true })) }).run(), 2);
+  entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
+  assert.equal(entry.status, 'pending');
+  assert.doesNotMatch(entry.line, /change by hand: Dependabot alerts/);
+  // A free setting Toolkit would turn on that the first read could not see is retried too.
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  reads = 0;
+  const unseenFirst = () => (reads++ === 0 ? { ...publicSecurity(ctx)(), alerts: 'unreadable' } : alertsOff());
+  assert.equal(await cli(ctx, [], [], { protectionReader: unprotected, securityReader: unseenFirst }).run(), 2);
+  assert.match(finishing.entryFor(ctx.registryOptions, state.repository_id).line, /could not finish here yet \(a free security setting Toolkit turns on is still off\)/);
+});
+
+test('dependency auto-merge is held behind protection only when its policy and allow auto-merge were read', async t => {
+  const ctx = governedRepo(t, { workflow: true });
+  fs.writeFileSync(path.join(ctx.repo, '.github', 'workflows', 'ci.yml'), 'name: CI\non:\n  pull_request:\n    types: [opened]\njobs:\n  validate:\n    name: validate\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n');
+  const bindingFile = path.join(ctx.repo, '.github', 'toolkit-programme.json');
+  fs.writeFileSync(bindingFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(bindingFile, 'utf8')), dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } }));
+  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath });
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  const protectedRead = () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, classic: null, toolkit_ruleset: null,
+    rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } }, { type: 'required_status_checks', ruleset_id: 7, parameters: { required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }] });
+  for (const [label, extra] of [['allow auto-merge unreadable', { allow_auto_merge: 'unreadable' }], ['binding unreadable, so the policy is unknown', { allow_auto_merge: true, binding: { status: 'unreadable' } }]]) {
+    finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+    assert.equal(await cli(ctx, [], [], { protectionReader: protectedRead, securityReader: () => ({ ...publicSecurity(ctx)(), ...extra }) }).run(), 2, label);
+    const line = finishing.entryFor(ctx.registryOptions, state.repository_id).line;
+    assert.match(line, /could not finish here yet \(the security settings could not be read back\)/, label);
+    assert.doesNotMatch(line, /dependency auto-merge waits/, label);
+  }
+});
+
+test('a write GitHub refuses for this account (forbidden) is held with the admin step, not retried', async t => {
+  const ctx = governedRepo(t, { workflow: true });
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  const run = cli(ctx, [], [], { rulesetCreator: () => ({ ok: false, reason: 'forbidden' }), protectionReader: unprotected,
+    protectionWriter: () => ({ ok: false, reason: 'forbidden' }), securityReader: publicSecurity(ctx) });
+  assert.equal(await run.run(), 0, run.out.join(''));
+  const entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
+  assert.equal(entry.status, 'done');
+  assert.match(entry.line, /Waiting for you, the no-force-push ruleset: GitHub refused the write for the account Toolkit used \(forbidden\): run `node ".*toolkit-governance\.cjs" migrate` in your own terminal from an account with admin rights on the repository\./);
+  assert.match(entry.line, /Waiting for you, default-branch protection: GitHub refused the write for the account Toolkit used \(forbidden\)/);
+});

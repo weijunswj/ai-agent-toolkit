@@ -532,19 +532,22 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
   let unplaced = null;
   let uploads = null;
   let unreadable = false;
+  // Where GitHub answered but Toolkit's own read stops (too many workflow files, or more than one it
+  // cannot place): a person has to check, and reading again changes nothing.
+  let limit = null;
   if (codeScanning === 'disabled') {
     const listing = branch ? ghRun([`repos/${slug}/contents/.github/workflows?ref=${encodeURIComponent(branch)}`], spawn) : { ok: false, reason: 'no-branch' };
     if (!listing.ok) unreadable = listing.reason !== 'not-found';
     else if (!Array.isArray(listing.value)) unreadable = true;
     else {
       const names = listing.value.filter(entry => entry && entry.type === 'file' && /\.ya?ml$/i.test(entry.name)).map(entry => entry.name).sort();
-      if (names.length > 50) unreadable = true;
+      if (names.length > 50) limit = `the default branch has ${names.length} workflow files, more than the 50 Toolkit reads`;
       for (const name of names.slice(0, 50)) {
         const file = committed(`.github/workflows/${name}`);
         if (file.status !== 'ok') { unreadable = true; continue; }
         const runs = runsCodeql(file.text);
         if (runs === true) { advancedCodeql = name; break; }
-        if (runs === 'unsure') { if (unplaced === null) unplaced = name; else unreadable = true; }
+        if (runs === 'unsure') { if (unplaced === null) unplaced = name; else limit = limit || `.github/workflows/${unplaced} and .github/workflows/${name} both name CodeQL steps Toolkit could not place or rule out`; }
       }
     }
     if (advancedCodeql === null) {
@@ -565,7 +568,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
         const last = analyses.value[analyses.value.length - 1];
         if (!other && analyses.value.length >= 100 && (!last || recent(last))) unreadable = true;
       } else if (!(analyses.ok === false && analyses.reason === 'no-analysis')) unreadable = true;
-      if (uploads !== null || unplaced !== null || unreadable) advancedCodeql = 'unreadable';
+      if (uploads !== null || unplaced !== null || unreadable || limit !== null) advancedCodeql = 'unreadable';
     }
   }
   return {
@@ -582,7 +585,8 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
     binding,
     advanced_codeql: advancedCodeql,
     ...(uploads !== null && advancedCodeql === 'unreadable' ? { codeql_uploads: uploads } : {}),
-    ...(unplaced !== null && uploads === null && !unreadable && advancedCodeql === 'unreadable' ? { codeql_unplaced: unplaced } : {}),
+    ...(unplaced !== null && uploads === null && !unreadable && limit === null && advancedCodeql === 'unreadable' ? { codeql_unplaced: unplaced } : {}),
+    ...(limit !== null && uploads === null && !unreadable && advancedCodeql === 'unreadable' ? { codeql_limit: limit } : {}),
   };
 }
 
@@ -786,10 +790,12 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   // by_hand: GitHub answered, and what is left is a check only a person can make (an advanced CodeQL
   // setup Toolkit cannot place), so reading again changes nothing.
   checks.S5 = online && advanced === 'unreadable' && read.code_scanning === 'disabled'
-    ? { status: 'unverified', ...(read.codeql_uploads || read.codeql_unplaced ? { by_hand: true } : {}), details: [read.codeql_uploads
+    ? { status: 'unverified', ...(read.codeql_uploads || read.codeql_unplaced || read.codeql_limit ? { by_hand: true } : {}), details: [read.codeql_uploads
       ? `GitHub has CodeQL results on the default branch from ${read.codeql_uploads} in the last 90 days, not from default setup, so an advanced CodeQL setup is in use somewhere; default setup stays off, so check it by hand`
       : read.codeql_unplaced
       ? `.github/workflows/${read.codeql_unplaced} names CodeQL steps Toolkit could not place or rule out, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check that workflow by hand`
+      : read.codeql_limit
+      ? `${read.codeql_limit}, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check the workflows by hand`
       : 'the default branch\'s workflows or GitHub\'s CodeQL results could not be read, so an advanced CodeQL setup cannot be ruled out; default setup stays off'] }
     : online && advanced && read.code_scanning === 'disabled'
       ? { status: 'ok', details: [`CodeQL runs from .github/workflows/${advanced} (advanced setup), so default setup stays off`] }
