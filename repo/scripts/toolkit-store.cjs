@@ -29,11 +29,12 @@
 // status   read-only: the checks above, clean or not, ahead or behind the last fetch.
 // sync     fetches the bound branch and fast-forwards only.
 // save     stages only the named paths (adds and changes, never deletions) inside the binding's store
-//          path, archives/ or evidence/, secret-scans exactly the staged content, commits, pushes the
-//          bound branch with a plain push and reads it back with one fetch. A file the text scan
-//          cannot read (over 5 MB, binary, not UTF-8) is refused. Before each push the tip GitHub
-//          serves must be in the pushed commit, and after it GitHub must show that old tip inside
-//          the new one.
+//          path, archives/ or evidence/, secret-scans exactly the staged content and the message,
+//          commits, pushes the bound branch with a plain push and reads it back with one fetch. A
+//          file the text scan cannot read (over 5 MB, binary, not UTF-8) is refused. Before each push
+//          the tip GitHub serves must be in the pushed commit, and after it GitHub must show that old
+//          tip inside the new one. Run again with nothing new, it pushes the commits an earlier run
+//          kept.
 // move     reorganises with `git mv` only, so content is kept; the target is inside the same folders.
 // merge-branch          merges a store branch into the bound branch with a merge commit, refusing a
 //                       merge that deletes or changes away any file or writes outside the same
@@ -41,6 +42,14 @@
 // delete-merged-branch  deletes a remote store branch only when GitHub shows its tip already in the
 //                       bound branch, never the bound branch (in any letter case); the delete holds
 //                       only while the tip is unchanged, and GitHub is asked again afterwards.
+//
+// Commits the remote lacks (kept by a failed push, made by hand, or a merge of the remote) are checked
+// again right before every push: every blob and every message scanned, and each change only adds,
+// changes or renames plain files inside the same folders. A push is tried up to 4 times, with waits
+// of 2, 4 and 8 seconds; before each retry the store is read first, so a push that landed is never
+// sent again, and a store that moved is merged with a merge commit. When that merge conflicts, the
+// store's copy stays in place and ours is kept under evidence/store-conflicts/. No step leaves a
+// half-done merge; sync cancels one an older run left.
 //
 // It never force-pushes, mirrors, rebases or resets anything on the remote, never pushes a branch but
 // the bound one (except the checked branch delete), never deletes a file, never touches another
@@ -92,6 +101,15 @@ const PINNED_CONFIG = Object.freeze(['core.fsmonitor=false', 'core.commitGraph=f
 // Another branch is fetched into this private namespace, never beside the bound branch's tracking
 // ref, so a name that differs only by case cannot land on it on a case-insensitive disk.
 const OTHER_REFS = 'refs/toolkit-store';
+// Push attempts per run and the waits before each retry.
+const PUSH_ATTEMPTS = 4;
+const RETRY_WAITS_MS = Object.freeze([2000, 4000, 8000]);
+// Where a conflicting race merge keeps our version, beside the store's.
+const CONFLICTS = 'evidence/store-conflicts';
+// The one Next line for a kept commit the checks refuse: no store step will ever push it.
+const KEPT_REFUSED = 'the store command never pushes that commit; copy your new files out of the store checkout, then save them from a fresh clone of the store.';
+const RAW_DIFF = ['--raw', '-z', '--no-abbrev', '-M100%'];
+const waitSync = ms => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 // A store path as typed: relative, forward slashes, plain characters, no `.` or `..` part, no `.git`
@@ -126,12 +144,13 @@ function defaultReadGitHub(apiPath, { environment = process.env, cwd = process.c
 }
 
 class EvidenceStore {
-  #fs; #run; #environment; #cwd; #readBinding; #readGitHub; #tmpdir; #platform; #findGit;
+  #fs; #run; #environment; #cwd; #readBinding; #readGitHub; #tmpdir; #platform; #findGit; #sleep;
   #dir = null; #hooks = null; #gitPath = null; #repository = null; #store = null; #branch = null; #allowed = [];
+  #resumed = 0; #kept = [];
 
-  constructor({ fs = nodeFs, run = spawnSync, environment = process.env, cwd = process.cwd(), readBinding = mergedStoreBinding, readGitHub = defaultReadGitHub, tmpdir = os.tmpdir(), platform = process.platform, findGit = resolveGit } = {}) {
+  constructor({ fs = nodeFs, run = spawnSync, environment = process.env, cwd = process.cwd(), readBinding = mergedStoreBinding, readGitHub = defaultReadGitHub, tmpdir = os.tmpdir(), platform = process.platform, findGit = resolveGit, sleep = waitSync } = {}) {
     this.#fs = fs; this.#run = run; this.#environment = environment; this.#cwd = cwd;
-    this.#readBinding = readBinding; this.#readGitHub = readGitHub; this.#tmpdir = tmpdir; this.#platform = platform; this.#findGit = findGit;
+    this.#readBinding = readBinding; this.#readGitHub = readGitHub; this.#tmpdir = tmpdir; this.#platform = platform; this.#findGit = findGit; this.#sleep = sleep;
   }
 
   #gitEnvironment() {
@@ -245,21 +264,129 @@ class EvidenceStore {
     return { ahead, behind };
   }
 
-  // Nothing staged and no local commit the remote lacks, so a step commits and pushes only its own work.
+  #merging() { return this.#git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).ok; }
+
+  // No half-done merge and nothing staged, so a step commits only its own work. The checkout is
+  // brought up to the remote, and commits the remote lacks (an earlier run kept them, or they were
+  // made by hand) are checked now and pushed with this step's own commit.
   #ready({ cleanTree = false } = {}) {
-    const { ahead, behind } = this.#position();
-    if (!Number.isInteger(ahead)) throw new StoreError('the store branch has no fetched remote copy to compare with.', 'run sync first.');
-    if (ahead > 0) throw new StoreError(`the store checkout has ${ahead} commit(s) the remote lacks, and they were never scanned here.`, 'look at them with git log; push them yourself or start from a fresh clone.');
+    if (this.#merging()) throw new StoreError('the store checkout has a half-done merge an earlier run left.', 'run sync; it cancels the half-done merge and keeps every commit. Then retry.');
     if (!this.#git(['diff', '--cached', '--quiet']).ok) throw new StoreError('the store checkout already has staged changes.', 'unstage them (git restore --staged) so only the named paths are committed.');
     if (cleanTree && !this.#git(['diff', '--quiet']).ok) throw new StoreError('the store checkout has changed tracked files.', 'save or restore them first.');
-    if (behind > 0) this.#must(['merge', '--ff-only', '--quiet', this.#tracking], 'the store checkout could not fast-forward to the remote (a local change is in the way).', 'move the conflicting local files aside, run sync, then retry.');
+    const { ahead } = this.#position();
+    if (!Number.isInteger(ahead)) throw new StoreError('the store branch has no fetched remote copy to compare with.', 'run sync first.');
+    this.#resumed = ahead;
+    this.#catchUp();
+    if (ahead > 0) this.#checkPending();
+  }
+
+  // Brings the checkout up to the fetched remote: a fast-forward when only behind, else one merge
+  // commit. When that merge conflicts it is always cancelled first, then made again keeping both.
+  #catchUp() {
+    const { ahead, behind } = this.#position();
+    if (!(behind > 0)) return;
+    if (ahead === 0) {
+      this.#must(['merge', '--ff-only', '--quiet', this.#tracking], 'the store checkout could not fast-forward to the remote (a local change is in the way).', 'move the conflicting local files aside, run sync, then retry.');
+      return;
+    }
+    if (this.#git(['merge', '--no-ff', '--no-edit', '--quiet', this.#tracking]).ok) return;
+    const conflicted = this.#git(['diff', '--name-only', '-z', '--diff-filter=U']).out.split('\0').filter(Boolean);
+    this.#git(['merge', '--abort']);
+    if (!conflicted.length || this.#merging()) throw new StoreError('the store moved and merging it failed (a local file is in the way); your commits are kept, nothing was pushed.', 'move the local files that are not saved aside, then run the same store command again.');
+    this.#keepBoth(conflicted);
+  }
+
+  // One tree entry ({ mode, sha }) of a commit, or null when the commit lacks that path.
+  #entry(commit, file) {
+    const listed = this.#git(['ls-tree', '-z', commit, '--', file]).out.split('\0').find(line => line.endsWith(`\t${file}`));
+    const head = listed && /^(\d{6}) \w+ ([0-9a-f]+)\t/.exec(listed);
+    return head ? { mode: head[1], sha: head[2] } : null;
+  }
+
+  // The race merge for conflicting paths: the store's copy stays where it is, and ours is written
+  // beside it under evidence/store-conflicts/<time>-<our commit>/<path>. A path the store lacks
+  // keeps ours in place. Any failure cancels the merge and removes only what this run wrote.
+  #keepBoth(files) {
+    const ours = this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim();
+    const folder = `${CONFLICTS}/${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${ours.slice(0, 7)}`;
+    const written = [];
+    const kept = [];
+    try {
+      this.#git(['merge', '--no-ff', '--no-commit', '--quiet', this.#tracking]);
+      if (!this.#merging()) throw new StoreError('the store moved and the conflicting merge could not be made again; your commits are kept, nothing was pushed.', 'run the same store command again.');
+      for (const file of files) {
+        if (!this.#entry(this.#tracking, file)) { this.#must(['add', '--', file], `${file} could not be kept.`, 'run the same store command again.'); continue; }
+        this.#must(['checkout', this.#tracking, '--', file], `the store's copy of ${file} could not be kept.`, 'run the same store command again.');
+        const mine = this.#entry(ours, file);
+        if (!mine) continue;
+        const target = `${folder}/${file}`;
+        if (!storePath(target) || this.#exists(target)) throw new StoreError(`${file} conflicts with the store, and our copy cannot be kept beside it.`, 'tell the owner; your commits are kept, nothing was pushed.');
+        this.#makeParent(target);
+        const blob = this.#git(['cat-file', 'blob', mine.sha], { buffer: true });
+        if (!blob.ok) throw new StoreError(`our copy of ${file} could not be read.`, 'run the same store command again.');
+        this.#fs.writeFileSync(path.join(this.#dir, ...target.split('/')), blob.out, { flag: 'wx', mode: mine.mode === '100755' ? 0o755 : 0o644 });
+        written.push(target);
+        this.#must(['add', '--', target], `our copy of ${file} could not be kept.`, 'run the same store command again.');
+        kept.push({ file, ours: target });
+      }
+      this.#must(['commit', '--quiet', '-m', `Merge the store's ${this.#branch}, keeping both versions of ${files.length} file(s)`], 'the keep-both merge commit failed.', 'run the same store command again.');
+    } catch (error) {
+      if (this.#merging()) this.#git(['merge', '--abort']);
+      for (const file of written) { try { this.#fs.rmSync(path.join(this.#dir, ...file.split('/')), { force: true }); } catch { /* written by this run */ } }
+      throw error;
+    }
+    this.#kept.push(...kept);
+  }
+
+  // Creates a target's folders inside the checkout; a link on the way is refused.
+  #makeParent(target) {
+    const parent = path.posix.dirname(target);
+    if (parent === '.') return;
+    let existing = parent;
+    while (existing !== '.' && !this.#exists(existing)) existing = path.posix.dirname(existing);
+    if (existing !== '.' && !this.#realInside(existing)) throw new StoreError(`${existing} leads out of the store checkout through a link.`, 'pick another target path.');
+    this.#fs.mkdirSync(path.join(this.#dir, ...parent.split('/')), { recursive: true });
+  }
+
+  // Every commit the remote lacks, checked right before it is sent, whoever made it: every blob in
+  // every commit and every commit message scanned, each single-parent commit's own change and the
+  // whole change from the remote tip only adding, changing or exactly renaming plain files inside
+  // the store folders. This covers commits an earlier run kept, commits made by hand, and blobs a
+  // race merge wrote that no earlier scan saw.
+  #checkPending() {
+    const range = `${this.#tracking}..HEAD`;
+    const commits = this.#must(['rev-list', range], 'the commits the remote lacks could not be listed.', 'retry.').split(/\r?\n/).filter(Boolean);
+    if (!commits.length) return;
+    const findings = [];
+    for (const sha of commits) {
+      const raw = this.#must(['cat-file', 'commit', sha], `commit ${sha.slice(0, 7)} could not be read.`, 'retry.');
+      const split = raw.indexOf('\n\n');
+      const parents = (split === -1 ? raw : raw.slice(0, split)).split('\n').filter(line => line.startsWith('parent ')).map(line => line.slice(7));
+      for (const hit of scanText(split === -1 ? '' : raw.slice(split + 2))) findings.push(`commit ${sha.slice(0, 7)} message:${hit.line} (${hit.rule})`);
+      if (!parents.length) throw new StoreError(`commit ${sha.slice(0, 7)} has no parent, so it does not continue the store's history.`, KEPT_REFUSED);
+      if (parents.length === 1) this.#checkChange(['diff-tree', '-r', ...RAW_DIFF, parents[0], sha], `commit ${sha.slice(0, 7)}`);
+    }
+    this.#checkChange(['diff-tree', '-r', ...RAW_DIFF, this.#tracking, 'HEAD'], `the change since the store tip ${this.#must(['rev-parse', this.#tracking], 'the store tip could not be read.', 'retry.').trim().slice(0, 7)}`);
+    const scan = this.#scanHistory(range, { findings, next: KEPT_REFUSED });
+    if (scan) throw scan;
+  }
+
+  #checkChange(args, label) {
+    const entries = this.#rawEntries(this.#must(args, `${label} could not be read.`, 'retry.'));
+    try { this.#check(entries, { scan: false, empty: true }); } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      throw new StoreError(`${label}: ${error.stopped}`, KEPT_REFUSED);
+    }
   }
 
   #inside(file) { return this.#allowed.some(prefix => file.startsWith(prefix)); }
 
   // The staged change against HEAD: [{ status, score, mode, sha, file }], renames found only when exact.
   #staged() {
-    const raw = this.#must(['diff', '--cached', '--raw', '-z', '--no-abbrev', '-M100%', 'HEAD'], 'the staged change could not be read.', 'retry.');
+    return this.#rawEntries(this.#must(['diff', '--cached', ...RAW_DIFF, 'HEAD'], 'the staged change could not be read.', 'retry.'));
+  }
+
+  #rawEntries(raw) {
     const parts = raw.split('\0');
     const entries = [];
     for (let index = 0; index < parts.length - 1;) {
@@ -273,16 +400,16 @@ class EvidenceStore {
   }
 
   // Refuses links, submodules and deletions; scans each new or changed blob as staged.
-  #check(entries, { prefixes = true } = {}) {
-    if (!entries.length) throw new StoreError('nothing would change in the store.', 'name a path with new or changed files.');
+  #check(entries, { prefixes = true, scan = true, empty = false } = {}) {
+    if (!entries.length && !empty) throw new StoreError('nothing would change in the store.', 'name a path with new or changed files.');
     const findings = [];
     const unread = [];
     for (const entry of entries) {
       if (entry.status === 'D' || (entry.status === 'R' && entry.score !== 100)) throw new StoreError(`${entry.from || entry.file} would be deleted or changed away; the store never loses a file this way.`, 'leave it in place.');
-      if (!/^(?:A|M|R|C)$/.test(entry.status)) throw new StoreError(`${entry.file} has a change of type ${entry.status} the store command does not make.`, 'commit it by hand.');
+      if (!/^(?:A|M|R|C)$/.test(entry.status)) throw new StoreError(`${entry.file} has a change of type ${entry.status} the store command does not make.`, 'save a plain added or changed file instead.');
       if (!/^1006(?:44|55)$/.test(entry.mode)) throw new StoreError(`${entry.file} is a link or a nested repository, which the store command never commits.`, 'copy the real file in instead.');
       if (prefixes && !this.#inside(entry.file)) throw new StoreError(`${entry.file} is outside the store folders this command writes (${this.#allowed.join(', ')}).`, 'write the file under one of those folders.');
-      if (entry.status === 'R') continue; // the same blob already in the store, at a new name
+      if (entry.status === 'R' || !scan) continue; // a rename keeps a blob already in the store
       this.#scanBlob(entry.sha, entry.file, findings, unread);
     }
     return { stop: this.#scanStop(findings, unread) };
@@ -300,44 +427,55 @@ class EvidenceStore {
     for (const hit of scanText(text)) findings.push(`${file}:${hit.line} (${hit.rule})`);
   }
 
-  #scanStop(findings, unread) {
-    if (findings.length) return new StoreError(`the secret scan found ${findings.length} match(es): ${[...new Set(findings)].slice(0, 10).join(', ')}.`, 'remove the secret (from every commit that holds it), or mark a reviewed false match with "secret-scan: allow <reason>" on its line, then retry.');
-    if (unread.length) return new StoreError(`these files could not be scanned (over 5 MB, binary or not UTF-8): ${[...new Set(unread)].slice(0, 10).join(', ')}.`, 'store them as plain UTF-8 text under 5 MB, then retry.');
+  #scanStop(findings, unread, next = null) {
+    if (findings.length) return new StoreError(`the secret scan found ${findings.length} match(es): ${[...new Set(findings)].slice(0, 10).join(', ')}.`, next || 'remove the secret (from every commit that holds it), or mark a reviewed false match with "secret-scan: allow <reason>" on its line, then retry.');
+    if (unread.length) return new StoreError(`these files could not be scanned (over 5 MB, binary or not UTF-8): ${[...new Set(unread)].slice(0, 10).join(', ')}.`, next || 'store them as plain UTF-8 text under 5 MB, then retry.');
     return null;
   }
 
   // Every blob the commits in `range` bring in, from every commit (not only the final tree), so a
   // secret added and removed again inside a branch is still found.
-  #scanHistory(range) {
+  #scanHistory(range, { findings = [], next = null } = {}) {
     const listed = this.#must(['rev-list', '--objects', range], 'the branch history could not be listed.', 'retry.').split(/\r?\n/).filter(Boolean);
     const named = new Map(listed.map(line => [line.slice(0, line.indexOf(' ') === -1 ? line.length : line.indexOf(' ')), line.includes(' ') ? line.slice(line.indexOf(' ') + 1) : '']));
     const types = this.#must(['cat-file', '--batch-check=%(objecttype) %(objectname)'], 'the branch objects could not be read.', 'retry.', { input: `${[...named.keys()].join('\n')}\n` });
-    const findings = [];
     const unread = [];
     for (const line of types.split(/\r?\n/)) {
       const [type, sha] = line.split(' ');
       if (type === 'blob') this.#scanBlob(sha, named.get(sha) || sha, findings, unread);
     }
-    return this.#scanStop(findings, unread);
+    return this.#scanStop(findings, unread, next);
   }
 
-  // A plain push of the bound branch; on a race, one merge of the remote and one more push. Before
-  // each push, the tip GitHub serves must be in the commit being pushed (real commits only), and
-  // after it GitHub must show that old tip inside the new one: history is only ever added to.
+  // A plain push of the bound branch, tried up to PUSH_ATTEMPTS times. Every commit it sends is
+  // checked again right before the push. Before each retry, after a wait, the store is read first:
+  // a push that timed out but landed is never sent again, and a store that moved is merged in with a
+  // merge commit. Before each push the tip GitHub serves must be in the commit being pushed (real
+  // commits only), and after it GitHub must show that old tip inside the new one.
   #push() {
-    const push = () => {
-      const before = this.#remoteTip(this.#branch);
-      if (!before || !this.#git(['merge-base', '--is-ancestor', before, 'HEAD']).ok) return { ok: false, before };
-      return { ok: this.#git(['push', '--quiet', 'origin', `refs/heads/${this.#branch}:refs/heads/${this.#branch}`], { timeout: 180000 }).ok, before };
+    let before = null;
+    // A dropped network counts as a failed attempt, never as a stop with the commit half-sent.
+    const landed = () => {
+      try { this.#fetch(); } catch { return null; }
+      return this.#git(['merge-base', '--is-ancestor', 'HEAD', this.#tracking]).ok;
     };
-    let pushed = push();
-    if (!pushed.ok) {
-      this.#fetch();
-      this.#must(['merge', '--no-ff', '--no-edit', '--quiet', this.#tracking], 'the store moved while saving and the merge with it conflicted; your commit is kept locally, not pushed.', 'resolve the merge in the store checkout, then push it.');
-      pushed = push();
-      if (!pushed.ok) throw new StoreError('the push to the store was refused twice; your commit is kept locally, not pushed.', 'run status, then retry.');
+    for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) {
+        this.#sleep(RETRY_WAITS_MS[attempt - 2]);
+        const read = landed();
+        if (read) return before;
+        if (read === null) continue;
+        this.#catchUp();
+      }
+      this.#checkPending();
+      let tip;
+      try { tip = this.#remoteTip(this.#branch); } catch { continue; }
+      if (!tip || !this.#git(['merge-base', '--is-ancestor', tip, 'HEAD']).ok) continue;
+      before = tip;
+      if (this.#git(['push', '--quiet', 'origin', `refs/heads/${this.#branch}:refs/heads/${this.#branch}`], { timeout: 180000 }).ok) return before;
     }
-    return pushed.before;
+    if (landed()) return before;
+    throw new StoreError(`the push to the store failed ${PUSH_ATTEMPTS} times; your commit is kept in the store checkout, not pushed.`, 'run the same store command again; it checks the kept commit again and pushes it.');
   }
 
   #readBack(commit, before = null) {
@@ -356,7 +494,14 @@ class EvidenceStore {
     const before = this.#push();
     const head = this.#must(['rev-parse', 'HEAD'], 'the pushed commit could not be read.', 'run status.').trim();
     this.#readBack(head, before);
-    return { store: this.#store, branch: this.#branch, commit: head, ...(head !== commit ? { merged_remote: true } : {}), read_back: true, ...extra };
+    const kept = this.#kept.length ? { conflicts: this.#kept.map(entry => entry.file), kept_ours: this.#kept.map(entry => entry.ours) } : {};
+    return { store: this.#store, branch: this.#branch, commit: head, ...(head !== commit ? { merged_remote: true } : {}), read_back: true, ...(this.#resumed ? { resumed: this.#resumed } : {}), ...kept, ...extra };
+  }
+
+  // The --message text is scanned before anything is committed, so a commit never carries a secret.
+  #checkMessage(message) {
+    const hits = scanText(message);
+    if (hits.length) throw new StoreError(`the secret scan found ${hits.length} match(es) in --message (${[...new Set(hits.map(hit => hit.rule))].join(', ')}).`, 'write the message without the secret, then retry.');
   }
 
   // ---- subcommands ----------------------------------------------------------------------------
@@ -364,13 +509,21 @@ class EvidenceStore {
   status() {
     const { ahead, behind } = this.#position();
     const changes = this.#git(['status', '--porcelain', '--untracked-files=all']).out.split(/\r?\n/).filter(Boolean).length;
-    return { store: this.#store, branch: this.#branch, folder: this.#dir, ahead: Number.isInteger(ahead) ? ahead : null, behind: Number.isInteger(behind) ? behind : null, changes, checked: true };
+    return { store: this.#store, branch: this.#branch, folder: this.#dir, ahead: Number.isInteger(ahead) ? ahead : null, behind: Number.isInteger(behind) ? behind : null, changes, ...(this.#merging() ? { half_done_merge: true } : {}), checked: true };
   }
 
+  // Fetches and fast-forwards only. It never pushes and never merges; it cancels a half-done merge
+  // an older run left (every commit stays), and reports commits the remote lacks as pending: the
+  // next save, move or merge-branch checks them again and pushes them.
   sync() {
     this.#fetch();
-    this.#ready();
-    return { store: this.#store, branch: this.#branch, commit: this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim() };
+    const cancelled = this.#merging();
+    if (cancelled) this.#must(['merge', '--abort'], 'the half-done merge could not be cancelled.', 'move the local files that are not saved aside, then run sync again.');
+    if (!this.#git(['diff', '--cached', '--quiet']).ok) throw new StoreError('the store checkout already has staged changes.', 'unstage them (git restore --staged) so only the named paths are committed.');
+    const { ahead, behind } = this.#position();
+    if (!Number.isInteger(ahead)) throw new StoreError('the store branch has no fetched remote copy to compare with.', 'check the network, then run sync again.');
+    if (behind > 0 && ahead === 0) this.#must(['merge', '--ff-only', '--quiet', this.#tracking], 'the store checkout could not fast-forward to the remote (a local change is in the way).', 'move the conflicting local files aside, then run sync again.');
+    return { store: this.#store, branch: this.#branch, commit: this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim(), ...(ahead > 0 ? { pending: ahead } : {}), ...(cancelled ? { cancelled_merge: true } : {}) };
   }
 
   save({ paths, message }) {
@@ -381,11 +534,15 @@ class EvidenceStore {
       const real = this.#realInside(file);
       if (!real) throw new StoreError(`${file} does not exist in the store checkout or leads out of it through a link.`, 'write the file inside the store checkout first.');
     }
+    this.#checkMessage(message);
     this.#fetch();
     this.#ready();
     this.#must(['add', '--ignore-removal', '--', ...files], 'git add refused the paths (an ignored or missing file?).', 'check the paths, then retry.');
+    const entries = this.#staged();
+    // The same save run again after a failed push: the files are already in the kept commit.
+    if (!entries.length && this.#position().ahead > 0) return this.#finish(this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim(), { files: files.length });
     let scan;
-    try { scan = this.#check(this.#staged()).stop; } catch (error) { this.#git(['reset', '--quiet']); throw error; }
+    try { scan = this.#check(entries).stop; } catch (error) { this.#git(['reset', '--quiet']); throw error; }
     if (scan) { this.#git(['reset', '--quiet']); throw scan; }
     const commit = this.#commit(message);
     return this.#finish(commit, { files: files.length });
@@ -398,16 +555,11 @@ class EvidenceStore {
     if (!this.#inside(`${target}/`)) throw new StoreError(`${target} is outside the store folders this command writes (${this.#allowed.join(', ')}).`, 'move it under one of those folders.');
     if (!this.#realInside(source)) throw new StoreError(`${source} does not exist in the store checkout or leads out of it through a link.`, 'name a tracked file or folder.');
     if (this.#exists(target)) throw new StoreError(`${target} already exists.`, 'pick a new target path.');
+    this.#checkMessage(message);
     this.#fetch();
     this.#ready({ cleanTree: true });
     // git mv needs the target's folder; create it inside the checkout (a link on the way is refused).
-    const parent = path.posix.dirname(target);
-    if (parent !== '.') {
-      let existing = parent;
-      while (existing !== '.' && !this.#exists(existing)) existing = path.posix.dirname(existing);
-      if (existing !== '.' && !this.#realInside(existing)) throw new StoreError(`${existing} leads out of the store checkout through a link.`, 'pick another target path.');
-      this.#fs.mkdirSync(path.join(this.#dir, ...parent.split('/')), { recursive: true });
-    }
+    this.#makeParent(target);
     this.#must(['mv', '--', source, target], `git mv refused to move ${source} (untracked or not clean?).`, 'commit it with save first, then move it.');
     // A pure rename brings no new content, so the check refuses only a link, a nested repository or
     // a target outside the folders; the move is then undone the same way it was made.
@@ -420,6 +572,7 @@ class EvidenceStore {
 
   mergeBranch({ branch, message }) {
     this.#checkBranch(branch);
+    this.#checkMessage(message);
     this.#fetch();
     this.#fetch(branch);
     this.#ready({ cleanTree: true });
