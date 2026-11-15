@@ -47,9 +47,10 @@ function closingReferences(text, repository) {
 
 // The UAT a task's generated programme STATE block records as still owed by the owner, or null.
 // Only the block's own UAT counts; text elsewhere in the body does not. The renderer
-// (programme-state.cjs renderChildBlockBody) writes it as one segment of the STATUS line,
-// `... · UAT: <state> · Review: ...`; older pages may still carry the legacy `- UAT: <state>; review:`
-// line. Any owed UAT segment in the block refuses, so a hand-made block or a spoofed segment can
+// (programme-state.cjs renderChildBlockBody) writes it as one segment of the hidden task status
+// line, `<!-- Task status: <status> · UAT: <state> -->` (the PR GRAPH shows it as `UAT owed`);
+// pages an older Toolkit drew still carry it in the STATUS line, `... · UAT: <state> · Review: ...`,
+// or as the legacy `- UAT: <state>; review:` line. Any owed UAT segment in the block refuses, so a hand-made block or a spoofed segment can
 // only add a refusal, never remove one.
 const STATE_BLOCK = /<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v\d+[^\r\n]*?-->([\s\S]*?)<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->/g;
 const OWED_STATES = '(PENDING|UAT_PARTIAL_REQUIRED|UAT_FULL_REQUIRED)\\b';
