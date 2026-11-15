@@ -67,8 +67,13 @@ test('in Claude Code the bank names one card; the owner\'s taps come back as the
   assert.doesNotMatch(shown.out, /```/);
   assert.match(shown.out, /Agents \(Claude Code\): do not repeat this table.*call AskUserQuestion once with exactly this input/);
   const card = shownCard(shown.out);
-  assert.deepEqual(card.questions.map(question => question.question), ['1.1 GitHub governance (now: On)', '1.2 Task auto-merge (now: Off)', '1.3 Merge trains (now: On)', '2.1 Toolkit permissions (Claude Code) (now: Outdated: 2 missing, 1 old)']);
-  assert.deepEqual(card.questions[3].options.map(option => option.label), ['A. Keep current', 'B. Update (Recommended)', 'C. Remove']);
+  const questions = card.questions.map(question => question.question);
+  assert.deepEqual(questions.slice(0, 3), ['1.1 GitHub governance (now: On)', '1.2 Task auto-merge (now: Off)', '1.3 Merge trains (now: On)']);
+  // A governed repository is also asked the parallel CI shards question, with its minutes line; five
+  // rows split over two cards, so the permissions row is on the second.
+  assert.match(questions[3], /^1\.4 Parallel CI shards \(now: Not asked yet\): Split this repository's tests into parallel CI shards\? .*Minutes: unknown/);
+  assert.deepEqual(card.questions[3].options.map(option => option.label), ['A. Not now (Recommended)', 'B. Yes', 'C. Never ask']);
+  assert.match(shown.out, /This is card 1 of 2\./);
   assert.ok(card.questions.every(question => question.header.length <= 12));
 
   const changed = structuredClone(card);
@@ -77,10 +82,17 @@ test('in Claude Code the bank names one card; the owner\'s taps come back as the
   assert.match(pre(ctx, { ...card, answers: {} }, 'tool-y').deny, /only exactly as Toolkit printed it/);
   assert.equal(pre(ctx, card), null, 'the exact card runs');
 
-  const answers = { [card.questions[0].question]: 'A. Keep current (Recommended)', [card.questions[1].question]: 'B. On', [card.questions[2].question]: 'A. Keep current (Recommended)', [card.questions[3].question]: 'C. Remove' };
-  const picked = post(ctx, card.questions, answers);
-  assert.match(picked.context, /^node "[^"]+" setup --answers "\S+: 1\.1=A, 1\.2=B, 1\.3=A, 2\.1=C" --ticket [0-9a-f]{32}$/m);
-  assert.equal(post(ctx, card.questions, answers), null, 'the taps count once: the bank is no longer waiting');
+  const answers = { [card.questions[0].question]: 'A. Keep current (Recommended)', [card.questions[1].question]: 'B. On', [card.questions[2].question]: 'A. Keep current (Recommended)', [card.questions[3].question]: 'A. Not now (Recommended)' };
+  const next = post(ctx, card.questions, answers);
+  assert.match(next.context, /tapped card 1 of 2 of governance bank \S+\. Nothing is sent yet\./);
+  const second = JSON.parse(next.context.split('\n').find(entry => entry.startsWith('{"questions"')));
+  assert.deepEqual(second.questions.map(question => question.question), ['2.1 Toolkit permissions (Claude Code) (now: Outdated: 2 missing, 1 old)']);
+  assert.deepEqual(second.questions[0].options.map(option => option.label), ['A. Keep current', 'B. Update (Recommended)', 'C. Remove']);
+  assert.equal(pre(ctx, second, 'tool-2'), null, 'the next exact card runs');
+  const lastAnswers = { [second.questions[0].question]: 'C. Remove' };
+  const picked = post(ctx, second.questions, lastAnswers, 'tool-2');
+  assert.match(picked.context, /^node "[^"]+" setup --answers "\S+: 1\.1=A, 1\.2=B, 1\.3=A, 1\.4=A, 2\.1=C" --ticket [0-9a-f]{32}$/m);
+  assert.equal(post(ctx, second.questions, lastAnswers, 'tool-2'), null, 'the taps count once: the bank is no longer waiting');
 });
 
 test('a card not let through, or a typed Other answer, records nothing and leaves the typed reply open', async t => {

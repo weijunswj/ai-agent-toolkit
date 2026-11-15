@@ -98,7 +98,9 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^# Toolkit governance choices - 4 questions across 2 sections/);
+    assert.match(result.out, /^# Toolkit governance choices - 5 questions across 2 sections/);
+    assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
+    assert.match(result.out, /1\.4 asks: Split this repository's tests into parallel CI shards\? .*Minutes: unknown, because no green CI run could be read\./);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
@@ -114,7 +116,7 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'showing the bank never writes the binding');
   const json = JSON.parse((await run(ctx, ['setup', '--json'])).out);
   assert.match(json.bank_reference, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
-  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'permission-blocks']);
+  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'ci-shards', 'permission-blocks']);
   const unmarked = await run(ctx, ['setup'], { environment: {} });
   assert.match(unmarked.out, /could not note this bank for this session/, 'a session without a mark is told a chat reply cannot count');
 });

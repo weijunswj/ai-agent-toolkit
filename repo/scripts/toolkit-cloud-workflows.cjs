@@ -15,8 +15,9 @@
 // still shows.
 //
 // Programme Sweep and its gate go to every governed repository. The test shards workflow and Shard
-// Timings go only to a repository with a usable shard list (.github/toolkit-test-shards.json, see
-// governed-test-shards.cjs); without one this script says they were not copied and why. The test
+// Timings go only to a repository whose merged binding answers yes to parallel CI shards (ci_shards,
+// asked by refresh governance) and that has a usable shard list (.github/toolkit-test-shards.json, see
+// governed-test-shards.cjs); otherwise this script says they were not copied and why. The test
 // shards copy carries the list's shard ids in its matrix, so a change to the list's shards makes the
 // copy outdated (a rules refresh rewrites it), never edited.
 //
@@ -210,7 +211,9 @@ function parseArgs(argv) {
 }
 
 // The plan for one repository: each workflow's path, expected text and current state.
-function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(root) }) {
+// `ciShards` is the merged binding's ci_shards answer ('yes', 'not-now', 'never' or null); by default it
+// is read from this computer's copy of the merged binding.
+function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(root), ciShards = undefined }) {
   const target = path.resolve(repo);
   if (!fs.existsSync(path.join(target, '.git'))) throw new InstallError(`${target} is not a git checkout.`);
   if (isToolkitCheckout(target)) {
@@ -237,7 +240,8 @@ function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(roo
     if (!name) throw new InstallError(`.github/workflows/${ci} has no plain name: line for the gate to follow.`);
     ciWorkflow = { file: ci, name };
   }
-  const shards = shardCopies(target, branch);
+  const answer = ciShards === undefined ? mergedCiShards(target) : ciShards;
+  const shards = shardCopies(target, branch, answer);
   const wanted = [...WORKFLOWS.map(row => ({ ...row, input: ciWorkflow })), ...shards.rows];
   const rows = wanted.map(({ id, file, source = file, input }) => {
     const expected = render(id, sourceText(source, commit, root), commit, input);
@@ -249,22 +253,31 @@ function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(roo
     };
     return { id, file, absolute, expected, consequence: CONSEQUENCE[id], ...copyState(readOrNull(absolute), expected, reference) };
   });
-  return { target, commit, ci: ciWorkflow, rows, not_copied: shards.notCopied };
+  return { target, commit, ci: ciWorkflow, ci_shards: answer || null, rows, not_copied: shards.notCopied, renamed: shards.renamed };
+}
+
+// The merged binding's ci_shards answer on this computer, or null when there is none to read.
+function mergedCiShards(target) {
+  try { return require('./toolkit-governance-state.cjs').mergedBinding(target)?.ci_shards?.answer || null; } catch { return null; }
 }
 
 // The shard copies for a repository: both rows when its shard list is usable, otherwise none, each
 // named in not_copied with the reason. A Toolkit copy still there from an earlier list is named too.
-function shardCopies(target, branch = 'main') {
+function shardCopies(target, branch = 'main', answer = null) {
   const list = governedShards.listState(target);
   const workflow = list.manifest?.workflow || governedShards.DEFAULT_WORKFLOW;
   let reason = null;
-  if (list.state === 'missing') reason = `the repository has no shard list at ${governedShards.MANIFEST_REL}`;
+  if (answer === 'never') reason = 'the merged binding answers never to parallel CI shards (ci_shards)';
+  else if (answer !== 'yes') reason = 'the merged binding has no yes to parallel CI shards (ci_shards); say refresh governance to answer it';
+  else if (list.state === 'missing') reason = `the repository has no shard list at ${governedShards.MANIFEST_REL}`;
   else if (list.state === 'invalid') reason = `the shard list ${governedShards.MANIFEST_REL} is not usable (${String(list.errors[0]).split('\n').pop().replace(/^- /, '').replace(/\.$/, '')})`;
   else if (governedShards.unsupportedPrograms(list.manifest).length) reason = `the shard list runs ${governedShards.unsupportedPrograms(list.manifest).join(', ')}, and the copied shard jobs set up Node only, so its tests could not run there yet; use a node command or keep the tests in the repository's own CI`;
   else if (RESERVED.has(workflow)) reason = `the shard list names ${workflow} for its workflow, a file another Toolkit copy uses`;
   if (!reason) {
     const input = { systems: governedShards.shardIds(list.manifest), branch };
-    return { notCopied: [], rows: SHARD_WORKFLOWS.map(row => ({ ...row, ...(row.id === 'test-shards' ? { file: `.github/workflows/${workflow}`, input } : { input: { branch } }) })) };
+    // A test shards copy at another name, from before the list renamed its workflow, runs on as well.
+    const renamed = markedCopies(target).filter(copy => copy.id === 'test-shards' && copy.file !== `.github/workflows/${workflow}`).map(copy => ({ id: copy.id, file: copy.file, workflow: `.github/workflows/${workflow}` }));
+    return { notCopied: [], renamed, rows: SHARD_WORKFLOWS.map(row => ({ ...row, ...(row.id === 'test-shards' ? { file: `.github/workflows/${workflow}`, input } : { input: { branch } }) })) };
   }
   // A Toolkit copy an earlier, usable list brought is found by its marker (the test shards copy at any
   // name) and named, so the governance check can report it.
@@ -273,7 +286,7 @@ function shardCopies(target, branch = 'main') {
     const left = marked.filter(copy => copy.id === row.id).map(copy => copy.file);
     return { id: row.id, reason, ...(left.length ? { left } : {}) };
   });
-  return { notCopied, rows: [] };
+  return { notCopied, rows: [], renamed: [] };
 }
 
 // The Toolkit copy a workflow file is, from its first line: the copy's id when the file starts with the
@@ -335,12 +348,12 @@ function report(result, check) {
   return lines.join('\n');
 }
 
-function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = TOOLKIT_ROOT, commit } = {}) {
+function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = TOOLKIT_ROOT, commit, ciShards } = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { err.write(`Not installed: ${error.message}\n${USAGE}\n`); return 2; }
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
   try {
-    const result = plan({ repo: options.repo, ci: options.ci, root, ...(commit ? { commit } : {}) });
+    const result = plan({ repo: options.repo, ci: options.ci, root, ...(commit ? { commit } : {}), ...(ciShards !== undefined ? { ciShards } : {}) });
     if (!options.check) apply(result);
     const drift = options.check && result.rows.some(row => row.state !== 'current');
     if (options.json) out.write(`${JSON.stringify({ toolkit: result.commit, ci: result.ci, workflows: result.rows.map(({ id, file, state, written }) => ({ id, file, state, written: Boolean(written) })), not_copied: result.not_copied })}\n`);
