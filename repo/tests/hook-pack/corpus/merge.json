@@ -1918,6 +1918,240 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"},"closure_cloud":true},
       "expect": {"decision":"deny"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-remove",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf user-state"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-remove-workdir",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf user-state","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-powershell",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"Remove-Item -Recurse .\\user-state"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-wildcard",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf user*"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-variable",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf $X"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-recursive",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"find . -delete"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-recursive-workdir",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"find . -delete","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-inside-list",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"{home}/.ai-agent-toolkit/user-state"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-inside-list-workdir",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"ls","workdir":"{home}/.ai-agent-toolkit/user-state"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-inside-remove",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf ."},"cwd":"{home}/.ai-agent-toolkit/user-state"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-climb",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm ../user-state/x"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cd-into-home",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cd \"{home}/.ai-agent-toolkit\"; rm -rf *"},"cwd":"{work}"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-control",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder (control: the same text elsewhere passes)",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf user-state"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-list",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder (control: a plain listing passes)",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"ls -la"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-list-workdir",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder (control: a plain listing passes)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"Get-ChildItem","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-script",
+      "source": "working-folder guard: a shell call in Toolkit's own folder or its user-state folder is judged by that folder (control: a Toolkit script run passes)",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"node current/repo/scripts/toolkit-env.cjs status"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-default-push",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git --git-dir={work}/.git push origin main"},"cwd":"{home}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-value-default-push",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git --git-dir \"{work}/.git\" push"},"cwd":"{home}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-prefix-default-push",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"GIT_DIR={work}/.git git push origin HEAD:main"},"cwd":"{home}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-export-default-push",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"export GIT_DIR={work}/.git; git push origin main"},"cwd":"{home}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-default-push-workdir",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git --git-dir={work}/.git push origin main","workdir":"{home}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-other-branch-push",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to (control: another branch of that repository passes)",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git --git-dir={work}/.git push origin work","workdir":"{home}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-value-default-push-workdir",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git --git-dir \"{work}/.git\" push","workdir":"{home}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-prefix-default-push-workdir",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"GIT_DIR={work}/.git git push origin HEAD:main","workdir":"{home}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-export-default-push-workdir",
+      "source": "merge hold push reader: --git-dir and GIT_DIR name the repository a push goes to",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"export GIT_DIR={work}/.git; git push origin main","workdir":"{home}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
     }
   ]
 }

@@ -131,7 +131,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch (evidence stores excepted, by name; a refused push whose remote is an
+//     to the remote's default branch, in the repository that -C, --git-dir, a GIT_DIR= prefix or an
+//     earlier export, $env: or set of GIT_DIR names (evidence stores excepted, by name; a refused push whose remote is an
 //     evidence store bound on this computer shows the store-command message instead), a merge whose target is
 //     moved by cd, pushd, Set-Location, Push-Location or GH_REPO, a push after a `cd -` whose folder this command cannot show, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
@@ -144,7 +145,9 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     that only ever removes a line), or that sets or clears TOOLKIT_HOST_SESSION (assignment,
 //     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, or an empty
 //     environment on a host launch through env -i, --ignore-environment or a bare -), names
-//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt,
+//     Toolkit's user-state folder or runs where it could reach it (ToolkitFolders: anything inside
+//     user-state, anything in Toolkit's own folder but a closed set of plain commands, and a `..` path
+//     back up from deeper in it), or the hook scripts together with what would feed them a prompt,
 //     a SessionStart event, or a tool event (PreToolUse, PostToolUse or the card functions) when
 //     any command in the text runs node, bun or deno and the word after it is not --test or test;
 //     also text that names the hook scripts with a command that starts env whose leading words
@@ -256,6 +259,108 @@ const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\b
 // The user-state folder named by path (STATE_WORDS) or reached through a folder change: the
 // Toolkit folder and `user-state` anywhere in one command, read as two linear checks.
 function stateWords(text) { return STATE_WORDS.test(text) || (/\.ai-agent-toolkit\b/i.test(text) && /\buser-state\b/i.test(text)); }
+
+const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. In Toolkit\'s own folder only listing, reading, changing folder, read-only git and running a script file with node are allowed, with no wildcards, variables, substitutions or `..`; nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
+// What may run with Toolkit's own folder (the one that holds user-state) as its working folder.
+const HOME_PROGRAMS = /^(?:ls|dir|gci|get-childitem|pwd|get-location|gl|echo|write-output|write-host|cat|type|get-content|gc|head|tail|test-path|stat|wc|cd|chdir|pushd|popd|set-location|sl|push-location|pop-location)$/i;
+const HOME_GIT = /^(?:status|log|diff|show|rev-parse|remote|branch|describe|ls-files)$/;
+const HOME_LISTING = /^(?:ls|dir|gci|get-childitem)$/i;
+// A listing that walks into subfolders (ls -R, --recursive, PowerShell's -Recurse and -Depth, cmd's
+// dir /s) reaches user-state, and in PowerShell can feed its files to Get-Content down a pipe.
+const recursive = word => /^-[A-Za-z]*R[A-Za-z]*$/.test(word) || /^--recursive$|^-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?::.*)?$|^-dep|^\/s$/i.test(word);
+// Node options that run code from the command line or another file than the script.
+const NODE_CODE = /^(?:-e|--eval|-p|--print|-r|--require|--import|--loader|--experimental-loader|--input-type)(?:=|$)/;
+// Shell text the reader cannot follow safely: wildcards, braces, variables, substitutions, `..`.
+const UNREADABLE_PATH = /[*?[\]{}$`%]|(?:^|[\\/=])\.\.(?:[\\/]|$)/;
+const CLIMBS = /(?:^|[\\/=])\.\.(?:[\\/]|$)/;
+
+// `folder` through its links (symlinks, junctions, 8.3 short names) as far as it exists, with the
+// rest appended; the plain resolved path when no part of it can be read.
+function realFolder(folder) {
+  const rest = [];
+  let head = path.resolve(folder);
+  for (;;) {
+    try { return path.join(fs.realpathSync.native(head), ...rest); } catch { /* not there: try its parent */ }
+    const parent = path.dirname(head);
+    if (parent === head) return path.resolve(folder);
+    rest.unshift(path.basename(head));
+    head = parent;
+  }
+}
+
+// Whether `folder` is `base` or inside it (case-insensitively on Windows, as path.relative compares).
+function within(folder, base) {
+  const relative = path.relative(base, folder);
+  return relative === '' || !(relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative));
+}
+
+// Toolkit's own folder and its user-state folder, resolved once from the same place the user-state
+// module reads (so a test home works), each by its real path. It judges whether a shell command
+// started in a folder could reach the user-state files: from inside user-state anything could; from
+// Toolkit's own folder only a closed set of plain commands is read as safe (default-deny); deeper in
+// Toolkit's folder only a word naming user-state or a `..` path back up to Toolkit's folder (or
+// above it) could.
+class ToolkitFolders {
+  #home;
+  #state;
+  // Real paths already read for this command, by folder.
+  #real = new Map();
+
+  constructor(registryOptions = {}) {
+    const state = governance.userStateDirectory(registryOptions);
+    this.#state = realFolder(state);
+    this.#home = realFolder(path.dirname(state));
+  }
+
+  // Whether `folder` is Toolkit's own folder or inside it.
+  holds(folder) { return typeof folder === 'string' && within(realFolder(folder), this.#home); }
+
+  // Whether one command segment's words, run in folder `root` (null: a folder this command cannot
+  // show), could reach the user-state files.
+  reaches(words, root) {
+    if (words.length === 0) return false;
+    const names = words.some(word => /\buser-state\b/i.test(word));
+    if (root === null) return names;
+    if (!this.#real.has(root)) this.#real.set(root, realFolder(root));
+    const here = this.#real.get(root);
+    if (within(here, this.#state)) return true;
+    if (!within(here, this.#home)) return false;
+    if (names) return true;
+    if (within(this.#home, here)) return !homeCommand(words);
+    return words.some(word => this.#climbs(word, here));
+  }
+
+  // A word with a `..` part whose literal start (before any wildcard or variable) resolves to
+  // Toolkit's own folder or above it, or into user-state.
+  #climbs(word, here) {
+    if (!CLIMBS.test(word)) return false;
+    const value = word.startsWith('-') && word.includes('=') ? word.slice(word.indexOf('=') + 1) : word;
+    const target = realFolder(shellPath(here, value.split(/[*?[\]{}$`%]/)[0] || '.'));
+    return within(this.#home, target) || within(target, this.#state);
+  }
+}
+
+// Whether a segment is one of the plain commands allowed in Toolkit's own folder.
+function homeCommand(words) {
+  if (words.some(word => UNREADABLE_PATH.test(word))) return false;
+  let at = 0;
+  while (at < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[at])) at += 1;
+  const program = path.basename(words[at] || '').replace(/\.exe$/i, '');
+  const rest = words.slice(at + 1);
+  if (HOME_LISTING.test(program)) return !rest.some(recursive);
+  if (HOME_PROGRAMS.test(program)) return true;
+  if (/^git$/i.test(program)) {
+    let index = 0;
+    while (index < rest.length && rest[index].startsWith('-')) index += GIT_VALUE_OPTIONS.has(rest[index]) ? 2 : 1;
+    // `git diff --no-index` compares plain folders, so it could read user-state.
+    return HOME_GIT.test(rest[index] || '') && !rest.includes('--no-index');
+  }
+  if (/^node$/i.test(program)) {
+    if (rest.some(word => NODE_CODE.test(word))) return false;
+    return rest.some(word => !word.startsWith('-')) || (rest.length > 0 && rest.every(word => /^(?:-v|--version|-h|--help)$/.test(word)));
+  }
+  return false;
+}
 const PROMPT_HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
 const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook|codex-session-start)/i;
 const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
@@ -529,20 +634,23 @@ function segments(text) {
 
 // ---- git push to the default branch -----------------------------------------------------------
 
-function gitDirs(root) {
-  const dotGit = path.join(root, '.git');
+// { gitDir, common } for a repository's git folder `dotGit` (a folder, or a file pointing at one),
+// common being a worktree's shared folder; null when it cannot be read.
+function gitDirsAt(dotGit) {
   let gitDir = dotGit;
   try {
     if (fs.statSync(dotGit).isFile()) {
       const line = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'));
       if (!line) return null;
-      gitDir = path.resolve(root, line[1].trim());
+      gitDir = path.resolve(path.dirname(dotGit), line[1].trim());
     }
   } catch { return null; }
   let common = gitDir;
   try { common = path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()); } catch { /* not a worktree */ }
   return { gitDir, common };
 }
+
+function gitDirs(root) { return gitDirsAt(path.join(root, '.git')); }
 
 function hasRef(common, ref) {
   if (fs.existsSync(path.join(common, ...ref.split('/')))) return true;
@@ -551,12 +659,19 @@ function hasRef(common, ref) {
 
 // { default, current, store } for a push from `cwd` to `remote`, or null outside a repository. A store
 // is an evidence store: by its remote's name (TRANSPORT-*), or, for a push to origin, a repository the
-// governance state names one (rule S1).
-function pushTarget(cwd, remote, registryOptions = {}) {
-  let root;
-  try { root = governance.findGitRoot(cwd); } catch { root = null; }
-  if (!root) return null;
-  const dirs = gitDirs(root);
+// governance state names one (rule S1). `gitDir` (from --git-dir or GIT_DIR) names the repository's
+// git folder itself, in place of the one `cwd` is in.
+function pushTarget(cwd, remote, registryOptions = {}, gitDir = null) {
+  let root = null;
+  let dirs;
+  if (gitDir) {
+    dirs = gitDirsAt(gitDir);
+    if (dirs && path.basename(dirs.common) === '.git') root = path.dirname(dirs.common);
+  } else {
+    try { root = governance.findGitRoot(cwd); } catch { root = null; }
+    if (!root) return null;
+    dirs = gitDirs(root);
+  }
   if (!dirs) return null;
   let current = null;
   try { current = (/^ref:\s*refs\/heads\/(.+)$/m.exec(fs.readFileSync(path.join(dirs.gitDir, 'HEAD'), 'utf8')) || [])[1] || null; } catch { current = null; }
@@ -571,7 +686,7 @@ function pushTarget(cwd, remote, registryOptions = {}) {
     if (!defaultBranch) defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/${remoteName}/${name}`)) || null;
   } else defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/origin/${name}`)) || null;
   const named = /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || ''));
-  return { default: defaultBranch, current, url, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
+  return { default: defaultBranch, current, url, store: named || (remoteName === 'origin' && root !== null && evidenceStoreAt(root, registryOptions)) };
 }
 
 // Whether the governance state names the repository at `root` an evidence store (rule S1). A state
@@ -619,11 +734,17 @@ function locationTarget(words, shell) {
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
 
 // The refusal for a git push in one segment, or ''. `variables` holds what earlier segments of the
-// same command assigned (assignmentOf).
-function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), shell = null } = {}) {
+// same command assigned (assignmentOf), and `gitDir` a GIT_DIR an earlier segment set (gitDirSetting).
+// A GIT_DIR= prefix, --git-dir <path> or --git-dir=<path> names the repository's git folder itself,
+// so the push is judged against that repository, not the one the folder is in.
+function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), shell = null, gitDir = null } = {}) {
   let index = 0;
   let root = cwd;
-  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index += 1;
+  let named = gitDir;
+  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) {
+    if (/^GIT_DIR=/i.test(words[index])) named = unquoted(words[index].slice(8));
+    index += 1;
+  }
   if (!/^git(?:\.exe)?$/i.test(path.basename(words[index] || ''))) return '';
   index += 1;
   while (index < words.length && words[index].startsWith('-')) {
@@ -631,11 +752,15 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
     if (option === '-C' && index + 1 < words.length) {
       const folder = folderWord(words[index + 1], variables, shell);
       root = root === null && !absoluteShellPath(folder) ? null : shellPath(root || process.cwd(), folder);
-    }
+    } else if (option === '--git-dir' && index + 1 < words.length) named = words[index + 1];
+    else if (option.startsWith('--git-dir=')) named = unquoted(option.slice(10));
     index += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
   }
   if (words[index] !== 'push') return '';
-  if (root === null) return UNKNOWN_FOLDER_PUSH;
+  // git reads a relative git folder from the folder it ends up in after every -C.
+  const folder = named ? folderWord(named, variables, shell) : '';
+  if (root === null && !(folder && absoluteShellPath(folder))) return UNKNOWN_FOLDER_PUSH;
+  const repository = folder ? shellPath(root || process.cwd(), folder) : null;
   const args = words.slice(index + 1);
   const positional = [];
   let mirror = false;
@@ -646,7 +771,7 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
     if (!word.startsWith('-')) positional.push(word);
   }
   const remote = positional[0] || 'origin';
-  const target = pushTarget(root, remote, registryOptions);
+  const target = pushTarget(root, remote, registryOptions, repository);
   if (!target || target.store || !target.default) return '';
   const refspecs = positional.slice(1);
   const branchOf = (name) => {
@@ -1011,7 +1136,17 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   let backs = 0;
   const saved = [];
   const move = next => { previous = roots; roots = [...new Set(next)]; visited.push(...roots); moves += 1; };
+  // Every folder the command could be in is judged for Toolkit's user-state files (ToolkitFolders).
+  const folders = new ToolkitFolders(registryOptions);
+  // A line break other than LF (a lone CR, NEL, LS or PS) may end a command in one shell and not in
+  // another, so the segments here may not be the ones that run: none runs in Toolkit's folder.
+  const oddBreaks = /\r(?!\n)|[\u0085\u2028\u2029]/.test(text);
+  // The GIT_DIR values a push could run with: none, until a segment sets one (gitDirSetting).
+  let gitDirValues = [null];
   for (const words of parts) {
+    if (roots.some(root => folders.reaches(words, root) || (oddBreaks && root !== null && folders.holds(root)))) return refuse(STATE_FOLDER_MESSAGE);
+    const setting = gitDirSetting(words);
+    if (setting) gitDirValues = [...new Set(setting.either ? [...gitDirValues, setting.value] : [setting.value])];
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
     if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) move(saved.pop()); continue; }
@@ -1043,12 +1178,37 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
       continue;
     }
     for (const root of roots) {
-      const reason = pushRefusal(words, root, { registryOptions, variables, shell });
-      if (reason && !reasons.includes(reason)) reasons.push(reason);
+      for (const gitDir of gitDirValues) {
+        const reason = pushRefusal(words, root, { registryOptions, variables, shell, gitDir });
+        if (reason && !reasons.includes(reason)) reasons.push(reason);
+      }
     }
   }
   return reasons.length ? refuse(reasons.join(' Also: ')) : '';
 }
+
+// A GIT_DIR a segment sets for the commands after it: { value, either }. export, declare -x,
+// typeset -x, cmd's set and PowerShell's $env:GIT_DIR set it for what follows; a plain GIT_DIR=value
+// reaches a later git only when GIT_DIR was already exported, so then either value may hold. null
+// when the segment sets none.
+function gitDirSetting(words) {
+  const [first = '', ...rest] = words;
+  // `$env:GIT_DIR = x`, `$env:GIT_DIR=x`, `$env:GIT_DIR= x` and `$env:GIT_DIR =x`.
+  const power = /^\$env:GIT_DIR(=.*)?$/is.exec(first);
+  if (power) {
+    const after = power[1] ? [power[1].slice(1), ...rest] : rest[0] === '=' ? rest.slice(1) : rest[0]?.startsWith('=') ? [rest[0].slice(1)] : [];
+    const value = unquoted(after.find(Boolean) || '');
+    return value ? { value, either: false } : null;
+  }
+  if (/^(?:export|declare|typeset|set)$/i.test(first)) {
+    const word = rest.find(item => /^GIT_DIR=/i.test(item));
+    return word && word.length > 8 ? { value: unquoted(word.slice(8)), either: false } : null;
+  }
+  return words.length === 1 && /^GIT_DIR=./i.test(first) ? { value: unquoted(first.slice(8)), either: true } : null;
+}
+
+// A value with the quotes around it removed (`'x'` and `"x"` read as x).
+function unquoted(value) { return String(value).replace(/^(['"])(.*)\1$/s, '$2'); }
 
 // Read command position with shell quoting intact: an env launch inside a message is just text.
 // Reuse the host-launch pattern and common wrappers above, within this command only.
@@ -1465,8 +1625,11 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     // a cmd caret before a line break) joins the next line.
     const call = ShellCall.from(input);
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ').replace(STOP_PARSING, '$1');
-    if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     cwd = call.folder;
+    if (text.length > MAX_COMMAND_CHARS) {
+      const guarded = /merge|push|\.ai-agent-toolkit\b/i.test(text) || stateWords(text) || new ToolkitFolders(registryOptions).holds(cwd);
+      return guarded ? refuse('this command is too long to check for a merge, a push or Toolkit\'s user-state files, so it is refused. Split it.') : null;
+    }
     // The host's shell wrapper is already unwrapped; only a runner inside its script is nested.
     const nested = nestedRefusal(call.text);
     if (nested) return nested;
@@ -1592,7 +1755,10 @@ function mayMerge(input) {
   const args = input.tool_input || input.toolInput || {};
   let text;
   try { text = JSON.stringify(args); } catch { text = String(args); }
-  return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || stateWords(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text);
+  if (/\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || stateWords(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text)) return true;
+  // A command in Toolkit's own folder is guarded too (ToolkitFolders); a folder that cannot be read
+  // here is not, as before.
+  try { return new ToolkitFolders().holds(ShellCall.from(input).folder); } catch { return false; }
 }
 
 const CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
