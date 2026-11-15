@@ -1,3 +1,0 @@
-### Fixed
-
-- **Owed UAT on the target task was not seen:** the issue closure check reads the UAT a task's generated programme status records, but it still looked for the older `- UAT: <state>; review:` line. Task pages now show the UAT as one part of the STATUS line (`... · UAT: PENDING · Review: ...`), so a closing word for a task still waiting on the owner's test was let through. The check now reads that part, still reads the older line on pages that carry it, and still ignores the same text outside the generated status block. The renderer names the check as a reader, so a later layout change updates both.
