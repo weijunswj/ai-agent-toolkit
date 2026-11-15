@@ -100,7 +100,8 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     assert.equal(result.code, 0, result.err);
     assert.match(result.out, /^# Toolkit governance choices - 5 questions across 2 sections/);
     assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
-    assert.match(result.out, /1\.4 asks: Split this repository's tests into parallel CI shards\? .*Minutes: unknown, because no green CI run could be read\./);
+    assert.match(result.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
+    assert.match(result.out, /^More on 1\.4: .*Minutes: unknown, because no green CI run could be read\./m);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
