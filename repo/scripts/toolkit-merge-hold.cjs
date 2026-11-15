@@ -131,8 +131,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch, in the repository that -C, --git-dir, a GIT_DIR= prefix or an
-//     earlier export, $env: or set of GIT_DIR names (evidence stores excepted, by name; a refused push whose remote is an
+//     to the remote's default branch, in the repository that -C, --git-dir or a GIT_DIR= prefix names;
+//     a GIT_DIR set by an earlier segment (export, $env:, set, declare) is judged beside the folder's own (evidence stores excepted, by name; a refused push whose remote is an
 //     evidence store bound on this computer shows the store-command message instead), a merge whose target is
 //     moved by cd, pushd, Set-Location, Push-Location or GH_REPO, a push after a `cd -` whose folder this command cannot show, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
@@ -260,7 +260,7 @@ const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\b
 // Toolkit folder and `user-state` anywhere in one command, read as two linear checks.
 function stateWords(text) { return STATE_WORDS.test(text) || (/\.ai-agent-toolkit\b/i.test(text) && /\buser-state\b/i.test(text)); }
 
-const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. In Toolkit\'s own folder only listing, reading, changing folder, read-only git and running a script file with node are allowed, with no wildcards, variables, substitutions or `..`; nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
+const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. In Toolkit\'s own folder only listing, reading, changing folder, read-only git and running a script file with node are allowed, with no wildcards, variables, substitutions, quotes, escapes, redirections or `..`; nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
 // What may run with Toolkit's own folder (the one that holds user-state) as its working folder.
 const HOME_PROGRAMS = /^(?:ls|dir|gci|get-childitem|pwd|get-location|gl|echo|write-output|write-host|cat|type|get-content|gc|head|tail|test-path|stat|wc|cd|chdir|pushd|popd|set-location|sl|push-location|pop-location)$/i;
 const HOME_GIT = /^(?:status|log|diff|show|rev-parse|remote|branch|describe|ls-files)$/;
@@ -316,17 +316,19 @@ class ToolkitFolders {
   holds(folder) { return typeof folder === 'string' && within(realFolder(folder), this.#home); }
 
   // Whether one command segment's words, run in folder `root` (null: a folder this command cannot
-  // show), could reach the user-state files.
-  reaches(words, root) {
+  // show), could reach the user-state files. `raw` is the segment as written, quotes included.
+  reaches(words, root, raw = words.join(' ')) {
     if (words.length === 0) return false;
-    const names = words.some(word => /\buser-state\b/i.test(word));
+    const names = words.some(word => /\buser-state\b/i.test(word)) || /\buser-state\b/i.test(unescaped(raw));
     if (root === null) return names;
     if (!this.#real.has(root)) this.#real.set(root, realFolder(root));
     const here = this.#real.get(root);
     if (within(here, this.#state)) return true;
     if (!within(here, this.#home)) return false;
     if (names) return true;
-    if (within(this.#home, here)) return !homeCommand(words);
+    // In Toolkit's own folder quotes, escapes and redirections are unreadable too: they can spell a
+    // name the words do not show, or write a file.
+    if (within(this.#home, here)) return /['"`\\<>]/.test(raw) || !homeCommand(words);
     return words.some(word => this.#climbs(word, here));
   }
 
@@ -741,8 +743,12 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
   let index = 0;
   let root = cwd;
   let named = gitDir;
+  // A prefix in another letter case reaches git only where names ignore case (Windows), so it is
+  // judged beside the repository git would otherwise use, never in its place.
+  const also = [];
   while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) {
-    if (/^GIT_DIR=/i.test(words[index])) named = unquoted(words[index].slice(8));
+    if (/^GIT_DIR=/.test(words[index])) named = unquoted(words[index].slice(8));
+    else if (/^GIT_DIR=/i.test(words[index])) also.push(unquoted(words[index].slice(8)));
     index += 1;
   }
   if (!/^git(?:\.exe)?$/i.test(path.basename(words[index] || ''))) return '';
@@ -758,10 +764,18 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
   }
   if (words[index] !== 'push') return '';
   // git reads a relative git folder from the folder it ends up in after every -C.
-  const folder = named ? folderWord(named, variables, shell) : '';
-  if (root === null && !(folder && absoluteShellPath(folder))) return UNKNOWN_FOLDER_PUSH;
-  const repository = folder ? shellPath(root || process.cwd(), folder) : null;
-  const args = words.slice(index + 1);
+  for (const value of [named, ...also]) {
+    const folder = value ? folderWord(value, variables, shell) : '';
+    if (root === null && !(folder && absoluteShellPath(folder))) return UNKNOWN_FOLDER_PUSH;
+    const reason = defaultPushRefusal(words.slice(index + 1), root, folder ? shellPath(root || process.cwd(), folder) : null, registryOptions);
+    if (reason) return reason;
+  }
+  return '';
+}
+
+// The refusal for push arguments `args` run from folder `root`, or in the git folder `repository`
+// when one is named, or ''.
+function defaultPushRefusal(args, root, repository, registryOptions) {
   const positional = [];
   let mirror = false;
   for (let at = 0; at < args.length; at += 1) {
@@ -1091,7 +1105,7 @@ function judge(merge, approvals, standing = null, evidence = null) {
 // A refusal for a shell command that could make an approval without the user, or merges outside
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
-  if (stateWords(text)) return refuse('Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
+  if (stateWords(text) || stateWords(unescaped(text))) return refuse('Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (clearedHostEnvironment(text)) return refuse('starting another coding-agent session with an empty environment hides the running session, so this launch is refused.');
   // Search arguments and test files are not hook invocations. Read the common command wrappers
   // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.
@@ -1115,10 +1129,29 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
       return refuse('this API call merges or moves a branch in a way an approval cannot cover (GraphQL merges, the merge queue, branch merges or a ref write to the default branch), so it is refused. Use `gh pr merge <number> --match-head-commit <sha>` after the user approves, or ask the user to do it.');
     }
   }
-  const variables = new Map();
   // Every refused push is named, each reason once: a command that pushes both a default branch and
   // a bound store gets the pull request advice and the store-command message.
   const reasons = [];
+  // The command is walked as written and again with its quotes and escapes undone (unescaped), so
+  // `'user'-state`, `user\-state` or `.\.` cannot hide a folder or a name from either reading.
+  const folders = new ToolkitFolders(registryOptions);
+  for (const reading of [...new Set([text, unescaped(text)])]) {
+    const refusal = walkFolders(reading, cwd, { registryOptions, shell, folders, reasons });
+    if (refusal) return refusal;
+  }
+  return reasons.length ? refuse(reasons.join(' Also: ')) : '';
+}
+
+// The text with shell quotes, backticks and backslash escapes undone, as bash reads `"user"-state`,
+// `user\-state` or `.\.`, and as PowerShell reads a backtick escape.
+function unescaped(text) { return String(text).replace(/\\(.)/gs, '$1').replace(/['"`]/g, ''); }
+
+// Walks one reading of a command segment by segment, tracking the folders it could be in, and returns
+// a refusal for a segment that could reach Toolkit's user-state files; push refusals go to `reasons`.
+function walkFolders(text, cwd, { registryOptions, shell, folders, reasons }) {
+  const variables = new Map();
+  const parts = segments(text);
+  const raws = rawSegments(text);
   // The folders the command could be in at each point: usually one, more after a `cd -` whose
   // target depends on the shell, and null for a folder Toolkit cannot see from this command alone
   // (a push judged there is refused). pushd and Push-Location save the folders they leave; popd and
@@ -1137,16 +1170,17 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   const saved = [];
   const move = next => { previous = roots; roots = [...new Set(next)]; visited.push(...roots); moves += 1; };
   // Every folder the command could be in is judged for Toolkit's user-state files (ToolkitFolders).
-  const folders = new ToolkitFolders(registryOptions);
   // A line break other than LF (a lone CR, NEL, LS or PS) may end a command in one shell and not in
   // another, so the segments here may not be the ones that run: none runs in Toolkit's folder.
   const oddBreaks = /\r(?!\n)|[\u0085\u2028\u2029]/.test(text);
-  // The GIT_DIR values a push could run with: none, until a segment sets one (gitDirSetting).
+  // The GIT_DIR values a push could run with. The folder's own repository (null) always stays: a
+  // setting may never reach git (bash's `set`, `declare` without -x, a name in another case, a later
+  // unset), so a GIT_DIR an earlier segment sets only adds a repository to judge (gitDirSetting).
   let gitDirValues = [null];
-  for (const words of parts) {
-    if (roots.some(root => folders.reaches(words, root) || (oddBreaks && root !== null && folders.holds(root)))) return refuse(STATE_FOLDER_MESSAGE);
+  for (const [at, words] of parts.entries()) {
+    if (roots.some(root => folders.reaches(words, root, raws[at]) || (oddBreaks && root !== null && folders.holds(root)))) return refuse(STATE_FOLDER_MESSAGE);
     const setting = gitDirSetting(words);
-    if (setting) gitDirValues = [...new Set(setting.either ? [...gitDirValues, setting.value] : [setting.value])];
+    if (setting) gitDirValues = [...new Set([...gitDirValues, setting])];
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
     if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) move(saved.pop()); continue; }
@@ -1184,27 +1218,30 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
       }
     }
   }
-  return reasons.length ? refuse(reasons.join(' Also: ')) : '';
+  return '';
 }
 
-// A GIT_DIR a segment sets for the commands after it: { value, either }. export, declare -x,
-// typeset -x, cmd's set and PowerShell's $env:GIT_DIR set it for what follows; a plain GIT_DIR=value
-// reaches a later git only when GIT_DIR was already exported, so then either value may hold. null
-// when the segment sets none.
+// The raw text of each segment segments() reads, in the same order.
+function rawSegments(text) {
+  return String(text).split(/\r?\n|;|&&|\|\||\||&/).filter(part => wordsOf(part).length > 0);
+}
+
+// A GIT_DIR value a segment may set for the commands after it, or null: export, declare, typeset,
+// cmd's set, PowerShell's $env:GIT_DIR, or a plain GIT_DIR=value, in any letter case. Each only
+// adds a repository to judge, since some never reach git.
 function gitDirSetting(words) {
   const [first = '', ...rest] = words;
   // `$env:GIT_DIR = x`, `$env:GIT_DIR=x`, `$env:GIT_DIR= x` and `$env:GIT_DIR =x`.
   const power = /^\$env:GIT_DIR(=.*)?$/is.exec(first);
   if (power) {
     const after = power[1] ? [power[1].slice(1), ...rest] : rest[0] === '=' ? rest.slice(1) : rest[0]?.startsWith('=') ? [rest[0].slice(1)] : [];
-    const value = unquoted(after.find(Boolean) || '');
-    return value ? { value, either: false } : null;
+    return unquoted(after.find(Boolean) || '') || null;
   }
   if (/^(?:export|declare|typeset|set)$/i.test(first)) {
     const word = rest.find(item => /^GIT_DIR=/i.test(item));
-    return word && word.length > 8 ? { value: unquoted(word.slice(8)), either: false } : null;
+    return word && word.length > 8 ? unquoted(word.slice(8)) : null;
   }
-  return words.length === 1 && /^GIT_DIR=./i.test(first) ? { value: unquoted(first.slice(8)), either: true } : null;
+  return words.length === 1 && /^GIT_DIR=./i.test(first) ? unquoted(first.slice(8)) : null;
 }
 
 // A value with the quotes around it removed (`'x'` and `"x"` read as x).
@@ -1627,7 +1664,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ').replace(STOP_PARSING, '$1');
     cwd = call.folder;
     if (text.length > MAX_COMMAND_CHARS) {
-      const guarded = /merge|push|\.ai-agent-toolkit\b/i.test(text) || stateWords(text) || new ToolkitFolders(registryOptions).holds(cwd);
+      const guarded = /merge|push|\.ai-agent-toolkit\b/i.test(text) || stateWords(text) || stateWords(unescaped(text)) || MOVES_TARGET.test(text) || new ToolkitFolders(registryOptions).holds(cwd);
       return guarded ? refuse('this command is too long to check for a merge, a push or Toolkit\'s user-state files, so it is refused. Split it.') : null;
     }
     // The host's shell wrapper is already unwrapped; only a runner inside its script is nested.
@@ -1755,7 +1792,7 @@ function mayMerge(input) {
   const args = input.tool_input || input.toolInput || {};
   let text;
   try { text = JSON.stringify(args); } catch { text = String(args); }
-  if (/\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || stateWords(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text)) return true;
+  if (/\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || stateWords(text) || stateWords(unescaped(text)) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text)) return true;
   // A command in Toolkit's own folder is guarded too (ToolkitFolders); a folder that cannot be read
   // here is not, as before.
   try { return new ToolkitFolders().holds(ShellCall.from(input).folder); } catch { return false; }

@@ -2152,6 +2152,176 @@
       "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
       "expect": {"decision":"deny"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-quoted-cd",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cd \"user\"-state; rm -rf ."},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-quoted-cd-workdir",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cd \"user\"-state; rm -rf .","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-escaped-cd",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cd user\\-state; rm -rf ."},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-escaped-cd-workdir",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cd user\\-state; rm -rf .","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-redirect",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo x > notes.txt"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-redirect-workdir",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"echo x > notes.txt","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-escaped",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf ../user\\-state"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-escaped-workdir",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf ../user\\-state","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-dot-escape",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf .\\./*"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-dot-escape-workdir",
+      "source": "working-folder guard, review round 1: quotes, escapes and redirections in Toolkit's folder",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf .\\./*","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-set-not-exported",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"set GIT_DIR={home}/none/.git; git push origin main"},"cwd":"{work}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-set-not-exported-workdir",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"set GIT_DIR={home}/none/.git; git push origin main","workdir":"{work}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-declare-not-exported",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"declare GIT_DIR={home}/none/.git; git push origin main"},"cwd":"{work}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-declare-not-exported-workdir",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"declare GIT_DIR={home}/none/.git; git push origin main","workdir":"{work}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-lower-case-prefix",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git_dir={home}/none/.git git push origin main"},"cwd":"{work}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-lower-case-prefix-workdir",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git_dir={home}/none/.git git push origin main","workdir":"{work}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-unset-after-export",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"export GIT_DIR={home}/none/.git; unset GIT_DIR; git push origin main"},"cwd":"{work}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.git-dir-unset-after-export-workdir",
+      "source": "merge hold push reader, review round 1: a GIT_DIR setting that may never reach git keeps the folder repository",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"export GIT_DIR={home}/none/.git; unset GIT_DIR; git push origin main","workdir":"{work}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
     }
   ]
 }

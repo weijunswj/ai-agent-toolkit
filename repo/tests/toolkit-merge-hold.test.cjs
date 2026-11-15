@@ -1832,6 +1832,8 @@ test('the folder reader in Toolkit\'s own folder is default-deny for hostile she
   }
   const shapes = hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'invisible'], ['shell']);
   hostile.expectDefaultDeny(assert, text => decide(ctx, bash(f.state, text)) === null, shapes);
+  // Quoting and continued-line shapes are refused in Toolkit's own folder too, not only inside user-state.
+  hostile.expectDefaultDeny(assert, text => decide(ctx, bash(f.home, text)) === null, hostile.cases(['quoting', 'continued-lines'], ['shell']));
 });
 
 test('a default-branch push names its repository through --git-dir or GIT_DIR, not only the folder', (t) => {
@@ -1877,4 +1879,67 @@ test('a default-branch push names its repository through --git-dir or GIT_DIR, n
   assert.match(decide(ctx, bash(plain, `git --git-dir=${worktreeGit} push origin HEAD:main`))?.deny || '', /default branch `main`/, 'worktree git folder');
   assert.equal(decide(ctx, bash(plain, `git --git-dir=${worktreeGit} push`)), null, 'worktree on its own branch');
   assert.match(decide(ctx, bash(plain, `git --git-dir=${path.join(ctx.root, 'side', '.git')} push origin HEAD:main`))?.deny || '', /default branch `main`/, 'worktree .git file');
+});
+
+// Review round 1: quotes, escapes and redirections cannot hide user-state from the folder reader, and
+// a GIT_DIR setting that may never reach git keeps the folder's own repository in the push check.
+test('matrix: quoted, escaped and redirected forms cannot reach user-state from Toolkit\'s folder', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const links = path.join(ctx.root, 'links');
+  fs.mkdirSync(links);
+  fs.symlinkSync(f.home, path.join(links, 'home'), process.platform === 'win32' ? 'junction' : 'dir');
+  const refused = [
+    [f.home, 'cd "user"-state; rm -rf .'],
+    [f.home, 'cd user""-state && rm -rf .'],
+    [f.home, 'cd user\\-state; rm -rf .'],
+    [f.home, "cd 'user'-state; ls"],
+    [f.home, "echo > 'user'-state/'merge'-approvals.json"],
+    [f.home, 'echo x > notes.txt'],
+    [f.home, 'cat < notes.txt'],
+    [f.home, 'ls "env"'],
+    [f.env, 'rm -rf ../user\\-state'],
+    [f.env, 'rm -rf .\\./*'],
+    [f.env, 'cd .\\.; rm -rf user\\-state'],
+    [f.env, 'rm -rf ../"user"-state'],
+    [f.checkout, "rm -rf ../../'user'-state"],
+    [f.checkout, 'rm -rf .\\./.\\./*'],
+    [f.outside, `cd ${f.home}; cd "user"-state; rm -rf .`],
+    [f.outside, `cd ${path.join(links, 'home')}; cd user\\-state; ls`],
+  ];
+  for (const [host, shape] of FOLDER_HOSTS) {
+    for (const [cwd, command] of refused) assert.match(decide(ctx, shape(cwd, command))?.deny || '', /^Toolkit: /, `${host} refuses in ${path.relative(ctx.root, cwd)}: ${command}`);
+    for (const [cwd, command] of [[f.checkout, 'git commit -m "a message"'], [f.checkout, "echo 'done'"], [f.env, 'ls -la']]) {
+      assert.equal(decide(ctx, shape(cwd, command)), null, `${host} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+    }
+  }
+  // A command too long to read that moves folder is refused even when it starts elsewhere.
+  const long = `cd ${path.join(links, 'home')}; rm -rf user\\-state; ls ${'a'.repeat(hold.MAX_COMMAND_CHARS)}`;
+  assert.match(decide(ctx, bash(f.outside, long))?.deny || '', /too long to check/);
+});
+
+test('a GIT_DIR setting that may never reach git keeps the folder\'s own repository in the push check', (t) => {
+  const ctx = context(t);
+  const store = path.join(repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' }), '.git');
+  // Each is refused on main from a repository on its default branch, and stays refused.
+  const refused = [
+    `set GIT_DIR=${store}; git push origin main`,
+    `declare GIT_DIR=${store}; git push origin main`,
+    `typeset GIT_DIR=${store}; git push origin main`,
+    `git_dir=${store} git push origin main`,
+    `export git_dir=${store}; git push origin main`,
+    `export GIT_DIR=${store}; unset GIT_DIR; git push origin main`,
+    `export GIT_DIR=${store}; unset -v GIT_DIR; git push`,
+    `GIT_DIR=${store}; git push origin main`,
+  ];
+  for (const [host, shape] of FOLDER_HOSTS) {
+    for (const command of refused) assert.match(decide(ctx, shape(ctx.repo, command))?.deny || '', /default branch `main`/, `${host}: ${command}`);
+  }
+  const powershell = command => hold.decide({ cwd: ctx.repo, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })?.deny || '';
+  for (const command of [`$env:GIT_DIR = '${store}'; Remove-Item Env:GIT_DIR; git push origin main`, `set GIT_DIR '${store}'; git push origin main`]) {
+    assert.match(powershell(command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  // A GIT_DIR named for this one command (prefix or option) is certain: the store push passes.
+  assert.equal(decide(ctx, bash(ctx.repo, `GIT_DIR=${store} git push origin main`)), null);
+  assert.equal(decide(ctx, bash(ctx.repo, `git --git-dir=${store} push origin main`)), null);
 });
