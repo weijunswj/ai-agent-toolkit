@@ -674,10 +674,12 @@ test('a task whose exported XML alone was edited by hand is planned as changed a
   assert.equal(fs.existsSync(windows.runnersDir(w.home)), true, 'a kept marked task keeps the shared runner');
 });
 
+// A secret-shaped value, built at run time so none sits in this file.
+const secret = () => ['gh', 'p_', 'A1b2C3d4E5'.repeat(4)].join('');
+
 // The task record's own guards (toolkit-tasks.cjs). The record is written by hand here, so each test
-// shows one guard on its own. A secret-shaped value is built at run time, so none sits in this file.
+// shows one guard on its own.
 test.describe('the task record\'s own guards', () => {
-  const secret = () => ['gh', 'p_', 'A1b2C3d4E5'.repeat(4)].join('');
   const entry = (extra = {}) => ({ id: 'demo-sweep', name: 'DEMO - SWEEP', host: 'windows', folder: 'DEMO', schedule: 'hourly', model: null, effort: null,
     purpose: 'Removes the footer.', repository: 'example/demo', created: '2026-10-29T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', ...extra });
   const record = (home, list) => {
@@ -709,6 +711,9 @@ test.describe('the task record\'s own guards', () => {
   });
 
   test('the record is written with mode 600', { skip: process.platform === 'win32' ? 'Windows keeps no POSIX mode; the file is in the user profile' : false }, t => {
+    // A loose umask, so the 600 comes from the write itself.
+    const umask = process.umask(0o022);
+    t.after(() => process.umask(umask));
     const home = s.tempHome(t);
     tasks.writeRegistry(home, [entry()]);
     assert.equal(fs.statSync(tasks.registryPath(home)).mode & 0o777, 0o600);
@@ -742,8 +747,7 @@ test('remove toolkit prints a Task Scheduler error as it is, screened for secret
   const run = scheduler => { const out = [], err = []; const code = removal.main(['plan', '--app', 'all'], { home: s.tempHome(t), scheduler, rules: null, parts: [], plugins: () => ({}), log: line => out.push(line), error: line => err.push(line) }); return { code, err: err.join('\n') }; };
   const denied = stderr => windows.powerShellScheduler({ run: () => ({ status: 1, stderr }) });
   assert.deepEqual(run(denied('Access is denied.\nmore detail')), { code: 1, err: 'Access is denied.' });
-  const token = ['gh', 'p_', 'A1b2C3d4E5'.repeat(4)].join('');
-  assert.deepEqual(run(denied(`denied for ${token}`)), { code: 1, err: '[removed: looked like a secret]' });
+  assert.deepEqual(run(denied(`denied for ${secret()}`)), { code: 1, err: '[removed: looked like a secret]' });
   const plain = { markedFolders() { throw new Error('internal detail'); }, list() { return []; } };
   assert.deepEqual(run(plain), { code: 1, err: 'Toolkit removal could not be planned; nothing was removed.' });
 });
