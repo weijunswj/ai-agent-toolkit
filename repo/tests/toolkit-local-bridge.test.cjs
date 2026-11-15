@@ -2557,6 +2557,35 @@ test('SessionStart notice names a vendored Toolkit check that is older or missin
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
 });
 
+test('SessionStart notice compares the vendored checks of an ENABLED repository that carries no Toolkit block', () => {
+  // Turn-on writes no governed block now, so a governed repository's own AGENTS.md (or none) must not
+  // switch the vendored-check comparison off, and its own instruction files are not compared.
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
+  for (const syncSource of ['codex-plugin', 'claude-plugin']) {
+    for (const agents of ['# Project rules\n', null]) {
+      const root = tmpRoot();
+      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+      if (agents !== null) writeFile(path.join(root, 'AGENTS.md'), agents);
+      const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+      writeFile(copy, installer.vendoredText());
+      const label = `${syncSource}, ${agents === null ? 'no AGENTS.md' : 'own AGENTS.md'}`;
+      const options = { targetRoot: root, pluginRoot: repoRoot, state: {}, governanceEnabled: () => true };
+      const current = runAgentRulesPreflight({ hook: true, syncSource }, options);
+      assert.equal(current.status, 'ok', `${label}: a current copy is quiet and the repository's own files are not compared`);
+      writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
+      const before = snapshotTree(root);
+      // Even with a newer Toolkit on record, the note is about the checks, not about repository rules.
+      const stale = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      assert.equal(stale.status, 'needs-attention', label);
+      assert.deepEqual(stale.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit /, label);
+      assert.deepEqual(snapshotTree(root), before, `${label}: read-only`);
+      assert.equal(runAgentRulesPreflight({ hook: true, syncSource }, { ...options, governanceEnabled: () => false }).status, 'not-managed', `${label}: not governed and no block is not managed`);
+    }
+  }
+});
+
 test('SessionStart notice: a governed-rules copy is a leftover whatever Toolkit wrote it; a newer source checkout says to refresh Toolkit', () => {
   // Hub state records a newer Toolkit than the running copy, and the repository still carries a copy.
   const root = tmpRoot();

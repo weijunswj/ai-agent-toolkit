@@ -440,7 +440,7 @@ test('adapter installer auto dry-run with no AGENTS.md asks for required target 
   assert.match(result.stdout, /No AGENTS\.md found for --target auto/i);
   assert.match(result.stdout, /No files would be created automatically/i);
   assert.match(result.stdout, /Required next step/i);
-  assert.match(result.stdout, /install or repair repo-local AGENTS\.md/i);
+  assert.doesNotMatch(result.stdout, /repo-local AGENTS\.md with repository-agent-rules/i);
   assert.match(result.stdout, /create\/update only AGENTS\.md/i);
   assert.match(result.stdout, /choose none/i);
   assert.match(result.stdout, /read-only or no-modify tasks/i);

@@ -1432,9 +1432,12 @@ function runAgentRulesPreflight(args, options = {}) {
   const pluginRoot = agentRulesPluginRoot(args, options);
   const runningVersion = options.runningVersion || BRIDGE_VERSION;
   const base = { targetRoot, gitRoot, gitRepoDetected: Boolean(gitRoot), pluginRoot, runningVersion, findings: [] };
-  // A governed repository is managed even with no Toolkit block left: its vendored checks are compared.
+  if (!gitRoot) return { ...base, status: 'not-managed' };
+  // A governed repository is managed even with no Toolkit block: turn-on no longer writes one, and
+  // the installed Toolkit delivers the governed rules. There only its vendored checks are compared.
   const governed = () => (options.governanceEnabled || governanceEnabledAt)(gitRoot);
-  if (!gitRoot || !(agentRulesRootIsManaged(gitRoot, specs, options.state) || governed())) return { ...base, status: 'not-managed' };
+  const rulesManaged = agentRulesRootIsManaged(gitRoot, specs, options.state);
+  if (!rulesManaged && !governed()) return { ...base, status: 'not-managed' };
 
   const sourceVersion = toolkitSourceCheckoutVersion(targetRoot);
   const reference = sourceVersion ? 'source-checkout' : 'installed-plugin';
@@ -1452,7 +1455,7 @@ function runAgentRulesPreflight(args, options = {}) {
   // its own templates: the installed copy is the stale side.
   if (sourceVersion && newer) return { ...result, status: 'needs-attention', direction: 'newer' };
   if (!findings.length) return { ...result, status: 'ok' };
-  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer ? 'newer' : 'differs' };
+  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer && rulesManaged ? 'newer' : 'differs' };
 }
 
 // One neutral line. Never an instruction to halt work or to question the user; it names the step and
