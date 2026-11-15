@@ -1145,3 +1145,9 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
     }
   }
 });
+
+test('the daily check-in reads each PR check from its newest run on the head only', () => {
+  const text = rendered('daily-check-in');
+  assert.ok(text.includes('every open PR with each check by name and the conclusion of its newest run on the head only (a re-run supersedes older runs)'));
+  assert.doesNotMatch(text, /every check run by name and conclusion/);
+});

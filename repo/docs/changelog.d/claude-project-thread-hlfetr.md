@@ -7,4 +7,6 @@
 
 ### Fixed
 
+- The Projects daily check-in reads each PR check by name from its newest run on the head only, because a re-run supersedes older runs.
+
 - The footer sweep reads GitHub lists by numbered pages (at most 100), so it also runs in cloud sessions, whose proxy refuses the numeric-ID next-page links that `gh api --paginate` follows. It stops reading pull requests at the first page older than its window.
