@@ -197,6 +197,137 @@ function auditSkill(skillRel) {
   return errors;
 }
 
+// Skill classes (repo/contracts/skill-publication.json): every skill folder is either portable (works
+// anywhere) or Toolkit's own. A portable skill's SKILL.md (name, description and text) outside fenced
+// code must not use a Toolkit term, or name an app unless depends_on_app gives the reason. Hits that
+// were already there sit in the baseline, which only shrinks: a count must match the hits exactly.
+const CONTRACT_REL = 'repo/contracts/skill-publication.json';
+// The README's Skills section has one table per class, named by its first header cell.
+const CLASSES = Object.freeze({ portable: 'Portable skill', toolkit: "Toolkit's own skill" });
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Whole words, any case, plural "s" included: "controllers" counts as "controller".
+function countWord(text, word) {
+  const pattern = new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(word)}s?(?![A-Za-z0-9])`, 'gi');
+  return (text.match(pattern) || []).length;
+}
+
+// The text a portable skill is judged on: its whole SKILL.md (front matter included) outside fenced code.
+function publicSkillText(skillRel) {
+  return readText(path.join(resolveRel(skillRel), 'SKILL.md')).replace(/```[\s\S]*?```/g, ' ');
+}
+
+function readmeSkillGroups() {
+  const readmePath = resolveRel('README.md');
+  const readme = fs.existsSync(readmePath) ? readText(readmePath) : '';
+  const section = readme.match(/^## Skills[ \t]*$(?<body>[\s\S]*?)(?=^## |(?![\s\S]))/m)?.groups?.body || '';
+  const groups = new Map();
+  let current = null;
+  for (const line of section.split('\n')) {
+    if (!line.startsWith('|')) {
+      current = null;
+      continue;
+    }
+    const row = line.match(/^\|\s*\[[^\]]+\]\(skills\/([^/)]+)\/\)\s*\|/);
+    if (row) groups.set(row[1], current);
+    else if (current === null) current = line.split('|')[1].trim();
+  }
+  return groups;
+}
+
+function auditSkillClasses(skills) {
+  const errors = [];
+  const contractPath = resolveRel(CONTRACT_REL);
+  if (!fs.existsSync(contractPath)) return [`Missing ${CONTRACT_REL}`];
+  let contract;
+  try {
+    contract = JSON.parse(readText(contractPath));
+  } catch (error) {
+    return [`${CONTRACT_REL} is invalid JSON: ${error.message}`];
+  }
+  // An empty or missing word list would quietly switch the check off, so it fails instead.
+  const wordList = (key) => {
+    const list = contract[key];
+    if (Array.isArray(list) && list.length && list.every((word) => typeof word === 'string' && word.trim())) return list;
+    errors.push(`${CONTRACT_REL} ${key} must be a non-empty list of words`);
+    return [];
+  };
+  const terms = wordList('toolkit_terms');
+  const apps = wordList('app_names');
+  const entries = {};
+  for (const [name, entry] of Object.entries(contract.skills || {})) {
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) entries[name] = entry;
+    else errors.push(`${name} entry must be an object with class and reason`);
+  }
+  const folderNames = new Set(skills.map((skillRel) => path.posix.basename(skillRel)));
+
+  for (const name of folderNames) {
+    if (!Object.hasOwn(contract.skills || {}, name)) errors.push(`skills/${name} has no class in ${CONTRACT_REL}`);
+  }
+  for (const [name, entry] of Object.entries(entries)) {
+    if (!folderNames.has(name)) errors.push(`${name} is classified but skills/${name} does not exist`);
+    if (!Object.hasOwn(CLASSES, entry.class)) errors.push(`${name} class must be "portable" or "toolkit"`);
+    if (typeof entry.reason !== 'string' || !entry.reason.trim()) errors.push(`${name} needs a one-line reason`);
+    for (const [app, why] of Object.entries(entry.depends_on_app || {})) {
+      if (!apps.includes(app)) errors.push(`${name} depends_on_app "${app}" is not one of app_names`);
+      else if (typeof why !== 'string' || !why.trim()) errors.push(`${name} depends_on_app "${app}" needs a reason`);
+    }
+  }
+
+  const allowed = new Map();
+  const baseline = contract.baseline === undefined ? [] : contract.baseline;
+  if (!Array.isArray(baseline)) errors.push(`${CONTRACT_REL} baseline must be a list`);
+  for (const raw of Array.isArray(baseline) ? baseline : []) {
+    const item = raw && typeof raw === 'object' ? raw : {};
+    if (entries[item.skill]?.class !== 'portable') {
+      errors.push(`baseline entry for ${item.skill} must name a portable skill`);
+    } else if (!terms.includes(item.term) && !apps.includes(item.term)) {
+      errors.push(`baseline entry "${item.term}" for ${item.skill} is not one of toolkit_terms or app_names`);
+    } else if (!Number.isInteger(item.count) || item.count < 1) {
+      errors.push(`baseline entry "${item.term}" for ${item.skill} needs a whole-number count above 0`);
+    } else if (allowed.has(`${item.skill}\0${item.term}`)) {
+      errors.push(`baseline lists "${item.term}" for ${item.skill} more than once`);
+    } else {
+      allowed.set(`${item.skill}\0${item.term}`, item.count);
+    }
+  }
+
+  for (const [name, entry] of Object.entries(entries)) {
+    if (entry.class !== 'portable' || !folderNames.has(name)) continue;
+    const text = publicSkillText(`skills/${name}`);
+    const checks = [
+      ...terms.map((term) => ({ term, label: `uses Toolkit term "${term}"`, exempt: false })),
+      ...apps.map((app) => ({ term: app, label: `names app "${app}"`, exempt: Object.hasOwn(entry.depends_on_app || {}, app) }))
+    ];
+    for (const check of checks) {
+      if (check.exempt) continue;
+      const hits = countWord(text, check.term);
+      const key = `${name}\0${check.term}`;
+      const limit = allowed.has(key) ? allowed.get(key) : 0;
+      if (hits > limit) {
+        const reason = apps.includes(check.term) ? ' with no depends_on_app reason' : '';
+        errors.push(`skills/${name} is portable but ${check.label} ${hits} time(s)${reason}; allowed ${limit}`);
+      } else if (allowed.has(key) && hits < limit) {
+        const fix = hits ? `lower the count to ${hits}` : 'remove the entry';
+        errors.push(`${CONTRACT_REL} baseline allows "${check.term}" ${limit} time(s) in ${name} but it now appears ${hits} time(s); ${fix}`);
+      }
+    }
+  }
+
+  const groups = readmeSkillGroups();
+  for (const [name, entry] of Object.entries(entries)) {
+    const expected = CLASSES[entry.class];
+    if (!expected || !folderNames.has(name)) continue;
+    const listed = groups.get(name);
+    if (listed === undefined) errors.push(`README.md does not list skills/${name} in the "${expected}" table`);
+    else if (listed !== expected) errors.push(`README.md lists skills/${name} in the "${listed}" table but its class is ${entry.class}`);
+  }
+  return errors;
+}
+
 function auditSkillPortability() {
   const skills = skillDirs(root);
   const errors = [];
@@ -207,6 +338,7 @@ function auditSkillPortability() {
   for (const skillRel of skills) {
     errors.push(...auditSkill(skillRel));
   }
+  errors.push(...auditSkillClasses(skills));
   if (fs.existsSync(path.join(root, removedSurfaceName, 'skills'))) {
     errors.push('Removed legacy skills directory is still present');
   }

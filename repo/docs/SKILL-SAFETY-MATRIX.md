@@ -11,6 +11,7 @@ It does not grant permission to run risky actions. Repo rules, skill instruction
 - Create a new Toolkit skill directly under `skills/<skill-name>/` after Skill Creation Center review, with coupled contracts, runtime, tests, and docs directly under canonical `repo/**` paths, only when the use case has a distinct trigger, domain, risk boundary, provenance requirement, local assets, or validation path. Do not add an intermediate ownership, publication, or generic synchronization layer.
 - For third-party skills, skill packs, GitHub skill repos, or adapted external agent material, run `skill-product-review` before copying, installing, executing, or converting anything.
 - The separate generic `skill-product-review` product retains its publication and anti-drift semantics; it is not part of Toolkit operation.
+- Give a new skill its class in `repo/contracts/skill-publication.json`: portable (works anywhere, no Toolkit words or app names without a reason) or Toolkit's own (runs Toolkit itself). The README lists the two classes in separate tables.
 
 ## Legend
 
