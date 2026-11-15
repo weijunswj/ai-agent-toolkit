@@ -11,7 +11,7 @@ const readline = require('node:readline');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const util = require('node:util');
-const { GovernanceProposals, GitHubProposalTransport } = require('./toolkit-governance-proposal.cjs');
+const { GovernanceProposals, GitHubProposalTransport, BANK_ONLY } = require('./toolkit-governance-proposal.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
@@ -28,7 +28,7 @@ const governedShards = require('./governed-test-shards.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
-const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance where GitHub can be read: its bank makes a missing parent issue and private evidence store and renders the governed rules into one setup pull request. Or prepare the binding and governed rules with repository-agent-rules and publish them together.';
+const ADOPTION_NOT_READY = 'The turn-on pull request is not ready: it needs the programme file and the full rules set (the governed AGENTS.md block, CLAUDE.md, the playbooks and the plain-text check). Run toolkit governance where GitHub can be read: its bank makes the missing parent issue and private evidence store and renders every rules file into one setup pull request. Build none of it by hand.';
 const PROPOSAL_ERRORS = Object.freeze({
   PROPOSAL_WRITE_REQUIRED: 'This GitHub account cannot write to this repository. Continue with global rules, without governance effects or standing task auto-merge. An owner with write access can publish the proposal.',
   PROPOSAL_CONFLICT: 'Conflicting governance proposals are open. Show their links and ask the owner which to keep before publishing again. None decides governance.',
@@ -275,12 +275,15 @@ class ToolkitGovernanceCli {
 
   // Publication uses only a live receipt from an accepted owner answer.
   // `switches` are the task_prs members the owner's answer sets ({ auto_merge, merge_train }), or null.
+  // `bank` is true only when the governance question bank publishes its own answer: a yes from anywhere
+  // else (an agent's publish --run) is refused, so no turn-on pull request is ever built by hand.
   // `app` is the bank's governance App answer ('setup' or 'keep'), or null outside the bank.
-  #publish(json, suppliedRun = null, switches = null, adopted = null, app = null) {
+  #publish(json, suppliedRun = null, switches = null, adopted = null, bank = false, app = null) {
     const pending = this.#proposals.pending(this.#cwd, { sessionId: process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID,
       epoch: new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID) });
     const run = suppliedRun || (pending?.kind === 'preparing' ? pending.run : null);
     if (!run) throw new GovernanceCliError(pending?.text || 'No pending owner answer for this run. Ask the owner in this chat; an agent cannot answer for them.');
+    if (!bank && this.#proposals.answerFor(this.#cwd, run) === 'yes') throw new GovernanceCliError(`${BANK_ONLY} Run ${CMD('setup')} and show the owner its bank; build nothing by hand. Nothing was written.`);
     let binding = adopted ? adopted.binding : null;
     if (!adopted) try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
@@ -502,7 +505,11 @@ class ToolkitGovernanceCli {
       const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
       if (plan && plan.blocked) this.#print(false, {}, [`GitHub could not be read (${plan.blocked}), so the evidence store and parent issue could not be found or made.`]);
       if (plan && !plan.blocked) store = plan.store.repository;
-      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, app) : this.#prepareDecision('yes', enabling, null, app);
+      else if (!found && adopt.adoptionPrepared(state.root)) {
+        try { store = JSON.parse(fs.readFileSync(path.join(state.root, governance.BINDING_FILE), 'utf8')).store?.repository || null; } catch { /* no --store */ }
+      }
+      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, app)
+        : !found && adopt.adoptionPrepared(state.root) ? this.#preparedAndPropose(state, enabling, app) : this.#prepareDecision('yes', enabling, null, app);
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
       code = this.#prepareDecision('no', null);
@@ -579,6 +586,21 @@ class ToolkitGovernanceCli {
     return this.#prepareDecision('yes', switches, adopted, app);
   }
 
+  // A repository prepared in the working tree: the same full rules set as a fresh one, then the one
+  // turn-on pull request.
+  #preparedAndPropose(state, switches, app = null) {
+    let ready;
+    try {
+      ready = adopt.prepared({ root: state.root, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
+    } catch (error) {
+      if (!(error instanceof adopt.AdoptError)) throw error;
+      this.#print(false, {}, [`${error.message} No pull request was prepared.`]);
+      return 2;
+    }
+    if (ready.lines.length) this.#print(false, {}, ready.lines);
+    return this.#prepareDecision('yes', switches, ready, app);
+  }
+
   // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
   // terminal is the proof); it applies only after the owner merges it. `adopted` carries the binding
   // and rendered rules for a fresh repository.
@@ -590,7 +612,7 @@ class ToolkitGovernanceCli {
     }
     const sessionId = 'bank-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(false, request.run, switches, adopted, app); }
+    try { return this.#publish(false, request.run, switches, adopted, true, app); }
     catch (error) {
       this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
@@ -598,7 +620,7 @@ class ToolkitGovernanceCli {
     }
   }
 
-  async #decide(command, json, switches = null) {
+  async #decide(command, json) {
     const before = this.#state();
     if (before.rule === 'R1' && command === 'enable') throw new GovernanceCliError('This folder is not inside a git repository, so GitHub governance is DISABLED automatically. Nothing was written.');
     if (['R1', 'R8', 'S1', 'R1s'].includes(before.rule)) {
@@ -607,18 +629,21 @@ class ToolkitGovernanceCli {
       return 0;
     }
     if (!this.#interactive) throw new GovernanceCliError('No answer was recorded. Ask the owner in this chat; an agent cannot answer for them.');
-    const answer = command === 'enable' ? 'yes' : 'no';
-    if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
+    // Yes in the owner's own terminal opens the full governance question bank there, the one route
+    // that turns governance on.
+    if (command === 'enable') return this.#bank(json, null, null);
+    const answer = 'no';
+    if (before.merged?.fresh && before.rule === 'M2') {
       this.#print(json, { state: before.state, writes: 0 }, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
       return 0;
     }
-    if (String(await this.#ask('Prepare a pull request setting repository governance ' + (answer === 'yes' ? 'on' : 'off') + ' on every computer? It applies only after the owner merges it. Type yes: ')).trim().toLowerCase() !== 'yes') {
+    if (String(await this.#ask('Prepare a pull request setting repository governance off on every computer? It applies only after the owner merges it. Type yes: ')).trim().toLowerCase() !== 'yes') {
       this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
       return 1;
     }
     const sessionId = 'terminal-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(json, request.run, switches); }
+    try { return this.#publish(json, request.run); }
     catch (error) {
       this.#print(json, { state: before.state, pending: true, run: request.run, error: error.code || 'PROPOSAL_UNAVAILABLE' }, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);

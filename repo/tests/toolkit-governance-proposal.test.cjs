@@ -28,7 +28,8 @@ function fakeGitHub(f, extra = {}) {
   fs.writeFileSync(file, JSON.stringify({ repository: 'example-owner/example-repo', calls: [], files: {}, ...extra }));
   return { transport: new GitHubProposalTransport({ command: [process.execPath, path.join(__dirname, 'support/governance-fake-github.cjs'), file] }), read: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
 }
-function prepareAdoption(f) {
+// full: also the rest of the rules set every turn-on carries (all playbooks and the plain-text check).
+function prepareAdoption(f, { full = true } = {}) {
   const binding = { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'enabled',
     parents: [{ issue: 1, record_prefix: 'INT-FX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' },
     required_checks: ['validate'], dependency_updates: { auto_merge: 'off', github_actions: 'owner' } };
@@ -38,6 +39,13 @@ function prepareAdoption(f) {
   fs.writeFileSync(path.join(f.cwd, 'CLAUDE.md'), '@AGENTS.md\n');
   fs.mkdirSync(path.join(f.cwd, 'docs/agent-playbooks'), { recursive: true });
   fs.writeFileSync(path.join(f.cwd, 'docs/agent-playbooks/INDEX.md'), '# Project playbooks\n');
+  if (full) {
+    const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
+    for (const name of requiredRules().filter(entry => !fs.existsSync(path.join(f.cwd, entry)))) {
+      fs.mkdirSync(path.dirname(path.join(f.cwd, name)), { recursive: true });
+      fs.writeFileSync(path.join(f.cwd, name), `${name}\n`);
+    }
+  }
   return binding;
 }
 for (const answer of ['yes', 'no']) test(`${answer}: accepted answer remains pending, isolated from other chats and effective state`, t => {
@@ -284,62 +292,65 @@ test('real runner handles large GitHub responses, projects the PR list and reads
   assert.ok(!calls.some(call => call.args.join(' ').includes('recursive=')));
 });
 
-test('first yes goes from the owner prompt through discovery and real publication as one complete marked adoption', async t => {
+test('first yes opens the governance bank, a hand-built yes is refused, and the bank publishes one complete marked adoption', async t => {
   const f = fixture(t), github = fakeGitHub(f);
   const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: github.transport };
   gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
   const hold = new gate.PromptHold(options);
   assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' }).action, 'pass');
-  // The owner's "yes" reaches the agent with a reply ticket; recording it starts the adoption.
+  // The owner's "yes" reaches the agent with a reply ticket; it records nothing and opens the bank.
   const reply = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'yes' });
   assert.equal(reply.action, 'pass');
   const answer = hold.answerTicket((/ ANSWER ([0-9a-f]{32})\n/.exec(reply.context) || [])[1], 'yes');
   assert.equal(answer.ok, true, answer.text);
-  assert.match(answer.text, /governance discover/);
-  assert.match(answer.text, /repository-agent-rules/);
+  assert.match(answer.text, /question bank/);
+  assert.match(answer.text, /toolkit-governance\.cjs" setup/);
+  assert.match(answer.text, /Build nothing by hand/);
+  assert.doesNotMatch(answer.text, /repository-agent-rules|publish --run|governance discover/);
   const epoch = new gate.SessionEpochs(options).get('owner');
-  const pending = f.owner.pending(f.cwd, { sessionId: 'owner', epoch });
+  assert.equal(f.owner.pending(f.cwd, { sessionId: 'owner', epoch }), null, 'a yes leaves no receipt to publish by hand');
   const stdout = [], stderr = [];
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  const answers = [];
   // The render result is set here, never left to where this checkout's commit sits: the prepared copies travel as they are.
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stderr.push(text) },
-    discoveryGh: () => ({ ok: false, reason: 'offline' }) });
-  assert.equal(await cli.main(['discover']), 0);
-  assert.match(stdout.join(''), /Adoption proposal/);
-  assert.equal(await cli.main(['publish', '--run', pending.run]), 2);
-  assert.match(stderr.join(''), /adoption proposal is not ready/i);
-  assert.ok(!stderr.join('').includes('PROPOSAL_ADOPTION_INCOMPLETE'));
-  assert.equal(github.read().calls.filter(call => call.input).length, 0, 'missing materials cause no GitHub writes');
-  const binding = prepareAdoption(f);
+    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, ask: async () => answers.shift() ?? '',
+    refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
+    permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
+  // A yes receipt from an older Toolkit is never published by an agent's publish --run.
+  const stale = f.owner.request(f.cwd, 'yes', run);
+  const binding = prepareAdoption(f, { full: false });
+  assert.equal(await cli.main(['publish', '--run', stale.run]), 2);
+  assert.match(stderr.join(''), /published only from the governance question bank/);
+  assert.equal(github.read().calls.filter(call => call.input).length, 0, 'a hand-built yes causes no GitHub writes');
+  // A working tree prepared with only the programme file and AGENTS.md (a hand-built two-file setup):
+  // the bank still renders the full rules set and adds the plain-text check, so nothing is left out.
   const rules = fs.readFileSync(path.join(f.cwd, 'AGENTS.md'));
-  fs.rmSync(path.join(f.cwd, 'AGENTS.md'));
-  assert.equal(await cli.main(['publish', '--run', pending.run]), 2, 'a binding alone cannot publish adoption');
-  assert.equal(github.read().calls.filter(call => call.input).length, 0);
-  fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), rules);
+  fs.rmSync(path.join(f.cwd, 'CLAUDE.md'));
+  fs.rmSync(path.join(f.cwd, 'docs'), { recursive: true });
   require('node:child_process').execFileSync('git', ['init', '--quiet', f.cwd], { stdio: 'ignore', windowsHide: true });
-  const installed = () => require('node:child_process').execFileSync('git', ['ls-files', '--others', '--exclude-standard', '.github'], { cwd: f.cwd, encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/);
-  const beforeInstall = new Set(installed());
-  const installerOptions = { repo: f.cwd, out: { write() {} } };
-  new (require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs').PlainTextInstaller)(installerOptions).install({ workflow: true });
-  new (require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs').GuardInstaller)(installerOptions).install({ identity: 'excluded', identityReason: 'Fixture identity excluded', workflow: true });
-  const installerFiles = installed().filter(name => !beforeInstall.has(name));
-  assert.equal(installerFiles.length, 7, 'both installers prepared all seven repository files');
   fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), rules.toString().replace(/\r?\n/g, '\r\n'));
   fs.writeFileSync(path.join(f.cwd, 'product.txt'), 'Unrelated work\n');
-  assert.equal(await cli.main(['publish', '--run', pending.run]), 0);
-  assert.equal(await cli.main(['publish', '--run', pending.run]), 0, 'retry reuses the same proposal');
+  answers.push('all recommended');
+  { const code = await cli.main(['setup']); assert.equal(code, 0, stdout.join('').slice(-1500) + stderr.join('')); }
+  answers.push('all recommended');
+  assert.equal(await cli.main(['setup']), 0, 'answering again reuses the same proposal');
   const published = github.read();
   assert.equal(published.commits, 1);
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1);
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
-  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', 'AGENTS.md', 'CLAUDE.md', 'docs/agent-playbooks/INDEX.md', ...installerFiles].sort());
-  for (const name of installerFiles) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
-  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), binding);
+  const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
+  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', '.github/plain-text-baseline.json', ...requiredRules()].sort(), 'the full rules set and nothing unrelated');
+  assert.equal(published.files['CLAUDE.md'], '@AGENTS.md\n');
+  for (const name of ['.github/plain-text.json', '.github/workflows/plain-text.yml']) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
+  // The bank writes both switches off with the turn-on, as it showed them.
+  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, task_prs: { auto_merge: 'off', merge_train: 'off' } });
   assert.equal(published.files['AGENTS.md'], rules.toString().replace(/\r\n/g, '\n'));
   assert.match(stdout.join(''), /Before pulling after merge.*untracked files/);
-  // The owner is shown the governance App setup with the decision, not asked for it; offline here.
-  assert.match(stdout.join(''), /Governance GitHub App: [^\n]*could not be checked \(offline\)[\s\S]*github\.com\/settings\/apps\/new\?[\s\S]*gh variable set TOOLKIT_GOVERNANCE_APP_CLIENT_ID/);
+  // The bank's App row recommends Set up, so the owner gets the App setup command instead of the by-hand steps.
+  assert.match(stdout.join(''), /^node "[^"]+toolkit-governance-app-setup\.cjs" --repo \S+\/\S+ --store \S+$/m);
+  assert.doesNotMatch(stdout.join(''), /github\.com\/settings\/apps\/new\?/);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
   const other = new GovernanceProposals({ registryOptions: { registryPath: path.join(f.root, 'other-home/state.json'), testOnly: true }, transport: github.transport });
@@ -529,6 +540,24 @@ test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding 
   const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => { rendered++; return { files: {}, warning: null }; } });
   owner.publish(f.cwd, owner.request(f.cwd, 'no', run).run);
   assert.equal(rendered, 0);
+});
+
+test('a yes missing any of the rules set is refused: the S3 two-file turn-on cannot publish', t => {
+  const { missingRules, requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
+  let writes = 0;
+  const f = fixture(t, { list: () => [], publish() { writes++; return proposal('yes'); }, read: () => proposal('yes') });
+  const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => ({ files: {}, warning: null }) });
+  const binding = prepareAdoption(f, { full: false });
+  fs.rmSync(path.join(f.cwd, 'CLAUDE.md'));
+  fs.rmSync(path.join(f.cwd, 'docs'), { recursive: true });
+  assert.throws(() => owner.publish(f.cwd, owner.request(f.cwd, 'yes', run).run, binding), /PROPOSAL_ADOPTION_INCOMPLETE/);
+  assert.equal(writes, 0);
+  const full = Object.fromEntries(requiredRules().map(name => [name, name === 'CLAUDE.md' ? '@AGENTS.md\n' : 'x']));
+  assert.deepEqual(missingRules(full), []);
+  assert.deepEqual(missingRules({ ...full, 'CLAUDE.md': '# no import\n' }), ['CLAUDE.md'], 'a CLAUDE.md that does not load AGENTS.md does not count');
+  const { 'docs/agent-playbooks/INDEX.md': dropped, ...partial } = full;
+  assert.ok(dropped);
+  assert.deepEqual(missingRules(partial), ['docs/agent-playbooks/INDEX.md']);
 });
 
 test('the default renderer leaves a Toolkit source checkout alone, renders both copies, and names a reason and fix when it cannot', t => {

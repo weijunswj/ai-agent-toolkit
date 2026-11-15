@@ -318,7 +318,7 @@ test('turning governance on in the bank carries the switch in the same enable pr
     const proposal = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
     const proposalTransport = { list: () => open, publish: (repository, prepared, files) => { published.push({ prepared, files }); open = [proposal]; return proposal; }, read: () => proposal };
     const result = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=B, 1.2=B'], proposalTransport });
-    assert.equal(result.code, 0, result.err);
+    assert.equal(result.code, 0, result.out + result.err);
     assert.equal(result.asked.length, 1, 'the owner\'s own terminal reads one reply to the bank');
     assert.equal(published.length, 1, `version ${version}`);
     const text = published[0].files['.github/toolkit-programme.json'];

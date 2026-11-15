@@ -89,6 +89,6 @@ function phraseContext(text) {
   return command ? `Toolkit command: the user typed \`${command.phrase}\`. ${CONTEXT[command.action]()}` : '';
 }
 
-module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext });
+module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext, bankGuide: CONTEXT.guide });
 
 if (require.main === module) process.stdout.write(`${listText()}\n`);

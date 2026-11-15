@@ -207,16 +207,16 @@ test('B: a saved note copy goes only to the private store, never to the public s
   assert.ok(store instanceof state.BranchStateStore);
   const page = '# Programme\r\n\r\n## Archive\nOld notes.\n';
   const publicBefore = new Map(fx.github.filesAt(REPO, BRANCH));
-  const saved = store.saveNoteCopy(7, page);
+  const saved = store.savePageCopy(7, page);
   assert.equal(saved.outcome, 'WRITTEN');
   assert.equal(saved.digest, state.sha256(page));
   assert.equal(saved.path, `${STORE.path}page-copies/issue-7/${saved.digest}.md`);
   assert.equal(fx.github.textAt(STORE_REPO, 'main', saved.path), page, 'byte for byte in the private store');
   assert.deepEqual(new Map(fx.github.filesAt(REPO, BRANCH)), publicBefore, 'nothing reaches the public state branch');
-  assert.equal(store.saveNoteCopy(7, page).outcome, 'EXISTS');
+  assert.equal(store.savePageCopy(7, page).outcome, 'EXISTS');
   fx.github.setPrivate(STORE_REPO, false);
   const writes = fx.writes().length;
-  assert.throws(() => store.saveNoteCopy(7, `${page}More.\n`), { code: 'STORE_NOT_PRIVATE' });
+  assert.throws(() => store.savePageCopy(7, `${page}More.\n`), { code: 'STORE_NOT_PRIVATE' });
   assert.equal(fx.writes().length, writes, 'a public store gets no copy');
 });
 

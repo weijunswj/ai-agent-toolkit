@@ -329,11 +329,11 @@ test('an open task is re-laid only after a copy of its page is saved and read ba
   assert.deepEqual(report.holds, []);
   const copy = f.copies();
   assert.equal(copy.length, 1);
-  assert.match(copy[0].path, /state\/acme\/app\/page-copies\/issue-806-[0-9a-f]{16}\.json/);
+  // The one page-copy format: the page's exact text as Markdown, named by its SHA-256.
+  assert.match(copy[0].path, new RegExp(`state/acme/app/page-copies/issue-806/${state.sha256(OLD_PAGE)}\\.md$`));
   assert.ok(f.github.calls.indexOf(copy[0]) < f.github.calls.indexOf(f.bodyWrites(806)[0]), 'the copy is written before the page');
-  const saved = f.github.readFile(decodeURIComponent(copy[0].path.split('/contents/')[1].split('?')[0]));
-  assert.equal(saved.body, OLD_PAGE, 'the copy holds the page exactly as it was');
-  assert.equal(saved.issue, 806);
+  const saved = f.github.files.get(decodeURIComponent(copy[0].path.split('/contents/')[1].split('?')[0])).text;
+  assert.equal(saved, OLD_PAGE, 'the copy holds the page exactly as it was');
   const body = f.github.issues.get(806).body;
   assert.equal(layout.inOrder(body), true);
   assert.match(body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n# PATH\n<!-- programme-nav -->\n#421 > #806\n/);
@@ -710,7 +710,7 @@ test('a page that will be laid out says so in the plan, and its result names the
   assert.equal(result.outcome, 'DONE');
   assert.match(result.text, /^Lay out #806's page in the fixed order/);
   const copy = decodeURIComponent(f.copies()[0].path.split('/contents/')[1].split('?')[0]);
-  assert.equal(result.detail, `the page was laid out in the fixed order; the page as it was is saved at ${copy} in the state store`);
+  assert.equal(result.detail, `the page was laid out in the fixed order; the page as it was is saved at ${copy} in the private store`);
 
   // A page already in order is an ordinary block update: no lay-out wording, no copy named.
   f.github.addComment(806, { body: 'Scope\n---\nA new decision' });
@@ -735,7 +735,7 @@ test('a page whose text stays where it is never claims a lay-out: closed tasks a
   const waiting = pages.filter(entry => !/^Lay out /.test(entry.text));
   assert.equal(laid.length, 10);
   assert.equal(waiting.length, 2);
-  for (const entry of laid) assert.match(entry.detail, /saved at state\/acme\/app\/page-copies\/issue-\d+-[0-9a-f]{16}\.json in the state store$/);
+  for (const entry of laid) assert.match(entry.detail, /saved at state\/acme\/app\/page-copies\/issue-\d+\/[0-9a-f]{64}\.md in the private store$/);
   for (const entry of waiting) {
     assert.equal(layout.inOrder(f.github.issues.get(entry.target.issue).body), false);
     assert.equal(entry.detail, 'the blocks were updated where they are; the page is laid out in a later pass (at most 10 pages are laid out per pass)');
