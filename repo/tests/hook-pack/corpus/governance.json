@@ -1332,6 +1332,28 @@
       "status": "pass"
     },
     {
+      "id": "GATEROUTE.wording-only-g2-at-high-runs",
+      "source": "owner 15 Nov 2026: wording-only docs pull requests take one G2 at high effort",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "a G2 brief with Review class: wording-only runs at high on the pinned model",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"},"effort":{"level":"high"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude opus opus-5.5/high\nReview class: wording-only\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g2-at-high-without-class-refused",
+      "source": "owner 15 Nov 2026: wording-only docs pull requests take one G2 at high effort",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "note": "the same G2 at high without the wording-only class line is refused before any work",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"},"effort":{"level":"high"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude opus opus-5.5/high\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
       "id": "GATEROUTE.off-pin-gate-can-report",
       "source": "owner 15 Nov 2026: G2 reviews ran at medium effort against the xhigh pin and their PASS verdicts boarded merge trains",
       "kind": "benign",
