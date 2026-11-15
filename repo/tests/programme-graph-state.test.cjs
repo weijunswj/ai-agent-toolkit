@@ -551,3 +551,40 @@ test('merge train carrier: a pasted train table on a PR that carried no member s
   assert.deepEqual(f.child(2).prs.map(p => p.number),[31,21],'merged a week after its "member": not its carrier');
   assert.deepEqual(f.child(3).prs.map(p => p.number).sort((a,b)=>a-b),[22,32],'an open table whose head is not the member\'s head: not its carrier');
 });
+
+// GitHub returns 100 cross-references a page. A busy task passed that (113 on one live task), its
+// links read as incomplete on every pass, and no pass could finish, so a stopped-pass finding never
+// cleared. The links now page on, and a pass over such a task finishes.
+const crossRefs = (count, prs) => [...Array.from({ length: count - prs.length }, () => ({ __typename: 'Issue' })), ...prs];
+
+test('a task with more than 100 cross-references reads them all: its PRs past the first page are in its history and the pass completes', () => {
+  const f = fixture([2, 3]); f.run();
+  pr(f, 30, { body: '' }); pr(f, 31, { body: '' });
+  f.github.issuePrLinks.set(2, { timeline: crossRefs(113, [30, 31]) });
+  const pass = f.pass(); const plan = pass.plan();
+  assert.equal(plan.observed.prGraph.discovery.get(2).complete, true);
+  assert.equal(plan.complete, true);
+  pass.apply(plan);
+  assert.deepEqual(f.child(2).prs.map(entry => entry.number).sort((a, b) => a - b), [30, 31]);
+  assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+});
+
+test('a stopped-pass finding clears on the next complete pass even when a task has more than 100 cross-references', () => {
+  const f = fixture([2, 3]); f.run();
+  f.github.issuePrLinks.set(2, { timeline: crossRefs(150, []) });
+  f.store.mutate('parent', 1, { writer: holder, change: doc => {
+    doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: new Date(epoch).toISOString(),
+      seen: [{ code: 'PASS_STOPPED', issue: 1, diagnostics: { cause: 'time_limit', phase: 'closing', done: 1, total: 72, started_at: new Date(epoch).toISOString() } }] });
+    return doc;
+  } });
+  assert.deepEqual(f.run().holds, []);
+  assert.equal(f.parent().attention.find(entry => entry.code === 'PASS_STOPPED').state, 'resolved');
+});
+
+test('links GitHub will not page past (no cursor) still leave the task incomplete', () => {
+  const f = fixture([2, 3]); f.run();
+  f.github.issuePrLinks.set(2, { timeline: crossRefs(150, []), timelineTruncated: true });
+  const plan = f.pass().plan();
+  assert.equal(plan.observed.prGraph.discovery.get(2).complete, false);
+  assert.equal(plan.complete, false);
+});

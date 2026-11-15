@@ -408,12 +408,24 @@ class FakeGitHub {
       })();
       const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
       const fields=[...body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)].map(([,alias,number])=>[alias,Number(number)]);
-      if (/issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      if (/(?<!more: )issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      // A follow-up page of one issue's links, from the cursors the last page returned.
+      if (/more: issue\(number:\s*\$number\)/.test(body.query)) fields.push(['more',body.variables.number]);
+      // One connection page of 100. A list longer than that pages with a cursor; a `...Truncated`
+      // link stands for a list GitHub will not page further, so it has no cursor.
+      const page = (list, after, truncated) => {
+        const start = after ? Number(after) : 0;
+        const more = list.length > start + 100;
+        return { pageInfo: { hasNextPage: Boolean(truncated) || more, endCursor: more && !truncated ? String(start + 100) : null }, slice: list.slice(start, start + 100) };
+      };
       for (const [alias, number] of fields) {
         const links = this.issuePrLinks.get(Number(number)) || {};
+        const cursors = alias === 'more' ? body.variables : {};
+        const closing = page(links.closing || [], cursors.closingAfter, links.closingTruncated);
+        const timeline = page(links.timeline || [], cursors.timelineAfter, links.timelineTruncated);
         repository[alias] = this.issues.has(Number(number)) ? {
-          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
-          timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || (links.timeline || []).length > 100 }, nodes: (links.timeline || []).slice(0,100).map(value => ({ source: node(value) })) },
+          closedByPullRequestsReferences: { pageInfo: closing.pageInfo, nodes: closing.slice.map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
+          timelineItems: { pageInfo: timeline.pageInfo, nodes: timeline.slice.map(value => ({ source: node(value) })) },
         } : null;
       }
       return ok(200, { data: { repository } });
