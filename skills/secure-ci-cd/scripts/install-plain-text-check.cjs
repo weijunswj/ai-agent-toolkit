@@ -5,7 +5,9 @@
 //   - copies plain-text-check.cjs to .github/scripts/ with a managed header (version and hash),
 //   - writes .github/plain-text.json when it is missing (issue and pull request reference rules on,
 //     no banned terms: the repository adds its own shorthand codes later),
-//   - writes the starting baseline once, from what is already there, so only new items fail,
+//   - writes the starting baseline once, from what is already there, so only new items fail (it says
+//     how many findings it left out because their file names cannot be stored), or keeps the existing
+//     one and prints any NOTE about it, such as an old format to migrate,
 //   - with --workflow, adds .github/workflows/plain-text.yml from the template if absent.
 // The repository's own settings and baseline are never overwritten. --check changes nothing and
 // reports drift: a missing, hand-edited or outdated copy, or missing settings.
@@ -113,12 +115,16 @@ class PlainTextInstaller {
     catch (error) { throw new InstallError(`${slash(CONFIG_PATH)} is not usable: ${error.message}. Fix it, then run the installer again.`); }
     writeFile(path.join(top, VENDORED_PATH), vendoredText());
     this.#say(`Check copied: ${slash(VENDORED_PATH)} (check v${check.CHECK_VERSION})${existingCopy.state === 'edited' ? '; local edits to the copy were replaced' : ''}.`);
-    if (fs.existsSync(path.join(top, config.baseline))) this.#say(`Baseline kept: ${config.baseline}.`);
-    else {
+    if (fs.existsSync(path.join(top, config.baseline))) {
+      this.#say(`Baseline kept: ${config.baseline}.`);
+      const { notice, unreadable } = baselineState(top, config);
+      if (notice) this.#say(`NOTE: ${notice}`);
+      if (unreadable) this.#say(`NOTE: ${unreadable}`);
+    } else {
       let result;
       try { result = check.initBaseline(top, config, { spawn: this.#spawn }); }
       catch (error) { throw new InstallError(`the starting baseline could not be written: ${error.message}.`); }
-      this.#say(`Baseline written: ${config.baseline} (${result.entries} existing item(s) allowed until rewritten).`);
+      this.#say(`Baseline written: ${config.baseline} (${result.entries} existing item(s) allowed until rewritten).${check.leftOutNote(result.skipped)}`);
     }
     let workflowWritten = false;
     if (workflow) {
@@ -145,13 +151,9 @@ class PlainTextInstaller {
         problems.push(`settings ${slash(CONFIG_PATH)}: could not be read or are invalid; fix them or reinstall`);
       }
       if (config) {
-        try {
-          const notice = check.baselineMigrationNotice(check.readBaseline(top, config), config);
-          if (notice) this.#say(`NOTE: ${notice}`);
-        } catch (error) {
-          if (!(error instanceof check.CheckError)) throw error;
-          problems.push(`baseline ${config.baseline}: could not be read or is invalid; fix it, or rewrite it with plain-text-check.cjs --init-baseline`);
-        }
+        const { notice, unreadable } = baselineState(top, config);
+        if (notice) this.#say(`NOTE: ${notice}`);
+        if (unreadable) problems.push(unreadable);
       }
     }
     if (problems.length) {
@@ -164,6 +166,15 @@ class PlainTextInstaller {
 }
 
 function slash(value) { return value.split(path.sep).join('/'); }
+
+// The existing baseline's advice: a NOTE to show (such as an old format to migrate), or why it cannot be read.
+function baselineState(top, config) {
+  try { return { notice: check.baselineMigrationNotice(check.readBaseline(top, config), config) }; }
+  catch (error) {
+    if (!(error instanceof check.CheckError)) throw error;
+    return { unreadable: `baseline ${config.baseline}: could not be read or is invalid; fix it, or rewrite it with plain-text-check.cjs --init-baseline` };
+  }
+}
 
 // Drift problems for a repository root, as plain lines; empty when the copy and settings are current.
 function drift(top) {
