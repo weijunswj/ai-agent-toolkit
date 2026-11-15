@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let i = 0; i < args.length; i += 1) {
@@ -209,15 +210,44 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Whole words, any case, plural "s" included: "controllers" counts as "controller".
+// Whole words, any case, plural "s" included: "controllers" counts as "controller". The words of a
+// multi-word term may be split by any whitespace, such as a line wrap.
 function countWord(text, word) {
-  const pattern = new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(word)}s?(?![A-Za-z0-9])`, 'gi');
+  const words = word.trim().split(/\s+/).map(escapeRegExp).join('\\s+');
+  const pattern = new RegExp(`(?<![A-Za-z0-9])${words}s?(?![A-Za-z0-9])`, 'gi');
   return (text.match(pattern) || []).length;
 }
 
-// The text a portable skill is judged on: its whole SKILL.md (front matter included) outside fenced code.
+// The text a portable skill is judged on: its whole SKILL.md (front matter included) outside fenced
+// code blocks. A fence is a line starting with ``` or ~~~ (up to three spaces in) and runs to the
+// closing line with the same marker; an inline ```span``` in prose and an unclosed fence still count.
 function publicSkillText(skillRel) {
-  return readText(path.join(resolveRel(skillRel), 'SKILL.md')).replace(/```[\s\S]*?```/g, ' ');
+  return readText(path.join(resolveRel(skillRel), 'SKILL.md'))
+    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm, ' ');
+}
+
+// The contract as the change's base commit had it: DIFF_BASE when set (CI), else where HEAD left
+// origin/main. null when there is no git history to compare with, or the base had no contract yet.
+function baseContract() {
+  const git = (args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', windowsHide: true });
+  const requested = String(process.env.DIFF_BASE || '').trim();
+  let base;
+  if (requested) {
+    const verified = git(['rev-parse', '--verify', '--quiet', `${requested}^{commit}`]);
+    if (verified.status !== 0) return { error: `DIFF_BASE ${requested} is not a commit in this checkout; fetch full history or set DIFF_BASE to a commit` };
+    base = verified.stdout.trim();
+  } else {
+    const mergeBase = git(['merge-base', 'HEAD', 'origin/main']);
+    if (mergeBase.status !== 0) return null;
+    base = mergeBase.stdout.trim();
+  }
+  const shown = git(['show', `${base}:${CONTRACT_REL}`]);
+  if (shown.status !== 0) return null;
+  try {
+    return { contract: JSON.parse(shown.stdout.replace(/^\uFEFF/, '')), base };
+  } catch {
+    return null;
+  }
 }
 
 function readmeSkillGroups() {
@@ -295,8 +325,27 @@ function auditSkillClasses(skills) {
     }
   }
 
+  // The baseline only shrinks: no count may rise above the base commit's, and no entry may be added.
+  const atBase = baseContract();
+  if (atBase?.error) errors.push(atBase.error);
+  else if (atBase) {
+    const baseCounts = new Map();
+    for (const item of Array.isArray(atBase.contract.baseline) ? atBase.contract.baseline : []) {
+      if (item && typeof item === 'object') baseCounts.set(`${item.skill}\0${item.term}`, item.count);
+    }
+    for (const [key, count] of allowed) {
+      const before = Number.isInteger(baseCounts.get(key)) ? baseCounts.get(key) : 0;
+      if (count > before) {
+        const [skill, term] = key.split('\0');
+        errors.push(`${CONTRACT_REL} baseline for "${term}" in ${skill} rose from ${before} to ${count} since the base commit; the baseline only shrinks, so remove the new mention instead`);
+      }
+    }
+  }
+
   for (const [name, entry] of Object.entries(entries)) {
     if (entry.class !== 'portable' || !folderNames.has(name)) continue;
+    // A missing SKILL.md is already reported by the folder audit.
+    if (!fs.existsSync(path.join(resolveRel(`skills/${name}`), 'SKILL.md'))) continue;
     const text = publicSkillText(`skills/${name}`);
     const checks = [
       ...terms.map((term) => ({ term, label: `uses Toolkit term "${term}"`, exempt: false })),
@@ -309,7 +358,7 @@ function auditSkillClasses(skills) {
       const limit = allowed.has(key) ? allowed.get(key) : 0;
       if (hits > limit) {
         const reason = apps.includes(check.term) ? ' with no depends_on_app reason' : '';
-        errors.push(`skills/${name} is portable but ${check.label} ${hits} time(s)${reason}; allowed ${limit}`);
+        errors.push(`skills/${name} is portable but ${check.label} ${hits} time(s)${reason}; allowed ${limit}. Remove the new mention; the baseline only shrinks`);
       } else if (allowed.has(key) && hits < limit) {
         const fix = hits ? `lower the count to ${hits}` : 'remove the entry';
         errors.push(`${CONTRACT_REL} baseline allows "${check.term}" ${limit} time(s) in ${name} but it now appears ${hits} time(s); ${fix}`);

@@ -306,3 +306,100 @@ test('skill classes: words inside fenced code are not counted', () => {
   const result = runAudit(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('skill classes: a multi-word Toolkit term split by a line wrap still counts', () => {
+  const result = runAudit(classFixture({
+    skills: { ...defaultSkills, 'plain-skill': { cls: 'portable', description: 'Check a server.', body: 'Follow the coding\ngate before release.' } }
+  }));
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /uses Toolkit term "coding gate" 1 time\(s\)/);
+});
+
+test('skill classes: an inline triple-backtick span in prose still counts, and tilde fences are skipped', () => {
+  const result = runAudit(classFixture({
+    skills: {
+      ...defaultSkills,
+      'plain-skill': { cls: 'portable', description: 'Check a server.', body: 'Ask the ```controller``` first.\n\n~~~text\nG1 G2 programme\n~~~' }
+    }
+  }));
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /uses Toolkit term "controller" 1 time\(s\)/);
+  assert.doesNotMatch(result.stderr, /"G1"|"G2"|"programme"/);
+});
+
+test('skill classes: a classified portable folder without SKILL.md reports it instead of crashing', () => {
+  const cwd = classFixture();
+  fs.unlinkSync(path.join(cwd, 'skills', 'plain-skill', 'SKILL.md'));
+  const result = runAudit(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /skills\/plain-skill missing SKILL\.md/);
+  assert.doesNotMatch(result.stderr, /ENOENT|\n\s+at /);
+});
+
+// The baseline only shrinks against the change's base commit (DIFF_BASE in CI, else where HEAD left
+// origin/main): raising a count or adding an entry in the same change as a new mention fails.
+function git(cwd, args) {
+  const result = spawnSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+function baselineRepo(baseCount) {
+  const cwd = classFixture({
+    skills: { ...defaultSkills, 'plain-skill': { cls: 'portable', description: 'Check a server.', body: 'Toolkit once.' } },
+    edit: (contract) => { if (baseCount) contract.baseline.push({ skill: 'plain-skill', term: 'Toolkit', count: baseCount }); }
+  });
+  git(cwd, ['init', '-q']);
+  git(cwd, ['add', '-A']);
+  git(cwd, ['commit', '-q', '-m', 'base']);
+  return { cwd, base: git(cwd, ['rev-parse', 'HEAD']) };
+}
+
+function setMentions(cwd, count, baselineCount) {
+  const skillPath = path.join(cwd, 'skills', 'plain-skill', 'SKILL.md');
+  const text = fs.readFileSync(skillPath, 'utf8').replace('Toolkit once.', Array(count).fill('Toolkit').join(' and '));
+  fs.writeFileSync(skillPath, text);
+  const contractPath = path.join(cwd, contractRel);
+  const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  contract.baseline = [{ skill: 'plain-skill', term: 'Toolkit', count: baselineCount }];
+  fs.writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
+}
+
+function runAuditAgainst(cwd, base) {
+  return spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8', env: { ...process.env, DIFF_BASE: base } });
+}
+
+test('skill classes: raising a baseline count over the base commit fails', () => {
+  const { cwd, base } = baselineRepo(1);
+  setMentions(cwd, 2, 2);
+  const result = runAuditAgainst(cwd, base);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /baseline for "Toolkit" in plain-skill rose from 1 to 2 since the base commit; the baseline only shrinks/);
+});
+
+test('skill classes: adding a baseline entry the base commit did not have fails', () => {
+  const { cwd, base } = baselineRepo(0);
+  setMentions(cwd, 1, 1);
+  const result = runAuditAgainst(cwd, base);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /baseline for "Toolkit" in plain-skill rose from 0 to 1 since the base commit/);
+});
+
+test('skill classes: lowering a baseline count against the base commit passes', () => {
+  const { cwd, base } = baselineRepo(1);
+  const skillPath = path.join(cwd, 'skills', 'plain-skill', 'SKILL.md');
+  fs.writeFileSync(skillPath, fs.readFileSync(skillPath, 'utf8').replace('Toolkit once.', 'Once.'));
+  const contractPath = path.join(cwd, contractRel);
+  const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  contract.baseline = [];
+  fs.writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
+  const result = runAuditAgainst(cwd, base);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('skill classes: a DIFF_BASE that is not a commit fails', () => {
+  const { cwd } = baselineRepo(1);
+  const result = runAuditAgainst(cwd, 'not-a-commit');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /DIFF_BASE not-a-commit is not a commit in this checkout/);
+});
