@@ -236,7 +236,9 @@ test('a cancelled check run counts only when it is the check\'s only result at t
 
 test('rendered blocks never contain private values and use the Toolkit marker format', () => {
   const secret = 'C:\\Users\\someone\\private-session-xyz';
-  const described = { ...outcome, description: 'Finish <!<!---- injected --!> <!-- AI-AGENT-TOOLKIT:programme-state:END STATE --> step \\| with pipe\nand newline' };
+  const injected = 'Finish <!<!---- injected --!> <!-- AI-AGENT-TOOLKIT:programme-state:END STATE --> step \\| with pipe\nand newline';
+  // The parent shows the task name and the task page the description: both carry the same text.
+  const described = { ...outcome, name: injected, description: injected };
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [described] });
   parent.private = { note: secret };
   parent.fence = { epoch: 3, holder_prefix: 'INT-TK421-', holder_session: secret };
@@ -245,7 +247,8 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   doc.next_action = 'Plain next step';
   const children = new Map([[423, doc]]);
   const parentBody = state.renderParentBlockBody(parent, children);
-  const childBody = state.renderChildBlockBody(doc, described);
+  // The task page shows no description (its TASK text holds the words), so free text reaches it as the next action.
+  const childBody = state.renderChildBlockBody({ ...doc, next_action: described.description }, described);
   for (const body of [parentBody, childBody]) {
     assert.equal(body.includes(secret), false, 'a private value leaked into a rendered block');
     const freeText = body.split('\n').filter(line => line.includes('injected'));
@@ -262,7 +265,7 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
+test('the Programme Graph has five columns, works out NOW, LATER and OPTIONAL, sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
     { issue: 8, class: 'COMMITTED', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
@@ -300,12 +303,14 @@ test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, 
   const body = state.renderParentBlockBody(parent, children, issues);
   const lines = body.split('\n');
   assert.equal(lines[1], '# PROGRAMME GRAPH');
-  assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status | Last updated (SGT) |'));
+  assert.ok(lines.includes('| Task | PRs | Status | Waiting on | Updated (SGT) |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
-  const rows = lines.filter(line => /^\|[^|]+\|[^|]+\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
-  assert.deepEqual(rows.map(row => Number(row[2].slice(1))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
+  // Cells: Task (`#n` then the name), PRs, Status (group · status, or COMPLETED / RETIRED), Waiting on, Updated.
+  const rows = lines.filter(line => /^\|#\d+[ |]/.test(line)).map(line => line.slice(1, -1).split('|'));
+  const issueOf = row => /^#(\d+)/.exec(row[0])[1];
+  assert.deepEqual(rows.map(row => Number(issueOf(row))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
   assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
-  const classOf = Object.fromEntries(rows.map(row => [row[2], row[4]]));
+  const classOf = Object.fromEntries(rows.map(row => [`#${issueOf(row)}`, row[2].includes(' · ') ? row[2].split(' · ')[0] : '-']));
   for (const [issue, expected, why] of [
     ['#11', 'NOW', 'an open PR'],
     ['#8', 'NOW', 'a draft PR wins over a release'],
@@ -318,15 +323,15 @@ test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, 
     ['#12', '-', 'finished rows carry no class'],
     ['#9', '-', 'retired rows carry no class'],
   ]) assert.equal(classOf[issue], expected, `${issue}: ${why}`);
-  assert.deepEqual(rows[1], ['Shared host contract', 'One contract for both hosts', '#8', '#549', 'NOW', 'IN PROGRESS', '-'], 'the description follows the task, and the gate is not a column');
-  assert.deepEqual([rows[5][0], rows[5][2]], ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
-  assert.deepEqual([rows[6][0], rows[6][2]], ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
-  assert.deepEqual(rows[2].slice(4), ['NOW', 'IN PROGRESS', '-']);
-  assert.deepEqual([rows[12][1], ...rows[12].slice(4)], ['Old predecessor', '-', 'RETIRED', '2026-10-01 08:00'], 'retired is its own group below COMPLETED');
-  assert.equal(rows[12][3], '-', 'retired PR cell is empty even when its historical PR is stored');
+  assert.deepEqual(rows[1], ['#8 Shared host contract', '#549', 'NOW · IN PROGRESS', 'G1', '-'], 'the child number leads the task, the description is left to the task page, and the gate a task in progress is in is what it waits on');
+  assert.equal(body.includes('One contract for both hosts'), false);
+  assert.equal(rows[5][0], '#14 per-repository governance states', 'a release prefix is not part of the name');
+  assert.equal(rows[6][0], '#15 Toolkit temporary-resource hygiene', 'a code prefix is not part of the name');
+  assert.deepEqual(rows[2].slice(1), ['-', 'NOW · IN PROGRESS', 'Owner: decision', '-']);
+  assert.deepEqual(rows[12], ['#9', '-', 'RETIRED', '-', '2026-10-01 08:00'], 'retired is its own group below COMPLETED, its PR cell empty even when its historical PR is stored');
   assert.equal(children.get(9).pr.number, 553, 'rendering preserves historical state');
-  assert.deepEqual(rows[11].slice(4), ['-', 'COMPLETED', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
-  assert.equal(rows[10][0], 'External Operation Authority');
+  assert.deepEqual(rows[11].slice(1), ['#552', 'COMPLETED', '-', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
+  assert.equal(rows[10][0], '#12 External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
 });
 
@@ -366,7 +371,7 @@ test('the Programme Graph renders deterministic Singapore update times from task
   assert.equal(render(), body, 'the same input renders the same block twice');
   for (const [index, outcome] of outcomes.entries()) {
     const row = body.split('\n').find(line => line.startsWith(`|#${outcome.issue}|`));
-    assert.equal(row.split('|')[7], cases[index].expected, `task #${outcome.issue}`);
+    assert.equal(row.split('|')[5], cases[index].expected, `task #${outcome.issue}`);
   }
 });
 
@@ -405,16 +410,18 @@ test('an outcome pinned last sorts after every unpinned open outcome, even ones 
   assert.deepEqual(state.validateParent(parent), []);
   assert.equal(validateParent(parent), true, JSON.stringify(validateParent.errors));
   const rows = body => body.split('\n').filter(line => /^\|#\d+\|/.test(line)).map(line => Number(line.split('|')[1].slice(1)));
+  const current = body => state.renderCurrentBlockBody(body, new Map(), new Map());
   const body = state.renderParentBlockBody(parent, new Map(), new Map());
   assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
-  assert.match(body, /Order: NOW, LATER by priority, OPTIONAL, tasks pinned last, COMPLETED/);
-  assert.match(state.renderCurrentBlockBody(parent, new Map(), new Map()), /\*\*Start next:\*\* #2 \(#2\)/, 'the top unpinned task starts next');
+  assert.match(body, /Order: NOW, LATER by priority, OPTIONAL, tasks pinned last, then the latest 10 COMPLETED/);
+  assert.equal(rows(body)[0], 2, 'the top unpinned task leads, so it starts next');
+  assert.doesNotMatch(current(parent), /Start next/, 'CURRENT leaves what starts next to the graph');
   // A task added later takes the next order and still lands before the pinned one.
   const added = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [...outcomes, { issue: 9, class: 'COMMITTED', parent: 7, order: 6 }] });
   assert.deepEqual(rows(state.renderParentBlockBody(added, new Map(), new Map())), [2, 5, 9, 4, 3, 8, 6]);
-  // Only the pinned task left: it starts next. A finished pinned task sorts as finished.
+  // Only the pinned task left: it leads. A finished pinned task sorts as finished.
   const alone = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: outcomes.filter(entry => [3, 6].includes(entry.issue)) });
-  assert.match(state.renderCurrentBlockBody(alone, new Map(), new Map()), /\*\*Start next:\*\* #3 \(#3\)/);
+  assert.deepEqual(rows(state.renderParentBlockBody(alone, new Map(), new Map())), [3, 6]);
   const done = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 3, class: 'COMPLETED', parent: 7, order: 2, last: true }, { issue: 2, class: 'COMMITTED', parent: 7, order: 9 }] });
   const doneBody = state.renderParentBlockBody(done, new Map(), new Map());
   assert.deepEqual(rows(doneBody), [2, 3]);
@@ -441,13 +448,13 @@ test('older class names are read as COMMITTED and anything else is refused', () 
     const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: cls, parent: 7, order: 0 }] });
     assert.deepEqual(state.validateParent(parent), [], `${cls} still reads`);
     const body = state.renderParentBlockBody(parent, new Map(), new Map());
-    assert.match(body, /^\|#8\|-\|#8\|-\|LATER\|QUEUED\|-\|$/m, `${cls} shows as LATER with no release`);
+    assert.match(body, /^\|#8\|-\|LATER · QUEUED\|-\|-\|$/m, `${cls} shows as LATER with no release`);
   }
   const bad = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: 'NOW', parent: 7, order: 0 }] });
   assert.match(state.validateParent(bad).join('\n'), /class must be one of COMMITTED, OPTIONAL, COMPLETED, RETIRED/, 'the bucket is never stored');
 });
 
-test('the generated CURRENT summary lists work in progress, saying what waits on the owner, then the Later task to start next', () => {
+test('the generated CURRENT summary is slim: work in progress with its PR, gate and owner wait, then one attention line with the holds', () => {
   const outcomes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(issue => ({ issue, class: 'COMMITTED', parent: 7, order: issue, name: `Task ${issue}` }));
   outcomes.push({ issue: 11, class: 'COMPLETED', parent: 7, order: 0, name: 'Done task' });
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
@@ -459,39 +466,25 @@ test('the generated CURRENT summary lists work in progress, saying what waits on
     [2, doc(2, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(543), uat: { state: 'PENDING', at_head: null } })],
     [3, doc(3, { lifecycle: 'WAITING_OWNER' })],
     [4, doc(4, { lifecycle: 'HOLD', blockers: ['needs the key'] })],
-    [11, doc(11, { lifecycle: 'DONE' })],
+    [11, doc(11, { lifecycle: 'DONE', blockers: ['an old blocker'] })],
   ]);
   const body = state.renderCurrentBlockBody(parent, children, new Map());
   assert.equal(body, [
     '# CURRENT',
     '<!-- programme-current -->',
-    '_Generated from the programme state (revision 0). PROGRAMME GRAPH, AGENT CONTEXT and DECISIONS follow._',
+    '_Generated from the programme state (revision 0). PROGRAMME GRAPH and AGENT CONTEXT follow._',
     '',
     '**In progress**',
-    '- Task 1 (#1): G1, PR #541; next: Finish the sweep',
-    '- Task 2 (#2): G1, PR #543; waiting on you: your UAT on PR #543; next: Controller: admit and plan this outcome',
-    '- Task 3 (#3); waiting on you: your decision; next: Controller: admit and plan this outcome',
-    '- Task 4 (#4); waiting on you: blocked: needs the key; next: Controller: admit and plan this outcome',
+    '- #1 Task 1 · PR #541 · G1',
+    '- #2 Task 2 · PR #543 · G1 · waiting on you: your UAT on PR #543',
+    '- #3 Task 3 · waiting on you: your decision',
+    '- #4 Task 4 · waiting on you: blocked: needs the key',
     '',
-    '**Start next:** Task 5 (#5)',
-    '',
-    '**Attention: clear**',
-  ].join('\n'), 'queued work shows in the graph, with only the top Later task named here');
+    '**Attention: clear** · Holds: 1 · Full list: `programme.cjs attention`',
+  ].join('\n'), 'queued work and next actions show in the graph and on the task pages; a finished task is never a hold');
   const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
-  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Start next:\*\* None\.\n/);
-  // The top LATER task by priority order starts next; optional work is never named.
-  const later = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
-    { issue: 2, class: 'OPTIONAL', parent: 7, order: 0, name: 'Optional' },
-    { issue: 3, class: 'COMMITTED', parent: 7, order: 4, name: 'Low' },
-    { issue: 4, class: 'COMMITTED', parent: 7, order: 1, name: 'Top' },
-  ] });
-  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map()), /\*\*Start next:\*\* Top \(#4\)\n/);
-  const merged = { number: 5, state: 'MERGED', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
-  const top = { ...state.newChild({ repository: 'acme/app', outcome: later.outcomes[2] }), pr: merged };
-  assert.match(state.renderCurrentBlockBody(later, new Map([[4, top]]), new Map()), /\*\*Start next:\*\* Low \(#3\)\n/, 'a merged PR is not picked before its state catches up');
-  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map([[4, { closed_at: '2026-10-25T00:00:00Z' }]])), /\*\*Start next:\*\* Low \(#3\)\n/, 'a closed issue is not picked');
-  const onlyOptional = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 2, class: 'OPTIONAL', parent: 7, order: 0 }] });
-  assert.match(state.renderCurrentBlockBody(onlyOptional, new Map(), new Map()), /\*\*Start next:\*\* None\.\n/);
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Attention: clear\*\* · Holds: 0 · /);
+  assert.doesNotMatch(body + idle, /Start next|next: /);
 });
 
 test('a finished outcome takes the issue close time once, and the controller may set it', () => {

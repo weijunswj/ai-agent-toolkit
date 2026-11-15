@@ -277,10 +277,14 @@ test('the key is bound to the exact text, and link definitions that stay are cop
   assert.equal(archive.noteText('plain comment'), null);
 });
 
+// Active rows only: the page always moves RETIRED and older COMPLETED rows into archive comments,
+// and these tests count the note comments alone.
+const ACTIVE = ['OPTIONAL', 'LATER', 'NOW'];
+
 // ---- The sweep --------------------------------------------------------------------------------
 
 test('marked notes move byte for byte: saved copy first, verified comment, one cut, links, then quiet', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   const before = f.page();
   const result = f.make().run({ apply: true });
   assert.deepEqual(result.holds, []);
@@ -307,7 +311,7 @@ test('marked notes move byte for byte: saved copy first, verified comment, one c
   assert.equal(f.page().includes('## Archive'), context(f).includes('## Archive'));
   assert.equal(f.page().includes('Keep every byte.'), false);
   assert.equal(hand(f), '# Programme\n\n|\n\nOwner text that stays.  \n\n' + TAIL + '\n');
-  assert.match(context(f), new RegExp(`\\n\\n- \\[Notes archived 2026-11-09 \\(part 1 of 1\\)\\]\\(https://github\\.com/example\\.test/app/issues/12#issuecomment-${entry.comment_id}\\)$`));
+  assert.ok(context(f).endsWith(` · Notes: [Notes archived 2026-11-09 (part 1 of 1)](https://github.com/example.test/app/issues/12#issuecomment-${entry.comment_id}) · Decisions: \`programme.cjs trace 12\``), context(f));
   assert.deepEqual(unsafe(f), []);
   assert.deepEqual(state.validateParent(f.parent()), []);
   // Steady state: nothing more is written to GitHub.
@@ -321,7 +325,7 @@ test('marked notes move byte for byte: saved copy first, verified comment, one c
 
 test('dry runs and single-issue passes post nothing, save nothing and cut nothing', () => {
   for (const options of [{ apply: false }, { apply: true, issue: 100 }]) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     const result = f.make().run(options);
     assert.deepEqual(result.holds, []);
     assert.equal(f.posts().length + f.edits().length + copies(f).length, 0);
@@ -333,7 +337,7 @@ test('dry runs and single-issue passes post nothing, save nothing and cut nothin
 
 test('an unsafe area raises one finding, moves nothing and never blocks the redraw; fixing it moves the notes and resolves the finding', () => {
   const bad = HEAD + '## Archive\nOld.\n\nCurrent plan\n---\nNever marked.\n';
-  const f = pageFixture(state, { count: 3, hand: bad });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: bad });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.posts().length + copies(f).length, 0);
   assert.ok(f.page().includes('## Archive\nOld.\n\nCurrent plan\n---\nNever marked.\n'));
@@ -356,14 +360,14 @@ test('an unsafe area raises one finding, moves nothing and never blocks the redr
 });
 
 test('no saved copy, no move: a store that is not private, a failed copy and secret-shaped text all post nothing', () => {
-  const open = pageFixture(state, { count: 3, hand: HAND });
+  const open = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   open.github.repos.get('example.test/store').private = false;
   const held = open.make().run({ apply: true });
   assert.ok(held.holds.some(hold => hold.code === 'STORE_NOT_PRIVATE'));
   assert.equal(open.posts().length + copies(open).length, 0);
   assert.ok(open.page().includes(AREA));
 
-  const failing = pageFixture(state, { count: 3, hand: HAND });
+  const failing = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   failing.github.intercept(call => (call.method === 'PUT' && call.path.includes('/page-copies/') ? { status: 500, json: { message: 'Server error' } } : null));
   assert.ok(failing.make().run({ apply: true }).holds.length);
   assert.equal(failing.posts().length, 0);
@@ -372,7 +376,7 @@ test('no saved copy, no move: a store that is not private, a failed copy and sec
   assert.deepEqual(failing.make().run({ apply: true }).holds, []);
   assert.equal(failing.page().includes('Keep every byte.'), false);
 
-  const mismatched = pageFixture(state, { count: 3, hand: HAND });
+  const mismatched = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   mismatched.github.intercept((call, github) => {
     if (call.method !== 'PUT' || !call.path.includes('/page-copies/')) return null;
     const answer = github.route(call.method, call.path, call.body);
@@ -383,13 +387,13 @@ test('no saved copy, no move: a store that is not private, a failed copy and sec
   assert.ok(mismatched.make().run({ apply: true }).holds.some(hold => hold.code === 'STATE_READBACK_MISMATCH'));
   assert.equal(mismatched.posts().length, 0);
 
-  const secret = pageFixture(state, { count: 3, hand: HAND.replace('Never marked.', `Bearer ${'a'.repeat(30)}`) });
+  const secret = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND.replace('Never marked.', `Bearer ${'a'.repeat(30)}`) });
   assert.deepEqual(secret.make().run({ apply: true }).holds, []);
   assert.equal(secret.posts().length + copies(secret).length, 0);
   assert.ok(secret.page().includes(AREA));
   assert.deepEqual(unsafe(secret).map(entry => entry.diagnostics), [{ reason: 'secret_like' }]);
   // A page the saved copy could not carry byte for byte (a lone surrogate outside the marked area).
-  const broken = pageFixture(state, { count: 3, hand: HAND.replace('Never marked.', `Never${String.fromCharCode(0xD800)} marked.`) });
+  const broken = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND.replace('Never marked.', `Never${String.fromCharCode(0xD800)} marked.`) });
   assert.deepEqual(broken.make().run({ apply: true }).holds, []);
   assert.equal(broken.posts().length + copies(broken).length, 0);
   assert.ok(broken.page().includes(AREA));
@@ -398,7 +402,7 @@ test('no saved copy, no move: a store that is not private, a failed copy and sec
 });
 
 test('a lost post reply is found under its key and never posted twice', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   let lost = false;
   f.github.intercept(call => {
     if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
@@ -418,7 +422,7 @@ test('a lost post reply is found under its key and never posted twice', () => {
 
 test('a comment changed or taken over before the cut never authorises it: the text stays until a fresh exact comment exists', () => {
   for (const mode of ['changed', 'foreign']) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     let lost = false;
     f.github.intercept(call => {
       if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
@@ -445,7 +449,7 @@ test('a comment changed or taken over before the cut never authorises it: the te
 
 test('a page edit between the post and the cut: unrelated text reuses the comment, changed notes set it aside', () => {
   for (const mode of ['unrelated', 'notes']) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     let edited = false;
     f.github.intercept((call, github) => {
       // The owner saves an edit just after the note comment lands.
@@ -498,7 +502,7 @@ test('a page edit between the post and the cut: unrelated text reuses the commen
 });
 
 test('a host that does not keep a note comment byte for byte gets one comment, not one per pass', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   f.github.intercept((call, github) => {
     if (call.method !== 'POST' || !/issues\/12\/comments$/.test(call.path)) return null;
     const answer = github.route(call.method, call.path, call.body);
@@ -529,7 +533,7 @@ test('a host that does not keep a note comment byte for byte gets one comment, n
 });
 
 test('an interrupted cut settles by read-back: no second post, no replay, link kept', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   let landed = false, stopped = false;
   f.github.intercept(call => {
     if (call.method === 'PATCH' && /issues\/12$/.test(call.path)) landed = true;
@@ -558,7 +562,7 @@ const answer = (f, id, change) => { const { doc, sha } = f.store.read('parent', 
 
 test('a moved note whose comment later changes or disappears keeps its link, raises one finding and is never reposted or edited', () => {
   for (const mode of ['changed', 'missing', 'foreign']) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     const [entry] = noteEntries(f);
     damage(f, entry, mode);
@@ -601,7 +605,7 @@ test('a moved note whose comment later changes or disappears keeps its link, rai
 
 test('two damaged notes from different saved copies: the one finding points to the copies folder and names neither file alone', () => {
   for (const together of [true, false]) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     f.github.issues.get(12).body = f.page().replace('## Current plan\n', '## Archive\nSecond batch.\n\n## Current plan\n');
     f.github.issues.get(12).updated_at = f.github.tick();
@@ -628,7 +632,7 @@ test('two damaged notes from different saved copies: the one finding points to t
 
 test("the owner's answer to a damaged note finding stands on every later pass", () => {
   for (const change of [{ state: 'acknowledged' }, { state: 'disposed', reason: 'Restored by hand.' }]) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     damage(f, noteEntries(f)[0], 'changed');
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
@@ -648,7 +652,7 @@ test("the owner's answer to a damaged note finding stands on every later pass", 
 
 test('putting the same notes back under the marker after the comment is damaged posts a fresh comment and never holds the page', () => {
   for (const mode of ['changed', 'missing', 'foreign']) for (const reportedFirst of [true, false]) {
-    const f = pageFixture(state, { count: 3, hand: HAND });
+    const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     const [entry] = noteEntries(f);
     const retained = f.github.comments.get(entry.comment_id)?.body;
@@ -690,16 +694,18 @@ test('a pass that stopped for time finishes its redraw but posts and cuts no not
     const stopped = f.make({ pass: new state.RefreshBudget({ nowMs: () => start, budgetMs: left }) }).run({ apply: true });
     assert.ok(stopped.holds.some(hold => hold.code === 'PASS_STOPPED'), JSON.stringify(stopped.holds));
     assert.ok(state.findStateBlock(f.page()).block, 'the page is still redrawn');
-    assert.equal(f.posts().length + copies(f).length, 0);
+    // The retired row's graph archive may move on any pass; notes wait for a full one.
+    const notePosts = () => f.posts().filter(post => !post.body.body.startsWith('<!-- programme-page-archive key=graph-')).length;
+    assert.equal(notePosts() + copies(f).length, 0);
     assert.ok(f.page().includes(AREA));
     assert.deepEqual(noteEntries(f), []);
     assert.deepEqual(f.make().run({ apply: true }).holds.filter(hold => hold.code !== 'PASS_STOPPED'), []);
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
-    assert.equal(f.posts().length, 1);
+    assert.equal(notePosts(), 1);
     assert.equal(f.page().includes('Keep every byte.'), false);
   }
   // The projection itself: asked to keep notes, it names the area's parts and leaves the page whole.
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   const kept = f.make().projectBody(12, f.page(), state.renderParentBlockBody(f.parent(), f.children, f.issues), [], '3.57.0', null,
     state.renderCurrentBlockBody(f.parent(), f.children, f.issues, f.NOW), null, 5, { parent: f.parent(), only: false, keepNotes: true });
   assert.equal(kept.noteCut, undefined); assert.equal(kept.noteKeys.length, 1);
@@ -747,14 +753,14 @@ test('the shared hostile variants never widen what the reader accepts, and readi
 });
 
 test('a dry run says that notes leave the page', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   const planned = f.make().run({ apply: false }).effects.find(effect => effect.kind === 'post_archive_comment');
   assert.equal(state.describeEffect(planned), 'Move the notes marked under `## Archive` off #12\'s page into a verified comment');
   assert.equal(state.describeEffect({ kind: 'post_archive_comment', target: { issue: 12, key: 'graph-now-1' } }), 'Archive programme content from #12 in a verified comment');
 });
 
 test('a second marked area later adds a new entry and keeps the first link', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const first = noteEntries(f)[0];
   f.github.issues.get(12).body = f.page().replace('## Current plan\n', '## Archive\nSecond batch.\n\n## Current plan\n');
@@ -770,13 +776,13 @@ test('a second marked area later adds a new entry and keeps the first link', () 
 });
 
 test('the Agent context comment and moved notes are both listed, the comment first, and a note comment never counts as context', () => {
-  const f = pageFixture(state, { count: 3, hand: HEAD + '## Archive\nAgent context\n\n---\nOld background.\n\n' + TAIL });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HEAD + '## Archive\nAgent context\n\n---\nOld background.\n\n' + TAIL });
   const id = f.github.addComment(12, { body: 'Agent context\n---\nBackground for agents.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const [entry] = noteEntries(f);
   assert.equal(entry.state, 'moved');
   const link = number => `https://github.com/example.test/app/issues/12#issuecomment-${number}`;
-  assert.equal(context(f), `${state.renderContextBlockBody()}\n\n- [Agent context](${link(id)})\n\n- [${entry.title}](${link(entry.comment_id)})`);
+  assert.equal(context(f), `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${link(id)}) · Notes: [${entry.title}](${link(entry.comment_id)}) · Decisions: \`programme.cjs trace 12\``);
   assert.equal(f.page().includes('Old background.'), false);
   const writes = f.github.mutations();
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
@@ -784,7 +790,7 @@ test('the Agent context comment and moved notes are both listed, the comment fir
 });
 
 test('notes share the five-comment budget after graph rows: with no slot left they wait, uncut, for the next pass', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   const none = f.project(f.page(), 0);
   assert.equal(none.noteCut, undefined);
   assert.ok(none.body.includes(AREA));
@@ -798,7 +804,7 @@ test('notes share the five-comment budget after graph rows: with no slot left th
 });
 
 test('note entries, their intents and the new finding are closed in runtime and schema', () => {
-  const f = pageFixture(state, { count: 3, hand: HAND });
+  const f = pageFixture(state, { count: 3, groups: ACTIVE, hand: HAND });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const Ajv = require('ajv/dist/2020');
   const validate = new Ajv({ strict: false }).compile(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'))));

@@ -78,7 +78,6 @@ test('budget modes: the computer refresh gets what is left before 55 minutes, le
 // Tasks natively under #421 with their pages drawn; every request takes `slow` on the pass clock.
 function fixture(t, { count = 30, slow = 0 } = {}) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
-  github.commentsMoveIssue = true;
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(421, { body: '# Programme\n' });
@@ -172,10 +171,10 @@ test('a pass that reaches the request cap at minute 20 stops, saves its place an
   assert.deepEqual(f.parent().sweep.queue, [], 'every task is read in later hours');
 });
 
-test('request caps: a scheduled pass on GitHub runs to the App limit, 600 on a computer; an after-write refresh keeps 300 on both', () => {
+test('request caps: a scheduled pass on GitHub sends what fits in half its budget, 600 on a computer; an after-write refresh keeps 300 on both', () => {
   const sweep = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-sweep.cjs'));
   const table = [
-    [{ host: 'cloud', scheduled: true }, Infinity],
+    [{ host: 'cloud', scheduled: true }, 1500],
     [{ host: 'computer', scheduled: true }, 600],
     [{ host: 'cloud', scheduled: false }, 300],
     [{ host: 'computer', scheduled: false }, 300],
@@ -189,8 +188,9 @@ test('request caps: a scheduled pass on GitHub runs to the App limit, 600 on a c
   assert.equal(sweep.LOW_REMAINING, 200, 'the low-remaining guard is the margin\'s floor');
   assert.equal(sweep.MARGIN_SHARE, 0.1, 'the margin is a tenth of GitHub\'s hourly limit');
   assert.deepEqual([sweep.margin(5000), sweep.margin(12500), sweep.margin(1000), sweep.margin(null)], [500, 1250, 200, 200]);
-  assert.equal(sweep.capText(Infinity), 'GitHub limit');
-  assert.equal(sweep.capText(600), '600');
+  // Every cap, at the measured pace of one request a second, fits in half the scheduled budget.
+  assert.equal(sweep.HALF_BUDGET_CAP, Math.floor(state.PASS_BUDGETS.scheduled.budgetMs / 2 / sweep.REQUEST_MS));
+  for (const cap of Object.values(sweep.PASS_CAPS).flatMap(Object.values)) assert.ok(Number.isSafeInteger(cap) && cap * sweep.REQUEST_MS <= state.PASS_BUDGETS.scheduled.budgetMs / 2, String(cap));
 });
 
 test('request caps: 97 stale tasks finish in one scheduled cloud pass; an after-write refresh stops safely at 300', t => {
@@ -204,7 +204,7 @@ test('request caps: 97 stale tasks finish in one scheduled cloud pass; an after-
   assert.deepEqual(cloud.parent().sweep.queue, []);
   assert.equal(cloud.stop(), undefined, 'no PASS_STOPPED');
   assert.ok(cloud.parent().outcomes.every(outcome => /State revision \d+ \(issue-/.test(cloud.page(outcome.issue))), 'every page drawn');
-  assert.match(full.report.metrics, /^Sweep: requests=\d+, cap=GitHub limit, tasks read=97, queue left=0, complete=yes$/);
+  assert.match(full.report.metrics, /^Sweep: requests=\d+, cap=1500, tasks read=97, queue left=0, complete=yes$/);
 
   const small = fixture(t, { count: 97 });
   stale(small);
@@ -225,7 +225,7 @@ test('request caps: a scheduled pass on a computer runs with 600 unless told oth
 test('request caps: the host and mode pick the cap from the run environment', () => {
   const cloud = { GITHUB_ACTIONS: 'true', TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1' };
   const cap = (argv, environment) => cli.sweepRequestCap(cli.parseArgs(argv), environment);
-  assert.equal(cap(['refresh', '--scheduled'], cloud), Infinity);
+  assert.equal(cap(['refresh', '--scheduled'], cloud), 1500);
   assert.equal(cap(['refresh'], cloud), 300);
   assert.equal(cap(['refresh', '--scheduled'], {}), 600);
   assert.equal(cap(['refresh', '--scheduled'], { GITHUB_ACTIONS: 'true' }), 600, 'an Actions run that is not the cloud sweep is a computer');

@@ -1,7 +1,7 @@
 'use strict';
 
-// The sweep at scale: no fixed limit can stall a big board for good. The cloud pass runs to GitHub's
-// own limit less a safety margin, saves its place and the next run resumes; the changed-issues list
+// The sweep at scale: no fixed limit can stall a big board for good. The cloud pass runs to its
+// half-budget cap or GitHub's own limit less a safety margin, saves its place and the next run resumes; the changed-issues list
 // resumes from a cursor; PR discovery's budget grows with the board; the board shows a calm note
 // when a pass stops early, and a warning only when the sweep is truly stuck.
 const assert = require('node:assert/strict');
@@ -42,7 +42,6 @@ function limited(github, left, limit = 5000) {
 
 function fixture(t, { count = 40 } = {}) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
-  github.commentsMoveIssue = true;
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(421, { body: '# Programme\n' });
@@ -68,10 +67,10 @@ function fixture(t, { count = 40 } = {}) {
   return { github, store, run, stale, parent, page, boardLine, outcomes, now: () => clock };
 }
 
-test('margin: a tenth of GitHub\'s reported limit, never under 200; the margin, not a cap, stops a cloud pass', () => {
-  assert.equal(sweep.passCap({ host: 'cloud', scheduled: true }), Infinity);
+test('margin: a tenth of GitHub\'s reported limit, never under 200; the margin or the half-budget cap, whichever comes first, stops a cloud pass', () => {
+  assert.equal(sweep.passCap({ host: 'cloud', scheduled: true }), sweep.HALF_BUDGET_CAP);
   assert.equal(sweep.passCap({ host: 'computer', scheduled: true }), 600, 'the computer keeps its cap');
-  for (const [limit, start] of [[5000, 5000], [5000, 900], [12500, 3000], [1000, 600]]) {
+  for (const [limit, start, bound] of [[5000, 5000, 'request cap'], [5000, 900, 'GitHub rate limit'], [12500, 3000, 'request cap'], [12500, 2500, 'GitHub rate limit'], [1000, 600, 'GitHub rate limit']]) {
     const left = { core: start, graphql: 5000 };
     const transport = { request: (method, endpoint) => {
       const resource = endpoint === 'graphql' ? 'graphql' : 'core';
@@ -83,7 +82,8 @@ test('margin: a tenth of GitHub\'s reported limit, never under 200; the margin, 
     assert.equal(requests.floor(), sweep.margin(limit));
     let pages = 0;
     while (requests.canStartTask(pages)) { for (let i = 0; i < sweep.TASK_COST; i += 1) requests.request('GET', 'task'); pages += 1; }
-    assert.equal(requests.bound(), 'GitHub rate limit', `${limit}/${start}: GitHub's count is what stops it`);
+    assert.equal(requests.bound(), bound, `${limit}/${start}: the lower of GitHub's count and the cap stops it`);
+    assert.ok(requests.count <= requests.cap);
     requests.reading = false;
     for (let i = 0; i < pages * sweep.PAGE_COST + requests.reserve; i += 1) requests.request('PATCH', 'page');
     // The pages owed and the reserve fit above the margin: the margin stays for other jobs.
@@ -187,7 +187,7 @@ test('limit hit mid-pass: the cloud pass stops at the margin, notes it calmly an
   assert.ok(first.code === 0 || first.report.holds.every(hold => hold.code === 'PASS_STOPPED'), JSON.stringify(first.report.holds));
   const queued = f.parent().sweep.queue;
   assert.ok(queued.length > 0 && first.report.sweep.read > 0, JSON.stringify(first.report.sweep));
-  assert.match(first.report.metrics, /, cap=GitHub limit, .*complete=no$/);
+  assert.match(first.report.metrics, /, cap=1500, .*complete=no$/);
   assert.ok(tight.lowest() >= sweep.margin(5000) - sweep.RESERVE, `GitHub's count went to ${tight.lowest()}`);
   assert.equal(f.boardLine(), f.boardLine().replace(/⚠️/g, ''), 'no warning');
   assert.match(f.boardLine(), new RegExp(`^Board updated: .* SGT \\(state revision \\d+\\)\\. Paused at GitHub's hourly App limit; the next run picks up the ${queued.length} tasks left\\.$`));
