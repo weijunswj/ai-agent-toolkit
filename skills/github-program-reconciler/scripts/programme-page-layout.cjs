@@ -26,7 +26,7 @@ const MORE_HEADING = 'More';
 const TASK_BLOCKS = Object.freeze(['NAV', 'STATE', 'TRACE']);
 // The generated blocks printed above TASK; the rest follow it.
 const ABOVE_TASK = Object.freeze(['NAV']);
-// The WHY parts, printed as `###` headings. Under `# TASK` they are read from a `###` heading too.
+// The WHY parts, printed as `###` headings. Inside `## WHY` they are read from a `###` heading too.
 const WHY_PARTS = Object.freeze(['PROBLEM', 'FIX', 'IF WE SKIP']);
 const KNOWN_BLOCKS = Object.freeze(['STATE', 'TRACE', 'NAV', 'CURRENT', 'CONTEXT']);
 const LABELS = new Map([...SPEC_SECTIONS.map(label => [label, label]), ['THE PROBLEM', 'PROBLEM'], ['THE FIX', 'FIX'], ['IF WE SKIP IT', 'IF WE SKIP']]);
@@ -201,8 +201,11 @@ function splitPage(source, names = TASK_BLOCKS) {
     if (!heading && !label) continue;
     const name = normalLabel(heading ? heading[2] : label[2]);
     const depth = heading ? heading[1].length : LABEL_LEVEL;
+    // A `###` WHY part is read only inside `## WHY` (or another WHY part), with or without `# TASK`:
+    // the same heading in PLAN, DONE WHEN or someone's notes stays where it is.
+    const inWhy = section === 'WHY' || WHY_PARTS.includes(section);
     const known = (depth <= 2 || depth === LABEL_LEVEL && !HEADING_ONLY.has(LABELS.get(name))
-      || task && depth === 3 && WHY_PARTS.includes(LABELS.get(name))) && LABELS.get(name) || null;
+      || inWhy && depth === 3 && WHY_PARTS.includes(LABELS.get(name))) && LABELS.get(name) || null;
     if (depth === 1 && name === TASK_HEADING) {
       if ((tasks += 1) > 1) throw held('the TASK heading appears more than once');
       keep(line.start);

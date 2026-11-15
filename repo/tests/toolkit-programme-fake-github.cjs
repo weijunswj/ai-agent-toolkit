@@ -395,7 +395,7 @@ class FakeGitHub {
     }
     if (/p\d+: pullRequest/.test(body.query)) {
       const repository = { defaultBranchRef: { name: 'main' } };
-      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: 'pullRequest', variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
+      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: 'pullRequest { title }', variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
       return ok(200, { data: { repository } });
     }
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
@@ -421,7 +421,8 @@ class FakeGitHub {
     const pr = this.prs.get(body.variables.number);
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
     return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {
-      number: pr.number, body: pr.body || '', state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
+      // Like GitHub, a field is returned only when the query asks for it.
+      number: pr.number, ...(/\btitle\b/.test(body.query) ? { title: pr.title || '' } : {}), body: pr.body || '', state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
       mergedAt: pr.mergedAt, mergeCommit: pr.merged ? {oid:pr.head} : null,
       commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
     } } } });

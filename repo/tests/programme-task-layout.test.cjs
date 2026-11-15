@@ -128,6 +128,24 @@ test('a page with only a plan gets PLAN and no TASK heading, and text under its 
   assert.equal(lay(second.body).body, second.body);
 });
 
+test('a new task filed as the skill says, with no TASK heading, is laid out on its first pass, in capitals or Title Case', () => {
+  for (const [why, parts, done, plan] of [['## WHY', ['### PROBLEM', '### FIX', '### IF WE SKIP'], '## DONE WHEN', '# PLAN'], ['## Why', ['### Problem', '### Fix', '### If we skip'], '## Done when', '# Plan']]) {
+    const source = [why, '', ...parts.flatMap((heading, index) => [heading, '', `Words ${index}.`, '']), done, '', '- [ ] a', '', plan, '', 'Slice 1.', ''].join('\n');
+    const first = lay(source);
+    assert.equal(taskPart(first.body), '\n\n# TASK\n\n## WHY\n\n### PROBLEM\n\nWords 0.\n\n### FIX\n\nWords 1.\n\n### IF WE SKIP\n\nWords 2.\n\n## DONE WHEN\n\n- [ ] a\n\n# PLAN\n\nSlice 1.\n\n', why);
+    assert.equal(lay(first.body).body, first.body, `${why}: the second lay-out gives the same bytes`);
+  }
+});
+
+test('a WHY part heading inside PLAN or DONE WHEN stays where it is written', () => {
+  const source = '## WHY\n\n### FIX\n\nThe fix.\n\n## DONE WHEN\n\n### Problem\n\nA check.\n\n# PLAN\n\n### Fix\n\nStep one.\n';
+  for (const page of [source, source.replace('## WHY', '# TASK\n\n## WHY')]) {
+    const first = lay(page);
+    assert.equal(taskPart(first.body), '\n\n# TASK\n\n## WHY\n\n### FIX\n\nThe fix.\n\n## DONE WHEN\n\n### Problem\n\nA check.\n\n# PLAN\n\n### Fix\n\nStep one.\n\n');
+    assert.equal(lay(first.body).body, first.body);
+  }
+});
+
 test('a heading people write inside a TASK part stays in that part when the page is laid out again', () => {
   const first = lay('# PROBLEM\n\nA.\n\n## Detail\n\nStill the problem.\n\n# FIX\n\n- one\n- two\n');
   assert.match(taskPart(first.body), /### PROBLEM\n\nA\.\n\n## Detail\n\nStill the problem\.\n\n### FIX\n\n- one\n- two\n/);
@@ -173,15 +191,16 @@ const childDoc = (change = {}) => ({ ...state.newChild({ repository: 'acme/app',
 const OUTCOME = { issue: 806, class: 'COMMITTED', order: 1 };
 
 test('the task status block is a PR GRAPH: PR title, number, status and merge commit; the status stays out of sight', () => {
-  const finished = Array.from({ length: 12 }, (unused, index) => ({ number: 700 - index, state: index % 4 === 3 ? 'CLOSED' : 'MERGED', merge_sha: index % 4 === 3 ? null : SHA_A, title: `Slice ${index}` }));
+  const finished = Array.from({ length: 12 }, (unused, index) => ({ number: 700 - index, state: index % 4 === 3 ? 'CLOSED' : 'MERGED', merge_sha: index % 4 === 3 ? null : SHA_A }));
+  const titles = new Map([[852, 'Build the child page | slice'], ...finished.map((pr, index) => [pr.number, `Slice ${index}`])]);
   const child = childDoc({
     lifecycle: 'ACTIVE', release: '3.67.0', next_action: 'G2 recheck at 0420542',
     gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] },
     pr: { number: 852, state: 'OPEN', head: SHA_A, checks: { state: 'PASS', required_total: 1, required_passed: 1, at_head: SHA_A } },
     review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] },
-    prs: [{ number: 852, state: 'OPEN', merge_sha: null, title: 'Build the child page | slice' }, ...finished],
+    prs: [{ number: 852, state: 'OPEN', merge_sha: null }, ...finished],
   });
-  const body = state.renderChildBlockBody(child, OUTCOME);
+  const body = state.renderChildBlockBody(child, OUTCOME, titles);
   const lines = body.split('\n');
   assert.equal(lines[0], '<!-- programme-state child=806@4 -->');
   assert.ok(lines.includes('<!-- State revision 4 (issue-806.json) -->'), 'the drawn revision stays on the page for drift checks, out of sight');
@@ -189,22 +208,23 @@ test('the task status block is a PR GRAPH: PR title, number, status and merge co
   assert.equal(lines.filter(line => /^# /.test(line)).join(','), '# PR GRAPH', 'no STATUS heading');
   assert.ok(lines.includes('| PR Task | PR # | Status | Merged SHA |'));
   const rows = lines.filter(line => /^\|[^|\n]*(?:\\\|[^|\n]*)*\|#\d+\|/.test(line));
-  assert.equal(rows[0], '|Build the child page \\| slice|#852|OPEN · G2 ACTIVE|-|', 'open PRs first, titled; the tracked one with its gate');
+  assert.equal(rows[0], '|`Build the child page \\| slice`|#852|OPEN · G2 ACTIVE|-|', 'open PRs first, titled; the tracked one with its gate');
   assert.equal(rows.length, 11, 'the open PR, then up to ten finished ones');
-  assert.equal(rows[1], `|Slice 0|#700|MERGED|[aaaaaaa](https://github.com/acme/app/commit/${SHA_A})|`);
+  assert.equal(rows[1], `|\`Slice 0\`|#700|MERGED|[aaaaaaa](https://github.com/acme/app/commit/${SHA_A})|`);
   assert.ok(lines.includes('Earlier: #690, #689'), 'older finished PRs collapse to one line');
   for (const gone of ['Next:', 'Release:', 'Review', '3.67.0', 'CI at head']) assert.equal(body.includes(gone), false, `${gone} lives in the handover file`);
-  assert.match(state.renderChildBlockBody({ ...child, prs: [{ number: 852, state: 'OPEN', merge_sha: null }] }, OUTCOME), /^\|-\|#852\|/m, 'a PR whose title is not read yet shows -');
+  assert.match(state.renderChildBlockBody(child, OUTCOME), /^\|-\|#852\|/m, 'a PR whose title is not read yet shows -');
 });
 
 test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owed', () => {
   const tracked = uat => childDoc({ lifecycle: 'ACTIVE', gate: { role: 'G2', state: 'PASSED', session_id: null, route: null, returns: [] },
     pr: { number: 852, state: 'MERGED', head: SHA_A, checks: null }, uat: { state: uat, at_head: uat === 'UAT_PARTIAL_REQUIRED' ? SHA_A : null },
-    prs: [{ number: 853, state: 'OPEN', merge_sha: null, title: 'Follow-up' }, { number: 852, state: 'MERGED', merge_sha: SHA_A, title: 'Main change' }] });
+    prs: [{ number: 853, state: 'OPEN', merge_sha: null }, { number: 852, state: 'MERGED', merge_sha: SHA_A }] });
+  const titles = new Map([[853, 'Follow-up'], [852, 'Main change']]);
   for (const uat of ['PENDING', 'UAT_FULL_REQUIRED', 'UAT_PARTIAL_REQUIRED']) {
-    const body = state.renderChildBlockBody(tracked(uat), OUTCOME);
-    assert.match(body, /^\|Main change\|#852\|MERGED · G2 PASSED · UAT owed\|\[aaaaaaa\]/m, uat);
-    assert.match(body, /^\|Follow-up\|#853\|OPEN\|-\|$/m, 'only the tracked PR carries the gate and UAT');
+    const body = state.renderChildBlockBody(tracked(uat), OUTCOME, titles);
+    assert.match(body, /^\|`Main change`\|#852\|MERGED · G2 PASSED · UAT owed\|\[aaaaaaa\]/m, uat);
+    assert.match(body, /^\|`Follow-up`\|#853\|OPEN\|-\|$/m, 'only the tracked PR carries the gate and UAT');
     assert.match(body, new RegExp(`^<!-- Task status: IN PROGRESS · UAT: ${uat}\\b`, 'm'), 'the exact UAT state stays out of sight for the closure check');
   }
   assert.doesNotMatch(state.renderChildBlockBody(tracked('PASSED'), OUTCOME), /UAT owed/);
@@ -212,8 +232,8 @@ test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owe
   assert.match(none, /# PR GRAPH\n\nNone yet · UAT owed$/, 'with no PR yet the owed UAT still shows');
   // PRs listed but none tracked: the owed UAT and the gate show on one line under the graph.
   const untracked = state.renderChildBlockBody(childDoc({ gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] }, uat: { state: 'PENDING', at_head: null },
-    prs: [{ number: 852, state: 'MERGED', merge_sha: SHA_A, title: 'Main change' }] }), OUTCOME);
-  assert.match(untracked, /^\|Main change\|#852\|MERGED\|/m);
+    prs: [{ number: 852, state: 'MERGED', merge_sha: SHA_A }] }), OUTCOME, titles);
+  assert.match(untracked, /^\|`Main change`\|#852\|MERGED\|/m);
   assert.match(untracked, /\n\nTask: G2 ACTIVE · UAT owed$/);
   // A tracked PR only on the Earlier line: the same line carries them.
   const older = Array.from({ length: 11 }, (unused, index) => ({ number: 700 - index, state: 'MERGED', merge_sha: SHA_A }));
@@ -244,32 +264,80 @@ test('long PR titles are cut to 60 characters, so the PR GRAPH stays well inside
   const title = n => `${String(n).padEnd(255, 'x')}y`;
   const child = childDoc({ gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] }, uat: { state: 'PENDING', at_head: null },
     pr: { number: 900, state: 'OPEN', head: SHA_A, checks: null },
-    prs: [{ number: 900, state: 'OPEN', merge_sha: null, title: title(900) }, ...Array.from({ length: 10 }, (unused, index) => ({ number: 800 - index, state: 'MERGED', merge_sha: SHA_A, title: title(800 - index) }))] });
-  const block = state.renderBlock(state.renderChildBlockBody(child, OUTCOME), VERSION);
+    prs: [{ number: 900, state: 'OPEN', merge_sha: null }, ...Array.from({ length: 10 }, (unused, index) => ({ number: 800 - index, state: 'MERGED', merge_sha: SHA_A }))] });
+  const titles = new Map(child.prs.map(pr => [pr.number, title(pr.number)]));
+  const block = state.renderBlock(state.renderChildBlockBody(child, OUTCOME, titles), VERSION);
   assert.ok(block.length <= 2250, `the STATE block with its markers is ${block.length} characters`);
   const cells = block.split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.split('|')[1]);
   assert.equal(cells.length, 11);
-  for (const cell of cells) assert.ok(cell.length === 60 && cell.endsWith('...'), cell);
-  assert.equal(state.renderChildBlockBody({ ...child, prs: [{ number: 900, state: 'OPEN', merge_sha: null, title: 'x'.repeat(60) }] }, OUTCOME).includes(`|${'x'.repeat(60)}|`), true, 'a 60-character title shows whole');
+  for (const cell of cells) assert.ok(cell.length === 62 && cell.endsWith('...`'), cell);
+  assert.equal(state.renderChildBlockBody(child, OUTCOME, new Map([[900, 'x'.repeat(60)]])).includes(`|\`${'x'.repeat(60)}\`|`), true, 'a 60-character title shows whole');
 });
 
-test('a pass keeps each PR\'s title in the task state and shows it in the PR GRAPH', () => {
+test('a pass shows each PR\'s title in the PR GRAPH without saving it, and a pass that reads no title keeps the cell', () => {
   const f = setup();
   f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806', title: 'Build the child page' });
   f.github.issuePrLinks.set(806, { timeline: [900] });
+  const reader = () => new state.ProgrammeGraphReader({ transport: f.github, repository: 'acme/app' });
   // PR history is read by a refresh pass.
-  const refresh = new state.Reconciler({ store: f.store, reader: new state.ProgrammeGraphReader({ transport: f.github, repository: 'acme/app' }),
+  const refresh = () => new state.Reconciler({ store: f.store, reader: reader(),
     mutator: new state.GitHubMutator({ transport: f.github, repository: 'acme/app' }), binding: f.binding,
     writer: state.refreshWriter(f.store.read('parent', 421).doc), toolkitVersion: VERSION, refreshFacts: true });
-  assert.deepEqual(refresh.run({ apply: true }).holds, []);
-  assert.deepEqual(f.store.read('child', 806).doc.prs, [{ number: 900, state: 'OPEN', merge_sha: null, title: 'Build the child page' }]);
-  assert.match(state.findStateBlock(f.github.issues.get(806).body, 'STATE').block.body, /^\|Build the child page\|#900\|OPEN\b/m);
+  assert.deepEqual(refresh().run({ apply: true }).holds, []);
+  assert.deepEqual(f.store.read('child', 806).doc.prs, [{ number: 900, state: 'OPEN', merge_sha: null }], 'the title is never saved in state');
+  const row = /^\|`Build the child page`\|#900\|OPEN\b/m;
+  assert.match(state.findStateBlock(f.github.issues.get(806).body, 'STATE').block.body, row);
+  // An ordinary pass reads no PR history: the page keeps the title it shows, and nothing is rewritten.
+  const page = f.github.issues.get(806).body;
+  assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
+  assert.equal(f.github.issues.get(806).body, page);
+  // A renamed PR shows its new title once a refresh reads it.
+  f.github.prs.get(900).title = 'Build the child page, renamed';
+  assert.deepEqual(refresh().run({ apply: true }).holds, []);
+  assert.match(f.github.issues.get(806).body, /^\|`Build the child page, renamed`\|#900\|/m);
+  // A PR read on its own carries its title too.
+  assert.equal(reader().pullRequest(900).title, 'Build the child page, renamed');
+  // Older Toolkit copies read a closed `prs` shape: a saved title would stop them reading the store.
   const doc = f.store.read('child', 806).doc;
-  const titled = title => state.validateChild({ ...doc, prs: [{ number: 900, state: 'OPEN', merge_sha: null, title }] });
-  assert.deepEqual(titled('x'.repeat(256)), []);
-  assert.ok(titled('x'.repeat(257)).some(error => /title must be text of at most 256/.test(error)));
-  assert.ok(titled('').some(error => /title must be text/.test(error)));
-  assert.deepEqual(state.validateChild({ ...doc, prs: [{ number: 900, state: 'OPEN', merge_sha: null }] }), [], 'an entry saved before titles were kept still reads');
+  assert.ok(state.validateChild({ ...doc, prs: [{ number: 900, state: 'OPEN', merge_sha: null, title: 'x' }] }).some(error => /unknown field\(s\): title/.test(error)));
+});
+
+test('a PR whose title looks like a secret never stops a refresh pass: its row shows -', () => {
+  const f = setup();
+  f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806', title: `ghp_${'a'.repeat(36)}` });
+  f.github.addPr(901, { head: SHA_A, branch: 'other', body: 'Refs #806', title: 'see https://example.test/x 123e4567-e89b-12d3-a456-426614174000' });
+  f.github.issuePrLinks.set(806, { timeline: [900, 901] });
+  const refresh = () => new state.Reconciler({ store: f.store, reader: new state.ProgrammeGraphReader({ transport: f.github, repository: 'acme/app' }),
+    mutator: new state.GitHubMutator({ transport: f.github, repository: 'acme/app' }), binding: f.binding,
+    writer: state.refreshWriter(f.store.read('parent', 421).doc), toolkitVersion: VERSION, refreshFacts: true });
+  for (let pass = 0; pass < 2; pass += 1) assert.deepEqual(refresh().run({ apply: true }).holds, [], `pass ${pass + 1}`);
+  assert.deepEqual(f.store.read('child', 806).doc.prs.map(pr => pr.number), [901, 900]);
+  const body = f.github.issues.get(806).body;
+  assert.match(body, /^\|-\|#900\|OPEN\|-\|$/m);
+  assert.match(body, /^\|`see https:\/\/example\.test\/x 123e4567-e89b-12d3-a456-426614\.\.\.`\|#901\|/m, 'other titles are drawn as code');
+  assert.equal(body.includes('ghp_'), false);
+});
+
+test('a PR title is drawn as code: no link, image, mention, reference, comment or UAT segment forms, and a secret-shaped title shows -', () => {
+  const child = childDoc({ pr: { number: 852, state: 'OPEN', head: SHA_A, checks: null }, uat: { state: 'PASSED', at_head: SHA_A },
+    prs: [{ number: 852, state: 'OPEN', merge_sha: null }, { number: 851, state: 'CLOSED', merge_sha: null }, { number: 850, state: 'CLOSED', merge_sha: null }] });
+  const titles = new Map([[852, '[click](https://evil.example/p) ![i](x.png) @weijunswj #421 · UAT: PENDING'],
+    [851, 'a `tick` <!-- AI-AGENT-TOOLKIT:x:END STATE --> c:\\p | b'], [850, `token ghp_${'a'.repeat(36)}`]]);
+  const body = state.renderChildBlockBody(child, OUTCOME, titles);
+  const cells = body.split('\n').filter(line => /^\|.*\|#\d+\|/.test(line)).map(line => /^\|(.*)\|#(\d+)\|/.exec(line)[1]);
+  assert.equal(cells[0], '`[click](https://evil.example/p) ![i](x.png) @weijunswj #4...`', 'cut, inside one code span');
+  assert.equal(cells[1], "`a 'tick' \u2039!-- AI-AGENT-TOOLKIT:x:END STATE --\u203A c:\uFF3Cp \\| b`", 'no backtick, < or > survives; the pipe is escaped');
+  assert.equal(cells[2], '-', 'a secret-shaped title is not drawn');
+  const page = `${state.renderBlock(body, VERSION)}\n\nTask text.`;
+  const closure = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  for (const raw of ['x · UAT: PENDING', 'UAT: PENDING']) {
+    assert.equal(closure.owedUat(`${state.renderBlock(state.renderChildBlockBody(child, OUTCOME, new Map([[852, raw]])), VERSION)}\n`), null, `${raw}: no owed UAT from a title`);
+  }
+  assert.equal(state.findStateBlock(page).block.tampered, false, 'the block is found whole');
+  // The page's cells read back to the same cells.
+  assert.equal(state.renderChildBlockBody(child, OUTCOME, state.pageTitles(page)), body);
+  // A block edited by hand gives no titles back.
+  assert.equal(state.pageTitles(page.replace('#852|OPEN', '#852|CLOSED')).size, 0);
 });
 
 test('a task with no PR yet shows None yet, and its status stays out of sight', () => {

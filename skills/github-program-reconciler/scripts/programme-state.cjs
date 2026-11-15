@@ -113,8 +113,6 @@ const INDEX_COMMENT_LIMIT = 60000;
 // Cap notifying topic comments across the pass; larger traces use directory pages directly.
 const MAX_TOPIC_COMMENTS_PER_PASS = 5;
 const TEXT_LIMIT = 200;
-// A PR's title as the task's PR GRAPH keeps it (GitHub allows 256 characters).
-const PR_TITLE_LIMIT = 256;
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 // Git's own blob id for a text (a SHA-1 repository): the id GitHub gives the blob it stores for it.
@@ -851,10 +849,9 @@ function validateChild(doc) {
       check(errors, Array.isArray(doc.prs), 'prs must be a list');
       const numbers = new Set();
       for (const pr of Array.isArray(doc.prs) ? doc.prs : []) {
-        checkShape(errors, pr, {all:['number','state','merge_sha','title'], optional:['title']}, 'prs entry');
+        checkShape(errors, pr, {all:['number','state','merge_sha']}, 'prs entry');
         check(errors, isObject(pr) && isInt(pr.number, 1) && !numbers.has(pr.number) && ['OPEN','MERGED','CLOSED'].includes(pr.state)
           && optional(pr.merge_sha, isSha) && (pr.state === 'MERGED' || pr.merge_sha === null), 'prs entries must have unique numbers, fixed states and a merge SHA or null');
-        check(errors, !isObject(pr) || pr.title === undefined || isText(pr.title) && pr.title.length <= PR_TITLE_LIMIT, `a prs entry title must be text of at most ${PR_TITLE_LIMIT} characters`);
         numbers.add(pr?.number);
       }
     }
@@ -1885,14 +1882,35 @@ function renderPrNavBlockBody(chains, pr) {
 const OWED_UAT_STATES = Object.freeze(['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED']);
 
 // The PR GRAPH of a task page: every open PR, then the latest finished ones, older ones on one line.
-// A row is the PR's title (cut to PR_TITLE_SHOWN characters, so long titles cannot fill the page's
-// budget), its number, its status and its merge commit. The tracked PR's status cell also carries
+// A row is the PR's title (titleCell), its number, its status and its merge commit. The tracked PR's status cell also carries
 // the task's gate and, while the owner's test is owed, `UAT owed`. With no PR yet, or no tracked PR
 // among the rows shown, one line under the graph carries them instead, so they always show. Review,
 // release and the next action are in the task's handover file.
 const PR_GRAPH_FINISHED = 10;
+// Titles are cut to this many characters, so long titles cannot fill the page's budget.
 const PR_TITLE_SHOWN = 60;
-function prGraphLines(child) {
+// A PR title as its PR GRAPH cell. Anyone who opens a PR writes its title, so it is shown as code:
+// GitHub forms no link, image, mention, issue reference or autolink inside code. Look-alikes stand in
+// for the characters that could end the code, open a comment or Toolkit marker (`<`, `>`) or form a
+// ` · UAT: <state>` segment the closure guard reads (the middle dot); a pipe is escaped for the table.
+// A title that is missing, or looks like a secret, shows `-`. Titles are never saved in state: a
+// pass that did not read a PR's title keeps the cell its page already shows (pageTitles).
+const TITLE_LOOKALIKES = Object.freeze({ '`': "'", '\\': '\uFF3C', '<': '\u2039', '>': '\u203A', '\u00B7': '\u2022' });
+function titleCell(title) {
+  const line = cutText(title, PR_TITLE_SHOWN);
+  if (!line || secretShaped(title) || secretShaped(line)) return '-';
+  return `\`${line.replace(/[`\\<>\u00B7]/g, char => TITLE_LOOKALIKES[char]).replace(/\|/g, '\\|')}\``;
+}
+// The titles a page's own PR GRAPH shows, by PR number, read back from its STATE block. A block
+// edited by hand (its hash no longer matches) gives none.
+function pageTitles(body) {
+  const titles = new Map();
+  const { block } = findStateBlock(String(body || ''));
+  if (!block || block.tampered) return titles;
+  for (const match of block.body.matchAll(/^\|`((?:\\\||[^`|])*)`\|#([1-9][0-9]*)\|/gm)) titles.set(Number(match[2]), match[1].replace(/\\\|/g, '|'));
+  return titles;
+}
+function prGraphLines(child, titles = null) {
   const listed = child.prs || [];
   const tracked = child.pr?.number && !listed.some(pr => pr.number === child.pr.number)
     ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
@@ -1907,7 +1925,7 @@ function prGraphLines(child) {
   const merged = pr => (pr.state === 'MERGED' && isSha(pr.merge_sha) ? `[${shortSha(pr.merge_sha)}](https://github.com/${child.repository}/commit/${pr.merge_sha})` : '-');
   const earlier = finished.slice(PR_GRAPH_FINISHED);
   return ['| PR Task | PR # | Status | Merged SHA |', '|---|---|---|---|',
-    ...shown.map(pr => `|${pr.title ? publicText(cutText(pr.title, PR_TITLE_SHOWN)) : '-'}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
+    ...shown.map(pr => `|${titleCell(titles?.get(pr.number))}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
     ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : []),
     ...(task.length && !shown.some(pr => pr.number === child.pr?.number) ? ['', `Task: ${task.join(' · ')}`] : [])];
 }
@@ -1917,7 +1935,7 @@ function prGraphLines(child) {
 // is frozen once its status reads COMPLETED or RETIRED (frozenPage), and issue-closure.cjs owedUat
 // reads the ` · UAT: <state>` segment, so change those together. Section headings generated or
 // required by Toolkit are in capitals; a heading people add themselves is in Title Case.
-function renderChildBlockBody(child, outcome) {
+function renderChildBlockBody(child, outcome, titles = null) {
   const status = outcome ? statusText(outcome, child) : '-';
   const uat = child.uat?.state ? ` · UAT: ${publicText(uatText(child))}` : '';
   return [
@@ -1926,7 +1944,7 @@ function renderChildBlockBody(child, outcome) {
     `<!-- Task status: ${status}${uat} -->`,
     '# PR GRAPH',
     '',
-    ...prGraphLines(child),
+    ...prGraphLines(child, titles),
   ].join('\n');
 }
 
@@ -3764,7 +3782,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      number body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
+      number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
@@ -3948,7 +3966,7 @@ class ProgrammeGraphReader {
     const commit = pr.commits?.nodes?.[0]?.commit;
     const rollup = commit?.statusCheckRollup;
     return {
-      number: pr.number,
+      number: pr.number, title: pr.title,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
       train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
@@ -4446,7 +4464,7 @@ function graphPr(pr, repository) {
   const head = typeof pr.head === 'string' ? pr.head : pr.head?.sha || pr.headRefOid || pr.head_sha || null;
   return {number:pr.number, state:state === 'DRAFT' ? 'OPEN' : state, merge_sha:merged ? mergeSha : null,
     merged_at:pr.mergedAt || pr.merged_at || null, head, train:pr.train === undefined ? trainRows(pr.body) : pr.train,
-    ...(typeof pr.title === 'string' && pr.title.trim() ? { title: pr.title.trim().slice(0, PR_TITLE_LIMIT) } : {})};
+    ...(typeof pr.title === 'string' && pr.title.trim() ? { title: pr.title.trim() } : {})};
 }
 
 function prHistory(entries) {
@@ -4454,7 +4472,7 @@ function prHistory(entries) {
   const rank = {OPEN:0,MERGED:1,CLOSED:2};
   return [...unique.values()].sort((a,b) => rank[a.state]-rank[b.state]
     || (a.state === 'MERGED' ? Date.parse(b.merged_at)-Date.parse(a.merged_at) : 0) || b.number-a.number)
-    .map(({number,state,merge_sha,title}) => ({number,state,merge_sha,...(title ? {title} : {})}));
+    .map(({number,state,merge_sha}) => ({number,state,merge_sha}));
 }
 
 // Only refresh uses this transformation, from a complete issue observation in its own pass.
@@ -4889,6 +4907,9 @@ class Reconciler {
   // tasks in `scoped`; a task outside it adds its known PRs to the linked set and nothing else.
   discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null) {
     const discovery = new Map(); const histories = new Map();
+    // Each PR's title as this pass read it, for the PR GRAPH only: titles are never saved in state.
+    const titles = new Map();
+    const noteTitle = pr => { if (pr?.title) titles.set(pr.number, pr.title); };
     const selectedPrs = new Map();
     // Take the boundary before any PR list read, never at planning completion: a close during
     // this scan must remain eligible on the next one.
@@ -4963,7 +4984,7 @@ class Reconciler {
               history.push(item);
             }
           } catch(error) { incomplete([number],error); continue; }
-          history.forEach(pr=>linked.add(pr.number));
+          history.forEach(pr=>{ linked.add(pr.number); noteTitle(pr); });
           // The members a train carried stay this task's PRs; the train (saved earlier too) leaves.
           const own=withoutCarriers(history);
           histories.set(number,prHistory(own));
@@ -4991,7 +5012,8 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)) && !listedCarriers.has(entry.issue))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
+    listed.forEach(noteTitle);
+    return {discovery,histories,titles,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -5349,11 +5371,23 @@ class Reconciler {
     return chain;
   }
 
-  renderAll(parent, children, issues, comments) {
+  // `titles` maps a PR number to the title this pass read; a PR it did not read keeps the title its
+  // task page already shows, so a pass that reads no titles changes no page.
+  renderAll(parent, children, issues, comments, titles = new Map()) {
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children, issues, comments)]]);
-    for (const child of children.values()) blocks.set(child.issue, renderChildBlockBody(child, outcomes.get(child.issue)));
+    for (const child of children.values()) {
+      const shown = new Map([...pageTitles(issues?.get(child.issue)?.body), ...titles]);
+      blocks.set(child.issue, renderChildBlockBody(child, outcomes.get(child.issue), shown));
+    }
     return blocks;
+  }
+
+  // The PR titles a pass read: its PR lists and task links, and the PRs it read one by one.
+  passTitles(observed) {
+    const titles = new Map(observed?.prGraph?.titles || []);
+    for (const pr of observed?.prs?.values?.() || []) if (pr?.title && isInt(pr.number, 1)) titles.set(pr.number, pr.title);
+    return titles;
   }
 
   // The link to a page's handover file in the private store (programme-handover.cjs), or null when
@@ -5597,7 +5631,7 @@ class Reconciler {
   }
 
   diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
-    const blocks = this.renderAll(parent, children, observed.issues, observed.comments);
+    const blocks = this.renderAll(parent, children, observed.issues, observed.comments, this.passTitles(observed));
     const version = this.toolkitVersion || '0.0.0';
     const requested = targetsOverride || (only ? [only, parent.parent_issue] : this.scope ? [...blocks.keys()].filter(number => number === parent.parent_issue || this.scope.has(number)) : [...blocks.keys()]);
     const targets = [...requested.filter(number => number !== parent.parent_issue), ...requested.filter(number => number === parent.parent_issue)];
@@ -6721,7 +6755,7 @@ class Reconciler {
         // pages and any final redraw; reading every child again adds no state written by this pass.
         if (!docs) docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
         const comments = new Map(plan.observed.comments);
-        const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments);
+        const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments, this.passTitles(plan.observed));
         const version = this.toolkitVersion;
         // The final parent check follows actual child writes, even when planning found no body change.
         const ordered = parentOnly ? [blockEffects.find(effect => effect.target.issue === parentNumber) || null] : blockEffects.filter(effect => effect.target.issue !== parentNumber);
@@ -7245,7 +7279,7 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
-  evaluateChecks, frozenPage, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, frozenPage, titleCell, pageTitles, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
