@@ -348,8 +348,9 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, task_prs: { auto_merge: 'off', merge_train: 'off' } });
   assert.equal(published.files['AGENTS.md'], rules.toString().replace(/\r\n/g, '\n'));
   assert.match(stdout.join(''), /Before pulling after merge.*untracked files/);
-  // The owner is shown the governance App setup with the decision, not asked for it; offline here.
-  assert.match(stdout.join(''), /Governance GitHub App: [^\n]*could not be checked \(offline\)[\s\S]*github\.com\/settings\/apps\/new\?[\s\S]*gh variable set TOOLKIT_GOVERNANCE_APP_CLIENT_ID/);
+  // The bank's App row recommends Set up, so the owner gets the App setup command instead of the by-hand steps.
+  assert.match(stdout.join(''), /^node "[^"]+toolkit-governance-app-setup\.cjs" --repo \S+\/\S+ --store \S+$/m);
+  assert.doesNotMatch(stdout.join(''), /github\.com\/settings\/apps\/new\?/);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
   const other = new GovernanceProposals({ registryOptions: { registryPath: path.join(f.root, 'other-home/state.json'), testOnly: true }, transport: github.transport });

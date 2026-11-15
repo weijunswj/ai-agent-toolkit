@@ -74,8 +74,9 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', mergeTrain: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
+  assert.match(table, /\| 1\.4 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep' });
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.4=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
   assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.2=B`, undecided).taskAutoMerge, 'on', 'on together with turning governance on');
   assert.throws(() => bank.parseBankAnswer(`${reference}: 1.1=A, 1.2=B`, undecided), /only while governance is on/);
   const outdated = bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', missing: 2, stale: 4 } });
@@ -84,6 +85,6 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /unavailable question 1\.9/);
   const enabled = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'after-gates', merged: { store: { repository: 'owner/store' }, required_checks: [] } });
   assert.notEqual(bank.bankReference(enabled), reference, 'a different state is a different bank');
-  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', mergeTrain: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep', ciShards: 'not-now' }, 'a governed bank also asks about parallel CI shards');
+  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep', ciShards: 'not-now' }, 'a governed bank also asks about parallel CI shards; Set up stays recommended and gives no command once governance is off');
   assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B, 1.4=B`, enabled), /offered only while governance is on/);
 });

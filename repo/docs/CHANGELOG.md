@@ -1,5 +1,20 @@
 # Toolkit Changelog
 
+## 3.126.0 (leftovers join their area's open child; governance App setup command)
+
+### Changed
+
+- **Leftovers join their area's open child:** the governed rules, the controller's task intake and its findings and review follow-up rules now send review Lows and other leftovers to the open child for the same area (same page, script or feature) instead of a new child per review. A closing child moves its remainder there too. The governed rules stay within their size cap.
+- **Daily fold check:** the Projects daily check-in lists each issue opened under the parent since its last run beside any older open child in the same area, as a `**Fold:**` line. The coordinator copies the text across and asks the owner once to close the new issue.
+
+### Merge scope
+
+- **Permission-line pin test waits for the owner:** a change to `repo/tests/toolkit-permissions.test.cjs`, the test that pins the commands and flags each pasted permission line allows, now needs the owner's typed merge. A new command, subcommand or flag on a pasted line fails that test, so that change now waits for the owner's typed merge; a changed check behind an existing flag still relies on review.
+
+### Added
+
+- `toolkit governance` shows a Governance App row that recommends Set up whenever governance is on or being turned on. Set up prints one command for the owner to run in their own terminal: it makes the repository's App through GitHub's App manifest flow (the owner only clicks Create), saves its Client ID and private key on the repository without the key ever being printed or written to disk, opens the install page and checks the installation. Keep current means not now: governance works without the App.
+
 ## 3.125.0
 
 ### Changed
