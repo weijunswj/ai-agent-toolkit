@@ -34,16 +34,18 @@ function lifecycleScript() {
   return workflow.slice(start);
 }
 
-test('source-watch PR notifier remains scheduled-only with minimum write permissions', () => {
+// GitHub can skip a scheduled run, so the notifier is also startable by hand, but only on main.
+test('source-watch PR notifier runs on its schedule or by hand on main only, with minimum write permissions', () => {
   assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
-  assert.doesNotMatch(workflow, /^\s*workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^  notify:\n    if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}$/m);
   assert.doesNotMatch(workflow, /^\s*repository_dispatch:\s*$/m);
   assert.doesNotMatch(workflow, /^\s*pull_request:\s*$/m);
   assert.doesNotMatch(workflow, /^\s*pull_request_target:\s*$/m);
   assert.doesNotMatch(workflow, /^\s*workflow_call:\s*$/m);
   assert.match(
     workflow,
-    /intentionally not manually dispatchable[\s\S]{0,120}contents: write[\s\S]{0,120}pull-requests: write/i
+    /startable by hand on main only[\s\S]{0,200}contents: write and pull-requests: write/i
   );
   assert.deepEqual(workflowPermissions(), ['contents: write', 'pull-requests: write']);
   assert.doesNotMatch(workflow, /^\s*issues:\s*write\s*$/m);
@@ -399,4 +401,15 @@ test('source-watch PR notifier documents advisory actions as report-only', () =>
   assert.match(workflow, /No toolkit rules, skills, hooks, repo-map guidance, or cleanup guidance were modified or deleted\./);
   assert.match(workflow, /For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes\./);
   assert.match(workflow, /separate evidence-backed PR/);
+});
+
+// GitHub skips scheduled runs at times. A scheduled workflow that cannot be started by hand cannot be
+// recovered until its next schedule, so every scheduled workflow here also takes workflow_dispatch.
+test('every scheduled workflow can also be started by hand', () => {
+  const dir = path.join(repoRoot, '.github', 'workflows');
+  const scheduled = fs.readdirSync(dir).filter(name => /\.ya?ml$/.test(name))
+    .map(name => [name, fs.readFileSync(path.join(dir, name), 'utf8').replace(/\r\n/g, '\n')])
+    .filter(([, text]) => /^\s+schedule:\s*$/m.test(text));
+  assert.ok(scheduled.length > 0, 'at least one scheduled workflow');
+  for (const [name, text] of scheduled) assert.match(text, /^\s+workflow_dispatch:/m, `${name} takes workflow_dispatch`);
 });
