@@ -5,22 +5,18 @@ Source: skills/repository-agent-rules/README.md
 
 # Repository Agent Rules
 
-Puts a repository under Toolkit governance, or checks and repairs that, by managing one Toolkit-governed block in its `AGENTS.md` plus tiny host shims. The generic rules every session needs are installed separately by `setup toolkit` into each harness's user-level file; this skill does not write them.
-
-The skill folder carries ready-to-copy templates (a curated-source comment plus the marker-wrapped content, except the one-line `CLAUDE.md` shim):
+Checks and repairs a repository's Toolkit files: the CI checks a governed repository carries (plain-text check, cloud sweep, optional personal-data guard) and the one-line `CLAUDE.md` shim that loads the repository's own `AGENTS.md`. The generic rules every session needs are installed separately by `setup toolkit` into each harness's user-level file; this skill does not write them. The governed rules come from the installed Toolkit at session start and the playbooks from the [toolkit-playbooks](../toolkit-playbooks/) skill, so neither is copied into a repository. Turning governance on is the governance question bank's job (`toolkit governance`): its setup pull request carries the programme file and the CI checks only.
 
 | Template | Target | When |
 |---|---|---|
-| [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) | `AGENTS.md` | After the user's yes; the block carries the governed rules |
 | [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) | `CLAUDE.md` | Claude Code; exactly the line `@AGENTS.md`, no markers |
-| [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) | `.agents/rules/00-agent-toolkit-bootstrap.md` | Antigravity |
-| [toolkit-playbooks](../toolkit-playbooks/) | `docs/agent-playbooks/` | The whole folder (`SKILL.md` as `INDEX.md`), so the governed block's links work |
+| [repo-local/toolkit-programme.template.json](repo-local/toolkit-programme.template.json) | `.github/toolkit-programme.json` | A merged enabled repository, or its accepted pending yes |
 
-Install only the current platform's shim unless the user asks for all, and never a shim without `AGENTS.md`: shims only point to it. A target repository or explicit path is required. The Antigravity bootstrap points to `AGENTS.md` and does not import it; Antigravity reads `AGENTS.md` itself, so there is no `GEMINI.md` shim.
+The governed block and Antigravity bootstrap templates stay only so the session-start preflight can compare leftover copies and this Toolkit repository can build its own root files; they are never installed into another repository. Install a shim only beside the repository's own `AGENTS.md`, never a shim without `AGENTS.md`: shims only point to it. A target repository or explicit path is required.
 
-When the required files already carry complete, balanced `AI-AGENT-TOOLKIT` markers, the cheap check stops and the original task continues without reading templates. Explicit install, repair or refresh requests back up anything they replace under `_agent-toolkit-backups/` with the shared restore contract, keep every byte outside the markers, and preview any `.gitignore` or `.git/info/exclude` change for exact approval. Legacy `.agent-toolkit-backups/` content is recognised and left untouched.
+A governed block, Antigravity bootstrap or `docs/agent-playbooks/` copy an older setup left is reported as a leftover and left as it is. Explicit repairs back up anything they replace under `_agent-toolkit-backups/` with the shared restore contract, keep every byte outside the markers, and preview any `.gitignore` or `.git/info/exclude` change for exact approval. Legacy `.agent-toolkit-backups/` content is recognised and left untouched.
 
-For n8n safety, load [n8n-safety-router](../n8n-safety-router/); the governed block does not carry the full n8n rules.
+For n8n safety, load [n8n-safety-router](../n8n-safety-router/); the governed rules do not carry the full n8n rules.
 
 ## Installing the skill folder
 

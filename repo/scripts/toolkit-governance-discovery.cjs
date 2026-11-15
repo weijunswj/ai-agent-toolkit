@@ -123,11 +123,9 @@ function localInventory(root) {
   try { agents = governance.readGovernedBlock(root); } catch { agents = null; }
   return {
     agents_md: exists('AGENTS.md'),
-    governed_block: Boolean(agents && agents.present),
-    governed_block_legacy: Boolean(agents && agents.legacy),
+    governed_block: Boolean(agents && (agents.present || agents.legacy)),
     host_shims: ['CLAUDE.md', 'GEMINI.md', '.github/copilot-instructions.md'].filter(exists),
     workflows, scheduled, monitoring, deploy_docs: deployDocs,
-    dependabot: exists('.github/dependabot.yml') || exists('.github/dependabot.yaml'),
   };
 }
 
@@ -266,10 +264,11 @@ function storeRank(entry, name) {
 // What Toolkit would reuse, add, repair, keep and defer, as { reuse, add, repair, keep, defer }.
 function adoptionList({ local, parents, stores, requiredChecks, rulesets, draft, pending }) {
   const list = { reuse: [], add: [], repair: [], keep: [], defer: [] };
-  if (local.governed_block && !local.governed_block_legacy) list.reuse.push('the governed block already in AGENTS.md');
-  else if (local.governed_block_legacy) list.repair.push('refresh the old governed block in AGENTS.md to the current one');
-  else list.add.push(local.agents_md ? 'the governed block in AGENTS.md (your own text stays byte-identical outside it)' : 'AGENTS.md with the governed block');
+  // The installed Toolkit gives sessions the governed rules, so turning on adds no instruction file.
+  if (local.governed_block) list.keep.push('the governed block in AGENTS.md, no longer needed: the installed Toolkit gives sessions the governed rules');
+  else if (local.agents_md) list.keep.push('AGENTS.md (your own rules, unchanged)');
   if (local.host_shims.length) list.keep.push(`host instruction files: ${local.host_shims.join(', ')}`);
+  list.add.push('the CI checks: the plain-text check and, where missing, the Dependabot config and the dependency auto-merge workflow');
   list.add.push(pending ? 'merge the programme binding already in the working tree (as version 2)' : `.github/toolkit-programme.json (version 2): ${JSON.stringify(draft)}`);
   if (parents.recommended) list.reuse.push(`parent issue #${parents.recommended.issue} (${parents.recommended.evidence.join(', ')}${parents.recommended.note ? `; ${parents.recommended.note}` : ''})`);
   else list.add.push('a new parent issue for the programme, created after your yes');
@@ -283,7 +282,6 @@ function adoptionList({ local, parents, stores, requiredChecks, rulesets, draft,
   if (local.scheduled.length) list.keep.push(`scheduled workflows: ${local.scheduled.join(', ')}`);
   if (local.deploy_docs.length) list.keep.push(`deployment notes: ${local.deploy_docs.join(', ')}`);
   if (local.monitoring.length) list.keep.push(`monitoring workflows: ${local.monitoring.join(', ')}`);
-  if (!local.dependabot) list.defer.push('Dependabot files (added by `toolkit governance security` once governance is on)');
   return list;
 }
 

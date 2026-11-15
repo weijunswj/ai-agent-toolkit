@@ -93,7 +93,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. After the owner merges the enabled governance decision on origin's default branch, the repository carries the governed block in its `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](../../AGENTS.md). Claude Code uses a one-line `CLAUDE.md` (`@AGENTS.md`) and Antigravity a small bootstrap under `.agents/rules/`; both point back to the target repo's `AGENTS.md`, so never install one by itself.
+Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. After the owner merges the enabled governance decision on origin's default branch, the installed Toolkit gives every session there the governed rules, and the playbooks come from the `toolkit-playbooks` skill. The repository carries only its programme file and the Toolkit CI checks, never a copy of the governed rules, and never this toolkit repo's root [AGENTS.md](../../AGENTS.md). Its own `AGENTS.md` stays its own; Claude Code loads it through a one-line `CLAUDE.md` (`@AGENTS.md`), so never install that shim by itself.
 
 ### Manual Skill Folder Locations
 
@@ -280,7 +280,6 @@ n8n helper templates may write scoped local outputs after they are copied into a
 
 Use:
 
-- [Codex managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Codex n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
@@ -295,7 +294,6 @@ Keep live n8n tokens in user environment variables, not repo files. Codex n8n wo
 
 Use:
 
-- [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [Claude Code shim template](../../skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Claude n8n adapter](../../skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md)
@@ -310,7 +308,6 @@ Claude Code n8n work uses the [official n8n Skills](https://github.com/n8n-io/sk
 
 Use:
 
-- [OpenCode managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional OpenCode n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
@@ -324,8 +321,6 @@ OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is plat
 
 Use:
 
-- [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
-- [Antigravity 2 bootstrap template](../../skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Antigravity 2 n8n adapter](../../skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)

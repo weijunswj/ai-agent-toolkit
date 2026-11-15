@@ -572,8 +572,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(howToUse, /\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md/);
   assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
   assert.match(howToUse, /Antigravity 2 reads `AGENTS\.md` itself, so Toolkit installs no `GEMINI\.md` shim/);
-  assert.match(howToUse, /After the owner merges the enabled governance decision on origin's default branch, the repository carries the governed block in its `AGENTS\.md`/);
-  assert.match(howToUse, /\[repo-local\/AGENTS\.managed\.template\.md\]\(\.\.\/\.\.\/skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
+  assert.match(howToUse, /After the owner merges the enabled governance decision on origin's default branch, the installed Toolkit gives every session there the governed rules/);
+  assert.doesNotMatch(howToUse, /repo-local\/(?:AGENTS\.managed|antigravity-bootstrap)\.template\.md/, 'no install route copies the governed rules or bootstrap into a repository');
 
   // The README is the short front page; it links out for the detail above.
   assert.match(readme, /Open the folder in Codex or Claude Code and say `setup toolkit`/);
@@ -586,9 +586,9 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
 
   assert.match(aiRulesReadme, /\| Template \| Target \| When \|/);
-  assert.match(aiRulesReadme, /\| \[repo-local\/AGENTS\.managed\.template\.md\]\(repo-local\/AGENTS\.managed\.template\.md\) \| `AGENTS\.md` \| After the user's yes; the block carries the governed rules \|/);
   assert.match(aiRulesReadme, /\| \[repo-local\/CLAUDE\.shim\.template\.md\]\(repo-local\/CLAUDE\.shim\.template\.md\) \| `CLAUDE\.md` \| Claude Code; exactly the line `@AGENTS\.md`, no markers \|/);
-  assert.match(aiRulesReadme, /\| \[repo-local\/antigravity-bootstrap\.template\.md\]\(repo-local\/antigravity-bootstrap\.template\.md\) \| `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` \| Antigravity \|/);
+  // The governed block and Antigravity bootstrap are never installed into a repository any more.
+  assert.doesNotMatch(aiRulesReadme, /\| \[repo-local\/(?:AGENTS\.managed|antigravity-bootstrap)\.template\.md\]/);
   assert.match(aiRulesReadme, /\| Codex \| `<repo>\\\.agents\\skills\\<skill>\\`/);
   assert.match(aiRulesReadme, /\| Antigravity \| `<workspace>\\\.agents\\skills\\<skill>\\` \(portable skills copy only; no native plugin\) \|/);
   assert.doesNotMatch(aiRulesReadme, /GEMINI\.shim/);

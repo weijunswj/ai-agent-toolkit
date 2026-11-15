@@ -23,18 +23,13 @@ const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(
 const securityFiles = () => { const security = require('./toolkit-governance-security.cjs'); return [security.DEPENDABOT_REL, '.github/dependabot.yaml', security.WORKFLOW_REL]; };
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
-const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and rules itself.';
-// The rules files every turn-on pull request carries, beside the programme file: a yes missing any of
-// them is refused, so every governed repository starts from the same full set.
+const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and CI checks itself.';
+// The files every turn-on pull request carries: the programme file and the plain-text check. A yes
+// missing any of them is refused. The installed Toolkit delivers the governed rules and playbooks,
+// so no instruction file is required or added.
 const PLAIN_TEXT_FILES = Object.freeze(['.github/plain-text.json', '.github/scripts/plain-text-check.cjs', '.github/workflows/plain-text.yml']);
-function requiredRules() {
-  const playbooks = Object.keys(require('./toolkit-playbooks.cjs').repositoryPlaybooks());
-  return ['AGENTS.md', 'CLAUDE.md', ...playbooks.map(name => `docs/agent-playbooks/${name}`), ...PLAIN_TEXT_FILES];
-}
-// The required rules files a turn-on file set lacks (CLAUDE.md counts only when it loads AGENTS.md).
-function missingRules(files) {
-  return requiredRules().filter(name => typeof files[name] !== 'string' || (name === 'CLAUDE.md' && !/^@AGENTS\.md[ \t]*$/m.test(files[name])));
-}
+const REQUIRED_FILES = Object.freeze([cache.BINDING_PATH, ...PLAIN_TEXT_FILES]);
+function missingFiles(files) { return REQUIRED_FILES.filter(name => typeof files[name] !== 'string'); }
 
 // The cloud sweep copies a governed repository needs, pinned to this Toolkit checkout's own commit,
 // which must be on its main branch:
@@ -68,26 +63,14 @@ function bindingV2(binding) {
   return { schema: BINDING_V2, repository, governance: 'enabled', parents: [{ issue, record_prefix, ...(writer_prefix === undefined ? {} : { writer_prefix }) }], ...rest };
 }
 
-// Only the instruction skill's prepared surfaces join the binding. Product files and backups do not.
-// `rendered` holds the governed rules the governance bank rendered from the templates for a fresh
-// repository (toolkit-governance-adopt.cjs); they take the place of the working tree's copies.
-function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
-  const governance = require('./toolkit-governance-state.cjs');
-  if (rendered) {
-    const { blocks, errors } = require('./toolkit-managed-block.cjs').findBlocks(String(rendered['AGENTS.md'] || ''));
-    if (errors.length || !blocks.some(entry => entry.name === 'TOOLKIT-GOVERNED-RULES')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
-  } else {
-    const block = governance.readGovernedBlock(cwd);
-    if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
-  }
-  const playbooks = Object.keys(require('./toolkit-playbooks.cjs').repositoryPlaybooks());
-  const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
-    ...playbooks.map(name => `docs/agent-playbooks/${name}`),
-    ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
+// The turn-on file set: the programme file, plus the CI files the working tree carries (the bank
+// installs the plain-text check and the dependency security files there first). Instruction files,
+// product files and backups never join it.
+function adoptionFiles(cwd, text, cloud = { files: {} }) {
+  const names = [...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
     ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
-    if (rendered && Object.hasOwn(rendered, name)) continue;
     const file = path.join(cwd, name);
     if (!fs.existsSync(file)) continue;
     let current = cwd;
@@ -99,8 +82,8 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
     if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
-  const all = { ...files, ...(rendered || {}), ...cloud.files };
-  if (missingRules(all).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  const all = { ...files, ...cloud.files };
+  if (missingFiles(all).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
   return all;
 }
 function proposalText(proposals) {
@@ -261,7 +244,7 @@ class GovernanceProposals {
     if (!proposal || governance.bindingProblems(proposal, identity).length || (request.answer === 'yes' && proposal.governance === 'disabled')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     return { identity, request, repository, binding: proposal, text: `${JSON.stringify(proposal, null, 2)}\n` };
   }
-  publish(cwd, run, binding = null, rendered = null) {
+  publish(cwd, run, binding = null) {
     this.prepare(cwd, run, binding);
     if (!this.#transport) fail('PROPOSAL_TRANSPORT_UNAVAILABLE');
     const checked = this.refresh(cwd);
@@ -273,7 +256,7 @@ class GovernanceProposals {
     if (checked.proposals.some(item => item.answer !== prepared.request.answer) || matches.length > 1) fail('PROPOSAL_CONFLICT');
     const cloud = prepared.request.answer === 'yes' && !matches[0] ? this.#cloudWorkflows(cwd, { ciShards: prepared.binding.ci_shards?.answer || null }) : { files: {}, warning: null };
     const proposal = matches[0] || this.#transport.publish(prepared.repository, prepared.binding,
-      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text });
+      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud) : { [cache.BINDING_PATH]: prepared.text });
     const readback = this.#transport.read(prepared.repository, proposal.number);
     if (!validProposal(readback, prepared.repository) || readback.head !== proposal.head || readback.answer !== prepared.request.answer) fail('PROPOSAL_PUBLISH_READBACK_FAILED');
     this.#update(prepared.identity.repository_id, value => {
@@ -472,7 +455,7 @@ class GitHubProposalTransport {
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
-    if (binding.governance !== 'disabled' && !files['AGENTS.md']) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+    if (binding.governance !== 'disabled' && missingFiles(files).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     this.#auth();
     const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
     if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
@@ -509,15 +492,15 @@ class GitHubProposalTransport {
           ...Object.entries(files).map(([name, content]) => ({ path: name, mode: '100644', type: 'blob', content })),
           ...removals.map(name => ({ path: name, mode: '100644', type: 'blob', sha: null })),
         ] });
-        const result = this.#api(`repos/${repository}/git/commits`, { message: binding.governance === 'disabled' ? 'Set repository governance off' : 'Prepare repository governance and rules', tree: tree.sha, parents: [base.object.sha] });
+        const result = this.#api(`repos/${repository}/git/commits`, { message: binding.governance === 'disabled' ? 'Set repository governance off' : 'Prepare repository governance and checks', tree: tree.sha, parents: [base.object.sha] });
         headSha = result.sha;
         if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
         this.#api(`repos/${repository}/git/refs/heads/${head}`, { sha: headSha, force: false }, 'PATCH');
       }
       if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
     }
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled, with its CI checks; the installed Toolkit gives sessions the governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
     return { number: pr.number, head: headSha };
   }
 }
-module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingRules, requiredRules, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });
+module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingFiles, REQUIRED_FILES, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });

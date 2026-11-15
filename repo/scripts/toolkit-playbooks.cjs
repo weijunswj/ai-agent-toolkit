@@ -1,9 +1,9 @@
 'use strict';
 
-// The playbooks the toolkit-playbooks skill ships, as a turn-on pull request still writes them into a
-// governed repository's docs/agent-playbooks/ folder: the skill's SKILL.md is the index, written as
-// INDEX.md without its skill frontmatter. The leftover scan compares a repository's copies with the
-// same text.
+// The playbooks the toolkit-playbooks skill ships, as older turn-ons copied them into a repository's
+// docs/agent-playbooks/ folder: the skill's SKILL.md is the index, as INDEX.md without its skill
+// frontmatter. Nothing copies them any more; the leftover scan compares a repository's copies with
+// this text to find Toolkit's own.
 
 const fs = require('node:fs');
 const path = require('node:path');

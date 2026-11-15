@@ -28,7 +28,7 @@ const governedShards = require('./governed-test-shards.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
-const ADOPTION_NOT_READY = 'The turn-on pull request is not ready: it needs the programme file and the full rules set (the governed AGENTS.md block, CLAUDE.md, the playbooks and the plain-text check). Run toolkit governance where GitHub can be read: its bank makes the missing parent issue and private evidence store and renders every rules file into one setup pull request. Build none of it by hand.';
+const ADOPTION_NOT_READY = 'The turn-on pull request is not ready: it needs the programme file and the plain-text check. Run toolkit governance where GitHub can be read: its bank makes the missing parent issue and private evidence store and adds the CI checks to one setup pull request. Build none of it by hand.';
 const PROPOSAL_ERRORS = Object.freeze({
   PROPOSAL_WRITE_REQUIRED: 'This GitHub account cannot write to this repository. Continue with global rules, without governance effects or standing task auto-merge. An owner with write access can publish the proposal.',
   PROPOSAL_CONFLICT: 'Conflicting governance proposals are open. Show their links and ask the owner which to keep before publishing again. None decides governance.',
@@ -291,7 +291,7 @@ class ToolkitGovernanceCli {
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
     if (switches && binding && typeof binding === 'object') binding = { ...binding, task_prs: { ...(binding.task_prs || {}), ...switches } };
     if (shards && binding && typeof binding === 'object') binding = { ...binding, ci_shards: shards };
-    const result = this.#proposals.publish(this.#cwd, run, binding, adopted ? adopted.files : null);
+    const result = this.#proposals.publish(this.#cwd, run, binding);
     this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
     return 0;
   }
@@ -601,8 +601,8 @@ class ToolkitGovernanceCli {
     return { answer, offered_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
   }
 
-  // A fresh repository: make the store and parent issue that are missing, render the governed rules,
-  // then the one turn-on pull request (toolkit-governance-adopt.cjs).
+  // A fresh repository: make the store and parent issue that are missing, add the CI checks, then the
+  // one turn-on pull request (toolkit-governance-adopt.cjs).
   #adoptAndPropose(state, plan, switches, shards = null, app = null) {
     if (!this.#adoptionWriter) {
       this.#print(false, {}, ['GitHub cannot be written from here, so nothing was made. Run toolkit governance again where gh is signed in.']);
@@ -624,8 +624,8 @@ class ToolkitGovernanceCli {
     return this.#prepareDecision('yes', switches, adopted, shards, app);
   }
 
-  // A repository prepared in the working tree: the same full rules set as a fresh one, then the one
-  // turn-on pull request.
+  // A repository whose programme file is prepared in the working tree: the same CI checks as a fresh
+  // one, then the one turn-on pull request.
   #preparedAndPropose(state, switches, shards = null, app = null) {
     let ready;
     try {
@@ -641,7 +641,7 @@ class ToolkitGovernanceCli {
 
   // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
   // terminal is the proof); it applies only after the owner merges it. `adopted` carries the binding
-  // and rendered rules for a fresh repository.
+  // for a fresh repository.
   #prepareDecision(answer, switches, adopted = null, shards = null, app = null) {
     const before = this.#state();
     if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
