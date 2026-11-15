@@ -77,7 +77,7 @@ test('A-T3: a short budget redraws all saved rows, reports the stop and resumes'
   const report = f.make(budget(() => Date.parse(NOW) + elapsed, 200000)).run({ apply: true });
   assert.ok(report.holds.some(entry => entry.code === 'PASS_STOPPED'));
   assert.equal(openStop(f)?.diagnostics.cause, 'time_limit');
-  assert.equal((f.github.issues.get(421).body.match(/^\|[^\n]*\|#\d+\|/gm) || []).length, 84);
+  assert.equal((f.github.issues.get(421).body.match(/^\|#\d+[ |]/gm) || []).length, 84);
   assert.match(f.github.issues.get(421).body, /PASS_STOPPED #421: the last refresh stopped at/);
   assert.equal(f.github.calls.slice(f.before.calls).filter(call => call.method === 'PATCH' && !call.path.endsWith('/issues/421') && !call.path.startsWith(`repos/${f.github.storeRepository}/`)).length, 0, 'queue skipped');
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
