@@ -2570,11 +2570,21 @@ test('SessionStart notice compares the vendored checks of an ENABLED repository 
       assert.equal(current.status, 'ok', `${label}: a current copy is quiet and the repository's own files are not compared`);
       writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
       const before = snapshotTree(root);
-      // Even with a newer Toolkit on record, the note is about the checks, not about repository rules.
-      const stale = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      // With no newer Toolkit known here, the checks are refreshed from the running copy.
+      const stale = runAgentRulesPreflight({ hook: true, syncSource }, options);
       assert.equal(stale.status, 'needs-attention', label);
+      assert.equal(stale.direction, 'differs', label);
       assert.deepEqual(stale.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
-      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit /, label);
+      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*next step: refresh them with repository-agent-rules before this task ends\. No files were changed\.$/, label);
+      // With a newer Toolkit on record the copy may be the newer one, so the note says to refresh
+      // Toolkit, never to rewrite the checks from the older running copy.
+      const newerOnRecord = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      assert.equal(newerOnRecord.direction, 'newer', label);
+      assert.deepEqual(newerOnRecord.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      const newerMessage = formatAgentRulesPreflight(newerOnRecord);
+      assert.match(newerMessage, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) may come from a newer Toolkit \(99\.0\.0\) than the running copy \(.+\); next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/, label);
+      assert.doesNotMatch(newerMessage, /repository-agent-rules|repository rules/, label);
+      assert.doesNotMatch(newerMessage, NEVER_HALTING, label);
       assert.deepEqual(snapshotTree(root), before, `${label}: read-only`);
       assert.equal(runAgentRulesPreflight({ hook: true, syncSource }, { ...options, governanceEnabled: () => false }).status, 'not-managed', `${label}: not governed and no block is not managed`);
     }
