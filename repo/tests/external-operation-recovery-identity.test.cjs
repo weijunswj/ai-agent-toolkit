@@ -285,8 +285,10 @@ test('a fresh process finds the exact resource from the record alone, then dispo
     const child = spawnSync(process.execPath, [scriptPath, ...argv, '--key', 'uat'], { encoding: 'utf8', env });
     return { status: child.status, result: child.stdout ? JSON.parse(child.stdout) : null };
   };
-  assert.equal(cli('claim', '--identity', writeJson(root, 'identity.json', IDENTITY)).status, 0);
-  assert.equal(cli('claim', '--identity', writeJson(root, 'identity.json', IDENTITY)).result.reason, REASONS.RECOVERY_IDENTITY_EXISTS);
+  // The script reads the real clock here, so the end date is set from it.
+  const identity = { ...IDENTITY, end_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) };
+  assert.equal(cli('claim', '--identity', writeJson(root, 'identity.json', identity)).status, 0);
+  assert.equal(cli('claim', '--identity', writeJson(root, 'identity.json', identity)).result.reason, REASONS.RECOVERY_IDENTITY_EXISTS);
   assert.equal(cli('record', '--read-back', writeJson(root, 'found.json', FOUND)).status, 0);
   const resolved = cli('resolve');
   assert.equal(resolved.status, 0);
