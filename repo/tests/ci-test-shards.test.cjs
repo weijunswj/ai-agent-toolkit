@@ -881,6 +881,14 @@ test('the CI duration check reads the downloaded shard summaries and never passe
   err = sink();
   assert.equal(main(['--ci'], { out: sink(), err, env: { RUNNER_TEMP: temp } }), 1);
   assert.match(err.text(), /windows: repo\/tests\/a\.test\.cjs took 100000 s, over its \d+ s budget/);
+  // A re-run of the slow shard replaces its older attempt, as the shard check does.
+  const attempt = (number, seconds) => ({ ...summary('windows', seconds), shard: 'windows-1', run_attempt: number });
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1.json'), JSON.stringify(attempt(1, 100000)));
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1-attempt-2.json'), JSON.stringify(attempt(2, 1)));
+  assert.equal(main(['--ci'], { out: sink(), err: sink(), env: { RUNNER_TEMP: temp } }), 0);
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1-attempt-2.json'), JSON.stringify(attempt(2, 100000)));
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1.json'), JSON.stringify(attempt(1, 1)));
+  assert.equal(main(['--ci'], { out: sink(), err: sink(), env: { RUNNER_TEMP: temp } }), 1);
 });
 
 test('this repository declares a valid per-file budget for every system', () => {
