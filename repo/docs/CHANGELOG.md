@@ -1,5 +1,17 @@
 # Toolkit Changelog
 
+## 3.125.0
+
+### Changed
+
+- A new top Development Principle, Accuracy first: zero hallucinations and no false data is always the top priority, and every claim, status or done verdict is checked in depth against its sources rather than skimmed.
+- Tests first now says what makes a test worth keeping: it fails on the old code for the right reason or guards a real contract, through the real code path with realistic inputs. Reviews flag data shaped to the assertion, test-only branches, a stubbed unit under test, duplicates and tautologies.
+- The PR review playbook applies both: check each claim against its source and run each new or changed test against the old code.
+
+### Fixed
+
+- **Holder orders stop at their expiry:** `run-order` reads the order's expiry again before every write, not only at the start. A run, including one the cloud sweep takes from the queue, that reaches the expiry makes no further write, keeps the log entries for the writes before it, reports `STOPPED` with `ORDER_EXPIRED` and files the queued order under `orders/refused/` with those results, so a later run never repeats or finishes it.
+
 ## 3.124.0 (governance yes opens the question bank)
 
 ### Added
