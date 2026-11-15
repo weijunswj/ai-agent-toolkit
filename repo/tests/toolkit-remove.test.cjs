@@ -743,11 +743,33 @@ test.describe('the task record\'s own guards', () => {
   });
 });
 
-test('remove toolkit prints a Task Scheduler error as it is, screened for secrets, and any other error as the plain line', t => {
+// What Windows PowerShell wrote to stderr on the owner's computer before anything else: a CLIXML
+// progress block ("Preparing modules for first use.").
+const CLIXML_PROGRESS = '#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>';
+
+test('a PowerShell failure gives the first real stderr line, past the CLIXML block Windows PowerShell writes first', () => {
+  const shapes = {
+    'after the block': `${CLIXML_PROGRESS}\r\nAccess is denied.\r\nmore detail\r\n`,
+    'inside the block': `${CLIXML_PROGRESS.replace('</Objs>', '')}Access is denied.\r\n</Objs>`,
+    'as an error record': '#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">Access is denied._x000D__x000A_</S><S S="Error">more detail_x000D__x000A_</S></Objs>',
+    'with no block': 'Access is denied.\nmore detail',
+  };
+  for (const [name, stderr] of Object.entries(shapes)) {
+    assert.equal(windows.stderrMessage(stderr), 'Access is denied.', name);
+    assert.throws(() => windows.powerShellScheduler({ run: () => ({ status: 1, stderr }) }).list('TOOLKIT'), { name: 'WindowsTasksError', message: 'Access is denied.' }, name);
+  }
+  // A block with nothing after it, or no stderr at all, names the operation.
+  for (const stderr of [CLIXML_PROGRESS, '', undefined])
+    assert.throws(() => windows.powerShellScheduler({ run: () => ({ status: 1, stderr }) }).list('TOOLKIT'), { message: 'PowerShell list failed' });
+});
+
+test('remove toolkit names a Task Scheduler error inside the plain line, screened for secrets, and any other error gets the plain line alone', t => {
   const run = scheduler => { const out = [], err = []; const code = removal.main(['plan', '--app', 'all'], { home: s.tempHome(t), scheduler, rules: null, parts: [], plugins: () => ({}), log: line => out.push(line), error: line => err.push(line) }); return { code, err: err.join('\n') }; };
   const denied = stderr => windows.powerShellScheduler({ run: () => ({ status: 1, stderr }) });
-  assert.deepEqual(run(denied('Access is denied.\nmore detail')), { code: 1, err: 'Access is denied.' });
-  assert.deepEqual(run(denied(`denied for ${secret()}`)), { code: 1, err: '[removed: looked like a secret]' });
+  for (const stderr of [`${CLIXML_PROGRESS}\r\nAccess is denied.\r\n`, 'Access is denied.\nmore detail'])
+    assert.deepEqual(run(denied(stderr)), { code: 1, err: 'Toolkit removal could not be planned (Access is denied.); nothing was removed.' });
+  assert.deepEqual(run(denied(CLIXML_PROGRESS)), { code: 1, err: 'Toolkit removal could not be planned (PowerShell marked-folders failed); nothing was removed.' });
+  assert.deepEqual(run(denied(`denied for ${secret()}`)), { code: 1, err: 'Toolkit removal could not be planned ([removed: looked like a secret]); nothing was removed.' });
   const plain = { markedFolders() { throw new Error('internal detail'); }, list() { return []; } };
   assert.deepEqual(run(plain), { code: 1, err: 'Toolkit removal could not be planned; nothing was removed.' });
 });

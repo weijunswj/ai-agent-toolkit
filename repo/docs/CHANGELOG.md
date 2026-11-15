@@ -84,7 +84,7 @@
 
 ### Removed
 
-- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now finds its runner gone and exits with an error; after three such runs it turns itself off, if Toolkit's record still matches it. Say `remove toolkit` to list and remove it after your OK.
+- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now finds its runner gone and exits with an error; after three such runs it turns itself off, if Toolkit's record still matches it. Say `remove toolkit` to uninstall Toolkit from this computer after your OK; the old tasks go with it once no app keeps Toolkit.
 - Setup's retired `--scheduled-task-update` and `--remove-toolkit-tasks` options are gone. Setup still prints one line when old Toolkit tasks are recorded on a Windows computer, pointing to `remove toolkit`.
 - The permission ask rows for the old task commands are gone, since those commands no longer exist.
 
