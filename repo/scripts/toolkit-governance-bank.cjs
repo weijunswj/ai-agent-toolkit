@@ -179,7 +179,7 @@ function renderGovernanceBank(specs, { card = false } = {}) {
     'The permissions row covers only this app. Any other app you use needs toolkit governance run there too.',
     '',
     card ? cardInstruction(specs)
-      : `Agents: show this bank to the owner exactly, as plain text and never in a code block, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
+      : `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
   ].join('\n');
 }
 
@@ -282,7 +282,7 @@ function cardInstruction(specs) {
   const status = specs.some(spec => spec.report_only);
   const cards = bankCards(specs);
   return [
-    `Agents (Claude Code): do not repeat this table${status ? '; tell the owner the Status lines above in one plain sentence each' : ''}, then call AskUserQuestion once with exactly this input, adding no answers field, and stop:`,
+    `Agents (Claude Code): this paragraph is for you alone; never show the owner any of it or the card input. Do not show the table above${status ? '; tell the owner the Status lines above in one plain sentence each' : ''}, then call AskUserQuestion once with exactly this input, adding no answers field, and stop:`,
     JSON.stringify(cards[0]),
     cards.length > 1 ? `This is card 1 of ${cards.length}. Their taps come back to you with the next card, and after the last card with the exact command to send.` : 'Their taps come back to you with the exact command to send.',
     'If the card cannot be shown, show the table above instead, as plain text and never in a code block.',
