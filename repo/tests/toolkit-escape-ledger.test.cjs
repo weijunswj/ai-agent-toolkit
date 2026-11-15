@@ -186,14 +186,62 @@ test('E2-b: hostile shapes with any character outside printable ASCII are refuse
   hostile.expectDefaultDeny(assert, text => ledger.readLedger(Buffer.from(line({ what_broke: `Broke: ${text} in the run`.slice(0, ledger.MAX_TEXT) }))).ok, unusual);
 });
 
-test('E2-b: every line-break and byte-order-mark variant of a valid ledger is refused', () => {
+test('E2-b: a ledger whose line ends are all CRLF is read; every other line-break and byte-order-mark variant is refused', () => {
   const valid = line() + line({ id: 'second-escape' });
   assert.equal(ledger.readLedger(Buffer.from(valid)).ok, true);
   const changed = hostile.variants(valid).filter(variant => variant.text !== valid);
   assert.ok(changed.length >= 6);
-  for (const variant of changed) assert.equal(ledger.readLedger(Buffer.from(variant.text, 'utf8')).ok, false, variant.id);
+  const crlf = ledger.readLedger(Buffer.from(changed.find(variant => variant.id === 'crlf').text, 'utf8'));
+  assert.equal(crlf.ok, true, JSON.stringify(crlf.errors));
+  assert.deepEqual(crlf.entries.map(item => item.id), ['graph-state-never-written', 'second-escape']);
+  for (const variant of changed.filter(item => item.id !== 'crlf')) assert.equal(ledger.readLedger(Buffer.from(variant.text, 'utf8')).ok, false, variant.id);
   // The whole-file check names the first line holding a character outside printable ASCII.
   assert.deepEqual(ledger.readLedger(Buffer.from(changed.find(variant => variant.id === 'bom').text, 'utf8')).errors, [{ line: 1, field: null, rule: 'not-printable-ascii' }]);
+});
+
+test('E2-b: mixed or lone-CR line ends are refused with a plain reason', () => {
+  const cases = {
+    'CRLF then LF': `${line().replace('\n', '\r\n')}${line({ id: 'second-escape' })}`,
+    'LF then CRLF': `${line()}${line({ id: 'second-escape' }).replace('\n', '\r\n')}`,
+    'lone CR line end': line().replace('\n', '\r'),
+    'CR inside CRLF lines': `${line().replace('\n', '\r\r\n')}`,
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    const read = ledger.readLedger(Buffer.from(text, 'utf8'));
+    assert.equal(read.ok, false, name);
+    assert.deepEqual(read.errors.map(error => error.rule), ['mixed-line-ends'], name);
+    assert.match(ledger.formatError(read.errors[0]), /mixed-line-ends: .*CRLF.*LF/, name);
+  }
+});
+
+test('E2-b: a store cloned with core.autocrlf=true reads, groups and takes new lines', t => {
+  const git = (cwd, ...args) => {
+    const run = spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', '-c', 'user.name=Escape Test', '-c', 'user.email=escape-test@example.invalid', ...args], { cwd, encoding: 'utf8' });
+    assert.equal(run.status, 0, `git ${args.join(' ')}: ${run.stderr}`);
+    return run.stdout;
+  };
+  const root = store(t);
+  const source = path.join(root, 'source');
+  fs.mkdirSync(source);
+  git(source, 'init', '-q');
+  assert.equal(book().add(source, REPO, entry()).ok, true);
+  assert.equal(book().add(source, REPO, entry({ id: 'second-escape', kind: 'ci' })).ok, true);
+  git(source, 'add', '-A');
+  git(source, 'commit', '-q', '-m', 'seed');
+  const clone = path.join(root, 'clone');
+  const cloned = spawnSync('git', ['clone', '-q', '-c', 'core.autocrlf=true', source, clone], { encoding: 'utf8' });
+  assert.equal(cloned.status, 0, cloned.stderr);
+  // The checkout really has CRLF line ends, so the reads below go through the CRLF path.
+  assert.match(fs.readFileSync(ledgerFile(clone), 'utf8'), /\r\n.*\r\n$/s);
+  const checked = book().check(clone, REPO);
+  assert.equal(checked.ok, true, JSON.stringify(checked.errors));
+  assert.equal(checked.entries.length, 2);
+  assert.equal(book().group(clone, REPO).summary.total, 2);
+  assert.equal(book().add(clone, REPO, entry({ id: 'third-escape' })).ok, true);
+  assert.equal(book().fix(clone, REPO, 'second-escape', { fix_pr: 12 }).ok, true);
+  // Writes are LF; the file stays one kind of line end and reads back.
+  assert.doesNotMatch(fs.readFileSync(ledgerFile(clone), 'utf8'), /\r/);
+  assert.equal(book().check(clone, REPO).entries.length, 3);
 });
 
 test('E2-b: non-canonical JSON is refused: spacing, key order, duplicate keys and escapes', () => {
