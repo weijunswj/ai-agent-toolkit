@@ -28,11 +28,37 @@ const MIN_TOOLKIT = '3.127.0';
 const BINDING_FILE = '.github/toolkit-programme.json';
 const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
 
+// A Toolkit source checkout builds its own instruction files from the templates, so its copies are
+// cleaned by hand there, never by this command.
+const SOURCE_MARKERS = Object.freeze(['skills/repository-agent-rules/repo-local/AGENTS.managed.template.md', 'repo/scripts/sync-agent-instruction-shims.cjs']);
+
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
 
 // { ok, changes: [{ file, action, text? }], lines }. `governance` is for tests.
+// The programme file with min_toolkit set, in its own layout (indent, line endings, byte order mark),
+// so the pull request shows one added or changed line; a layout it cannot follow is written out whole.
+function withMinToolkit(text, binding) {
+  const expected = { ...binding, min_toolkit: MIN_TOOLKIT };
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const body = text.slice(bom.length);
+  const same = candidate => { try { return JSON.stringify(JSON.parse(candidate)) === JSON.stringify(JSON.parse(JSON.stringify(expected))); } catch { return false; } };
+  let edited;
+  if (Object.hasOwn(binding, 'min_toolkit')) edited = body.replace(/("min_toolkit"\s*:\s*)"[^"]*"/, `$1"${MIN_TOOLKIT}"`);
+  else {
+    const close = body.lastIndexOf('}');
+    const head = body.slice(0, close).replace(/\s+$/, '');
+    const newline = body.includes('\r\n') ? '\r\n' : '\n';
+    const indent = /\n([ \t]+)"/.exec(head)?.[1];
+    edited = indent === undefined ? `${head}, "min_toolkit": "${MIN_TOOLKIT}"${body.slice(head.length)}` : `${head},${newline}${indent}"min_toolkit": "${MIN_TOOLKIT}"${body.slice(head.length)}`;
+  }
+  return same(edited) ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
+}
+
 function run({ root, write = false, governance = null }) {
   if (!fs.existsSync(path.join(root, '.git'))) return { ok: false, changes: [], lines: [`Nothing was changed: ${root} is not the top folder of a git checkout.`] };
+  if (SOURCE_MARKERS.every(file => fs.existsSync(path.join(root, ...file.split('/'))))) {
+    return { ok: false, changes: [], lines: ['Nothing was changed: this is a Toolkit source checkout, which builds its own instruction files from the templates, so its copies are removed by hand in a source pull request.'] };
+  }
   const scan = new LeftoverScan({ discover: () => [], ...(governance ? { governance } : {}) }).inspect(root);
   if (!scan.scanned) return { ok: false, changes: [], lines: [`Nothing was changed: ${scan.reason}.`] };
   if (!scan.governed) return { ok: false, changes: [], lines: [`Nothing was changed: governance is not on here (${scan.governance}). Use the leftover scan's report; removing Toolkit files from a repository without governance is the owner's choice.`] };
@@ -47,13 +73,17 @@ function run({ root, write = false, governance = null }) {
     changes.push({ file, action: 'remove-block', text });
   }
 
-  let binding;
-  try { binding = JSON.parse(fs.readFileSync(path.join(root, BINDING_FILE), 'utf8').replace(/^﻿/, '')); } catch { binding = null; }
+  let binding, bindingText = '';
+  try { bindingText = fs.readFileSync(path.join(root, BINDING_FILE), 'utf8'); binding = JSON.parse(bindingText.replace(/^\uFEFF/, '')); } catch { binding = null; }
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
     return { ok: false, changes: [], lines: [`Nothing was changed: ${BINDING_FILE} could not be read, so min_toolkit cannot be set. Fix it first.`] };
   }
-  if (!binding.min_toolkit || newer(MIN_TOOLKIT, binding.min_toolkit)) {
-    changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: `${JSON.stringify({ ...binding, min_toolkit: MIN_TOOLKIT }, null, 2)}\n` });
+  // min_toolkit is a version 2 key: a version 1 binding holding it would read as invalid once merged.
+  if (binding.schema !== 'toolkit.programme-binding.v2') {
+    return { ok: false, changes: [], lines: [`Nothing was changed: ${BINDING_FILE} is not a version 2 programme file, and only version 2 can carry min_toolkit. Move it to version 2 first.`] };
+  }
+  if (typeof binding.min_toolkit !== 'string' || newer(MIN_TOOLKIT, binding.min_toolkit)) {
+    changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: withMinToolkit(bindingText, binding) });
   }
 
   const words = { delete: 'remove the file', 'remove-block': 'remove the Toolkit block, keeping the rest of the file', 'set-min-toolkit': `set min_toolkit to ${MIN_TOOLKIT}` };

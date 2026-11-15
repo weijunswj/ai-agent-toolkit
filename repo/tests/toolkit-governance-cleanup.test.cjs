@@ -86,6 +86,35 @@ test('only a governed repository is cleaned, and a broken or unreadable programm
   assert.equal(read(broken.root, 'AGENTS.md'), BLOCK, 'nothing is removed when the programme file cannot be updated');
 });
 
+test('a version 1 programme file and a Toolkit source checkout are refused, so a merge never leaves an unusable binding or breaks the source sync', t => {
+  const v1 = '{\n  "schema": "toolkit.programme-binding.v1",\n  "repository": "example/adopter",\n  "parent_issue": 1\n}\n';
+  const old = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': v1 });
+  const refused = cleanup.run({ root: old.root, write: true, governance: old.governance });
+  assert.equal(refused.ok, false);
+  assert.match(refused.lines.join('\n'), /version 2/);
+  assert.equal(read(old.root, 'AGENTS.md'), BLOCK);
+  assert.equal(read(old.root, '.github/toolkit-programme.json'), v1);
+  const source = repo(t, {
+    'AGENTS.md': BLOCK, '.github/toolkit-programme.json': BINDING,
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md': BLOCK,
+    'repo/scripts/sync-agent-instruction-shims.cjs': '// sync\n',
+  });
+  const held = cleanup.run({ root: source.root, write: true, governance: source.governance });
+  assert.equal(held.ok, false);
+  assert.match(held.lines.join('\n'), /Toolkit source checkout/);
+  assert.equal(read(source.root, 'AGENTS.md'), BLOCK);
+});
+
+test('min_toolkit goes into the programme file in its own layout, so the pull request shows one added line', t => {
+  const crlf = '{\r\n    "schema": "toolkit.programme-binding.v2",\r\n    "repository": "example/adopter",\r\n    "governance": "enabled",\r\n    "required_checks": ["validate", "plain-text"]\r\n}\r\n';
+  const r = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': crlf });
+  assert.equal(cleanup.run({ root: r.root, write: true, governance: r.governance }).ok, true);
+  assert.equal(read(r.root, '.github/toolkit-programme.json'), crlf.replace('"plain-text"]\r\n}', `"plain-text"],\r\n    "min_toolkit": "${cleanup.MIN_TOOLKIT}"\r\n}`));
+  const older = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': BINDING.replace('"enabled"', '"enabled",\n  "min_toolkit": "3.100.0"') });
+  assert.equal(cleanup.run({ root: older.root, write: true, governance: older.governance }).ok, true);
+  assert.equal(read(older.root, '.github/toolkit-programme.json'), BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`), 'an older value is raised in place');
+});
+
 // The cleanup is wired into refresh governance: the bank of a governed repository with copies asks
 // about them, and only the owner's ticketed Clean up writes the cleanup in the working tree.
 test('refresh governance asks about the copies; Keep current is recommended and Clean up writes the cleanup', async t => {
