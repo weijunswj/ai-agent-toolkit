@@ -48,6 +48,7 @@ function nodeRepo(t, count = 5) {
 test('offer: the minutes line shows the last green run, or says the minutes are unknown', () => {
   assert.match(offer.estimateText({ minutes: 23.4, workflow: 'CI' }), /^Minutes: the last green CI run used about 23 runner minutes\. Each shard adds a minute or two of setup, which a private repository pays for\.$/);
   assert.match(offer.estimateText(null), /^Minutes: unknown, because no green CI run could be read\./);
+  assert.match(offer.estimateText({ minutes: 0.6, workflow: 'CI' }), /used about 1 runner minute\. /, 'one minute is singular');
   // The estimate reads the default branch's green push runs, skips Toolkit copies and other branches,
   // takes the newest run of each workflow and keeps the largest, so a small lint job does not stand in.
   const calls = [];
@@ -170,7 +171,7 @@ test('bank: a governed repository is asked with the minutes estimate; yes prepar
   const ctx = governedFixture(t);
   const transport = recorder();
   const result = await answer(ctx, '1.4=B', { transport });
-  assert.match(result.shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now/);
+  assert.match(result.shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| B\. Yes: /, '25 minutes is slow CI, so Yes is recommended');
   assert.match(result.shown.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
   assert.match(result.shown.out, /^More on 1\.4: .*Minutes: the last green CI run used about 25 runner minutes\./m);
   assert.equal(result.code, 0, result.err);
@@ -208,22 +209,46 @@ test('bank: the minutes line is display-only, so a CI run that finishes before t
   assert.equal(transport.calls.length, 1, 'the answer is accepted');
 });
 
-test('bank: one answer that changes a switch holds the shards answer, so two binding pull requests never conflict', async t => {
+test('bank: one answer that changes a switch and answers shards prepares one binding pull request with both', async t => {
   const ctx = governedFixture(t);
   const transport = recorder();
   const switches = [];
   transport.publishSwitch = (...args) => { switches.push(args); return { number: 6, url: `https://github.com/${SLUG}/pull/6`, head: 'b'.repeat(40) }; };
   const result = await answer(ctx, '1.2=B, 1.4=B', { transport });
   assert.equal(result.code, 0, result.err);
-  assert.equal(switches.length, 1, 'the task auto-merge pull request is prepared');
-  assert.equal(transport.calls.length, 0, 'no second pull request on the same binding');
-  assert.match(result.out, /Parallel CI shards: held, because the switch pull request above changes the same binding file\./);
+  assert.equal(switches.length, 0, 'no separate switch pull request');
+  assert.equal(transport.calls.length, 1, 'one pull request on the binding');
+  const [, mergedText, text, value, list, changes] = transport.calls[0];
+  assert.equal(mergedText, ctx.mergedText);
+  assert.equal(value, 'yes');
+  assert.deepEqual(changes, { auto_merge: 'after-gates' });
+  const proposal = JSON.parse(text);
+  assert.equal(proposal.task_prs.auto_merge, 'after-gates');
+  assert.equal(proposal.ci_shards.answer, 'yes');
+  delete proposal.ci_shards;
+  delete proposal.task_prs;
+  const merged = JSON.parse(ctx.mergedText);
+  delete merged.task_prs;
+  assert.deepEqual(proposal, merged, 'only the switch and ci_shards change');
+  assert.ok(list, 'the first list joins it');
+  assert.match(result.out, /Prepared https:\/\/github\.com\/toolkit-test-fixture\/shards\/pull\/5: it sets task auto-merge on and records parallel CI shards as yes/);
+  assert.doesNotMatch(result.out, /held/);
+});
+
+test('bank: Yes is recommended only for slow CI; fast or unknown CI keeps Not now', () => {
+  const specsFor = measured => bankSpecs({ state: { state: 'ENABLED' }, task: 'off', merged: JSON.parse(bindingText()), ciShards: { estimate: offer.estimateText(measured), measured } });
+  const recommended = measured => specsFor(measured).find(spec => spec.id === 'ci-shards').recommendation.value;
+  assert.equal(recommended({ minutes: 10, workflow: 'CI' }), 'yes', 'ten minutes or more is slow');
+  assert.equal(recommended({ minutes: 42, workflow: 'CI' }), 'yes');
+  assert.equal(recommended({ minutes: 9.4, workflow: 'CI' }), 'not-now');
+  assert.equal(recommended(null), 'not-now', 'an unknown time is never guessed slow');
+  assert.match(renderGovernanceBank(specsFor({ minutes: 4, workflow: 'CI' })), /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: /);
 });
 
 test('bank: not now writes nothing and asks again; never records the answer and the question stops', async t => {
   const ctx = governedFixture(t);
   const transport = recorder();
-  const later = await answer(ctx, 'all recommended', { transport });
+  const later = await answer(ctx, 'all recommended', { transport, estimate: () => ({ minutes: 4, workflow: 'CI' }) });
   assert.equal(later.code, 0, later.err);
   assert.equal(transport.calls.length, 0);
   assert.match(later.out, /Parallel CI shards: not now\. Nothing was written; the next refresh asks again\./);
@@ -245,12 +270,14 @@ test('bank: not now writes nothing and asks again; never records the answer and 
   }
 });
 
-test('bank: an ungoverned repository is never asked, and the answer waits for pinned copies that read ci_shards', async t => {
+test('bank: a repository with governance off is asked only alongside turning it on, and the answer waits for pinned copies that read ci_shards', async t => {
   const ctx = governedFixture(t);
   fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), bindingText({ governance: 'disabled' }));
   recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
   const off = await run(ctx, ['setup']);
-  assert.doesNotMatch(off.out, /Parallel CI shards/);
+  assert.match(off.out, /\| Parallel CI shards \| Not asked yet \| .*Yes \(needs governance on\)/);
+  const refused = await answer(ctx, '1.4=B', { transport: recorder() });
+  assert.match(refused.out, /Parallel CI shards can be answered only while governance is on/);
   const held = governedFixture(t);
   const transport = recorder();
   const result = await answer(held, '1.4=B', { transport, readers: () => ({ ok: false, reason: 'the pinned Toolkit copies x run a Toolkit older than the one that reads ci_shards (3.113.0), and would read the binding as invalid. Refresh the repository rules first (merge their pull request), then answer again' }) });
@@ -299,6 +326,11 @@ test('transport: the answer pull request starts from the exact merged binding an
   kept.transport.publishCiShards(SLUG, merged, proposal, 'yes', '{"list":1}\n');
   assert.equal(kept.calls.filter(args => args.includes('PUT')).length, 1, 'a list already on the default branch is kept');
   assert.throws(() => fake({ base: bindingText({ required_checks: [] }) }).transport.publishCiShards(SLUG, merged, proposal, 'yes', null), { code: 'SWITCH_BASE_CHANGED' });
+  // A switch change from the same answer joins it: one branch, one pull request that names both.
+  const both = fake();
+  both.transport.publishCiShards(SLUG, merged, proposal, 'yes', null, { auto_merge: 'after-gates' });
+  assert.ok(both.calls.some(args => JSON.stringify(args).includes('toolkit/switches-task-auto-merge-on-ci-shards-yes-')), 'the branch names both');
+  assert.equal(both.calls.filter(args => args[1] === `repos/${SLUG}/pulls`).length, 1, 'one pull request');
 });
 
 // ---- the installer and the governance check ----------------------------------------------------

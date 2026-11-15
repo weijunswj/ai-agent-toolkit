@@ -40,6 +40,9 @@ const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 const APP_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
 
 const STATE_LABEL = Object.freeze({ ENABLED: 'On', DISABLED: 'Off', UNDECIDED: 'Not decided' });
+// CI this slow on its last green run gets Yes recommended for parallel shards: the first shard list
+// names one shard per this many minutes, so below it shards add setup for little time saved.
+const SLOW_CI_MINUTES = require('./toolkit-ci-shards-offer.cjs').MINUTES_PER_SHARD;
 
 // ---- the rows -----------------------------------------------------------------------------------
 
@@ -59,7 +62,7 @@ function statusRow({ id, section, title, current, text }) {
 // `adoption` what turning governance on would make in a repository that is not prepared yet
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
 // merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
-// minutes line }) for a repository whose merged binding turns governance on, and `app` the governance
+// minutes line, measured: the estimate or null }) where it is offered, or null, and `app` the governance
 // App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read).
 function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
@@ -114,29 +117,36 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       bank.wizardChoice('on', 'On (needs governance on)', 'Only together with turning governance on in the same answer; the same pull request sets it.'),
     ],
   }));
-  // The sharded CI offer: asked only in a governed repository, again at each refresh after not now,
-  // never again after never (toolkit-ci-shards-offer.cjs).
-  if (state.state === 'ENABLED' && merged) {
-    const answered = merged.ci_shards?.answer;
-    if (answered === 'yes' || answered === 'never') {
-      specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
-        text: answered === 'yes' ? 'Bound in the merged programme file; the next rules refresh copies the shard workflows while the shard list is usable' : 'Bound in the merged programme file; Toolkit does not ask again' }));
-    } else {
-      // The minutes line is display-only and kept out of the hashed question text: a CI run that
-      // finishes between showing the bank and answering it must not change the bank reference.
-      specs.push({ ...bank.resolvedQuestion({
-        id: 'ci-shards', key: 'ciShards', section, title: 'Parallel CI shards',
-        whatThisControls: 'Run tests in parallel CI jobs so they finish faster? It uses about the same CI minutes.',
-        current: answered === 'not-now' ? 'Not now' : 'Not asked yet',
-        currentChoice: '',
-        recommendation: { value: 'not-now', outcome: 'Nothing is written; Toolkit asks again at the next refresh.', reason: 'Shards save time, not minutes, and are not yet proven end to end on a real repository.' },
-        choices: [
-          bank.wizardChoice('not-now', 'Not now', 'Nothing is written; Toolkit asks again at the next refresh.'),
-          bank.wizardChoice('yes', 'Yes', 'Toolkit prepares one binding pull request with the answer and a first shard list. It applies only after you merge it.'),
-          bank.wizardChoice('never', 'Never ask', 'Toolkit prepares one binding pull request recording never; it does not ask again.'),
-        ],
-      }), estimateLine: ciShards?.estimate || '' });
-    }
+  // The sharded CI offer: asked in a governed repository with no final answer (again at each refresh
+  // after not now, never again after never), and in the first bank, where a yes joins the one turn-on
+  // pull request (toolkit-ci-shards-offer.cjs). `ciShards` is null where it is not offered.
+  const answered = merged?.ci_shards?.answer;
+  if (governed && (answered === 'yes' || answered === 'never')) {
+    specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
+      text: answered === 'yes' ? 'Bound in the merged programme file; the next rules refresh copies the shard workflows while the shard list is usable' : 'Bound in the merged programme file; Toolkit does not ask again' }));
+  } else if (ciShards) {
+    // Slow CI (SLOW_CI_MINUTES or more on its last green run) is where shards pay off, so Yes is
+    // recommended there; fast or unknown CI keeps Not now. The minutes line is display-only and kept
+    // out of the hashed question text, so a CI run that finishes between showing the bank and
+    // answering it changes the bank reference only when it crosses the threshold.
+    const slow = Number.isFinite(ciShards.measured?.minutes) && ciShards.measured.minutes >= SLOW_CI_MINUTES;
+    const yesOutcome = governed
+      ? 'Toolkit prepares one binding pull request with the answer and a first shard list. It applies only after you merge it.'
+      : 'The turn-on pull request also records yes and adds a first shard list and the shard workflows. It applies only after you merge it.';
+    specs.push({ ...bank.resolvedQuestion({
+      id: 'ci-shards', key: 'ciShards', section, title: 'Parallel CI shards',
+      whatThisControls: 'Run tests in parallel CI jobs so they finish faster? It uses about the same CI minutes.',
+      current: answered === 'not-now' ? 'Not now' : 'Not asked yet',
+      currentChoice: '',
+      recommendation: slow
+        ? { value: 'yes', outcome: yesOutcome, reason: `The last green CI run took ${SLOW_CI_MINUTES} minutes or more, so parallel shards finish it sooner for about the same minutes.` }
+        : { value: 'not-now', outcome: 'Nothing is written; Toolkit asks again at the next refresh.', reason: `CI is under ${SLOW_CI_MINUTES} minutes or its time is unknown, so shards would add setup minutes for little time saved.` },
+      choices: [
+        bank.wizardChoice('not-now', 'Not now', 'Nothing is written; Toolkit asks again at the next refresh.'),
+        bank.wizardChoice('yes', governed ? 'Yes' : 'Yes (needs governance on)', yesOutcome),
+        bank.wizardChoice('never', governed ? 'Never ask' : 'Never ask (needs governance on)', governed ? 'Toolkit prepares one binding pull request recording never; it does not ask again.' : 'The turn-on pull request records never; Toolkit does not ask again.'),
+      ],
+    }), estimateLine: ciShards.estimate || '' });
   }
   if (adoption && adoption.blocked) {
     specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Could not be checked', text: `GitHub could not be read (${adoption.blocked}), so turning on makes nothing until it can` }));
@@ -209,7 +219,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
 
 // The shard question's short "more" line: what Yes makes, why Not now is recommended, and the
 // display-only minutes line.
-const SHARDS_MORE = 'Yes adds a first shard list (Node tests) in the answer pull request, and the next rules refresh adds the shard workflows, which check every test file ran once. Not now is recommended until shards are proven end to end on a real repository.';
+const SHARDS_MORE = `Yes adds a first shard list (Node tests) and the shard workflows, which check every test file ran once: in the turn-on pull request when governance turns on in the same answer, otherwise in its own pull request, with the workflows at the next rules refresh. Yes is recommended when the last green CI run took ${SLOW_CI_MINUTES} minutes or more.`;
 function shardMoreText(spec) { return [SHARDS_MORE, spec.estimateLine].filter(Boolean).join(' '); }
 
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }
@@ -264,8 +274,8 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
       throw new Error(`${label} can be on only while governance is on: turn governance on in the same answer, or leave ${label.toLowerCase()} as it is.`);
     }
   }
-  if (['yes', 'never'].includes(chosen.ciShards) && chosen.governance === 'off') {
-    throw new Error('Parallel CI shards are offered only while governance is on: leave them as not now when turning governance off.');
+  if (['yes', 'never'].includes(chosen.ciShards) && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
+    throw new Error('Parallel CI shards can be answered only while governance is on: turn governance on in the same answer, or leave them as not now.');
   }
   return chosen;
 }

@@ -83,8 +83,8 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.match(questionBank.renderCompactQuestionTable(outdated, true).join('\n'), /\| 2\.1 \| Toolkit permissions \(Claude Code\) \| Outdated: 2 missing, 4 old \| B\. Update: .* \| A\. Keep current<br>C\. Remove \|/);
   assert.throws(() => bank.parseBankAnswer('AAAA-AAAA-AAAA-AAAA: all recommended', undecided), /Governance question bank reference is stale/);
   assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /unavailable question 1\.9/);
-  const enabled = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'after-gates', merged: { store: { repository: 'owner/store' }, required_checks: [] } });
+  const enabled = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'after-gates', merged: { store: { repository: 'owner/store' }, required_checks: [] }, ciShards: { estimate: '', measured: null } });
   assert.notEqual(bank.bankReference(enabled), reference, 'a different state is a different bank');
   assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep', ciShards: 'not-now' }, 'a governed bank also asks about parallel CI shards; Set up stays recommended and gives no command once governance is off');
-  assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B, 1.4=B`, enabled), /offered only while governance is on/);
+  assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B, 1.4=B`, enabled), /answered only while governance is on/);
 });
