@@ -72,6 +72,14 @@ function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
   return { calls, world, discoveryGh: args => get(args[0]), writer };
 }
 
+// What the real installer leaves in the working tree: every turn-on pull request must carry these.
+function writePlainText(root) {
+  for (const name of ['.github/plain-text.json', '.github/scripts/plain-text-check.cjs', '.github/workflows/plain-text.yml']) {
+    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+    fs.writeFileSync(path.join(root, name), `${name}\n`);
+  }
+}
+
 async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false } = {}) {
   let out = ''; let err = '';
   const published = [];
@@ -84,7 +92,7 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
-    discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); },
+    discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(root); },
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
     cloudWorkflows: () => ({ files: {}, warning: null }),
   });

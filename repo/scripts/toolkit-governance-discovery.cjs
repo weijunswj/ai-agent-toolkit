@@ -233,6 +233,8 @@ class GovernanceDiscovery {
       ...base,
       status: 'propose',
       repository: slug,
+      // Whether the repository itself is public: the programme file and parent issue are then public too.
+      visibility: repoInfo.ok && repoInfo.value && typeof repoInfo.value.private === 'boolean' ? (repoInfo.value.private ? 'private' : 'public') : 'unknown',
       parents,
       stores,
       other_bindings: otherBindings,

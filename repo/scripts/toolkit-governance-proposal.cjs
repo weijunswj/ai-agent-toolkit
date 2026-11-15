@@ -20,7 +20,19 @@ const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file);
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
-const ADOPTION_HELP = 'Run toolkit governance discover, reuse the adoption proposal and ask only for missing parent, separate evidence store or required checks. Verify the store is private. Use repository-agent-rules to prepare the binding, governed block and supporting rules before publishing them together.';
+// A yes is published only by the governance question bank, whose script makes every piece itself.
+const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and rules itself.';
+// The rules files every turn-on pull request carries, beside the programme file: a yes missing any of
+// them is refused, so every governed repository starts from the same full set.
+const PLAIN_TEXT_FILES = Object.freeze(['.github/plain-text.json', '.github/scripts/plain-text-check.cjs', '.github/workflows/plain-text.yml']);
+function requiredRules() {
+  const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md')).sort();
+  return ['AGENTS.md', 'CLAUDE.md', ...playbooks.map(name => `docs/agent-playbooks/${name}`), ...PLAIN_TEXT_FILES];
+}
+// The required rules files a turn-on file set lacks (CLAUDE.md counts only when it loads AGENTS.md).
+function missingRules(files) {
+  return requiredRules().filter(name => typeof files[name] !== 'string' || (name === 'CLAUDE.md' && !/^@AGENTS\.md[ \t]*$/m.test(files[name])));
+}
 
 // The cloud sweep copies a governed repository needs, pinned to this Toolkit checkout's own commit,
 // which must be on its main branch:
@@ -83,7 +95,9 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
     if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
-  return { ...files, ...(rendered || {}), ...cloud.files };
+  const all = { ...files, ...(rendered || {}), ...cloud.files };
+  if (missingRules(all).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  return all;
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
@@ -136,6 +150,12 @@ class GovernanceProposals {
       return this.#write(id, value);
     } finally { fs.closeSync(descriptor); fs.rmSync(lock, { force: true }); }
   }
+  // The answer a run's live receipt carries ('yes' or 'no'), or null.
+  answerFor(cwd, run) {
+    const identity = this.#identity(cwd), value = this.#read(identity.repository_id);
+    const request = value?.requests.find(item => item.run === run);
+    return request && ['yes', 'no'].includes(request.answer) ? request.answer : null;
+  }
   // Called only after the host gate or interactive terminal has accepted the owner's answer.
   // There is deliberately no confirmed:true bypass. The receipt is bound to that run, never global.
   request(cwd, answer, { sessionId, epoch }) {
@@ -160,7 +180,7 @@ class GovernanceProposals {
     const run = sessionId && EPOCH.test(epoch) ? key(`${sessionId}:${epoch}`) : null;
     const request = value.requests.find(item => item.run === run && ['yes', 'no'].includes(item.answer) && this.#now() - new Date(item.at) >= 0 && this.#now() - new Date(item.at) <= cache.FRESH_MS);
     if (!request) return null;
-    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${ADOPTION_HELP} ` : ''}Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now. Governance stays as merged on the default branch.` };
+    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the bank again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now.`} Governance stays as merged on the default branch.` };
   }
   // A failed query is unknown, never "there are no proposals". Closed unmerged PRs end requests.
   // One PR-state read per minute across chats. Claim before I/O, so even a killed hook is throttled.
@@ -491,4 +511,4 @@ class GitHubProposalTransport {
     return { number: pr.number, head: headSha };
   }
 }
-module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, SCHEMA, MARKER, PROMPT_BUDGET_MS });
+module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingRules, requiredRules, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });

@@ -1237,6 +1237,22 @@
       "fixture": { "repo": { "governance": "undecided" } },
       "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`."], "context_excludes": ["Toolkit asks the user once per session, and nothing waits on the answer."] },
       "status": "pass"
+    },
+    {
+      "id": "GOV.yes-opens-governance-bank",
+      "source": "governance one-flow: a yes opens the question bank, and the hand-built turn-on route is gone",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}}
+      ],
+      "payload": {"prompt":"toolkit governance enable"},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["Build nothing by hand"],"context_excludes":["repository-agent-rules","publish --run"]},
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
     }
   ]
 }

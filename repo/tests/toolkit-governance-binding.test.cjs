@@ -171,9 +171,11 @@ test('A3: a merged disabled is not flipped by the CLI, discovery or migration', 
   cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } });
   const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
   const out = []; const err = [];
-  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: true, ask: async () => 'yes', stdout: { write: text => out.push(text) }, stderr: { write: text => err.push(text) }, refresh: () => ({}) });
-  assert.equal(await cli.main(['enable']), 2);
-  assert.match(out.join(''), /pending|not published/i);
+  // enable opens the bank, whose recommendation keeps the merged answer.
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: true, ask: async () => 'all recommended', stdout: { write: text => out.push(text) }, stderr: { write: text => err.push(text) }, refresh: () => ({}),
+    hookReader: () => null, queueReader: () => null, permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
+  assert.equal(await cli.main(['enable']), 0, err.join(''));
+  assert.match(out.join(''), /Nothing changed/);
   assert.equal(registryBytes(ctx), null, 'nothing written');
   assert.equal(new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, gh: () => { throw new Error('no GitHub read'); } }).discover(repo).status, 'disabled');
 });

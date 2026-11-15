@@ -398,7 +398,7 @@ test('no saved copy, no move: a store that is not private, a failed copy and sec
   assert.equal(broken.posts().length + copies(broken).length, 0);
   assert.ok(broken.page().includes(AREA));
   assert.deepEqual(unsafe(broken).map(entry => entry.diagnostics), [{ reason: 'control_character' }]);
-  assert.throws(() => secret.store.saveNoteCopy(12, `token ghp_${'a'.repeat(30)}`), { code: 'PAGE_COPY_REFUSED' });
+  assert.throws(() => secret.store.savePageCopy(12, `token ghp_${'a'.repeat(30)}`), { code: 'PAGE_COPY_REFUSED' });
 });
 
 test('a lost post reply is found under its key and never posted twice', () => {

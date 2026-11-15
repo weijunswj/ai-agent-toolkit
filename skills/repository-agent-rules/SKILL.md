@@ -87,7 +87,7 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 **Carry the refresh to a pull request.** When the refresh wrote files in a Git repository that has a GitHub remote, and no in-flight task already carries those files on its own authorised branch, do not leave them uncommitted:
 
-For an accepted pending governance yes, keep these files in the one adoption proposal. Run `toolkit-governance.cjs publish --run <pending receipt>` after preparing the binding and rules; do not open a separate instruction pull request. After merge, compare prepared untracked files with the merged copies, preserve local differences and clear only verified duplicates with permission before pulling.
+Turning governance on is not done here: the governance question bank (`toolkit governance`) renders the governed block and supporting rules into its one setup pull request itself, and a yes is never published with `toolkit-governance.cjs publish --run`. Do not open a separate instruction pull request for it. After merge, compare prepared untracked files with the merged copies, preserve local differences and clear only verified duplicates with permission before pulling.
 
 1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed, and any personal-data guard, plain-text check or cloud sweep files it installed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.

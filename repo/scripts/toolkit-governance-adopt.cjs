@@ -71,6 +71,7 @@ function adoptionPlan(found, { newStore = false } = {}) {
     store_choice: choice,
     parent: found.parents.recommended ? { issue: found.parents.recommended.issue, title: found.parents.recommended.title, create: false } : { issue: null, create: true },
     checks: found.binding_draft.required_checks,
+    visibility: found.visibility || 'unknown',
     unknown: found.unknown,
     draft: found.binding_draft,
   };
@@ -195,4 +196,16 @@ function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train
   return { binding, files, made, lines };
 }
 
-module.exports = Object.freeze({ AdoptError, GitHubAdoptionWriter, adopt, adoptionPlan, adoptionPrepared, renderedRules, storeName });
+// A repository whose programme file and governed block were already prepared in the working tree:
+// nothing is made on GitHub, but the same full rules set is rendered and the plain-text check added
+// where missing, so its turn-on pull request carries exactly what a fresh one does.
+// { binding (the working tree's, or null when unreadable), files, made: [], lines }.
+function prepared({ root, plainText = null }) {
+  const lines = ensurePlainText(root, plainText);
+  const files = renderedRules(root);
+  let binding = null;
+  try { binding = JSON.parse(fs.readFileSync(path.join(root, governance.BINDING_FILE), 'utf8').replace(/^\uFEFF/, '')); } catch { binding = null; }
+  return { binding, files, made: [], lines };
+}
+
+module.exports = Object.freeze({ AdoptError, GitHubAdoptionWriter, adopt, adoptionPlan, adoptionPrepared, prepared, renderedRules, storeName });

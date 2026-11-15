@@ -1,5 +1,5 @@
 'use strict';
-const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone } = require('./toolkit-governance-gate-support.cjs');
+const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone, assertAnswered } = require('./toolkit-governance-gate-support.cjs');
 
 const pending = (ctx, repo, sessionId = 's1') => gate.sessionLine(repo, { registryOptions: ctx.options, sessionId });
 const record = (ctx, ticket, word) => new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).answerTicket(ticket, word);
@@ -46,7 +46,7 @@ test('short replies after the question go to the agent with a ticket: the hook r
     assert.doesNotMatch(answered.context, /fix the login bug/, 'nothing was kept to hand back');
     assert.doesNotMatch(pending(ctx, repo), /is pending/, `${reply}: the hook records nothing by itself`);
     assert.equal(record(ctx, ticket, word).ok, true);
-    assert.match(pending(ctx, repo), new RegExp(`${word} is pending`), reply);
+    assertAnswered(pending(ctx, repo), word, reply);
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', reply);
   }
 });
@@ -65,7 +65,7 @@ test('a reply sent from a Claude Projects thread answers like a typed one; relay
       assert.doesNotMatch(pending(ctx, repo), /is pending/, reply);
       assert.equal(record(ctx, replyTicket(answered), word).ok, true, reply);
     }
-    assert.match(pending(ctx, repo), new RegExp(`${word} is pending`), reply);
+    assertAnswered(pending(ctx, repo), word, reply);
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', reply);
   }
   // "later" from the thread goes the same way, and recording it decides nothing.
@@ -210,7 +210,7 @@ test('a real thread reply with the host\'s system note answers in the repository
     const answered = hold(ctx).decide({ cwd: repo, prompt: REAL_THREAD_WAKE(reply), sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);
     assert.equal(record(ctx, replyTicket(answered), word).ok, true, reply);
-    assert.match(pending(ctx, repo), new RegExp(`${word} is pending`), reply);
+    assertAnswered(pending(ctx, repo), word, reply);
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', reply);
   }
 });
