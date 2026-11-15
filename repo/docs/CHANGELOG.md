@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.117.0
+
+### Fixed
+
+- The decision-trace audit and `programme.cjs trace` no longer read the record a comment replaces as its own record ID when its text starts with `SUPERSEDES=`. A record ID inside a `SUPERSEDES=` token now only names the replaced record, wherever the token sits, so a record written `SUPERSEDES=` first no longer shows as a false "superseded by itself" finding.
+
+### Changed
+
+- The governance question bank has a Merge trains row (1.3) for the repository's `task_prs.merge_train` switch. Like task auto-merge, it can be on only while governance is on, or in the same answer that turns it on; otherwise it reads "Off (needs governance)". Turning governance on writes both switches into the programme file, off unless the answer turns them on, so a repository that turns governance on from now on gets merge trains off unless the owner picks On; governed repositories with no `merge_train` key still read as on. A later change opens one pull request that sets only the switches that change, adding a missing switch in place.
+- In Claude Code a bank with more than four rows, such as a new repository with a found evidence store, is now shown as several question cards tapped in order instead of a typed table. Only the next card runs, and the last card's taps return the whole answer with a one-use ticket.
+
 ## 3.116.0 (merge train finder)
 
 ### Added

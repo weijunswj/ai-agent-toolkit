@@ -280,6 +280,22 @@ test('index lines carry the date, record, summary, fragment link and supersessio
   assert.equal(parseArgs(['--repo', 'o/r', '--issue', '7', '--repair', '--out', 'b.md', '--ledger', 'l.json']).ledger, 'l.json');
 });
 
+for (const [where, line] of [
+  ['before', 'SUPERSEDES=INT-TK421-664 INT-TK421-668 OWNER-DECISION replaces the old plan'],
+  ['after', 'INT-TK421-668 OWNER-DECISION replaces the old plan SUPERSEDES=INT-TK421-664'],
+]) test(`a SUPERSEDES= token ${where} the record ID never becomes the comment's own ID`, () => {
+  const comments = [person(1, 'INT-TK421-664 old plan'), person(2, `${line}\nDetails.`)];
+  const result = auditDecisionTraces({ body: '[x](#issuecomment-1) [y](#issuecomment-2)', comments, recordPrefix: PREFIX });
+  assert.deepEqual(result.superseded_unmarked, [{ id: '1', record: 'INT-TK421-664', superseded_by: 'INT-TK421-668' }]);
+  assert.deepEqual(result.unknown_supersedes, []);
+  assert.deepEqual(result.unlabelled, []);
+  const entries = auditDecisionTraces({ body: '', comments, recordPrefix: PREFIX }).unlinked;
+  assert.deepEqual(entries.map(entry => [entry.id, entry.record, entry.supersedes, entry.superseded_by]), [
+    ['1', 'INT-TK421-664', [], 'INT-TK421-668'],
+    ['2', 'INT-TK421-668', ['INT-TK421-664'], null],
+  ]);
+});
+
 test('unknown SUPERSEDES targets and a body at the threshold fail', () => {
   const comments = [person(1, 'INT-TK421-001 SUPERSEDES=INT-TK421-999')];
   const linked = '[x](#issuecomment-1)';

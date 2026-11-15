@@ -135,12 +135,15 @@ function isBot(comment) {
 }
 
 // A record ID is the declared literal prefix followed by digits, for example INT-TK421-042. The
-// prefix is matched as plain text, never compiled into a regular expression.
+// prefix is matched as plain text, never compiled into a regular expression. A match inside a
+// SUPERSEDES= token names the replaced record, never the comment's own, wherever the token sits.
 const RECORD_PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 function recordId(text, prefix) {
   if (!prefix || isArchiveComment(text)) return null;
   const source = String(text || '');
+  const replaced = [...source.matchAll(SUPERSEDES)].map(match => [match.index, match.index + match[0].length]);
   for (let at = source.indexOf(prefix); at !== -1; at = source.indexOf(prefix, at + 1)) {
+    if (replaced.some(([start, end]) => at >= start && at < end)) continue;
     const digits = /^\d+/.exec(source.slice(at + prefix.length))?.[0];
     if (digits) return `${prefix}${digits}`;
   }
@@ -400,4 +403,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs, isBot });
+module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs, isBot, recordId });

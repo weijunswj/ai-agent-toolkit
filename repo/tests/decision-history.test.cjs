@@ -109,6 +109,13 @@ test('bots and index comments are counted, never entries', () => {
   assert.equal(result.entries[0].url, 'https://github.com/acme/app/issues/548#issuecomment-4');
 });
 
+test('a SUPERSEDES= token before or after the record ID never becomes the own record', () => {
+  for (const text of [`SUPERSEDES=${PREFIX}664 ${PREFIX}668 new plan`, `${PREFIX}668 new plan SUPERSEDES=${PREFIX}664`]) {
+    const { entries } = read(548, [comment(1, tagged('PLAN', `${PREFIX}664 old plan`)), comment(2, tagged('PLAN', text))]);
+    assert.deepEqual(entries.map(entry => [entry.record, entry.supersedes]), [[`${PREFIX}664`, []], [`${PREFIX}668`, [`${PREFIX}664`]]]);
+  }
+});
+
 test('parent and child traces are read and analysed separately, with SUPERSEDES= across them', () => {
   const parentEntries = read(421, [comment(100, tagged('VERSIONING', `${PREFIX}001 one number per batch`)), comment(101, 'Note about #548 and #5480'), comment(102, 'Note about #549')]);
   const childEntries = read(548, [comment(200, tagged('VERSIONING', `${PREFIX}002 child keeps no version SUPERSEDES=${PREFIX}001`))]);

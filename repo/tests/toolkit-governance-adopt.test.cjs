@@ -72,7 +72,7 @@ function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
   return { calls, world, discoveryGh: args => get(args[0]), writer };
 }
 
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, agentHost = undefined } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = [];
@@ -87,6 +87,7 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); },
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
     cloudWorkflows: () => ({ files: {}, warning: null }),
+    ...(agentHost ? { agentHost } : {}),
   });
   const code = await cli.main(argv);
   return { code, out, err, published, plainText };
@@ -97,7 +98,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
   assert.match(table, /Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on/);
@@ -113,7 +114,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const { binding, files } = result.published[0];
   assert.deepEqual(binding.parents, [{ issue: 7, record_prefix: 'INT-FRE7-' }]);
   assert.deepEqual(binding.store, { kind: 'github', repository: STORE, branch: 'main', path: `state/${SLUG}/` });
-  assert.deepEqual(binding.task_prs, { auto_merge: 'off' });
+  assert.deepEqual(binding.task_prs, { auto_merge: 'off', merge_train: 'off' });
   assert.deepEqual(JSON.parse(files['.github/toolkit-programme.json']), binding);
   const { blocks, errors } = managedBlock.findBlocks(files['AGENTS.md']);
   assert.equal(errors.length, 0);
@@ -159,7 +160,7 @@ test('a found store is a question: keep it, or create a new private one', async 
   const parent = { number: 3, title: 'Programme tracker', state: 'open', labels: [] };
   const keep = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], keep, { interactive: true, answers: [''] });
-  assert.match(shown.out, /\| 1\.3 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
+  assert.match(shown.out, /\| 1\.4 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
   assert.match(shown.out, /Parent issue: #3\. Reused when governance turns on/);
   const kept = await run(ctx, ['setup'], keep, { interactive: true, answers: ['all recommended'] });
   assert.equal(kept.code, 0, kept.err + kept.out);
@@ -169,10 +170,38 @@ test('a found store is a question: keep it, or create a new private one', async 
 
   const ctx2 = fixture(t);
   const fresh = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
-  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.3=B'] });
+  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.4=B'] });
   assert.equal(made.code, 0, made.err + made.out);
   assert.deepEqual(fresh.calls, [['create', STORE], ['put', STORE, 'archives/README.md']]);
   assert.equal(made.published[0].binding.store.repository, STORE);
+});
+
+test('in Claude Code a bank of five rows stays a card: two cards, tapped in order, make one answer', async t => {
+  const ctx = fixture(t);
+  const session = 'session-adopt';
+  const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
+  const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
+  new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).start(session, 'startup', governance.governanceState(ctx.repo, ctx.registryOptions).repository_id);
+  const github = fakeGitHub({ repos: { [`${OWNER}/fresh-evidence`]: { private: true, dirs: ['archives'] } } });
+  const shown = await run(ctx, ['setup'], github, { agentHost: () => 'claude' });
+  assert.equal(shown.code, 0, shown.err + shown.out);
+  assert.match(shown.out, /This is card 1 of 2\./);
+  const first = JSON.parse(shown.out.split('\n').find(line => line.startsWith('{"questions"')));
+  assert.equal(first.questions.length, 4);
+  const pre = (input, id) => new gate.ToolGate({ registryOptions: ctx.registryOptions }).decide({ tool_name: 'AskUserQuestion', session_id: session, cwd: ctx.repo, tool_use_id: id, tool_input: input });
+  const post = (input, answers, id) => new gate.PromptHold({ registryOptions: ctx.registryOptions, environment: {} }).picked({ cwd: ctx.repo, sessionId: session, toolUseId: id, toolResponse: { questions: input.questions, answers } });
+  const firstOption = input => Object.fromEntries(input.questions.map(question => [question.question, question.options[0].label]));
+
+  const nextOf = context => JSON.parse(context.split('\n').find(line => line.startsWith('{"questions"')));
+  assert.equal(pre(first, 'card-1'), null);
+  const tapped = post(first, firstOption(first), 'card-1');
+  assert.match(tapped.context, /tapped card 1 of 2.*Nothing is sent yet/);
+  const second = nextOf(tapped.context);
+  assert.deepEqual(second.questions.map(question => question.question.split(' ')[0]), ['2.1']);
+  assert.match(pre(first, 'card-1-again').deny, /only exactly as Toolkit printed it/, 'a tapped card is not shown again');
+  assert.equal(pre(second, 'card-2'), null);
+  const done = post(second, firstOption(second), 'card-2');
+  assert.match(done.context, /setup --answers "\S+: 1\.1=A, 1\.2=A, 1\.3=A, 1\.4=A, 2\.1=A" --ticket [0-9a-f]{32}$/m);
 });
 
 test('when GitHub cannot be searched, turning on makes nothing and says why', async t => {
