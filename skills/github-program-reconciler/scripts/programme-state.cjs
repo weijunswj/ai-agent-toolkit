@@ -5483,7 +5483,7 @@ class Reconciler {
     return tracked?.head || observed.prHeads?.get(pr) || null;
   }
 
-  diffPrPages(parent, docs, observed, only, effects) {
+  diffPrPages(parent, docs, observed, only, effects, findings) {
     for (const [pr, issues] of this.prTasks(parent, docs, observed, only)) {
       const page = observed.prPages?.get(pr);
       if (!page || !page.is_pull_request || page.state !== 'open') continue;
@@ -5492,7 +5492,13 @@ class Reconciler {
       if (nav.error || status.error) continue;
       const bodies = this.prPageBodies(parent, docs, pr, issues, this.prHead(docs, observed, pr, issues));
       const same = (found, body) => Boolean(found.block) && normalizeBlockBody(found.block.body) === normalizeBlockBody(body) && !found.block.tampered;
-      if (same(nav, bodies.nav) && same(status, bodies.status) && prStatusPlaced(page.body, status.block, nav.block)) continue;
+      const settled = same(nav, bodies.nav) && same(status, bodies.status) && prStatusPlaced(page.body, status.block, nav.block);
+      // The budget is checked on the page as it will read after this pass, so a settled page still raises it.
+      const version = this.toolkitVersion || '0.0.0';
+      const drawn = settled ? page.body : upsertPrBlocks(page.body, renderBlock(bodies.nav, version, NAV_BLOCK_NAME), renderBlock(bodies.status, version));
+      const over = pageBudgetFinding(pr, drawn, PAGE_BUDGETS.pr);
+      if (over) findings.push({ ...over, kind: 'pr' });
+      if (settled) continue;
       effects.push({ kind: 'replace_pr_nav', target: { issue: issues[0], pr, digest: blockDigest(bodies.nav), status: blockDigest(bodies.status) }, body: bodies.nav, status_body: bodies.status });
     }
   }
@@ -5502,7 +5508,7 @@ class Reconciler {
     const version = this.toolkitVersion || '0.0.0';
     const requested = targetsOverride || (only ? [only, parent.parent_issue] : this.scope ? [...blocks.keys()].filter(number => number === parent.parent_issue || this.scope.has(number)) : [...blocks.keys()]);
     const targets = [...requested.filter(number => number !== parent.parent_issue), ...requested.filter(number => number === parent.parent_issue)];
-    if (!targetsOverride) this.diffPrPages(parent, children, observed, only, effects);
+    if (!targetsOverride) this.diffPrPages(parent, children, observed, only, effects, findings);
     for (const number of targets) {
       const issue = observed.issues.get(number);
       const body = blocks.get(number);
@@ -5511,8 +5517,9 @@ class Reconciler {
       const traced = findStateBlock(issue.body, TRACE_BLOCK_NAME);
       const nav = findStateBlock(issue.body, NAV_BLOCK_NAME);
       if (error || traced.error || nav.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error || nav.error }); continue; }
-      if (number !== parent.parent_issue && frozenPage(issue, block)) continue;
       const navBody = this.navFor(parent, number, children);
+      // A frozen page is drawn again only when its PATH changed (the task moved under another parent).
+      if (number !== parent.parent_issue && frozenPage(issue, block) && nav.block && !nav.block.tampered && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody)) continue;
       const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues, this.now(), this.boardLine(parent)) : null;
       const summary = currentBody ? findStateBlock(issue.body, CURRENT_BLOCK_NAME) : { block: null, error: null };
       if (summary.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: summary.error }); continue; }
@@ -5550,7 +5557,11 @@ class Reconciler {
         } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; reason = error.reason; }
       }
       if (reason && number !== parent.parent_issue && issue.state === 'open' && !issue.is_pull_request) findings.push({ code: 'PAGE_LAYOUT_HELD', issue: number, detail: `the page was not re-laid: ${reason}` });
-      if (number !== parent.parent_issue && current && !move && ordered && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
+      if (number !== parent.parent_issue && current && !move && ordered && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) {
+        const settledOver = pageBudgetFinding(number, issue.body, PAGE_BUDGETS.child);
+        if (settledOver) findings.push(settledOver);
+        continue;
+      }
       if (!ordered) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no DECISIONS block yet' : traced.block.tampered ? 'the DECISIONS block was edited by hand' : 'the DECISIONS block differs from the comments (an old comment trace is replaced here)' });
@@ -5581,7 +5592,7 @@ class Reconciler {
         continue;
       }
       if (projected.nearLimit) findings.push({ code: 'BODY_NEAR_LIMIT', issue: number, diagnostics: bodySizeDiagnostics(projected.body, Math.min(SAFE_LIMIT, this.threshold)), detail: 'The projected page fits the hard limit but has lost its safe headroom' });
-      const overBudget = number === parent.parent_issue ? pageBudgetFinding(number, projected.body, PAGE_BUDGETS.parent) : null;
+      const overBudget = pageBudgetFinding(number, projected.body, number === parent.parent_issue ? PAGE_BUDGETS.parent : PAGE_BUDGETS.child);
       if (overBudget) findings.push(overBudget);
       const archiveEffects = (projected.archive || []).filter(part => !parent.page_archive?.some(entry => entry.key === part.key && entry.digest === archiveTools().digest(part.body) && entry.comment_id));
       if (projected.noteUnsafe) findings.push({ code: 'ARCHIVE_SECTION_UNSAFE', issue: number, diagnostics: { reason: projected.noteUnsafe }, detail: 'The marked Archive section cannot be moved safely' });

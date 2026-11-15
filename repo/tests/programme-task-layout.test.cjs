@@ -200,6 +200,39 @@ test('a closed task page that already shows its finished status is frozen: never
   assert.ok(f.reconciler().run().effects.some(effect => effect.target.issue === 806), 'a reopened task is drawn again');
 });
 
+test('a task page over 4,000 characters and a PR page over 3,000 raise BODY_OVER_BUDGET naming their largest parts', () => {
+  assert.deepEqual(state.PAGE_BUDGETS, { parent: 10000, child: 4000, pr: 3000 });
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], bodies: { 806: `## Plan\n\n${'p'.repeat(4200)}\n`, 807: '## Plan\n\nShort.\n' } });
+  f.github.addPr(900, { head: SHA_A, branch: 'feature', body: `${'w'.repeat(3100)}\n\nRefs #806` });
+  f.github.addPr(901, { head: SHA_A, branch: 'other', body: 'Short.\n\nRefs #807' });
+  const report = f.reconciler().run({ apply: true });
+  const over = report.findings.filter(entry => entry.code === 'BODY_OVER_BUDGET');
+  const task = over.find(entry => entry.issue === 806 && !entry.kind);
+  assert.ok(task && task.diagnostics.threshold === 4000 && task.diagnostics.largest_sections[0].kind === 'hand_written', JSON.stringify(over));
+  const pr = over.find(entry => entry.issue === 900 && entry.kind === 'pr');
+  assert.ok(pr && pr.diagnostics.threshold === 3000, JSON.stringify(over));
+  assert.equal(over.some(entry => [807, 901].includes(entry.issue)), false, 'pages within budget raise nothing');
+  assert.ok(f.reconciler().run().findings.some(entry => entry.code === 'BODY_OVER_BUDGET' && entry.issue === 806), 'a settled page over budget still raises it');
+});
+
+test('a frozen closed page whose task moved under another parent gets its new PATH once, then stays frozen', () => {
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], closed: [806] });
+  const parentDoc = () => f.store.read('parent', 421).doc;
+  f.reconciler().run({ apply: true });
+  f.store.mutate('child', 806, { writer, parentDoc: parentDoc(), change: doc => ({ ...doc, lifecycle: 'DONE', completed_at: '2026-11-01T00:00:00Z' }) });
+  f.store.mutate('parent', 421, { writer, change: doc => ({ ...doc, outcomes: doc.outcomes.map(outcome => (outcome.issue === 806 ? { ...outcome, class: 'COMPLETED' } : outcome)) }) });
+  f.reconciler().run({ apply: true });
+  assert.match(f.github.issues.get(806).body, /\n#421 > #806\n/);
+  f.store.mutate('parent', 421, { writer, change: doc => ({ ...doc, outcomes: doc.outcomes.map(outcome => (outcome.issue === 806 ? { ...outcome, parent: 807 } : outcome)) }) });
+  f.reconciler().run({ apply: true });
+  const moved = f.github.issues.get(806).body;
+  assert.match(moved, /\n#421 > #807 > #806\n/, 'the new path is drawn');
+  const writes = f.bodyWrites(806).length;
+  f.github.addComment(806, { body: 'Scope\n---\nA late decision' });
+  f.reconciler().run({ apply: true });
+  assert.equal(f.bodyWrites(806).length, writes, 'then the page is frozen again');
+});
+
 test('laying out twice gives the same bytes, and a newer version redraws the blocks without moving a word', () => {
   const first = lay(OLD_PAGE);
   const second = lay(first.body);
