@@ -343,6 +343,7 @@ jobs:
           node repo/scripts/check-diff-whitespace.cjs
           node repo/scripts/check-test-durations.cjs --ci
           node repo/scripts/toolkit-hook-pack.cjs check-expectations
+          node repo/scripts/check-script-references.cjs
           node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries" --legs gate
 
   validate:
