@@ -161,12 +161,13 @@ test('route stamps: an off-pin stamp never boards, and a RISKY pull request need
     ready(8, { comments: [verdict(sha(8), { tier: 'RISKY' })], pull: { body: bodyWith(8, null) } }),
     ready(9, { comments: [verdict(sha(9), { route: 'Route: UNVERIFIED' })], pull: { body: bodyWith(9, null) } }),
     ready(10, { pull: { body: bodyWith(10, `${G1_STAMP}\nRoute: UNVERIFIED`) } }),
-    // A temporary owner change: the stamp cites the owner's record, so a non-registry model can board.
+    // A retired owner override stamp is off the pin, so a non-registry model never boards, NORMAL or RISKY.
     ready(11, { comments: [verdict(sha(11), { tier: 'RISKY' })], pull: { body: bodyWith(11, 'Route: host-verified deepseek-v4/high pin=owner-claude/BUILDER override=rec-990') } }),
+    ready(13, { pull: { body: bodyWith(13, 'Route: host-verified deepseek-v4/high pin=owner-claude/BUILDER override=cmsg_FAKE123') } }),
     ready(12, { comments: [verdict(sha(12), { route: 'Route: host-verified opus-5.5/xhigh' })] }),
   ]);
   const { result } = find(f, live);
-  assert.deepEqual(result.ready, ['#1', '#2', '#9', '#11', '#12']);
+  assert.deepEqual(result.ready, ['#1', '#2', '#9', '#12']);
   const reasons = Object.fromEntries(result.skipped.map(line => [line.split(':')[0], line.slice(line.indexOf(': ') + 2)]));
   assert.match(reasons['#3'], /G2 route stamp is off the stack-registry pin: Route: host-verified opus-5.5\/medium/);
   assert.match(reasons['#4'], /G1 route stamp is off the stack-registry pin/);
@@ -175,5 +176,7 @@ test('route stamps: an off-pin stamp never boards, and a RISKY pull request need
   assert.match(reasons['#7'], /RISKY pull request needs a verified or launcher-attested G2 route stamp \(missing\)/);
   assert.match(reasons['#8'], /RISKY pull request needs a verified or launcher-attested G1 route stamp \(missing\)/);
   assert.match(reasons['#10'], /2 route stamp lines/);
+  assert.match(reasons['#11'], /G1 route stamp is off the stack-registry pin: .*override=rec-990/);
+  assert.match(reasons['#13'], /G1 route stamp is off the stack-registry pin: .*override=cmsg_FAKE123/);
   assert.equal(finder.verdictFor([verdict(sha(1))], sha(1)).route, G2_STAMP);
 });
