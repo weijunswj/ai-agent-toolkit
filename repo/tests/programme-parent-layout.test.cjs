@@ -1,8 +1,8 @@
 'use strict';
 
-// The parent page's locked layout: a slim CURRENT, a graph of Task | PRs | Status | Waiting on |
-// Updated with the latest ten COMPLETED rows on the page and the rest behind one link line, a
-// one-line AGENT CONTEXT, and a run-checked page budget (BODY_OVER_BUDGET).
+// The parent page's locked layout: a slim CURRENT, a graph of Task | Child # | Status | Waiting on |
+// Last Updated with the latest ten COMPLETED rows on the page and the rest behind one link line, a one-line
+// AGENT CONTEXT, and a run-checked page budget (BODY_OVER_BUDGET).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,37 +11,33 @@ const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
 const { renderScaleFixture } = require('./support/programme-render-scale.cjs');
 
-const HEADER = '| Task | PRs | Status | Waiting on | Updated (SGT) |';
-const rowsOf = text => text.split('\n').filter(line => /^\|#\d+[ |]/.test(line));
+const HEADER = '| Task | Child # | Status | Waiting on | Last Updated (SGT) |';
 const cellsOf = row => row.slice(1, -1).split(/(?<!\\)\|/);
+const rowsOf = text => text.split('\n').filter(line => line.startsWith('|') && /^#\d+$/.test(cellsOf(line)[1] || ''));
 
-test('graph columns: the child number leads the Task cell, status carries its group, PRs cap at three', () => {
+test('graph columns: the task name, its child number, one status, what it waits on and the update time; PRs stay on the task page', () => {
   const f = renderScaleFixture(state);
   const graph = state.renderParentBlockBody(f.parent, f.children, f.issues);
   assert.ok(graph.split('\n').includes(HEADER), graph.slice(0, 600));
-  assert.doesNotMatch(graph, /Task Description|Child #|\| Class \|/);
+  assert.doesNotMatch(graph, /Task Description|OPTIONAL|LATER · |\| PRs? /);
   const rows = rowsOf(graph);
   assert.equal(rows.length, 72);
   for (const row of rows) {
     const cells = cellsOf(row);
     assert.equal(cells.length, 5, row);
-    const issue = Number(/^#(\d+) /.exec(cells[0])[1]);
+    const issue = Number(/^#(\d+)$/.exec(cells[1])[1]);
     const child = f.children.get(issue);
     const status = child.lifecycle === 'DONE' ? 'COMPLETED' : child.lifecycle === 'RETIRED' ? 'RETIRED'
-      : child.lifecycle === 'ACTIVE' ? 'NOW · IN PROGRESS' : 'LATER · QUEUED';
+      : child.lifecycle === 'ACTIVE' ? (child.blockers.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS') : 'LATER';
     assert.equal(cells[2], status, row);
-    // Four PRs per task: the three newest, then a count of the rest; none for a retired task.
-    const newest = [...new Set([child.pr.number, ...child.prs.map(pr => pr.number)])].sort((a, b) => b - a);
-    // On an open task the newest PR says when it already merged or closed.
-    const shown = [child.pr, ...child.prs].find(pr => pr.number === newest[0]).state;
-    const suffix = ['DONE', 'RETIRED'].includes(child.lifecycle) ? '' : { MERGED: ' merged', CLOSED: ' closed' }[shown] || '';
-    assert.equal(cells[1], child.lifecycle === 'RETIRED' ? '-' : `#${newest[0]}${suffix}, ${newest.slice(1, 3).map(n => `#${n}`).join(', ')} +1`, row);
+    assert.match(cells[0], /^Programme task \d+/, 'the Task cell is the name alone; the number has its own column');
+    for (const pr of [child.pr, ...child.prs]) assert.ok(!row.includes(`#${pr.number}`), `${row} names no PR`);
   }
 });
 
 test('Waiting on names the owner ask, a blocker or the gate, and nothing for queued or finished rows', () => {
   const f = renderScaleFixture(state);
-  const at = issue => cellsOf(rowsOf(state.renderParentBlockBody(f.parent, f.children, f.issues)).find(row => row.startsWith(`|#${issue} `)))[3];
+  const at = issue => cellsOf(rowsOf(state.renderParentBlockBody(f.parent, f.children, f.issues)).find(row => cellsOf(row)[1] === `#${issue}`))[3];
   const set = (issue, change) => { const child = f.children.get(issue); change(child); };
   set(500, child => { child.lifecycle = 'WAITING_OWNER'; });
   set(501, child => { child.gate.role = 'G2'; child.pr.number = 2005; child.pr.state = 'OPEN'; child.uat.state = 'PENDING'; });
@@ -97,7 +93,7 @@ test('the page keeps the latest ten COMPLETED rows; older completed and retired 
   assert.equal(rows.length, 18 + 10);
   // The ten most recent completions stay, most recent last.
   const done = [...f.children.values()].filter(child => child.lifecycle === 'DONE').sort((a, b) => a.completed_at.localeCompare(b.completed_at) || a.issue - b.issue);
-  assert.deepEqual(completed.map(row => Number(/^\|#(\d+) /.exec(row)[1])), done.slice(-10).map(child => child.issue));
+  assert.deepEqual(completed.map(row => Number(cellsOf(row)[1].slice(1))), done.slice(-10).map(child => child.issue));
   const link = body.split('\n').find(line => line.startsWith('[Earlier completed'));
   assert.match(link, /^\[Earlier completed \(30\)\]\(https:\/\/github\.com\/example\.test\/app\/issues\/421#issuecomment-\d+\) · \[Retired \(14\)\]\(https:\/\/github\.com\/example\.test\/app\/issues\/421#issuecomment-\d+\)$/);
   assert.doesNotMatch(body, /^Archived: /m);

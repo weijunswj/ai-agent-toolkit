@@ -4,7 +4,8 @@
 const crypto = require('node:crypto');
 const digest = text => crypto.createHash('sha256').update(text).digest('hex');
 const COMMENT_LIMIT = 60000;
-const GROUPS = ['RETIRED', 'COMPLETED', 'OPTIONAL', 'LATER', 'NOW'];
+// Archive groups follow the graph's Status: optional tasks show, and archive, as LATER.
+const GROUPS = ['RETIRED', 'COMPLETED', 'LATER', 'NOW'];
 const marker = key => `<!-- programme-page-archive key=${key} -->`;
 // `header` is the graph's two table header lines, from the renderer, so a copy reads like the page.
 function graphComments(rows, header) {
@@ -340,4 +341,73 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
   return { kind: 'area', start, end, id, parts };
 }
 
-module.exports = { GROUPS, digest, marker, graphComments, NOTE_MARKER_LINE, NOTE_KEY, NOTE_REASONS, noteArea, noteText };
+// ---------------------------------------------------------------------------------------------
+// The `mark-archive` write (pure): an agent's only edit to hand-written page text, so nobody edits a
+// page by hand. It either adds the one `## Archive` line right above a named line, or removes named
+// link lines that nothing left on the page uses. Each named line must stand on the page exactly once
+// as a whole, top-level line outside any generated block. The result must pass the reader that will
+// move the notes: the parent's (noteArea) or a task page's (programme-page-layout archiveArea). A
+// page already as asked comes back unchanged. Anything else is refused with ARCHIVE_MARK_REFUSED.
+function markArchive(body, { before, remove } = {}, { parent = false } = {}) {
+  const { ProgrammeError } = require('./resolve-executable.cjs');
+  const pageLayout = require('./programme-page-layout.cjs');
+  const refuse = why => new ProgrammeError('ARCHIVE_MARK_REFUSED', `The page was not marked: ${why}. Nothing was written.`);
+  const text = String(body || '');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const { lines } = pageLayout.markdownLines(text);
+  let block = null;
+  const placed = lines.map(line => {
+    const managed = MANAGED_LINE.exec(line.text);
+    const inside = block !== null || Boolean(managed);
+    if (managed && managed[2] === 'BEGIN') block = managed[3];
+    else if (managed && managed[2] === 'END') block = null;
+    return { ...line, bare: line.text.replace(/\r$/, ''), free: line.top && !inside };
+  });
+  const find = wanted => placed.filter(line => line.bare === wanted);
+  const once = wanted => {
+    const hits = find(wanted);
+    if (hits.length > 1) throw refuse('a named line appears more than once on the page');
+    if (hits.length && !hits[0].free) throw refuse('a named line is inside a code block, a fold, a comment, a list or a generated block');
+    return hits[0] || null;
+  };
+  const check = next => {
+    if (parent) {
+      const scan = noteArea(next);
+      if (scan.kind === 'unsafe') throw refuse(`the sweep would not move the marked notes (${scan.reason})`);
+      return scan;
+    }
+    try { pageLayout.splitPage(next); return pageLayout.archiveArea(next); }
+    catch (error) { if (error.code === 'PAGE_LAYOUT_HELD') throw refuse(`the sweep would not lay out the page (${error.reason})`); throw error; }
+  };
+  if ((before === undefined) === (remove === undefined)) throw refuse('it needs exactly one of before or remove');
+  if (before !== undefined) {
+    if (typeof before !== 'string' || !before.trim() || /[\r\n]/.test(before)) throw refuse('before must be one whole line of the page');
+    const hit = once(before);
+    if (!hit) throw refuse('the named line is not on the page');
+    const above = placed[placed.indexOf(hit) - 1];
+    if (above && above.bare === NOTE_MARKER_LINE) return text;
+    if (find(NOTE_MARKER_LINE).length) throw refuse('the page already has a `## Archive` line elsewhere');
+    const next = text.slice(0, hit.start) + NOTE_MARKER_LINE + eol + text.slice(hit.start);
+    const scan = check(next);
+    const area = parent ? (scan.kind === 'area' ? scan : null) : scan;
+    const notes = area ? next.slice(area.start, area.end).split(/\r?\n/).filter(line => line !== NOTE_MARKER_LINE).join('') : '';
+    if (!notes.trim()) throw refuse('no notes would follow the `## Archive` line');
+    return next;
+  }
+  if (!Array.isArray(remove) || !remove.length) throw refuse('remove must list one or more link lines');
+  const gone = [];
+  for (const wanted of remove) {
+    if (typeof wanted !== 'string' || !DEFINITION.test(wanted) || /[\r\n]/.test(wanted)) throw refuse('only link lines (`[name]: url`) can be removed');
+    const hit = once(wanted);
+    if (hit) gone.push(hit);
+  }
+  if (!gone.length) return text;
+  const kept = placed.filter(line => !gone.includes(line));
+  const needed = usedLabels(kept);
+  if (gone.some(line => needed.has(label(DEFINITION.exec(line.bare)[1])))) throw refuse('a named link line is still used on the page');
+  const next = kept.map(line => text.slice(line.start, line.end)).join('');
+  check(next);
+  return next;
+}
+
+module.exports = { GROUPS, digest, marker, graphComments, NOTE_MARKER_LINE, NOTE_KEY, NOTE_REASONS, noteArea, noteText, markArchive };

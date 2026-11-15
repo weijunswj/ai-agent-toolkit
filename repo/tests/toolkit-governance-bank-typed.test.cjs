@@ -79,7 +79,7 @@ test('the shards row asks in one short line, with the details on one "More" line
   const ctx = fixture(t);
   const { out } = await run(ctx, ['setup']);
   assert.match(out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
-  assert.match(out, /^More on 1\.4: Yes adds a first shard list .*Not now is recommended until shards are proven end to end on a real repository\. Minutes: unknown, because no green CI run could be read\. Each shard adds a minute or two of setup, which a private repository pays for\.$/m);
+  assert.match(out, /^More on 1\.4: Yes adds a first shard list .*Yes is recommended when the last green CI run took 10 minutes or more\. Minutes: unknown, because no green CI run could be read\. Each shard adds a minute or two of setup, which a private repository pays for\.$/m);
 });
 
 test('a question card that carries bank rows is not Toolkit\'s: it runs, and its taps record nothing', async t => {

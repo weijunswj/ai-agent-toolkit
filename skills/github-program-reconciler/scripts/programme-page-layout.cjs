@@ -275,11 +275,47 @@ function withoutBlocks(source, names = KNOWN_BLOCKS) {
   return text;
 }
 
+// Notes marked under one `## Archive` line on a task page: the line and what follows it, up to the
+// next level one or two heading, the next generated block or the end of the page. Text inside code,
+// lists, quotes, comments and details is never read as the line. Returns null without a marked area;
+// throws PAGE_LAYOUT_HELD for a second line, or a link line in the area that text outside it uses.
+const ARCHIVE_LINE = '## Archive';
+function archiveArea(source) {
+  const text = String(source || '');
+  const { lines } = markdownLines(text);
+  const marks = lines.filter(line => line.top && line.text.replace(/\r$/, '') === ARCHIVE_LINE);
+  if (!marks.length) return null;
+  if (marks.length > 1) throw held('the `## Archive` line appears more than once');
+  const start = marks[0].start;
+  const close = lines.find(line => line.start > start && line.top && (/^ {0,3}#{1,2}[ \t]/.test(line.text) || TOOLKIT_MARKER.test(line.text)));
+  const end = close ? close.start : text.length;
+  const inside = text.slice(start, end);
+  const outside = text.slice(0, start) + text.slice(end);
+  const used = new Set([...outside.matchAll(/\[([^\]\n]+)\](?!:)/g)].map(match => match[1].trim().toLowerCase()));
+  for (const match of inside.matchAll(/^ {0,3}\[([^\]\n]+)\]:[ \t]*\S/gm)) {
+    if (used.has(match[1].trim().toLowerCase())) throw held('a link line under `## Archive` is used elsewhere on the page');
+  }
+  return { start, end };
+}
+
+// The page with its marked notes replaced by one line linking the saved copy of the whole page.
+// `archiveLink` turns the copy's SHA-256 into its link; the copy itself is saved by the caller
+// before the page is written.
+function withoutArchive(source, archiveLink) {
+  const area = archiveArea(source);
+  if (!area) return source;
+  if (!archiveLink) throw held('marked notes need the private store for their saved copy');
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const line = `Archived notes: [page copy](${archiveLink(state().sha256(source))})${eol}`;
+  return source.slice(0, area.start) + line + (area.end < source.length ? eol : '') + source.slice(area.end);
+}
+
 // Whether a task page already has its three blocks and its text in the fixed order, whatever
-// Toolkit version drew the blocks.
+// Toolkit version drew the blocks. A page with notes marked under `## Archive` is not: they move.
 function inOrder(source) {
   const { findStateBlock } = state();
   const layout = splitPage(source);
+  if (archiveArea(source)) return false;
   let skeleton = String(source || '');
   for (const name of TASK_BLOCKS) {
     const { block } = findStateBlock(skeleton, name);
@@ -291,15 +327,17 @@ function inOrder(source) {
 }
 
 // The re-laid task page, checked: laying it out again gives the same bytes, and every hand-written
-// word is still there. Throws PAGE_LAYOUT_HELD otherwise.
-function layoutTaskPage(source, generated, version) {
+// word is still there, except notes marked under `## Archive`, which give way to the link to the
+// saved copy that holds them (see withoutArchive). Throws PAGE_LAYOUT_HELD otherwise.
+function layoutTaskPage(original, generated, version, { archiveLink = null } = {}) {
+  const source = withoutArchive(original, archiveLink);
   const layout = splitPage(source);
   const body = buildPage(layout, generated, version);
   const again = splitPage(body);
   if (buildPage(again, generated, version) !== body) throw held('laying the page out twice did not give the same page');
   const joined = { ...layout, extra: layout.extra.length ? [{ text: layout.extra.reduce((text, span) => (text ? `${text.replace(/(?:\r?\n[ \t]*)+$/, '')}\n\n${span.text.replace(/^(?:[ \t]*\r?\n)+/, '')}` : span.text), '') }] : [] };
   if (authoredText(again) !== authoredText(joined)) throw held('the re-laid page would not keep every hand-written word');
-  return { body, sections: [...layout.specs.keys()], more: layout.extra.length > 0, moves: withoutBlocks(body) !== withoutBlocks(source) };
+  return { body, sections: [...layout.specs.keys()], more: layout.extra.length > 0, archived: source !== original, moves: withoutBlocks(body) !== withoutBlocks(original) };
 }
 
-module.exports = Object.freeze({ SPEC_SECTIONS, TASK_HEADING, MORE_HEADING, TASK_BLOCKS, markdownLines, splitPage, buildPage, inOrder, authoredText, withoutBlocks, layoutTaskPage });
+module.exports = Object.freeze({ SPEC_SECTIONS, TASK_HEADING, MORE_HEADING, TASK_BLOCKS, ARCHIVE_LINE, markdownLines, splitPage, buildPage, inOrder, authoredText, withoutBlocks, archiveArea, withoutArchive, layoutTaskPage });

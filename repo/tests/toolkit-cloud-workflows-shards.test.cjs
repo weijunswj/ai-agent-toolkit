@@ -113,7 +113,7 @@ test('shard timings copy: the Toolkit\'s own workflow, checking the Toolkit out 
   const original = source(TIMINGS.source);
   const text = workflows.render('shard-timings', original, COMMIT);
   assert.match(text, /- name: Check out this run's commit\n[^\n]+\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n\n      - name: Check out the Toolkit\n[^\n]+\n        with:\n          repository: weijunswj\/ai-agent-toolkit\n          ref: [0-9a-f]{40}\n          path: \.toolkit\n          persist-credentials: false\n/);
-  assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --fail-if-due\n/);
+  assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --warn-if-due\n/);
   assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --open-pr\n/);
   assert.doesNotMatch(text, /node repo\/scripts\/|Validate run on main|^# shard manifest\./m, 'nothing that only holds in the Toolkit');
   assert.match(text, /\.github\/toolkit-test-shards\.json/);

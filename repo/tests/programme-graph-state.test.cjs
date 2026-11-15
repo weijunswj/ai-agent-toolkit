@@ -243,7 +243,7 @@ test('A2-1: one refresh copies closes, adopts native children and lists merged P
   assert.deepEqual(f.child(3).prs,[{number:20,state:'MERGED',merge_sha:SHA}]);
   assert.deepEqual(openCodes(f),['CHILD_ADDED','CHILD_ADDED','CLOSED_WITHOUT_ACCEPTANCE']);
   assert.match(f.github.issues.get(1).body,/\n\[Retired \(2\)\]\(https:[^)]+\)\n/,'the retired rows (#3 and the nested #6) sit behind one link');
-  assert.ok(f.github.commentsOf(1).some(comment => /^\|#3 [^|]*\|-\|RETIRED\|/m.test(comment.body)),'its row is in the archive comment');
+  assert.ok(f.github.commentsOf(1).some(comment => /^\|[^|\n]*\|#3\|RETIRED\|/m.test(comment.body)),'its row is in the archive comment');
   assert.doesNotMatch(state.findStateBlock(f.github.issues.get(1).body).block.body,/#20|aaaaaaa/);
   assert.match(f.github.issues.get(3).body,/#20.*aaaaaaa/);
 });

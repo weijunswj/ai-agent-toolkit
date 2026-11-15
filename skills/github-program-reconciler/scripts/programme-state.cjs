@@ -269,7 +269,9 @@ function validatePageArchive(errors, archive) {
     // A note part is one verified, never-edited comment holding marked hand-written text; `copy`
     // is the SHA-256 of the whole page saved to the private store before that text could move.
     if (note) check(errors, entry.group === null && typeof entry.copy === 'string' && /^[0-9a-f]{64}$/.test(entry.copy), 'page_archive note must have no group and name its saved page copy');
-    else check(errors, entry.kind === 'graph' && archiveTools().GROUPS.includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
+    // OPTIONAL is a legacy group: optional rows now show and archive as LATER, and an OPTIONAL part a
+    // parent still lists is kept and redrawn empty.
+    else check(errors, entry.kind === 'graph' && [...archiveTools().GROUPS, 'OPTIONAL'].includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
     check(errors, isText(entry.title) && entry.title.length <= 200, 'page_archive title must be bounded text');
     check(errors, ['pending', 'moved', ...(note ? ['withdrawn'] : [])].includes(entry.state), 'page_archive state must be pending or moved, or withdrawn for a note');
     check(errors, entry.comment_id === null ? entry.login === null && entry.state === 'pending' : isInt(entry.comment_id, 1) && isText(entry.login) && !ids.has(entry.comment_id), 'page_archive id must be unique with verified login');
@@ -386,7 +388,7 @@ const FINDING_CODES = Object.freeze({
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   PAGE_LAYOUT_HELD: { source: 'reconcile', next_action: 'Controller: fix what the finding names on the task page (an unclosed code block, a section that appears twice, an unknown marker or a secret-shaped value); until then its blocks are updated where they are and its text is not moved' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  BODY_OVER_BUDGET: { source: 'reconcile', next_action: 'Controller: the page is over its budget (parent 10,000, task 4,000, PR 3,000 characters); have an agent put old hand-written text under one `## Archive` line so the next sweep moves it, or shorten the largest part the finding names' },
+  BODY_OVER_BUDGET: { source: 'reconcile', next_action: 'Controller: the page is over its budget (parent 10,000, task 4,000, PR 3,000 characters). Parent or task page: queue a holder order with a `mark-archive` write that puts one `## Archive` line above the old hand-written text, so the next sweep moves it (and, once moved, removes link lines nothing uses). PR page: its builder trims the description to the CHANGE shape' },
   ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
@@ -1608,15 +1610,15 @@ function revisionLine(parent, children) {
   return `<!-- programme-state parent=${parent.parent_issue}@${parent.revision} children=${revs} -->`;
 }
 
-// A row's group, shown first in its Status cell, is worked out, never stored: NOW when the task is in
-// progress (an open or draft PR, or active, waiting on the owner or held), else LATER (OPTIONAL for an
-// optional task). A planned release names where the work merges; it does not change the group.
-// A finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED,
-// or RETIRED. A task in progress shows its gate under Waiting on; review and UAT stay on its page.
+// A row's Status is worked out, never stored. A task in progress (an open or draft PR, or active,
+// waiting on the owner or held) is NOW: `NOW · IN PROGRESS`, or `NOW · QUEUED` while its state lists
+// a blocker, since it cannot move until that clears. Every other open task, optional ones too, is
+// `LATER`; a finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is
+// COMPLETED or RETIRED. A planned release names where the work merges; it does not change the
+// status. Waiting on names what an active task waits for; PRs, review and UAT are on its own page,
+// which lists every PR. Optional tasks still sort after the rest of LATER.
 const GRAPH_GROUPS = Object.freeze(['NOW', 'LATER', 'OPTIONAL']);
-const GRAPH_HEADER = ['| Task | PRs | Status | Waiting on | Updated (SGT) |', '|---|---|---|---|---|'];
-// PRs a graph row names: the newest few, then a count of the rest (all of them are on the task page).
-const GRAPH_PRS_SHOWN = 3;
+const GRAPH_HEADER = ['| Task | Child # | Status | Waiting on | Last Updated (SGT) |', '|---|---|---|---|---|'];
 // The parent keeps this many COMPLETED rows, the most recent; older ones and every RETIRED row sit
 // in archive comments behind one link line.
 const GRAPH_COMPLETED_SHOWN = 10;
@@ -1678,10 +1680,6 @@ function taskName(outcome, issue) {
   return publicText(taskTitle(outcome, issue));
 }
 
-function descriptionText(outcome) {
-  return publicText(outcome.description || '') || '-';
-}
-
 // When an outcome finished: the state's completion time, else the issue's close time.
 function completedAt(child, issue) {
   return child?.completed_at || issue?.closed_at || null;
@@ -1734,24 +1732,12 @@ function orderTies(parent, children) {
     .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
 }
 
-// The PRs cell: every PR found for the task, newest first, the first few by number and then `+n`
-// for the rest; a retired task shows none, since its PRs are no longer the way to the work. On a
-// task still open, a newest PR that already merged or closed says so, so it never reads as in progress.
-function prsCell(outcome, child) {
-  if (isRetired(outcome, child)) return '-';
-  const numbers = [...new Set([child?.pr?.number, ...(child?.prs || []).map(pr => pr.number)].filter(number => isInt(number, 1)))].sort((a, b) => b - a);
-  if (!numbers.length) return '-';
-  const rest = numbers.length - GRAPH_PRS_SHOWN;
-  const state = isFinished(outcome, child) ? null : [child?.pr, ...(child?.prs || [])].find(pr => pr?.number === numbers[0])?.state;
-  const newest = `#${numbers[0]}${state === 'MERGED' ? ' merged' : state === 'CLOSED' ? ' closed' : ''}`;
-  return `${[newest, ...numbers.slice(1, GRAPH_PRS_SHOWN).map(number => `#${number}`)].join(', ')}${rest > 0 ? ` +${rest}` : ''}`;
-}
-
-// The Status cell: the group and the status of an active row (`NOW · IN PROGRESS`), else
-// `COMPLETED` or `RETIRED`.
+// The Status cell (see above): NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED or RETIRED.
 function statusCell(outcome, child) {
   const cls = graphClass(outcome, child);
-  return cls === '-' ? statusText(outcome, child) : `${cls} · ${statusText(outcome, child)}`;
+  if (cls === '-') return statusText(outcome, child);
+  if (cls !== 'NOW') return 'LATER';
+  return child?.blockers?.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
 }
 
 // The Waiting on cell of an active row: the owner's ask, a blocker, else the gate a task in
@@ -1764,10 +1750,10 @@ function waitingCell(outcome, child) {
   return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role ? publicText(child.gate.role) : '-';
 }
 
-// The issue number a graph row names: the `#n` that leads its Task cell (alone when the task has no
-// name of its own).
+// The issue number a graph row names: its Child # cell.
 function graphRowIssue(line) {
-  const match = /^\|#(\d+)[ |]/.exec(line);
+  if (!line.startsWith('|')) return null;
+  const match = /^#(\d+)$/.exec(graphRowCells(line)[1] || '');
   return match ? Number(match[1]) : null;
 }
 
@@ -1788,14 +1774,13 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const issue = issues.get(outcome.issue);
-    const name = taskName(outcome, issue);
-    return `|#${outcome.issue}${name === `#${outcome.issue}` ? '' : ` ${name}`}|${prsCell(outcome, child)}|${statusCell(outcome, child)}|${waitingCell(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
+    return `|${taskName(outcome, issue)}|#${outcome.issue}|${statusCell(outcome, child)}|${waitingCell(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
   });
   return [
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW, LATER by priority, OPTIONAL, ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). Gate, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: NOW, LATER by priority (optional tasks after the rest), ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2158,17 +2143,18 @@ function contextCommentId(comments) {
 
 // The AGENT CONTEXT block: one line. With one Agent context comment it links that comment; with
 // more than one it holds, names them (the first five) and leaves them in the comments; with none it
-// says so. `notes` are the archived note comments, oldest first ([{ title, link }]), listed after it.
-// It ends with the command that lists the page's decision records.
+// says so. `handover` is the link to the page's handover file, listed next; `notes` are the archived
+// note comments, oldest first ([{ title, link }]), after it. It ends with the command that lists the
+// page's decision records.
 const CONTEXT_NAMED = 5;
-function renderContextBlockBody(number = null, comments = [], repository = '', notes = []) {
+function renderContextBlockBody(number = null, comments = [], repository = '', notes = [], handover = null) {
   const ids = contextCommentIds(comments);
   const link = id => `[comment ${id}](${commentLink(issueUrl(repository, number), id)})`;
   const context = ids.length === 1 ? link(ids[0]) : ids.length > 1
     ? `held, ${ids.length} comments have that topic (${ids.slice(0, CONTEXT_NAMED).map(link).join(', ')}${ids.length > CONTEXT_NAMED ? ` and ${ids.length - CONTEXT_NAMED} more` : ''}); keep it on one and the next redraw links it`
     : 'none yet';
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
-    [`Agent context: ${context}`, ...(notes.length ? [`Notes: ${notes.map(note => `[${note.title}](${note.link})`).join(', ')}`] : []), `Decisions: \`programme.cjs trace ${number}\``].join(' · '),
+    [`Agent context: ${context}`, ...(handover ? [`Handover: [handover file](${handover})`] : []), ...(notes.length ? [`Notes: ${notes.map(note => `[${note.title}](${note.link})`).join(', ')}`] : []), `Decisions: \`programme.cjs trace ${number}\``].join(' · '),
   ].join('\n');
 }
 
@@ -5107,7 +5093,7 @@ class Reconciler {
 
   // Drift (programme-drift.cjs): what fell behind its state with nothing in this pass to fix it. Open
   // task pages and task PR pages are checked from the bodies this pass already holds; a task the
-  // sweep left queued for a later pass is not checked until it is read.
+  // sweep left queued for a later pass, or outside this pass's scope, is not checked until it is read.
   diffDrift(parent, docs, observed, effects, findings, holds) {
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const queued = new Set([...(observed.sweep?.left || []), ...(observed.sweep?.failed || [])]);
@@ -5120,11 +5106,12 @@ class Reconciler {
     for (const [number, doc] of docs) {
       const outcome = outcomes.get(number);
       const issue = observed.issues.get(number);
-      if (!outcome || !issue || issue.is_pull_request || issue.state !== 'open' || queued.has(number)) continue;
+      // A page outside this pass's scope was not read for planning, so nothing could redraw it here.
+      if (!outcome || !issue || issue.is_pull_request || issue.state !== 'open' || queued.has(number) || (this.scope && !this.scope.has(number))) continue;
       const found = findStateBlock(issue.body);
       if (found.error) continue;
-      const block = !found.block ? 'missing'
-        : normalizeBlockBody(found.block.body) === normalizeBlockBody(renderChildBlockBody(doc, outcome)) && !found.block.tampered ? 'current' : 'behind';
+      // Behind means drawn from an older revision than the stored one, not drawn by an older Toolkit.
+      const block = !found.block ? 'missing' : drift().drawnRevision(found.block.body) === doc.revision && !found.block.tampered ? 'current' : 'behind';
       pages.push({ number, block, planned: planned('replace_block', target => target.issue === number), explained: explained(number), holding: inFlight(number) });
     }
     findings.push(...drift().pageDrift(pages));
@@ -5348,6 +5335,23 @@ class Reconciler {
     return blocks;
   }
 
+  // The link to a page's handover file in the private store (programme-handover.cjs), or null when
+  // the binding names no GitHub store.
+  handoverLink(number) {
+    const store = this.binding.store;
+    if (store?.kind !== 'github' || !store.repository || !store.branch) return null;
+    return require('./programme-handover.cjs').handoverUrl(store, number);
+  }
+
+  // The link to a saved page copy in the private store, from the copy's SHA-256 (the one page-copy
+  // format: page-copies/issue-<n>/<sha256>.md), or null when the binding names no GitHub store.
+  pageCopyLink(number) {
+    const store = this.binding.store;
+    if (store?.kind !== 'github' || !store.repository || !store.branch) return null;
+    const file = `${store.path || ''}page-copies/issue-${number}/`;
+    return digest => `https://github.com/${store.repository}/blob/${encodeURIComponent(store.branch)}/${`${file}${digest}.md`.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
   // The parent page puts the Programme Graph right under the CURRENT summary (the binding's
   // projection places the summary); task pages put their status block right under the title.
   placementFor(number) {
@@ -5427,7 +5431,7 @@ class Reconciler {
       const link = part => commentLink(issueUrl(this.binding.repository, number), commentId(part));
       // One link line under the table: earlier completed rows, retired rows, then any active group
       // moved for size, each with its count and further parts.
-      const summary = ['COMPLETED', 'RETIRED', 'NOW', 'LATER', 'OPTIONAL'].map(group => {
+      const summary = ['COMPLETED', 'RETIRED', 'NOW', 'LATER'].map(group => {
         const parts = graphs.filter(part => part.group === group && part.count);
         const count = parts.reduce((sum, part) => sum + part.count, 0);
         const label = { COMPLETED: 'Earlier completed', RETIRED: 'Retired' }[group] || group;
@@ -5440,7 +5444,7 @@ class Reconciler {
       const listed = [...archive.filter(entry => entry.kind === 'note' && entry.state === 'moved' && entry.comment_id && !noteParts.some(part => part.key === entry.key))
         .map(entry => ({ title: entry.title, link: commentLink(issueUrl(this.binding.repository, number), entry.comment_id) })),
       ...noteParts.map(part => ({ title: part.title, link: link(part) }))];
-      const context = renderContextBlockBody(number, comments, this.binding.repository, listed);
+      const context = renderContextBlockBody(number, comments, this.binding.repository, listed, this.handoverLink(number));
       const remainingBudget = Math.min(Math.max(0, postBudget - posts), page?.traceTopicBudget ?? MAX_TOPIC_COMMENTS_PER_PASS);
       // Include future archive links in size selection, before spending their post slots. Otherwise
       // their own trace growth could require another graph group after the budget was spent.
@@ -5475,7 +5479,8 @@ class Reconciler {
     let hard = projected.body.length < this.threshold && projected.budgetFits ? projected : null;
     if (projected.body.length < safe && projected.budgetFits) return projected;
     for (const group of archiveTools().GROUPS) {
-      if (group === 'OPTIONAL') {
+      // Trace pages go before any live row moves.
+      if (group === 'LATER') {
         tracePaging = true; projected = build();
         rememberFeasible();
         if (!hard && projected.body.length < this.threshold && projected.budgetFits) hard = projected;
@@ -5504,7 +5509,7 @@ class Reconciler {
       if (layout.relay) {
         // A task page: PATH, then TASK, then the other generated blocks, then everything else.
         try {
-          const laid = pageLayout().layoutTaskPage(source, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]].filter(([, body]) => body), version);
+          const laid = pageLayout().layoutTaskPage(source, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]].filter(([, body]) => body), version, { archiveLink: this.pageCopyLink(number) });
           assertBlocksReadBack(laid.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
           return { body: laid.body, traceBody, moved: false, relaid: true, moves: laid.moves };
         } catch (error) {
@@ -5619,7 +5624,7 @@ class Reconciler {
       let reason = relay.reason;
       if (relay.relay) {
         try {
-          pageLayout().layoutTaskPage(issue.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, body], [TRACE_BLOCK_NAME, traceBody]].filter(([, text]) => text), version);
+          pageLayout().layoutTaskPage(issue.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, body], [TRACE_BLOCK_NAME, traceBody]].filter(([, text]) => text), version, { archiveLink: this.pageCopyLink(number) });
           ordered = pageLayout().inOrder(issue.body);
         } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; reason = error.reason; }
       }
@@ -6424,18 +6429,12 @@ class Reconciler {
     const postsByIssue = new Map();
     const postsLeft = number => MAX_TOPIC_COMMENTS_PER_PASS - (postsByIssue.get(number) || 0);
     const posted = number => postsByIssue.set(number, (postsByIssue.get(number) || 0) + 1);
-    // GitHub moves an issue's update time to that of a comment posted or edited on it. The times of
-    // this pass's own comment writes are kept per issue, so a page check tells them apart from
-    // anyone else's change: the body must be as read, and the update time either the one read or
-    // exactly the time of one of this pass's own comments on that issue.
-    const ownCommentTimes = new Map();
-    const commented = (number, response) => {
-      const at = Date.parse(response?.json?.updated_at || response?.json?.created_at);
-      if (Number.isFinite(at)) ownCommentTimes.set(number, new Set([...(ownCommentTimes.get(number) || []), at]));
-      return response;
-    };
-    const pageMoved = (number, latest, before) => !latest || latest.body !== before.body
-      || (latest.updated_at !== before.updated_at && !ownCommentTimes.get(number)?.has(Date.parse(latest.updated_at)));
+    // A page is held only when its body changed since it was read. Its update time is no guide: GitHub
+    // moves it for every comment posted or edited on the issue, and a busy parent gets comments all
+    // the time (decision and merge records), which never change the page's text. The write replaces
+    // only the body, built from the body read, so nothing a person wrote in a comment is lost; the
+    // next pass picks up anything a new comment changes on the page.
+    const pageMoved = (number, latest, before) => !latest || latest.body !== before.body;
     const notePageFinding = (number, code, diagnostics) => {
       const finding = { code, issue: number, diagnostics, detail: FINDING_CODES[code].next_action };
       const previous = plan.findings.find(entry => entry.code === code && entry.issue === number);
@@ -6565,7 +6564,7 @@ class Reconciler {
               if (prior) {
                 const fresh = trust(registered);
                 if (!fresh || archiveTools().digest(fresh.body) !== target.before) return { outcome: 'UNKNOWN' };
-                guard(); commented(parentNumber, this.mutator.editComment(id, part.body));
+                guard(); this.mutator.editComment(id, part.body);
               } else {
                 // A lost successful response is found under the pending key, never posted twice.
                 const candidates = this.reader.comments(parentNumber).filter(comment => comment.body.startsWith(`${archiveTools().marker(part.key)}\n`)
@@ -6583,7 +6582,7 @@ class Reconciler {
                 else {
                   if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
                   guard(); posted(parentNumber);
-                  const response = commented(parentNumber, this.mutator.postComment(parentNumber, part.body)); id = response.json?.id;
+                  const response = this.mutator.postComment(parentNumber, part.body); id = response.json?.id;
                   if (!id) return { outcome: 'UNKNOWN' };
                 }
               }
@@ -6625,7 +6624,7 @@ class Reconciler {
             if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE' };
             const latest = this.reader.issue(parentNumber);
             if (pageMoved(parentNumber, latest, snapshot.before)) return { outcome: 'NOT_DONE', code: 'BODY_MOVED' };
-            guard(); posted(parentNumber); commented(parentNumber, this.mutator.postComment(parentNumber, text));
+            guard(); posted(parentNumber); this.mutator.postComment(parentNumber, text);
             if (!this.reader.comments(parentNumber).some(comment => comment.body === text)) return { outcome: 'UNKNOWN' };
           }
           return { outcome: indexReadback(this.reader.comments(parentNumber), intent, post.target.parts) === true ? 'DONE' : 'UNKNOWN' };
@@ -6771,7 +6770,7 @@ class Reconciler {
                 if (postsLeft(number) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
                 guard();
                 posted(number);
-                commented(number, this.mutator.postComment(number, text));
+                this.mutator.postComment(number, text);
                 // Stop on the first uncertain response, including a lost successful response.
                 // The next pass reads it back before choosing the remaining pages.
                 if (!this.reader.comments(number).some(comment => comment.body === text)) return { outcome: 'UNKNOWN', detail: 'an index page did not read back exactly as written' };
@@ -7001,7 +7000,7 @@ class Reconciler {
           if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent; the repair notice remains owed.' };
           guard();
           posted(parentNumber);
-          commented(parentNumber, this.mutator.postComment(parentNumber, effect.target.body));
+          this.mutator.postComment(parentNumber, effect.target.body);
         }
         return { outcome: this.reader.comments(parentNumber).some(comment => comment.body.includes(effect.target.marker)) ? 'DONE' : 'UNKNOWN' };
       });

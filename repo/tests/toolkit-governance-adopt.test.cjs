@@ -80,12 +80,13 @@ function writePlainText(root) {
   }
 }
 
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = [];
   const proposal = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
   const plainText = [];
+  const cloud = [];
   const cli = new ToolkitGovernanceCli({
     stdout: { write: text => { out += text; return true; } }, stderr: { write: text => { err += text; return true; } },
     cwd: ctx.repo, interactive, registryOptions: ctx.registryOptions,
@@ -94,10 +95,11 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(root); },
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
-    cloudWorkflows: () => ({ files: {}, warning: null }),
+    cloudWorkflows: (cwd, options) => { cloud.push(options); return { files: {}, warning: null }; },
+    ...(estimate ? { ciEstimator: () => estimate } : {}),
   });
   const code = await cli.main(argv);
-  return { code, out, err, published, plainText };
+  return { code, out, err, published, plainText, cloud };
 }
 
 test('a fresh repository shows what turning on makes, and all recommended makes the store and parent and one turn-on pull request', async t => {
@@ -105,7 +107,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['governance-app', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['governance-app', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
   assert.match(table, /Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on/);
@@ -129,7 +131,12 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   assert.ok(files['AGENTS.md'].endsWith('\n\n# My own rules\n\nKeep this exactly.\n'), 'text outside the markers keeps its bytes');
   assert.equal(files['CLAUDE.md'], '@AGENTS.md\n');
   for (const name of PLAYBOOKS) assert.ok(files[`docs/agent-playbooks/${name}`], name);
-  assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the working tree is not changed');
+  // The dependency security files join the same pull request, so governance never starts with its own
+  // security check failing.
+  assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/);
+  assert.match(files['.github/workflows/dependency-auto-merge.yml'], /^# Toolkit dependency auto-merge v/m);
+  assert.match(result.out, /Added \.github\/dependabot\.yml and \.github\/workflows\/dependency-auto-merge\.yml to the working tree/);
+  assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the rules files in the working tree are not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
   // The App row recommends Set up while governance turns on: the owner's one command, with the store,
@@ -140,7 +147,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
 
 test('the governance App row: Not now says so once, and Set up gives no command while governance stays off', async t => {
   const ctx = fixture(t);
-  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.4=A'] });
+  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.5=A'] });
   assert.equal(notNow.code, 0, notNow.err + notNow.out);
   assert.match(notNow.out, /Governance GitHub App: not now\. Governance works without it/);
   assert.doesNotMatch(notNow.out, /toolkit-governance-app-setup|pre-filled page/);
@@ -183,7 +190,7 @@ test('a found store is a question: keep it, or create a new private one', async 
   const parent = { number: 3, title: 'Programme tracker', state: 'open', labels: [] };
   const keep = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], keep, { interactive: true, answers: [''] });
-  assert.match(shown.out, /\| 1\.4 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
+  assert.match(shown.out, /\| 1\.5 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
   assert.match(shown.out, /Parent issue: #3\. Reused when governance turns on/);
   const kept = await run(ctx, ['setup'], keep, { interactive: true, answers: ['all recommended'] });
   assert.equal(kept.code, 0, kept.err + kept.out);
@@ -193,7 +200,7 @@ test('a found store is a question: keep it, or create a new private one', async 
 
   const ctx2 = fixture(t);
   const fresh = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
-  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.4=B'] });
+  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.5=B'] });
   assert.equal(made.code, 0, made.err + made.out);
   assert.deepEqual(fresh.calls, [['create', STORE], ['put', STORE, 'archives/README.md']]);
   assert.equal(made.published[0].binding.store.repository, STORE);
@@ -221,4 +228,38 @@ test('a repository that already carries its prepared rules and programme file us
   assert.equal(adopt.adoptionPrepared(ctx.repo), true);
   const files = adopt.renderedRules(ctx.repo);
   assert.equal(files['AGENTS.md'], fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), 'a current block renders unchanged');
+});
+
+test('a fresh repository with slow CI gets Yes recommended for parallel CI shards, and all recommended puts them in the one turn-on pull request', async t => {
+  const ctx = fixture(t);
+  const PASS = "const test = require('node:test');\ntest('ok', () => {});\n";
+  for (let index = 1; index <= 4; index += 1) {
+    fs.mkdirSync(path.join(ctx.repo, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(ctx.repo, 'test', `case${index}.test.js`), PASS);
+  }
+  const slow = { minutes: 25, workflow: 'CI' };
+  const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
+  assert.match(shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| B\. Yes \(needs governance on\): The turn-on pull request also records yes/);
+  const github = fakeGitHub();
+  const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], estimate: slow });
+  assert.equal(result.code, 0, result.err + result.out);
+  assert.equal(result.published.length, 1, 'still one turn-on pull request');
+  const { binding, files } = result.published[0];
+  assert.equal(binding.ci_shards.answer, 'yes');
+  assert.match(binding.ci_shards.offered_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  const list = JSON.parse(files['.github/toolkit-test-shards.json']);
+  assert.equal(list.systems.linux.shards.length, 3, '25 measured minutes: two named shards and the rest');
+  assert.deepEqual(result.cloud.at(-1), { ciShards: 'yes' }, 'the shard copies follow this pull request\'s own answer, not an old read of the merged binding');
+  assert.match(result.out, /a first \.github\/toolkit-test-shards\.json with 3 Linux shards .*travels in the turn-on pull request with the shard workflows/);
+
+  // Fast or unknown CI keeps Not now, so all recommended turns governance on without shards.
+  const fast = fixture(t);
+  const plain = await run(fast, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: { minutes: 4, workflow: 'CI' } });
+  assert.equal(plain.code, 0, plain.err + plain.out);
+  assert.equal(plain.published[0].binding.ci_shards, undefined);
+  assert.equal(plain.published[0].files['.github/toolkit-test-shards.json'], undefined);
+  // Shards cannot be answered without turning governance on in the same answer.
+  const kept = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A, 1.4=B'] });
+  assert.match(kept.out, /Parallel CI shards can be answered only while governance is on/);
+  assert.equal(kept.published.length, 0);
 });

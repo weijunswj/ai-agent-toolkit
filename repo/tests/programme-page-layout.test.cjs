@@ -2,6 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+// The parent's handover file in the fixture's private store (programme-handover.cjs).
+const HANDOVER = 'https://github.com/example.test/store/blob/main/state/handover/issue-12.md';
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
 const { pageFixture } = require('./support/programme-page-fixture.cjs');
@@ -218,16 +220,16 @@ test('B-T3: overflow chooses the shortest row prefix, terminal groups before tra
   assert.ok(projected.body.length < 55000);
   assert.ok(projected.graphRows.length > 0);
   const groups = projected.archive.filter(part => part.kind === 'graph' && part.count).map(part => part.group);
-  assert.deepEqual(groups, ['OPTIONAL', 'LATER'].slice(0, groups.length));
-  const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|#\d+[ |][^\n]*$/gm) || []);
-  const kept = projected.body.match(/^\|#\d+[ |][^\n]*$/gm) || [];
-  assert.equal(new Set([...kept, ...archived].map(row => /^\|#(\d+)/.exec(row)[1])).size, 84);
+  assert.deepEqual(groups, ['LATER', 'NOW'].slice(0, groups.length), 'optional tasks show, and move, as LATER');
+  const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|[^|\n]*\|#\d+\|[^\n]*$/gm) || []);
+  const kept = projected.body.match(/^\|[^|\n]*\|#\d+\|[^\n]*$/gm) || [];
+  assert.equal(new Set([...kept, ...archived].map(row => /^\|[^|\n]*\|#(\d+)\|/.exec(row)[1])).size, 84);
   assert.equal(kept.length + archived.length, 84);
   const last = archived.at(-1);
   // In this fixture the last removed row stays in the same archive part. Restoring it costs exactly
   // its line and newline; the count remains one digit, so the summary costs the same.
   assert.ok(projected.body.length + last.length + 1 >= 55000, 'one fewer row cannot restore the safe limit');
-  assert.match(projected.body, /\n\n\[OPTIONAL \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
+  assert.match(projected.body, /\n\n\[LATER \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
   t.diagnostic(JSON.stringify({ fixture: '84 rows', moved: projected.archive.filter(part => part.kind === 'graph').map(part => [part.group, part.count]), posts: projected.posts, body: projected.body.length }));
 });
 
@@ -299,8 +301,8 @@ test('a configured redraw threshold cannot raise the hard body limit', () => {
 test('a refusal measures the smallest feasible body within the five-post budget', () => {
   const pass = new state.Reconciler({ store: null, reader: null, mutator: null,
     binding: { repository: 'example.test/app', parent_issue: 12, record_prefix: 'TEST-' }, toolkitVersion: '3.57.0' });
-  const rows = Array.from({ length: 900 }, (_, i) => `|#${1000 + i} ${'n'.repeat(400)}|-|RETIRED|-|-|`);
-  const graph = '# PROGRAMME GRAPH\n\n| Task | PRs | Status | Waiting on | Updated (SGT) |\n|---|---|---|---|---|\n' + rows.join('\n');
+  const rows = Array.from({ length: 900 }, (_, i) => `|${'n'.repeat(400)}|#${1000 + i}|RETIRED|-|-|`);
+  const graph = '# PROGRAMME GRAPH\n\n| Task | Child # | Status | Waiting on | Last Updated (SGT) |\n|---|---|---|---|---|\n' + rows.join('\n');
   const projected = pass.projectBody(12, '# Programme\n', graph, [], '3.57.0');
   assert.equal(projected.refused, true);
   assert.ok(projected.posts <= 5);
@@ -310,9 +312,9 @@ test('a refusal measures the smallest feasible body within the five-post budget'
 test('the smaller CONTEXT stub retains an exact disjoint size span and 5000 units of safe headroom', () => {
   const f = pageFixture(state);
   const projected = f.project(), context = state.findStateBlock(projected.body, 'CONTEXT').block;
-  assert.equal(context.body, state.renderContextBlockBody(12));
-  assert.equal(context.body.split('\n')[2], 'Agent context: none yet · Decisions: `programme.cjs trace 12`', 'one line');
-  assert.doesNotMatch(context.body, /ARCHIVE_SECTION_UNSAFE|Archived notes:|Notes archived|\]\(https/);
+  assert.equal(context.body, state.renderContextBlockBody(12, [], '', [], HANDOVER));
+  assert.equal(context.body.split('\n')[2], `Agent context: none yet · Handover: [handover file](${HANDOVER}) · Decisions: \`programme.cjs trace 12\``, 'one line');
+  assert.doesNotMatch(context.body, /ARCHIVE_SECTION_UNSAFE|Archived notes:|Notes archived|Notes: /);
   const sizes = state.bodySizeDiagnostics(projected.body, state.SAFE_LIMIT);
   assert.equal(sizes.largest_sections.find(part => part.kind === 'CONTEXT').size, context.end - context.start);
   assert.equal(sizes.largest_sections.reduce((sum, part) => sum + part.size, sizes.remainder), projected.body.length);
@@ -346,7 +348,7 @@ test('one Agent context comment shows under AGENT CONTEXT and is never the DECIS
   const report = f.make().run({ apply: true });
   assert.deepEqual(report.holds, []);
   const { context, trace } = contextBlocks(f);
-  assert.equal(context, `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${contextLink(id)}) · Decisions: \`programme.cjs trace 12\``);
+  assert.equal(context, `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${contextLink(id)}) · Handover: [handover file](${HANDOVER}) · Decisions: \`programme.cjs trace 12\``);
   assert.doesNotMatch(trace, new RegExp(String(id)));
   assert.doesNotMatch(trace, /Agent context/);
   assert.match(trace, new RegExp(`Newest: \\[${decision}\\]`), 'the newest tagged decision is the one link');
@@ -390,7 +392,7 @@ test('a long Agent context hold names five comments and counts the rest', () => 
 
 test('no Agent context comment keeps the fixed lines; bot, index, archive and untagged comments never count', () => {
   const f = pageFixture(state);
-  const fixed = state.renderContextBlockBody(12);
+  const fixed = state.renderContextBlockBody(12, [], '', [], HANDOVER);
   assert.equal(fixed.split('\n').length, 3);
   f.github.addComment(12, { body: 'Agent context\n---\nFrom a bot.', login: 'helper[bot]', type: 'Bot' });
   f.github.addComment(12, { body: 'Agent context without the rule line.' });

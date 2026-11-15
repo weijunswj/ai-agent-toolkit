@@ -32,32 +32,19 @@ test('72-row programme with four PRs per task and 106 waiting findings fits with
   assert.deepEqual({ commits: f.github.commits, writes: f.github.mutations() }, before, 'unchanged scale fixture makes no writes');
 });
 
-test('parent PR cells stay bounded: the three newest PRs, then a count, and none for a retired task', () => {
+test('parent rows stay short and name no PR however many a task has; its task page lists every one', () => {
   const f = renderScaleFixture(state);
   const render = () => state.renderParentBlockBody(f.parent, f.children, f.issues);
-  const rows = () => render().split('\n').filter(line => /^\|#\d+[ |]/.test(line));
+  const rows = () => render().split('\n').filter(line => /^\|[^|\n]*\|#\d+\|/.test(line));
   assert.equal(rows().length, 72);
-  for (const row of rows()) {
-    const cells = row.slice(1, -1).split('|');
-    const child = f.children.get(Number(/^#(\d+)/.exec(cells[0])[1]));
-    const numbers = [...new Set([child.pr.number, ...child.prs.map(pr => pr.number)])].sort((a, b) => b - a);
-    const shown = [child.pr, ...child.prs].find(pr => pr.number === numbers[0]).state;
-    const suffix = ['DONE', 'RETIRED'].includes(child.lifecycle) ? '' : { MERGED: ' merged', CLOSED: ' closed' }[shown] || '';
-    assert.equal(cells[1], child.lifecycle === 'RETIRED' ? '-' : `#${numbers[0]}${suffix}, ${numbers.slice(1, 3).map(n => `#${n}`).join(', ')} +${numbers.length - 3}`);
-    assert.ok(row.length < 200, `${child.issue}: a row stays short (${row.length})`);
-  }
   const child = f.children.get(500);
   child.prs.push(...Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: 'MERGED', merge_sha: 'c'.repeat(40) })));
-  assert.equal(rows()[0].split('|')[2], '#5099 merged, #5098, #5097 +101', 'a hundred more PRs still show as three and a count');
-  assert.doesNotMatch(render(), /#5000|\/commit\//);
+  for (const row of rows()) assert.ok(row.length < 120, `a row stays short (${row.length}): ${row}`);
+  assert.doesNotMatch(render(), /#5\d{3}\b|#2\d{3}\b|\/commit\//, 'the parent names no PR (Waiting on names one only for an owner UAT)');
   const detail = state.renderChildBlockBody(child, f.parent.outcomes[0]);
   // The task page's PR GRAPH names every PR: a row each for the latest ten finished, the rest on its Earlier line.
-  for (const pr of child.prs) assert.ok(detail.includes(`|#${pr.number}|${pr.state}|`) || new RegExp(`^Earlier: .*#${pr.number}\\b`, 'm').test(detail), `#${pr.number}`);
+  for (const pr of [child.pr, ...child.prs]) assert.ok(new RegExp(`^\\|#${pr.number}\\|`, 'm').test(detail) || new RegExp(`^Earlier: .*#${pr.number}\\b`, 'm').test(detail), `#${pr.number}`);
   assert.match(detail, /\/commit\/ccccccc/);
-  child.prs = [];
-  assert.equal(rows()[0].split('|')[2], '#2000 closed');
-  child.pr.number = null;
-  assert.equal(rows()[0].split('|')[2], '-');
 });
 
 test('CURRENT keeps only the waiting count; the full list is in the attention command', () => {
