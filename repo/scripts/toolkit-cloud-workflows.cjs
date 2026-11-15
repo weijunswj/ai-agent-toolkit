@@ -14,15 +14,19 @@
 // this checkout has it and the render file is unchanged since, so an edit whose hash was recomputed
 // still shows.
 //
-// Programme Sweep and its gate go to every governed repository. Shard Timings needs the Toolkit's
-// test-shard manifest and run summaries, so it is not copied; this script says so.
+// Programme Sweep and its gate go to every governed repository. The test shards workflow and Shard
+// Timings go only to a repository with a usable shard list (.github/toolkit-test-shards.json, see
+// governed-test-shards.cjs); without one this script says they were not copied and why. The test
+// shards copy carries the list's shard ids in its matrix, so a change to the list's shards makes the
+// copy outdated (a rules refresh rewrites it), never edited.
 //
 // Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]
 // Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed (the reason is printed).
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, MARKER, SHA, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
+const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
+const governedShards = require('./governed-test-shards.cjs');
 
 const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
 const RENDER_FILE = 'repo/scripts/toolkit-cloud-workflows-render.cjs';
@@ -30,9 +34,21 @@ const WORKFLOWS = Object.freeze([
   Object.freeze({ id: 'programme-sweep', file: '.github/workflows/toolkit-programme-sweep.yml' }),
   Object.freeze({ id: 'programme-sweep-gate', file: '.github/workflows/toolkit-programme-sweep-gate.yml' }),
 ]);
-const NOT_COPIED = Object.freeze([
-  Object.freeze({ id: 'shard-timings', file: '.github/workflows/toolkit-shard-timings.yml', reason: 'it needs the Toolkit\'s test-shard manifest and run summaries' }),
+// Copied only where the repository has a usable shard list. The test shards copy goes to the file the
+// list's `workflow` names (default toolkit-test-shards.yml) and is rendered from a Toolkit template
+// that runs nowhere in the Toolkit itself.
+const SHARD_WORKFLOWS = Object.freeze([
+  Object.freeze({ id: 'test-shards', source: 'repo/contracts/ci/governed-test-shards.yml', file: `.github/workflows/${governedShards.DEFAULT_WORKFLOW}` }),
+  Object.freeze({ id: 'shard-timings', source: '.github/workflows/toolkit-shard-timings.yml', file: '.github/workflows/toolkit-shard-timings.yml' }),
 ]);
+// What a copy that drifted costs the repository, for the governance check.
+const CONSEQUENCE = Object.freeze({
+  'programme-sweep': 'this repository\'s programme board gets no cloud sweep',
+  'programme-sweep-gate': 'this repository\'s programme board gets no cloud sweep',
+  'test-shards': 'this repository\'s Toolkit test shards and their gate do not run as the Toolkit wrote them',
+  'shard-timings': 'this repository\'s test shard timings are not refreshed as the Toolkit wrote them',
+});
+const RESERVED = new Set([...WORKFLOWS, ...SHARD_WORKFLOWS].map(row => row.file.slice('.github/workflows/'.length)).filter(name => name !== governedShards.DEFAULT_WORKFLOW));
 const CI_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
 const USAGE = 'Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]';
 
@@ -86,6 +102,50 @@ function renderAt(id, file, at, root, ci) {
   try { return render(id, sourceText(file, at, root), at, ci); } catch (error) { if (error instanceof InstallError) return null; throw error; }
 }
 
+// The shard ids a test shards copy runs, read from the copy's own matrix lines: { systems }, or
+// undefined when they are broken (a hand edit).
+function copyShards(text) {
+  const systems = {};
+  const jobs = text.split(/^(?=  [a-z-]+:$)/m);
+  for (const job of jobs) {
+    const name = /^  (linux|windows):$/m.exec(job.split('\n')[0]);
+    if (!name) continue;
+    const lines = [...job.matchAll(/^ {8}shard: (\[[^\n]*\])$/gm)];
+    if (lines.length !== 1 || systems[name[1]]) return undefined;
+    try {
+      const ids = JSON.parse(lines[0][1]);
+      if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !SHARD_ID.test(id) || !id.startsWith(`${name[1]}-`))) return undefined;
+      systems[name[1]] = ids;
+    } catch { return undefined; }
+  }
+  return Object.keys(systems).length ? { systems } : undefined;
+}
+
+// The default branch a shard copy runs on, from its push trigger (and, for Shard Timings, the same
+// --branch on each refresh line), or undefined when those lines are broken (a hand edit).
+function copyBranch(id, text) {
+  const pushes = [...text.matchAll(/^  push:\n    branches: \[([^\]\n]*)\]$/gm)];
+  if (pushes.length !== 1 || !/^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/.test(pushes[0][1])) return undefined;
+  const branch = pushes[0][1];
+  if (id === 'shard-timings') {
+    const named = [...text.matchAll(/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch (\S+) /g)];
+    if (named.length !== 2 || named.some(([, value]) => value !== branch)) return undefined;
+  }
+  return branch;
+}
+
+// What a copy follows, read from the copy itself: the gate's CI workflow (copyCi), the test shards
+// copy's shard ids and branch (copyShards, copyBranch), the Shard Timings copy's branch, or null for a
+// copy that follows nothing. Undefined means broken.
+function copyInput(id, text) {
+  if (id === 'test-shards' || id === 'shard-timings') {
+    const branch = copyBranch(id, text);
+    const shards = id === 'test-shards' ? copyShards(text) : {};
+    return branch === undefined || shards === undefined ? undefined : { ...shards, branch };
+  }
+  return copyCi(text);
+}
+
 // The CI workflow a gate copy follows, read from the copy itself: { file, name }, null when it follows
 // none, or undefined when its CI lines are broken (a hand edit).
 function copyCi(text) {
@@ -100,10 +160,11 @@ function copyCi(text) {
 }
 
 // { state: 'current' | 'outdated' | 'edited' | 'unmanaged' | 'missing' } for an installed copy.
-// `reference(commit, ci)` gives what the installer wrote at the copy's own Toolkit commit for the CI
-// workflow the copy names, or null when that cannot be known; with it, a copy that differs from its
-// own render (pins aside) is a hand edit. A CI workflow renamed or removed since only makes the copy
-// outdated, because the reference uses the copy's own CI lines, not the repository's current ones.
+// `reference(commit, input)` gives what the installer wrote at the copy's own Toolkit commit for what
+// the copy itself follows (copyInput: the CI workflow it names, or its shard ids), or null when that
+// cannot be known; with it, a copy that differs from its own render (pins aside) is a hand edit. A CI
+// workflow renamed or removed since, or a shard list whose shards changed, only makes the copy
+// outdated, because the reference uses the copy's own lines, not the repository's current ones.
 function copyState(text, expected, reference = () => null) {
   if (text === null) return { state: 'missing' };
   const normalised = normalise(text);
@@ -119,9 +180,9 @@ function copyState(text, expected, reference = () => null) {
   const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: (\S+)$/gm)];
   if (!named.length || named.some(([, repository, ref]) => repository !== TOOLKIT_REPOSITORY || ref !== marker[2])) return { state: 'edited', toolkit: marker[2] };
   if (normalised === expected) return { state: 'current', toolkit: marker[2] };
-  const ci = copyCi(body);
-  if (ci === undefined) return { state: 'edited', toolkit: marker[2] };
-  const own = reference(marker[2], ci);
+  const input = copyInput(marker[1], body);
+  if (input === undefined) return { state: 'edited', toolkit: marker[2] };
+  const own = reference(marker[2], input);
   if (own !== null && withoutPins(normalised) !== withoutPins(normalise(own))) return { state: 'edited', toolkit: marker[2] };
   return { state: 'outdated', toolkit: marker[2] };
 }
@@ -155,7 +216,10 @@ function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(roo
   if (isToolkitCheckout(target)) {
     throw new InstallError('this is a Toolkit source checkout, which runs its own workflow files.');
   }
+  // The sweep and its gate run only on main, so another default branch stops the whole install. The
+  // shard copies are rendered for the default branch read here all the same, so they are ready for one.
   const head = git(target, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).stdout.trim();
+  const branch = head ? head.replace('refs/remotes/origin/', '') : 'main';
   if (head && head !== 'refs/remotes/origin/main') throw new InstallError(`the default branch is ${head.replace('refs/remotes/origin/', '')}; the cloud sweep runs only on a main branch.`);
   // Without --ci-workflow, an installed gate copy keeps the CI workflow it already follows, while that
   // workflow is still there with a plain name; otherwise the CI trigger is left out.
@@ -173,17 +237,84 @@ function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(roo
     if (!name) throw new InstallError(`.github/workflows/${ci} has no plain name: line for the gate to follow.`);
     ciWorkflow = { file: ci, name };
   }
-  const rows = WORKFLOWS.map(({ id, file }) => {
-    const expected = render(id, sourceText(file, commit, root), commit, ciWorkflow);
+  const shards = shardCopies(target, branch);
+  const wanted = [...WORKFLOWS.map(row => ({ ...row, input: ciWorkflow })), ...shards.rows];
+  const rows = wanted.map(({ id, file, source = file, input }) => {
+    const expected = render(id, sourceText(source, commit, root), commit, input);
     const absolute = path.join(target, ...file.split('/'));
-    // The copy's own commit, re-rendered with the CI workflow the copy itself names.
-    const reference = (at, ci) => {
-      if (at !== commit) return renderAt(id, file, at, root, ci);
-      try { return render(id, sourceText(file, commit, root), commit, ci); } catch (error) { if (error instanceof InstallError) return null; throw error; }
+    // The copy's own commit, re-rendered with what the copy itself follows.
+    const reference = (at, own) => {
+      if (at !== commit) return renderAt(id, source, at, root, own);
+      try { return render(id, sourceText(source, commit, root), commit, own); } catch (error) { if (error instanceof InstallError) return null; throw error; }
     };
-    return { id, file, absolute, expected, ...copyState(readOrNull(absolute), expected, reference) };
+    return { id, file, absolute, expected, consequence: CONSEQUENCE[id], ...copyState(readOrNull(absolute), expected, reference) };
   });
-  return { target, commit, ci: ciWorkflow, rows, not_copied: NOT_COPIED.map(({ id, reason }) => ({ id, reason })) };
+  return { target, commit, ci: ciWorkflow, rows, not_copied: shards.notCopied };
+}
+
+// The shard copies for a repository: both rows when its shard list is usable, otherwise none, each
+// named in not_copied with the reason. A Toolkit copy still there from an earlier list is named too.
+function shardCopies(target, branch = 'main') {
+  const list = governedShards.listState(target);
+  const workflow = list.manifest?.workflow || governedShards.DEFAULT_WORKFLOW;
+  let reason = null;
+  if (list.state === 'missing') reason = `the repository has no shard list at ${governedShards.MANIFEST_REL}`;
+  else if (list.state === 'invalid') reason = `the shard list ${governedShards.MANIFEST_REL} is not usable (${String(list.errors[0]).split('\n').pop().replace(/^- /, '').replace(/\.$/, '')})`;
+  else if (governedShards.unsupportedPrograms(list.manifest).length) reason = `the shard list runs ${governedShards.unsupportedPrograms(list.manifest).join(', ')}, and the copied shard jobs set up Node only, so its tests could not run there yet; use a node command or keep the tests in the repository's own CI`;
+  else if (RESERVED.has(workflow)) reason = `the shard list names ${workflow} for its workflow, a file another Toolkit copy uses`;
+  if (!reason) {
+    const input = { systems: governedShards.shardIds(list.manifest), branch };
+    return { notCopied: [], rows: SHARD_WORKFLOWS.map(row => ({ ...row, ...(row.id === 'test-shards' ? { file: `.github/workflows/${workflow}`, input } : { input: { branch } }) })) };
+  }
+  // A Toolkit copy an earlier, usable list brought is found by its marker (the test shards copy at any
+  // name) and named, so the governance check can report it.
+  const marked = markedCopies(target);
+  const notCopied = SHARD_WORKFLOWS.map(row => {
+    const left = marked.filter(copy => copy.id === row.id).map(copy => copy.file);
+    return { id: row.id, reason, ...(left.length ? { left } : {}) };
+  });
+  return { notCopied, rows: [] };
+}
+
+// The Toolkit copy a workflow file is, from its first line: the copy's id when the file starts with the
+// rendered-copy marker of a known copy at a path that copy can have, otherwise null. Every copy has a
+// fixed path except the test shards workflow, which goes to the name its shard list chose, so a copy
+// is found by its marker, not only by the fixed file list.
+const COPY_IDS = new Set([...WORKFLOWS, ...SHARD_WORKFLOWS].map(row => row.id));
+const WORKFLOW_PATH = /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/;
+function copyIdAt(file, text) {
+  if (!WORKFLOW_PATH.test(file) || typeof text !== 'string') return null;
+  const normalised = normalise(text);
+  const marker = MARKER.exec(normalised);
+  if (!marker || normalised.indexOf(marker[0]) !== 0 || !COPY_IDS.has(marker[1])) return null;
+  const fixed = [...WORKFLOWS, ...SHARD_WORKFLOWS].find(row => row.id === marker[1] && row.id !== 'test-shards');
+  return !fixed || fixed.file === file ? marker[1] : null;
+}
+
+// The workflow files a rules refresh may look at for Toolkit copies: every fixed copy path plus each
+// .yml or .yaml file in .github/workflows (`names` lists that folder; null when it cannot be read).
+function copyCandidates(names) {
+  const fixed = [...WORKFLOWS, ...SHARD_WORKFLOWS].map(row => row.file);
+  const listed = (names || []).filter(name => /^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name)).map(name => `.github/workflows/${name}`).filter(file => !fixed.includes(file)).sort();
+  return [...fixed, ...listed];
+}
+
+// The Toolkit copies in a checkout, found by marker: [{ id, file, edited }]. Links and other
+// non-regular files are never read.
+function markedCopies(root) {
+  let names = null;
+  try { names = fs.readdirSync(path.join(root, '.github', 'workflows')); } catch { names = null; }
+  const found = [];
+  for (const file of copyCandidates(names)) {
+    const absolute = path.join(root, ...file.split('/'));
+    let text;
+    try { if (!fs.lstatSync(absolute).isFile()) continue; text = fs.readFileSync(absolute, 'utf8'); } catch { continue; }
+    const id = copyIdAt(file, text);
+    if (!id) continue;
+    const normalised = normalise(text), marker = MARKER.exec(normalised);
+    found.push({ id, file, edited: bodyHash(normalised.slice(marker[0].length + 1)) !== marker[3] });
+  }
+  return found;
 }
 
 function apply(result) {
@@ -200,7 +331,7 @@ function apply(result) {
 function report(result, check) {
   const lines = [`Toolkit cloud workflows for ${result.target} at Toolkit ${result.commit.slice(0, 7)}${result.ci ? `, gate follows ${result.ci.file}` : ', gate has no CI trigger'}:`];
   for (const row of result.rows) lines.push(`- ${row.file}: ${row.written ? `written (was ${row.state})` : row.state}${!check || row.state === 'current' ? '' : row.state === 'unmanaged' ? '; not a Toolkit copy' : '; refresh the repository rules to fix it'}`);
-  for (const row of result.not_copied) lines.push(`- ${row.id}: not copied, ${row.reason}.`);
+  for (const row of result.not_copied) lines.push(`- ${row.id}: not copied, ${row.reason}${row.left ? `; the Toolkit copy at ${row.left.join(', ')} is left as it was` : ''}.`);
   return lines.join('\n');
 }
 
@@ -224,4 +355,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, NOT_COPIED, MARKER, InstallError, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
