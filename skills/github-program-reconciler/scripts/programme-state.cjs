@@ -1103,6 +1103,9 @@ function validateBinding(binding) {
     // nothing acts on it in this release, so a copy that knows the key is out before any writer sets it.
     const ciShards = binding.ci_shards;
     if (ciShards !== undefined) check(errors, v2 && isObject(ciShards) && Object.keys(ciShards).every(key => ['answer', 'offered_at'].includes(key)) && ['yes', 'not-now', 'never'].includes(ciShards.answer) && optional(ciShards.offered_at, value => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value)), 'ci_shards may hold only answer (yes, not-now or never) and offered_at (a date and time), in a version 2 binding');
+    // The oldest Toolkit release that may read this binding (a cleaned repository needs the installed
+    // Toolkit to give sessions its governed rules). toolkit-governance-state.cjs compares it.
+    check(errors, optional(binding.min_toolkit, value => v2 && typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value)), 'min_toolkit must be a Toolkit version written as three whole numbers joined by dots, in a version 2 binding');
     // Retired: the Task Scheduler folder of the old computer tasks. Nothing reads it; it stays
     // accepted so a binding that carries it stays valid.
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
@@ -1122,7 +1125,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars

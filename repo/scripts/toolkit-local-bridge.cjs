@@ -1314,6 +1314,21 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
   return findings;
 }
 
+// The governed-rules copies older setups wrote into a repository (the governed block, its older
+// template block and the Antigravity bootstrap), and broken Toolkit markers in those files.
+const LEFTOVER_RULE_BLOCKS = Object.freeze({ 'AGENTS.md': ['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE'], '.agents/rules/00-agent-toolkit-bootstrap.md': ['ANTIGRAVITY.BOOTSTRAP'] });
+function leftoverRuleCopies(targetRoot) {
+  const findings = [];
+  for (const [file, names] of Object.entries(LEFTOVER_RULE_BLOCKS)) {
+    let text;
+    try { if (!fs.statSync(path.join(targetRoot, file)).isFile()) continue; text = fs.readFileSync(path.join(targetRoot, file), 'utf8'); } catch { continue; }
+    const parsed = parseManagedMarkerBlocks(text);
+    if (parsed.errors.length) { findings.push(...parsed.errors.map((error) => ({ file, kind: 'broken-marker', detail: error }))); continue; }
+    if ([...parsed.blocks.values()].some((block) => names.includes(block.label))) findings.push({ file, kind: 'leftover', detail: 'carries a governed-rules copy' });
+  }
+  return findings;
+}
+
 // Toolkit checks a repository carries as vendored copies (secure-ci-cd installers). Only in a
 // repository whose Toolkit GitHub governance is ENABLED: a copy whose recorded source hash differs
 // from the running Toolkit's source, or a missing plain-text check (governed repositories carry
@@ -1429,11 +1444,16 @@ function runAgentRulesPreflight(args, options = {}) {
   const reference = sourceVersion ? 'source-checkout' : 'installed-plugin';
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
-  if (rulesManaged) for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
-  if (!sourceVersion) findings.push(...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
+  // A Toolkit source checkout still builds its own root files from the templates, so they are
+  // compared. Anywhere else the installed Toolkit delivers the governed rules: a copy is a leftover to
+  // remove, and a missing one is the goal.
+  if (sourceVersion) for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  else findings.push(...leftoverRuleCopies(targetRoot), ...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
   const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
   const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
-  const result = { ...base, reference, templateRoot, authorVersion, findings };
+  // A leftover note depends on governance: where it is on, removal is the owner's Clean up answer.
+  const leftovers = findings.some((finding) => finding.kind === 'leftover');
+  const result = { ...base, reference, templateRoot, authorVersion, findings, ...(leftovers ? { governed: !rulesManaged || governed() } : {}) };
   // A source checkout newer than the running copy is reported even when it matches
   // its own templates: the installed copy is the stale side.
   if (sourceVersion && newer) return { ...result, status: 'needs-attention', direction: 'newer' };
@@ -1445,13 +1465,23 @@ function runAgentRulesPreflight(args, options = {}) {
 // that it is due before the current task ends, and repeats at each session start while it holds.
 function formatAgentRulesPreflight(result) {
   if (result.status !== 'needs-attention') return '';
-  const files = [...new Set((result.findings || []).map((finding) => finding.file))].join(', ');
-  const checksOnly = (result.findings || []).length > 0 && result.findings.every((finding) => finding.kind === 'repo-check');
-  const missingCheck = (result.findings || []).some((finding) => finding.detail === 'missing');
+  const findings = result.findings || [];
+  const named = (kinds) => [...new Set(findings.filter((finding) => kinds.includes(finding.kind)).map((finding) => finding.file))].join(', ');
+  const files = named(findings.map((finding) => finding.kind));
+  const missingCheck = findings.some((finding) => finding.detail === 'missing');
+  // Checks, with or without leftover copies beside them.
+  const checksAndLeftovers = findings.some((finding) => finding.kind === 'repo-check') && findings.every((finding) => ['repo-check', 'leftover'].includes(finding.kind));
+  // Removing instruction copies is always the owner's choice, so this part names where that choice is
+  // made and asks nothing of this task.
+  const leftover = !findings.some((finding) => finding.kind === 'leftover') ? '' : result.governed
+    ? `this repository still carries Toolkit instruction copies (${named(['leftover'])}) that the installed Toolkit now delivers itself. Removing them is the owner's choice: \`refresh governance\` asks about them (Toolkit instruction copies), and only a Clean up answer opens the one cleanup pull request; nothing is due in this task.`
+    : `this repository still carries Toolkit instruction copies (${named(['leftover'])}) from an older setup. Governance is not on here, so the installed Toolkit does not replace them; the leftover scan (toolkit-leftover-files.cjs scan) lists them, and removing them is the owner's choice; nothing is due in this task.`;
+  const note = (checks) => (leftover ? `Toolkit note: ${leftover} Also, ${checks} No files were changed.` : `Toolkit note: ${checks} No files were changed.`);
+  if (findings.length && findings.every((finding) => finding.kind === 'leftover')) return `Toolkit note: ${leftover} No files were changed.`;
   // The check installer cannot tell a newer copy from an older one, so with a newer Toolkit on
   // record the step is to refresh Toolkit, never to rewrite the checks from the running copy.
-  if (result.direction === 'newer' && checksOnly) {
-    return `Toolkit note: this repository's Toolkit checks (${files}) ${missingCheck ? 'are missing or may come from' : 'may come from'} a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); next step: refresh Toolkit (setup toolkit) before this task ends. No files were changed.`;
+  if (result.direction === 'newer' && checksAndLeftovers) {
+    return note(`this repository's Toolkit checks (${named(['repo-check'])}) ${missingCheck ? 'are missing or may come from' : 'may come from'} a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); next step: refresh Toolkit (setup toolkit) before this task ends.`);
   }
   if (result.direction === 'newer') {
     return `Toolkit note: this repository's Toolkit rules may come from a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); the repository rules are authoritative. Next step: refresh Toolkit (setup toolkit) before this task ends. No files were changed.`;
@@ -1459,11 +1489,10 @@ function formatAgentRulesPreflight(result) {
   if (result.direction === 'drift') {
     return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; next step: regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs --write before this task ends. No files were changed.`;
   }
-  if (checksOnly) {
-    const state = missingCheck ? 'are missing or differ from' : 'differ from';
-    return `Toolkit note: this repository's Toolkit checks (${files}) ${state} the running Toolkit ${result.runningVersion}; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`;
+  if (checksAndLeftovers) {
+    return note(`this repository's Toolkit checks (${named(['repo-check'])}) ${missingCheck ? 'are missing or differ from' : 'differ from'} the running Toolkit ${result.runningVersion}; next step: refresh them with repository-agent-rules before this task ends.`);
   }
-  return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`;
+  return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates (broken Toolkit markers); next step: repair the markers, or remove the copies in one pull request, before this task ends. No files were changed.`;
 }
 
 function agentRulesNoticeKey(result, message) {
