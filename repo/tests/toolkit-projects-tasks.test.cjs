@@ -1193,3 +1193,25 @@ test('rendered daily check-ins run workflow health, and the decision trace and C
   }
   assert.ok(text.indexOf('**Checkers:**', text.indexOf('REPORT')) > 0, 'the report has a Checkers bullet');
 });
+
+// A session without repo access once relayed runs and wrote `.done` with the PR sweep unrun, leaving a
+// bot PR unowned. A GitHub step that cannot read GitHub is a prefix, and `.done` waits for a thread with the repos.
+test('periodic runs hand GitHub steps they cannot read to a thread with the repos before .done', () => {
+  for (const session of ['bound', 'fresh']) {
+    const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    const step = text.split('\n').find(line => line.startsWith('5. PRs'));
+    assert.ok(step.includes('this step is not done: start the first line with "GITHUB STEPS OWED: <steps> | "'), `${session}: step 5`);
+    assert.doesNotMatch(step, /If GitHub MCP is unavailable, say so\./, `${session}: step 5 no longer just says so`);
+    assert.ok(text.includes('"THREAD SCAN INCOMPLETE: <read> of <total> | ", "GITHUB STEPS OWED: <steps> | "'), `${session}: first line`);
+  }
+  const checkIn = rendered('daily-check-in');
+  assert.ok(checkIn.includes('start the first line with "GITHUB STEPS OWED: <steps> | ", naming each step that could not read GitHub (11, 11b)'));
+  assert.ok(checkIn.includes('NUDGE NOT ARMED, GITHUB STEPS OWED, PROJECT TASKS MISSING'));
+  const reference = path.join(TASKS, '..', 'reference');
+  const recurring = fs.readFileSync(path.join(reference, 'recurring-tasks.md'), 'utf8');
+  for (const phrase of ['- **GitHub steps need repo access.**', 'a relay alone does not complete it',
+    'hand every GitHub step of the run', 'Write `.done` only after that thread reports back']) assert.ok(recurring.includes(phrase), phrase);
+  const periodic = fs.readFileSync(path.join(reference, 'periodic-runs.md'), 'utf8');
+  assert.ok(periodic.includes('  - `GITHUB STEPS OWED`:') && periodic.includes('- `GITHUB STEPS OWED`: as in **Acting on the check-in report**'));
+  assert.ok(fs.readFileSync(SKILL, 'utf8').includes("Without repo access, hand the run's GitHub steps to a thread with the repos; `.done` waits for its report."));
+});
