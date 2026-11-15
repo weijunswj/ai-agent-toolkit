@@ -46,7 +46,7 @@ function setup(t) {
       { command: 'dispose', finding: NO_TASK, reason: 'A docs-only PR with no task.' },
       { command: 'update', issue: 423, patch: { next_action: 'Controller: owner test after merge' } },
     ], ...extra });
-  const run = (body, argv = [], { environment = {} } = {}) => {
+  const run = (body, argv = [], { environment = {}, clock = () => NOW } = {}) => {
     const file = path.join(dir, `order-${Math.random().toString(16).slice(2)}.json`);
     fs.writeFileSync(file, typeof body === 'string' ? body : JSON.stringify(body));
     let output = '';
@@ -54,7 +54,7 @@ function setup(t) {
     let code = null;
     try {
       code = cli.main(['run-order', '--order', file, '--session', 'records-thread-7', ...argv], { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: '.',
-        toolkitVersion: '3.74.0', now: () => new Date(NOW).toISOString(), orderClock: () => NOW, environment, stdout: { write: text => { output += text; } } });
+        toolkitVersion: '3.74.0', now: () => new Date(NOW).toISOString(), orderClock: clock, environment, stdout: { write: text => { output += text; } } });
     } catch (thrown) { error = thrown; }
     return { code, error, report: output ? JSON.parse(output) : null };
   };
@@ -196,4 +196,65 @@ test('an ack in an order carries its next step, and a due time it gives must be 
   assert.equal(result.report.outcome, 'DONE');
   assert.equal(finding(f.parentDoc(), ADDED).due, due);
   assert.equal(f.parentDoc().private.attention_notes[ADDED], 'Confirm #423 today.');
+});
+
+// An order accepted before its expiry must not keep writing after it: the clock is read again before
+// every write, a run that meets the deadline stops there with its receipts, and a retry writes nothing.
+// `lateAfter(n)` moves the clock past the expiry once the parent has taken n writes.
+function lateAfter(f, parentPuts) {
+  const expiry = NOW + 2 * 3600 * 1000;
+  let late = false;
+  let puts = 0;
+  const request = f.github.request.bind(f.github);
+  f.github.request = (method, endpoint, body, options) => {
+    const response = request(method, endpoint, body, options);
+    if (method === 'PUT' && endpoint.includes('parent-421.json') && ++puts >= parentPuts) late = true;
+    return response;
+  };
+  return () => (late ? expiry + 1000 : NOW);
+}
+
+test('an order that expires mid-run stops before its next write and keeps its receipts', t => {
+  const f = setup(t);
+  // Parent writes: 1 the order's log entry, 2 the ack. The deadline passes as the ack lands.
+  const clock = lateAfter(f, 2);
+  const order = f.order();
+  const plan = f.store.read('child', 423).doc.next_action;
+  const start = f.github.commits;
+  const result = f.run(order, [], { clock });
+  assert.equal(result.error, null, result.error?.message);
+  assert.equal(result.report.outcome, 'STOPPED');
+  assert.deepEqual(result.report.results.map(entry => entry.outcome).slice(1), ['EXPIRED']);
+  assert.equal(result.report.results[1].code, 'ORDER_EXPIRED');
+  assert.equal(result.report.results.length, 2, 'the third write is never tried');
+  assert.match(result.report.next_action, /expired/);
+  assert.equal(finding(f.parentDoc(), ADDED).state, 'acknowledged', 'the write before the deadline stands');
+  assert.equal(finding(f.parentDoc(), NO_TASK).state, 'new', 'no write after the deadline');
+  assert.equal(f.store.read('child', 423).doc.next_action, plan, 'no write after the deadline');
+  const [entry] = f.parentDoc().private.holder_orders;
+  assert.deepEqual(entry.done, [0], 'the receipt for the finished write is kept');
+  // Three writes: the log entry, the ack and its receipt. Nothing after the deadline, not even the log.
+  assert.equal(f.github.commits - start, 3);
+  // A retry of the same order is refused at once and writes nothing, not even the log.
+  const before = f.github.commits;
+  const retry = f.run(order, [], { clock });
+  assert.equal(retry.error?.code, 'ORDER_EXPIRED');
+  assert.equal(f.github.commits, before);
+});
+
+test('an order that expires after its checks but before its first write writes nothing', t => {
+  const f = setup(t);
+  const order = f.order();
+  let late = false;
+  const request = f.github.request.bind(f.github);
+  // The deadline passes while the run reads the parent for its fence check.
+  f.github.request = (method, endpoint, body, options) => {
+    if (method === 'GET' && endpoint.includes('parent-421.json')) late = true;
+    return request(method, endpoint, body, options);
+  };
+  const before = f.github.commits;
+  const result = f.run(order, [], { clock: () => (late ? NOW + 3 * 3600 * 1000 : NOW) });
+  assert.equal(result.error?.code, 'ORDER_EXPIRED');
+  assert.equal(f.github.commits, before, 'nothing written, not even the log entry');
+  assert.equal(f.parentDoc().private?.holder_orders, undefined);
 });
