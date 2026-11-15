@@ -251,7 +251,7 @@ test('a lost lease, a spent budget or a code-less error mid-order ends the pass 
     const b = bareQueue(t, () => { throw error; });
     assert.throws(() => b.q.run(), thrown => thrown === error);
     assert.equal(b.pending().length, 1);
-    assert.equal(b.github.calls.filter(call => call.path.includes('/orders/done/') || call.path.includes('/orders/refused/')).length, 0);
+    assert.equal(b.github.calls.filter(call => call.method !== 'GET' && (call.path.includes('/orders/done/') || call.path.includes('/orders/refused/'))).length, 0, 'nothing is filed');
   }
 });
 
@@ -344,3 +344,149 @@ test('a queued order that expires mid-run stops at the deadline, files its recei
   assert.equal(childWrites(), before);
   assert.equal(f.store.read('child', 500).doc.next_action, plan);
 });
+
+// SQAG: a result was filed and read back, but taking the order off the queue failed. A later run
+// finishes that removal from the filed result; it never runs the order again or files a second result.
+function failFirstRemoval(f) {
+  const request = f.github.request.bind(f.github);
+  let failed = false;
+  f.github.request = (method, endpoint, body, options) => {
+    if (!failed && method === 'DELETE' && endpoint.includes('/orders/pending/')) { failed = true; return { status: 502, json: { message: 'Bad gateway' } }; }
+    return request(method, endpoint, body, options);
+  };
+}
+const EXPIRED = () => NOW + 3 * 3600 * 1000;
+for (const [label, clock] of [['after the order expires', EXPIRED], ['before the order expires', () => NOW]]) {
+  test(`a done order whose removal failed is taken off the queue ${label}, keeping its one result`, t => {
+    const f = fixture(t);
+    f.enqueue('ack-500-1.json', f.order());
+    failFirstRemoval(f);
+    const first = f.run();
+    assert.equal(first.error, null, first.error?.message);
+    assert.equal(first.report.orders.results[0].outcome, 'PENDING');
+    assert.ok(f.file('pending/ack-500-1.json'), 'the removal failed, so the order is still queued');
+    const filed = f.file('done/ack-500-1.json');
+    const second = f.run({ clock });
+    assert.equal(second.error, null, second.error?.message);
+    assert.deepEqual(second.report.orders.results, [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'DONE' }]);
+    assert.equal(f.file('pending/ack-500-1.json'), null);
+    assert.equal(f.file('refused/ack-500-1.json'), null, 'a done order is never also filed as refused');
+    assert.deepEqual(f.file('done/ack-500-1.json'), filed, 'the filed result and its receipts are kept');
+    assert.equal(f.parentDoc().private.holder_orders.length, 1);
+  });
+}
+
+test('a stopped order whose removal failed keeps its receipts when a later run finds it expired', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order({ ops: [
+    { command: 'update', issue: 500, patch: { next_action: 'First write' } },
+    { command: 'dispose', finding: 'abcdefabcdef', reason: 'No such finding.' },
+  ] }));
+  failFirstRemoval(f);
+  const first = f.run();
+  assert.equal(first.error, null, first.error?.message);
+  assert.ok(f.file('pending/ack-500-1.json'));
+  const filed = f.file('refused/ack-500-1.json');
+  assert.equal(filed.outcome, 'STOPPED');
+  const second = f.run({ clock: EXPIRED });
+  assert.equal(second.error, null, second.error?.message);
+  assert.equal(second.report.orders.results[0].outcome, 'STOPPED');
+  assert.equal(f.file('pending/ack-500-1.json'), null);
+  assert.deepEqual(f.file('refused/ack-500-1.json'), filed, 'the stopped result keeps its operation receipts');
+  assert.deepEqual(f.file('refused/ack-500-1.json').results.map(entry => entry.outcome), ['WRITTEN', 'REFUSED']);
+  assert.equal(f.file('done/ack-500-1.json'), null);
+});
+
+test('a new order that reuses a filed order id still runs', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order());
+  f.run();
+  assert.equal(f.file('done/ack-500-1.json').outcome, 'DONE');
+  f.enqueue('ack-500-1.json', f.order({ expires_at: new Date(NOW - 1000).toISOString() }));
+  const again = f.run();
+  assert.equal(again.report.orders.results[0].code, 'ORDER_EXPIRED', 'a different order under the same name is judged on its own');
+  assert.equal(f.file('pending/ack-500-1.json'), null);
+});
+
+// G2 M1: a filed result names the commit that queued its pending file, so the same bytes queued
+// again (a new commit) run again, as a stopped result's own advice says, while a pending file the
+// run could not remove (the same commit) is only taken off the queue.
+const ADDED_501 = state.findingId('reconcile', 'CHILD_ADDED', 501);
+function addFinding(f, id, issue) {
+  const current = f.store.read('parent', 421);
+  const next = JSON.parse(JSON.stringify(current.doc));
+  next.attention = [...(next.attention || []), { id, source: 'reconcile', code: 'CHILD_ADDED', issue, head: null, state: 'new', first_seen: '2026-11-14T10:00:00.000Z', changed_at: '2026-11-14T10:00:00.000Z' }];
+  f.store.write('parent', 421, next, { sha: current.sha, previous: current.doc });
+}
+
+test('a stopped order queued again with the same bytes continues from its refused write', t => {
+  const f = fixture(t);
+  const order = f.order({ ops: [
+    { command: 'update', issue: 500, patch: { next_action: 'First write' } },
+    { command: 'ack', finding: ADDED_501, next: 'Confirm #501 in the catalogue today.' },
+  ] });
+  f.enqueue('ack-500-1.json', order);
+  const first = f.run();
+  assert.equal(first.error, null, first.error?.message);
+  const stopped = f.file('refused/ack-500-1.json');
+  assert.equal(stopped.outcome, 'STOPPED');
+  assert.match(stopped.detail, /a run of the same order continues from this write/);
+  assert.equal(f.file('pending/ack-500-1.json'), null);
+  addFinding(f, ADDED_501, 501);
+  f.enqueue('ack-500-1.json', order);
+  const second = f.run();
+  assert.equal(second.error, null, second.error?.message);
+  assert.deepEqual(second.report.orders.results, [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'DONE' }]);
+  assert.deepEqual(f.parentDoc().private.holder_orders.find(entry => entry.order_id === 'ack-500-1').done, [0, 1]);
+  assert.deepEqual(f.file('done/ack-500-1.json').results.map(entry => entry.outcome), ['DONE_EARLIER', 'WRITTEN']);
+  assert.equal(f.file('pending/ack-500-1.json'), null);
+});
+
+test('a rehearsal queued again with the same bytes after the parent changed rehearses again', t => {
+  const f = fixture(t);
+  const order = f.order({ ops: [{ command: 'ack', finding: ADDED_501, next: 'Confirm #501 in the catalogue today.' }] });
+  f.enqueue('ack-500-1.dry-run.json', order);
+  assert.equal(f.run().report.orders.results[0].outcome, 'WOULD_STOP');
+  addFinding(f, ADDED_501, 501);
+  f.enqueue('ack-500-1.dry-run.json', order);
+  const second = f.run();
+  assert.equal(second.report.orders.results[0].outcome, 'READY');
+  assert.equal(f.file('done/ack-500-1.dry-run.json').outcome, 'READY');
+});
+
+// G2 L1: the order that runs is the pending file as listed, read at the commit that queued it, so a
+// result never names a commit whose order did not run, and a replacement is never taken for a leftover.
+const HISTORY = /\/commits\?path=state%2Forders%2Fpending%2Fack-500-1\.json&/;
+const READ = /\/orders\/pending\/ack-500-1\.json\?/;
+for (const [label, when] of [['before its history is read', HISTORY], ['after it was read', READ]]) {
+  test(`a pending file replaced ${label} never hides the replacement, which is judged next`, t => {
+    const f = fixture(t);
+    f.enqueue('ack-500-1.json', f.order());
+    const replaced = f.order({ ops: [{ command: 'update', issue: 500, patch: { next_action: 'Replaced order' } }] });
+    const request = f.github.request.bind(f.github);
+    let swapped = false;
+    f.github.request = (method, endpoint, body, options) => {
+      if (!swapped && method === 'GET' && when.test(endpoint)) { swapped = true; f.github.putFile(`${PENDING}ack-500-1.json`, replaced); }
+      return request(method, endpoint, body, options);
+    };
+    const first = f.run();
+    assert.equal(first.error, null, first.error?.message);
+    assert.equal(swapped, true);
+    assert.equal(first.report.orders.results[0].outcome, 'PENDING');
+    const second = f.run();
+    assert.equal(second.error, null, second.error?.message);
+    assert.equal(f.file('pending/ack-500-1.json'), null);
+    if (when === HISTORY) {
+      // Changed before it was read: nothing ran, and the next run runs the replacement.
+      assert.deepEqual(second.report.orders.results, [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'DONE' }]);
+      assert.deepEqual(f.file('done/ack-500-1.json').order, replaced);
+      assert.equal(f.store.read('child', 500).doc.next_action, 'Replaced order');
+    } else {
+      // Changed after it was read: the listed order ran and its result names it; the replacement is
+      // not taken for a leftover but judged on its own, and a changed order under a used id is refused.
+      assert.deepEqual(f.file('done/ack-500-1.json').order, f.order());
+      assert.deepEqual(second.report.orders.results, [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'REFUSED', code: 'ORDER_CHANGED' }]);
+      assert.deepEqual(f.file('refused/ack-500-1.json').order, replaced);
+    }
+  });
+}
