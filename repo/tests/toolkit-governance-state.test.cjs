@@ -363,7 +363,7 @@ test('min_toolkit: a binding asking for a newer Toolkit is an update ERROR; an o
   const state = governance.GovernanceState.derive({ identity, materials: { governed_block: { present: false }, binding: { present: false, valid: false, problems: [] } }, merged });
   assert.deepEqual([state.state, state.reason, state.governed_effects_hold], ['ERROR', 'toolkit-too-old', true]);
   const line = gate.decidedLine(state);
-  assert.match(line, new RegExp(`needs Toolkit ${ahead.replace(/\./g, '\\.')} or later`));
+  assert.ok(line.includes(`needs Toolkit ${ahead} or later`), line);
   assert.match(line, /setup toolkit/);
   assert.equal(governance.judgeMerged(entry({ min_toolkit: '3.127' }), identity, new Date()).status, 'invalid', 'a version that is not x.y.z is invalid');
 });
