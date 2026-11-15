@@ -1943,3 +1943,14 @@ test('a GIT_DIR setting that may never reach git keeps the folder\'s own reposit
   assert.equal(decide(ctx, bash(ctx.repo, `GIT_DIR=${store} git push origin main`)), null);
   assert.equal(decide(ctx, bash(ctx.repo, `git --git-dir=${store} push origin main`)), null);
 });
+
+test('a push is judged in the folder the command names, not in its reading with backslashes undone', (t) => {
+  const ctx = context(t);
+  // A repository on a feature branch whose path holds a backslash (every Windows path; a folder name
+  // on Linux). With backslashes undone its path names a missing folder inside the repository on main.
+  const nested = repository(ctx.repo, process.platform === 'win32' ? 'nested' : 'sub\\dir', { branch: 'feature' });
+  for (const command of [`cd "${nested}"; git push`, `Push-Location "${nested}"; git push origin feature`]) {
+    assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
+  }
+  assert.match(decide(ctx, bash(ctx.repo, 'git push'))?.deny || '', /default branch `main`/);
+});

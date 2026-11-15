@@ -1133,10 +1133,13 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   // a bound store gets the pull request advice and the store-command message.
   const reasons = [];
   // The command is walked as written and again with its quotes and escapes undone (unescaped), so
-  // `'user'-state`, `user\-state` or `.\.` cannot hide a folder or a name from either reading.
+  // `'user'-state`, `user\-state` or `.\.` cannot hide a folder or a name from either reading. Pushes
+  // are judged in the reading as written only: a backslash is a path separator on Windows, so the
+  // undone reading would move a quoted `C:\...` folder somewhere else and judge the push there.
   const folders = new ToolkitFolders(registryOptions);
-  for (const reading of [...new Set([text, unescaped(text)])]) {
-    const refusal = walkFolders(reading, cwd, { registryOptions, shell, folders, reasons });
+  const undone = unescaped(text);
+  for (const [reading, pushes] of [[text, true], ...(undone === text ? [] : [[undone, false]])]) {
+    const refusal = walkFolders(reading, cwd, { registryOptions, shell, folders, reasons, pushes });
     if (refusal) return refusal;
   }
   return reasons.length ? refuse(reasons.join(' Also: ')) : '';
@@ -1147,8 +1150,9 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 function unescaped(text) { return String(text).replace(/\\(.)/gs, '$1').replace(/['"`]/g, ''); }
 
 // Walks one reading of a command segment by segment, tracking the folders it could be in, and returns
-// a refusal for a segment that could reach Toolkit's user-state files; push refusals go to `reasons`.
-function walkFolders(text, cwd, { registryOptions, shell, folders, reasons }) {
+// a refusal for a segment that could reach Toolkit's user-state files; with `pushes`, push refusals
+// go to `reasons`.
+function walkFolders(text, cwd, { registryOptions, shell, folders, reasons, pushes }) {
   const variables = new Map();
   const parts = segments(text);
   const raws = rawSegments(text);
@@ -1211,7 +1215,7 @@ function walkFolders(text, cwd, { registryOptions, shell, folders, reasons }) {
       }
       continue;
     }
-    for (const root of roots) {
+    for (const root of pushes ? roots : []) {
       for (const gitDir of gitDirValues) {
         const reason = pushRefusal(words, root, { registryOptions, variables, shell, gitDir });
         if (reason && !reasons.includes(reason)) reasons.push(reason);
