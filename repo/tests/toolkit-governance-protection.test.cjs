@@ -2,7 +2,7 @@
 
 // Default-branch protection (toolkit-governance-protection.cjs): required checks match the binding
 // and are pinned (P1, P2), one workflow job produces each and cannot mask a failure (P3, P4), and
-// merge commits only (P5); GitHub unreadable is unverified, never conformant; the ruleset Toolkit
+// merge commits only (P5), branches up to date before merging (P6); GitHub unreadable is unverified, never conformant; the ruleset Toolkit
 // writes is the one the check accepts; and the check reads only.
 
 const assert = require('node:assert/strict');
@@ -51,10 +51,10 @@ function repo(t, workflows = { 'ci.yml': AGGREGATE }, remote = 'https://github.c
   return root;
 }
 
-function github({ checks = [{ context: 'validate', integration_id: 15368 }], methods = ['merge'], classic = null, settings = { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true }, own = null } = {}) {
+function github({ checks = [{ context: 'validate', integration_id: 15368 }], methods = ['merge'], classic = null, settings = { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true }, own = null, strict = true } = {}) {
   const rules = [];
   if (methods !== null) rules.push({ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: methods } });
-  if (checks.length) rules.push({ type: 'required_status_checks', ruleset_id: 7, parameters: { required_status_checks: checks } });
+  if (checks.length) rules.push({ type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: strict, required_status_checks: checks } });
   return () => ({ ok: true, default_branch: 'main', repository: settings, rules, classic, toolkit_ruleset: own });
 }
 
@@ -69,7 +69,7 @@ function statuses(result) {
 test('P-01: binding checks required, pinned, one producer, aggregate reads its needs, merge only: conformant', (t) => {
   const result = check(repo(t));
   assert.equal(result.status, 'conformant');
-  assert.deepEqual(statuses(result), { P1: 'ok', P2: 'ok', P3: 'ok', P4: 'ok', P5: 'ok' });
+  assert.deepEqual(statuses(result), { P1: 'ok', P2: 'ok', P3: 'ok', P4: 'ok', P5: 'ok', P6: 'ok' });
 });
 
 test('P-02: P1 drifts on a missing or an extra required check, from rulesets or classic protection', (t) => {
@@ -610,14 +610,14 @@ test('P-08: GitHub unreadable is unverified, a Free private repository is not-en
   for (const reason of ['gh-unavailable', 'classic-protection-not-visible', 'not-visible']) {
     const result = check(root, () => ({ ok: false, reason }));
     assert.equal(result.status, 'unverified', reason);
-    assert.deepEqual(statuses(result), { P1: 'unverified', P2: 'unverified', P3: 'ok', P4: 'ok', P5: 'unverified' });
+    assert.deepEqual(statuses(result), { P1: 'unverified', P2: 'unverified', P3: 'ok', P4: 'ok', P5: 'unverified', P6: 'unverified' });
   }
   assert.equal(check(root, () => { throw new Error('boom'); }).status, 'unverified');
   assert.equal(check(root, () => ({ ok: false, reason: 'plan-has-no-protection' })).status, 'not-enforceable');
   let called = false;
   const offline = check(root, () => { called = true; return github()(); }, { offline: true });
   assert.equal(called, false);
-  assert.deepEqual(statuses(offline), { P1: 'not-checked', P2: 'not-checked', P3: 'ok', P4: 'ok', P5: 'not-checked' });
+  assert.deepEqual(statuses(offline), { P1: 'not-checked', P2: 'not-checked', P3: 'ok', P4: 'ok', P5: 'not-checked', P6: 'not-checked' });
   assert.equal(offline.status, 'unverified');
   // Offline with a branch filter: the default branch comes from origin/HEAD, else the filter is unverified.
   const filtered = repo(t, { 'ci.yml': AGGREGATE.replace('  pull_request:', '  pull_request:\n    branches: [trunk]') });
@@ -666,7 +666,7 @@ test('P-11: the reader asks GitHub only with GETs and maps classic protection an
   const read = protection.ghProtectionReader('o/r', { spawn });
   assert.equal(read.ok, true);
   assert.equal(read.default_branch, 'trunk');
-  assert.deepEqual(read.classic, { checks: [{ context: 'validate', app_id: 15368 }] });
+  assert.deepEqual(read.classic, { checks: [{ context: 'validate', app_id: 15368 }], strict: false });
   assert.deepEqual(read.toolkit_ruleset, { id: 3 });
   assert.ok(calls.every(args => args[0] === 'api' && !args.includes('-X')), 'only GET requests');
   delete answers['repos/o/r/branches/trunk/protection'];
@@ -708,4 +708,17 @@ test('P-12: the check writes nothing in the repository', (t) => {
   check(root);
   check(root, github(), { offline: true });
   assert.deepEqual(snapshot(), before);
+});
+
+test('P-12: P6 drifts unless a required status checks rule or classic protection requires branches up to date', (t) => {
+  const root = repo(t);
+  const stale = check(root, github({ strict: false }));
+  assert.equal(stale.status, 'drift');
+  assert.equal(stale.checks.P6.status, 'drift');
+  assert.deepEqual(stale.checks.P6.details, ['main does not require branches to be up to date before merging']);
+  const classic = () => ({ ...github({ checks: [] })(), classic: { checks: [{ context: 'validate', app_id: 15368 }], strict: true } });
+  assert.equal(check(root, classic).checks.P6.status, 'ok', 'classic protection can require it');
+  const another = () => { const read = github({ strict: false })(); read.rules.push({ type: 'required_status_checks', ruleset_id: 8, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }); return read; };
+  assert.equal(check(root, another).checks.P6.status, 'ok', 'any active ruleset can require it');
+  assert.equal(protection.protectionRulesetBody(['validate']).rules.find(rule => rule.type === 'required_status_checks').parameters.strict_required_status_checks_policy, true, 'the ruleset Toolkit writes requires it');
 });

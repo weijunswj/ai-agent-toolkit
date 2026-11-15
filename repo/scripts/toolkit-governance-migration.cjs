@@ -194,9 +194,9 @@ class GovernanceMaintenance {
     else if (result.status === 'not-enforceable' || (rulesetsUnavailable && result.reason === 'binding-has-no-required-checks')) unavailable.push(name);
     else if (result.reason === 'binding-has-no-required-checks') {
       held.push({ name, step: `the programme file lists no required checks yet, so there is nothing for it to require. Add the check names every pull request must pass to required_checks in ${governance.BINDING_FILE} through a pull request, merge it, ${then} to add the protection.` });
-    } else if (['P1', 'P2', 'P5'].some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
+    } else if (protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
     else {
-      const notes = ['P1', 'P2', 'P3', 'P4', 'P5'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));
+      const notes = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));
       held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}; ${then} to check it again.` });
     }
   }
@@ -267,15 +267,15 @@ class GovernanceMaintenance {
   // allowed, or an unpinned check in Toolkit's own ruleset.
   static #rulesetFixes(result) {
     if (result.status !== 'drift') return false;
-    const { P1, P2, P5 } = result.checks;
+    const { P1, P2, P5, P6 } = result.checks;
     const own = result.toolkit_ruleset ? `ruleset ${result.toolkit_ruleset.id}` : null;
-    return (P1 && P1.status === 'drift' && P1.missing.length > 0) || (P5 && P5.status === 'drift')
+    return (P1 && P1.status === 'drift' && P1.missing.length > 0) || (P5 && P5.status === 'drift') || (P6 && P6.status === 'drift')
       || Boolean(own && P2 && P2.status === 'drift' && P2.details.some(detail => detail.includes(own)));
   }
 
   #byHand(row, result) {
     const notes = [];
-    for (const id of ['P1', 'P2', 'P3', 'P4', 'P5']) {
+    for (const id of ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']) {
       const check = result.checks[id];
       if (check && check.status === 'drift') notes.push(...check.details);
     }
@@ -290,7 +290,7 @@ class GovernanceMaintenance {
       const { result } = read;
       if (result.status === 'not-enforceable') this.#say(`${row.root}: GitHub cannot protect the default branch here (private repository on GitHub Free).`);
       else {
-        const unread = ['P1', 'P2', 'P5'].map(id => result.checks[id]).find(check => check && check.status === 'unverified');
+        const unread = protection.SETTINGS_CHECKS.map(id => result.checks[id]).find(check => check && check.status === 'unverified');
         if (unread) this.#say(`${row.root}: default-branch protection could not be checked on GitHub (${unread.details.join('; ')}).`);
       }
       // A required check that no job produces would wait forever, and with no bypass that blocks
@@ -308,11 +308,11 @@ class GovernanceMaintenance {
     if (candidates.length === 0) return [];
     this.#say(['These governed GitHub repositories need default-branch protection:', ...candidates.flatMap(({ row, result }) => [
       `- ${row.slug} (${row.root})`,
-      ...['P1', 'P2', 'P5'].flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])).map(detail => `  - ${detail}`),
+      ...protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])).map(detail => `  - ${detail}`),
       // Workflow problems the ruleset does not fix, shown before the question.
       ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `  - workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
     ])]);
-    this.#say([`The "${protection.RULESET_NAME}" ruleset covers the default branch:`, '- every change needs a pull request, and the binding\'s required checks must pass (pinned to GitHub Actions);', '- merge commits only, and nobody can bypass it;', '- updating it replaces any rules already in that ruleset.']);
+    this.#say([`The "${protection.RULESET_NAME}" ruleset covers the default branch:`, '- every change needs a pull request, and the binding\'s required checks must pass (pinned to GitHub Actions) at a head that holds the branch\'s latest commit;', '- merge commits only, and nobody can bypass it;', '- updating it replaces any rules already in that ruleset.']);
     if (await this.#confirm(`add or update it on these ${candidates.length} repositories`) !== true) {
       this.#say('Default-branch rulesets not added.');
       return [];
