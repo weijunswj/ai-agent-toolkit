@@ -27,6 +27,9 @@ const governance = require('./toolkit-governance-state.cjs');
 const bank = require('./toolkit-question-bank.cjs');
 
 const BANK_HOST = 'governance';
+// What a yes to Turn on also covers: the settings Toolkit adds on its own after the merge
+// (toolkit-governance-finish.cjs), named here so the owner sees them before answering.
+const AFTER_MERGE = `After the merge, Toolkit also turns on, without asking again: ${require('./toolkit-governance-finish.cjs').WHAT}.`;
 const BANK_TITLE = 'Toolkit governance choices';
 const TICKETS_BASENAME = 'governance-bank-tickets.v1.json';
 const TICKETS_SCHEMA = 'toolkit.governance-bank-tickets.v1';
@@ -75,10 +78,10 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     currentChoice: state.state === 'ENABLED' ? 'on' : state.state === 'DISABLED' ? 'off' : '',
     recommendation: decided
       ? { value: 'keep', outcome: 'Governance stays as merged.', reason: 'Nothing needs to change.' }
-      : { value: 'on', outcome: 'Toolkit prepares one pull request that turns governance on.', reason: 'Governance keeps records and evidence for every task in this repository.' },
+      : { value: 'on', outcome: `Toolkit prepares one pull request that turns governance on. ${AFTER_MERGE}`, reason: 'Governance keeps records and evidence for every task in this repository.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', decided ? 'Governance stays as merged.' : 'Nothing is decided; it counts as off and Toolkit asks again next session.'),
-      bank.wizardChoice('on', 'Turn on', 'Toolkit prepares one pull request that turns governance on. It applies only after you merge it.'),
+      bank.wizardChoice('on', 'Turn on', `Toolkit prepares one pull request that turns governance on. It applies only after you merge it. ${AFTER_MERGE}`),
       bank.wizardChoice('off', 'Turn off', 'Toolkit prepares one pull request that turns governance off. It applies only after you merge it.'),
     ],
   }));
@@ -166,7 +169,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: adoption.found_store ? adoption.found_store.split('/')[1] : 'None yet', text: adoption.found_store ? 'Reused when governance turns on' : `Toolkit creates a private ${adoption.store_name} when governance turns on` }));
     }
     specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
-    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: 'Taken from what the default branch already enforces' }));
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : 'None enforced on the default branch yet, so default-branch protection waits until a pull request adds some' }));
     // Said before the answer, so turning on never stops afterwards to ask about it.
     if (adoption.visibility === 'public') specs.push(statusRow({ id: 'visibility', section, title: 'Repository visibility', current: 'Public', text: 'The programme file names your private evidence store (its name only, never its contents) and the parent issue is public. The store stays private' }));
   }
@@ -210,7 +213,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       : { value: 'keep', outcome: 'Nothing changes.', reason: missing === 0 ? 'They are already up to date.' : 'They could not be checked here.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', 'Nothing changes.'),
-      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to type apply.'),
+      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to press Enter.'),
       bank.wizardChoice('remove', 'Remove', 'You get one command to run yourself that takes every Toolkit permission line out, the same way.'),
     ],
   }));
@@ -233,6 +236,10 @@ function renderGovernanceBank(specs) {
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
+    // Turn on covers the post-merge settings too, so they are named whenever it is offered, not
+    // only when it is the recommendation (the table shows choice text only for that one).
+    ...specs.filter(spec => spec.id === 'governance').flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
+      .map(choice => `${spec.presentation.question_ref} ${choice.presentation_ref}. ${choice.label}: ${choice.consequence}`)).flatMap(line => ['', line]),
     ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).flatMap(spec => ['', `${spec.presentation.question_ref} asks: ${spec.whatThisControls}`, `More on ${spec.presentation.question_ref}: ${shardMoreText(spec)}`]),
     '',
     'For the full text of a question, say "explain 1.2".',

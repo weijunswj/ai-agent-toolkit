@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
+const ownerTerminal = require('./owner-terminal.cjs');
 const delegation = require('./codex-delegation-config.cjs');
 const { runtimeLabel } = require('./codex-delegation-state.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
@@ -1571,12 +1572,17 @@ function shortCodexHelpers(delegation) {
   return 'Not verified';
 }
 
+// Gate runs admit only the Toolkit's own helpers whatever the choice, and Toolkit repos keep one
+// subagent layer outside them; the choice sets the rule only in other folders. The note names the
+// Claude Code limit only when it is not the one the choice expects.
 function shortClaudeTopology(profile, depth) {
-  const topology = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'Broader native' : 'Root only';
-  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return `${topology}; subagent limit 1`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `${topology}; subagent limit ${depth.value} (yours)`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return `${topology}; no subagent limit set`;
-  return `${topology}; subagent limit unknown`;
+  const broader = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE;
+  const outsideGates = broader ? 'Toolkit repos: one subagent layer; elsewhere Claude Code\'s own rules' : 'elsewhere one subagent layer';
+  let note = ' (Claude Code limit unknown)';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) note = broader ? ' (Toolkit\'s Claude Code limit of 1 still set)' : '';
+  else if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) note = ` (your Claude Code limit: ${depth.value})`;
+  else if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) note = broader ? '' : ' (Claude Code limit not set yet)';
+  return `Gates: Toolkit helpers only; ${outsideGates}${note}`;
 }
 
 function shortClaudePlugin(current) {
@@ -2562,15 +2568,16 @@ async function promptForHelperCount(lines, rl) {
   }
 }
 
-async function requireHighHelperCapacityApproval(args, lines, rl) {
+// An answer file (the agent passes on the owner's chat approval) answers `approve`; in the owner's own
+// terminal it is a fresh Enter (owner-terminal.cjs), with no readline open on stdin at the time.
+async function requireHighHelperCapacityApproval(args, lines, confirm = ownerTerminal.pressEnter) {
   if (args.codexHelperCount <= 1 || args.approveHighHelperCapacity) return;
   console.log('WARNING: More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work.');
   if (lines) {
     const answer = nextNonEmptyLine(lines).toLowerCase();
     if (answer !== 'approve') throw new Error('Custom helper counts above one require the exact approval answer `approve`');
-  } else {
-    const answer = (await rl.question('Type approve to accept the RAM risk for this persistent capacity change: ')).trim().toLowerCase();
-    if (answer !== 'approve') throw new Error('Custom helper counts above one require the exact approval answer `approve`');
+  } else if (await confirm(`accept the RAM risk of ${args.codexHelperCount} helpers`) !== true) {
+    throw new Error('Custom helper counts above one need your Enter at the RAM prompt, or --approve-high-helper-capacity after your OK in chat');
   }
   args.approveHighHelperCapacity = true;
 }
@@ -2614,7 +2621,7 @@ async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
     } else if (entry.detail_type === 'codex-helper-count') {
       args.codexHelperCount = await promptForHelperCount(lines, null);
     } else if (entry.detail_type === 'codex-helper-risk-approval') {
-      await requireHighHelperCapacityApproval(args, lines, null);
+      await requireHighHelperCapacityApproval(args, lines);
     } else {
       throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
     }
@@ -2964,9 +2971,11 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     }
     if (args.setupChoices.codexHelperCapacity === 'custom') {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
-      await requireHighHelperCapacityApproval(args, lines, rl);
+      if (rl && args.codexHelperCount > 1 && !args.approveHighHelperCapacity) { rl.close(); rl = null; }
+      await requireHighHelperCapacityApproval(args, lines, options.confirm);
     }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
+      if (!lines && !rl) rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
       args.repoRoot = await promptForCustomPath(lines, rl);
       args.repoRootExplicit = true;
     }

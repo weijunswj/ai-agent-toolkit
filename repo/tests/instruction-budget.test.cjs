@@ -45,8 +45,9 @@ test('each block stays inside its own budget', () => {
   // Owner record 335 (5 November) confirms 19,400 and 44,900, overriding the 4 November
   // cap decision, preserving wording and allowing Windows CRLF. The combined limit still applies.
   // The global cap rose to 21,800 for the Development Principles section: the owner asked on
-  // 14 November for principles that steer all development in every repository, so they load every session.
-  assert.ok(crlfBytes(GLOBAL) <= 21800, `global block ${crlfBytes(GLOBAL)} bytes`);
+  // 14 November for principles that steer all development in every repository, so they load every session,
+  // then to 21,900 when the owner added fixing problems upstream, at the shared source, to the root-cause principle.
+  assert.ok(crlfBytes(GLOBAL) <= 21900, `global block ${crlfBytes(GLOBAL)} bytes`);
   // The governed cap rose to 4,850 for the Governance Principles section (owner, 14 November).
   assert.ok(crlfBytes(GOVERNED) <= 4850, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
@@ -70,9 +71,8 @@ test('each block stays inside its own budget', () => {
   // Claude Projects as the third app (its switch is a project line, and its one merge thread merges),
   // then to 14,400 for merging before the owner's test and one real-host round per release batch,
   // then to 15,150 (owner OK) for the review-round limits: a blocker needs proof, rechecks after a FAIL
-  // are scope-locked, and a third FAIL round waits for the owner's card answer; then to 15,300 (owner
-  // OK, 15 November) for the route stamp: launcher-attested or UNVERIFIED where the host keeps no record.
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 15300, 'gate rules');
+  // are scope-locked, and a third FAIL round waits for the owner's card answer.
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 15150, 'gate rules');
 });
 
 test('the Projects controller skill fits a claude.ai skill card, with room for lanes in flight', () => {

@@ -42,8 +42,8 @@ class Capture {
 function noPrivateDirectory(directory) { fs.mkdirSync(directory, { recursive: true }); }
 
 // environment holds the agent markers a test sets (none by default, whatever runs the tests);
-// tty, typed and clipboard stand in for the terminal and the clipboard used by show.
-function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath, clock, helpers = [], startHelper, findApp, cleanCopies } = {}) {
+// tty, enters (true for a fresh Enter) and clipboard stand in for the terminal and the clipboard used by show.
+function harness(t, { values = {}, answers = [], hidden = [], enters = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath, clock, helpers = [], startHelper, findApp, cleanCopies } = {}) {
   const home = tempHome(t);
   const paths = new EnvPaths({ homeDir: home, environment: {} });
   const store = new FakeEnvStore({ values, corruptReadBack });
@@ -53,7 +53,7 @@ function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeder
     environment,
     now,
     tty: () => tty,
-    askTerminal: async (question) => { asked.push(question); return typed.shift() ?? ''; },
+    askTerminal: async (effect) => { asked.push(effect); return enters.shift() ?? false; },
     clipboard: clipboard || (() => { throw new Error('the clipboard is not used in this test'); }),
     ...(scriptPath ? { scriptPath } : {}),
     ...(findApp ? { findApp } : {}),
@@ -66,7 +66,7 @@ function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeder
     }),
     feeders,
     paths,
-    ask: async (question) => { asked.push(question); return answers.shift() ?? ''; },
+    ask: async (question, effect) => { asked.push(effect ? `${question} [${effect}]` : question); return answers.shift() ?? ''; },
     askHidden: async (question) => { asked.push(question); return hidden.shift() ?? ''; },
     commandFor,
   });
@@ -133,7 +133,7 @@ test('edit shows real values; a save changes, adds and removes keys, and done re
   assert.match(applied.stdout, /^changed: X1_TEST_CHANGED_KEY$/m);
   assert.match(applied.stdout, /^added: X1_TEST_ADDED_KEY$/m);
   assert.match(applied.stdout, /^removed: X1_TEST_GONE_KEY$/m);
-  assert.deepEqual(asked, ['Remove X1_TEST_GONE_KEY from the Toolkit env store? Type yes to remove it: ']);
+  assert.deepEqual(asked, ['Remove X1_TEST_GONE_KEY from the Toolkit env store? [remove it]']);
   assert.equal(store.peek('X1_TEST_CHANGED_KEY'), fresh);
   assert.equal(store.peek('X1_TEST_ADDED_KEY'), added);
   assert.equal(store.peek('X1_TEST_KEPT_KEY'), kept);
@@ -820,9 +820,9 @@ test('no-leak: a sentinel value never reaches output, errors, the record, backup
     ['remove', 'X1_TEST_SECOND_KEY'], ['header', 'X1_TEST_MISSING_KEY'], ['run', '--names', 'X1_TEST_COOLIFY_TOKEN', '--', 'env'],
     ['revoke', '--feeders'], ['retire-codex-env'], ['unknown-command'],
   ]) outputs.push(await h.run(...argv));
-  // show under an agent marker and through a pipe, even with the name retyped correctly.
+  // show under an agent marker and through a pipe, even with Enter pressed.
   for (const options of [{ environment: { CLAUDECODE: '1' } }, { tty: { stdin: false, stdout: false } }]) {
-    const refused = harness(t, { values: { X1_TEST_COOLIFY_TOKEN: value }, typed: ['X1_TEST_COOLIFY_TOKEN'], ...options });
+    const refused = harness(t, { values: { X1_TEST_COOLIFY_TOKEN: value }, enters: [true], ...options });
     outputs.push(await refused.run('show', 'X1_TEST_COOLIFY_TOKEN'), await refused.run('show', 'X1_TEST_COOLIFY_TOKEN', '--copy'));
     assert.equal(refused.store.reads, 0);
   }
@@ -993,7 +993,7 @@ test('private folders and files work on Windows paths with non-ASCII characters'
 test('show refuses under every agent marker before the store is read', async (t) => {
   for (const marker of AGENT_MARKERS) {
     const value = sentinel();
-    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], environment: { [marker]: '1' } });
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, enters: [true], environment: { [marker]: '1' } });
     const result = await h.run('show', 'X1_TEST_SHOW_KEY');
     assert.equal(result.code, 1, marker);
     assert.match(result.stderr, /only runs in a PowerShell window you opened yourself/, marker);
@@ -1002,14 +1002,14 @@ test('show refuses under every agent marker before the store is read', async (t)
     assert.equal(h.asked.length, 0, marker);
     assert.doesNotMatch(result.stdout + result.stderr, new RegExp(value), marker);
   }
-  const empty = harness(t, { values: { X1_TEST_SHOW_KEY: sentinel() }, environment: { CLAUDECODE: '' }, typed: ['X1_TEST_NOPE_KEY'] });
+  const empty = harness(t, { values: { X1_TEST_SHOW_KEY: sentinel() }, environment: { CLAUDECODE: '' }, enters: [false] });
   assert.match((await empty.run('show', 'X1_TEST_SHOW_KEY')).stdout, /^Not shown\.$/m, 'an empty marker is not a marker');
 });
 
 test('show needs a terminal on both ends and reads nothing from a pipe', async (t) => {
   for (const tty of [{ stdin: false, stdout: true }, { stdin: true, stdout: false }, { stdin: false, stdout: false }]) {
     const value = sentinel();
-    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], tty });
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, enters: [true], tty });
     const result = await h.run('show', 'X1_TEST_SHOW_KEY', '--copy');
     assert.equal(result.code, 1);
     assert.match(result.stderr, /show needs a terminal you type into/);
@@ -1033,17 +1033,17 @@ test('the real show command refuses a pipe, and an agent shell, without touching
   assert.equal(fs.existsSync(path.join(home, '.ai-agent-toolkit')), false, 'nothing is written');
 });
 
-test('show needs the exact name retyped, and a wrong retype reads nothing', async (t) => {
-  for (const answer of ['x1_test_show_key', 'X1_TEST_SHOW_KEY ', ' X1_TEST_SHOW_KEY', '', 'X1_TEST_OTHER_KEY']) {
+test('show needs a fresh Enter, and anything else reads nothing', async (t) => {
+  for (const answer of [false, null, 'yes', 'X1_TEST_SHOW_KEY']) {
     const value = sentinel();
-    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: [answer] });
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, enters: [answer] });
     const result = await h.run('show', 'X1_TEST_SHOW_KEY');
     assert.equal(result.code, 0);
     assert.equal(result.stdout, 'Not shown.\n');
     assert.equal(h.store.reads, 0, JSON.stringify(answer));
-    assert.deepEqual(h.asked, ['Type X1_TEST_SHOW_KEY again to show its value: ']);
+    assert.deepEqual(h.asked, ['show X1_TEST_SHOW_KEY on screen']);
   }
-  const missing = harness(t, { values: {}, typed: ['X1_TEST_SHOW_KEY'] });
+  const missing = harness(t, { values: {}, enters: [true] });
   const result = await missing.run('show', 'X1_TEST_SHOW_KEY');
   assert.equal(result.code, 1);
   assert.match(result.stderr, /X1_TEST_SHOW_KEY is not in the Toolkit env store/);
@@ -1052,7 +1052,7 @@ test('show needs the exact name retyped, and a wrong retype reads nothing', asyn
 
 test('show prints only the value on stdout and records nothing', async (t) => {
   const value = sentinel();
-  const h = harness(t, { hidden: [value], typed: ['X1_TEST_SHOW_KEY'] });
+  const h = harness(t, { hidden: [value], enters: [true] });
   await h.run('set', 'X1_TEST_SHOW_KEY');
   const before = fs.readFileSync(h.paths.manifest);
   const result = await h.run('show', 'X1_TEST_SHOW_KEY');
@@ -1065,14 +1065,14 @@ test('show prints only the value on stdout and records nothing', async (t) => {
 test('show --copy puts the value on the clipboard and prints nothing to stdout', async (t) => {
   const value = sentinel();
   const copied = [];
-  const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], clipboard: (text) => { copied.push(text); return true; } });
+  const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, enters: [true], clipboard: (text) => { copied.push(text); return true; } });
   const result = await h.run('show', 'X1_TEST_SHOW_KEY', '--copy');
   assert.equal(result.code, 0);
   assert.deepEqual(copied, [value]);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /^Copied X1_TEST_SHOW_KEY to the clipboard\. Windows clipboard history \(Win\+V\) and clipboard sync/);
   assert.doesNotMatch(result.stderr, new RegExp(value));
-  const failing = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], clipboard: () => false });
+  const failing = harness(t, { values: { X1_TEST_SHOW_KEY: value }, enters: [true], clipboard: () => false });
   const failed = await failing.run('show', 'X1_TEST_SHOW_KEY', '--copy');
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /could not be put on the clipboard/);
@@ -1100,7 +1100,7 @@ test('the clipboard writer passes the value on stdin, never in its arguments', (
 test('show takes exactly one name: no show-all, no extra names', async (t) => {
   for (const argv of [['show'], ['show', 'X1_TEST_SHOW_KEY', 'X1_TEST_OTHER_KEY'], ['show', '--all'], ['show', '--copy']]) {
     const value = sentinel();
-    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value, X1_TEST_OTHER_KEY: sentinel() }, typed: ['X1_TEST_SHOW_KEY'] });
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value, X1_TEST_OTHER_KEY: sentinel() }, enters: [true] });
     const result = await h.run(...argv);
     assert.equal(result.code, 1, argv.join(' '));
     assert.equal(h.store.reads, 0, argv.join(' '));
@@ -1668,7 +1668,7 @@ test('a deleted line waits for done and a yes; no, no answer and the 30-minute e
     save(file, fs.readFileSync(file, 'utf8').replace(/^X1_TEST_GONE_KEY=.*$/m, ''));
     const done = await h.run('apply');
     assert.equal(done.code, 0, done.stderr);
-    assert.deepEqual(h.asked, ['Remove X1_TEST_GONE_KEY from the Toolkit env store? Type yes to remove it: ']);
+    assert.deepEqual(h.asked, ['Remove X1_TEST_GONE_KEY from the Toolkit env store? [remove it]']);
     assert.equal(h.store.peek('X1_TEST_GONE_KEY'), gone);
     assert.doesNotMatch(done.stdout, /^removed:/m);
     assert.match(done.stdout, /Kept X1_TEST_GONE_KEY: a deleted line is removed only at "done", after your yes\. To remove it now, run toolkit env remove X1_TEST_GONE_KEY|Kept X1_TEST_GONE_KEY: a deleted line is removed only at "done", after your yes\. To remove it now, run node /);
@@ -1738,7 +1738,7 @@ test('done asks once about every marked key, naming apps that use them, and remo
   save(file, fs.readFileSync(file, 'utf8').replace(/^X1_TEST_GONE_KEY=.*$/m, '').replace(/^X1_TEST_OLD_KEY=.*$/m, ''));
   const done = await h.run('apply');
   assert.equal(done.code, 0, done.stderr);
-  assert.deepEqual(h.asked, ['Remove X1_TEST_GONE_KEY and X1_TEST_OLD_KEY from the Toolkit env store? claude-code (coolify) will stop connecting until you add them again. Type yes to remove them: ']);
+  assert.deepEqual(h.asked, ['Remove X1_TEST_GONE_KEY and X1_TEST_OLD_KEY from the Toolkit env store? claude-code (coolify) will stop connecting until you add them again. [remove them]']);
   assert.match(done.stdout, /^removed: X1_TEST_GONE_KEY, X1_TEST_OLD_KEY$/m);
   assert.deepEqual(h.store.list(), ['X1_TEST_KEPT_KEY']);
   const record = JSON.parse(fs.readFileSync(h.paths.manifest, 'utf8'));
