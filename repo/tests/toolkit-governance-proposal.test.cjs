@@ -451,6 +451,16 @@ test('a busy proposal lock allows the prompt with a note, keeping the receipt in
   assert.deepEqual(fs.readFileSync(file), before);
 });
 
+// The turn-on set keeps exactly the playbooks repository-agent-rules lists, never the skill's README.
+test('the turn-on rules carry exactly the sixteen playbooks, as INDEX.md and fifteen named files', () => {
+  const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
+  assert.deepEqual(requiredRules().filter(name => name.startsWith('docs/agent-playbooks/')), [
+    'INDEX.md', 'baseline-workflow.md', 'closing-comments.md', 'decision-trace.md', 'docs-governance.md', 'fast-tests-and-sharding.md',
+    'generated-files.md', 'git-completion.md', 'invariant-models.md', 'local-docs.md', 'model-safety-flags.md', 'n8n-workflows.md',
+    'privacy-safe-checks.md', 'release-readiness-audit.md', 'safety-gates.md', 'windows-command-hygiene.md',
+  ].map(name => `docs/agent-playbooks/${name}`));
+});
+
 // The installed Toolkit delivers the governed rules, so a repository needs no copy of them.
 const GOVERNED_RULES = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
 const TOOLKIT_VERSION = require('../contracts/toolkit-local-bridge/version.json').version;
