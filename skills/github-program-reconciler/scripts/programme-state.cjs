@@ -1813,12 +1813,25 @@ function statusCell(outcome, child) {
   return child?.blockers?.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
 }
 
+// The owner's test a task still owes, as `UAT on PR #n` (or `UAT` with no PR), or null.
+function owedUat(child) {
+  return OWED_UAT_STATES.includes(child?.uat?.state) ? `UAT${child.pr?.number ? ` on PR #${child.pr.number}` : ''}` : null;
+}
+
+// True while a gate is at work on the task: assigned or active, and not blocked. Its work is then
+// the current step, so a UAT still owed (often on an earlier PR) shows after it, not in its place.
+function gateAtWork(child) {
+  return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state) && !child.blockers?.length);
+}
+
 // The Waiting on cell of an active row: the owner's ask, a blocker, else the gate a task in
-// progress is in; `-` for queued and finished rows.
+// progress is in (then any UAT still owed); `-` for queued and finished rows.
 function waitingCell(outcome, child) {
   if (!child || isFinished(outcome, child)) return '-';
   if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'Owner: decision';
-  if (['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'].includes(child.uat?.state)) return `Owner: UAT${child.pr?.number ? ` on PR #${child.pr.number}` : ''}`;
+  const uat = owedUat(child);
+  if (uat && gateAtWork(child)) return `${publicText(child.gate.role)}, then Owner: ${uat}`;
+  if (uat) return `Owner: ${uat}`;
   if (child.blockers?.length) return `Blocked: ${child.blockers.map(publicText).join('; ')}`;
   return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role ? publicText(child.gate.role) : '-';
 }
@@ -1883,13 +1896,19 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
     `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
 }
 
-// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker.
+// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker. A UAT
+// owed while a gate is at work waits for that gate (ownerNext).
 function ownerWait(child) {
   if (!child) return null;
   if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'your decision';
-  if (['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'].includes(child.uat.state)) return `your UAT${child.pr.number ? ` on PR #${child.pr.number}` : ''}`;
+  if (owedUat(child) && !gateAtWork(child)) return `your ${owedUat(child)}`;
   if (child.blockers.length) return `blocked: ${child.blockers.map(publicText).join('; ')}`;
   return null;
+}
+
+// The owner's step after the gate at work, or null: a UAT still owed.
+function ownerNext(child) {
+  return !ownerWait(child) && gateAtWork(child) && owedUat(child) ? `your ${owedUat(child)}` : null;
 }
 
 // The generated CURRENT summary, kept slim: the board line, the tasks in progress in Programme Graph
@@ -1902,7 +1921,8 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
     const wait = ownerWait(row.child);
     return `- ${[`#${row.outcome.issue} ${taskName(row.outcome, issues.get(row.outcome.issue))}`, row.child.pr.number ? `PR #${row.child.pr.number}` : null,
-      row.child.gate.role ? publicText(row.child.gate.role) : null, wait ? `waiting on you: ${wait}` : null].filter(Boolean).join(' · ')}`;
+      row.child.gate.role ? publicText(row.child.gate.role) : null, wait ? `waiting on you: ${wait}` : null,
+      ownerNext(row.child) ? `then ${ownerNext(row.child)}` : null].filter(Boolean).join(' · ')}`;
   });
   const holds = rows.filter(row => row.child && !isFinished(row.outcome, row.child) && (row.child.lifecycle === 'HOLD' || row.child.blockers.length)).length;
   return [
