@@ -438,6 +438,10 @@ test('two readings: a force push hidden from bash by backslash quoting is refuse
     ['echo "a\\" ; git push --force-with-lease origin feature ; echo \\"b"', false, true, true, true],
     ['Write-Output "C:\\work\\"; git push --mirror', false, true, true, true],
     ['git push --force origin feature', true, true, true, true],
+    // A script handed to PowerShell is read both ways wherever it starts; one handed to bash, as bash.
+    ['pwsh -Command \'echo "a\\" ; git push --force origin feature ; echo \\"b"\'', true, true, true, true],
+    ['iex \'echo "a\\" ; git push --force origin feature ; echo \\"b"\'', true, true, true, true],
+    ['bash -c \'echo "a\\" ; git push --force origin feature ; echo \\"b"\'', false, false, false, false],
     // Controls: no force push in either reading.
     ['echo "a\\" ; git push origin feature ; echo \\"b"', false, false, false, false],
     ['git commit -m "Explain why \\"git push --force\\" is refused"', false, false, false, false],
