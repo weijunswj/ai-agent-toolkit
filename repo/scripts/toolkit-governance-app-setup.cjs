@@ -64,9 +64,9 @@ function parseArgs(argv) {
     const [flag, value] = [argv[index], argv[index + 1]];
     if (flag === '--replace' && !options.replace) { options.replace = true; continue; }
     const [key, valid] = FLAGS[flag] || [];
-    if (!key || options[key] !== null || typeof value !== 'string' || !valid(value)) {
-      throw new SetupStop(`${JSON.stringify(flag)} is not one of the flags below with a valid value.`, USAGE, 2);
-    }
+    if (!key) throw new SetupStop(`${JSON.stringify(flag)} is not one of the flags below.`, USAGE, 2);
+    if (options[key] !== null) throw new SetupStop(`${flag} is given twice.`, USAGE, 2);
+    if (typeof value !== 'string' || !valid(value)) throw new SetupStop(`${flag} ${value === undefined ? 'has no value' : `has a value that does not fit: ${JSON.stringify(value)}`}.`, USAGE, 2);
     options[key] = value;
     index += 1;
   }

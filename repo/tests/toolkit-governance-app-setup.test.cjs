@@ -81,6 +81,10 @@ test('the arguments are one repository and an optional store, each owner/name', 
     ['--repo', SLUG, '--save', 'secret', '--key-file', 'k.pem', '--store', STORE], ['--repo', SLUG, '--save', 'all']]) {
     assert.throws(() => setup.parseArgs(argv), error => error instanceof setup.SetupStop && error.exitCode === 2, JSON.stringify(argv));
   }
+  // The stop names what is wrong: a bad value is not blamed on the flag.
+  assert.throws(() => setup.parseArgs(['--repo', 'weijunswj/<repo>']), error => error.stopped === '--repo has a value that does not fit: "weijunswj/<repo>".');
+  assert.throws(() => setup.parseArgs(['--repo']), error => error.stopped === '--repo has no value.');
+  assert.throws(() => setup.parseArgs(['--repo', SLUG, '--key', 'x']), error => error.stopped === '"--key" is not one of the flags below.');
 });
 
 test('the manifest asks for the App\'s one permission list, webhook off, installable only here, no events', () => {
