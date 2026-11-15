@@ -93,7 +93,7 @@ test('T9 explicit takeover routes to the shared journey without replacing depend
   const playbook = fs.readFileSync(path.join(root, 'repo/docs/agent-playbooks/controller-takeover.md'), 'utf8');
   for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Gate pack']) assert.ok(playbook.includes(`**${name}:**`), name);
   assert.doesNotMatch(playbook, /\bR\d+\b/);
-  for (const phrase of ['you are taking over as controller for <repo>',
+  for (const phrase of ['you are taking over as controller for [repo]',
     'repo/docs/agent-playbooks/controller-takeover.md)',
     'repo/docs/agent-playbooks/controller-takeover.md#capability-routes)',
     'Git blob SHA-1 and content SHA-256', 'exactly one binding per source',
