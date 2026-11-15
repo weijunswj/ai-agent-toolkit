@@ -11,8 +11,9 @@
 // `Gate: G0|G1|G2|G2 recheck|delta review|design challenge|none` (another value declares nothing, and
 // outside a spawn relay the Route line below must be there too). A brief-declared gate also needs
 //   Route: <profile> <member> <model>/<effort>
-// naming its stack-registry pin (member: DISCOVERY, BUILDER, DESIGN_CHALLENGE or a reviewer id). A
-// temporary owner change is one more brief line, for that launch only:
+// naming its stack-registry pin (member: a role name in any case, DISCOVERY, BUILDER,
+// DESIGN_CHALLENGE or REVIEWER for the profile's one reviewer, or a reviewer id; stamps name the
+// registry's own member). A temporary owner change is one more brief line, for that launch only:
 //   Route override: <member> <model>/<effort> owner=<rec N | cmsg_...>
 // citing the owner's record or message; without the citation the override is refused.
 //
@@ -31,13 +32,18 @@
 // G0 plans, G1 reports and PR bodies, and G2 verdicts (the line after `Toolkit-G2:`) carry it. The
 // governance hook refuses a declared gate's state-changing tools while it is off its pin (messaging
 // tools stay open so it can report), refuses a verdict or a G1 pull request body whose stamp is not
-// the session's own, and the merge train finder reads the stamps (stampStatus).
+// the session's own, and the merge train finder reads the stamps (stampStatus). A verdict is read
+// only where the finder counts one, the first line of a published comment, so reads and quotes of
+// verdict lines pass. A helper's call (agent_id) is checked against its helper pin, never the gate's.
 //
 // Accepted gaps, written down as the hook design playbook asks: the brief is the launcher's text, so
 // a brief that names no gate is not checked (the Projects skill requires the Gate line); an owner
 // citation is checked for shape, not looked up (G2 checks it); a stamp is text, so a session the
-// hook does not run in can type any stamp (the finder trusts only the line, and RISKY pull requests
-// need a verified or attested one); after /clear the transcript starts again without the brief.
+// hook does not run in, or a body the hook cannot read (a shell variable, a file written in the same
+// command), can carry any stamp (the finder trusts only the line, and RISKY pull requests need a
+// verified or attested one); after /clear the transcript starts again without the brief; until the
+// transcript has its first assistant entry only effort is checked; a helper's model is not in its
+// hook input, so only its effort is checked, and G2 subagents have no helper pin to check.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -61,9 +67,32 @@ function registryModel(id) {
   return id.trim().toLowerCase().replace(/\[[^\]]*\]$/, '').replace(/^claude-/, '').replace(/-\d{8}$/, '').replace(/-(\d+)-(\d+)$/, '-$1.$2');
 }
 
+const profileOf = (registry, profile) => registry && registry.profiles && Object.hasOwn(registry.profiles, profile) ? registry.profiles[profile] : null;
+
+// A brief's member, as the registry names it: a role name in any case (DISCOVERY, BUILDER,
+// DESIGN_CHALLENGE, or REVIEWER for the profile's one reviewer) or a reviewer id. { member } or
+// { problem } when REVIEWER names more than one reviewer.
+function resolveMember(registry, profile, member) {
+  const role = member.toUpperCase();
+  const stack = profileOf(registry, profile);
+  if (role !== 'REVIEWER') return { member: Object.values(ROLE_MEMBER).includes(role) ? role : member };
+  const ids = ((stack && stack.reviewers) || []).map(entry => entry.reviewer_id);
+  if (ids.length > 1) return { problem: `${profile} has ${ids.length} reviewers (${ids.join(', ')}), so REVIEWER names none of them. Name the reviewer id this G2 is, such as \`Route: ${profile} ${ids[0]} ...\`.` };
+  return { member: ids.length === 1 ? ids[0] : member };
+}
+
+// The members a profile's Route line can name, for a refusal.
+function membersOf(registry, profile) {
+  const stack = profileOf(registry, profile);
+  if (!stack) return '';
+  const ids = (stack.reviewers || []).map(entry => entry.reviewer_id);
+  const roles = Object.keys(stack.routes || {}).filter(name => !name.endsWith('_HELPER'));
+  return ` Its members: ${[...roles, ...(ids.length ? [`REVIEWER (${ids.join(', ')})`] : [])].join(', ')}.`;
+}
+
 // The pinned route of one member of a profile: { model, effort, reviewer } or null.
 function pinFor(registry, profile, member) {
-  const stack = registry && registry.profiles && Object.hasOwn(registry.profiles, profile) ? registry.profiles[profile] : null;
+  const stack = profileOf(registry, profile);
   if (!stack) return null;
   if (Object.hasOwn(stack.routes || {}, member)) return { model: stack.routes[member].model, effort: stack.routes[member].reasoning, reviewer: false };
   const reviewer = (stack.reviewers || []).find(entry => entry.reviewer_id === member);
@@ -178,19 +207,34 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
     return refuse(gate, `this ${gate} brief has no Route line, so nothing says which pin to check. Launch it again with one line \`Route: <profile> <member> <model>/<effort>\` copied from the stack registry, with model and effort pinned in the launch call.`);
   }
   if (brief.route.malformed !== undefined) return refuse(gate, `the brief's Route line "${brief.route.malformed}" is not \`Route: <profile> <member> <model>/<effort>\`. Launch it again with that line.`);
-  const { profile, member } = brief.route;
-  const pinned = pinFor(registry || loadRegistry(), profile, member);
-  if (!pinned) return refuse(gate, `the stack registry has no route ${profile}/${member}. Copy the Route line from the registry and launch again.`);
+  registry = registry || loadRegistry();
+  const { profile } = brief.route;
+  const named = resolveMember(registry, profile, brief.route.member);
+  if (named.problem) return refuse(gate, named.problem);
+  const { member } = named;
+  const pinned = pinFor(registry, profile, member);
+  if (!pinned) return refuse(gate, `the stack registry has no route ${profile}/${brief.route.member}.${membersOf(registry, profile)} Launch again with \`Route: <profile> <member> <model>/<effort>\` naming one of them.`);
   if (gate === 'G2' ? !pinned.reviewer : pinned.reviewer || ROLE_MEMBER[gate] !== member) return refuse(gate, `${profile}/${member} is not the ${gate} route${gate === 'G2' ? ' (a G2 names a reviewer id)' : ` (${ROLE_MEMBER[gate]})`}. Launch it again on the right route.`);
   let pin = { model: pinned.model, effort: pinned.effort, override: null };
   if (brief.override) {
-    if (brief.override.malformed !== undefined || brief.override.member !== member) return refuse(gate, `the Route override line "${brief.override.malformed ?? brief.override.member}" is not \`Route override: ${member} <model>/<effort> owner=<rec N | cmsg_...>\` citing the owner's own record or message. Without that citation the registry pin stands.`);
+    if (brief.override.malformed !== undefined || resolveMember(registry, profile, brief.override.member).member !== member) return refuse(gate, `the Route override line "${brief.override.malformed ?? brief.override.member}" is not \`Route override: ${member} <model>/<effort> owner=<rec N | cmsg_...>\` citing the owner's own record or message. Without that citation the registry pin stands.`);
     pin = { model: brief.override.model, effort: brief.override.effort, override: brief.override.owner };
   } else if (brief.route.model !== pinned.model || brief.route.effort !== pinned.effort) {
     return refuse(gate, `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin, or add a Route override line citing the owner's approval.`);
   }
-  if (!transcript && file) read = { ...read, ...readTranscript(file, { brief: false, served: true }), brief: read.brief };
   const level = input.effort && typeof input.effort === 'object' ? input.effort.level : null;
+  // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but the
+  // helper's own effort: it is checked against the profile's helper pin, never the gate's. Only the
+  // hook input counts here, since the session environment is the gate's. G2 and design challenge
+  // have no helper pin (gate rules: G2 has no helpers), so their subagents are not checked; the gate
+  // could start one only while on its own pin, since an off-pin gate's Agent call is refused.
+  if (typeof input.agent_id === 'string' && input.agent_id) {
+    const helper = ROLE_MEMBER[gate] && gate !== 'DESIGN_CHALLENGE' ? `${ROLE_MEMBER[gate]}_HELPER` : null;
+    const helperPin = helper ? pinFor(registry, profile, helper) : null;
+    if (helperPin && EFFORTS.includes(level) && level !== helperPin.effort) return refuse(gate, `this ${gate} helper runs on effort ${level}, but the ${profile}/${helper} pin is ${helperPin.model}/${helperPin.effort}. Start the helper again with its pinned model and effort set in its agent file; you may still report this.`);
+    return { gate, helper: true, stamp: null };
+  }
+  if (!transcript && file) read = { ...read, ...readTranscript(file, { brief: false, served: true }), brief: read.brief };
   const effort = [level, environment.CLAUDE_EFFORT, read.effort].find(value => EFFORTS.includes(value)) || null;
   const model = read.model ? registryModel(read.model) : (typeof input.model === 'string' ? registryModel(input.model) : null);
   const wrong = [effort && effort !== pin.effort ? `effort ${effort}` : null, model && model !== registryModel(pin.model) ? `model ${model}` : null].filter(Boolean);
@@ -202,32 +246,81 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
 
 // ---- Stamps in what a session writes ----
 
-// Tools that stay open to an off-pin gate: it must still be able to say why it stopped.
-const REPORT_TOOLS = /^(?:mcp__hearthbot__.*|mcp__claude-code-remote__get_session)$/;
+// Tools that stay open to an off-pin gate: it must still be able to say why it stopped, and nothing
+// more (no device session, connector or card).
+const REPORT_TOOLS = /^(?:mcp__hearthbot__(?:post_message|edit_message|react|unreact|update_progress_checklist|request_decision|close_decision|message_coordinator|message_thread|no_reply_needed|read_thread|read_messages_by_id|read_project_chat|list_threads|rename_thread|show_helpline_card|stop_remote_control)|mcp__claude-code-remote__get_session)$/;
 const STATE_CHANGING = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$/;
 const SHELL = /^(?:Bash|PowerShell)$/;
+// A verdict where the train finder counts one: the first line of a published comment.
+const VERDICT_FIRST = /^[ \t\r\n]*Toolkit-G2: (?:PASS|FAIL) [0-9a-f]{40} tier=(?:LIGHT|NORMAL|RISKY)/;
 
-// The texts a call would publish as a comment or pull request body: { verdict: [texts], body: [texts] }.
+const readText = (file, cwd) => { try { return fs.readFileSync(path.resolve(cwd || process.cwd(), file), 'utf8'); } catch { return null; } };
+const FILE_VALUE = /^[ \t]*(?:=|[ \t]+)?(?:"([^"]+)"|'([^']+)'|([^\s"';|&)]+))/;
+
+// The start of an inline body value: past its quote, a `body=` field name and a `$(cat <<'EOF'` or
+// `$(cat file)` opener (that file is read). The body runs on to the end of the command; only its first
+// two lines matter here.
+function inlineBody(rest, cwd) {
+  let text = rest.replace(/^[ \t]*(?:=|[ \t]+)?/, '').replace(/^\$?["']/, '').replace(/^body=/, '').replace(/^\$?["']/, '');
+  const heredoc = /^\$\([ \t]*cat[ \t]+<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1[^\n]*\n/.exec(text);
+  if (heredoc) return text.slice(heredoc[0].length);
+  const cat = /^\$\([ \t]*cat[ \t]+(?:"([^"]+)"|'([^']+)'|([^\s"')]+))[ \t]*\)/.exec(text);
+  if (cat) return readText(cat[1] || cat[2] || cat[3], cwd) ?? '';
+  return text;
+}
+
+// One gh command's published body texts: { comment, body, files }, where comment is true for a
+// comment post (gh pr|issue comment, or gh api with a body field), body for a pull request body
+// write. Reads (gh api with GET or no body field, gh pr view) publish nothing.
+function ghBodies(segment, cwd) {
+  const kind = /^gh\s+(?:(pr|issue)\s+(comment|create|edit)|(api))\b/.exec(segment);
+  if (!kind) return null;
+  const api = Boolean(kind[3]);
+  if (api && /(?:^|\s)(?:-X|--method)(?:=|\s+)["']?GET\b/i.test(segment)) return null;
+  const texts = [];
+  const files = [];
+  const inline = api ? /(?:^|\s)(?:-f|--raw-field|-F|--field)(?=[ \t=])(?=[ \t=]*["']?body=)/g : /(?:^|\s)(?:--body|-b)(?=[ \t=])/g;
+  for (const match of segment.matchAll(inline)) {
+    const rest = segment.slice(match.index + match[0].length);
+    const at = api && /^[ \t=]*["']?body=@/.exec(rest);
+    if (at && /-F|--field/.test(match[0])) { const file = FILE_VALUE.exec(rest.slice(at[0].length)); if (file) files.push(file[1] || file[2] || file[3]); continue; }
+    texts.push(inlineBody(rest, cwd));
+  }
+  for (const match of segment.matchAll(api ? /(?:^|\s)--input(?=[ \t=])/g : /(?:^|\s)(?:--body-file|-F)(?=[ \t=])/g)) {
+    const file = FILE_VALUE.exec(segment.slice(match.index + match[0].length));
+    if (file) files.push(file[1] || file[2] || file[3]);
+  }
+  for (const file of files) {
+    if (file === '-') continue;
+    let text = readText(file, cwd);
+    if (text === null) continue;
+    if (api && /--input/.test(segment)) { try { const parsed = JSON.parse(text); if (parsed && typeof parsed.body === 'string') text = parsed.body; } catch { /* not JSON: read as it is */ } }
+    texts.push(text);
+  }
+  if (!texts.length) return null;
+  return { comment: api || kind[2] === 'comment', body: kind[1] === 'pr' && kind[2] !== 'comment', texts, segment };
+}
+
+// The texts a call would publish: { verdict: [comment bodies], body: [pull request body texts] }.
 function publishedTexts(input, cwd) {
   const name = String(input && input.tool_name || '');
   const tool = (input && input.tool_input) || {};
   const out = { verdict: [], body: [] };
   if (/github/i.test(name) && typeof tool.body === 'string') {
     if (/(?:add_issue_comment|update_issue_comment|add_reply_to_pull_request_comment)$/.test(name)) out.verdict.push(tool.body);
-    if (/(?:create_pull_request|update_pull_request)$/.test(name)) { out.verdict.push(tool.body); out.body.push(tool.body); }
+    if (/(?:create_pull_request|update_pull_request)$/.test(name)) out.body.push(tool.body);
     return out;
   }
   if (!SHELL.test(name) || typeof tool.command !== 'string') return out;
-  const command = tool.command;
-  if (!/\bgh\b/.test(command)) return out;
-  const texts = [command];
-  for (const match of command.matchAll(/(?:--body-file|--input|(?:^|\s)-F)[ =]+(?:body=@)?(?:"([^"]+)"|'([^']+)'|([^\s"';|&]+))/g)) {
-    const file = match[1] || match[2] || match[3];
-    if (!file || file === '-') continue;
-    try { texts.push(fs.readFileSync(path.resolve(cwd || process.cwd(), file), 'utf8')); } catch { /* an unreadable file is not checked */ }
-  }
-  if (/\bgh\s+(?:pr|issue)\s+comment\b|\bgh\s+api\b/.test(command)) out.verdict.push(...texts);
-  if (/\bgh\s+pr\s+(?:create|edit)\b/.test(command) && /(?:--body|--body-file|\s-b\s|\s-F\s)/.test(command)) { out.verdict.push(...texts); out.body.push(...texts); }
+  // Each gh command in the line, up to the next one.
+  const starts = [...tool.command.matchAll(/(?:^|[\s;&|(])(gh\s)/g)].map(match => match.index + match[0].length - match[1].length);
+  starts.forEach((start, index) => {
+    const found = ghBodies(tool.command.slice(start, starts[index + 1] ?? tool.command.length), cwd);
+    if (!found) return;
+    if (found.comment) out.verdict.push(...found.texts);
+    // The command and the body file it names are one write: their stamp lines count together.
+    if (found.body) out.body.push(found.segment, ...found.texts.filter(text => !found.segment.includes(text)));
+  });
   return out;
 }
 
@@ -236,11 +329,11 @@ function stampLines(text) {
   return String(text).split(/\r?\n|\\n/).map(line => line.replace(/^[\s"'$]+/, '').replace(/["'\s]+$/, '')).filter(line => /^Route: (?:host-verified|launcher-attested|UNVERIFIED)\b/.test(line));
 }
 
-// The line right after a verdict line, or null when the text has no verdict.
+// The line right after a verdict that opens the text, or null when the text does not open with one.
 function lineAfterVerdict(text) {
-  const match = VERDICT.exec(String(text));
+  const match = VERDICT_FIRST.exec(String(text));
   if (!match) return null;
-  const rest = String(text).slice(match.index + match[0].length);
+  const rest = String(text).slice(match[0].length);
   const next = /^[ \t]*(?:\r?\n|\\n)([^\r\n]*?)(?:\\n|\r?\n|$)/.exec(rest);
   return next ? next[1].replace(/["'\s]+$/, '') : '';
 }
@@ -252,12 +345,13 @@ function stampProblem(input, decision) {
   for (const text of texts.verdict) {
     const after = lineAfterVerdict(text);
     if (after === null) continue;
+    if (decision.helper) return `a helper does not post a Toolkit-G2 verdict. Its ${decision.gate} session posts its own.`;
     if (decision.gate && decision.gate !== 'G2') return `a ${decision.gate} session does not post a Toolkit-G2 verdict. A G2 session on the reviewer route does.`;
     if (decision.gate === 'G2' && after !== expected) return `the line after the Toolkit-G2 verdict line must be this session's route stamp, exactly:\n${expected}`;
     if (!decision.gate && !/^Route: UNVERIFIED\b/.test(after)) return `this session is not a declared G2 (no \`Gate: G2\` brief line or launcher mark), so its verdict's next line must be \`Route: UNVERIFIED\`. Only a hooked gate session on its pin can stamp a verified route.`;
   }
   if (decision.gate === 'G1' && texts.body.length) {
-    // The command and the body file it names are one write: count their stamp lines together.
+    if (decision.helper) return 'a helper does not write the pull request body. The G1 session writes it with its own route stamp.';
     const lines = texts.body.flatMap(stampLines);
     if (lines.length !== 1 || lines[0] !== expected) return `a G1 pull request body carries exactly one route stamp line, this session's own:\n${expected}`;
   }

@@ -178,3 +178,87 @@ test('the stamp command prints the session\'s own stamp, or why it is off its ro
   assert.match(lines.pop(), /runs on effort xhigh/);
   assert.equal(route.main([], {}, write), 2);
 });
+
+test('a brief may name the member by its role: REVIEWER resolves to the profile\'s one reviewer id', t => {
+  const dir = scratch(t);
+  const run = (text, level, reg = registry) => route.evaluate({ input: { transcript_path: transcript(dir, { brief: text, effort: level }), effort: { level } }, environment: {}, registry: reg });
+  // The coordinator launches every G2 with this line.
+  assert.equal(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh'), 'xhigh').stamp, 'Route: host-verified opus-5.5/xhigh pin=owner-claude/opus');
+  assert.equal(run(brief('G2 recheck', 'owner-claude reviewer opus-5.5/xhigh'), 'xhigh').stamp, 'Route: host-verified opus-5.5/xhigh pin=owner-claude/opus');
+  assert.match(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh'), 'medium').deny, /runs on effort medium, but its route is opus-5.5\/xhigh/);
+  assert.equal(run(brief('G1', 'owner-claude builder opus-5.5/high'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/BUILDER');
+  assert.equal(run(brief('G0', 'owner-claude DISCOVERY opus-5.5/high'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/DISCOVERY');
+  assert.match(run(brief('G1', 'owner-claude REVIEWER opus-5.5/xhigh'), 'xhigh').deny, /not the G1 route/);
+  assert.equal(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh', 'Route override: REVIEWER opus-5.5/high owner=rec 5'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/opus override=rec-5');
+  assert.equal(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh', 'Route override: opus opus-5.5/high owner=rec 5'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/opus override=rec-5');
+  // A wrong member is refused with the members the profile has.
+  assert.match(run(brief('G2', 'owner-claude REVIEWERS opus-5.5/xhigh'), 'xhigh').deny, /has no route owner-claude\/REVIEWERS\. Its members: DISCOVERY, BUILDER, DESIGN_CHALLENGE, REVIEWER \(opus\)/);
+  // With two reviewers, REVIEWER is ambiguous: the brief names one reviewer id.
+  const two = JSON.parse(JSON.stringify(registry));
+  two.profiles['owner-claude'].reviewers.push({ ...two.profiles['owner-claude'].reviewers[0], reviewer_id: 'opus-b' });
+  assert.match(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh'), 'xhigh', two).deny, /owner-claude has 2 reviewers \(opus, opus-b\)/);
+  assert.equal(run(brief('G2', 'owner-claude opus-b opus-5.5/xhigh'), 'xhigh', two).stamp, 'Route: host-verified opus-5.5/xhigh pin=owner-claude/opus-b');
+});
+
+test('a helper inside a gate is checked against its helper pin, never the gate\'s', t => {
+  const dir = scratch(t);
+  const g2 = transcript(dir, { brief: brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh'), effort: 'xhigh' });
+  const g1 = transcript(dir, { brief: G1 });
+  const g0 = transcript(dir, { brief: brief('G0', 'owner-claude DISCOVERY opus-5.5/high') });
+  const helper = (file, level, tool_name = 'Bash', tool_input = { command: 'git log -1' }, environment = {}) => route.preToolUse({ transcript_path: file, cwd: dir, tool_name, tool_input, agent_id: 'agent-1', agent_type: 'Explore', ...(level ? { effort: { level } } : {}) }, { environment, registry });
+  // The hook input of a helper's call carries the gate's transcript and the helper's own effort.
+  assert.equal(helper(g2, 'medium'), null, 'a helper at medium inside an xhigh G2');
+  assert.equal(helper(g1, 'xhigh'), null, 'a G1 helper on its BUILDER_HELPER pin (xhigh) inside a high G1');
+  assert.equal(helper(g0, 'xhigh', 'Write', { file_path: 'x', content: 'y' }), null, 'a G0 helper on its DISCOVERY_HELPER pin');
+  assert.equal(helper(g1, null), null, 'a helper whose host sends no effort');
+  assert.equal(helper(g1, 'xhigh', 'Bash', { command: 'ls' }, { CLAUDE_EFFORT: 'high' }), null, 'the session environment is the gate\'s, not the helper\'s');
+  assert.match(helper(g1, 'medium'), /this G1 helper runs on effort medium, but the owner-claude\/BUILDER_HELPER pin is haiku-5.5\/xhigh/);
+  assert.match(helper(g2, 'xhigh', 'mcp__github__add_issue_comment', { body: `Toolkit-G2: PASS ${HEAD} tier=NORMAL\nRoute: host-verified opus-5.5/xhigh pin=owner-claude/opus\n---` }), /a helper does not post a Toolkit-G2 verdict/);
+  // The gate's own calls are still checked.
+  assert.match(route.preToolUse({ transcript_path: g1, cwd: dir, tool_name: 'Bash', tool_input: { command: 'ls' }, effort: { level: 'xhigh' } }, { environment: {}, registry }), /this G1 runs on effort xhigh/);
+});
+
+test('only a published comment whose first line is a verdict is read as a verdict', t => {
+  const dir = scratch(t);
+  const g2 = transcript(dir, { brief: G2, effort: 'xhigh' });
+  const g1 = transcript(dir, { brief: G1 });
+  const none = transcript(dir, { brief: 'Keep the records.' });
+  const off = transcript(dir, { brief: G2, effort: 'medium' });
+  const stamp2 = 'Route: host-verified opus-5.5/xhigh pin=owner-claude/opus';
+  const verdict = `Toolkit-G2: PASS ${HEAD} tier=NORMAL`;
+  const file = (name, text) => { const out = path.join(dir, name); fs.writeFileSync(out, text); return out; };
+  const unstamped = file('unstamped.md', `${verdict}\n---\nReport: x\n`);
+  const stamped = file('stamped.md', `${verdict}\n${stamp2}\n---\nReport: x\n`);
+  const call = (session, tool_name, tool_input) => route.preToolUse({ transcript_path: session, cwd: dir, tool_name, tool_input }, { environment: {}, registry });
+  const read = `gh api repos/o/r/issues/5/comments --jq '.[] | select(.body | startswith("${verdict}")) | .html_url'`;
+  const heredoc = text => `gh pr comment 5 --body "$(cat <<'EOF'\n${text}\nEOF\n)"`;
+  const cases = [
+    // Reads and quotes, from every kind of session.
+    ['records thread quotes a verdict inline', none, 'mcp__github__add_issue_comment', { body: `The G2 posted "${verdict}" at 11:31, so the train can pick it up.` }, null],
+    ['records thread reads verdicts with gh api', none, 'Bash', { command: read }, null],
+    ['G2 reads its own posted verdict', g2, 'Bash', { command: read }, null],
+    ['G1 reads the verdict', g1, 'Bash', { command: read }, null],
+    ['G1 quotes the verdict in a reply', g1, 'mcp__github__add_issue_comment', { body: `Fixed what ${verdict} asked for.` }, null],
+    ['search with GET fields', none, 'Bash', { command: `gh api -X GET search/issues -f q="${verdict}"` }, null],
+    ['gh pr view', g1, 'Bash', { command: `gh pr view 5 --comments | grep "${verdict}"` }, null],
+    // Real verdict posts, every way gh writes one.
+    ['G2 heredoc verdict with its stamp', g2, 'Bash', { command: heredoc(`${verdict}\n${stamp2}\n---\nReport: x`) }, null],
+    ['G2 heredoc verdict, unstamped', g2, 'Bash', { command: heredoc(`${verdict}\n---\nReport: x`) }, /route stamp/],
+    ['G2 api raw field with its stamp', g2, 'Bash', { command: `gh api repos/o/r/issues/5/comments -f body="${verdict}\n${stamp2}\n---"` }, null],
+    ['G2 api raw field, unstamped', g2, 'Bash', { command: `gh api repos/o/r/issues/5/comments -f body="${verdict}\n---"` }, /route stamp/],
+    ['G2 api -F body file, unstamped', g2, 'Bash', { command: `gh api repos/o/r/issues/5/comments -F body=@${unstamped}` }, /route stamp/],
+    ['G2 api --field body file, unstamped', g2, 'Bash', { command: `gh api repos/o/r/issues/5/comments --field body=@${unstamped}` }, /route stamp/],
+    ['G2 api --field body file with its stamp', g2, 'Bash', { command: `gh api repos/o/r/issues/5/comments --field body=@${stamped}` }, null],
+    ['G2 comment body file, unstamped', g2, 'Bash', { command: `gh pr comment 5 --body-file ${unstamped}` }, /route stamp/],
+    ['G2 comment from cat of a file, unstamped', g2, 'Bash', { command: `gh pr comment 5 --body "$(cat ${unstamped})"` }, /route stamp/],
+    ['G1 posts a real verdict', g1, 'Bash', { command: `gh pr comment 5 --body-file ${stamped}` }, /G1 session does not post a Toolkit-G2 verdict/],
+    ['records thread posts an unmarked verdict', none, 'Bash', { command: `gh issue comment 5 --body-file ${stamped}` }, /must be `Route: UNVERIFIED`/],
+    // An off-pin gate keeps only its messaging tools.
+    ['off-pin gate cannot start a device session', off, 'mcp__hearthbot__start_remote_control', { instructions: 'x' }, /runs on effort medium/],
+    ['off-pin gate can message the coordinator', off, 'mcp__hearthbot__message_coordinator', { text: 'Off route.' }, null],
+  ];
+  for (const [name, session, tool, input, want] of cases) {
+    const got = call(session, tool, input);
+    if (want) assert.match(got || '', want, name); else assert.equal(got, null, `${name}: ${got}`);
+  }
+});

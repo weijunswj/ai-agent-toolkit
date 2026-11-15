@@ -1385,6 +1385,105 @@
       "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nBuild it.\nGate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
       "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
       "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g2-reviewer-role-word-runs",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "a G2 launched with the coordinator's Route form, member REVIEWER, on its pin runs",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"},"effort":{"level":"xhigh"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude REVIEWER opus-5.5/xhigh\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"xhigh"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g2-reviewer-role-word-off-pin-refused",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "note": "the same G2 brief whose host record says medium is refused",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"},"effort":{"level":"medium"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude REVIEWER opus-5.5/xhigh\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"medium"}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g2-helper-other-effort-runs",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "a subagent inside an on-pin xhigh G2 runs at its own effort",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git log -1"},"effort":{"level":"medium"},"agent_id":"a1b2c3","agent_type":"Explore"},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude REVIEWER opus-5.5/xhigh\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"xhigh"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g1-pinned-helper-runs",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "a G1 helper on its BUILDER_HELPER pin (xhigh) inside a high G1 runs",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git log -1"},"effort":{"level":"xhigh"},"agent_id":"a1b2c3","agent_type":"Explore"},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nBuild it.\nGate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g1-helper-off-pin-refused",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "note": "a G1 helper at medium, off its BUILDER_HELPER pin, is refused",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git log -1"},"effort":{"level":"medium"},"agent_id":"a1b2c3","agent_type":"Explore"},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nBuild it.\nGate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.nongate-quotes-verdict-inline",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "a records thread comment that quotes a verdict line mid-text is not a verdict post",
+      "payload": {"tool_name":"mcp__github__add_issue_comment","tool_input":{"owner":"toolkit-test-fixture","repo":"fixture","issue_number":5,"body":"The G2 posted \"Toolkit-G2: PASS bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tier=NORMAL\" at 11:31."},"effort":{"level":"low"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nKeep the records.\nGate: none\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"low"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.nongate-gh-read-verdict",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "a records thread reads verdict comments with gh api and a jq filter naming the verdict line",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh api repos/toolkit-test-fixture/fixture/issues/5/comments --jq '.[] | select(.body | startswith(\"Toolkit-G2: PASS bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tier=NORMAL\")) | .html_url'"},"effort":{"level":"low"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nKeep the records.\nGate: none\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"low"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.g2-reads-own-verdict",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "note": "an on-pin G2 reads back the verdict it posted",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh api repos/toolkit-test-fixture/fixture/issues/5/comments --jq '.[] | select(.body | startswith(\"Toolkit-G2: PASS bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tier=NORMAL\")) | .html_url'"},"effort":{"level":"xhigh"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude REVIEWER opus-5.5/xhigh\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"xhigh"}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATEROUTE.offpin-gate-start-remote-control-refused",
+      "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "note": "an off-pin G2 cannot start a session on the owner's device; only its messaging tools stay open",
+      "payload": {"tool_name":"mcp__hearthbot__start_remote_control","tool_input":{"instructions":"run the review there"},"effort":{"level":"medium"}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude REVIEWER opus-5.5/xhigh\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"medium"}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
     }
   ]
 }
