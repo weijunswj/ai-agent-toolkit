@@ -97,7 +97,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
   assert.match(table, /Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on/);
@@ -113,7 +113,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const { binding, files } = result.published[0];
   assert.deepEqual(binding.parents, [{ issue: 7, record_prefix: 'INT-FRE7-' }]);
   assert.deepEqual(binding.store, { kind: 'github', repository: STORE, branch: 'main', path: `state/${SLUG}/` });
-  assert.deepEqual(binding.task_prs, { auto_merge: 'off' });
+  assert.deepEqual(binding.task_prs, { auto_merge: 'off', merge_train: 'off' });
   assert.deepEqual(JSON.parse(files['.github/toolkit-programme.json']), binding);
   const { blocks, errors } = managedBlock.findBlocks(files['AGENTS.md']);
   assert.equal(errors.length, 0);
@@ -159,7 +159,7 @@ test('a found store is a question: keep it, or create a new private one', async 
   const parent = { number: 3, title: 'Programme tracker', state: 'open', labels: [] };
   const keep = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], keep, { interactive: true, answers: [''] });
-  assert.match(shown.out, /\| 1\.3 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
+  assert.match(shown.out, /\| 1\.4 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
   assert.match(shown.out, /Parent issue: #3\. Reused when governance turns on/);
   const kept = await run(ctx, ['setup'], keep, { interactive: true, answers: ['all recommended'] });
   assert.equal(kept.code, 0, kept.err + kept.out);
@@ -169,7 +169,7 @@ test('a found store is a question: keep it, or create a new private one', async 
 
   const ctx2 = fixture(t);
   const fresh = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
-  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.3=B'] });
+  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.4=B'] });
   assert.equal(made.code, 0, made.err + made.out);
   assert.deepEqual(fresh.calls, [['create', STORE], ['put', STORE, 'archives/README.md']]);
   assert.equal(made.published[0].binding.store.repository, STORE);

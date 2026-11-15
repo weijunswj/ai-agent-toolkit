@@ -58,7 +58,7 @@ function statusRow({ id, section, title, current, text }) {
 // 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }, and
 // `adoption` what turning governance on would make in a repository that is not prepared yet
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on).
-function governanceBankSpecs({ state, task = 'unset', merged = null, permissions = { checked: false, missing: 0 }, adoption = null }) {
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -92,6 +92,22 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
       bank.wizardChoice('off', 'Off', 'Every pull request waits for your typed merge.'),
     ] : [
       bank.wizardChoice('keep', 'Keep current', 'Task auto-merge stays off.'),
+      bank.wizardChoice('on', 'On (needs governance on)', 'Only together with turning governance on in the same answer; the same pull request sets it.'),
+    ],
+  }));
+  const trainOn = governed && train === 'on';
+  specs.push(bank.resolvedQuestion({
+    id: 'merge-train', key: 'mergeTrain', section, title: 'Merge trains',
+    whatThisControls: 'Whether reviewed pull requests that are ready together land as one merge train with one version bump. It applies only while governance is on.',
+    current: governed ? (trainOn ? 'On' : 'Off') : 'Off (needs governance)',
+    currentChoice: governed ? (trainOn ? 'on' : 'off') : '',
+    recommendation: { value: 'keep', outcome: 'Merge trains stay as they are.', reason: 'Nothing needs to change.' },
+    choices: governed ? [
+      bank.wizardChoice('keep', 'Keep current', 'Merge trains stay as they are.'),
+      bank.wizardChoice('on', 'On', 'Ready pull requests land together as one train with one version bump.'),
+      bank.wizardChoice('off', 'Off', 'Each pull request lands on its own.'),
+    ] : [
+      bank.wizardChoice('keep', 'Keep current', 'Merge trains stay off.'),
       bank.wizardChoice('on', 'On (needs governance on)', 'Only together with turning governance on in the same answer; the same pull request sets it.'),
     ],
   }));
@@ -176,7 +192,7 @@ function selectionsOf(parsed, specs) {
     // A hidden twin (the choice that changes nothing) applies as Keep current.
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store') };
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store') };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
@@ -185,8 +201,11 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
   bank.assertQuestionBankAnswerBinding(parsed, specs, 'Governance');
   const chosen = selectionsOf(parsed, specs);
   const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
-  if (chosen.taskAutoMerge === 'on' && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
-    throw new Error('Task auto-merge can be on only while governance is on: turn governance on in the same answer, or leave task auto-merge as it is.');
+  // Every option under governance is On only while governance is on, or in the answer that turns it on.
+  for (const [name, label] of [['taskAutoMerge', 'Task auto-merge'], ['mergeTrain', 'Merge trains']]) {
+    if (chosen[name] === 'on' && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
+      throw new Error(`${label} can be on only while governance is on: turn governance on in the same answer, or leave ${label.toLowerCase()} as it is.`);
+    }
   }
   return chosen;
 }
@@ -197,12 +216,15 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
 // The card carries every answerable row, its options lettered as in the bank; the tool gate lets only
 // this exact card through for the bank shown last, and the owner's taps come back as one bank answer
 // with a one-use ticket (toolkit-governance-gate.cjs PromptHold.bankPicked).
-const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
+const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'merge-train': 'Trains', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
+// The app's card holds at most four questions; a bank with more is answered as a typed reply.
+const CARD_MAX = 4;
 const CARD_KEYS = Object.freeze(['questions', 'metadata']);
 const CARD_QUESTION = /^(\d+\.\d+) /;
 const CARD_OPTION = /^([A-D])\. /;
 
 function bankCardInput(specs) {
+  if (specs.filter(spec => !spec.report_only).length > CARD_MAX) return null;
   return {
     questions: specs.filter(spec => !spec.report_only).map(spec => ({
       question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})`,

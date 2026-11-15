@@ -98,7 +98,7 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^# Toolkit governance choices - 3 questions across 2 sections/);
+    assert.match(result.out, /^# Toolkit governance choices - 4 questions across 2 sections/);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
@@ -114,7 +114,7 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'showing the bank never writes the binding');
   const json = JSON.parse((await run(ctx, ['setup', '--json'])).out);
   assert.match(json.bank_reference, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
-  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'permission-blocks']);
+  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'permission-blocks']);
   const unmarked = await run(ctx, ['setup'], { environment: {} });
   assert.match(unmarked.out, /could not note this bank for this session/, 'a session without a mark is told a chat reply cannot count');
 });
@@ -150,7 +150,7 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
   const [repository, mergedText, text, value] = calls[0];
   assert.equal(repository, SLUG);
   assert.equal(mergedText, ctx.mergedText);
-  assert.equal(value, 'after-gates');
+  assert.deepEqual(value, { auto_merge: 'after-gates' });
   const proposal = JSON.parse(text);
   assert.deepEqual(proposal.task_prs, { auto_merge: 'after-gates' });
   delete proposal.task_prs;
@@ -242,6 +242,35 @@ test('task auto-merge can be turned on only while governance is on, or in the an
   assert.match(alone.out, /Task auto-merge can be on only while governance is on.*Nothing was written/);
 });
 
+test('the merge-train row: one switch pull request sets only the switches that change, and it needs governance on', async t => {
+  const ctx = fixture(t);
+  const calls = [];
+  const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 13, url: `https://github.com/${SLUG}/pull/13`, head: 'a'.repeat(40) }; } };
+  startOwnerSession(ctx);
+  const shown = await run(ctx, ['setup']);
+  assert.match(shown.out, /\| 1\.3 \| Merge trains \| On \| A\. Keep current \| B\. Off \|/, 'no key reads as on');
+  const off = await answerBank(ctx, '1.3=B', { switchTransport });
+  assert.equal(off.code, 0, off.err);
+  assert.deepEqual(calls.at(-1)[3], { merge_train: 'off' });
+  assert.deepEqual(JSON.parse(calls.at(-1)[2]).task_prs, { merge_train: 'off' });
+  assert.match(off.out, /it sets merge trains off and changes nothing else/);
+  const both = await answerBank(ctx, '1.2=B, 1.3=B', { switchTransport });
+  assert.equal(both.code, 0, both.err);
+  assert.deepEqual(calls.at(-1)[3], { auto_merge: 'after-gates', merge_train: 'off' }, 'both changes ride one pull request');
+  assert.match(both.out, /it sets task auto-merge on and merge trains off and changes nothing else/);
+  const set = bindingText({ task_prs: { auto_merge: 'off', merge_train: 'on' } });
+  ctx.merge(set);
+  await answerBank(ctx, '1.3=B', { switchTransport });
+  assert.equal(calls.at(-1)[2], set.replace('"merge_train": "on"', '"merge_train": "off"'), 'a set value is replaced in place');
+
+  recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
+  startOwnerSession(ctx);
+  const disabled = await run(ctx, ['setup']);
+  assert.match(disabled.out, /\| 1\.3 \| Merge trains \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
+  const alone = await answerBank(ctx, '1.3=B', { switchTransport });
+  assert.match(alone.out, /Merge trains can be on only while governance is on.*Nothing was written/);
+});
+
 test('the switch pull request keeps the merged formatting: a compact binding gains one member, a set value is replaced in place', async t => {
   const ctx = fixture(t);
   const texts = [];
@@ -276,14 +305,14 @@ test('turning governance on in the bank carries the switch in the same enable pr
     assert.equal(result.asked.length, 1, 'the owner\'s own terminal reads one reply to the bank');
     assert.equal(published.length, 1, `version ${version}`);
     const text = published[0].files['.github/toolkit-programme.json'];
-    assert.equal(JSON.parse(text).task_prs.auto_merge, 'after-gates', `version ${version}`);
+    assert.deepEqual(JSON.parse(text).task_prs, { auto_merge: 'after-gates', merge_train: 'off' }, `version ${version}: the unanswered merge-train row is written off, as shown`);
     assert.equal(JSON.parse(text).schema, 'toolkit.programme-binding.v2');
     assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with the proposal');
     assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).answered, false, 'a pending proposal grants nothing');
   }
   assert.equal(switchNote({ governance: 'enabled' }), '', 'an enable proposal without the switch says nothing about it');
   const note = switchNote({ governance: 'enabled', task_prs: { auto_merge: 'after-gates' } });
-  assert.match(note, /sets this repository's task auto-merge switch \(`task_prs\.auto_merge`\) to `after-gates`/);
+  assert.match(note, /sets this repository's switches: `task_prs\.auto_merge` to `after-gates`/);
   assert.ok(note.includes(VERSION_LINE), 'the enable pull request warns about older copies');
 });
 
@@ -340,15 +369,15 @@ test('the switch transport refuses a moved default branch and opens a pull reque
     [/^POST repos\/toolkit-test-fixture\/switch\/pulls$/, input => ({ number: 7, html_url: `https://github.com/${SLUG}/pull/7`, body: input.body })],
   ];
   const moved = fakeGh(routes(bindingText({ required_checks: ['validate', 'other'] })));
-  assert.throws(() => new GitHubProposalTransport({ run: moved.runner }).publishSwitch(SLUG, merged, proposal, 'after-gates'), { code: 'SWITCH_BASE_CHANGED' });
+  assert.throws(() => new GitHubProposalTransport({ run: moved.runner }).publishSwitch(SLUG, merged, proposal, { auto_merge: 'after-gates' }), { code: 'SWITCH_BASE_CHANGED' });
   assert.ok(!moved.calls.some(call => /git\/refs$|pulls$/.test(call.args[1] || '') && call.input !== undefined), 'nothing written');
 
   const gh = fakeGh(routes(merged));
-  const result = new GitHubProposalTransport({ run: gh.runner }).publishSwitch(SLUG, merged, proposal, 'after-gates');
+  const result = new GitHubProposalTransport({ run: gh.runner }).publishSwitch(SLUG, merged, proposal, { auto_merge: 'after-gates' });
   assert.equal(result.number, 7);
   const put = gh.calls.find(call => call.args.includes('PUT'));
   assert.equal(Buffer.from(put.input.content, 'base64').toString('utf8'), proposal);
-  assert.match(put.input.branch, /^toolkit\/task-auto-merge-on-[0-9a-f]{32}$/);
+  assert.match(put.input.branch, /^toolkit\/switches-task-auto-merge-on-[0-9a-f]{32}$/);
   const pr = gh.calls.find(call => /pulls$/.test(call.args[1]) && call.input);
   assert.equal(pr.input.base, 'main');
   assert.ok(!pr.input.body.includes(MARKER), 'never read as a governance decision');
