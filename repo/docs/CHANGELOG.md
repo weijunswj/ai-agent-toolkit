@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.121.0
+
+### Changed
+
+- `toolkit governance` now shows its choices as one typed question bank in every app, Claude Code included, the same way as `setup toolkit`: the whole list at once, answered in one line such as `all recommended` or `1.4=B`. The governance bank no longer splits its rows over tap cards. The single yes or no governance card and the merge card stay.
+- The parallel CI shards question is now one short line, "Run tests in parallel CI jobs so they finish faster? It uses about the same CI minutes.", with the details, the minutes estimate and why Not now is recommended on one "More on" line under it.
+- **Programme Sweep gate:** a closed issue now starts the cloud sweep at once instead of waiting until an hour after the last sweep, so the programme board stops showing a closed task as open within minutes. A pass paused at GitHub's hourly App limit still waits for the reset, and a queued or running sweep is handled as for any other activity.
+
 ## 3.120.2
 
 ### Fixed
