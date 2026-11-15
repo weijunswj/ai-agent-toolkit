@@ -500,7 +500,41 @@ test('the CI check reads the live PR body and every closing reference', () => {
   assert.match(adapter.uatClosingDecision(result.pr.body, result.references), /commit a{40}, line 3 closes #2/);
 });
 
-test('closing words wait while the target issue records an owed UAT', () => {
+// A task page as the reconciler draws it today: its STATE block from the real renderer, with the
+// UAT in the STATUS line (`... · UAT: <state> · Review: ...`).
+function renderedTaskPage(uat, { head = SHA, gate = { role: 'G2', state: 'ACTIVE' } } = {}) {
+  const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const child = { ...state.newChild({ repository: repo, outcome: { issue: 2, class: 'COMMITTED' } }), revision: 4, lifecycle: 'ACTIVE', gate: { ...state.newChild({ repository: repo, outcome: { issue: 2, class: 'COMMITTED' } }).gate, ...gate },
+    pr: { number: 12, state: 'OPEN', head, checks: { state: 'SUCCESS', required_total: 1, required_passed: 1, at_head: head } },
+    uat: { state: uat, at_head: uat === '-' ? null : SHA }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head, verdict: 'PASSED' }] } };
+  if (uat === '-') child.uat.state = null;
+  return `${state.renderBlock(state.renderChildBlockBody(child, { issue: 2, class: 'COMMITTED', order: 1 }), '3.126.0')}\n\nTask text.`;
+}
+test('closing words wait while the rendered task page records an owed UAT', () => {
+  const { owedUat } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  const pending = renderedTaskPage('PENDING');
+  assert.match(pending, /^IN PROGRESS · Gate: G2 ACTIVE · Waiting on you: your UAT on PR #12 · UAT: PENDING · Review: PASSED · /m, 'the renderer\'s own STATUS line');
+  assert.equal(owedUat(pending), 'PENDING');
+  assert.equal(owedUat(renderedTaskPage('UAT_FULL_REQUIRED')), 'UAT_FULL_REQUIRED');
+  const stale = renderedTaskPage('UAT_PARTIAL_REQUIRED', { head: 'b'.repeat(40) });
+  assert.match(stale, / · UAT: UAT_PARTIAL_REQUIRED \(STALE_HEAD, was aaaaaaa\) · /);
+  assert.equal(owedUat(stale), 'UAT_PARTIAL_REQUIRED');
+  for (const uat of ['PASSED', 'NOT_REQUIRED', 'UAT_RETAINED', '-']) assert.equal(owedUat(renderedTaskPage(uat)), null, uat);
+  // Only the generated block counts: the same STATUS line as plain text does not.
+  assert.equal(owedUat(pending.replace(/<!-- AI-AGENT-TOOLKIT:[^\n]*\n/g, '')), null);
+  // A gate text that spoofs a passed UAT ahead of the real one never removes the refusal.
+  assert.equal(owedUat(renderedTaskPage('PENDING', { gate: { role: 'G2', state: 'ACTIVE · UAT: PASSED' } })), 'PENDING');
+  const refused = new IssueClosureGuard({ repository: repo, transport: { request(method, apiPath) {
+    const rows = { [`repos/${repo}/issues/2`]: { number: 2, state: 'open', body: pending, sub_issues_summary: { total: 0 } }, [`repos/${repo}/issues/2/sub_issues?per_page=100&page=1`]: [] };
+    if (!(apiPath in rows)) assert.fail(apiPath);
+    return { status: 200, json: rows[apiPath] };
+  } } }).checkTexts(['UAT: NOT_REQUIRED (docs)\n\nCloses #2'], undefined, { sources: ['body'] });
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.reason, /body, line 3.*records UAT PENDING.*use Refs/);
+});
+
+// Older task pages may still carry the legacy `- UAT: <state>; review:` line; it keeps counting.
+test('closing words wait while the target issue records an owed UAT (legacy STATE line)', () => {
   const { owedUat } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
   const block = state => `<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.70.1 sha256=0123456789ab -->\n<!-- programme-state child=2@4 -->\n- Status: ACTIVE\n- UAT: ${state}; review: PASSED\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\nTask text.`;
   assert.equal(owedUat(block('PENDING')), 'PENDING');
