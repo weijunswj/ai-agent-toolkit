@@ -43,8 +43,9 @@ const SCHEMA = 'toolkit-usage-report/v1';
 const RUN_TYPES = Object.freeze(['hourly', 'daily', 'weekly', 'coordinator', 'g0', 'g1', 'g2', 'train', 'other']);
 const USAGE = 'Usage: node repo/scripts/toolkit-usage-report.cjs --transcripts <dir|file>... [--codex <dir|file>...] [--since <ISO time>] [--tag <session id>=<run type>]... --out <report.json>';
 
-// Names that reach the report (models, tools, session ids) must look like names.
-const NAME = /^[A-Za-z0-9][A-Za-z0-9_.:@/\-[\]]{0,127}$/;
+// Names that reach the report (models, tools) must look like names: no spaces, slashes or @ (so no
+// path or email address passes), except a model's dated suffix such as @20250514.
+const NAME = /^[A-Za-z0-9][A-Za-z0-9_.:\-[\]]{0,127}(?:@[0-9]{8})?$/;
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
 const UNRECOGNISED = 'unrecognised';
 // A shell command that waits: `sleep <n>` as its own command.

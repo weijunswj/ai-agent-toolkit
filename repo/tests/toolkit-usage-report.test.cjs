@@ -297,7 +297,16 @@ test('a malformed or non-object line is counted and skipped, and the rest is rea
     '{"type":"assistant", broken',
     '[1,2,3]',
     '"just a string"',
-    ...replyLines({ id: 'msg_x', requestId: 'req_x', timestamp: '2026-11-15T12:00:00.000Z', uuidBase: 'x', blocks: [{ type: 'text', text: TEXT.reply }], use: [usage(1, 2, 3, 4)] }),
+    ...replyLines({
+      id: 'msg_x', requestId: 'req_x', timestamp: '2026-11-15T12:00:00.000Z', uuidBase: 'x', model: 'claude-opus-4@20250514',
+      blocks: [
+        { type: 'text', text: TEXT.reply },
+        // Names that are not plain names (an address, a path) are counted under one placeholder.
+        { type: 'tool_use', id: 'toolu_x1', name: ['someone', 'example.com'].join('@'), input: {} },
+        { type: 'tool_use', id: 'toolu_x2', name: 'home/LEAKMARK-user', input: {} },
+      ],
+      use: [usage(1, 2, 3, 4)],
+    }),
   ]);
   const out = path.join(dir, 'r.json');
   const result = run(['--transcripts', file, '--out', out]);
@@ -306,6 +315,9 @@ test('a malformed or non-object line is counted and skipped, and the rest is rea
   assert.equal(json.skipped.malformed_lines, 3);
   assert.equal(json.sessions.length, 1);
   assert.deepEqual(json.sessions[0].tokens, { input: 1, cache_creation: 2, cache_read: 3, output: 4 });
+  assert.deepEqual(json.sessions[0].tool_calls, { unrecognised: 2 });
+  assert.deepEqual(json.sessions[0].models, { 'claude-opus-4@20250514': 1 });
+  assert.doesNotMatch(fs.readFileSync(out, 'utf8'), /someone|LEAKMARK/);
   assert.doesNotMatch(result.stdout + result.stderr, /broken/);
 });
 
