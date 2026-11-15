@@ -1,6 +1,6 @@
 ---
 name: controller-bootstrap
-description: Use only when explicitly asked to take over as controller (including "you are taking over as controller for <repo>"), bootstrap or recover the assigned controller after context loss or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, questions about controllers, or programme reconciliation (github-program-reconciler does that).
+description: Use only when explicitly asked to take over as controller (including "you are taking over as controller for [repo]"), bootstrap or recover the assigned controller after context loss or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, questions about controllers, or programme reconciliation (github-program-reconciler does that).
 ---
 
 # Controller Bootstrap
