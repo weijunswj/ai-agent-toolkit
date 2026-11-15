@@ -2797,34 +2797,49 @@ class StateStore {
     return assertValid(kind, doc);
   }
 
-  // The whole page as it stood, kept in the private store before marked notes can leave it. The
-  // file is named by its content, so a retry finds the same file. It is read back before use, and a
-  // store that is not private, or text shaped like a secret, saves nothing.
-  noteCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
+  // One page-copy format for every caller: the whole page as it stood, as its exact text, at
+  // page-copies/issue-<n>/<sha256>.md in the private store, saved before any write that moves
+  // hand-written text off the page (marked notes leaving it, or a task page re-laid). The file is
+  // named by its content, so a retry finds the same file. It is read back before use, and a store
+  // that is not private, or text shaped like a secret, saves nothing.
+  pageCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
 
-  saveNoteCopy(issue, text) {
+  savePageCopy(issue, text) {
     if (secretShaped(text)) throw new ProgrammeError('PAGE_COPY_REFUSED', 'The page holds text shaped like a secret, so no copy was saved and nothing was moved.');
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
     if (repo.status !== 200) throw ghFailure(repo, 'Reading the private store');
     if (repo.json?.private !== true) throw new ProgrammeError('STORE_NOT_PRIVATE', `The store ${this.store.repository} is not private, so no page copy was saved and nothing was moved.`);
     const digest = sha256(text);
-    const docPath = this.noteCopyPath(issue, digest);
-    const decoded = response => (response.json?.encoding === 'base64' ? Buffer.from(response.json.content, 'base64').toString('utf8') : null);
-    const existing = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(this.store.branch)}`);
-    if (existing.status === 200) {
-      if (decoded(existing) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} exists with other content.`);
+    const docPath = this.pageCopyPath(issue, digest);
+    const existing = this.readCopyText(docPath);
+    if (existing !== null) {
+      if (existing !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} exists with other content.`);
       return { digest, path: docPath, outcome: 'EXISTS' };
     }
-    if (existing.status !== 404) throw ghFailure(existing, `Reading ${docPath}`);
     const response = this.transport.request('PUT', this.encodedContents(docPath), {
       message: `programme page copy: issue-${issue} ${digest.slice(0, 12)}`, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch,
     });
     if (!okStatus(response.status)) throw ghFailure(response, `Writing ${docPath}`);
     this.writes += 1;
     const commit = response.json?.commit?.sha;
-    const readback = commit ? this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(commit)}`) : null;
-    if (!readback || readback.status !== 200 || decoded(readback) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
+    if (!commit || this.readCopyText(docPath, commit) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
     return { digest, path: docPath, outcome: 'WRITTEN' };
+  }
+
+  // The text of one saved copy, or null when there is none. A copy an older Toolkit saved as JSON
+  // (page-copies/issue-<n>-<first 16 hex>.json) still reads, but only when its text has that digest.
+  readPageCopy(issue, digest) {
+    const text = this.readCopyText(this.pageCopyPath(issue, digest));
+    if (text !== null) return sha256(text) === digest ? text : null;
+    const legacy = this.readPath(`${this.store.path}page-copies/issue-${issue}-${digest.slice(0, 16)}.json`, 'page_copy');
+    return legacy.doc && legacy.doc.issue === issue && legacy.doc.sha256 === digest ? legacy.doc.body : null;
+  }
+
+  readCopyText(docPath, ref = this.store.branch) {
+    const response = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(ref)}`);
+    if (response.status === 404) return null;
+    if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
+    return response.json?.encoding === 'base64' ? Buffer.from(response.json.content, 'base64').toString('utf8') : null;
   }
 
   // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
@@ -2850,23 +2865,6 @@ class StateStore {
     this.ownWrites.set(docPath, { replaced: sha || null, doc: clone(readback.doc), sha: blob });
     this.lastCommit = commit;
     return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
-  }
-
-  // A copy of a page as it was before a write that moves hand-written text, kept in the private
-  // store under the page's own digest and read back. Saving the same page twice writes once.
-  pageCopyPath(number, digest) { return `${this.store.path}page-copies/issue-${number}-${digest.slice(0, 16)}.json`; }
-
-  savePageCopy(number, page) {
-    const digest = sha256(page.body);
-    const file = this.pageCopyPath(number, digest);
-    const existing = this.readPath(file, 'page_copy');
-    if (existing.doc) {
-      if (existing.doc.issue !== number || existing.doc.body !== page.body) throw new ProgrammeError('STATE_CONFLICT', `${file} holds a different page.`);
-      return { outcome: 'NOOP', path: file };
-    }
-    const doc = { schema: PAGE_COPY_SCHEMA, issue: number, sha256: digest, updated_at: page.updated_at || null, saved_at: this.now(), body: page.body };
-    this.putVerified(file, 'page_copy', canonicalText(doc), null, `programme page copy: issue-${number}`);
-    return { outcome: 'WRITTEN', path: file };
   }
 
   listJournals(issue) {
@@ -3333,8 +3331,10 @@ class BranchStateStore extends StateStore {
     this.sessions = new Set();
   }
 
-  // Page copies hold whole pages, so they stay in the private store.
-  savePageCopy(number, page) { return this.private.savePageCopy(number, page); }
+  // Page copies hold whole pages and hand-written text, so they go to the private store, never the
+  // public branch, and only while that store is still private.
+  savePageCopy(issue, text) { this.requirePrivateStore(); return this.private.savePageCopy(issue, text); }
+  readPageCopy(issue, digest) { return this.private.readPageCopy(issue, digest); }
 
   // The public file holds only what validatePublic allows.
   validateRead(kind, doc) { return validatePublic(kind, doc); }
@@ -3343,8 +3343,6 @@ class BranchStateStore extends StateStore {
   // bindRepository; the branch itself by the read path.
   verify() { return this.private.verify(); }
 
-  // Page copies hold hand-written text, so they go to the private store, never the public branch.
-  saveNoteCopy(issue, text) { this.requirePrivateStore(); return this.private.saveNoteCopy(issue, text); }
 
   // Journals stay in the private store, unchanged.
   journalDir(issue) { return this.private.journalDir(issue); }
@@ -5529,6 +5527,12 @@ class Reconciler {
     }
   }
 
+  // Whether a saved page copy can still be read; a failed read counts as not there.
+  copySaved(issue, digest) {
+    try { return this.store.readPageCopy(issue, digest) !== null; }
+    catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; return false; }
+  }
+
   archiveTrust(entry) {
     const comment = this.reader.archiveComment(entry.comment_id);
     if (!comment) return { reason: 'missing' };
@@ -6325,7 +6329,8 @@ class Reconciler {
           const reason = reported ? null : this.archiveTrust(entry).reason;
           if (!reported && !reason) continue;
           if (reason) reportedCopies.add(entry.copy);
-          const diagnostics = reason ? { reason, ...(reportedCopies.size === 1 ? { copy: entry.copy } : {}) } : null;
+          // The finding names the copy only while that copy is really in the store.
+          const diagnostics = reason ? { reason, ...(reportedCopies.size === 1 && this.copySaved(parentNumber, entry.copy) ? { copy: entry.copy } : {}) } : null;
           if (snapshot.next.noteKeys.includes(entry.key)) {
             // The owner put the same notes back under the marker (as the saved copy holds them):
             // the damaged comment is let go and a fresh one is posted for them on this full pass.
@@ -6367,7 +6372,7 @@ class Reconciler {
             // A note comment is never edited: its key is bound to its exact text.
             const prior = part.kind !== 'note' && entry?.comment_id && entry.login === login ? trust(entry) : null;
             // Saved copy first: the whole page as it stands, before any marked text is posted.
-            const copy = part.kind === 'note' ? this.store.saveNoteCopy(parentNumber, snapshot.before.body).digest : null;
+            const copy = part.kind === 'note' ? this.store.savePageCopy(parentNumber, snapshot.before.body).digest : null;
             if (!entry) {
               entry = { key: part.key, kind: part.kind, group: part.group, title: part.title.slice(0, 200), comment_id: null, login: null,
                 digest, state: 'pending', ...(copy ? { copy } : {}) };
@@ -6485,7 +6490,7 @@ class Reconciler {
       const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block, context = findStateBlock(next.body, CONTEXT_BLOCK_NAME).block;
       if (!state || !trace || !context) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `#${parentNumber}: a block of the programme page cannot be read back, so nothing was written to this page`);
       // Saved copy first (again): the exact page this write replaces, before marked text leaves it.
-      if (next.noteCut) cutCopy = this.store.saveNoteCopy(parentNumber, before.body).digest;
+      if (next.noteCut) cutCopy = this.store.savePageCopy(parentNumber, before.body).digest;
       effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: context.digest, body_digest: sha256(next.body) };
       withIntent(effect, () => {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
@@ -6649,7 +6654,7 @@ class Reconciler {
           if (next.relaid && next.moves) {
             // Hand-written text is about to move: the page as it is now is saved and read back
             // first. Without that copy nothing is written.
-            try { guard(); const copy = this.store.savePageCopy(number, before); relays += 1; done = `the page was laid out in the fixed order; the page as it was is saved at ${copy.path} in the state store`; }
+            try { guard(); const copy = this.store.savePageCopy(number, before.body); relays += 1; done = `the page was laid out in the fixed order; the page as it was is saved at ${copy.path} in the private store`; }
             catch (error) {
               if (!error.code || STOPS_PASS.has(error.code)) throw error;
               record(effect, 'HELD', 'the copy of the page could not be saved');
