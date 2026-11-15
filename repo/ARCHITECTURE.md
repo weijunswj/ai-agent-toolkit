@@ -54,6 +54,7 @@ Last reviewed against `main` `51c6bbe`.
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
 | Projects guidebook (library copy of the skill the coordinator reads) | `repo/scripts/toolkit-projects-guidebook.cjs`, copied from `repo/contracts/claude-projects/web-controller-projects/`; it also copies and checks the canonical takeover `repo/docs/agent-playbooks/controller-takeover.md` as `takeover.md` |
 | Projects scheduled task prompts (stored as pointers, expanded from main each run) | `repo/scripts/toolkit-projects-tasks.cjs`, templates `repo/contracts/claude-projects/web-controller-projects/tasks/`, setup inventory `repo/contracts/claude-projects/web-controller-projects/setup-inventory.json` |
+| Projects stuck-thread check (which cloud threads and Remote Control lanes need a fresh successor; the hourly nudge runs it, the coordinator starts the successors and keeps the ledger it reads) | `repo/scripts/toolkit-projects-stuck.cjs` |
 | Shared programme lock (built-ins only, unchanged record format; shared by programme and cleaner/apply owners) | `skills/github-program-reconciler/scripts/programme-lock.cjs`; scheduled jobs serialise store writes through `repo/scripts/toolkit-programme-lock.cjs` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
