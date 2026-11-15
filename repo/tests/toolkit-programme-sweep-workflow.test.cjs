@@ -1016,8 +1016,8 @@ test('off the default branch: the store step names no store, so no token is mint
 test('refreshed: only a pass that ran says so; every skip and failure leaves footer cleaning off', () => {
   const ran = runAction('run', { env: minted });
   assert.ok(ran.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'));
-  const held = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=4', holds: ['x'] } }) });
-  assert.ok(held.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'), 'a held pass ran');
+  const held = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=4', holds: ['x'], writes: { state: 1, github: 0 } } }) });
+  assert.ok(held.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'), 'a held pass that saved ran');
   for (const [label, env, refresh] of [
     ['queued behind another sweep', minted, () => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running' } })],
     ['main moved', minted, () => ({ status: 1, code: 'MAIN_MOVED', report: null })],
@@ -1094,9 +1094,37 @@ test('state readback mismatch: never refreshed, so footer cleaning is skipped; t
   assert.equal(action().saveUnverified(unverified.report), true);
   assert.equal(action().wroteNothing(unverified.report), false, 'the reconciler does not report it as noWrite');
   // Another hold beside a verified save still counts as refreshed: only the readback decides.
-  const other = { status: 1, code: null, report: { metrics: 'Sweep: requests=40', holds: [{ code: 'STATE_WRITE_FAILED', target: '#500', detail: 'x' }], sweep: { read: 3, left: 0, noWrite: false } } };
+  const other = { status: 1, code: null, report: { metrics: 'Sweep: requests=40', holds: [{ code: 'STATE_WRITE_FAILED', target: '#500', detail: 'x' }], writes: { state: 2, github: 1 }, sweep: { read: 3, left: 0, noWrite: false } } };
   assert.equal(action().saveUnverified(other.report), false);
   assert.ok(runAction('run', { env: minted, refresh: () => other }).outputs.some(([name, value]) => name === 'refreshed' && value === 'true'));
+  // The footer step then sees no REFRESHED and edits nothing.
+  const footers = runFooters({ env: { REFRESHED: '' } });
+  assert.deepEqual([footers.code, footers.calls.length], [0, 0]);
+  assert.deepEqual(footers.warnings, [action().FOOTER_SKIPPED]);
+});
+
+// saqg report: a worker older than the Toolkit that drew the board holds every page it would redraw
+// (BLOCK_NEWER_TOOLKIT) and can save nothing, yet the reconciler does not call that noWrite. A held
+// pass counts as refreshed only when a state save landed, and a stale worker never refreshed the
+// board, so footer cleaning skips both.
+test('held without a landed save, or held by a newer Toolkit: never refreshed, so footer cleaning is skipped', () => {
+  const newer = { code: 'BLOCK_NEWER_TOOLKIT', target: '#421', detail: '#421 was written by Toolkit 3.118.0, newer than this copy (3.109.0); update Toolkit on this computer, then run again', scope: 'body' };
+  const report = (holds, writes) => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=40', holds, ...(writes ? { writes } : {}), sweep: { read: 3, left: 0, noWrite: false, reason: null, limit: null } } });
+  const refreshed = result => result.outputs.some(([name, value]) => name === 'refreshed' && value === 'true');
+  for (const [label, refresh] of [
+    ['newer Toolkit, nothing saved', report([newer], { state: 0, github: 0 })],
+    ['newer Toolkit, child documents saved', report([newer], { state: 2, github: 6 })],
+    ['write failed, nothing saved', report([{ code: 'STATE_WRITE_FAILED', target: '#500', detail: 'x' }], { state: 0, github: 0 })],
+    ['held, no write count reported', report([{ code: 'STATE_WRITE_FAILED', target: '#500', detail: 'x' }], null)]]) {
+    const result = runAction('run', { env: minted, refresh: () => refresh });
+    assert.equal(result.code, 0, label);
+    assert.equal(refreshed(result), false, `${label}: not refreshed`);
+    assert.equal(result.outputs.some(([name]) => name === 'at_limit'), false, `${label}: not at the limit`);
+    assert.deepEqual(result.tags, [{ title: action().HELD_TITLE, code: action().holdCodes(refresh.report) }], label);
+  }
+  assert.equal(action().refreshLanded(report([newer], { state: 0, github: 0 }).report), false);
+  assert.equal(action().refreshLanded(report([{ code: 'STATE_WRITE_FAILED', target: '#500', detail: 'x' }], { state: 1, github: 0 }).report), true, 'a hold beside a landed save still refreshed');
+  assert.equal(action().refreshLanded({ metrics: 'Sweep: requests=4', holds: [], writes: { state: 0, github: 0 } }), true, 'an unheld pass with nothing to save still ran');
   // The footer step then sees no REFRESHED and edits nothing.
   const footers = runFooters({ env: { REFRESHED: '' } });
   assert.deepEqual([footers.code, footers.calls.length], [0, 0]);
