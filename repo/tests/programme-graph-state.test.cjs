@@ -225,7 +225,8 @@ test('fix1 H1: parent and task title references count without reading the parent
   const f=fixture(); pr(f,20); f.github.prs.get(20).title='Fixes #1';
   pr(f,21); f.github.prs.get(21).title='Refs #2';
   f.run(); assert.ok(!openCodes(f).includes('PR_WITHOUT_TASK'));
-  assert.deepEqual(f.child(2).prs,[{number:21,state:'OPEN',merge_sha:null}]);
+  assert.deepEqual(f.child(2).prs,[{number:21,state:'OPEN',merge_sha:null}],'the PR title is never saved in state');
+  assert.match(f.github.issues.get(2).body,/^\|`Refs #2`\|#21\|OPEN\|-\|$/m,'the task page shows it as code');
 });
 
 test('A2-1: one refresh copies closes, adopts native children and lists merged PRs', () => {

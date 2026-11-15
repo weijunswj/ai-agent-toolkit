@@ -1191,7 +1191,7 @@ test('the graph replaces the hand-kept index once, sits right under the CURRENT 
   assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CURRENT -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'), 'the graph follows the summary directly');
   assert.match(page, /<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CONTEXT/);
   assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END CONTEXT -->\n\nLive now.\n\n## Parent completion\n\nDone when.\n'), 'hand-written notes come after agent context and close the page; there is no DECISIONS block');
-  assert.match(github.issues.get(423).body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n# PATH\n<!-- programme-nav -->\n#421 > #423\n<!-- AI-AGENT-TOOLKIT:programme-state:END NAV -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE [^\n]*\n<!-- programme-state child=423@1 -->\n<!-- State revision 1 \(issue-423\.json\) -->\n# PR GRAPH\n[\s\S]*\n# STATUS\n[\s\S]*<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE [^\n]*\n# AGENT CONTEXT\n[\s\S]*<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n\n# More\n\n# C2 title\n\nBody of 423\n$/, 'a task page with no TASK text opens with PATH, PR GRAPH and STATUS, AGENT CONTEXT, then every hand-written word under More');
+  assert.match(github.issues.get(423).body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n# PATH\n<!-- programme-nav -->\n#421 > #423\n<!-- AI-AGENT-TOOLKIT:programme-state:END NAV -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE [^\n]*\n<!-- programme-state child=423@1 -->\n<!-- State revision 1 \(issue-423\.json\) -->\n<!-- Task status: [^\n]*-->\n# PR GRAPH\n[\s\S]*<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE [^\n]*\n# AGENT CONTEXT\n[\s\S]*<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n\n# C2 title\n\nBody of 423\n$/, 'a task page with no TASK text opens with PATH, PR GRAPH, AGENT CONTEXT, then every hand-written word under its own headings');
   assert.equal(reconciler().run().summary, 'No changes');
 
   // A block someone moved back to the top is planned as a move, not a content change.
@@ -1221,9 +1221,9 @@ test('every body keeps one DECISIONS link to its newest tagged comment, never a 
   assert.deepEqual(block.split('\n'), [
     '# AGENT CONTEXT',
     '<!-- programme-trace issue=423 -->',
-    `Decisions: \`programme.cjs trace 423\` · Newest: [${tagged.id}](https://github.com/acme/app/issues/423#issuecomment-${tagged.id})`,
-  ], 'one link, to the newest tagged person comment; untagged and bot comments are not it');
-  assert.equal((block.match(/\]\(/g) || []).length, 1, 'exactly one link');
+    `Handover: [handover file](${require('../../skills/github-program-reconciler/scripts/programme-handover.cjs').handoverUrl({ repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' }, 423)}) · Decisions: \`programme.cjs trace 423\` · Newest: [${tagged.id}](https://github.com/acme/app/issues/423#issuecomment-${tagged.id})`,
+  ], 'the handover link, then one decision link, to the newest tagged person comment; untagged and bot comments are not it');
+  assert.equal((block.match(/\]\(https:\/\/github\.com\/acme\/app\//g) || []).length, 1, 'exactly one decision link');
   assert.equal(github.commentsOf(423).some(entry => entry.body.includes('<!-- decision-trace-index -->')), false, 'no index comment is posted');
   assert.equal(reconciler().run().summary, 'No changes');
   comment(github, 423, 'Another untagged note');
@@ -1243,7 +1243,7 @@ test('an old comment trace on a page is replaced by the DECISIONS block on the n
   reconciler().run({ apply: true });
   const after = github.issues.get(423).body;
   assert.equal(after.includes('COMMENT TRACE'), false);
-  assert.match(after, /# AGENT CONTEXT\n<!-- programme-trace issue=423 -->\nDecisions: /);
+  assert.match(after, /# AGENT CONTEXT\n<!-- programme-trace issue=423 -->\nHandover: \[handover file\]\([^)]+\) · Decisions: /);
   assert.equal(reconciler().run().summary, 'No changes');
 });
 
@@ -1296,7 +1296,7 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   assert.equal(docAfter.revision, docBefore.revision);
   assert.deepEqual(docAfter.fence, docBefore.fence);
   assert.equal(github.issues.get(423).parent, 421);
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /^QUEUED · /m);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /^<!-- Task status: QUEUED\b/m);
 });
 
 test('older classes read as COMMITTED and sort by priority like any task, are reported as CLASS_LEGACY, and migrate in one patch', () => {
@@ -1362,10 +1362,10 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   assert.equal(doc.pr.checks.state, 'PENDING');
   const childBlock = state.findStateBlock(github.issues.get(423).body).block.body;
   const parentBlock = state.findStateBlock(github.issues.get(421).body).block.body;
-  assert.match(childBlock, / · UAT: PASSED \(STALE_HEAD, was aaaaaaa\) · Review: PASSED \(STALE_HEAD\) · /);
+  assert.match(childBlock, / · UAT: PASSED \(STALE_HEAD, was aaaaaaa\) -->/);
   assert.match(parentBlock, new RegExp(`423:${doc.revision}\\b`));
   assert.match(childBlock, new RegExp(`child=423@${doc.revision} -->`));
-  assert.match(childBlock, /^\|#540\|OPEN\|[^|]*\|-\|$/m, 'the open PR leads the PR GRAPH; GitHub shows its head');
+  assert.match(childBlock, /^\|[^|]*\|#540\|OPEN\b[^|]*\|-\|$/m, 'the open PR leads the PR GRAPH; GitHub shows its head');
   assert.match(parentBlock, /^\|Issue 423\|#423\|NOW · IN PROGRESS\|-\|-\|$/m, 'an open PR means the work is in progress');
 });
 

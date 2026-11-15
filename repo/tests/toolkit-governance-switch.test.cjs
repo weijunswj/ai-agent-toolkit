@@ -98,7 +98,9 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^# Toolkit governance choices - 6 questions and 2 status rows across 2 sections/);
+    // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup row is asked too.
+    assert.match(result.out, /^# Toolkit governance choices - 7 questions and 2 status rows across 2 sections/);
+    assert.match(result.out, /\| 1\.10 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
     assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI time unknown\) \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
@@ -114,7 +116,7 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'showing the bank never writes the binding');
   const json = JSON.parse((await run(ctx, ['setup', '--json'])).out);
   assert.match(json.bank_reference, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
-  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'ci-shards', 'governance-app', 'permission-blocks']);
+  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'ci-shards', 'governance-app', 'instruction-copies', 'permission-blocks']);
   const unmarked = await run(ctx, ['setup'], { environment: {} });
   assert.match(unmarked.out, /could not note this bank for this session/, 'a session without a mark is told a chat reply cannot count');
 });

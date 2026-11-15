@@ -196,7 +196,7 @@ test('re-arming keeps the run, the repository mark and the repository of the ban
 });
 
 test('rows keep their numbers whichever rows apply, and status rows sit in the table under theirs', () => {
-  const { governanceBankSpecs, renderGovernanceBank } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+  const { governanceBankSpecs, renderGovernanceBank, parseBankAnswer } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
   const state = { state: 'UNDECIDED', repository: SLUG, root: '/x' };
   const adoption = storeChoice => ({ repository: SLUG, store: { repository: 'toolkit-test-fixture/TRANSPORT-card', create: !storeChoice }, found_store: storeChoice ? 'toolkit-test-fixture/evidence' : null,
     store_name: 'TRANSPORT-card', store_choice: storeChoice, parent: { issue: null, create: true }, checks: [], visibility: 'private', unknown: [] });
@@ -216,6 +216,14 @@ test('rows keep their numbers whichever rows apply, and status rows sit in the t
   assert.match(shown, /^\| 1\.5 \| Evidence store \| None yet \| Nothing to answer: Toolkit creates a private TRANSPORT-card when governance turns on \| - \|$/m);
   assert.doesNotMatch(shown, /Status \(nothing to answer\)/);
   assert.doesNotMatch(shown, /^\| 1\.9 \|/m, 'a row that does not apply leaves its number free');
+  // The instruction copies row is 1.10 in a governed repository, held or not, and 1.10 never reads as 1.1.
+  const governed = { state: 'ENABLED', repository: SLUG, root: '/x' };
+  for (const copies of [{ files: 2 }, { files: 2, held: 'a cloud workflow copy is older' }]) {
+    assert.deepEqual(Object.values(refs(governanceBankSpecs({ state: governed, copies }))), ['1.1', '1.2', '1.3', '1.6', '1.10', '2.1']);
+  }
+  const chosen = parseBankAnswer('1.10=B', governanceBankSpecs({ state: governed, copies: { files: 2 } }), { requireBankReference: false });
+  assert.equal(chosen.instructionCopies, 'clean');
+  assert.equal(chosen.governance, 'keep');
 });
 
 test('in the owner\'s own terminal a reply that cannot be used gets one line and the question again, without the bank', async t => {

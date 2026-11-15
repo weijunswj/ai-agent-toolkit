@@ -87,14 +87,10 @@ function writeCodexPluginRefreshFixture(repoPath) {
   ].join('\n'));
 }
 
-test('Codex SessionStart hook adds no missing-rule notice for current AGENTS', () => {
+test('Codex SessionStart hook adds no rules notice for a repository with only its own AGENTS.md', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  const template = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
-  writeFile(path.join(root, 'AGENTS.md'), template);
+  writeFile(path.join(root, 'AGENTS.md'), '# Project rules\n\nOur own.\n');
   const hub = path.join(root, '.test-home', 'hub', 'current');
   writeDisabledHookHub(hub);
 

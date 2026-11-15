@@ -225,7 +225,7 @@ test('page queue: a frozen closed page is no drift reason, whatever revision it 
   Object.assign(f.github.issues.get(502), { state: 'closed', state_reason: 'completed', closed_at: f.tick(), updated_at: f.tick() });
   f.run();
   const frozen = f.page(502);
-  assert.match(state.findStateBlock(frozen).block.body, /\nCOMPLETED\b/);
+  assert.match(state.findStateBlock(frozen).block.body, /\n<!-- Task status: COMPLETED -->\n/);
   f.store.mutate('child', 502, { writer: controller, parentDoc: f.parent(), change: doc => { doc.next_action = 'None: closed later'; return doc; } });
   const result = f.run();
   assert.equal(result.report.sweep.why.drifted, 0, 'a frozen page drawn at an older revision is not re-read for it');

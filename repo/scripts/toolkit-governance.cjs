@@ -23,6 +23,7 @@ const security = require('./toolkit-governance-security.cjs');
 const hookCapability = require('./toolkit-hook-capability.cjs');
 const governanceApp = require('./toolkit-governance-app.cjs');
 const governanceBank = require('./toolkit-governance-bank.cjs');
+const cleanupRoute = require('./toolkit-governance-cleanup.cjs');
 const adopt = require('./toolkit-governance-adopt.cjs');
 const ciOffer = require('./toolkit-ci-shards-offer.cjs');
 const governedShards = require('./governed-test-shards.cjs');
@@ -464,7 +465,8 @@ class ToolkitGovernanceCli {
     const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
     // The App row reads its variable and secret only where governance is on or can be turned on here.
     const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app });
+    const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copies && copies.ok ? { files: copies.changes.filter(change => change.action !== 'set-min-toolkit').length } : copies && copies.held ? { files: copies.files, held: copies.held } : null });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -525,6 +527,16 @@ class ToolkitGovernanceCli {
   #lastCiEstimate = null;
   // The turn-on pull request the bank published in this run, for its closing line.
   #turnOnUrl = null;
+
+  // The cleanup route (toolkit-governance-cleanup.cjs), reading governance the way this command does.
+  // A preview writes nothing; it never runs git.
+  #cleanup(root, write) {
+    try {
+      return cleanupRoute.run({ root, write, governance: { readIdentity: governance.readIdentity, governanceState: dir => governance.governanceState(dir, this.#registryOptions) } });
+    } catch (error) {
+      return { ok: false, changes: [], lines: [`The instruction copies could not be checked (${error.code || error.message}).`] };
+    }
+  }
 
   // One binding pull request for the owner's sharded CI answer, built from the exact merged text: it
   // sets ci_shards (answer, offered_at) and, for yes, adds a first shard list when the repository has
@@ -658,6 +670,14 @@ class ToolkitGovernanceCli {
     if (!shardsDone && state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
       const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards);
       this.#print(false, {}, [`Prepared ${prepared.url}: it records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
+      acted = true;
+    }
+    // The instruction copies: Clean up removes them in the working tree and sets min_toolkit; the owner
+    // commits them and merges the one pull request. The row is asked only where governance is on.
+    if (chosen.instructionCopies === 'clean') {
+      const cleaned = state.state === 'ENABLED' ? this.#cleanup(state.root, true) : { ok: false, lines: ['Toolkit instruction copies: not cleaned, because governance is not on here.'] };
+      this.#print(false, {}, ['', ...cleaned.lines]);
+      if (!cleaned.ok && code === 0) code = 1;
       acted = true;
     }
     if (chosen.permissionBlocks !== 'keep') {

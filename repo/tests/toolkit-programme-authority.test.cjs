@@ -404,19 +404,19 @@ test('UAT or review evidence without its head is refused on write and rendered s
   assert.throws(() => write({ review: { state: 'NOT_PASSED' } }), { code: 'STATE_INVALID' });
   write({ candidate: { branch: 'feature', head: SHA_A }, uat: { state: 'PASSED', at_head: SHA_A }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } });
   reconciler().run({ apply: true });
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED · Review: PASSED · /);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED -->/);
   github.prs.get(540).head = SHA_B;
   github.prs.get(540).rollupOid = SHA_B;
   reconciler().run({ apply: true });
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED \(STALE_HEAD, was aaaaaaa\) · Review: PASSED \(STALE_HEAD\) · /);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED \(STALE_HEAD, was aaaaaaa\) -->/);
 
   // Rendering stays safe even for a document that bypassed validation.
   const doc = { ...store.read('child', 423).doc, uat: { state: 'PASSED', at_head: null }, review: { state: 'PASSED', verdicts: [] } };
   const body = state.renderChildBlockBody(doc, CATALOGUE[0]);
-  assert.match(body, / · UAT: PASSED \(STALE_HEAD, head not recorded\) · Review: PASSED \(STALE_HEAD, no verdict recorded\) · /);
-  // A current-head verdict beside an older one is current.
+  assert.match(body, / · UAT: PASSED \(STALE_HEAD, head not recorded\) -->/);
+  // A pending UAT is owed at any head; review verdicts are in the handover file, not on the page.
   const mixed = { ...doc, uat: { state: 'PENDING', at_head: null }, review: { state: 'PASSED', verdicts: [{ reviewer: 'a', head: SHA_A, verdict: 'NOT_PASSED' }, { reviewer: 'a', head: SHA_B, verdict: 'PASSED' }] } };
-  assert.match(state.renderChildBlockBody(mixed, CATALOGUE[0]), / · UAT: PENDING · Review: PASSED · /);
+  assert.match(state.renderChildBlockBody(mixed, CATALOGUE[0]), / · UAT: PENDING -->/);
 });
 
 test('a body hold skips only that issue\'s body, not its native link', () => {

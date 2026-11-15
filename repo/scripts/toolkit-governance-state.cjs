@@ -506,6 +506,12 @@ function result(fields) {
 
 // What the cached default-branch binding says: { status: 'none' | 'unknown' | 'invalid' | 'foreign'
 // | 'enabled' | 'disabled', version, problems, foreign_repository, commit, fetched_at, fresh }.
+function newerVersion(a, b) {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return false;
+}
+
 function judgeMerged(entry, identity, now) {
   if (!entry) return { status: 'unknown', fresh: false };
   const base = { commit: entry.commit, fetched_at: entry.fetched_at, fresh: !entry.refresh_error && bindingCache.isFresh(entry, now), unavailable: Boolean(entry.refresh_error) };
@@ -520,6 +526,12 @@ function judgeMerged(entry, identity, now) {
   }
   const slug = remoteSlug(identity.remote);
   if (!slug || slug.toLowerCase() !== valid.repository.toLowerCase()) return { ...base, status: 'foreign', foreign_repository: valid.repository };
+  // A binding that asks for a newer Toolkit cannot be used by this copy: it may rely on rules only the
+  // newer copy delivers.
+  const running = require('./toolkit-version.cjs').readToolkitVersion();
+  if (valid.min_toolkit && newerVersion(valid.min_toolkit, running)) {
+    return { ...base, status: 'invalid', min_toolkit: valid.min_toolkit, problems: [`this repository needs Toolkit ${valid.min_toolkit} or later; this copy is ${running}`] };
+  }
   return { ...base, status: programmeState.bindingEnabled(valid) ? 'enabled' : 'disabled', version: valid.schema === BINDING_SCHEMA ? 1 : 2, binding: valid };
 }
 
@@ -547,10 +559,10 @@ class GovernanceState {
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
       return result({ ...fields, state: 'DISABLED', rule: 'R8' });
     }
-    const view = { status: merged.status, version: merged.version || null, commit: merged.commit || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [] };
+    const view = { status: merged.status, min_toolkit: merged.min_toolkit || null, version: merged.version || null, commit: merged.commit || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [] };
     const withMerged = { ...base, merged: view, merged_fresh: view.fresh };
     // The repository's merged binding decides, on every computer (A1, A3).
-    if (merged.status === 'invalid') return result({ ...withMerged, state: 'ERROR', rule: 'M0', reason: 'merged-binding-invalid' });
+    if (merged.status === 'invalid') return result({ ...withMerged, state: 'ERROR', rule: 'M0', reason: merged.min_toolkit ? 'toolkit-too-old' : 'merged-binding-invalid' });
     if (merged.status === 'disabled') return result({ ...withMerged, state: 'DISABLED', rule: 'M2', reason: 'repository-disabled',
       notes: merged.unavailable ? ['could-not-check-governance'] : !view.fresh ? ['merged-binding-stale'] : [] });
     if (merged.status === 'enabled') {

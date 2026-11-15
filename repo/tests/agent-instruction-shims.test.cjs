@@ -261,7 +261,7 @@ test('governed rules hold only the GitHub governance parts: release lanes, recor
     // Review Lows and leftovers fold into their area's open child; a new child per review is what split the parent.
     /Reuse first:\*\* extend or reopen an existing issue, task or job before adding a new one; Lows and leftovers join their area's open child\./,
     /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen the one in its area \(same page, script or feature; once in progress, one follow-up sibling takes later work\), else create a child as a native sub-issue/,
-    /Programme tracking: the parent shows queue and status; each child and PR shows SHA, release, gate, review and UAT\. Gate ends run `programme\.cjs handover`\./,
+    /Programme tracking: the parent shows queue and status; each child's PR GRAPH shows each PR's SHA, gate and owed UAT, and its handover file the release and review\. Gate ends run `programme\.cjs handover`\./,
     /A child closes as completed once a merge completes every criterion and any owner UAT passed, any remainder moved to its area's open child first: that PR says `Closes #n`, else the controller does\. Use `Refs` for staged, UAT-pending, blocked, partial or follow-up PRs\./,
     /in a Git store the commit is the manifest and a push plus one fetch the read-back/,
     /session folders, side-session notes, scratchpads and temp paths are never custody/,
@@ -295,7 +295,8 @@ test('the repository-agent-rules skill describes the two layers, the opt-in and 
   assert.match(skill, /Never create shims for platforms out of scope/);
   // The installed Toolkit delivers the governed rules and the playbooks: nothing copies them into a repository.
   assert.match(skill, /this skill never adds the governed block, the Antigravity bootstrap or playbook files/);
-  assert.match(skill, /Report them as leftovers and leave them as they are: never refresh, repair or add one/);
+  assert.match(skill, /Report them as leftovers: never refresh, repair or add one/);
+  assert.match(skill, /toolkit-governance-cleanup\.cjs --repo <repo>` to preview, then, with the owner's OK, `--write`/);
   assert.doesNotMatch(skill, /AGENTS\.managed\.template\.md|antigravity-bootstrap\.template\.md|-> `docs\/agent-playbooks\/`/);
   assert.match(skill, /_agent-toolkit-backups\//);
   assert.match(skill, /legacy `\.agent-toolkit-backups\/`/);
