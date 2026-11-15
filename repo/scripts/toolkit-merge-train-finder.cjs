@@ -15,7 +15,9 @@
 //   - every required check the merged binding lists has a successful latest run;
 //   - its body has exactly one `Bump:` line and a `UAT:` line the auto-merge check accepts;
 //   - it carries no version bump of its own and no open train pull request holds it.
-// The manifest takes at most the train's cap (six), oldest pull request first, with tier and head from the verdict, the
+// The manifest takes at most the train's cap (six), oldest pull request first, with the head from
+// the verdict and the higher of the verdict's tier and the tier the repository's risk-tier list
+// (toolkit-risk-tier.cjs) gives the changed files, so a verdict can never lower a tier; then the
 // bump level, UAT line, closing lines and any `Pack changes` lines from the body. It never fills
 // `owner_ok`, so a RISKY member keeps the owner's merge card. With fewer than two ready, it writes
 // nothing and says to merge the one alone.
@@ -31,6 +33,7 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const governance = require('./toolkit-governance-state.cjs');
 const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
+const riskTier = require('./toolkit-risk-tier.cjs');
 const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 
 const VERDICT = /^Toolkit-G2: (PASS|FAIL) ([0-9a-f]{40}) tier=(LIGHT|NORMAL|RISKY)[ \t]*$/;
@@ -40,6 +43,7 @@ const UAT = /^UAT: (?:NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b[^\r\n]*$/m;
 const LINK = /^(?:Closes|Fixes|Resolves|Refs) #\d+$/;
 // A pull request that changes this file carries its own release bump; it lands alone.
 const VERSION_FILE = 'repo/contracts/toolkit-local-bridge/version.json';
+const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 
 class GitHubFacts {
   constructor(repository) { this.repository = repository; }
@@ -78,7 +82,8 @@ function verdictFor(comments, head) {
     .filter(comment => WRITERS.includes(comment.author_association))
     .map(comment => ({ comment, match: VERDICT.exec(String(comment.body || '').split(/\r?\n/, 1)[0]) }))
     .filter(entry => entry.match && entry.match[2] === head)
-    .sort((a, b) => Date.parse(a.comment.created_at) - Date.parse(b.comment.created_at));
+    // An edited verdict counts from its edit.
+    .sort((a, b) => Date.parse(a.comment.updated_at || a.comment.created_at) - Date.parse(b.comment.updated_at || b.comment.created_at));
   const last = found[found.length - 1];
   return last ? { verdict: last.match[1], tier: last.match[3], link: last.comment.html_url || `verdict for ${head}` } : null;
 }
@@ -105,7 +110,7 @@ function packChanges(body) {
 }
 
 // Why the pull request cannot board, or a manifest member.
-function judge(pull, facts, { required, branch, held }) {
+function judge(pull, facts, { required, branch, held, tiers }) {
   const head = pull.head && pull.head.sha;
   if (pull.draft) return { skip: 'a draft' };
   if (!pull.base || pull.base.ref !== branch) return { skip: `based on ${pull.base && pull.base.ref}, not ${branch}` };
@@ -120,10 +125,13 @@ function judge(pull, facts, { required, branch, held }) {
   if (bumps.length !== 1) return { skip: `needs exactly one Bump: line (has ${bumps.length})` };
   const uat = UAT.exec(body);
   if (!uat || !uatVerdict(body).mergeable) return { skip: 'no UAT: line the auto-merge check accepts' };
-  if (facts.files(pull.number).includes(VERSION_FILE)) return { skip: 'carries its own version bump: it lands alone' };
+  const files = facts.files(pull.number);
+  if (files.includes(VERSION_FILE)) return { skip: 'carries its own version bump: it lands alone' };
+  const byFiles = riskTier.classify(files.map(file => ({ path: file })), tiers).tier;
+  const tier = TIERS.indexOf(byFiles) > TIERS.indexOf(verdict.tier) ? byFiles : verdict.tier;
   const links = body.split(/\r?\n/).map(line => line.trim()).filter(line => LINK.test(line));
   const pack = packChanges(body);
-  return { member: { pr: pull.number, head, g2: verdict.link, tier: verdict.tier, bump: bumps[0][1], uat: uat[0].trim(), links, ...(pack.length ? { pack_changes: pack } : {}) } };
+  return { member: { pr: pull.number, head, g2: verdict.link, tier, bump: bumps[0][1], uat: uat[0].trim(), links, ...(pack.length ? { pack_changes: pack } : {}) } };
 }
 
 // `maxMembers` is the train's own cap (toolkit-merge-train.cjs).
@@ -136,11 +144,12 @@ function find(cwd, options, maxMembers) {
   const branch = facts.defaultBranch();
   const pulls = facts.pulls().slice().sort((a, b) => a.number - b.number);
   const held = new Set(pulls.flatMap(pull => mergeTrainMembers(pull.body) || []));
+  const tiers = riskTier.loadConfig(governance.findGitRoot(cwd)).config;
   const ready = [];
   const skipped = [];
   for (const pull of pulls) {
     if (mergeTrainMembers(pull.body)) continue; // a train pull request itself
-    const outcome = judge(pull, facts, { required, branch, held });
+    const outcome = judge(pull, facts, { required, branch, held, tiers });
     if (outcome.member) ready.push(outcome.member);
     else skipped.push(`#${pull.number}: ${outcome.skip}`);
   }

@@ -53,6 +53,25 @@ test('verdicts: only an exact first line from a writer counts, and the newest fo
   assert.deepEqual(finder.packChanges('x\n## Pack changes\n\n- row-1: why\n- row-2: why\n\n## Next\n- not this'), ['- row-1: why', '- row-2: why']);
 });
 
+test('a verdict never lowers a tier: the risk-tier list of the changed files wins when it is higher', t => {
+  const f = fixture(t);
+  const live = facts(f, [
+    ready(1, { comments: [verdict(sha(1), { tier: 'LIGHT' })], files: ['.github/workflows/ci.yml', 'repo/scripts/toolkit-merge-hold.cjs'] }),
+    ready(2, { comments: [verdict(sha(2), { tier: 'RISKY' })], files: ['README.md'] }),
+  ]);
+  const { result, out } = find(f, live);
+  assert.equal(result.written, true);
+  const tiers = JSON.parse(fs.readFileSync(out, 'utf8')).members.map(member => [member.pr, member.tier]);
+  assert.deepEqual(tiers, [[1, 'RISKY'], [2, 'RISKY']]);
+});
+
+test('an edited verdict counts from its edit', () => {
+  const head = sha(7);
+  const passEditedLater = { ...verdict(head, { when: 1 }), updated_at: at(5) };
+  assert.equal(finder.verdictFor([passEditedLater, verdict(head, { result: 'FAIL', when: 3 })], head).verdict, 'PASS');
+  assert.equal(finder.verdictFor([verdict(head, { when: 1 }), verdict(head, { result: 'FAIL', when: 3 })], head).verdict, 'FAIL');
+});
+
 test('find writes the manifest of ready pull requests, oldest first, that build takes as it is', t => {
   const f = fixture(t);
   const live = facts(f, [ready(3, { pull: { body: 'Three.\n\nBump: minor\nUAT: OWNER_TEST_NEEDED (try it)\n\nCloses #30\n\n## Pack changes\n\n- row-9: changed' } }), ready(2, { comments: [verdict(sha(2), { tier: 'RISKY' })] })]);
