@@ -597,33 +597,106 @@ for (const [label, body, options] of [
 const TRAIN_BODY = members => ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
   ...members.map(pr => `| #${pr} | \`${String(pr % 10).repeat(40)}\` | NORMAL | patch | PASS |`), '',
   `UAT: OWNER_TEST_NEEDED (each member's own test after the merge: #${members[0]})`, '', 'Refs #1'].join('\n');
-// Each source may set `head` (its real head; a member defaults to the head its train row names)
-// and a train may set `contains` (the heads its branch holds; default every row's head).
-function timelineGuard(sources) {
+// A merged train as GitHub shows it: its pull request, the merge commit that landed it on main, its
+// commits (first parents from its head back to main, plus one branch commit under each boarding) and
+// each commit's files. `chain` lists its first-parent commits oldest first:
+//   ['board', head]            a merge whose second parent is `head` (a member's or an ejected head)
+//   ['catchup']                a merge of a later main commit (main holds it)
+//   ['sibling']                a merge of a branch main does not hold
+//   ['octopus']                a merge of three commits
+//   ['code', file]             a plain commit that changes a code file
+//   ['bump'] / ['bumpRevert']  bump-version.cjs's bump, and eject's revert of it
+//   ['bumpWithCode']           a bump that also changes a code line
+//   ['eject', head, inexact]   eject's revert of the boarding of `head` (inexact: not its exact undo)
+// Options: `start` (the commit the chain grows from; default main itself; main also holds EARLIER_TRAIN), `squash` (landed without a
+// merge commit), `commits` (the commit count GitHub reports), `fail` (a path that answers HTTP 500).
+const hex = label => require('node:crypto').createHash('sha1').update(String(label)).digest('hex');
+const MAIN = hex('main');
+const MAIN_LATER = hex('main-later');
+const EARLIER_TRAIN = hex('earlier-train-head'); // a train that landed on main before this one
+const memberFile = head => ({ filename: `src/member-${head.slice(0, 6)}.js`, status: 'added', patch: `@@ -0,0 +1,2 @@\n+// ${head.slice(0, 6)}\n+module.exports = 1;` });
+const VERSION_PATCH = (from, to) => `@@ -1,4 +1,4 @@\n {\n   "name": "ai-agent-toolkit",\n-  "version": "${from}",\n+  "version": "${to}",\n   "description": "x"`;
+const BUMP_FILES = [
+  { filename: 'repo/contracts/toolkit-local-bridge/version.json', status: 'modified', patch: VERSION_PATCH('3.1.0', '3.2.0') },
+  { filename: 'AGENTS.md', status: 'modified', patch: '@@ -10,3 +10,3 @@\n x\n-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.1.0 sha256=0123456789ab -->\n+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.2.0 sha256=0123456789ab -->\n y' },
+  { filename: 'repo/docs/CHANGELOG.md', status: 'modified', patch: '@@ -1,2 +1,6 @@\n # Toolkit Changelog\n \n+## 3.2.0\n+\n+- **A note.**\n+' },
+  { filename: 'repo/docs/changelog.d/claude-project-thread-a.md', status: 'removed', patch: '@@ -1 +0,0 @@\n-- **A note.**' },
+];
+const BUMP_REVERT_FILES = [
+  { ...BUMP_FILES[0], patch: VERSION_PATCH('3.2.0', '3.1.0') },
+  { ...BUMP_FILES[1], patch: BUMP_FILES[1].patch.replace('-<!--', '=<!--').replace('+<!--', '-<!--').replace('=<!--', '+<!--') },
+  { ...BUMP_FILES[2], patch: '@@ -1,6 +1,2 @@\n # Toolkit Changelog\n \n-## 3.2.0\n-\n-- **A note.**\n-' },
+  { ...BUMP_FILES[3], status: 'added', patch: '@@ -0,0 +1 @@\n+- **A note.**' },
+];
+function mergedTrain(github, number, { chain, start = MAIN, squash = false, commits, fail }) {
+  const list = []; const files = new Map(); let parent = start;
+  const plain = (sha, changed, message = 'Merge train: commit') => { list.push({ sha, parents: [{ sha: parent }], commit: { message } }); files.set(sha, changed); parent = sha; };
+  const merge = (sha, others, changed) => { list.push({ sha, parents: [parent, ...others].map(p => ({ sha: p })), commit: { message: 'Merge train: board' } }); files.set(sha, changed); parent = sha; };
+  chain.forEach(([kind, value, inexact], index) => {
+    const sha = hex(`${number}-${index}-${kind}`);
+    if (kind === 'board') {
+      const branch = hex(`branch-${value}`);
+      list.push({ sha: value, parents: [{ sha: branch }], commit: { message: 'member work' } }, { sha: branch, parents: [{ sha: MAIN }], commit: { message: 'member work' } });
+      merge(sha, [value], [memberFile(value)]);
+    } else if (kind === 'catchup') merge(sha, [MAIN_LATER], [{ filename: 'src/main-later.js', status: 'added', patch: '@@ -0,0 +1 @@\n+later' }]);
+    else if (kind === 'sibling') {
+      list.push({ sha: hex('sibling-branch'), parents: [{ sha: MAIN }], commit: { message: 'sibling work' } });
+      merge(sha, [hex('sibling-branch')], [{ filename: 'src/sibling.js', status: 'added', patch: '@@ -0,0 +1 @@\n+sibling' }]);
+    } else if (kind === 'octopus') merge(sha, [MAIN_LATER, hex('third')], []);
+    else if (kind === 'code') plain(sha, [{ filename: value || 'src/extra.js', status: 'modified', patch: '@@ -1 +1 @@\n-a\n+b' }]);
+    else if (kind === 'bump') plain(sha, BUMP_FILES, 'Merge train: bump minor for #947, #948');
+    else if (kind === 'bumpRevert') plain(sha, BUMP_REVERT_FILES, 'Merge train: eject #949, revert the bump to re-bump without it');
+    else if (kind === 'bumpWithCode') plain(sha, [...BUMP_FILES, { filename: 'repo/scripts/x.cjs', status: 'modified', patch: '@@ -1 +1 @@\n-const version = "3.1.0";\n+const version = "3.2.0"; run()' }]);
+    else if (kind === 'eject') {
+      const undo = memberFile(value);
+      plain(sha, [{ ...undo, status: 'removed', patch: inexact ? '@@ -1,2 +0,0 @@\n-// other\n-module.exports = 2;' : undo.patch.replace('@@ -0,0 +1,2 @@', '@@ -1,2 +0,0 @@').replace(/^\+/gm, '-') }],
+        `Merge train: eject #949 (failed CI)\n\nTrain-Eject-Head: ${value}\nTrain-Eject-PR: #949`);
+    } else throw new Error(`unknown chain entry ${kind}`);
+  });
+  const head = parent; const landed = hex(`landed-${number}`);
+  const answers = new Map([
+    [`repos/${repo}/pulls/${number}`, { number, merged: true, head: { sha: head }, merge_commit_sha: landed, commits: commits ?? list.length }],
+    [`repos/${repo}/commits/${landed}`, { sha: landed, parents: (squash ? [MAIN] : [MAIN, head]).map(sha => ({ sha })) }],
+    [`repos/${repo}/pulls/${number}/commits?per_page=100&page=1`, list],
+    ...[...files].map(([sha, changed]) => [`repos/${repo}/commits/${sha}`, { sha, files: changed }]),
+  ]);
+  const mainHolds = new Set([MAIN, MAIN_LATER, EARLIER_TRAIN]);
+  github.intercept(call => {
+    if (call.method !== 'GET') return undefined;
+    if (fail && call.path === fail) return { status: 500, json: {} };
+    if (answers.has(call.path)) return { status: 200, json: answers.get(call.path) };
+    const compare = /^repos\/[^/]+\/[^/]+\/compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})\?per_page=1$/.exec(call.path);
+    if (compare && compare[2] === MAIN) return { status: 200, json: { status: compare[1] === MAIN ? 'identical' : mainHolds.has(compare[1]) ? 'ahead' : 'diverged' } };
+    // As GitHub answers it, the train's head holds every commit of its branch.
+    if (compare && compare[2] === head) return { status: 200, json: { status: compare[1] === head ? 'identical' : list.some(entry => entry.sha === compare[1]) ? 'ahead' : 'diverged' } };
+    return undefined;
+  });
+  return head;
+}
+// Each source may set `head` (its real head; a member defaults to the head its train row names); a
+// train may set `chain` and the other mergedTrain options (default: every row boarded, then a bump).
+function timelineGuard(sources, { trainBump = adapter.trainBumpFiles } = {}) {
   const github = new FakeGitHub({ repository: repo });
   github.addIssue(1);
   const events = sources.map(({ number, body, merged = true, at = '2026-11-12T10:00:00Z' }) => ({ event: 'cross-referenced', source: { issue: { number, body,
     repository_url: `https://api.github.com/repos/${repo}`, pull_request: { merged_at: merged ? at : null } } } }));
   const { mergeTrainRows } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
-  const rowHead = new Map(); const contains = new Map();
-  for (const source of sources) {
-    const rows = mergeTrainRows(source.body) || [];
-    for (const row of rows) if (!rowHead.has(row.pr)) rowHead.set(row.pr, row.head);
-    if (rows.length) contains.set(source.head || 'e'.repeat(40), new Set(source.contains || rows.map(row => row.head)));
-  }
+  const rowHead = new Map();
+  for (const source of sources) for (const row of mergeTrainRows(source.body) || []) if (!rowHead.has(row.pr)) rowHead.set(row.pr, row.head);
   const heads = new Map(sources.map(source => [source.number, source.head || rowHead.get(source.number) || 'e'.repeat(40)]));
-  for (const source of sources) if (!source.head && mergeTrainRows(source.body)) heads.set(source.number, 'e'.repeat(40));
   github.intercept(call => {
     if (call.method !== 'GET') return undefined;
     if (/\/issues\/1\/timeline\?/.test(call.path)) return { status: 200, json: events };
     const pull = /\/pulls\/(\d+)$/.exec(call.path);
-    if (pull && heads.has(Number(pull[1]))) return { status: 200, json: { number: Number(pull[1]), merged: true, head: { sha: heads.get(Number(pull[1])) } } };
-    const compare = /\/compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})(?:\?|$)/.exec(call.path);
-    if (compare) return { status: 200, json: { status: compare[1] === compare[2] ? 'identical' : contains.get(compare[2])?.has(compare[1]) ? 'ahead' : 'diverged' } };
+    if (pull && heads.has(Number(pull[1])) && !mergeTrainRows(sources.find(source => source.number === Number(pull[1])).body)) return { status: 200, json: { number: Number(pull[1]), merged: true, head: { sha: heads.get(Number(pull[1])) } } };
     return undefined;
   });
+  for (const source of sources) {
+    const rows = mergeTrainRows(source.body);
+    if (rows) mergedTrain(github, source.number, { chain: source.chain || [...rows.map(row => ['board', row.head]), ['bump']], ...source });
+  }
   const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
-  return new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state });
+  return Object.assign(new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state, trainBump }), { github });
 }
 test('a merged train does not hold an issue its merged member answers for with UAT: NOT_REQUIRED', () => {
   const guard = timelineGuard([{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Closes #1\n\nUAT: NOT_REQUIRED (internal)' }]);
@@ -662,7 +735,7 @@ for (const [label, sources] of [
 });
 for (const [label, sources] of [
   ['the member merged at a head other than the one its row names', [{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER, head: 'd'.repeat(40) }]],
-  ['the train branch does not hold the member head (a pasted table naming a sibling)', [{ number: 970, body: TRAIN_BODY([948, 947]), contains: [] }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER }]],
+  ['the train does not board the member head (a pasted table naming a sibling)', [{ number: 970, body: TRAIN_BODY([948, 947]), chain: [['board', '8'.repeat(40)], ['board', hex('sibling')], ['bump']] }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER }]],
 ]) test(`a merged train keeps its hold when ${label}`, () => {
   const result = timelineGuard(sources).checkTexts(['Closes #1']);
   assert.equal(result.status, 'refused');
@@ -671,6 +744,64 @@ for (const [label, sources] of [
 test('a merged train releases its hold through a carried member whose UAT is PASSED', () => {
   const guard = timelineGuard([{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Refs #1\n\nUAT: PASSED (owner OK)', at: MEMBER_LATER }]);
   assert.equal(guard.checkTexts(['Closes #1']).status, 'allowed');
+});
+// Closure matrix B: a merged train releases a task only when its own commits prove it is a train.
+// The task is referenced by train #970 (OWNER_TEST_NEEDED for #948) and its member #947, which owes
+// nothing, so the train's hold is the only thing between `Closes #1` and the close.
+const H948 = '8'.repeat(40); const H947 = '7'.repeat(40); const EJECTED = hex('ejected-949');
+const MEMBER_947 = { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER };
+const TRAIN_970 = { number: 970, body: TRAIN_BODY([948, 947]) };
+for (const [label, train, expected, reason] of [
+  ['member merges only, last commit a version-only bump', { chain: [['board', H948], ['board', H947], ['bump']] }, 'allowed'],
+  ['plus a main catch-up merge', { chain: [['board', H948], ['catchup'], ['board', H947], ['bump']] }, 'allowed'],
+  ['plus a recorded eject revert (bump, bump revert, eject revert, fresh bump)', { chain: [['board', H948], ['board', EJECTED], ['board', H947], ['bump'], ['bumpRevert'], ['eject', EJECTED], ['bump']] }, 'allowed'],
+  ['a stacked train, grown from an earlier train main now holds, then caught up', { start: EARLIER_TRAIN, chain: [['board', H948], ['board', H947], ['catchup'], ['bump']] }, 'allowed'],
+  ['members only and no bump (a train at level none)', { chain: [['board', H948], ['board', H947]] }, 'allowed'],
+  ['a merge of a sibling branch that is neither a row head nor in main', { chain: [['board', H948], ['sibling'], ['board', H947], ['bump']] }, 'refused'],
+  ['a plain commit that changes a code file', { chain: [['board', H948], ['board', H947], ['code'], ['bump']] }, 'refused'],
+  ['a last commit that changes a code file instead of a bump', { chain: [['board', H948], ['board', H947], ['code']] }, 'refused'],
+  ['a last commit that changes a changelog fragment folder README', { chain: [['board', H948], ['board', H947], ['code', 'repo/docs/changelog.d/README.md']] }, 'refused'],
+  ['a bump that also changes a code line', { chain: [['board', H948], ['board', H947], ['bumpWithCode']] }, 'refused'],
+  ['a bump before a member merge', { chain: [['board', H948], ['bump'], ['board', H947]] }, 'refused'],
+  ['a merged head the table does not list and nothing reverts', { chain: [['board', H948], ['board', EJECTED], ['board', H947], ['bump']] }, 'refused'],
+  ['an eject revert that is not the exact undo of its boarding', { chain: [['board', H948], ['board', EJECTED], ['board', H947], ['eject', EJECTED, true], ['bump']] }, 'refused'],
+  ['an eject revert of a head the train never merged', { chain: [['board', H948], ['board', H947], ['eject', EJECTED], ['bump']] }, 'refused'],
+  ['a row boarded twice', { chain: [['board', H948], ['board', H947], ['board', H947], ['bump']] }, 'refused'],
+  ['the member the release relies on is not boarded', { chain: [['board', H948], ['bump']] }, 'refused'],
+  ['a merge of three commits', { chain: [['board', H948], ['board', H947], ['octopus'], ['bump']] }, 'refused'],
+  ['a member table but no merges (not a train)', { chain: [['bump']] }, 'refused'],
+  ['a train landed without a merge commit', { squash: true, chain: [['board', H948], ['board', H947], ['bump']] }, 'refused'],
+  ['a chain that starts from a commit main does not hold', { start: hex('elsewhere'), chain: [['board', H948], ['board', H947], ['bump']] }, 'refused'],
+  ['more commits than GitHub lists for a pull request', { commits: 251, chain: [['board', H948], ['board', H947], ['bump']] }, 'unknown', /more than 250 commits/],
+  ['a commit list shorter than the commit count', { commits: 9, chain: [['board', H948], ['board', H947], ['bump']] }, 'unknown', /commits incomplete/],
+  ['a failed read of the train commits', { fail: `repos/${repo}/pulls/970/commits?per_page=100&page=1`, chain: [['board', H948], ['board', H947], ['bump']] }, 'unknown', /HTTP 500/],
+]) test(`closure matrix B: a merged train with ${label}: ${expected}`, () => {
+  const result = timelineGuard([{ ...TRAIN_970, ...train }, MEMBER_947]).checkTexts(['Closes #1']);
+  assert.equal(result.status, expected, result.reason);
+  if (expected === 'refused') assert.match(result.reason, /merged PR #970,/);
+  if (reason) assert.match(result.reason, reason);
+});
+test('closure matrix B: a train read past the request budget is an unknown', () => {
+  const guard = timelineGuard([{ ...TRAIN_970, chain: [['board', H948], ['board', H947], ['bump']] }, MEMBER_947]);
+  guard.maxRequests = 6;
+  const result = guard.checkTexts(['Closes #1']);
+  assert.equal(result.status, 'unknown');
+  assert.match(result.reason, /exceeded their bound/);
+});
+test('closure matrix B: without a bump reader no train with a bump releases', () => {
+  const result = timelineGuard([{ ...TRAIN_970, chain: [['board', H948], ['board', H947], ['bump']] }, MEMBER_947], { trainBump: null }).checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused');
+});
+test('closure matrix B: a six-member train is proven in ten reads beyond the task itself', () => {
+  const prs = [941, 942, 943, 944, 945, 946];
+  const body = TRAIN_BODY(prs).replace(/^UAT: .*$/m, 'UAT: OWNER_TEST_NEEDED (each member\'s own test after the merge: #946)');
+  const members = prs.slice(0, 5).map(number => ({ number, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER }));
+  const guard = timelineGuard([{ number: 970, body }, ...members]);
+  const before = guard.github.calls.length;
+  assert.deepEqual(guard.ownerTestPrs(repo, 1, guard.budget()), [], 'the train releases the task');
+  const reads = guard.github.calls.slice(before).map(call => call.path);
+  // One timeline page, five member PRs, then the train: its PR, merge commit, commit page and bump.
+  assert.equal(reads.length, 10, reads.join('\n'));
 });
 test('mergeTrainMembers reads only a train body', () => {
   const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
@@ -687,7 +818,9 @@ test('without a UAT reader (the skill copied alone) the merged-PR check is skipp
 });
 test('the hook guard passes the UAT reader', () => {
   const adapter = require('../scripts/toolkit-issue-closure.cjs');
-  assert.equal(typeof adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).uatState, 'function');
+  const guard = adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath });
+  assert.equal(typeof guard.uatState, 'function');
+  assert.equal(guard.trainBump, adapter.trainBumpFiles);
 });
 test('an open native child is still a proven refusal when the timeline cannot be read', () => {
   const github = new FakeGitHub({ repository: repo });

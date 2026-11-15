@@ -97,15 +97,47 @@ function trainOwing(body) {
   return new Set(line ? [...line[1].matchAll(/#([1-9][0-9]*)/g)].map(match => Number(match[1])) : []);
 }
 
+// The train's own commits (trainShape). GitHub lists at most 250 commits for a pull request and 300
+// files for a commit; a train or commit beyond that cannot be proven.
+const SHA40 = /^[0-9a-f]{40}$/;
+const MAX_TRAIN_COMMITS = 250;
+const MAX_COMMIT_FILES = 300;
+const lower = value => (typeof value === 'string' ? value.toLowerCase() : '');
+function parentShas(parents) {
+  if (!Array.isArray(parents)) return null;
+  const shas = parents.map(parent => lower(parent?.sha));
+  return shas.every(sha => SHA40.test(sha)) ? shas : null;
+}
+// The head an eject revert names, when it carries both trailers toolkit-merge-train.cjs eject writes.
+function ejectHead(message) {
+  const head = /^Train-Eject-Head: ([0-9a-f]{40})[ \t]*$/m.exec(message);
+  return head && /^Train-Eject-PR: #[1-9][0-9]*[ \t]*$/m.test(message) ? head[1] : null;
+}
+// The removed and added lines of a unified diff patch as GitHub returns it, by hunk; only lines
+// inside a hunk count, and "\ No newline at end of file" is not a line.
+function patchChanges(patch) {
+  const hunks = [];
+  for (const line of String(patch).split('\n')) {
+    if (line.startsWith('@@')) hunks.push({ removed: [], added: [] });
+    else if (hunks.length && line.startsWith('-')) hunks[hunks.length - 1].removed.push(line.slice(1).replace(/\r$/, ''));
+    else if (hunks.length && line.startsWith('+')) hunks[hunks.length - 1].added.push(line.slice(1).replace(/\r$/, ''));
+  }
+  return { removed: hunks.flatMap(hunk => hunk.removed), added: hunks.flatMap(hunk => hunk.added), hunks };
+}
+const sameLines = (a, b) => a.length === b.length && JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+
 const allowed = extra => ({ status: 'allowed', ...extra });
 const unknown = reason => ({ status: 'unknown', reason });
 class IssueClosureGuard {
   // `uatState`, when given, reads a PR body's UAT verdict (NOT_REQUIRED, OWNER_TEST_NEEDED, PASSED or
   // invalid); with it, closing words are also refused for a task that a merged PR still waiting on
   // the owner's test references. Without it that check is skipped (a copy of the skill alone).
-  constructor({ transport, repository, maxRequests = 500, maxPages = 50, deadlineMs = 30000, deadline, now = () => performance.now(), uatState = null }) {
+  // `trainBump`, when given, reads the files of a merge train's bump commit (GitHub's commit `files`)
+  // and returns true only when they change nothing but version stamps and changelog notes; without
+  // it no train with a bump commit releases a task.
+  constructor({ transport, repository, maxRequests = 500, maxPages = 50, deadlineMs = 30000, deadline, now = () => performance.now(), uatState = null, trainBump = null }) {
     if (!REPOSITORY.test(repository)) throw new Error('Invalid repository.');
-    Object.assign(this, { transport, repository: repository.toLowerCase(), maxRequests, maxPages, deadlineMs, deadline, now, uatState });
+    Object.assign(this, { transport, repository: repository.toLowerCase(), maxRequests, maxPages, deadlineMs, deadline, now, uatState, trainBump });
   }
 
   // Merged PRs in the same repository that reference the task and still say UAT: OWNER_TEST_NEEDED.
@@ -137,7 +169,7 @@ class IssueClosureGuard {
         const backing = rows.filter(row => row.pr !== pr && merged.has(row.pr));
         if (backing.length && backing.every(row => trainCarried(train, asMerged(merged.get(row.pr)), row.head) && !owing.has(row.pr)
           && ['NOT_REQUIRED', 'PASSED'].includes(this.uatState(merged.get(row.pr).body)))
-          && this.carriedHeads(repository, pr, backing, budget)) continue;
+          && this.carriedHeads(repository, pr, rows, backing, budget)) continue;
       }
       found.add(pr);
     }
@@ -145,19 +177,95 @@ class IssueClosureGuard {
   }
 
   // A table and merge times can still be pasted. Each member must have merged at the head its row
-  // names, and that head must sit inside the train's own branch: one PR read per member, one for the
-  // train and one compare per member. A failed read is an unknown, never a release.
-  carriedHeads(repository, train, rows, budget) {
-    const head = this.get(`repos/${repository}/pulls/${train}`, budget)?.head?.sha;
-    if (!/^[0-9a-f]{40}$/i.test(head || '')) throw new Error('Merge train head unreadable.');
-    for (const row of rows) {
+  // names (one PR read each), and the train's own commits must prove it is a train (trainShape).
+  carriedHeads(repository, train, rows, backing, budget) {
+    for (const row of backing) {
       const member = this.get(`repos/${repository}/pulls/${row.pr}`, budget);
       if (member?.merged !== true || String(member.head?.sha || '').toLowerCase() !== row.head) return false;
-      if (row.head === head.toLowerCase()) continue;
-      const status = this.get(`repos/${repository}/compare/${row.head}...${head}?per_page=1`, budget)?.status;
-      if (!['ahead', 'identical'].includes(status)) return false;
     }
-    return true;
+    return this.trainShape(repository, train, rows, backing, budget);
+  }
+
+  // A merged train is a train only when its first-parent commits, from its head back to the main it
+  // landed on, are each one of: a member merge (its second parent is a row's reviewed head; a row
+  // boards at most once and every member the release relies on boards), a catch-up merge (its second
+  // parent is already in that main), an eject revert (Train-Eject-Head and Train-Eject-PR trailers)
+  // that exactly undoes an earlier merge of that head,
+  // or a commit the `trainBump` reader accepts as changing only version stamps and changelog notes
+  // after the last merge (the bump, and eject's revert of a bump and fresh bump).
+  // Every other commit, including a merge of a sibling branch that never reached main, keeps the hold.
+  // GitHub reads only, since the guard has no checkout; a failed read throws (an unknown, never a release).
+  trainShape(repository, train, rows, backing, budget) {
+    const pull = this.get(`repos/${repository}/pulls/${train}`, budget);
+    const head = lower(pull?.head?.sha); const landed = lower(pull?.merge_commit_sha);
+    if (pull?.merged !== true || !SHA40.test(head) || !SHA40.test(landed) || !Number.isSafeInteger(pull.commits)) throw new Error('Merge train metadata unreadable.');
+    if (pull.commits > MAX_TRAIN_COMMITS) throw new Error(`Merge train has more than ${MAX_TRAIN_COMMITS} commits, which GitHub cannot list.`);
+    if (pull.commits < 1) return false;
+    // The main it landed on is the first parent of its merge commit; a squash or rebase has no second.
+    const parents = parentShas(this.get(`repos/${repository}/commits/${landed}`, budget)?.parents);
+    if (parents?.length !== 2 || parents[1] !== head) return false;
+    const main = parents[0];
+    const listed = this.pages(`repos/${repository}/pulls/${train}/commits`, budget);
+    if (listed.length !== pull.commits) throw new Error('Merge train commits incomplete.');
+    const commits = new Map();
+    for (const entry of listed) {
+      const sha = lower(entry?.sha); const ups = parentShas(entry?.parents);
+      if (!SHA40.test(sha) || !ups?.length || typeof entry.commit?.message !== 'string') throw new Error('Malformed merge train commit.');
+      commits.set(sha, { sha, parents: ups, message: entry.commit.message });
+    }
+    const chain = [];
+    for (let at = head; commits.has(at); at = commits.get(at).parents[0]) {
+      if (chain.length >= commits.size) return false;
+      chain.unshift(commits.get(at));
+    }
+    if (!chain.length || !this.holds(repository, main, chain[0].parents[0], budget)) return false;
+    const rowByHead = new Map(rows.map(row => [row.head, row]));
+    const boarded = new Set();
+    const unreverted = new Map(); // merged head the table does not list -> its merge commit
+    for (const [index, { sha, parents: ups, message }] of chain.entries()) {
+      if (ups.length > 2) return false;
+      if (ups.length === 2) {
+        const row = rowByHead.get(ups[1]);
+        if (row) { if (boarded.has(row.pr)) return false; boarded.add(row.pr); continue; }
+        if (this.holds(repository, main, ups[1], budget)) continue;
+        if (unreverted.has(ups[1])) return false;
+        unreverted.set(ups[1], sha);
+        continue;
+      }
+      const ejected = ejectHead(message);
+      if (ejected) {
+        const boarding = unreverted.get(ejected);
+        if (!boarding || !this.reverts(repository, sha, boarding, budget)) return false;
+        unreverted.delete(ejected);
+        continue;
+      }
+      // A bump comes after every merge: eject only adds reverts and a fresh bump on top of it.
+      if (chain.slice(index + 1).some(commit => commit.parents.length !== 1) || !this.bumpOnly(repository, sha, budget)) return false;
+    }
+    return unreverted.size === 0 && backing.every(row => boarded.has(row.pr));
+  }
+  // Whether `main` holds `commit` (one compare read unless they are the same commit).
+  holds(repository, main, commit, budget) {
+    if (commit === main) return true;
+    return ['ahead', 'identical'].includes(this.get(`repos/${repository}/compare/${commit}...${main}?per_page=1`, budget)?.status);
+  }
+  // Whether `revert` changes exactly the lines `boarding` changed, the other way round, in the same files.
+  reverts(repository, revert, boarding, budget) {
+    const [undo, done] = [revert, boarding].map(sha => this.get(`repos/${repository}/commits/${sha}`, budget)?.files);
+    if (!Array.isArray(undo) || !Array.isArray(done) || !done.length || undo.length !== done.length || done.length >= MAX_COMMIT_FILES) return false;
+    const byName = new Map(undo.map(file => [file?.filename, file]));
+    const inverse = { added: 'removed', removed: 'added', modified: 'modified' };
+    return byName.size === undo.length && done.every(file => {
+      const back = byName.get(file?.filename);
+      if (!back || !inverse[file.status] || back.status !== inverse[file.status] || typeof file.patch !== 'string' || typeof back.patch !== 'string') return false;
+      const [a, b] = [patchChanges(file.patch), patchChanges(back.patch)];
+      return sameLines(a.added, b.removed) && sameLines(a.removed, b.added);
+    });
+  }
+  bumpOnly(repository, sha, budget) {
+    if (typeof this.trainBump !== 'function') return false;
+    const files = this.get(`repos/${repository}/commits/${sha}`, budget)?.files;
+    return Array.isArray(files) && files.length > 0 && files.length < MAX_COMMIT_FILES && this.trainBump(files) === true;
   }
 
   budget() { return { requests: 0, deadline: Math.min(this.deadline ?? Infinity, this.now() + this.deadlineMs) }; }
@@ -289,4 +397,4 @@ class IssueClosureGuard {
     } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
-module.exports = { closingReferences, owedUat, mergeTrainRows, mergeTrainMembers, trainCarried, TRAIN_MERGE_WINDOW_MS, IssueClosureGuard };
+module.exports = { closingReferences, owedUat, mergeTrainRows, mergeTrainMembers, patchChanges, trainCarried, TRAIN_MERGE_WINDOW_MS, IssueClosureGuard };
