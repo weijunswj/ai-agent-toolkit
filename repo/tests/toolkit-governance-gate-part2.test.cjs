@@ -184,8 +184,10 @@ for (const picker of [false, true]) {
       assert.doesNotMatch(line(f), /is pending/);
       assert.equal(f.say(projects.wake('toolkit governance enable', { now: f.now })).action, 'block', 'a wrapped full answer still needs working receipts');
       assert.doesNotMatch(line(f), /is pending/);
-      assert.equal(f.say('toolkit governance enable').action, 'pass', 'the typed full answer does not use receipts');
-      assert.match(line(f), /yes is pending/);
+      const typed = f.say('toolkit governance enable');
+      assert.equal(typed.action, 'pass', 'the typed full answer does not use receipts');
+      assert.match(typed.context, /answered yes[\s\S]*question bank/);
+      assert.doesNotMatch(line(f), /is pending/, 'a yes opens the bank and records nothing');
       assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
       assert.equal(fs.readFileSync(file, 'utf8'), stored, 'spent receipts are preserved');
     }
@@ -230,8 +232,9 @@ test('Projects full answers in an asked run still reject deliveries from before 
   const stale = f.say(projects.wake('toolkit governance enable', { at: earlier }));
   assert.equal(stale.action, 'block');
   assert.doesNotMatch(line(f), /is pending/);
-  assert.equal(f.say(projects.wake('toolkit governance enable', { now: f.now })).action, 'pass');
-  assert.match(line(f), /yes is pending/);
+  const current = f.say(projects.wake('toolkit governance enable', { now: f.now }));
+  assert.equal(current.action, 'pass');
+  assert.match(current.context, /answered yes[\s\S]*question bank/);
   assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
 });
 

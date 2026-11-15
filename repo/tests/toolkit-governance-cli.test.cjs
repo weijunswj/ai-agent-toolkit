@@ -186,7 +186,7 @@ test('H-06 (unit): anything but yes writes nothing and keeps the repository UNDE
   assert.equal(JSON.parse(status.stdout).state, 'UNDECIDED');
 });
 
-test('interactive yes/no publishes repository proposals without a laptop decision; decline is an alias', async t => {
+test('interactive no publishes the off proposal without a laptop decision, decline is an alias, and enable opens the bank', async t => {
   const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
   for (const command of ['disable', 'decline']) {
     let open = [], writes = 0;
@@ -206,10 +206,14 @@ test('interactive yes/no publishes repository proposals without a laptop decisio
     assert.equal(status.programme_records_bind, false);
     assert.match((await run(ctx, repo, ['status'])).stdout, /decision pending[\s\S]*merge this pull request now/);
   }
-  const incomplete = await run(ctx, repo, ['enable', '--json']);
-  assert.equal(incomplete.code, 2);
-  assert.equal(JSON.parse(incomplete.stdout).pending, true);
-  assert.equal(JSON.parse(incomplete.stdout).error, 'PROPOSAL_ADOPTION_INCOMPLETE');
+  // Yes in the owner's own terminal is the governance question bank, never a bare decision pull request.
+  const bank = await run(ctx, repo, ['enable', '--json']);
+  assert.equal(bank.code, 0, bank.stderr);
+  const shown = JSON.parse(bank.stdout);
+  assert.equal(shown.questions[0].id, 'governance');
+  assert.equal(shown.questions[0].recommendation.value, 'on');
+  assert.ok(shown.bank_reference);
+  assert.equal(bank.asked.length, 0, 'the bank is shown, not a yes/no prompt');
   assert.equal(fs.existsSync(ctx.registryPath), false);
 });
 

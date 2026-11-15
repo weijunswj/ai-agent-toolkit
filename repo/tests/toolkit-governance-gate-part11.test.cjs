@@ -138,9 +138,9 @@ test('card: Toolkit\'s question runs only as the exact card, with no answer fill
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
-test('card: Yes and No each record the pending answer, Later records nothing, and work carries on either way', (t) => {
+test('card: Yes opens the governance bank and records nothing, No records the pending answer, Later records nothing, and work carries on either way', (t) => {
   const ctx = scratch(t);
-  for (const [label, pattern, line] of [['Yes', /yes is pending[\s\S]*missing parent/, /yes is pending/], ['No', /no is pending/, /no is pending/], ['Later', /answered "later"/, /not decided yet/]]) {
+  for (const [label, pattern, line] of [['Yes', /answered yes[\s\S]*question bank[\s\S]*toolkit-governance\.cjs" setup/, /not decided yet/], ['No', /no is pending/, /no is pending/], ['Later', /answered "later"/, /not decided yet/]]) {
     const repo = gitRepo(ctx, `tap-${label}`, { remote: `https://github.com/example-owner/tap-${label}.git` });
     const c = card(ctx);
     const session = `tap-${label}`;
@@ -216,7 +216,7 @@ test('card: a typed answer still works after the card was shown, and the Claude 
   c.send(typedRepo, 'go', 's1');
   const typed = c.send(typedRepo, 'toolkit governance enable', 's1');
   assert.equal(typed.action, 'pass');
-  assert.match(typed.context, /yes is pending/);
+  assert.match(typed.context, /answered yes[\s\S]*question bank/);
   assert.doesNotMatch(typed.context, /1\. go/);
   const repo = gitRepo(ctx, 'hook', { remote: 'https://github.com/example-owner/hook.git' });
   const home = path.join(ctx.root, 'home');

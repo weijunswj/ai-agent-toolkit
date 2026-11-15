@@ -205,23 +205,24 @@ test('only the user\'s own answer records: near-misses, a "yes" before the quest
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   // Letter case and a final full stop are accepted forms of the answer.
   assert.match(gate.ANSWER.exec('Toolkit Governance Enable.')[1], /enable/i);
-  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'Toolkit Governance Enable.', sessionId: 's1' }).action, 'pass');
-  assert.match(line('s1'), /yes is pending/);
+  const cased = hold(ctx).decide({ cwd: repo, prompt: 'Toolkit Governance Enable.', sessionId: 's1' });
+  assert.equal(cased.action, 'pass');
+  assert.match(cased.context, /answered yes[\s\S]*question bank/);
 });
 
-test('accepted yes stays pending, hands nothing back and writes no repository or laptop decision', t => {
+test('accepted yes opens the governance bank, hands nothing back and writes no receipt, repository or laptop decision', t => {
   const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
   const prompts = hold(ctx);
   prompts.decide({ cwd: repo, prompt: 'first request', sessionId: 's1' });
   assert.match(replyTicket(prompts.decide({ cwd: repo, prompt: 'second request', sessionId: 's1' })), /^[0-9a-f]{32}$/, 'the next own message may be the reply');
   const answered = prompts.decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /yes is pending/);
-  assert.match(answered.context, /missing parent, separate evidence store or required checks/);
-  assert.match(answered.context, /toolkit governance discover/);
-  assert.match(answered.context, /repository-agent-rules/);
+  assert.match(answered.context, /answered yes[\s\S]*question bank/);
+  assert.match(answered.context, /toolkit-governance\.cjs" setup/);
+  assert.match(answered.context, /Build nothing by hand/);
+  assert.doesNotMatch(answered.context, /repository-agent-rules|governance discover|publish --run/, 'the hand-built route is gone');
   assert.doesNotMatch(answered.context, /first request|second request/, 'no earlier message is replayed: none was held');
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /yes is pending/);
+  assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /is pending/, 'a yes leaves no receipt');
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   assert.equal(registryBytes(ctx), null); writesNothingIn(repo);
   assert.equal(git(repo, ['status', '--porcelain']), '');

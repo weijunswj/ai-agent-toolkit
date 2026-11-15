@@ -92,3 +92,17 @@ test('a question card that carries bank rows is not Toolkit\'s: it runs, and its
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
   assert.ok(new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch), 'the bank still waits for the owner\'s typed reply');
 });
+
+test('a public repository shows a visibility line in the bank before the answer; a private one does not', () => {
+  const { governanceBankSpecs } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+  const adoptionFor = visibility => ({ repository: SLUG, store: { repository: 'toolkit-test-fixture/TRANSPORT-card', create: true }, found_store: null, store_name: 'TRANSPORT-card', store_choice: false,
+    parent: { issue: null, create: true }, checks: [], visibility, unknown: [] });
+  const state = { state: 'UNDECIDED', repository: SLUG, root: '/x' };
+  const ids = visibility => governanceBankSpecs({ state, adoption: adoptionFor(visibility) }).map(spec => spec.id);
+  const shown = governanceBankSpecs({ state, adoption: adoptionFor('public') }).find(spec => spec.id === 'visibility');
+  assert.ok(shown, 'public: the line is shown');
+  assert.equal(shown.report_only, true, 'it is information, never a question that stops the flow');
+  assert.match(shown.recommended_outcome, /names your private evidence store \(its name only/);
+  assert.ok(!ids('private').includes('visibility'));
+  assert.ok(!ids('unknown').includes('visibility'));
+});

@@ -1,5 +1,5 @@
 'use strict';
-const { assert, childProcess, fs, path, test, scripts, gate, governance, QUESTION_LINE, git, scratch, gitRepo, hold, tools, stateOf, writesNothingIn, registryBytes, projects, boundOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE } = require('./toolkit-governance-gate-support.cjs');
+const { assert, childProcess, fs, path, test, scripts, gate, governance, QUESTION_LINE, git, scratch, gitRepo, hold, tools, stateOf, writesNothingIn, registryBytes, projects, boundOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, assertAnswered } = require('./toolkit-governance-gate-support.cjs');
 
 // Split to keep the per-file time budget.
 // Shared by the ticket tests: sibling repositories under one parent folder, and the run helpers.
@@ -99,7 +99,8 @@ test('reply tickets: "no, leave it off" from the user is read by the agent and r
   const enabled = prompts().answerTicket(insideTicket, 'yes');
   assert.equal(enabled.ok, true, enabled.text);
   assert.doesNotMatch(enabled.text, /set up the site/);
-  assert.match(line(inside, 'inside'), /yes is pending/);
+  assert.match(enabled.text, /question bank/);
+  assertAnswered(line(inside, 'inside'), 'yes');
   assert.equal(stateOf(ctx, inside).state, 'UNDECIDED');
   // Before the question was shown, no ticket: the first message only carries the question.
   const unasked = gitRepo(ctx, 'unasked', { remote: 'https://github.com/example-owner/unasked.git' });
@@ -347,8 +348,9 @@ test('later: nothing is recorded, this session carries on under the global rules
   assert.ok(asksIn(hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's2' })));
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /not decided yet/);
   // The full answer in the new session still decides.
-  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's2' }).action, 'pass');
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's2' }), /yes is pending/);
+  const decided = hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's2' });
+  assert.equal(decided.action, 'pass');
+  assert.match(decided.context, /answered yes[\s\S]*question bank/);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
@@ -363,7 +365,7 @@ test('after the reply: the full answer still decides, and a short reply is an or
     assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /is pending/);
     const decided = hold(ctx).decide({ cwd: repo, prompt: answer, sessionId: 's1' });
     assert.equal(decided.action, 'pass', answer);
-    assert.match(decided.context, /is pending/);
+    assert.match(decided.context, /enable/.test(answer) ? /answered yes[\s\S]*question bank/ : /is pending/);
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', answer);
   }
   // A launcher-started session still cannot answer.
@@ -486,7 +488,7 @@ test('nested sessions: nothing is held on either host, and only the session that
     assert.doesNotMatch(pending(own, `own-${host}`), /is pending/);
     const answered = send({ cwd: own, session_id: `own-${host}`, prompt: 'toolkit governance enable' });
     assert.equal(answered.held, false, host);
-    assert.match(answered.context, /yes is pending/);
+    assert.match(answered.context, /answered yes[\s\S]*question bank/);
     assert.doesNotMatch(answered.context, /fix the bug/);
   }
 });
