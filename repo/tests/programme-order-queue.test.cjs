@@ -50,13 +50,13 @@ function fixture(t) {
     github.files.set(`${PENDING}${name}`, { text, sha: require('node:crypto').createHash('sha1').update(text).digest('hex') });
     github.commit();
   };
-  const run = ({ cloud = true } = {}) => {
+  const run = ({ cloud = true, clock = () => NOW } = {}) => {
     let output = '';
     let error = null;
     let code = null;
     try {
       code = cli.main(['refresh', '--scheduled', '--json'], { transport: github, binding, originUrl: 'https://github.com/example.test/app.git', repoRoot: '.',
-        toolkitVersion: '3.107.0', now: () => new Date(NOW).toISOString(), passClock: () => NOW, orderClock: () => NOW,
+        toolkitVersion: '3.107.0', now: () => new Date(NOW).toISOString(), passClock: () => NOW, orderClock: clock,
         lockFile: cloud ? null : path.join(dir, 'pass.lock'), environment: cloud ? CLOUD : {}, stdout: { write: text => { output += text; } } });
     } catch (thrown) { error = thrown; }
     let report = null;
@@ -306,4 +306,63 @@ test('a code-less error inside a write keeps the order queued through the real r
   const second = f.run();
   assert.equal(second.error, null, second.error?.message);
   assert.equal(f.file('done/ack-500-1.json').outcome, 'DONE');
+});
+
+// SQAG on 3.119.1: a cloud sweep took an order before its expiry, then made a later programme write
+// after it. The queued run must stop at the deadline, file what it wrote, and never run the order again.
+test('a queued order that expires mid-run stops at the deadline, files its receipts and is not retried', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order());
+  const request = f.github.request.bind(f.github);
+  let parentPuts = 0;
+  let late = false;
+  // Parent writes: 1 the order's log entry, 2 the ack. The deadline passes as the ack lands.
+  f.github.request = (method, endpoint, body, options) => {
+    const response = request(method, endpoint, body, options);
+    if (method === 'PUT' && endpoint.endsWith('/state/parent-421.json') && ++parentPuts === 2) late = true;
+    return response;
+  };
+  const clock = () => (late ? NOW + 3 * 3600 * 1000 : NOW);
+  const plan = f.store.read('child', 500).doc.next_action;
+  const result = f.run({ clock });
+  assert.equal(result.error, null, result.error?.message);
+  const [row] = result.report.orders.results;
+  assert.equal(row.outcome, 'STOPPED');
+  assert.equal(row.code, 'ORDER_EXPIRED');
+  assert.equal(f.store.read('child', 500).doc.next_action, plan, 'the write after the deadline never ran');
+  const filed = f.file('refused/ack-500-1.json');
+  assert.equal(filed.code, 'ORDER_EXPIRED');
+  assert.deepEqual(filed.results.map(entry => entry.outcome), ['WRITTEN', 'EXPIRED'], 'the receipt for the finished write is filed');
+  assert.deepEqual(f.parentDoc().private.holder_orders[0].done, [0]);
+  assert.equal(f.file('pending/ack-500-1.json'), null, 'the order leaves the queue');
+  // A later run finds nothing to retry: the order never runs again.
+  const childWrites = () => f.github.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/state/issue-500.json')).length;
+  const before = childWrites();
+  const again = f.run({ clock });
+  assert.equal(again.error, null, again.error?.message);
+  assert.deepEqual(again.report.orders.results, []);
+  assert.equal(childWrites(), before);
+  assert.equal(f.store.read('child', 500).doc.next_action, plan);
+});
+
+test('a queued order already expired on a retry is refused with nothing written', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order());
+  const plan = f.store.read('child', 500).doc.next_action;
+  const request = f.github.request.bind(f.github);
+  let parentPuts = 0;
+  // The first run meets a passing failure on the ack, so the order stays pending.
+  f.github.request = (method, endpoint, body, options) => {
+    if (method === 'PUT' && endpoint.endsWith('/state/parent-421.json') && ++parentPuts === 2) return { status: 502, json: { message: 'Bad gateway' } };
+    return request(method, endpoint, body, options);
+  };
+  const first = f.run();
+  assert.equal(first.report.orders.results[0].outcome, 'PENDING');
+  // The retry runs after the expiry: refused at once, and the finding stays as it was.
+  const second = f.run({ clock: () => NOW + 3 * 3600 * 1000 });
+  assert.equal(second.error, null, second.error?.message);
+  assert.equal(second.report.orders.results[0].outcome, 'REFUSED');
+  assert.equal(second.report.orders.results[0].code, 'ORDER_EXPIRED');
+  assert.equal(f.store.read('child', 500).doc.next_action, plan);
+  assert.equal(f.file('pending/ack-500-1.json'), null);
 });
