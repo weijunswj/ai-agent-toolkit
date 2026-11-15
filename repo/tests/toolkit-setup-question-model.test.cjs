@@ -732,8 +732,8 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
     ['root-only', { state: 'owner-value', value: '3' }, 'Gates: Toolkit helpers only; elsewhere one subagent layer (your Claude Code limit: 3)'],
     ['root-only', { state: 'claude-default' }, 'Gates: Toolkit helpers only; elsewhere one subagent layer (Claude Code limit not set yet)'],
     ['root-only', undefined, 'Gates: Toolkit helpers only; elsewhere one subagent layer (Claude Code limit unknown)'],
-    ['broader-native', { state: 'claude-default' }, "Gates: Toolkit helpers only; elsewhere Claude Code's own rules"],
-    ['broader-native', { state: 'toolkit-one-layer', value: '1' }, "Gates: Toolkit helpers only; elsewhere Claude Code's own rules (Toolkit's Claude Code limit of 1 still set)"],
+    ['broader-native', { state: 'claude-default' }, "Gates: Toolkit helpers only; Toolkit repos: one subagent layer; elsewhere Claude Code's own rules"],
+    ['broader-native', { state: 'toolkit-one-layer', value: '1' }, "Gates: Toolkit helpers only; Toolkit repos: one subagent layer; elsewhere Claude Code's own rules (Toolkit's Claude Code limit of 1 still set)"],
   ]) {
     const rows = claude((c) => { c.agentProfile.topology = topology; c.claudeSubagentDepth = depth; });
     assert.equal(rows['claude-agent-topology'].current_short, expected, `${topology} ${depth?.state}`);
