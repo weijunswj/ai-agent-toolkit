@@ -485,6 +485,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.ok(!fs.existsSync(path.join(repoRoot, REFERENCE_DIR, 'skill-card.md')));
   assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|skill-card|card due|damaged card|tap Save/);
   assert.match(text, /call `propose_skills` once with kind `improvement`, name and target `web-controller-projects`/);
+  assert.match(text, /Record `skill card <guidebook Version> offered <date>`/);
   assert.match(text, /never a hand upload\. Never offer a Version that has a `skill card` line again\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);

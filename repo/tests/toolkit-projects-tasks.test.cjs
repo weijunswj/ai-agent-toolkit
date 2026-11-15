@@ -487,7 +487,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   // The saved claude.ai copy of the skill is compared with the guidebook; the check-in only reports, and a Version
   // already offered, declined or refused (any "skill card <Version>" memory line) is never raised again.
   for (const required of ['`/root/.claude/skills/synced/*/web-controller-projects/SKILL.md`', '"SKILL CARD OUTDATED: saved <old>, main <new> | "',
-    'unless memory has a "skill card <guidebook Version>" line', '"**Guidebook:** no saved skill copy seen", advice only']) {
+    'unless memory has a "skill card <guidebook Version>" line', 'the day counter as a number, so .10 is newer than .9', '"**Guidebook:** no saved skill copy seen", advice only']) {
     assert.ok(text.includes(required), required);
   }
   assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|propose_skills/);
