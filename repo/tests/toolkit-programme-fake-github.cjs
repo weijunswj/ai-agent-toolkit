@@ -5,10 +5,10 @@
 // 2026-10-23: sub-issue ids (not numbers), 422 for a second parent without replace_parent or a
 // duplicate, 422 for a reorder without an anchor, 409 for a stale Contents sha, 422 for a create
 // over an existing file, and a new commit even for an identical Contents PUT. A Contents GET on a
-// folder lists its files, `commits?path=` gives a file's last commit date, and comments carry their
-// issue URL, author and creation time. With `branchLag` on,
-// a Contents read of the branch serves the files as of the commit before the latest one, as the
-// real API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
+// folder lists its files, `commits?path=` gives the last commit that changed a file (its id and
+// date), and comments carry their issue URL, author and creation time. With `branchLag` on, a
+// Contents read of the branch serves the files as of the commit before the latest one, as the real
+// API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
 
 const crypto = require('node:crypto');
 
@@ -47,6 +47,7 @@ class FakeGitHub {
     this.hooks = [];
     this.nextId = 9000;
     this.fileDates = new Map();
+    this.fileCommits = new Map();
     this.comments = new Map();
     this.commentSequence = 0;
     this.login = 'owner';
@@ -160,8 +161,10 @@ class FakeGitHub {
     }
     if (/^repos\/[^/]+\/[^/]+\/git\/refs\/heads\//.test(path) && method === 'PATCH') {
       if (body.force || !this.sweepCommits.get(body.sha)?.parents.includes(this.sweepHead)) return ok(422, { message: 'Reference moved' });
+      const before = this.files;
       this.files = new Map(this.snapshots.get(body.sha)); this.commits++;
       this.snapshots.set(`c${this.commits}`, new Map(this.files)); this.sweepHead = body.sha;
+      this.touched(before, body.sha);
       return ok(200, { object: { sha: body.sha } });
     }
     if ((match = /^repos\/[^/]+\/[^/]+\/git\/blobs\/([0-9a-f]{40})$/.exec(path)) && method === 'GET') {
@@ -178,8 +181,8 @@ class FakeGitHub {
     if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
     if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
     if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) {
-      const date = this.fileDates.get(params.get('path'));
-      return ok(200, date ? [{ sha: 'f'.repeat(40), commit: { committer: { date } } }] : []);
+      const [date, sha] = [this.fileDates.get(params.get('path')), this.fileCommits.get(params.get('path'))];
+      return ok(200, date || sha ? [{ sha: sha || 'f'.repeat(40), commit: { committer: { date: date || new Date(this.clock).toISOString() } } }] : []);
     }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
@@ -357,10 +360,19 @@ class FakeGitHub {
   }
 
   commit() {
+    const before = this.snapshots.get(`c${this.commits}`) || new Map();
     this.commits += 1;
     this.snapshots.set(`c${this.commits}`, new Map(this.files));
     this.sweepHead = crypto.createHash('sha1').update(`contents-${this.commits}-${++this.sweepSequence}`).digest('hex');
     this.snapshots.set(this.sweepHead, new Map(this.files));
+    this.touched(before, this.sweepHead);
+  }
+
+  // Every file a commit added, changed or removed now names that commit as its last one.
+  touched(before, sha) {
+    for (const file of new Set([...before.keys(), ...this.files.keys()])) {
+      if (before.get(file)?.sha !== this.files.get(file)?.sha) this.fileCommits.set(file, sha);
+    }
   }
 
   readFile(filePath) {
