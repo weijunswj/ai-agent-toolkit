@@ -924,13 +924,17 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
       const text = full('daily-check-in', promptParams);
       const plugin = text.slice(text.indexOf('10. PLUGIN BEHIND:'), text.indexOf('11. GitHub'));
       const rows = [
-        ['own session and nested timestamp', [/get_session` with no session_id and read `ccr\.created_at`, not a top-level created_at/, /never the coordinator's thread, the trigger creation time/]],
-        ['valid timezone and non-future time', [/valid calendar timestamp with an explicit time zone \(Z or a numeric offset\) that is not in the future/]],
-        ['historical first-parent baseline', [/git -C TK rev-list -1 --first-parent --before=<start> HEAD/, /git -C TK show B:\.claude-plugin\/plugin\.json/]],
-        ['missing, malformed or future start falls back explicitly', [/Missing, malformed, future or unavailable session start: use today's HEAD as B/, /session start unavailable; comparing with main today/]],
+        ['sync time from the copy folder birth time', [/sync time comes from the copy's own `ai-agent-toolkit` folder/, /`stat -c '%W %Z' <folder>`/, /take its birth time \(%W\)/]],
+        ['change time fallback', [/0 or unreadable means its change time \(%Z\)/]],
+        ['never a file mtime', [/Never use a file's mtime: synced files can read 1980-01-01/]],
+        ['never the session start or other clocks', [/never this session's start, which stays old while the container re-syncs the copy/, /never the coordinator's thread, the trigger creation time/]],
+        ['valid non-future time in UTC', [/Accept only a whole number of seconds above 0 that is not in the future/, /date -u -d @<seconds> \+%FT%TZ/]],
+        ['newest of several copies', [/Several copies: use the one with the newest sync time, read its version and name the others under \*\*Plugin:\*\*/]],
+        ['historical first-parent baseline', [/git -C TK rev-list -1 --first-parent --before=<sync time> HEAD/, /git -C TK show B:\.claude-plugin\/plugin\.json/]],
+        ['unavailable sync time falls back to today explicitly', [/Missing, zero, invalid, future or unreadable sync time: use today's HEAD as B/, /sync time unavailable; comparing with main today/, /Otherwise baseline mode is sync-time/]],
         ['numeric version comparison', [/Compare version components numerically \(3\.9\.0 is older than 3\.10\.0\), never as strings/]],
         ['current today', [/equal to today's main: "\*\*Plugin:\*\* current \(<version>\)"/]],
-        ['matches or exceeds baseline, below today', [/Equal to or newer than the selected baseline, but older than today's main/, /home thread copy pinned at <date>; observed <account>, baseline <baseline> at <commit7>, main today <main>/, /verified pinned report gets no PLUGIN BEHIND prefix, owner steps or plugin card/]],
+        ['matches or exceeds baseline, below today', [/Equal to or newer than the selected baseline, but older than today's main/, /pinned copy synced at <time>; observed <account>, baseline <baseline> at <commit7>, main today <main>/, /verified pinned report gets no PLUGIN BEHIND prefix, owner steps or plugin card/]],
         ['ahead of today', [/newer than today's main is reported as ahead/, /no prefix, owner steps or card/]],
         ['only real baseline lag is aged', [/Only a copy older than the selected baseline enters the lag-age calculation/, /--format='%h %cI' B -- \.claude-plugin\/plugin\.json/, /next newer commit on the first-parent path up to B/, /oldest commit up to B whose version is above the account's/]],
         ['at and below the threshold, no card', [/At or below 24 hours ago:[^\n]*no prefix, owner steps or card/]],
@@ -941,8 +945,9 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
         ['copy unavailable or invalid', [/Missing\/unreadable copy or invalid version: report unverified and no prefix, owner steps or plugin card/]],
       ];
       for (const [label, patterns] of rows) for (const pattern of patterns) assert.match(plugin, pattern, label);
+      assert.doesNotMatch(plugin, /ccr\.created_at|session start unavailable/, 'the session start is no longer a baseline');
       const state = text.split('\n').find(line => line.startsWith('- Overwrite '));
-      for (const pattern of [/baseline mode \(session-start or today\)/, /validated session start in UTC \(or unavailable\)/,
+      for (const pattern of [/baseline mode \(sync-time or today\)/, /validated sync time in UTC \(or unavailable\)/,
         /baseline commit\/version and observed version \(or unverified\)/, /carry it forward while that gap remains, even on an unverified run/,
         /including a legacy "plugin behind <main version>"/, /only when this run verifies current, pinned or ahead; uncertainty never clears it/]) assert.match(state, pattern);
       assert.match(text, /Recompute the baseline in step 10 each run; an old state record is never evidence/);
@@ -954,12 +959,12 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
 test('hook note covers changed, deleted, unchanged and unavailable evidence without new actions', () => {
   const text = rendered('daily-check-in');
   const note = text.split('\n').find(line => line.startsWith('   Hook note:'));
-  for (const pattern of [/observed plugin is older than today's main and the session-start baseline is verified/,
+  for (const pattern of [/observed plugin is older than today's main and the sync-time baseline is verified/,
     /first-parent range `B\.\.HEAD`/, /\.claude-plugin\/hooks\/hooks\.json/, /`hooks\/hooks\.json`/,
     /changed\/deleted hook entry scripts named by either the baseline or current manifests/, /resolve their plugin-root paths/,
     /\*hook\*\.cjs/, /\*hook\*\.ps1/, /exactly one advisory sentence/, /home thread may retain older hooks/,
     /fresh home thread after account sync can load the updated copy/, /No changes: omit the advisory/,
-    /Missing history or manifests needed for this comparison, or unavailable session start/, /hook check unverified/,
+    /changed since this copy was synced/, /Missing history or manifests needed for this comparison, or unavailable sync time/, /hook check unverified/,
     /manifest proven absent at a revision is a deletion\/addition, not a failed read/, /Never infer which hooks ran/,
     /no prefix, plugin card, owner update steps or automatic thread rotation/]) assert.match(note, pattern);
 });
@@ -977,7 +982,7 @@ test('today-only plugin prompts become outdated at the same version and refresh 
       assert.equal(tasks().check('daily-check-in', old).state, 'outdated');
       const refreshed = tasks().refresh('daily-check-in', old, { session });
       assert.equal(tasks().check('daily-check-in', refreshed).state, 'current');
-      assert.ok(tasks().expand('daily-check-in', promptParams).includes('ccr.created_at'));
+      assert.ok(tasks().expand('daily-check-in', promptParams).includes("stat -c '%W %Z' <folder>"));
       assert.ok(refreshed.includes('Keep this owner check.'));
       assert.equal(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1], old.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
     }
