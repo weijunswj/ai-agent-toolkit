@@ -1295,6 +1295,16 @@ function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
 }
 
+// Acceptance the controller logged without a gate lifecycle: a review PASSED whose verdicts at the
+// tracked PR head all passed (with no head tracked, the newest verdict passed), and UAT settled on
+// record at that head. Only the parent's holder writes review and UAT.
+function acceptanceLogged(child) {
+  const { review, pr } = child;
+  const verdicts = pr.head ? review.verdicts.filter(verdict => verdict.head === pr.head) : review.verdicts.slice(-1);
+  return review.state === 'PASSED' && verdicts.length > 0 && verdicts.every(verdict => verdict.verdict === 'PASSED')
+    && CLOSABLE_UAT.includes(uatText(child));
+}
+
 const GATE_HISTORY_LIMIT = 20;
 const needsReason = (reason, command) => {
   if (!isText(String(reason ?? '').trim())) throw new ProgrammeError('USAGE', `${command} needs --reason <why>.`);
@@ -5414,7 +5424,7 @@ class Reconciler {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.

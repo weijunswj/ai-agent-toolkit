@@ -58,7 +58,7 @@ The first complete scan seeds the private watermark without reporting historic c
 
 Refresh records these attention findings:
 
-- `CLOSED_WITHOUT_ACCEPTANCE`: A copied completed close lacks accepted completion. Controller: record G2 and UAT, or confirm the close.
+- `CLOSED_WITHOUT_ACCEPTANCE`: A copied completed close lacks accepted completion: an accepted G1 or G2 gate, or a logged review `PASSED` whose verdicts at the tracked PR head all passed (with no head tracked, the newest verdict) plus UAT `NOT_REQUIRED`, `PASSED` or `UAT_RETAINED` at that head. Controller: record G2 and UAT, or confirm the close.
 - `CHILD_REOPENED`: A sweep-closed task reopened and its previous lifecycle was restored. Reported once per reopening, retained until answered.
 - `CHILD_ADDED`: A new native task joined the catalogue. Reported once per addition, retained until answered.
 - `SWEEP_STUCK`: The board's `⚠️ Sweep stuck` warning as a finding on the parent, so it reaches the `Attention:` line: no sweep pass has finished for six hours and the passes in those hours read fewer than ten tasks. Only a sweep pass resolves it, once one finishes; the controller fixes the cause (rate limit, sign-in, lock) or tells the owner the exact step.
