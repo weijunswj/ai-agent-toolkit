@@ -24,7 +24,7 @@ If `repo/scripts/toolkit-env.cjs` is missing from the managed checkout, ask the 
 | see, check, change, update, rotate, add or remove their keys, in any words ("show env", "let me see my keys", "I need to update my OpenAI key", "remove the old n8n token") | `edit`, then wait for them to say "done", then `status` and `apply` as below |
 | a names-only question ("is my GitHub token set?", "which keys does Codex use?") | `status` |
 | set one key | ask them to run the full PowerShell line for `set NAME` in their own terminal (it asks for the value with hidden input) |
-| see a key's value | ask them to run the full PowerShell line for `show NAME` (or `show NAME --copy`) in a PowerShell window they open themselves; it asks them to retype the name. Never run it yourself |
+| see a key's value | ask them to run the full PowerShell line for `show NAME` (or `show NAME --copy`) in a PowerShell window they open themselves; it asks them to press Enter. Never run it yourself |
 | remove or delete a key without opening the edit file | ask "Remove NAME? yes or no" naming the exact key; only after they say yes, run `remove NAME` and answer `yes` on its stdin. Deleting its line during an `edit` marks it for removal at "done", after the same kind of yes |
 | connect an MCP server entry to a key | `connect SERVER --name NAME`; show them the planned changes and pass on their yes or no |
 | undo connected entries | `revoke --feeders`, after their yes |
