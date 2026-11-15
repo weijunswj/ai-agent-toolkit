@@ -1043,13 +1043,13 @@
     },
     {
       "id": "CMD.toolkit-governance-opens-the-guide",
-      "source": "owner 14 Nov 2026: toolkit governance is the one governance entry and guides on, the auto-merge switch and off; owner 15 Nov 2026 UAT: the Agents paragraph and card input never reach the owner",
+      "source": "owner 14 Nov 2026: toolkit governance is the one governance entry and guides on, the auto-merge switch and off; owner 15 Nov 2026 UAT: the Agents paragraph never reaches the owner; owner 15 Nov 2026: the governance bank is one typed question bank, never a card",
       "kind": "benign",
       "hosts": ["claude", "codex"],
       "event": "UserPromptSubmit",
       "payload": { "prompt": "toolkit governance" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \"", "toolkit-governance.cjs\" setup` in this repository, then do what its paragraph that starts with `Agents` says", "That paragraph is for you alone: never show the user any of it, nor the card input in it.", "never summarise, shorten or repeat it", "Never answer the bank for the user."], "context_excludes": ["in full and as printed"] },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \"", "toolkit-governance.cjs\" setup` in this repository, then do what its paragraph that starts with `Agents` says", "That paragraph is for you alone: never show the user any of it.", "Show them the rest of the output once, as printed, as plain text", "never summarise, shorten or repeat it", "Never answer the bank for the user."], "context_excludes": ["in full and as printed", "question card", "card input"] },
       "status": "pass"
     },
     {
