@@ -456,8 +456,10 @@ test('E3: sessionLine never reads the retired Windows task registry, whatever an
   tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
     purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab' }]);
   const at = new Date(now.getTime() - 50 * 60000).toISOString();
+  const lastRun = path.join(tasks.userStateDir(home), 'tasks', 'app-programme-sweep', 'last-run.json');
+  fs.mkdirSync(path.dirname(lastRun), { recursive: true });
   for (const status of ['skipped', 'held', 'failed']) {
-    tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: status === 'failed' ? 1 : 0, status, reason: 'offline', skipped_streak: 3, summary: [] }, home);
+    fs.writeFileSync(lastRun, JSON.stringify({ started: at, finished: at, exit: status === 'failed' ? 1 : 0, status, reason: 'offline', skipped_streak: 3, summary: [] }));
     const line = evaluate();
     assert.match(line, /Toolkit governance: ENABLED/);
     assert.doesNotMatch(line, /Programme sweep:|Task health|see toolkit tasks/, status);
@@ -729,8 +731,8 @@ test('a refresh that changes only the CURRENT summary names it in the effect', (
   fx.github.addIssue(450, { parent: 421 });
   const plan = fx.run(['reconcile']).result;
   assert.ok(plan.effects.some(effect => effect.kind === 'update_attention'));
-  assert.ok(plan.effects.some(effect => effect.text === "Update the DECISIONS block and CURRENT summary in #421's body" || effect.text === "Update the CURRENT summary in #421's body"), JSON.stringify(plan.effects.map(effect => effect.text)));
-  assert.equal(plan.effects.some(effect => /DECISIONS block in #421/.test(effect.text) && !/CURRENT/.test(effect.text)), false, 'never labelled as the DECISIONS block alone');
+  assert.ok(plan.effects.some(effect => effect.text === "Update the CURRENT summary in #421's body"), JSON.stringify(plan.effects.map(effect => effect.text)));
+  assert.equal(plan.effects.some(effect => /DECISIONS block/.test(effect.text)), false, 'the parent has no DECISIONS block to name');
 });
 
 test('work queue: a stalled-task finding is never acknowledged, leads the list, and returns as new after a dispose clears', () => {

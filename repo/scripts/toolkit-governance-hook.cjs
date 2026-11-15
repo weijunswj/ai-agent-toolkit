@@ -7,7 +7,8 @@
 //                     keeps each "merge N" the user types, for the merge hold, and adds one
 //                     context line for a typed Toolkit command (toolkit-commands.cjs).
 //   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
-//                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
+//                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs),
+//                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs).
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
 //   SessionStart      adds context stating the effective governance state, exports the session's
@@ -81,6 +82,9 @@ function respond(event, input, options = {}) {
     options = { ...options, evidenceResponses: new Map() };
     const merge = mergeDecision(input, { ...options, consume: false });
     if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
+    // A gate session off its stack-registry pin, or a verdict or G1 body with the wrong route stamp.
+    const route = gateRouteDecision(input, options);
+    if (route) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: route } };
   }
   let gate;
   try {
@@ -144,6 +148,16 @@ function respond(event, input, options = {}) {
 }
 
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+// The gate route check (toolkit-gate-route.cjs). It refuses only in a gate session or on a verdict
+// or G1 body write; when the module cannot load, only a launcher-marked gate session is refused.
+function gateRouteDecision(input, options) {
+  const environment = options.environment || process.env;
+  try { return (options.gateRoute || require('./toolkit-gate-route.cjs')).preToolUse(input, { environment, registry: options.stackRegistry }); } catch {
+    return ['G0', 'G1', 'G2'].includes(environment.TOOLKIT_GATE_ROLE) && STATE_CHANGING_TOOLS.test(String(input && input.tool_name || ''))
+      ? 'Toolkit gate route check: the check is unavailable, so this gate session\'s tools are refused. Run setup toolkit to repair the plugin.' : null;
+  }
+}
 
 // One advisory context line when the user's own message is exactly a typed Toolkit command
 // (toolkit-commands.cjs). It never blocks: any failure adds nothing, and the turn that carries

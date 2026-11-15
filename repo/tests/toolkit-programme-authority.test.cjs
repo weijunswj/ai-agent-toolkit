@@ -358,11 +358,26 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
       const text = read(file);
       assert.doesNotMatch(text, /(?:issue tracking|records|comments)[^.\n]*(?:off by default|opt-in)/i, file);
       assert.doesNotMatch(text, /Toolkit writes no issues, comments or records|without the binding it does nothing/i, file);
-      assert.match(text, /binding does not change the Toolkit-governed rules[^\n]*or their issue records/, file);
-      assert.match(text, /without that block get no governed issue writes/i, file);
+      assert.match(text, /Toolkit-governed rules and their issue records apply where that file, merged on the default branch, turns governance on \(ENABLED\)/, file);
+      assert.match(text, /where it is not ENABLED get no governed issue writes/i, file);
       assert.match(text, /programme state commands refuse without it/i, file);
       assert.match(text, /closing-comment.*(?:any GitHub repository|governance is off)/, file);
     }
+  }
+});
+
+test('governed issue writes follow the ENABLED programme file, never a governed block, in every reconciler summary', () => {
+  // Turn-on no longer writes a governed block, so a summary that keyed governed issue writes on the
+  // block would tell agents to skip them in every repository turned on since.
+  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
+  const files = ['skills/github-program-reconciler/SKILL.md', 'skills/github-program-reconciler/README.md', 'README.md',
+    'repo/contracts/agent-rules/toolkit-skill-routing.md', 'repo/docs/FOR_AI_AGENTS.md', 'repo/docs/SKILL-SAFETY-MATRIX.md'];
+  for (const file of files) {
+    const text = read(file);
+    assert.doesNotMatch(text, /without (?:that|the|the `TOOLKIT-GOVERNED-RULES`|the governed) block get no governed issue writes/i, file);
+    const lines = text.split('\n').filter(line => line.includes('no governed issue writes'));
+    assert.ok(lines.length, `${file} must say where governed issue writes stop`);
+    for (const line of lines) assert.match(line, /where it is not ENABLED get no governed issue writes/, file);
   }
 });
 
@@ -389,19 +404,19 @@ test('UAT or review evidence without its head is refused on write and rendered s
   assert.throws(() => write({ review: { state: 'NOT_PASSED' } }), { code: 'STATE_INVALID' });
   write({ candidate: { branch: 'feature', head: SHA_A }, uat: { state: 'PASSED', at_head: SHA_A }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } });
   reconciler().run({ apply: true });
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED · Review: PASSED · /);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED -->/);
   github.prs.get(540).head = SHA_B;
   github.prs.get(540).rollupOid = SHA_B;
   reconciler().run({ apply: true });
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED \(STALE_HEAD, was aaaaaaa\) · Review: PASSED \(STALE_HEAD\) · /);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED \(STALE_HEAD, was aaaaaaa\) -->/);
 
   // Rendering stays safe even for a document that bypassed validation.
   const doc = { ...store.read('child', 423).doc, uat: { state: 'PASSED', at_head: null }, review: { state: 'PASSED', verdicts: [] } };
   const body = state.renderChildBlockBody(doc, CATALOGUE[0]);
-  assert.match(body, / · UAT: PASSED \(STALE_HEAD, head not recorded\) · Review: PASSED \(STALE_HEAD, no verdict recorded\) · /);
-  // A current-head verdict beside an older one is current.
+  assert.match(body, / · UAT: PASSED \(STALE_HEAD, head not recorded\) -->/);
+  // A pending UAT is owed at any head; review verdicts are in the handover file, not on the page.
   const mixed = { ...doc, uat: { state: 'PENDING', at_head: null }, review: { state: 'PASSED', verdicts: [{ reviewer: 'a', head: SHA_A, verdict: 'NOT_PASSED' }, { reviewer: 'a', head: SHA_B, verdict: 'PASSED' }] } };
-  assert.match(state.renderChildBlockBody(mixed, CATALOGUE[0]), / · UAT: PENDING · Review: PASSED · /);
+  assert.match(state.renderChildBlockBody(mixed, CATALOGUE[0]), / · UAT: PENDING -->/);
 });
 
 test('a body hold skips only that issue\'s body, not its native link', () => {

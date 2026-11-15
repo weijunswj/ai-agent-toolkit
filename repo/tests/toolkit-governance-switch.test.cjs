@@ -98,7 +98,9 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^# Toolkit governance choices - 6 questions across 2 sections/);
+    // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup row is asked too.
+    assert.match(result.out, /^# Toolkit governance choices - 7 questions across 2 sections/);
+    assert.match(result.out, /\| 1\.6 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
     assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
     assert.match(result.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
     assert.match(result.out, /^More on 1\.4: .*Minutes: unknown, because no green CI run could be read\./m);
@@ -117,7 +119,7 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'showing the bank never writes the binding');
   const json = JSON.parse((await run(ctx, ['setup', '--json'])).out);
   assert.match(json.bank_reference, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
-  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'ci-shards', 'governance-app', 'permission-blocks']);
+  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge', 'merge-train', 'ci-shards', 'governance-app', 'instruction-copies', 'permission-blocks']);
   const unmarked = await run(ctx, ['setup'], { environment: {} });
   assert.match(unmarked.out, /could not note this bank for this session/, 'a session without a mark is told a chat reply cannot count');
 });
@@ -230,7 +232,7 @@ test('the permission row: Update and Remove give the owner one command to run th
   const ctx = fixture(t);
   const update = await answerBank(ctx, 'all recommended', { missing: 3 });
   assert.equal(update.code, 0, update.err);
-  assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*type apply\./);
+  assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
   assert.match(update.out, /^node fixture-apply\.cjs --apply$/m, 'the command is printed on its own line, not indented into a code block');
   assert.match(update.out, /never in a code block of your own making; never run it yourself\./);
   assert.doesNotMatch(update.out, /Paste into|Next step/);

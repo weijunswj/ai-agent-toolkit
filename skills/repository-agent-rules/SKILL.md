@@ -1,6 +1,6 @@
 ---
 name: repository-agent-rules
-description: Install, check, repair, refresh, or bootstrap repo-local agent rules such as AGENTS.md and supported host shims. Do not route for ordinary coding when repository instructions are already current. Use once for an unchecked target, then stop unless instruction state may have changed.
+description: Install, check, repair or refresh a repository's Toolkit files, such as the CI checks a governed repository carries and the one-line CLAUDE.md shim, and report Toolkit instruction copies an older setup left. Do not route for ordinary coding when repository files are already current. Use once for an unchecked target, then stop unless their state may have changed.
 ---
 
 <!--
@@ -10,12 +10,14 @@ Source: skills/repository-agent-rules/SKILL.md
 
 # Repository Agent Rules
 
-Installs and maintains the Toolkit-governed rules block and host shims in one repository or folder.
+Installs and maintains a repository's Toolkit files: the CI checks a governed repository carries and the one-line `CLAUDE.md` shim. The governed rules and the playbooks are never copied into a repository.
 
 ## Two layers
 
 - **Global rules** live in each harness's user-level file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, optionally `~/.gemini/GEMINI.md`). `setup toolkit` installs and refreshes them; this skill never writes them.
-- **Toolkit-governed rules** live in one block in the repository's `AGENTS.md` and, with the user's yes, turn on Toolkit's GitHub governance there. Write a repository's own instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/`) only when its governance state is ENABLED (`toolkit-governance.cjs status`), and install the block only when the user explicitly asks. An accepted pending yes also permits preparing exactly the instruction materials for its adoption pull request; the governance question bank (`toolkit governance`) renders them itself for a repository that has none. Preparation never activates governance, programme records or standing task auto-merge. In other states, report what would change and write nothing. Repository rules outside the block stay authoritative.
+- **Toolkit-governed rules** come from the installed Toolkit: in a repository whose merged programme file is ENABLED, every session start carries them, and the playbooks ship as the `toolkit-playbooks` skill. A repository needs no copy, so this skill never adds the governed block, the Antigravity bootstrap or playbook files. Turning governance on is the governance question bank's job (`toolkit governance`): its one setup pull request carries the programme file and the CI checks only.
+- Write a repository's own instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/`) only when its governance state is ENABLED (`toolkit-governance.cjs status`), and then only the `CLAUDE.md` shim and the retired `GEMINI.md` removal below. An accepted pending yes also permits preparing exactly the CI check files for its adoption pull request. Preparation never activates governance, programme records or standing task auto-merge. In other states, report what would change and write nothing. The repository's own rules stay authoritative for everything that is its own.
+- **Leftovers:** a `TOOLKIT-GOVERNED-RULES` block (or an older `GLOBAL-AGENTS.MD-TEMPLATE` or `N8N-AGENT-RULES-ADAPTER` v1 block) in `AGENTS.md`, `.agents/rules/00-agent-toolkit-bootstrap.md` and Toolkit copies under `docs/agent-playbooks/` were written by older setups. Report them as leftovers: never refresh, repair or add one. The installed Toolkit's rules win over an older copy. To remove them where governance is on, the owner answers Clean up in `refresh governance`, or run `node <toolkit>/repo/scripts/toolkit-governance-cleanup.cjs --repo <repo>` to preview, then, with the owner's OK, `--write`, and carry the changes to one pull request as below; it deletes files, so the owner merges it and it never goes through task auto-merge.
 
 All action-blocking questions to the user are fully bold.
 
@@ -24,11 +26,11 @@ All action-blocking questions to the user are fully bold.
 Works for any git host, local git repositories and plain folders.
 
 1. Use the open target or the explicit target path; if neither exists, stop and ask for a target path.
-2. Required files by platform: Codex or unspecified: `AGENTS.md`. Claude Code: `AGENTS.md` and `CLAUDE.md`. Antigravity: `AGENTS.md` and `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity reads `AGENTS.md` itself, so there is no `GEMINI.md` shim).
-3. For each required file, check that it exists. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. For every other file, check that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
-4. If every file is structurally current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
+2. Expected files: for Claude Code where the repository has its own `AGENTS.md`, a `CLAUDE.md` that loads it; where governance is ENABLED, the plain-text check (`.github/plain-text.json`). Codex and Antigravity read `AGENTS.md` themselves, so they need no shim and there is no `GEMINI.md` shim.
+3. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. Note any leftovers (above).
+4. If every expected file is current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
-Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line) and, where governance is ENABLED, the vendored Toolkit checks under `.github/scripts/` with the running Toolkit's sources, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
+Native Toolkit startup hooks run a passive preflight: they compare only the managed blocks a repository still carries with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line) and, where governance is ENABLED, the vendored Toolkit checks under `.github/scripts/` with the running Toolkit's sources, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
 
 ## Markers
 
@@ -36,23 +38,19 @@ Every Toolkit insert uses versioned, hashed markers:
 
 `<!-- AI-AGENT-TOOLKIT:<source>:BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex> -->` ... `<!-- AI-AGENT-TOOLKIT:<source>:END <NAME> -->`
 
-`sha256` covers the block body, so a hand edit inside the block is detectable. Content inside the markers is Toolkit-owned; everything outside is the user's and keeps its exact bytes. A refresh replaces the older `GLOBAL-AGENTS.MD-TEMPLATE` and `N8N-AGENT-RULES-ADAPTER` v1 blocks with the single `TOOLKIT-GOVERNED-RULES` block; their generic content now comes from the global rules.
+`sha256` covers the block body, so a hand edit inside the block is detectable. Content inside the markers is Toolkit-owned; everything outside is the user's and keeps its exact bytes. The generic content of the older v1 blocks now comes from the global rules, and the governed rules from the installed Toolkit.
 
 ## Install, check, repair or refresh
 
-For an explicit request, compare the Toolkit-owned blocks with the current templates instead of stopping at the structural check:
+For an explicit request, compare the Toolkit files with the current templates instead of stopping at the cheap check:
 
-- `repo-local/AGENTS.managed.template.md` -> `AGENTS.md`
-- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
-- `repo-local/antigravity-bootstrap.template.md` -> `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity only)
+- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only, where the repository has its own `AGENTS.md`). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/toolkit-programme.template.json` -> `.github/toolkit-programme.json`, only for a merged enabled repository or its accepted pending yes adoption proposal. Fill in the repository, parent issue, record prefixes and the separate private evidence store from the user's answers, with one entry in `parents` only (a second parent waits for the reconciler's cross-programme rule); the binding lands through a pull request, never a push to the default branch.
-- The `toolkit-playbooks` skill (`../toolkit-playbooks/`) -> `docs/agent-playbooks/`, as a whole folder, its `SKILL.md` written as `INDEX.md` without the skill frontmatter (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `closing-comments.md`, `decision-trace.md`, `docs-governance.md`, `fast-tests-and-sharding.md`, `generated-files.md`, `git-completion.md`, `invariant-models.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `privacy-safe-checks.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
 
 Rules:
 
-- A missing file is created from its template. A file without a valid block keeps all its content, with the block inserted at the top unless the user asks otherwise.
-- A stale, edited or older-format block is backed up, then replaced from the template; unmarked content is preserved.
-- Broken, duplicate, unmatched, nested or out-of-order markers are repaired before any unrelated edit. If unmarked content cannot be separated safely, write a clean file and report the backup.
+- A missing `CLAUDE.md` is created from its template; an existing one keeps all its content.
+- Broken, duplicate, unmatched, nested or out-of-order markers in a file this skill writes are repaired before any unrelated edit. If unmarked content cannot be separated safely, write a clean file and report the backup.
 - Never delete duplicate, conflicting or obsolete unmarked content automatically; keep it, or keep it in the backup, and report it. Never create shims for platforms out of scope.
 - A refresh removes the retired `GEMINI.md` shim: back it up, then remove a `GEMINI.md` that holds only the old Toolkit `GEMINI.SHIM` block, or remove just that block when the file has other text. Never touch a `GEMINI.md` without that block.
 - Before modifying, record the target path, git presence, branch, HEAD and dirty state where available, existing files, and whether they were already dirty or hand-edited. In a plain folder, treat existing instruction files as the user's unless complete markers say otherwise.
@@ -67,7 +65,7 @@ New backups always use `_agent-toolkit-backups/`. Recognise legacy `.agent-toolk
 
 ### Optional personal-data guard
 
-On an install, offer the personal-data guard once; never install it without the owner's yes. On yes, ask whether commit author and committer addresses are scanned, then run `node <toolkit>/skills/secure-ci-cd/scripts/install-personal-data-guard.cjs --repo <repo> --identity <excluded|included> [--identity-reason <text>] --workflow` and report its output, including the hooks folder it used. On a refresh where `.github/personal-data-guard.json` exists, run it with `--check` and, when it reports drift, rerun the install (it keeps the config and any existing hooks). Details: `docs/agent-playbooks/privacy-safe-checks.md`.
+On an install, offer the personal-data guard once; never install it without the owner's yes. On yes, ask whether commit author and committer addresses are scanned, then run `node <toolkit>/skills/secure-ci-cd/scripts/install-personal-data-guard.cjs --repo <repo> --identity <excluded|included> [--identity-reason <text>] --workflow` and report its output, including the hooks folder it used. On a refresh where `.github/personal-data-guard.json` exists, run it with `--check` and, when it reports drift, rerun the install (it keeps the config and any existing hooks). Details: the `toolkit-playbooks` skill's `privacy-safe-checks.md`.
 
 ### Plain-text check
 
@@ -87,9 +85,9 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 **Carry the refresh to a pull request.** When the refresh wrote files in a Git repository that has a GitHub remote, and no in-flight task already carries those files on its own authorised branch, do not leave them uncommitted:
 
-Turning governance on is not done here: the governance question bank (`toolkit governance`) renders the governed block and supporting rules into its one setup pull request itself, and a yes is never published with `toolkit-governance.cjs publish --run`. Do not open a separate instruction pull request for it. After merge, compare prepared untracked files with the merged copies, preserve local differences and clear only verified duplicates with permission before pulling.
+Turning governance on is not done here: the governance question bank (`toolkit governance`) puts the programme file and the CI checks into its one setup pull request itself, and a yes is never published with `toolkit-governance.cjs publish --run`. Do not open a separate instruction pull request for it. After merge, compare prepared untracked files with the merged copies, preserve local differences and clear only verified duplicates with permission before pulling.
 
-1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed, and any personal-data guard, plain-text check or cloud sweep files it installed); never stage dirty, unrelated or backup files.
+1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the shims it created, repaired or removed, and any personal-data guard, plain-text check or cloud sweep files it installed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
 3. Watch every check on the pull request's exact head, then stop at the open pull request: report its link, head and check results for the owner to merge. This skill never merges.
 
@@ -109,4 +107,4 @@ Keep the full reset message and question bolded exactly as shown. Do not continu
 
 ## Boundaries
 
-This skill touches only repo-local instruction files, their backups and the playbook folder, plus, on the owner's opt-in, the personal-data guard files (`.github/scripts/personal-data-guard.cjs`, `.github/personal-data-guard.json`, `.github/workflows/personal-data-guard.yml`) and the local git hooks the guard installer writes, the plain-text check files (`.github/scripts/plain-text-check.cjs`, `.github/plain-text.json`, `.github/plain-text-baseline.json`, `.github/workflows/plain-text.yml`), and in governed repositories the cloud sweep workflows (`.github/workflows/toolkit-programme-sweep.yml`, `.github/workflows/toolkit-programme-sweep-gate.yml`). Apart from the refresh and accepted governance decision pull requests above, it must not push, open or update a PR, or touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product code, workflow JSON, imports, exports or runtime actions. After install, the repository's own files are the source of truth for its governed rules.
+This skill touches only the `CLAUDE.md` and retired `GEMINI.md` shims and their backups, plus, on the owner's opt-in, the personal-data guard files (`.github/scripts/personal-data-guard.cjs`, `.github/personal-data-guard.json`, `.github/workflows/personal-data-guard.yml`) and the local git hooks the guard installer writes, the plain-text check files (`.github/scripts/plain-text-check.cjs`, `.github/plain-text.json`, `.github/plain-text-baseline.json`, `.github/workflows/plain-text.yml`), and in governed repositories the cloud sweep workflows (`.github/workflows/toolkit-programme-sweep.yml`, `.github/workflows/toolkit-programme-sweep-gate.yml`). Apart from the refresh and accepted governance decision pull requests above, it must not push, open or update a PR, or touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product code, workflow JSON, imports, exports or runtime actions. The installed Toolkit is the source of the governed rules; the repository's own files are the source of its own rules.

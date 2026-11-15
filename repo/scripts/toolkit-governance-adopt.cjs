@@ -11,12 +11,13 @@
 //      discovery accepts it.
 //   2. Parent issue: when discovery found none, it opens one programme parent issue. The controller
 //      still turns it into a programme parent document later; this only gives the binding its issue.
-//   3. Governed rules: the governed AGENTS.md block, the CLAUDE.md shim and the playbooks are rendered
-//      from the repository-agent-rules templates straight into the proposal. The working tree is not
-//      changed, and text outside the block markers keeps its exact bytes.
-//   4. The plain-text check (which a governed repository always carries) is installed into the
-//      working tree only where it is missing, as the repository-agent-rules skill does; its files join
-//      the same proposal.
+//   3. The plain-text check (which a governed repository always carries) and the dependency security
+//      files are installed into the working tree only where they are missing, as the
+//      repository-agent-rules skill does; their files join the same proposal.
+//
+// No instruction file is written or proposed: the installed Toolkit gives every session in an
+// enabled repository the governed rules and the playbooks, so the repository's own AGENTS.md and
+// CLAUDE.md stay exactly as they are.
 //
 // A failed step stops with what was made and what was not. Nothing is deleted: a store or issue made
 // on an earlier try is found again by discovery and reused.
@@ -26,11 +27,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const governance = require('./toolkit-governance-state.cjs');
-const managedBlock = require('./toolkit-managed-block.cjs');
 const discovery = require('./toolkit-governance-discovery.cjs');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
-const TEMPLATES = path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
 const GH_TIMEOUT_MS = 15000;
 const STORE_README = '# Evidence store\n\nPrivate evidence for the governed repository REPOSITORY: plans, reviews and archives that agents keep here instead of in the task repository.\n';
 const PARENT_BODY = 'Programme parent for REPOSITORY. Toolkit opened it when governance was turned on from the governance question bank. Tasks join as native sub-issues; the controller keeps the tracker here.\n';
@@ -39,13 +38,16 @@ class AdoptError extends Error {
   constructor(message, made = []) { super(message); this.name = 'AdoptError'; this.made = made; }
 }
 
-// Whether the working tree already carries a prepared adoption (the governed block and a programme
-// file), so the bank uses it as it is and makes nothing.
+// Whether the working tree already carries a prepared adoption: a programme file that turns
+// governance on, so the bank uses it as it is and makes nothing. One that turns it off is a decision,
+// not a prepared yes.
 function adoptionPrepared(root) {
-  let block = null;
-  try { block = governance.readGovernedBlock(root); } catch { return false; }
-  if (!block.present || block.legacy || block.marker_errors) return false;
-  try { return fs.lstatSync(path.join(root, governance.BINDING_FILE)).isFile(); } catch { return false; }
+  try {
+    const file = path.join(root, governance.BINDING_FILE);
+    if (!fs.lstatSync(file).isFile()) return false;
+    const binding = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    return Boolean(binding) && typeof binding === 'object' && !Array.isArray(binding) && binding.governance !== 'disabled';
+  } catch { return false; }
 }
 
 function storeName(slug) { return `TRANSPORT-${slug.split('/')[1]}`; }
@@ -144,25 +146,7 @@ function ensureParent(plan, writer, made) {
   return created.value.number;
 }
 
-// Step 3: the governed rules as proposal files, rendered from the templates. `root` is read, never written.
-function renderedRules(root) {
-  const template = fs.readFileSync(path.join(TEMPLATES, 'AGENTS.managed.template.md'), 'utf8').replace(/\r\n/g, '\n');
-  const block = managedBlock.findBlocks(template).blocks.find(entry => entry.name === 'TOOLKIT-GOVERNED-RULES');
-  const read = rel => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
-  const files = {};
-  try {
-    files['AGENTS.md'] = managedBlock.upsertBlock(read('AGENTS.md') || '', { source: block.source, name: block.name, version: block.version, body: block.body }, { replaces: ['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE'] }).replace(/\r\n/g, '\n');
-  } catch (error) {
-    throw new AdoptError(`AGENTS.md has broken Toolkit markers, so the governed rules were not added (${error.message}). Repair them with repository-agent-rules first.`);
-  }
-  const claude = read('CLAUDE.md');
-  if (claude === null) files['CLAUDE.md'] = '@AGENTS.md\n';
-  else if (!/^@AGENTS\.md[ \t]*\r?$/m.test(claude)) files['CLAUDE.md'] = `@AGENTS.md\n\n${claude.replace(/\r\n/g, '\n')}`;
-  for (const [name, text] of Object.entries(require('./toolkit-playbooks.cjs').repositoryPlaybooks())) files[`docs/agent-playbooks/${name}`] = text;
-  return files;
-}
-
-// Step 4: the plain-text check, where it is missing. Returns the lines to show.
+// Step 3: the plain-text check, where it is missing. Returns the lines to show.
 function ensurePlainText(root, installer = null) {
   if (fs.existsSync(path.join(root, '.github', 'plain-text.json'))) return [];
   const { PlainTextInstaller } = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
@@ -173,9 +157,10 @@ function ensurePlainText(root, installer = null) {
   return [...said.split('\n').filter(line => line && !line.startsWith('Next:')), 'The plain-text check files were added to the working tree and travel in the turn-on pull request.'];
 }
 
-// Step 5: the dependency security files, where missing: a dependabot.yml for every package ecosystem
+// Step 4: the dependency security files, where missing: a dependabot.yml for every package ecosystem
 // found and Toolkit's dependency auto-merge workflow. They travel in the turn-on pull request, so
-// governance never starts with its own security check failing. An existing file is never changed.
+// governance never starts with its own security check failing. An older Toolkit copy of the workflow
+// is refreshed; any other existing file is never changed.
 function ensureSecurityFiles(root, writer = null) {
   const security = require('./toolkit-governance-security.cjs');
   const results = (writer || (dir => security.writeSecurityFiles(dir, { dependabot: true, workflow: true })))(root);
@@ -184,14 +169,13 @@ function ensureSecurityFiles(root, writer = null) {
   return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the working tree; they travel in the turn-on pull request.`] : [];
 }
 
-// The whole turn-on: { binding, files, made, lines }. The binding still goes through the one
+// The whole turn-on: { binding, made, lines }. The binding still goes through the one
 // governance pull request, which decides nothing until the owner merges it.
 function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
   const made = [];
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
-  let files;
-  try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; files = renderedRules(root); } catch (error) { error.made = made; throw error; }
+  try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; } catch (error) { error.made = made; throw error; }
   const store = ensureStore(plan, writer, made);
   const issue = ensureParent(plan, writer, made);
   const [owner, name] = plan.repository.split('/');
@@ -201,19 +185,18 @@ function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train
     store: { kind: 'github', repository: store, branch: 'main', path: `state/${owner}/${name}/` },
     task_prs: { ...switches },
   };
-  return { binding, files, made, lines };
+  return { binding, made, lines };
 }
 
-// A repository whose programme file and governed block were already prepared in the working tree:
-// nothing is made on GitHub, but the same full rules set is rendered and the plain-text check added
-// where missing, so its turn-on pull request carries exactly what a fresh one does.
-// { binding (the working tree's, or null when unreadable), files, made: [], lines }.
+// A repository whose programme file was already prepared in the working tree: nothing is made on
+// GitHub, and the plain-text check and dependency security files are added where missing, so its
+// turn-on pull request carries exactly what a fresh one does.
+// { binding (the working tree's, or null when unreadable), made: [], lines }.
 function prepared({ root, plainText = null, securityFiles = null }) {
   const lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)];
-  const files = renderedRules(root);
   let binding = null;
   try { binding = JSON.parse(fs.readFileSync(path.join(root, governance.BINDING_FILE), 'utf8').replace(/^\uFEFF/, '')); } catch { binding = null; }
-  return { binding, files, made: [], lines };
+  return { binding, made: [], lines };
 }
 
-module.exports = Object.freeze({ AdoptError, GitHubAdoptionWriter, adopt, adoptionPlan, adoptionPrepared, prepared, renderedRules, storeName });
+module.exports = Object.freeze({ AdoptError, GitHubAdoptionWriter, adopt, adoptionPlan, adoptionPrepared, prepared, storeName });

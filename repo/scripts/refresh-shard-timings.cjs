@@ -21,9 +21,8 @@
 // origin/main in a temporary worktree, pushes it and opens a pull request; with no trigger crossed
 // it opens nothing. While an earlier refresh pull request is open it opens no second one, and one
 // open for over 7 days fails the run naming it: merge or close it.
-// --fail-if-due makes a report run fail when a refresh trigger crossed, for a run that cannot
-// publish. --warn-if-due is the same report for a run without the governance App, where the App is
-// optional: it stays green and writes a GitHub warning annotation with the owner's step instead.
+// --warn-if-due is the report for a run without the governance App, where the App is optional: when
+// a refresh trigger crossed it stays green and writes a GitHub warning annotation with the owner's step.
 //
 // A governed repository's shard list (.github/toolkit-test-shards.json, schema v2, see
 // governed-test-shards.cjs) is refreshed the same way when --repo-root names a checkout that has one:
@@ -125,18 +124,17 @@ function profileFor(root, branch = null, readBranch = defaultBranch) {
   return v2Profile(root, branch || readBranch(root));
 }
 
-const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--branch <default branch>] [--run <id>] [--write | --open-pr | --fail-if-due | --warn-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
+const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--branch <default branch>] [--run <id>] [--write | --open-pr | --warn-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const options = { run: null, write: false, openPr: false, failIfDue: false, warnIfDue: false };
+  const options = { run: null, write: false, openPr: false, warnIfDue: false };
   const BRANCH_ARG = /^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--write') options.write = true;
     else if (arg === '--open-pr') options.openPr = true;
-    else if (arg === '--fail-if-due') options.failIfDue = true;
     else if (arg === '--warn-if-due') options.warnIfDue = true;
     else if (arg === '--repo-root') {
       const value = argv[index += 1];
@@ -155,7 +153,7 @@ function parseArgs(argv) {
     } else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new UsageError(`Unknown argument: ${arg}`);
   }
-  if ([options.write, options.openPr, options.failIfDue, options.warnIfDue].filter(Boolean).length > 1) throw new UsageError('Use one of --write, --open-pr, --fail-if-due or --warn-if-due');
+  if ([options.write, options.openPr, options.warnIfDue].filter(Boolean).length > 1) throw new UsageError('Use one of --write, --open-pr or --warn-if-due');
   return options;
 }
 
@@ -318,13 +316,13 @@ function prBody(run, plan, profile = V1) {
     '',
     'Made by `node <Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --open-pr`, which makes no model calls. Only the shard manifest changes; no test is added, removed or skipped.',
     '',
-    'This is a generated candidate. Required route and evidence:',
-    '- G0: pending checks of the source run, trigger and unchanged budgets.',
-    '- A fresh G1: pending verification and recorded classifier tier, currently RISKY for the shard manifest.',
-    '- Agent UAT: pending exact-head CI coverage on Linux and Windows.',
-    '- Owner UAT: NOT_REQUIRED for manifest-only redistribution because both CI systems exercise the entire changed surface.',
-    '- Full G2: pending before merge.',
+    'This is a generated candidate. Review route: scripted carry (shard-timings). The merge train finder boards it with no G2 only while it stays a manifest-only redistribution from this bot branch (measured times and the files each named shard lists; budgets and every shard unchanged) and its required checks are green on Linux and Windows. Anything more needs the full gates: G0, a fresh G1 and a full G2. The shard manifest is RISKY, so the owner\'s merge card stays.',
     'Budget or generator changes need their own impact assessment.',
+    '',
+    // The merge check reads the UAT line and the train finder the Bump line; without them the
+    // pull request can neither auto-merge nor board a train. A manifest-only change bumps nothing.
+    'UAT: NOT_REQUIRED (manifest-only shard redistribution; both CI systems run every changed shard)',
+    'Bump: none',
   ].join('\n');
 }
 
@@ -432,14 +430,10 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     else if (options.write) {
       fs.writeFileSync(path.join(root, ...profile.manifestRel.split('/')), manifestText(plan.manifest));
       out.write(`Updated ${profile.manifestRel}.\n`);
-    } else if (options.failIfDue || options.warnIfDue) {
+    } else if (options.warnIfDue) {
       const step = `set up the governance App (TOOLKIT_GOVERNANCE_APP_CLIENT_ID and TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY) so the daily run opens the pull request, or run node ${profile.kind === 'v1' ? 'repo/scripts/refresh-shard-timings.cjs --write' : '<Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --write'} and open the pull request by hand.`;
-      if (options.warnIfDue) {
-        out.write(`::warning::A shard timing refresh is due and this run has no governance App to publish it. The shards still run and check every test file; they are only less balanced. Owner: ${step}\n`);
-        return 0;
-      }
-      err.write(`A refresh trigger crossed and this run cannot publish. Owner: ${step}\n`);
-      return 1;
+      out.write(`::warning::A shard timing refresh is due and this run has no governance App to publish it. The shards still run and check every test file; they are only less balanced. Owner: ${step}\n`);
+      return 0;
     } else out.write('A refresh trigger crossed; run again with --write or --open-pr to apply it.\n');
     return 0;
   } catch (error) {

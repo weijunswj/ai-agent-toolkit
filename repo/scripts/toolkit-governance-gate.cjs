@@ -1485,13 +1485,15 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
     return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
   }
   const { lines, checkpoints } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
+  // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
+  const finish = state.programme_records_bind === true ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.
   const rules = state.state === 'ENABLED' ? `\n\n${governedRules()}` : '';
   // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
   return fitLines(checkpoints, (kept, leftOut) => {
     const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own programme.cjs show --session <its id> shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
-    return `${[decidedLine(state), ...lines, ...kept, ...more].join(' ')}${rules}`;
+    return `${[decidedLine(state), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
   });
 }
 
@@ -1575,6 +1577,7 @@ function decidedLine(state) {
   if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED automatically (it ${whereText(state)}, so GitHub governance cannot run here). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
+  if (state.state === 'ERROR' && state.reason === 'toolkit-too-old') return `Toolkit governance: ERROR for this repository: it needs Toolkit ${state.merged?.min_toolkit} or later, and this copy is older, so it cannot give this session the governed rules. Update Toolkit (setup toolkit). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until Toolkit is updated.`;
   if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
   const enabled = 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the Toolkit-governed rules below (GitHub governance: records and evidence).';
@@ -1674,6 +1677,7 @@ function insideRepository(cwd) {
 
 module.exports = Object.freeze({
   ANSWER,
+  decidedLine,
   FINDING_ACTIONS,
   HOST_SESSION_VARIABLE,
   LAUNCHER_MARKERS,

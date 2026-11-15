@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
+const ownerTerminal = require('./owner-terminal.cjs');
 const delegation = require('./codex-delegation-config.cjs');
 const { runtimeLabel } = require('./codex-delegation-state.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
@@ -52,7 +53,6 @@ const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 const MANAGED_QUESTION_BANK_PROTOCOL = 'setup-toolkit-managed-question-bank-v2';
 const MANAGED_PROTOCOL_PROBE_FLAG = '--managed-question-bank-protocol-probe';
-const REMOVE_TOOLKIT_TASKS_FLAG = '--remove-toolkit-tasks';
 const MANAGED_PROTOCOL_ENV = 'AI_AGENT_TOOLKIT_MANAGED_QUESTION_BANK_PROTOCOL';
 const MANAGED_DELEGATION_DEPTH_ENV = 'AI_AGENT_TOOLKIT_MANAGED_DELEGATION_DEPTH';
 const MANAGED_CHILD_TIMEOUT_MS = 300000;
@@ -124,7 +124,6 @@ function parseNonNegativeInteger(value, flagName) {
   return number;
 }
 
-const SCHEDULED_TASK_FLAG_RETIRED = 'The --scheduled-task-update option is retired and was ignored: Toolkit no longer runs scheduled tasks on this computer.';
 const TASK_AUTO_MERGE_MOVED = "Task auto-merge now lives in each repository's governance; say refresh governance to see or change it.";
 
 function emptySetupChoices() {
@@ -230,9 +229,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
-    // Retired with Toolkit's Windows scheduled tasks: older installed skills may still pass it, so it
-    // is accepted and ignored with one notice until the next minor release removes it.
-    else if (arg === '--scheduled-task-update') { next(); args.retiredScheduledTaskFlag = true; }
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--refresh') args.refresh = true;
     else if (arg === '--codex-helper-capacity') {
@@ -607,7 +603,6 @@ function printHelp() {
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
-    '  --remove-toolkit-tasks       on its own: stop and remove Toolkit tasks for the invocation repository main checkout only',
     '  --repo-branch <branch>       default: main',
     '  --repo-remote <url>          default: https://github.com/weijunswj/ai-agent-toolkit',
     '  --host codex|claude-code     default: codex',
@@ -617,7 +612,6 @@ function printHelp() {
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
     '  --refresh                   refresh toolkit: keep every current answer with no bank when the questions match',
     '                               the last bank answered on this computer; any new or different question shows the bank',
-    '  --scheduled-task-update <any> retired: accepted and ignored (Toolkit no longer runs scheduled tasks on this computer)',
     '  --codex-helper-capacity one-helper|root-only|keep|custom',
     '                               Codex only; choose one helper, no helpers, keep current, or a custom count',
     '  --codex-delegation-control limit',
@@ -1571,12 +1565,17 @@ function shortCodexHelpers(delegation) {
   return 'Not verified';
 }
 
+// Gate runs admit only the Toolkit's own helpers whatever the choice, and Toolkit repos keep one
+// subagent layer outside them; the choice sets the rule only in other folders. The note names the
+// Claude Code limit only when it is not the one the choice expects.
 function shortClaudeTopology(profile, depth) {
-  const topology = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'Broader native' : 'Root only';
-  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return `${topology}; subagent limit 1`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `${topology}; subagent limit ${depth.value} (yours)`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return `${topology}; no subagent limit set`;
-  return `${topology}; subagent limit unknown`;
+  const broader = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE;
+  const outsideGates = broader ? 'Toolkit repos: one subagent layer; elsewhere Claude Code\'s own rules' : 'elsewhere one subagent layer';
+  let note = ' (Claude Code limit unknown)';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) note = broader ? ' (Toolkit\'s Claude Code limit of 1 still set)' : '';
+  else if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) note = ` (your Claude Code limit: ${depth.value})`;
+  else if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) note = broader ? '' : ' (Claude Code limit not set yet)';
+  return `Gates: Toolkit helpers only; ${outsideGates}${note}`;
 }
 
 function shortClaudePlugin(current) {
@@ -2562,15 +2561,16 @@ async function promptForHelperCount(lines, rl) {
   }
 }
 
-async function requireHighHelperCapacityApproval(args, lines, rl) {
+// An answer file (the agent passes on the owner's chat approval) answers `approve`; in the owner's own
+// terminal it is a fresh Enter (owner-terminal.cjs), with no readline open on stdin at the time.
+async function requireHighHelperCapacityApproval(args, lines, confirm = ownerTerminal.pressEnter) {
   if (args.codexHelperCount <= 1 || args.approveHighHelperCapacity) return;
   console.log('WARNING: More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work.');
   if (lines) {
     const answer = nextNonEmptyLine(lines).toLowerCase();
     if (answer !== 'approve') throw new Error('Custom helper counts above one require the exact approval answer `approve`');
-  } else {
-    const answer = (await rl.question('Type approve to accept the RAM risk for this persistent capacity change: ')).trim().toLowerCase();
-    if (answer !== 'approve') throw new Error('Custom helper counts above one require the exact approval answer `approve`');
+  } else if (await confirm(`accept the RAM risk of ${args.codexHelperCount} helpers`) !== true) {
+    throw new Error('Custom helper counts above one need your Enter at the RAM prompt, or --approve-high-helper-capacity after your OK in chat');
   }
   args.approveHighHelperCapacity = true;
 }
@@ -2614,7 +2614,7 @@ async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
     } else if (entry.detail_type === 'codex-helper-count') {
       args.codexHelperCount = await promptForHelperCount(lines, null);
     } else if (entry.detail_type === 'codex-helper-risk-approval') {
-      await requireHighHelperCapacityApproval(args, lines, null);
+      await requireHighHelperCapacityApproval(args, lines);
     } else {
       throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
     }
@@ -2964,9 +2964,11 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     }
     if (args.setupChoices.codexHelperCapacity === 'custom') {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
-      await requireHighHelperCapacityApproval(args, lines, rl);
+      if (rl && args.codexHelperCount > 1 && !args.approveHighHelperCapacity) { rl.close(); rl = null; }
+      await requireHighHelperCapacityApproval(args, lines, options.confirm);
     }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
+      if (!lines && !rl) rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
       args.repoRoot = await promptForCustomPath(lines, rl);
       args.repoRootExplicit = true;
     }
@@ -3858,7 +3860,6 @@ class ToolkitSetupExecution {
     if (early?.managed.update_action === 'fast-forwarded' && managed.update_action === 'already up to date') {
       managed = { ...managed, commit_before: early.managed.commit_before, update_action: 'fast-forwarded' };
     }
-    if (args.retiredScheduledTaskFlag) console.log(SCHEDULED_TASK_FLAG_RETIRED);
     // The old per-app answer grants nothing now; it is removed once a repository's switch is read back.
     if (legacyTaskAnswersPresent()) console.log(TASK_AUTO_MERGE_MOVED);
     const localClone = fastForwardLocalClone(args);
@@ -3941,11 +3942,6 @@ async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.length === 1 && argv[0] === MANAGED_PROTOCOL_PROBE_FLAG) {
     process.stdout.write(`${JSON.stringify(managedProtocolProbe())}\n`);
     return 0;
-  }
-  if (argv.includes(REMOVE_TOOLKIT_TASKS_FLAG)) {
-    if (argv.length !== 1) throw new Error(`${REMOVE_TOOLKIT_TASKS_FLAG} runs on its own`);
-    assertSupportedComputer(options);
-    return require('./toolkit-windows-tasks.cjs').main(['remove', '--repo-root', process.env[SETUP_START_FOLDER_ENV] || options.windowsTasksDeps?.cwd || process.cwd()], options.windowsTasksDeps || {});
   }
   const restoreIndex = argv.indexOf(RESTORE_FLAG);
   const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));
@@ -4037,7 +4033,6 @@ module.exports = {
   NewSessionNotice,
   leftoverTaskLines,
   cloudSweepSkipLines,
-  SCHEDULED_TASK_FLAG_RETIRED,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,

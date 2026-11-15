@@ -1,5 +1,163 @@
 # Toolkit Changelog
 
+## 3.135.0 (cleanup route for Toolkit instruction copies)
+
+### Added
+
+- `repo/scripts/toolkit-governance-cleanup.cjs`: in a repository whose governance is on, it previews and then (with `--write`) removes the Toolkit instruction copies older setups wrote: the governed block (keeping every byte outside the markers), the Antigravity bootstrap, Toolkit playbook copies, and a one-line `CLAUDE.md` when `AGENTS.md` has nothing of its own left. It sets `min_toolkit` in the programme file, keeping that file's own layout so the pull request shows one changed line, and never runs git; the owner merges the one pull request. It refuses a version 1 programme file, which cannot carry `min_toolkit`, and a Toolkit source checkout, whose copies are removed by hand, and holds while a pinned cloud sweep copy runs a Toolkit that does not know `min_toolkit` (the bank shows that as a status line). A governed block edited by hand is named in the preview.
+- `refresh governance` asks about a governed repository's instruction copies as one bank row; Keep current is recommended, and only the owner's Clean up answer runs the cleanup in the working tree.
+- `min_toolkit` binding key: a Toolkit copy older than it reads the binding as ERROR and says to update Toolkit.
+- `repo/contracts/agent-rules/playbook-history.json`: hashes of every playbook version Toolkit shipped, retired names included, so a repository's older copies are recognised.
+
+### Changed
+
+- The leftover scan now covers repositories whose governance is on: only the instruction copies are listed there, and its checks and workflow copies are kept. A playbook matching any earlier Toolkit copy is listed. A one-line `CLAUDE.md` that loads the repository's own `AGENTS.md` rules is kept.
+- The session-start preflight names a governed-rules copy as a leftover instead of asking to refresh it. Where governance is on it says removal is the owner's Clean up answer in `refresh governance`; elsewhere it names the leftover scan. Neither asks anything of the current task. A note with both a leftover copy and differing checks names both, instead of reporting broken markers.
+- The n8n router no longer offers "install `AGENTS.md` with `repository-agent-rules`".
+
+## 3.134.0
+
+### Changed
+
+- **Task pages follow page layout v2:** PATH, then TASK (`## WHY` with `### PROBLEM`, `### FIX` and `### IF WE SKIP`, then `## DONE WHEN` with its `**Not in scope:**` label), then `# PLAN` as a part of its own, then the PR GRAPH, then AGENT CONTEXT, then the hand-written text. The `# More` heading is gone: hand-written text sits under the generated blocks with its own Title Case headings. The `###` parts are read only inside `## WHY`, so a new page filed with `## WHY`, `## DONE WHEN` and `# PLAN` lays out on its first pass and a `### Fix` written inside PLAN stays there. New pages have no WHAT (the problem and the fix say it); a page that still has one keeps its words as `## WHAT` at the top of TASK. Pages an earlier Toolkit laid out are redrawn once, with a copy saved first, as before.
+- **The PR GRAPH names each PR's task:** its columns are PR Task (the PR's title, cut to 60 characters so long titles cannot fill the page's budget, and drawn as code so a title forms no link, mention or reference), PR #, Status and Merged SHA. The tracked PR's Status cell carries the task's gate and, while the owner's test is owed, `UAT owed`. With no PR yet the graph reads `None yet` with the gate and any owed UAT (`None yet · G0 ACTIVE`); when the tracked PR is not among the rows shown, one `Task:` line under the graph carries them. Titles are never saved in the task state, so older Toolkit copies still read the store: a refresh pass reads them, and a pass that reads none keeps the titles the page already shows. A PR whose title is not read yet, or looks like a secret, shows `-`.
+- **No STATUS line on task pages:** review, release, the next action and blockers are in the task's handover file, which the task's AGENT CONTEXT line now links first (`Handover: [handover file](…) · Decisions: …`) when the binding names a GitHub store. The task status and the exact UAT state stay in one hidden line in the block, so frozen closed pages and the issue-closure guard read them as before, and STATUS lines older pages still carry keep counting for that guard. A task kept open on purpose shows its `Kept open: <reason> (since <time>)` line under the PR GRAPH.
+- **Heading rule:** generated headings are in capitals and hand-written ones are in Title Case by convention. Only a hand-written heading below the generated blocks that reuses a generated name in capitals (such as `## PR GRAPH` or `# STATUS`) holds the page with `PAGE_LAYOUT_HELD`, naming the heading; it is never rewritten. Other headings in capitals, such as `# NOTES`, are left as written.
+- **Rules:** the governed rules' programme tracking line now says each child's PR GRAPH shows each PR's SHA, gate and owed UAT, and its handover file the release and review.
+
+## 3.133.0 (turn-on writes only what the repository needs; scripted review carry; gate route check and route stamps)
+
+### Changed
+
+- Turning governance on now opens one pull request with only the programme file and the Toolkit CI checks (the plain-text check, plus the dependency security files and cloud sweep copies where they apply). It no longer writes the governed block into `AGENTS.md`, a `CLAUDE.md` shim, the Antigravity bootstrap or the playbooks: the installed Toolkit gives every session the governed rules, and the playbooks ship as the `toolkit-playbooks` skill.
+- A working tree is a prepared adoption when its programme file turns governance on; a governed block is no longer needed. A programme file that turns governance off is not taken as a prepared yes.
+- The governance discovery list no longer offers to reuse or refresh a governed block. A block an older setup left is listed as no longer needed, and the CI checks the turn-on adds are listed.
+- `repository-agent-rules` no longer installs or refreshes the governed block, the Antigravity bootstrap or playbook copies; it reports any it finds as leftovers and keeps the CI checks and the one-line `CLAUDE.md` shim.
+- The programme reconciler's instructions and the docs that summarise them now say governed issue writes follow the merged programme file turning governance on (ENABLED), with or without a governed block in `AGENTS.md`.
+- The session-start check of a governed repository's vendored Toolkit checks (the plain-text check and the personal-data guard) now runs when the repository carries no Toolkit block, so a stale or missing copy is still noted there. Only the checks are compared; the repository's own `AGENTS.md` and `CLAUDE.md` are left alone. When a newer Toolkit is on record on this computer, the note says the checks may come from that newer Toolkit and to refresh Toolkit, so an older copy never rewrites newer checks.
+- The n8n router no longer offers to install `AGENTS.md` with `repository-agent-rules`, which no longer does that; it offers the adapter-only `AGENTS.md` or none.
+
+### Merge trains
+
+- **Scripted review carry:** three kinds of pull request now board a merge train with no fresh G2, each only inside an exact check (`repo/scripts/toolkit-review-carry.cjs`), with green required checks, one `Bump:` line, an accepted `UAT:` line and no footer or other personal data in the title or body. Anything else, or any doubt, still needs the normal G2.
+  - **Body-only FAIL:** a G2 that failed a pull request only for its description adds `Carry: body-only uat=<state>` under its verdict's route stamp. Once the body is fixed, the same head boards on that verdict, as long as the body keeps that UAT state or makes it `OWNER_TEST_NEEDED`. A weaker UAT line needs a fresh G2.
+  - **Shard-timing refresh:** the bot's `toolkit/shard-timings-*` pull request that changes only the shard manifest, and only its measured times and the files each named shard lists (its normal rebalance included). Budgets, every other key and every shard must stay as they were; the rest shard runs any file a named shard drops, and CI proves each file ran once. Its body now carries `UAT:` and `Bump: none` lines and names this route.
+  - **Generated sync:** a pull request that changes only files the two instruction syncs write (each sync now lists them as `PROJECTED_OUTPUTS`): whole projected files, or managed blocks with the hand-written rest unchanged. Only where the Validate workflow runs both syncs' `--check` (the Toolkit repository), at the merge base and the head, since that check is what proves the generated text matches its sources; elsewhere it needs a G2.
+- **RISKY keeps the owner's card:** the shard manifest and instruction files are RISKY, so a carried pull request of those still waits for the owner's merge card.
+- **Wording-only docs:** a G2 brief with `Review class: wording-only` may run at high on the reviewer's pinned model, and the gate route check accepts it. `find` accepts that high stamp only when every changed file is a LIGHT `.md` file.
+- **Rules:** the gate rules name the carry and the wording-only route.
+
+### Gate routes
+
+- **Gate route check:** the governance hook now refuses a G0, G1 or G2 session's state-changing tools while the host's own record (the hook input's effort, `CLAUDE_EFFORT`, and the model the CLI wrote to the session transcript) is off its stack-registry pin. The session can still post why it stopped. A session is a gate when a Toolkit launcher marked it or its brief has a `Gate:` line; a brief-declared gate also carries `Route: <profile> <member> <model>/<effort>`, where the member is a role name (`DISCOVERY`, `BUILDER`, or `REVIEWER` for the profile's one reviewer) or a reviewer id. A helper inside a G0 or G1 is checked against its helper pin, never the gate's.
+- **Owner overrides:** a temporary owner change of a gate's model or effort is one brief line, `Route override: <member> <model>/<effort> owner=<rec N or cmsg id>`, for that launch only. Without the owner citation the registry pin stands.
+- **Route stamps:** G0 plans, G1 pull request bodies and G2 verdicts carry one `Route:` stamp line: `host-verified`, `launcher-attested` (the host shows no record, so the launcher's Route line stands in) or `UNVERIFIED`. `node repo/scripts/toolkit-gate-route.cjs stamp` prints a session's own stamp, and the hook refuses a verdict or G1 body whose stamp is not the session's own. A verdict is read only as the first line of a posted comment, so reads and quotes of verdict lines go through.
+- **Merge train acceptance:** `find` refuses a pull request whose G1 or G2 stamp is off its pin, and a RISKY one whose stamp is missing or `UNVERIFIED`.
+- **Rules:** the roles and routes page, the gates page, the gate rules' route proof and the Projects controller skill's gate launch line say so; the Projects line now says to set the model and effort pin explicitly on every gate launch.
+
+### Fixed
+
+- **Hourly nudge PR owners on quiet runs:** step 5 now takes each open PR's owner from the thread list step 2b reads on every run, instead of step 2's list, which a quiet run skips. A thread that takes the PR step over because the run could not read GitHub pages the thread list itself.
+- **Unowned evidence-store PRs:** the `PR UNOWNED` action keeps the owner's OK for closing a task-repository PR only. An evidence-store PR is merged or closed without asking, because the store is agent-managed with standing permission.
+- **Other projects' outdated tasks are report only:** the platform changes a scheduled task's prompt only from the thread that task posts into, so the Toolkit project's daily check-in and its `PROJECT TASKS OUTDATED` action now name the project and task for the owner and never call `update_trigger` across projects. Each project's own coordinator swaps its own tasks when its own check-in reports `TASKS OUTDATED`.
+
+## 3.132.0 (light CI after main moves; pull request body pre-flight; old scheduled-task code removed)
+
+### Programme sweep
+
+- **Busy tasks no longer stall the sweep:** a task with more than 100 closing references or cross-references now reads the rest of its PR links page by page (up to 1,000 a connection). Before, one such task made every pass incomplete, so the lease never recorded a finished pass, an earlier `PASS_STOPPED` never cleared and the task's PR history stopped updating. A pass that still cannot prove its read whole records `an incomplete read` as its reason instead of none.
+- **Keep a merged task open on purpose:** `update --patch` with `{"private":{"keep_open":{"reason":"<why>"}}}` keeps a task whose PRs have all merged off the work queue's `TASK_MERGED_OPEN` while its merged PRs are the ones the mark was set over; a later merge brings the task back until the mark is set again with a new reason. The write stamps the time and the PRs it covers, and the task page's STATUS line shows `Kept open: <reason> (since <time>)`. Older Toolkit copies still read the document.
+- **Null in an update patch:** `null` on a field a candidate, UAT or review must carry (such as `candidate.head`) now sets it to null instead of removing it, which could only end in a refused write. A refused state document now names its task.
+
+### CI
+
+- **Body edits stay light after main moves:** a pull request title or body edit used to rerun the whole Linux and Windows test matrix whenever `main` had moved since the last run, because the tested merge commit changed. The route job now also reuses an earlier run of the same head on an older base, but only when GitHub shows that run tested this head merged into a base commit today's base still contains, and the base moved no test file, shard manifest, workflow or dependency file. Only the newest run at the head that ran its tests can be reused: if it failed, the edit runs in full rather than reaching back to an older pass. The edit's run still checks the title, body and repository again. Any doubt runs in full.
+- **The summary checks follow the choice:** the gate job's legs step names the tested commit it reused (`TESTED_COMMIT`), and both `--verify-ci` checks require exactly that commit.
+- **Faster Toolkit validation:** the validator reads the topology policy once per run instead of once per checked review field, builds each retired-wording pattern once, and skips plain words when it looks for file paths. A full run takes about a quarter less time, which the copied-workspace tests feel on every case.
+- **Topology tests split in two:** the copied-workspace topology tests took up to about 109 s of their 120 s budget on Windows. The retired-wording cases now run in their own file, so both halves run side by side well inside the budget.
+
+### Pull request bodies
+
+- **Pre-flight before every write:** `node repo/scripts/toolkit-pr-body.cjs --body-file <draft> --title "<title>" --out <clean file>` removes every line holding an AI footer, a claude.ai session or project-thread link or the Projects attribution marker, then checks the cleaned body with the same personal-data guard CI runs, the UAT line rule and, in the Toolkit repository, the one `Bump:` line rule. In a repository with no guard config it uses a default with pull request text and AI attribution on and says so; a guard block whose report it cannot read counts as not ready. Builders run it before opening a pull request and before every body edit, so a body they write already passes the body checks instead of failing and costing a full run and a review round (a cloud create still gets the route's footer, which the update right after it removes).
+- **Footer-free writes from the cloud:** the PR review and git completion playbooks now say to write pull request bodies with the GitHub connector, never cloud `gh`, and to read them back; the footer a cloud create still gets is cleaned once with the connector's update call.
+- **Projects briefs:** every G1 brief asks for a body that passed the pre-flight; the merge card steps and the cloud hook parity table point at it.
+
+### Removed
+
+- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now fails to start; say `remove toolkit` to list and remove it after your OK.
+- Setup's retired `--scheduled-task-update` and `--remove-toolkit-tasks` options are gone. Setup still prints one line when old Toolkit tasks are recorded on a Windows computer, pointing to `remove toolkit`.
+- The permission ask rows for the old task commands are gone, since those commands no longer exist.
+
+### Changed
+
+- `remove toolkit` keeps a small legacy cleaner for old tasks. It removes a task only while it still carries Toolkit's marker (or the exact description an old launcher wrote when it disabled it) and still matches the definition Toolkit recorded. A task you made or that Toolkit only listed is never removed, and a Task Scheduler folder goes only when it is empty.
+- The `schedule_folder` binding key is retired: it is still accepted, so a binding that carries it stays valid, and nothing reads it.
+
+### Fixed
+
+- **Governance post-merge finish ends on a by-hand check:** a security check only a person can make, such as a CodeQL setup Toolkit cannot place, and dependency auto-merge waiting for protection that needs a fix by hand, now end the finish with the owner's step instead of retrying it every session.
+- **Clearer finish results:** a private repository on GitHub Free with no required checks names default-branch protection with what GitHub cannot enforce, not as a step; a write GitHub refuses keeps GitHub's answer in the reason, and a refusal for a non-admin account (forbidden) is held with the step to run `migrate` as an admin; the bank's required-checks row names the `migrate` step. A security read or write GitHub did not confirm, or a free setting Toolkit would still turn on, keeps being retried.
+- **CodeQL read limits:** more workflow files than Toolkit reads, or more than one workflow with CodeQL steps it cannot place, is named as a by-hand check instead of an unread result.
+- **Re-runs of the turn-on pull request:** a workflow someone else pushed to the turn-on branch stays; only Toolkit's marked copies and the shard list leave it. The read-back after an update waits briefly for GitHub to show the new head.
+
+## 3.131.0
+
+### Changed
+
+- **Setup question 2.1 (Claude Code agents):** the Current cell now says what the choice does in plain words, for example `Gates: Toolkit helpers only; elsewhere one subagent layer`, instead of `Root only; subagent limit 1`. With broader native behaviour it says Toolkit repos still keep one subagent layer. It adds the Claude Code subagent limit only when that limit is not the one the choice expects (your own value, not set yet, unknown, or Toolkit's limit still set under broader native behaviour).
+- **The programme page has three generated parts:** CURRENT, PROGRAMME GRAPH and AGENT CONTEXT, then the hand-written text. The DECISIONS block, which nothing read and which linked only the newest decision comment, is gone. A page that still has one reads as before and loses it on the next write, keeping the text around it byte for byte.
+- **AGENT CONTEXT links the full decision index:** its Decisions part now links every top-level decision index comment on the parent, oldest first (`index`, or `index 1` to `index n`; a directory comment stands for its parts), before `programme.cjs trace <n>`. Bot and archive comments never count, as in the trace audit. The body itself therefore reaches every record an index lists, so hand-written index links on the page can later move to an archive comment without leaving records unlinked.
+- **A faulty index comment costs only its own link:** an index comment on the parent that links in a loop, too deep or to too many pages is left out of the Decisions part, and the healthy ones stay linked, so their records stay reachable from the body. The pass names the faulty comment in a report-only `TRACE_INDEX_INVALID` finding with the step to fix it.
+- **Re-runs update the open setup pull request:** answering the bank again while the turn-on pull request is open adds one commit with the new answers to the same branch, never a second pull request. Toolkit changes only its own turn-on branch.
+- **Rendered from the managed checkout:** the turn-on and `toolkit governance check` render the cloud workflows with the managed Toolkit checkout's own installer, so a lagging plugin copy cannot render workflows that do not match their pinned commit.
+
+### Added
+
+- **Governance post-merge finish:** after the question bank's turn-on pull request is merged, the next session starts `toolkit-governance.cjs finish` in the background. It adds default-branch protection, the ruleset that blocks force pushes and the free dependency and security settings without asking again, and the following session shows the result once, built from what actually happened: what is on, what GitHub cannot enforce on a private repository on GitHub Free, and any step left for the owner (such as adding required checks to a fresh repository before protection can be added). Only a setting GitHub could not confirm keeps it pending, with the reason, and it is tried again later. The bank names these settings whenever Turn on is offered, not only when it is recommended.
+- **One closing line for the turn-on:** the bank's setup pull request ends with a fixed summary (its link, what merging does, the files it holds, what finishes after the merge) and one line: "Merge <link>. Nothing else is needed from you."
+
+### Removed
+
+- **Shard timings `--fail-if-due`:** nothing used it; `--warn-if-due` stays.
+
+### Fixed
+
+- **Setup file wording:** the docs now say that an older Toolkit copy of the dependency auto-merge workflow is refreshed, instead of "existing files are never changed".
+
+## 3.130.0 (periodic runs hand GitHub steps to a thread with the repos and recover skipped schedules)
+
+### Fixed
+
+- **A queued holder order could be filed twice or lose its receipts:** when the cloud sweep filed an order's result and read it back but then failed to take the order off the queue, the next run ran the order again. After the order's expiry that filed a completed order as both done and refused, or replaced a stopped result and its write receipts with a bare refusal; before expiry it replaced the receipts with "done earlier". Result files now name the commit that queued the order, and the next run finds the result for that same commit and only removes the file. The same order queued again comes with a new commit and still runs, so a stopped order continues from its refused write. The sweep also runs a pending file exactly as listed, read at the commit that queued it, so a file replaced mid-run never hides the replacement or gets a result for an order that did not run.
+- A shard timing refresh pull request now ends with `UAT: NOT_REQUIRED` and `Bump: none` lines, so the auto-merge check accepts it and the merge train finder can board it once its review passes. Before, every such pull request needed both lines added by hand.
+
+### Claude Projects
+
+- **Added:** the hourly nudge and the daily check-in start their first line with `GITHUB STEPS OWED: <steps> | ` when a step could not read GitHub (the nudge's CI waits, PR sweep and programme sweep; the check-in's GitHub and checker steps), instead of only saying so.
+- **Changed:** a coordinator without repo access no longer finishes a task run by relaying it: the same turn it hands every GitHub step of the run to a thread that has the repos, and writes `.done` only after that thread reports back (**GitHub steps need repo access** in the recurring-tasks reference, and the skill's **Every task run reaches the project chat** line).
+- **Added:** the hourly nudge's PR step also reads each scheduled workflow's newest run and raises `SCHEDULE MISSED: <names> | ` when a scheduled time passed more than 30 minutes ago with no run since, because GitHub can skip a scheduled run. The coordinator re-reads the newest run, then has a thread with the repos start it by hand on the default branch only when the workflow stays inside the repository's own GitHub state or the owner approved it by name; anything else waits for the owner.
+
+### Changed
+
+- The Source Watch PR Notifier can now also be started by hand, on `main` only (a manual run on any other branch does nothing), so a skipped scheduled run can be recovered without waiting for the next schedule. A test now requires every scheduled workflow in the repository to take `workflow_dispatch`.
+- The global rules' root-cause principle now also says to fix problems upstream: where it matters, the fix goes in the shared source that copies, prompts and later runs inherit, not a local patch. The global block's byte cap rises to 21,900 to hold it.
+
+## 3.129.0 (Enter-only owner terminal steps)
+
+### Added
+
+- `repo/scripts/owner-terminal.cjs` is the one place Toolkit scripts print to, and confirm with, the owner's own terminal: a title line, a few `label: value` facts, at most one sentence wrapped to the window, and an OK or STOP line. Colour and markers show only on a terminal with `NO_COLOR` unset.
+- Every owner confirmation is a fresh Enter, and Ctrl+C stops with nothing changed. The prompt drops anything typed or pasted before it and anything that arrives before the input has been quiet for a moment, and a pasted block never confirms, so the blank line at the end of a pasted command no longer answers it.
+- The governance App setup command has a `--save both|variable|secret` step for an App made by hand: it saves the Client ID and the key file's key on the repository, reads both names back, and overwrites an App already there only with `--replace`, which `toolkit governance check` prints only on its replace route.
+
+### Changed
+
+- `toolkit permissions --apply` and `--remove`, the governance App setup, `toolkit governance disable` in a terminal, the `toolkit governance migrate` rulesets, `programme.cjs migrate-state --apply`, the setup RAM approval and the Codex configuration approval wait for Enter instead of a typed `apply`, `create`, `yes` or `approve`. Answer files and flags work as before.
+- `toolkit env` remove, apply, connect, revoke and retire-codex-env wait for Enter when run in your own terminal; your agent still passes your chat yes or no on stdin. `toolkit env show` asks for Enter instead of the key's name. Typing a secret value stays hidden typed input.
+- The governance App setup screen is a title, four facts and one sentence instead of two long paragraphs.
+- The App's by-hand save commands are the setup command's `--save` step instead of long pasted PowerShell and shell lines that asked you to type `replace`.
+- The global Development Principles say owner terminal steps are short and Enter-only.
+
 ## 3.128.2
 
 ### Fixed

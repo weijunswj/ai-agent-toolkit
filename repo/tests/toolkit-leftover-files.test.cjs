@@ -52,7 +52,7 @@ const TOOLKIT_FILES = {
   'src/app.js': '// AI-AGENT-TOOLKIT is mentioned here, and this is still my file\n',
 };
 
-test('only the ungoverned repository is scanned, only its provably Toolkit files are listed, and nothing is written', t => {
+test('a repository whose governance could not be checked is not scanned, only provably Toolkit files are listed, and nothing is written', t => {
   const w = world(t, {
     governed: { state: 'ENABLED', files: TOOLKIT_FILES },
     widget: { state: 'DISABLED', files: TOOLKIT_FILES },
@@ -65,31 +65,36 @@ test('only the ungoverned repository is scanned, only its provably Toolkit files
   const report = w.scan();
   assert.deepEqual(treeOf(w.folder), before, 'the scan changes nothing');
 
-  assert.deepEqual([w.of(report, 'governed').scanned, w.of(report, 'governed').reason], [false, 'governance is on, so its Toolkit files are in use']);
+  // A governed repository is scanned for instruction copies only: its check and programme file are in use.
+  const governed = w.of(report, 'governed');
+  assert.deepEqual([governed.scanned, governed.governance], [true, 'governance on']);
+  assert.deepEqual(governed.files.map(item => [item.file, item.kind]), [['AGENTS.md', 'block'], ['docs/agent-playbooks/INDEX.md', 'file']]);
   for (const name of ['unknown', 'broken', 'unreadable']) assert.deepEqual([w.of(report, name).scanned, w.of(report, name).reason], [false, 'its governance could not be checked'], name);
 
   const widget = w.of(report, 'widget');
   assert.equal(widget.governance, 'governance off');
   assert.deepEqual(widget.files.map(item => [item.file, item.kind, item.proof]), [
     ['AGENTS.md', 'block', 'Toolkit marker'],
-    ['CLAUDE.md', 'file', "same as Toolkit's shipped copy"],
     ['docs/agent-playbooks/INDEX.md', 'file', "same as Toolkit's shipped copy"],
     ['.github/scripts/plain-text-check.cjs', 'check', 'Toolkit marker'],
   ]);
   assert.equal(widget.files[0].block, 'TOOLKIT-GOVERNED-RULES');
   assert.equal(widget.files[0].edited, false);
-  assert.deepEqual(widget.kept, [{ file: '.github/toolkit-programme.json', reason: 'it records this repository\'s "governance off" decision' }]);
-  assert.deepEqual(widget.unproven, [{ file: 'docs/agent-playbooks/safety-gates.md', reason: "it differs from Toolkit's shipped copy" }]);
+  assert.deepEqual(widget.kept, [
+    { file: 'CLAUDE.md', reason: "it loads this repository's own rules in AGENTS.md" },
+    { file: '.github/toolkit-programme.json', reason: 'it records this repository\'s "governance off" decision' },
+  ]);
+  assert.deepEqual(widget.unproven, [{ file: 'docs/agent-playbooks/safety-gates.md', reason: "it differs from every Toolkit copy" }]);
 
   const clean = w.of(report, 'clean');
   assert.deepEqual([clean.scanned, clean.governance, clean.files, clean.kept, clean.unproven], [true, 'no governance decision', [], [], []]);
 
   const text = leftovers.describe(report).join('\n');
   assert.match(text, /^Leftover Toolkit files \(report only: nothing was changed or deleted\)/);
-  assert.match(text, /example\/governed: not scanned, because governance is on, so its Toolkit files are in use\./);
+  assert.match(text, /example\/governed \(governance on\), /);
   assert.match(text, /- AGENTS\.md: Toolkit block TOOLKIT-GOVERNED-RULES inside the file\. The rest of the file is yours\./);
   assert.match(text, /- Kept: \.github\/toolkit-programme\.json, because it records this repository's "governance off" decision\./);
-  assert.match(text, /- Not listed as Toolkit's: docs\/agent-playbooks\/safety-gates\.md, because it differs from Toolkit's shipped copy\./);
+  assert.match(text, /- Not listed as Toolkit's: docs\/agent-playbooks\/safety-gates\.md, because it differs from every Toolkit copy\./);
   assert.match(text, /example\/clean \(no governance decision\), .*:\n- No file here is provably Toolkit's\./);
   assert.match(text, /Nothing is removed without your OK\.$/);
   assert.equal(text.includes('My own notes'), false, 'no file contents are printed');
@@ -127,7 +132,9 @@ test('cloud sweep copies with the Toolkit marker are listed; an edited one says 
     [gate.file, 'workflow', 'Toolkit marker', true],
   ]);
   assert.deepEqual(w.of(report, 'mine').files, [], 'an unmarked file, or a marker naming another workflow, is not listed');
-  assert.equal(w.of(report, 'governed').scanned, false);
+  // In a governed repository the sweep copy is in use, so it is kept, never listed.
+  assert.deepEqual(w.of(report, 'governed').files, []);
+  assert.deepEqual(w.of(report, 'governed').kept.map(item => item.file), [sweep.file]);
   const text = leftovers.describe(report).join('\n');
   assert.match(text, /- \.github\/workflows\/toolkit-programme-sweep\.yml: a Toolkit cloud sweep copy\. With governance off it writes nothing, but its runs still start on GitHub, so removing it is suggested\./);
   assert.match(text, /toolkit-programme-sweep-gate\.yml: a Toolkit cloud sweep copy, edited by hand since\./);
@@ -232,7 +239,79 @@ test('command line: scan prints the report, --json prints the same data, anythin
   assert.match(run.stderr, /^Usage: /);
 });
 
+// A governed repository shaped like an early adopter: an older governed block above its own rules,
+// the shipped playbooks, an earlier copy of one, a retired one, one the owner edited, and the files
+// governance uses. Only the instruction copies are listed; the rest is kept or not proven.
+test('a governed repository lists its instruction copies, including earlier and retired playbooks, and keeps what governance uses', t => {
+  const crypto = require('node:crypto');
+  const hash = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+  const older = '# Safety gates\n\nAn earlier Toolkit wording.\n';
+  const retired = '# Managed memory\n\nA playbook Toolkit no longer ships.\n';
+  const history = { 'safety-gates.md': [hash(older)], 'managed-memory.md': [hash(retired)] };
+  const cloud = require('../scripts/toolkit-cloud-workflows.cjs');
+  const body = '# A copy\nname: X\non: push\njobs: {}\n';
+  const sweep = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${cloud.WORKFLOWS[0].id} toolkit=${'c'.repeat(40)} sha256=${cloud.bodyHash(body)}\n${body}`;
+  const playbooks = Object.fromEntries(Object.entries(PLAYBOOKS).map(([name, text]) => [`docs/agent-playbooks/${name}`, text]));
+  const w = world(t, {
+    adopter: { state: 'ENABLED', files: {
+      'AGENTS.md': `${BLOCK}\n\n# Adopter rules\n\nKeep these.\n`,
+      ...playbooks,
+      'docs/agent-playbooks/safety-gates.md': older,
+      'docs/agent-playbooks/managed-memory.md': retired,
+      'docs/agent-playbooks/git-completion.md': `${PLAYBOOKS['git-completion.md']}\nMy own addition.\n`,
+      'docs/agent-playbooks/my-team.md': '# Our own playbook\n',
+      '.github/scripts/plain-text-check.cjs': CHECK,
+      [cloud.WORKFLOWS[0].file]: sweep,
+      '.github/toolkit-programme.json': '{ "governance": "enabled" }\n',
+    } },
+    // Nothing of its own is left once the block goes, so the one-line CLAUDE.md goes too.
+    template: { state: 'ENABLED', files: { 'AGENTS.md': template('AGENTS.managed.template.md'), 'CLAUDE.md': '@AGENTS.md\n', '.agents/rules/00-agent-toolkit-bootstrap.md': template('antigravity-bootstrap.template.md') } },
+  });
+  const scan = () => new leftovers.LeftoverScan({ githubFolder: w.folder, governance: w.governance, history }).scan();
+  const report = scan();
+  const adopter = w.of(report, 'adopter');
+  const listed = adopter.files.map(item => item.file);
+  const expected = Object.keys(PLAYBOOKS).filter(name => name !== 'git-completion.md').map(name => `docs/agent-playbooks/${name}`);
+  assert.deepEqual(listed, ['AGENTS.md', ...[...expected, 'docs/agent-playbooks/managed-memory.md'].sort()]);
+  assert.equal(adopter.files[0].empties, false, 'the adopter keeps its own rules in AGENTS.md');
+  assert.deepEqual(adopter.files.filter(item => ['safety-gates.md', 'managed-memory.md'].some(name => item.file.endsWith(name))).map(item => item.proof), ['same as an earlier Toolkit copy', 'same as an earlier Toolkit copy']);
+  assert.deepEqual(adopter.unproven, [{ file: 'docs/agent-playbooks/git-completion.md', reason: "it differs from every Toolkit copy" }]);
+  assert.deepEqual(adopter.kept.map(item => item.file), ['.github/scripts/plain-text-check.cjs', cloud.WORKFLOWS[0].file, '.github/toolkit-programme.json']);
+  assert.ok(!listed.includes('docs/agent-playbooks/my-team.md'));
+  const plain = w.of(report, 'template');
+  assert.deepEqual(plain.files.map(item => [item.file, item.kind, item.empties ?? null]), [
+    ['AGENTS.md', 'block', true], ['.agents/rules/00-agent-toolkit-bootstrap.md', 'block', true], ['CLAUDE.md', 'file', null]]);
+});
+
+test('every playbook Toolkit ships now is in the playbook history, so a copy made from it is always recognised', () => {
+  const crypto = require('node:crypto');
+  const history = require('../contracts/agent-rules/playbook-history.json').playbooks;
+  for (const [name, text] of Object.entries(PLAYBOOKS)) {
+    assert.ok((history[name] || []).includes(crypto.createHash('sha256').update(text).digest('hex').slice(0, 16)), `${name}: add its hash to repo/contracts/agent-rules/playbook-history.json`);
+  }
+});
+
 test('the script has no way to change a file', () => {
   const source = fs.readFileSync(SCRIPT, 'utf8');
   assert.doesNotMatch(source, /\b(?:writeFileSync|appendFileSync|rmSync|unlinkSync|renameSync|rmdirSync|mkdirSync|copyFileSync|child_process|spawn\w*|exec(?:File)?Sync)\b/);
+});
+
+test('discovery takes main checkouts at the top and one level down; a linked worktree is skipped', t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-discover-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  const main = path.join(folder, 'app'), nested = path.join(folder, 'group', 'lib'), linked = path.join(folder, 'app-worktree');
+  fs.mkdirSync(path.join(main, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(nested, '.git'), { recursive: true });
+  fs.mkdirSync(linked); fs.writeFileSync(path.join(linked, '.git'), 'gitdir: ../app/.git/worktrees/x\n');
+  assert.deepEqual(leftovers.discoverCheckouts(folder).sort(), [main, nested].sort());
+});
+
+test('discovery reports an unreadable folder as held without hiding readable neighbours', t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-discover-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  const blocked = path.join(folder, 'blocked'), good = path.join(folder, 'good');
+  fs.mkdirSync(blocked); fs.mkdirSync(path.join(good, '.git'), { recursive: true });
+  const found = leftovers.discoverCheckouts(folder, { readDir: dir => { if (dir === blocked) throw new Error('access denied'); return fs.readdirSync(dir, { withFileTypes: true }); } });
+  assert.ok(found.includes(good));
+  assert.ok(found.some(row => row.root === blocked && row.held && /could not be read/.test(row.reason)));
 });

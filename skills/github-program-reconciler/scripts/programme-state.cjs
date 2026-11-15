@@ -399,7 +399,7 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
-  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued)' },
+  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -926,11 +926,67 @@ function validateChild(doc) {
     }
     check(errors, Array.isArray(doc.blockers) && doc.blockers.every(isText), 'blockers must be a list of text');
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
+    if (isObject(doc.private) && doc.private.keep_open !== undefined) validateKeepOpen(errors, doc.private.keep_open);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
       && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
   return errors;
 }
+
+// A merged task the controller keeps open on purpose: why, since when, and the merged or closed PRs
+// it was set over (the write stamps both). It lives in the child's private part, which every Toolkit
+// reader accepts, so no reader refuses a document that carries it; this Toolkit shows it on the task
+// page and leaves the task off the work queue's TASK_MERGED_OPEN while the task's finished PRs are
+// the ones it covers. A later merge is a new condition: the mark lapses and the finding returns.
+// Removed with {"private":{"keep_open":null}}; set again with a new reason to cover a later merge.
+function validateKeepOpen(errors, keep) {
+  check(errors, isObject(keep), 'private.keep_open must be an object with a reason');
+  if (!isObject(keep)) return;
+  checkShape(errors, keep, { all: ['reason', 'at', 'covers'], optional: ['at', 'covers'] }, 'private.keep_open');
+  check(errors, isText(keep.reason) && keep.reason.length <= ATTENTION_NOTE_LIMIT, `private.keep_open.reason must be text of at most ${ATTENTION_NOTE_LIMIT} characters`);
+  // The reason is drawn on the public task page, so it gets the public free-text screen.
+  if (isText(keep.reason)) {
+    for (const [held, what] of [['\\', 'a path'], ['@', 'an @ (an address or a mention)'], ['://', 'an address']]) check(errors, !keep.reason.includes(held), `private.keep_open.reason holds ${what}`);
+    check(errors, !HOST_LIKE.test(keep.reason), 'private.keep_open.reason holds something that reads as a host name');
+  }
+  check(errors, keep.at === undefined || (isText(keep.at) && Number.isFinite(Date.parse(keep.at))), 'private.keep_open.at must be a date and time');
+  check(errors, keep.covers === undefined || (Array.isArray(keep.covers) && keep.covers.length <= KEEP_OPEN_COVERS && keep.covers.every(number => isInt(number, 1))
+    && new Set(keep.covers).size === keep.covers.length), `private.keep_open.covers must list at most ${KEEP_OPEN_COVERS} different PR numbers`);
+}
+
+// The task's merged or closed PR numbers, in order.
+const finishedPrs = doc => [...new Set([doc?.pr, ...(Array.isArray(doc?.prs) ? doc.prs : [])]
+  .filter(pr => isInt(pr?.number, 1) && ['MERGED', 'CLOSED'].includes(pr.state)).map(pr => pr.number))].sort((a, b) => a - b);
+
+// Stamps a keep-open mark on every write: one that adds it or changes its reason gets the write time
+// and the task's finished PRs; one that keeps the reason keeps both from the stored mark, whatever the
+// write supplied.
+function stampKeepOpen(previous, next, now) {
+  const keep = next?.private?.keep_open;
+  if (!isObject(keep)) return next;
+  const before = previous?.private?.keep_open;
+  const kept = isObject(before) && before.reason === keep.reason && before.at && Array.isArray(before.covers);
+  next.private = { ...next.private, keep_open: { ...keep, at: kept ? before.at : now, covers: kept ? before.covers : finishedPrs(next).slice(-KEEP_OPEN_COVERS) } };
+  return next;
+}
+
+// The write-time stamps of a child document's private part.
+function stampChild(previous, next, now) {
+  drift().stampNextAction(previous, next, now);
+  return stampKeepOpen(previous, next, now);
+}
+
+// A mark holds while every finished PR on the task is one it was set over.
+const keptOpen = doc => {
+  const keep = doc?.private?.keep_open;
+  if (!isObject(keep) || !isText(keep.reason) || !Array.isArray(keep.covers)) return false;
+  const covered = new Set(keep.covers);
+  return finishedPrs(doc).every(number => covered.has(number));
+};
+const keptSince = doc => {
+  const at = Date.parse(doc.private.keep_open.at || '');
+  return Number.isFinite(at) ? ` (since ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')}Z)` : '';
+};
 
 const isOptionalText = (value, limit = JOURNAL_TEXT_LIMIT) => value === null || (isText(value) && value.length <= limit);
 
@@ -973,7 +1029,8 @@ function validateJournal(doc) {
 
 function assertValid(kind, doc) {
   const errors = kind === 'parent' ? validateParent(doc) : kind === 'journal' ? validateJournal(doc) : validateChild(doc);
-  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The ${kind} state document is invalid: ${errors[0]}`, { errors });
+  const which = kind === 'parent' ? doc?.parent_issue : doc?.issue;
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The ${kind} state document${isInt(which, 1) ? ` for #${which}` : ''} is invalid: ${errors[0]}`, { errors });
   return doc;
 }
 
@@ -1046,7 +1103,11 @@ function validateBinding(binding) {
     // nothing acts on it in this release, so a copy that knows the key is out before any writer sets it.
     const ciShards = binding.ci_shards;
     if (ciShards !== undefined) check(errors, v2 && isObject(ciShards) && Object.keys(ciShards).every(key => ['answer', 'offered_at'].includes(key)) && ['yes', 'not-now', 'never'].includes(ciShards.answer) && optional(ciShards.offered_at, value => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value)), 'ci_shards may hold only answer (yes, not-now or never) and offered_at (a date and time), in a version 2 binding');
-    // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
+    // The oldest Toolkit release that may read this binding (a cleaned repository needs the installed
+    // Toolkit to give sessions its governed rules). toolkit-governance-state.cjs compares it.
+    check(errors, optional(binding.min_toolkit, value => v2 && typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value)), 'min_toolkit must be a Toolkit version written as three whole numbers joined by dots, in a version 2 binding');
+    // Retired: the Task Scheduler folder of the old computer tasks. Nothing reads it; it stays
+    // accepted so a binding that carries it stays valid.
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
     if (projection !== undefined) {
@@ -1064,7 +1125,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -1459,12 +1520,16 @@ function foldJournals(doc, observation) {
   return { doc: next, findings, holds };
 }
 
-// RFC 7386 merge patch, limited to the named top-level fields.
-function mergePatch(target, patch) {
+// RFC 7386 merge patch, limited to the named top-level fields. One exception: in a fixed-shape
+// field (a candidate, UAT or review), a null for a key the shape requires sets that key to null.
+// Deleting it could only end in a refused write, and "head": null is how a patch says "no head yet".
+function mergePatch(target, patch, shape = null) {
   if (!isObject(patch)) return clone(patch);
+  const required = shape ? shape.all.filter(key => !(shape.optional || []).includes(key)) : [];
   const result = isObject(target) ? clone(target) : {};
   for (const [key, value] of Object.entries(patch)) {
-    if (value === null) delete result[key];
+    if (value === null && required.includes(key)) result[key] = null;
+    else if (value === null) delete result[key];
     else result[key] = mergePatch(result[key], value);
   }
   return result;
@@ -1487,7 +1552,7 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
   for (const [key, value] of Object.entries(patch)) {
     // Lists and plain values are replaced whole; objects are merge-patched.
     if (Array.isArray(value) || !isObject(value)) next[key] = clone(value);
-    else next[key] = mergePatch(next[key], value);
+    else next[key] = mergePatch(next[key], value, Object.hasOwn(SHAPES, key) ? SHAPES[key] : null);
   }
   if (kind === 'parent') refuseNewLegacy(doc, next);
   return next;
@@ -1574,8 +1639,16 @@ const shortSha = sha => (isSha(sha) ? sha.slice(0, 7) : '');
 // Free text as one Markdown table-safe line: shortened first, then `&`, `<` and `>` become entities
 // (so no comment, marker or tag can be opened) and backslash and `|` are escaped.
 function publicText(value) {
+  return escapedText(cutText(value, TEXT_LIMIT));
+}
+
+// Free text as one line of at most `limit` characters, ending `...` when cut.
+function cutText(value, limit) {
   const line = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
-  const short = line.length > TEXT_LIMIT ? `${line.slice(0, TEXT_LIMIT - 3)}...` : line;
+  return line.length > limit ? `${line.slice(0, limit - 3)}...` : line;
+}
+
+function escapedText(short) {
   return short.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
@@ -1787,32 +1860,27 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   ].join('\n');
 }
 
-// The DECISIONS block an issue body carries in place of the old comment trace: the decision records
-// stay as tagged comments on the issue, listed by `programme.cjs trace <n>`, and the body keeps one
-// link, to the newest tagged comment (or none). Index and directory pages an older Toolkit posted,
-// archive comments and bot comments are never that link, nor on the parent an Agent context comment
-// (its AGENT CONTEXT block lists those).
-function latestDecisionComment(comments, parentPage = false) {
+// A task page's decision link, in place of the old comment trace: the decision records stay as
+// tagged comments on the issue, listed by `programme.cjs trace <n>`, and the body keeps one link, to
+// the newest tagged comment (or none). Index and directory pages an older Toolkit posted, archive
+// comments and bot comments are never that link.
+function latestDecisionComment(comments) {
   const { commentTag, isArchiveComment } = require('./decision-tags.cjs');
   const { isBot } = require('./decision-trace-audit.cjs');
-  const tagged = (comments || []).filter(comment => !isBot(comment) && commentTag(comment.body) && !(parentPage && commentTag(comment.body) === CONTEXT_TAG) && !isArchiveComment(comment.body)
+  const tagged = (comments || []).filter(comment => !isBot(comment) && commentTag(comment.body) && !isArchiveComment(comment.body)
     && ![INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER].some(marker => String(comment.body || '').includes(marker))
     && !String(comment.body || '').includes('programme-trace intent='));
   return tagged.reduce((latest, comment) => (!latest || String(comment.created_at || '') >= String(latest.created_at || '') ? comment : latest), null);
 }
 
-// A task page carries the same link as one AGENT CONTEXT line; the programme page keeps its DECISIONS block.
-function renderTraceBlockBody(number, comments = [], repository = '', parentPage = false) {
-  const latest = latestDecisionComment(comments, parentPage);
-  if (!parentPage) {
-    return ['# AGENT CONTEXT', `<!-- programme-trace issue=${number} -->`,
-      `Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
-  }
-  return [
-    '# DECISIONS',
-    `<!-- programme-trace issue=${number} -->`,
-    `Decision records are this issue's tagged comments (topic on line 1, \`---\` on line 2; the latest per topic wins). List them with \`programme.cjs trace ${number}\`. ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)}).` : 'None yet.'}`,
-  ].join('\n');
+// A task page carries its decision link as one AGENT CONTEXT line (the TRACE block). The programme
+// page has no TRACE block: its AGENT CONTEXT block links the decision index (renderContextBlockBody).
+// The line starts with the link to the task's handover file (`handover`), which holds the gate,
+// review, release, next action and blockers the page no longer shows.
+function renderTraceBlockBody(number, comments = [], repository = '', handover = null) {
+  const latest = latestDecisionComment(comments);
+  return ['# AGENT CONTEXT', `<!-- programme-trace issue=${number} -->`,
+    `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
 }
 
 // What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker.
@@ -1868,46 +1936,77 @@ function renderPrNavBlockBody(chains, pr) {
   return ['# PATH', '<!-- programme-nav -->', ...chains.map(chain => `${chains.length > 1 ? '- ' : ''}${chain.map(number => `#${number}`).join(' > ')} > PR #${pr}`)].join('\n');
 }
 
+// The UAT states that leave the owner's test still owed.
+const OWED_UAT_STATES = Object.freeze(['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED']);
+
 // The PR GRAPH of a task page: every open PR, then the latest finished ones, older ones on one line.
+// A row is the PR's title (titleCell), its number, its status and its merge commit. The tracked PR's status cell also carries
+// the task's gate and, while the owner's test is owed, `UAT owed`. With no PR yet, or no tracked PR
+// among the rows shown, one line under the graph carries them instead, so they always show. Review,
+// release and the next action are in the task's handover file.
 const PR_GRAPH_FINISHED = 10;
-function prGraphLines(child) {
+// Titles are cut to this many characters, so long titles cannot fill the page's budget.
+const PR_TITLE_SHOWN = 60;
+// A PR title as its PR GRAPH cell. Anyone who opens a PR writes its title, so it is shown as code:
+// GitHub forms no link, image, mention, issue reference or autolink inside code. Look-alikes stand in
+// for the characters that could end the code, open a comment or Toolkit marker (`<`, `>`) or form a
+// ` · UAT: <state>` segment the closure guard reads (the middle dot); a pipe is escaped for the table.
+// A title that is missing, or looks like a secret, shows `-`. Titles are never saved in state: a
+// pass that did not read a PR's title keeps the cell its page already shows (pageTitles).
+const TITLE_LOOKALIKES = Object.freeze({ '`': "'", '\\': '\uFF3C', '<': '\u2039', '>': '\u203A', '\u00B7': '\u2022', '|': '\\|' });
+function titleCell(title) {
+  const line = cutText(title, PR_TITLE_SHOWN);
+  if (!line || secretShaped(title) || secretShaped(line)) return '-';
+  return `\`${line.replace(/[`\\<>\u00B7|]/g, char => TITLE_LOOKALIKES[char])}\``;
+}
+// The titles a page's own PR GRAPH shows, by PR number, read back from its STATE block. A block
+// edited by hand (its hash no longer matches) gives none.
+function pageTitles(body) {
+  const titles = new Map();
+  const { block } = findStateBlock(String(body || ''));
+  if (!block || block.tampered) return titles;
+  for (const match of block.body.matchAll(/^\|`((?:\\\||[^`|])*)`\|#([1-9][0-9]*)\|/gm)) titles.set(Number(match[2]), match[1].replace(/\\\|/g, '|'));
+  return titles;
+}
+function prGraphLines(child, titles = null) {
   const listed = child.prs || [];
   const tracked = child.pr?.number && !listed.some(pr => pr.number === child.pr.number)
     ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
   const all = [...tracked, ...listed];
-  if (!all.length) return ['None yet.'];
+  const gate = [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ');
+  const task = [gate, OWED_UAT_STATES.includes(child.uat?.state) ? 'UAT owed' : ''].filter(Boolean);
+  if (!all.length) return [task.length ? ['None yet', ...task].join(' · ') : 'None yet.'];
   const open = all.filter(pr => !['MERGED', 'CLOSED'].includes(pr.state));
   const finished = all.filter(pr => ['MERGED', 'CLOSED'].includes(pr.state));
-  const gate = pr => (pr.number === child.pr?.number ? [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ') : '') || '-';
+  const shown = [...open, ...finished.slice(0, PR_GRAPH_FINISHED)];
+  const status = pr => [pr.state, ...(pr.number === child.pr?.number ? task : [])].join(' · ');
   const merged = pr => (pr.state === 'MERGED' && isSha(pr.merge_sha) ? `[${shortSha(pr.merge_sha)}](https://github.com/${child.repository}/commit/${pr.merge_sha})` : '-');
   const earlier = finished.slice(PR_GRAPH_FINISHED);
-  return ['| PR | Status | Gate | Merged |', '|---|---|---|---|',
-    ...[...open, ...finished.slice(0, PR_GRAPH_FINISHED)].map(pr => `|#${pr.number}|${pr.state}|${gate(pr)}|${merged(pr)}|`),
-    ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : [])];
+  return ['| PR Task | PR # | Status | Merged SHA |', '|---|---|---|---|',
+    ...shown.map(pr => `|${titleCell(titles?.get(pr.number))}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
+    ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : []),
+    ...(task.length && !shown.some(pr => pr.number === child.pr?.number) ? ['', `Task: ${task.join(' · ')}`] : [])];
 }
 
-// The status block of a task page: its PR GRAPH and one STATUS line. The drawn revision stays in a
-// comment for the sweep's drift check. Section headings generated or required by Toolkit are in
-// capitals; a heading people add themselves keeps its own case.
-function renderChildBlockBody(child, outcome) {
+// The status block of a task page: its PR GRAPH. The drawn revision, the task status and the UAT
+// state stay in comments, out of sight: the sweep's drift check reads the revision, a closed page
+// is frozen once its status reads COMPLETED or RETIRED (frozenPage), and issue-closure.cjs owedUat
+// reads the ` · UAT: <state>` segment, so change those together. Section headings generated or
+// required by Toolkit are in capitals; a heading people add themselves is in Title Case.
+function renderChildBlockBody(child, outcome, titles = null) {
   const status = outcome ? statusText(outcome, child) : '-';
-  const gate = [child.gate?.role, child.gate?.state].filter(Boolean).join(' ');
-  const wait = ownerWait(child);
-  // UAT and review show once recorded, marked STALE_HEAD when given at an older head. The UAT
-  // segment (` · UAT: <state>`) is read by issue-closure.cjs owedUat: change both together.
-  const line = [status, status === 'IN PROGRESS' && gate ? `Gate: ${publicText(gate)}` : null, wait ? `Waiting on you: ${wait}` : null,
-    child.uat?.state ? `UAT: ${publicText(uatText(child))}` : null, child.review?.state ? `Review: ${publicText(reviewText(child))}` : null,
-    child.next_action ? `Next: ${publicText(child.next_action)}` : null, child.release ? `Release: ${publicText(child.release)}` : null].filter(Boolean).join(' · ');
+  const uat = child.uat?.state ? ` · UAT: ${publicText(uatText(child))}` : '';
+  // A task the controller keeps open on purpose says why, under its graph, while the mark covers
+  // every finished PR (keptOpen).
+  const kept = keptOpen(child) ? ['', `Kept open: ${publicText(child.private.keep_open.reason)}${keptSince(child)}`] : [];
   return [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
     `<!-- State revision ${child.revision} (issue-${child.issue}.json) -->`,
+    `<!-- Task status: ${status}${uat} -->`,
     '# PR GRAPH',
     '',
-    ...prGraphLines(child),
-    '',
-    '# STATUS',
-    '',
-    line,
+    ...prGraphLines(child, titles),
+    ...kept,
   ].join('\n');
 }
 
@@ -1934,7 +2033,7 @@ function renderPrStatusBlockBody(pr, head, tasks) {
 // again, so a pass reads and writes only open tasks and the parent. A reopened task is drawn again.
 function frozenPage(issue, block) {
   return issue.state === 'closed' && !issue.is_pull_request && Boolean(block) && !block.tampered
-    && /^(?:- Status: )?(?:COMPLETED|RETIRED)\b/m.test(block.body);
+    && /^(?:- Status: |<!-- Task status: )?(?:COMPLETED|RETIRED)\b/m.test(block.body);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2068,6 +2167,20 @@ function newestBlockVersion(text) {
   return newest;
 }
 
+// The body without a trace block: an old programme-page DECISIONS block is taken out with one of
+// the blank lines that separated it, so the text around it keeps its bytes.
+function removeTraceBlock(text) {
+  const source = String(text || '');
+  const eol = /\r\n/.test(source) ? '\r\n' : '\n';
+  const { block: found, error } = findStateBlock(source, TRACE_BLOCK_NAME);
+  if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  if (!found) return source;
+  let before = source.slice(0, found.start), after = source.slice(found.end);
+  if (after.startsWith(eol)) after = after.slice(eol.length);
+  if (before.endsWith(eol + eol)) before = before.slice(0, -eol.length);
+  return before + after;
+}
+
 // The body with the trace block written: replaced in place, else added at the end of the body.
 function upsertTraceBlock(text, rendered) {
   const source = String(text || '');
@@ -2142,20 +2255,45 @@ function contextCommentId(comments) {
   return ids.length === 1 ? ids[0] : null;
 }
 
+// The decision index the programme page links: every top-level index comment a person wrote (one
+// no other healthy generated index lists), oldest first, so a directory stands for the parts under
+// it. The trust rules are the audit's own: bot and archive comments never count. An index comment
+// that links in a loop or too deep is left out, and only it: the healthy ones stay linked, so the
+// body still reaches every record they list, and the pass names the faulty one in a
+// TRACE_INDEX_INVALID finding (decisionIndexFault).
+function decisionIndexIds(comments, repository, number) {
+  const { linkableIndexRoots } = require('./decision-trace-audit.cjs');
+  const created = new Map((comments || []).map(comment => [String(comment.id), String(comment.created_at || '')]));
+  return linkableIndexRoots(comments || [], repository, number).roots.map(comment => String(comment.id))
+    .sort((a, b) => (created.get(a) < created.get(b) ? -1 : created.get(a) > created.get(b) ? 1 : Number(a) - Number(b)));
+}
+
+// The report-only finding for a programme page whose decision index has a structural fault, or null.
+function decisionIndexFault(number, comments, repository) {
+  const { linkableIndexRoots } = require('./decision-trace-audit.cjs');
+  const { errors, faulty } = linkableIndexRoots(comments || [], repository, number);
+  if (!errors.length) return null;
+  const left = faulty.length ? ` The Decisions line leaves out index comment${faulty.length > 1 ? 's' : ''} ${faulty.join(', ')} until then; the other index comments stay linked.` : '';
+  return { code: 'TRACE_INDEX_INVALID', issue: number, detail: `${indexErrorText(errors)}${left}` };
+}
+
 // The AGENT CONTEXT block: one line. With one Agent context comment it links that comment; with
 // more than one it holds, names them (the first five) and leaves them in the comments; with none it
 // says so. `handover` is the link to the page's handover file, listed next; `notes` are the archived
-// note comments, oldest first ([{ title, link }]), after it. It ends with the command that lists the
+// note comments, oldest first ([{ title, link }]), after it. It ends with the decisions: links to the
+// decision index comments (`index`, or `index 1` to `index n`), then the command that lists the
 // page's decision records.
 const CONTEXT_NAMED = 5;
 function renderContextBlockBody(number = null, comments = [], repository = '', notes = [], handover = null) {
   const ids = contextCommentIds(comments);
   const link = id => `[comment ${id}](${commentLink(issueUrl(repository, number), id)})`;
+  const indexes = decisionIndexIds(comments, repository, number);
+  const indexLinks = indexes.map((id, at) => `[index${indexes.length > 1 ? ` ${at + 1}` : ''}](${commentLink(issueUrl(repository, number), id)})`);
   const context = ids.length === 1 ? link(ids[0]) : ids.length > 1
     ? `held, ${ids.length} comments have that topic (${ids.slice(0, CONTEXT_NAMED).map(link).join(', ')}${ids.length > CONTEXT_NAMED ? ` and ${ids.length - CONTEXT_NAMED} more` : ''}); keep it on one and the next redraw links it`
     : 'none yet';
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
-    [`Agent context: ${context}`, ...(handover ? [`Handover: [handover file](${handover})`] : []), ...(notes.length ? [`Notes: ${notes.map(note => `[${note.title}](${note.link})`).join(', ')}`] : []), `Decisions: \`programme.cjs trace ${number}\``].join(' · '),
+    [`Agent context: ${context}`, ...(handover ? [`Handover: [handover file](${handover})`] : []), ...(notes.length ? [`Notes: ${notes.map(note => `[${note.title}](${note.link})`).join(', ')}`] : []), `Decisions: ${indexLinks.length ? `${indexLinks.join(', ')} · ` : ''}\`programme.cjs trace ${number}\``].join(' · '),
   ].join('\n');
 }
 
@@ -2421,6 +2559,15 @@ const CHANGED_PAGES = 10;
 // A runaway guard on one PR list (100 PRs a page), far above any real repository; the pass's own
 // request budget is what normally bounds it.
 const LIST_PAGE_GUARD = 1000;
+// Pages of 100 read per issue link connection: 1,000 closing references or cross-references.
+const LINK_PAGES = 10;
+// The most merged or closed PRs one keep-open mark records as covered (the most link paging reads).
+const KEEP_OPEN_COVERS = 1000;
+const PR_NODE = 'number title body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner }';
+const LINK_FIELDS = Object.freeze({
+  closing: `pageInfo { hasNextPage endCursor } nodes { ${PR_NODE} }`,
+  timeline: `pageInfo { hasNextPage endCursor } nodes { ... on CrossReferencedEvent { source { __typename ... on PullRequest { ${PR_NODE} } } } }`,
+});
 // PR discovery's own budget: a fixed part for the PR lists' detail reads and the parent, plus one
 // request for each batch of twenty task links and two for each task read this pass (an older PR to
 // reconfirm and a merge to confirm). It grows with the board, so a large board never fails discovery
@@ -2958,7 +3105,7 @@ class StateStore {
     if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
-    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
+    if (kind === 'child') stampChild(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -3078,7 +3225,7 @@ class StateBatch {
       if (!entry.doc || (entry.base && sameState(entry.base, entry.doc))) continue;
       const doc = clone(entry.doc);
       if (entry.kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
-      if (entry.kind === 'child') drift().stampNextAction(entry.base, doc, store.now());
+      if (entry.kind === 'child') stampChild(entry.base, doc, store.now());
       doc.revision = entry.base ? entry.base.revision + (contentDigest(entry.base) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
       doc.volatile = { written_at: store.now(), ...(store.toolkitVersion ? { toolkit: store.toolkitVersion } : {}) };
       assertValid(entry.kind, doc);
@@ -3668,7 +3815,7 @@ class BranchStateStore extends StateStore {
     }
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
-    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
+    if (kind === 'child') stampChild(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -3745,7 +3892,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      number body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
+      number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
@@ -3929,7 +4076,7 @@ class ProgrammeGraphReader {
     const commit = pr.commits?.nodes?.[0]?.commit;
     const rollup = commit?.statusCheckRollup;
     return {
-      number: pr.number,
+      number: pr.number, title: pr.title,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
       train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
@@ -3997,18 +4144,14 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `The programme PR scan reached ${LIST_PAGE_GUARD} full pages.`);
   }
 
-  // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
+  // At most twenty aliases, each with two issue connections of 100. A connection that has more pages
+  // is read on, page by page, up to LINK_PAGES pages; a busy task passes 100 cross-references, and a
+  // task whose links stay unread keeps every sweep pass from finishing. No partial GraphQL data is used.
   issuePullRequestLinks(numbers, spend) {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
-      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
-      }
-      timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
-        pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
-        } }
-      }
+      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) { ${LINK_FIELDS.closing} }
+      timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) { ${LINK_FIELDS.timeline} }
     }`).join('\n');
     spend();
     const response = this.transport.request('POST', 'graphql', {
@@ -4020,8 +4163,7 @@ class ProgrammeGraphReader {
     if (response.json?.errors?.length || !repository) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The issue PR references were not fully readable.');
     return new Map(numbers.map(number => {
       const issue = repository[`i${number}`];
-      const closing = issue?.closedByPullRequestsReferences;
-      const timeline = issue?.timelineItems;
+      const { closing, timeline } = this.moreLinkPages(number, issue?.closedByPullRequestsReferences, issue?.timelineItems, spend);
       const complete = [closing, timeline].every(connection => connection?.pageInfo?.hasNextPage === false && Array.isArray(connection.nodes));
       const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')] : [];
       // A merge train carries its members' work; the member PR, never the train, is the task's PR.
@@ -4030,6 +4172,43 @@ class ProgrammeGraphReader {
       return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(candidate => candidate && kept.has(candidate.number)), history }];
     }));
+  }
+
+  // The rest of one issue's link connections, from the cursors the first page returned. Each page
+  // spends from the discovery budget. A page that cannot be read, a connection with more pages but no
+  // cursor, or LINK_PAGES pages read leaves that connection with a next page, so the task stays
+  // incomplete exactly as before; only a stop for the whole pass is raised.
+  moreLinkPages(number, closing, timeline, spend) {
+    const [owner, name] = this.repository.split('/');
+    const more = connection => connection?.pageInfo?.hasNextPage === true && isText(connection.pageInfo.endCursor) && Array.isArray(connection.nodes);
+    for (let page = 1; page < LINK_PAGES && (more(closing) || more(timeline)); page += 1) {
+      const wanted = { closing: more(closing), timeline: more(timeline) };
+      let next;
+      try {
+        spend();
+        const response = this.transport.request('POST', 'graphql', {
+          query: `query($owner: String!, $name: String!, $number: Int!, $closingAfter: String, $timelineAfter: String, $closing: Boolean!, $timeline: Boolean!) {
+            repository(owner: $owner, name: $name) { more: issue(number: $number) {
+              closedByPullRequestsReferences(first: 100, after: $closingAfter, includeClosedPrs: true) @include(if: $closing) { ${LINK_FIELDS.closing} }
+              timelineItems(first: 100, after: $timelineAfter, itemTypes: [CROSS_REFERENCED_EVENT]) @include(if: $timeline) { ${LINK_FIELDS.timeline} }
+            } } }`,
+          variables: { owner, name, number, closingAfter: wanted.closing ? closing.pageInfo.endCursor : null, timelineAfter: wanted.timeline ? timeline.pageInfo.endCursor : null, ...wanted },
+        });
+        next = response.status === 200 && !response.json?.errors?.length ? response.json?.data?.repository?.more : null;
+      } catch (error) {
+        if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
+        next = null;
+      }
+      const joined = (connection, key) => {
+        const page = next?.[key];
+        return isObject(page?.pageInfo) && Array.isArray(page.nodes) ? { pageInfo: page.pageInfo, nodes: [...connection.nodes, ...page.nodes] } : null;
+      };
+      const nextClosing = wanted.closing ? joined(closing, 'closedByPullRequestsReferences') : closing;
+      const nextTimeline = wanted.timeline ? joined(timeline, 'timelineItems') : timeline;
+      if (!nextClosing || !nextTimeline) break;
+      closing = nextClosing; timeline = nextTimeline;
+    }
+    return { closing, timeline };
   }
 
   // The issues and pull requests GitHub changed at or after `since`, oldest change first. Each
@@ -4426,7 +4605,8 @@ function graphPr(pr, repository) {
   if (merged && !Number.isFinite(Date.parse(pr.mergedAt || pr.merged_at))) return null;
   const head = typeof pr.head === 'string' ? pr.head : pr.head?.sha || pr.headRefOid || pr.head_sha || null;
   return {number:pr.number, state:state === 'DRAFT' ? 'OPEN' : state, merge_sha:merged ? mergeSha : null,
-    merged_at:pr.mergedAt || pr.merged_at || null, head, train:pr.train === undefined ? trainRows(pr.body) : pr.train};
+    merged_at:pr.mergedAt || pr.merged_at || null, head, train:pr.train === undefined ? trainRows(pr.body) : pr.train,
+    ...(typeof pr.title === 'string' && pr.title.trim() ? { title: pr.title.trim() } : {})};
 }
 
 function prHistory(entries) {
@@ -4477,7 +4657,7 @@ const EFFECT_TEXT = {
   detach: effect => `Detach finished #${effect.target.issue} from under #${effect.target.parent} (the task stays in the catalogue)`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, TASK, PR GRAPH and STATUS, AGENT CONTEXT, then More); its hand-written text moves, and a copy of the page is saved first`
+  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, TASK, PLAN, PR GRAPH, AGENT CONTEXT, then the hand-written text); its hand-written text moves, and a copy of the page is saved first`
     : effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Write the PATH and STATUS blocks at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
@@ -4486,10 +4666,12 @@ const EFFECT_TEXT = {
   edit_archive_comment: effect => `Update a registered programme archive comment on #${effect.target.issue}`,
 };
 
-// The parts of a body a block effect rewrites when its state block is already current.
+// The parts of a body a block effect rewrites when its state block is already current. The
+// programme page has no DECISIONS block: its decisions sit in AGENT CONTEXT, and an old block goes.
 function staleParts(effect) {
-  const names = [['trace', 'DECISIONS block'], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
-  if (!names.length) return 'DECISIONS block';
+  const decisions = effect.stale?.parent ? 'AGENT CONTEXT block' : 'DECISIONS block';
+  const names = [['trace', effect.stale?.parent ? 'AGENT CONTEXT block (the old DECISIONS block goes)' : decisions], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
+  if (!names.length) return decisions;
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
@@ -4869,6 +5051,9 @@ class Reconciler {
   // tasks in `scoped`; a task outside it adds its known PRs to the linked set and nothing else.
   discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null) {
     const discovery = new Map(); const histories = new Map();
+    // Each PR's title as this pass read it, for the PR GRAPH only: titles are never saved in state.
+    const titles = new Map();
+    const noteTitle = pr => { if (pr?.title) titles.set(pr.number, pr.title); };
     const selectedPrs = new Map();
     // Take the boundary before any PR list read, never at planning completion: a close during
     // this scan must remain eligible on the next one.
@@ -4943,7 +5128,7 @@ class Reconciler {
               history.push(item);
             }
           } catch(error) { incomplete([number],error); continue; }
-          history.forEach(pr=>linked.add(pr.number));
+          history.forEach(pr=>{ linked.add(pr.number); noteTitle(pr); });
           // The members a train carried stay this task's PRs; the train (saved earlier too) leaves.
           const own=withoutCarriers(history);
           histories.set(number,prHistory(own));
@@ -4971,7 +5156,8 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)) && !listedCarriers.has(entry.issue))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
+    listed.forEach(noteTitle);
+    return {discovery,histories,titles,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -5084,6 +5270,8 @@ class Reconciler {
       if (!found) continue;
       if ((observed.blockedBy.get(outcome.issue) || []).some(moving)) continue;
       const { doc, open, merged, hours, latest } = found;
+      // Kept open on purpose by the controller: the mark on its page says why, so it is not queued.
+      if (merged && keptOpen(doc)) continue;
       const since = new Date(latest).toISOString().slice(0, 16);
       const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
       findings.push(merged
@@ -5329,11 +5517,23 @@ class Reconciler {
     return chain;
   }
 
-  renderAll(parent, children, issues, comments) {
+  // `titles` maps a PR number to the title this pass read; a PR it did not read keeps the title its
+  // task page already shows, so a pass that reads no titles changes no page.
+  renderAll(parent, children, issues, comments, titles = new Map()) {
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children, issues, comments)]]);
-    for (const child of children.values()) blocks.set(child.issue, renderChildBlockBody(child, outcomes.get(child.issue)));
+    for (const child of children.values()) {
+      const shown = new Map([...pageTitles(issues?.get(child.issue)?.body), ...titles]);
+      blocks.set(child.issue, renderChildBlockBody(child, outcomes.get(child.issue), shown));
+    }
     return blocks;
+  }
+
+  // The PR titles a pass read: its PR lists and task links, and the PRs it read one by one.
+  passTitles(observed) {
+    const titles = new Map(observed?.prGraph?.titles || []);
+    for (const pr of observed?.prs?.values?.() || []) if (pr?.title && isInt(pr.number, 1)) titles.set(pr.number, pr.title);
+    return titles;
   }
 
   // The link to a page's handover file in the private store (programme-handover.cjs), or null when
@@ -5359,7 +5559,12 @@ class Reconciler {
     return number === this.binding.parent_issue ? { ...(this.binding.projection || {}), after_block: CURRENT_BLOCK_NAME } : {};
   }
 
-  // The body with the state block and the DECISIONS block written (see projectTrace).
+  // A task page's TRACE block body; the programme page has none (null).
+  traceBodyFor(number, comments) {
+    return number === this.binding.parent_issue ? null : renderTraceBlockBody(number, comments, this.binding.repository, this.handoverLink(number));
+  }
+
+  // The body with the state block and the TRACE block written (see projectTrace).
   projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, page = null) {
     if (number === this.binding.parent_issue) return this.projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, page);
     return this.projectTrace(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, { relay: page?.relay === true });
@@ -5500,12 +5705,13 @@ class Reconciler {
     return { ...(feasible || projected), refused: true };
   }
 
-  // The body with the state block and the DECISIONS block written. The decisions block is a fixed
-  // line and one link, so nothing pages into index comments: `overflow` is always empty. A body still
-  // at the threshold is the caller's to report (BODY_TOO_LARGE).
+  // The body with the state block and, on a task page, the TRACE block written; the programme page
+  // has none (an old DECISIONS block is taken out). The trace block is a fixed line and one link, so
+  // nothing pages into index comments: `overflow` is always empty. A body still at the threshold is
+  // the caller's to report (BODY_TOO_LARGE).
   projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
     const build = () => {
-      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue);
+      const traceBody = this.traceBodyFor(number, comments);
       let layoutHold = null;
       if (layout.relay) {
         // A task page: PATH, then TASK, then the other generated blocks, then everything else.
@@ -5523,7 +5729,8 @@ class Reconciler {
         : upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
       const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
       const withContext = layout.context ? upsertContextBlock(withNav, renderBlock(layout.context, version, CONTEXT_BLOCK_NAME)) : withNav;
-      const body = assertBlocksReadBack(upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)),
+      const withTrace = traceBody ? upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)) : removeTraceBlock(withContext);
+      const body = assertBlocksReadBack(withTrace,
         [[CURRENT_BLOCK_NAME, currentBody], [BLOCK_NAME, stateBody], [NAV_BLOCK_NAME, navBody], [CONTEXT_BLOCK_NAME, layout.context], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
       return { body, traceBody, moved: withState.moved, ...(layoutHold ? { layoutHold } : {}) };
     };
@@ -5577,7 +5784,7 @@ class Reconciler {
   }
 
   diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
-    const blocks = this.renderAll(parent, children, observed.issues, observed.comments);
+    const blocks = this.renderAll(parent, children, observed.issues, observed.comments, this.passTitles(observed));
     const version = this.toolkitVersion || '0.0.0';
     const requested = targetsOverride || (only ? [only, parent.parent_issue] : this.scope ? [...blocks.keys()].filter(number => number === parent.parent_issue || this.scope.has(number)) : [...blocks.keys()]);
     const targets = [...requested.filter(number => number !== parent.parent_issue), ...requested.filter(number => number === parent.parent_issue)];
@@ -5612,8 +5819,9 @@ class Reconciler {
       const relay = this.taskRelay(number, issue);
       const move = !relay.relay && Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
-      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue);
-      const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
+      const traceBody = this.traceBodyFor(number, comments);
+      // The programme page's trace is current when it has no TRACE block left.
+      const traceCurrent = traceBody ? Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered : !traced.block;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
         && resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN'));
@@ -5637,9 +5845,11 @@ class Reconciler {
       }
       if (!ordered) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
-      if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no DECISIONS block yet' : traced.block.tampered ? 'the DECISIONS block was edited by hand' : 'the DECISIONS block differs from the comments (an old comment trace is replaced here)' });
+      if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traceBody ? 'an old DECISIONS block is still on the page' : !traced.block ? 'no DECISIONS block yet' : traced.block.tampered ? 'the DECISIONS block was edited by hand' : 'the DECISIONS block differs from the comments (an old comment trace is replaced here)' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
+      const indexFault = number === parent.parent_issue ? decisionIndexFault(number, comments, this.binding.repository) : null;
+      if (indexFault) findings.push(indexFault);
       let projected;
       const topicBudget = Math.max(0, MAX_TOPIC_COMMENTS_PER_PASS - effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory).reduce((count, effect) => count + effect.target.parts.length, 0));
       try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, number === parent.parent_issue ? MAX_TOPIC_COMMENTS_PER_PASS : topicBudget, { parent, only, traceTopicBudget: topicBudget, relay: relay.relay }); }
@@ -5685,8 +5895,8 @@ class Reconciler {
       if (number === parent.parent_issue && projected.body === issue.body && !archiveEffects.length && !timeWillChange && !archiveNeedsRecovery) continue;
       for (const part of archiveEffects) effects.push({ kind: parent.page_archive?.some(entry => entry.key === part.key && entry.comment_id) ? 'edit_archive_comment' : 'post_archive_comment', target: { issue: number, key: part.key } });
       for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
-      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
-        insert: !block, move: current && move && ordered, state: !current || move, relay: Boolean(projected.relaid && projected.moves), stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
+      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), ...(projected.traceBody ? { trace: blockDigest(projected.traceBody) } : {}), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
+        insert: !block, move: current && move && ordered, state: !current || move, relay: Boolean(projected.relaid && projected.moves), stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent, ...(number === parent.parent_issue ? { parent: true } : {}) }, body, updated_at: issue.updated_at });
     }
   }
 
@@ -5851,7 +6061,7 @@ class Reconciler {
     const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next, now) };
     effects.push(effect);
     const number = parent.parent_issue;
-    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', ...PAGE_CODES]);
+    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'TRACE_INDEX_INVALID', 'MANAGED_BLOCK_BROKEN', ...PAGE_CODES]);
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
     const redraw = attention => {
       keep(effects, effect => ['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && effect.target.issue === number);
@@ -5984,8 +6194,8 @@ class Reconciler {
       const existing = children.get(number)?.doc;
       const copy = clone(doc);
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
-      // A next action this pass sets counts as set now, as the write will stamp it.
-      drift().stampNextAction(existing || null, copy, this.now());
+      // A next action or keep-open mark this pass sets counts as set now, as the write will stamp it.
+      stampChild(existing || null, copy, this.now());
       return [number, copy];
     }));
     const blockHoldStart = holds.length;
@@ -6664,11 +6874,11 @@ class Reconciler {
       if (next.body === before.body) { finish(); record(effect, 'NOOP'); return; }
       // Every block was read back when the body was projected; a missing one holds the page here
       // instead of failing on a digest that is not there.
-      const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block, context = findStateBlock(next.body, CONTEXT_BLOCK_NAME).block;
-      if (!state || !trace || !context) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `#${parentNumber}: a block of the programme page cannot be read back, so nothing was written to this page`);
+      const state = findStateBlock(next.body).block, context = findStateBlock(next.body, CONTEXT_BLOCK_NAME).block;
+      if (!state || !context) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `#${parentNumber}: a block of the programme page cannot be read back, so nothing was written to this page`);
       // Saved copy first (again): the exact page this write replaces, before marked text leaves it.
       if (next.noteCut) cutCopy = this.store.savePageCopy(parentNumber, before.body).digest;
-      effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: context.digest, body_digest: sha256(next.body) };
+      effect.target = { issue: parentNumber, digest: state.digest, current: blockDigest(currentBody), context: context.digest, body_digest: sha256(next.body) };
       withIntent(effect, () => {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
         // comment edited during bookkeeping cannot authorise hiding its graph rows.
@@ -6701,7 +6911,7 @@ class Reconciler {
         // pages and any final redraw; reading every child again adds no state written by this pass.
         if (!docs) docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
         const comments = new Map(plan.observed.comments);
-        const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments);
+        const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments, this.passTitles(plan.observed));
         const version = this.toolkitVersion;
         // The final parent check follows actual child writes, even when planning found no body change.
         const ordered = parentOnly ? [blockEffects.find(effect => effect.target.issue === parentNumber) || null] : blockEffects.filter(effect => effect.target.issue !== parentNumber);
@@ -6816,7 +7026,7 @@ class Reconciler {
             // for now; its blocks are still updated where they are.
             if (next.relaid && next.moves && relays >= MAX_RELAYS_PER_PASS) { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0, { relay: false }); waits = true; }
           } catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-          effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
+          effect = { ...effect, target: { ...effect.target, ...(next.traceBody ? { trace: blockDigest(next.traceBody) } : {}), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
           // The result says what was done to this page: a re-lay names its saved copy, and a page
           // that keeps its old order for now says so.
           const laidOut = Boolean(next.relaid && next.moves);
@@ -7180,7 +7390,9 @@ class Reconciler {
         board_time: this.board?.time || null,
         read: sweep?.read.length ?? 0, tasks: sweep?.read || [], why: sweep?.why || {}, left: sweep ? sweep.left.length + sweep.failed.length : (this.sweepOrder?.length ?? plan.parent?.sweep?.queue.length ?? 0),
         changedCursor: sweep?.changedCursor || null,
-        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null),
+        // A pass that read everything it set out to but could not prove it whole (a task's PR links,
+        // the inventory or an issue read fell short) says so, so the lease never shows a silent stop.
+        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : !plan.complete ? 'an incomplete read' : null),
         // The request limit that bound the stop, kept apart from the reason so a stop whose reason
         // names something else (a document too large for GraphQL) still reads as at the App limit.
         limit: plan.limit || this.pass.stopReason || (this.pausedBy && this.pausedBy !== 'time limit' ? this.pausedBy : null) };
@@ -7225,7 +7437,7 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
-  evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, frozenPage, titleCell, pageTitles, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,

@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 'use strict';
 
-// Report-only scan for Toolkit files left in repositories that do not use Toolkit's GitHub governance.
+// Report-only scan for Toolkit files left in repositories.
 //
 // It looks at each GitHub checkout under the owner's GitHub folder (the same discovery the scheduled
-// task update uses). A repository whose governance is on, or could not be checked, is not scanned.
-// In the rest it lists only what is provably Toolkit's:
+// task update uses). A repository whose governance could not be checked is not scanned. In the rest
+// it lists only what is provably Toolkit's:
 //   - a Toolkit marker (a managed block inside an instruction file, a vendored check's first line, or
 //     the first line of a cloud sweep workflow copy);
-//   - a file that is byte for byte Toolkit's shipped copy, line endings aside.
-// The repository's programme file is its on/off decision, so it is always shown as kept.
+//   - a file that is byte for byte a copy Toolkit shipped, now or earlier (playbook-history.json),
+//     line endings aside.
+// A repository whose governance is on gets its governed rules and playbooks from the installed
+// Toolkit, so only those instruction copies are listed there; its checks and workflow copies are in
+// use and shown as kept. The repository's programme file is its on/off decision, so it is always kept.
+// A one-line CLAUDE.md is listed only when AGENTS.md has nothing of its own left without the listed
+// blocks; otherwise it loads the repository's own rules and is kept.
 //
 // It never deletes, writes, stages or fetches anything, and it prints no file contents. Removing a
 // leftover is a later step: one pull request per repository, with the owner's OK.
@@ -28,10 +33,41 @@ const BLOCK_FILES = Object.freeze(['AGENTS.md', 'GEMINI.md', '.agents/rules/00-a
 const VENDORED_CHECKS = Object.freeze(['plain-text-check', 'personal-data-guard']);
 const VENDORED_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=[0-9a-f]{12}$/m;
 const LIMIT = 1024 * 1024;
-const SCANNED_STATES = Object.freeze({ DISABLED: 'governance off', UNDECIDED: 'no governance decision' });
+const SCANNED_STATES = Object.freeze({ DISABLED: 'governance off', UNDECIDED: 'no governance decision', ENABLED: 'governance on' });
+// The Toolkit blocks that copied governed rules into a repository. Only these are leftovers where
+// governance is on; any other block there (an n8n adapter, say) is in use.
+const GOVERNED_COPY_BLOCKS = Object.freeze(['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE', 'ANTIGRAVITY.BOOTSTRAP']);
+const HISTORY = path.resolve(__dirname, '..', 'contracts', 'agent-rules', 'playbook-history.json');
+const IN_USE = 'governance is on, so it is in use';
 const USAGE = 'Usage: node repo/scripts/toolkit-leftover-files.cjs scan [--github-folder <folder>] [--json]';
 
 const unix = text => text.replace(/\r\n/g, '\n');
+
+// The main checkouts in the GitHub folder and one level below it. A linked worktree is not one; a
+// folder that cannot be read is returned as { root, held, reason } so readable neighbours still show.
+function gitKind(root) {
+  try { return fs.lstatSync(path.join(root, '.git')).isDirectory() ? 'main' : 'linked'; } catch { return null; }
+}
+function discoverCheckouts(folder, { readDir = dir => fs.readdirSync(dir, { withFileTypes: true }) } = {}) {
+  if (!fs.existsSync(folder)) return [];
+  if (!fs.lstatSync(folder).isDirectory() || fs.lstatSync(folder).isSymbolicLink()) throw new Error('GitHub checkout folder is not a directory');
+  const found = [];
+  for (const item of readDir(folder)) {
+    if (!item.isDirectory() || item.isSymbolicLink() || item.name.startsWith('.')) continue;
+    const root = path.join(folder, item.name), kind = gitKind(root);
+    if (kind === 'main') found.push(root);
+    else if (!kind) {
+      let children;
+      try { children = readDir(root); } catch { found.push({ root, held: true, reason: 'Checkout folder could not be read; check local folder access, then retry.' }); continue; }
+      for (const child of children) {
+        if (!child.isDirectory() || child.isSymbolicLink() || child.name.startsWith('.')) continue;
+        const candidate = path.join(root, child.name);
+        if (gitKind(candidate) === 'main') found.push(candidate);
+      }
+    }
+  }
+  return found;
+}
 
 // One file inside a checkout, read without following a symbolic link anywhere on its path.
 // Returns { text } for a readable regular file, { skipped } when it cannot be judged, null when absent.
@@ -55,15 +91,33 @@ function repositoryName(identity) {
   return String(remote.path).replace(/^\/+/, '').replace(/\.git$/i, '') || null;
 }
 
-class LeftoverScan {
-  #githubFolder; #discover; #governance; #templates;
+const shortHash = text => require('node:crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
 
-  constructor({ home = os.homedir(), githubFolder, discover, governance, templates = TEMPLATES } = {}) {
+// The text left in an instruction file once the given blocks go, with the curated-source comment the
+// Toolkit template puts above them counted as Toolkit's: empty means nothing of the owner's is left.
+function ownText(text, names, templates) {
+  let rest = unix(text);
+  for (const name of names) rest = blocks.removeBlock(rest, name);
+  rest = rest.trim();
+  let header = '';
+  try { header = /^<!--[\s\S]*?-->/.exec(unix(fs.readFileSync(path.join(templates, 'AGENTS.managed.template.md'), 'utf8')))?.[0] || ''; } catch { header = ''; }
+  return header && rest === header ? '' : rest;
+}
+
+class LeftoverScan {
+  #githubFolder; #discover; #governance; #templates; #history;
+
+  // `history` maps a playbook name to the hashes of every copy Toolkit shipped (playbook-history.json).
+  constructor({ home = os.homedir(), githubFolder, discover, governance, templates = TEMPLATES, history = null } = {}) {
     this.#githubFolder = githubFolder || path.join(home, 'GitHub');
-    this.#discover = discover || require('./toolkit-update-scheduled-task.cjs').discoverCheckouts;
+    this.#discover = discover || discoverCheckouts;
     this.#governance = governance || require('./toolkit-governance-state.cjs');
     this.#templates = templates;
+    this.#history = history || JSON.parse(fs.readFileSync(HISTORY, 'utf8')).playbooks;
   }
+
+  // One checkout, as scan() reports it.
+  inspect(root) { return this.#repository(root); }
 
   scan() {
     let found;
@@ -77,9 +131,8 @@ class LeftoverScan {
     let name = path.basename(root), state;
     try { name = repositoryName(this.#governance.readIdentity(root)) || name; } catch { /* the folder name stands in */ }
     try { state = this.#governance.governanceState(root)?.state; } catch { state = null; }
-    if (state === 'ENABLED') return { root, name, scanned: false, reason: 'governance is on, so its Toolkit files are in use' };
     if (!Object.hasOwn(SCANNED_STATES, state)) return { root, name, scanned: false, reason: 'its governance could not be checked' };
-    const result = { root, name, scanned: true, governance: SCANNED_STATES[state], files: [], kept: [], unproven: [] };
+    const result = { root, name, scanned: true, governance: SCANNED_STATES[state], governed: state === 'ENABLED', files: [], kept: [], unproven: [] };
     try {
       this.#blocks(root, result);
       this.#pointer(root, result);
@@ -91,41 +144,52 @@ class LeftoverScan {
     return result;
   }
 
-  // A Toolkit block inside an instruction file. The rest of the file is the owner's.
+  // A Toolkit block inside an instruction file. The rest of the file is the owner's; `empties` says
+  // whether anything of the owner's is left once the listed blocks go.
   #blocks(root, result) {
     for (const file of BLOCK_FILES) {
       const read = readInside(root, file);
       if (!read) continue;
       if (read.skipped) { if (file !== 'GEMINI.md') result.unproven.push({ file, reason: read.skipped }); continue; }
       const parsed = blocks.findBlocks(read.text);
-      for (const block of parsed.blocks) {
+      const listed = parsed.blocks.filter(block => !result.governed || GOVERNED_COPY_BLOCKS.includes(block.name));
+      const empties = !parsed.errors.length && listed.length > 0 && !ownText(read.text, listed.map(block => block.name), this.#templates);
+      for (const block of listed) {
         const edited = block.format >= 2 && block.digest !== blocks.bodyDigest(block.body);
-        result.files.push({ file, kind: 'block', block: block.name, proof: 'Toolkit marker', edited });
+        result.files.push({ file, kind: 'block', block: block.name, proof: 'Toolkit marker', edited, empties });
       }
       if (parsed.errors.length) result.unproven.push({ file, reason: 'its Toolkit markers are broken' });
     }
   }
 
-  // CLAUDE.md that is exactly Toolkit's one-line pointer.
+  // CLAUDE.md that is exactly Toolkit's one-line pointer. It is a leftover only when AGENTS.md is
+  // missing or has nothing of its own left; otherwise it loads the repository's own rules.
   #pointer(root, result) {
     const read = readInside(root, 'CLAUDE.md');
     if (!read?.text) return;
     const template = fs.readFileSync(path.join(this.#templates, 'CLAUDE.shim.template.md'), 'utf8');
-    if (unix(read.text).trim() === unix(template).trim()) result.files.push({ file: 'CLAUDE.md', kind: 'file', proof: "same as Toolkit's shipped copy" });
+    if (unix(read.text).trim() !== unix(template).trim()) return;
+    const agents = readInside(root, 'AGENTS.md');
+    const empties = result.files.some(item => item.file === 'AGENTS.md' && item.empties);
+    if (!agents || empties) result.files.push({ file: 'CLAUDE.md', kind: 'file', proof: "same as Toolkit's shipped copy" });
+    else result.kept.push({ file: 'CLAUDE.md', reason: "it loads this repository's own rules in AGENTS.md" });
   }
 
-  // Playbooks that are still Toolkit's shipped copy. A same-named file that differs may be the owner's.
+  // Playbooks that are a copy Toolkit shipped, now or earlier, including retired names. A same-named
+  // file that differs from every copy may be the owner's.
   #playbooks(root, result) {
     const shipped = require('./toolkit-playbooks.cjs').repositoryPlaybooks();
     // A linked docs or playbook folder is reported once, not once per shipped playbook name.
     const parent = readInside(root, 'docs/agent-playbooks/.');
     if (parent?.skipped === 'it is a symbolic link') { result.unproven.push({ file: 'docs/agent-playbooks', reason: parent.skipped }); return; }
-    for (const [name, text] of Object.entries(shipped)) {
+    for (const name of [...new Set([...Object.keys(shipped), ...Object.keys(this.#history)])].sort()) {
       const file = `docs/agent-playbooks/${name}`, read = readInside(root, file);
       if (!read) continue;
       if (read.skipped) { result.unproven.push({ file, reason: read.skipped }); continue; }
-      if (unix(read.text) === text) result.files.push({ file, kind: 'file', proof: "same as Toolkit's shipped copy" });
-      else result.unproven.push({ file, reason: "it differs from Toolkit's shipped copy" });
+      const text = unix(read.text);
+      if (text === shipped[name]) result.files.push({ file, kind: 'file', proof: "same as Toolkit's shipped copy" });
+      else if ((this.#history[name] || []).includes(shortHash(text))) result.files.push({ file, kind: 'file', proof: 'same as an earlier Toolkit copy' });
+      else result.unproven.push({ file, reason: 'it differs from every Toolkit copy' });
     }
   }
 
@@ -134,7 +198,9 @@ class LeftoverScan {
     for (const name of VENDORED_CHECKS) {
       const file = `.github/scripts/${name}.cjs`, read = readInside(root, file);
       if (!read?.text) continue;
-      if (VENDORED_MARKER.exec(unix(read.text))?.[1] === name) result.files.push({ file, kind: 'check', proof: 'Toolkit marker' });
+      if (VENDORED_MARKER.exec(unix(read.text))?.[1] !== name) continue;
+      if (result.governed) result.kept.push({ file, reason: IN_USE });
+      else result.files.push({ file, kind: 'check', proof: 'Toolkit marker' });
     }
   }
 
@@ -156,6 +222,7 @@ class LeftoverScan {
       const text = unix(read.text), marker = cloud.MARKER.exec(text);
       const id = cloud.copyIdAt(file, text);
       if (!id) continue;
+      if (result.governed) { result.kept.push({ file, reason: IN_USE }); continue; }
       result.files.push({ file, kind: 'workflow', ...(id.startsWith('programme-sweep') ? {} : { copy: id }), proof: 'Toolkit marker', edited: cloud.bodyHash(text.slice(marker[0].length + 1)) !== marker[3] });
     }
   }
@@ -219,6 +286,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return 0;
 }
 
-module.exports = Object.freeze({ LeftoverScan, describe, parseArgs, main });
+module.exports = Object.freeze({ LeftoverScan, discoverCheckouts, describe, parseArgs, main });
 
 if (require.main === module) process.exitCode = main();

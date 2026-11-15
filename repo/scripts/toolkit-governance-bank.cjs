@@ -27,6 +27,9 @@ const governance = require('./toolkit-governance-state.cjs');
 const bank = require('./toolkit-question-bank.cjs');
 
 const BANK_HOST = 'governance';
+// What a yes to Turn on also covers: the settings Toolkit adds on its own after the merge
+// (toolkit-governance-finish.cjs), named here so the owner sees them before answering.
+const AFTER_MERGE = `After the merge, Toolkit also turns on, without asking again: ${require('./toolkit-governance-finish.cjs').WHAT}.`;
 const BANK_TITLE = 'Toolkit governance choices';
 const TICKETS_BASENAME = 'governance-bank-tickets.v1.json';
 const TICKETS_SCHEMA = 'toolkit.governance-bank-tickets.v1';
@@ -63,8 +66,10 @@ function statusRow({ id, section, title, current, text }) {
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
 // merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
 // minutes line, measured: the estimate or null }) where it is offered, or null, and `app` the governance
-// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read).
-function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null }) {
+// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read), and
+// `copies` the instruction copies the cleanup route would remove ({ files, held? }: `held` is why the
+// cleanup cannot run yet; null when not read).
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -75,10 +80,10 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     currentChoice: state.state === 'ENABLED' ? 'on' : state.state === 'DISABLED' ? 'off' : '',
     recommendation: decided
       ? { value: 'keep', outcome: 'Governance stays as merged.', reason: 'Nothing needs to change.' }
-      : { value: 'on', outcome: 'Toolkit prepares one pull request that turns governance on.', reason: 'Governance keeps records and evidence for every task in this repository.' },
+      : { value: 'on', outcome: `Toolkit prepares one pull request that turns governance on. ${AFTER_MERGE}`, reason: 'Governance keeps records and evidence for every task in this repository.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', decided ? 'Governance stays as merged.' : 'Nothing is decided; it counts as off and Toolkit asks again next session.'),
-      bank.wizardChoice('on', 'Turn on', 'Toolkit prepares one pull request that turns governance on. It applies only after you merge it.'),
+      bank.wizardChoice('on', 'Turn on', `Toolkit prepares one pull request that turns governance on. It applies only after you merge it. ${AFTER_MERGE}`),
       bank.wizardChoice('off', 'Turn off', 'Toolkit prepares one pull request that turns governance off. It applies only after you merge it.'),
     ],
   }));
@@ -166,7 +171,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: adoption.found_store ? adoption.found_store.split('/')[1] : 'None yet', text: adoption.found_store ? 'Reused when governance turns on' : `Toolkit creates a private ${adoption.store_name} when governance turns on` }));
     }
     specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
-    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: 'Taken from what the default branch already enforces' }));
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : `None enforced on the default branch yet, so default-branch protection waits: once a pull request adds some to required_checks, run \`${governance.governanceCommand('migrate')}\` in your own terminal to add it` }));
     // Said before the answer, so turning on never stops afterwards to ask about it.
     if (adoption.visibility === 'public') specs.push(statusRow({ id: 'visibility', section, title: 'Repository visibility', current: 'Public', text: 'The programme file names your private evidence store (its name only, never its contents) and the parent issue is public. The store stays private' }));
   }
@@ -196,6 +201,24 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       ],
     }));
   }
+  // The cleanup route (toolkit-governance-cleanup.cjs): asked only in a governed repository that still
+  // has instruction copies. Removing files is the owner's own choice, so Keep current is recommended
+  // and all recommended removes nothing.
+  if (governed && copies && copies.files > 0 && copies.held) {
+    specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${copies.files} ${copies.files === 1 ? 'file' : 'files'} left, cleanup held`, text: `Not offered yet: ${copies.held}. Refresh the cloud workflow copies first` }));
+  } else if (governed && copies && copies.files > 0) {
+    specs.push(bank.resolvedQuestion({
+      id: 'instruction-copies', key: 'instructionCopies', section, title: 'Toolkit instruction copies',
+      whatThisControls: 'The governed rules block, playbooks and one-line shims older setups copied into this repository. The installed Toolkit now gives sessions these rules, so the copies are leftovers.',
+      current: `${copies.files} ${copies.files === 1 ? 'file' : 'files'} to clean up`,
+      currentChoice: '',
+      recommendation: { value: 'keep', outcome: 'The copies stay; Toolkit asks again at the next refresh.', reason: 'Removing files is your choice, made when you are ready to merge one cleanup pull request.' },
+      choices: [
+        bank.wizardChoice('keep', 'Keep current', 'The copies stay; Toolkit asks again at the next refresh.'),
+        bank.wizardChoice('clean', 'Clean up', 'Toolkit removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file. You merge the one pull request yourself.'),
+      ],
+    }));
+  }
   const appName = APP_NAMES[permissions.host] || 'this app';
   const missing = permissions.checked ? permissions.missing : null;
   const stale = permissions.checked ? permissions.stale || 0 : 0;
@@ -210,7 +233,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       : { value: 'keep', outcome: 'Nothing changes.', reason: missing === 0 ? 'They are already up to date.' : 'They could not be checked here.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', 'Nothing changes.'),
-      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to type apply.'),
+      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to press Enter.'),
       bank.wizardChoice('remove', 'Remove', 'You get one command to run yourself that takes every Toolkit permission line out, the same way.'),
     ],
   }));
@@ -233,6 +256,10 @@ function renderGovernanceBank(specs) {
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
+    // Turn on covers the post-merge settings too, so they are named whenever it is offered, not
+    // only when it is the recommendation (the table shows choice text only for that one).
+    ...specs.filter(spec => spec.id === 'governance').flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
+      .map(choice => `${spec.presentation.question_ref} ${choice.presentation_ref}. ${choice.label}: ${choice.consequence}`)).flatMap(line => ['', line]),
     ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).flatMap(spec => ['', `${spec.presentation.question_ref} asks: ${spec.whatThisControls}`, `More on ${spec.presentation.question_ref}: ${shardMoreText(spec)}`]),
     '',
     'For the full text of a question, say "explain 1.2".',
@@ -259,7 +286,7 @@ function selectionsOf(parsed, specs) {
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
   const asked = specs.some(spec => spec.id === 'ci-shards' && !spec.report_only);
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}) };
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}), ...(specs.some(spec => spec.id === 'instruction-copies' && !spec.report_only) ? { instructionCopies: value('instruction-copies') } : {}) };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
@@ -273,6 +300,9 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
     if (chosen[name] === 'on' && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
       throw new Error(`${label} can be on only while governance is on: turn governance on in the same answer, or leave ${label.toLowerCase()} as it is.`);
     }
+  }
+  if (chosen.instructionCopies === 'clean' && chosen.governance === 'off') {
+    throw new Error('The instruction copies can be cleaned up only while governance stays on: leave governance as it is, or leave the copies as they are.');
   }
   if (['yes', 'never'].includes(chosen.ciShards) && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
     throw new Error('Parallel CI shards can be answered only while governance is on: turn governance on in the same answer, or leave them as not now.');

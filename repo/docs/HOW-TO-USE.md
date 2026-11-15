@@ -79,7 +79,7 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 
 Governance has one entry:
 
-- `toolkit governance`, `setup governance` or `refresh governance` (with or without `toolkit` in front): show this repository's governance question bank, in the same format as `setup toolkit`. It asks whether GitHub governance is on, whether task auto-merge is on, whether to split the tests into parallel CI shards (only while governance is on; not now asks again at the next refresh, never ask stops it), and whether to add Toolkit's permission blocks for you, and shows the evidence store and required checks as status lines. Reply `all recommended` or only your changes, such as `1.2=B`, in chat; no terminal step. Toolkit checks that the reply is your own message before it acts. Every change to governance, task auto-merge or parallel CI shards is one pull request for you to merge, and applies only after your merge. In a new repository the bank also shows the evidence store, parent issue and required checks it found, or says it will make them: turning governance on creates a private `TRANSPORT-<name>` store and a parent issue when none is found, and puts the governed rules, the `CLAUDE.md` shim, the playbooks and the plain-text check in the same pull request.
+- `toolkit governance`, `setup governance` or `refresh governance` (with or without `toolkit` in front): show this repository's governance question bank, in the same format as `setup toolkit`. It asks whether GitHub governance is on, whether task auto-merge is on, whether to split the tests into parallel CI shards (only while governance is on; not now asks again at the next refresh, never ask stops it), whether to add Toolkit's permission blocks for you, and, where governance is on and older setups left copies of the governed rules or playbooks here, whether to clean them up (Keep current is recommended; Clean up removes them in the working tree and sets `min_toolkit`, for one pull request you merge yourself), and shows the evidence store and required checks as status lines. Reply `all recommended` or only your changes, such as `1.2=B`, in chat; no terminal step. Toolkit checks that the reply is your own message before it acts. Every change to governance, task auto-merge or parallel CI shards is one pull request for you to merge, and applies only after your merge. In a new repository the bank also shows the evidence store, parent issue and required checks it found, or says it will make them: turning governance on creates a private `TRANSPORT-<name>` store and a parent issue when none is found, and puts only the programme file and the Toolkit CI checks in the same pull request.
 
 `toolkit governance enable` and `toolkit governance disable` are your answers to Toolkit's governance question. Each prepares a pull request for you to merge, and counts only while that question is open for this repository.
 
@@ -93,7 +93,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. After the owner merges the enabled governance decision on origin's default branch, the repository carries the governed block in its `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](../../AGENTS.md). Claude Code uses a one-line `CLAUDE.md` (`@AGENTS.md`) and Antigravity a small bootstrap under `.agents/rules/`; both point back to the target repo's `AGENTS.md`, so never install one by itself.
+Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. After the owner merges the enabled governance decision on origin's default branch, the installed Toolkit gives every session there the governed rules, and the playbooks come from the `toolkit-playbooks` skill. The repository carries only its programme file and the Toolkit CI checks, never a copy of the governed rules, and never this toolkit repo's root [AGENTS.md](../../AGENTS.md). Its own `AGENTS.md` stays its own; Claude Code loads it through a one-line `CLAUDE.md` (`@AGENTS.md`), so never install that shim by itself.
 
 ### Manual Skill Folder Locations
 
@@ -280,7 +280,6 @@ n8n helper templates may write scoped local outputs after they are copied into a
 
 Use:
 
-- [Codex managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Codex n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
@@ -295,7 +294,6 @@ Keep live n8n tokens in user environment variables, not repo files. Codex n8n wo
 
 Use:
 
-- [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [Claude Code shim template](../../skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Claude n8n adapter](../../skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md)
@@ -310,7 +308,6 @@ Claude Code n8n work uses the [official n8n Skills](https://github.com/n8n-io/sk
 
 Use:
 
-- [OpenCode managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional OpenCode n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
@@ -324,8 +321,6 @@ OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is plat
 
 Use:
 
-- [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
-- [Antigravity 2 bootstrap template](../../skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Antigravity 2 n8n adapter](../../skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)

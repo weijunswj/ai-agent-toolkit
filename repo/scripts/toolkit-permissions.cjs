@@ -44,7 +44,6 @@ class PermissionsError extends Error {
 // ---- the table ---------------------------------------------------------------------------------
 
 const PROGRAMME = 'skills/github-program-reconciler/scripts/programme.cjs';
-const WINDOWS_TASKS = 'repo/scripts/toolkit-windows-tasks.cjs';
 const CLEANUP = 'repo/scripts/toolkit-cleanup.cjs';
 const STORE = 'repo/scripts/toolkit-store.cjs';
 
@@ -66,16 +65,6 @@ const PROGRAMME_ASK = Object.freeze({
   'migrate-state': 'Moving the state documents asks for the owner in that run.',
   'mark-archive': 'It edits a page\'s hand-written text; agents run it through a holder order, which the cloud sweep applies.',
 });
-// Toolkit no longer creates, updates or starts scheduled tasks on a computer (the cloud runs those
-// jobs), so no task form is allowed. The old Windows-task script still runs until it is deleted, so
-// its changing forms keep an explicit ask (Claude Code) or prompt (Codex) line that beats a broad allow.
-const TASKS_ASK = Object.freeze({
-  apply: 'Toolkit no longer creates or updates scheduled tasks on a computer; creating one is the owner\'s own choice.',
-  start: 'Toolkit no longer runs scheduled tasks on a computer; starting an old one is the owner\'s own choice.',
-  remove: 'Removing registered tasks is a delete.',
-  adopt: 'Recording a hand-made task as known is the owner\'s choice.',
-});
-
 // Whether the repository's programme file turns governance on, read as the sweep reads it.
 const PROGRAMME_STATE = path.join(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs');
 function governanceEnabled(binding) {
@@ -245,7 +234,6 @@ class PermissionBlocks {
         ...Object.keys(PROGRAMME_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${PROGRAMME}`)} ${sub}`, tokens: ['node', `${managed.safe}/${PROGRAMME}`, sub], why: PROGRAMME_ASK[sub] })),
         // Codex rules match from the start of the command, so --apply and --remove must be the first argument.
         ...OWNER_FLAGS.map(flag => ({ command: `node ${quoted(`${managed.safe}/repo/scripts/toolkit-permissions.cjs`)} ${flag}`, tokens: ['node', `${managed.safe}/repo/scripts/toolkit-permissions.cjs`, flag], why: APPLY_WHY })),
-        ...(windows ? Object.keys(TASKS_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${WINDOWS_TASKS}`)} ${sub}`, tokens: ['node', `${managed.safe}/${WINDOWS_TASKS}`, sub], why: TASKS_ASK[sub] })) : []),
       ];
       blocks.push(this.#block({ host, scope: 'computer', made, excluded: [...excluded, ...made.prompts],
         target: host === 'claude' ? path.join(this.#environment.CLAUDE_CONFIG_DIR || path.join(this.#home, '.claude'), 'settings.json') : path.join(this.#environment.CODEX_HOME || path.join(this.#home, '.codex'), 'rules', 'toolkit.rules') }));
@@ -345,7 +333,7 @@ function describe(built, options) {
   lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push(`To take every Toolkit line out again, run ${applyLine(built, '--remove').command} in your own terminal. Run toolkit permissions again after the Toolkit folder moves.`);
   const shortcut = applyLine(built);
-  lines.push(`Owner shortcut: paste this one command into your own PowerShell or terminal, then type apply. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it.`, '', `    ${shortcut.command}`);
+  lines.push(`Owner shortcut: paste this one command into your own PowerShell or terminal, then press Enter. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it.`, '', `    ${shortcut.command}`);
   return lines;
 }
 
@@ -408,6 +396,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ PermissionBlocks, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, TASKS_ASK, safePath, parseArgs, main });
+module.exports = Object.freeze({ PermissionBlocks, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

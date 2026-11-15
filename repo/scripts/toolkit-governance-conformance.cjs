@@ -315,7 +315,7 @@ function leftoverBlockFindings(repoRoot, toolkitRoot) {
   if (materials.marker_errors > 0) out.push(finding('MARKERS_BROKEN', 'drift', 'The Toolkit markers in AGENTS.md are broken; fix them before the leftover governed block can be removed.'));
   let version = 'this';
   try { version = expectedGovernedBlock(toolkitRoot).version; } catch { /* the note still stands */ }
-  out.push(finding('GOVERNED_BLOCK_LEFTOVER', 'info', `AGENTS.md still carries a governed block. The installed Toolkit now gives sessions the governed rules, so the block is a leftover copy: remove it by pull request once every app working here runs Toolkit ${version} or later.`));
+  out.push(finding('GOVERNED_BLOCK_LEFTOVER', 'info', `AGENTS.md still carries a governed block. The installed Toolkit now gives sessions the governed rules, so the block is a leftover copy: remove it by pull request once every app working here runs Toolkit ${version} or later (toolkit-governance-cleanup.cjs previews and makes the changes).`));
   return out;
 }
 
@@ -325,7 +325,10 @@ function leftoverBlockFindings(repoRoot, toolkitRoot) {
 // shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
 // own files and is skipped.
 function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
-  const workflows = require('./toolkit-cloud-workflows.cjs');
+  // From a plugin copy (no git) the check renders from the managed Toolkit checkout, with its own
+  // installer, as the turn-on and the rules refresh do.
+  if (!options.toolkitRoot) toolkitRoot = require('./toolkit-cloud-workflows.cjs').sourceRoot({ self: toolkitRoot });
+  const workflows = require('./toolkit-cloud-workflows.cjs').installerAt(toolkitRoot);
   if (workflows.isToolkitCheckout(state.root)) return [];
   let result;
   let merged = null;

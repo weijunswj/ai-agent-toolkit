@@ -77,7 +77,9 @@ test('NF-03: GitHub Free private repositories are not enforceable; other failure
   const plan = () => ({ status: 1, stdout: '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature."}', stderr: 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' });
   const viaGh = (spawn) => ruleset.noForcePushRuleset(root, { reader: (slug) => ruleset.ghRulesetReader(slug, { spawn }) });
   assert.deepEqual({ ...viaGh(fakeGh({ 'repos/': plan })) }, { status: 'not-enforceable', reason: 'plan-has-no-rulesets', bypass: null });
-  assert.equal(viaGh(fakeGh({ 'repos/': () => ({ status: 1, stdout: '', stderr: 'gh: Resource not accessible (HTTP 403)' }) })).status, 'unverified');
+  const refused = viaGh(fakeGh({ 'repos/': () => ({ status: 1, stdout: '', stderr: 'gh: Resource not accessible (HTTP 403)' }) }));
+  assert.deepEqual([refused.status, refused.reason], ['unverified', 'forbidden'], 'a 403 that is not about the plan is a refusal for this account');
+  assert.equal(viaGh(fakeGh({ 'repos/': () => ({ status: 1, stdout: '', stderr: 'gh: API rate limit exceeded (HTTP 403)' }) })).reason, 'gh-request-failed', 'a rate limit passes');
   assert.equal(viaGh(fakeGh({})).reason, 'repository-not-visible');
   assert.equal(viaGh(() => { throw new Error('ENOENT'); }).reason, 'gh-unavailable');
   assert.equal(viaGh(fakeGh({ 'repos/': () => ({ status: 0, stdout: 'not json', stderr: '' }) })).reason, 'gh-output-invalid');

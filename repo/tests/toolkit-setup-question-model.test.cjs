@@ -726,7 +726,18 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   assert.equal(folded['claude-toolkit-plugin'].current, 'Claude Code runs Toolkit 9.9.9 (turned on); this Toolkit copy is 9.9.9.');
   const table = core.renderSetupQuestionBank(Object.values(folded));
   // The Current column holds a short state.
-  assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \| Root only; subagent limit 1 \| A\. Keep current \| B\. Broader native behaviour \|/);
+  assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \| Gates: Toolkit helpers only; elsewhere one subagent layer \| A\. Keep current \| B\. Broader native behaviour \|/);
+  // The 2.1 Current cell names the Claude Code limit only when it is not the one the stored choice expects.
+  for (const [topology, depth, expected] of [
+    ['root-only', { state: 'owner-value', value: '3' }, 'Gates: Toolkit helpers only; elsewhere one subagent layer (your Claude Code limit: 3)'],
+    ['root-only', { state: 'claude-default' }, 'Gates: Toolkit helpers only; elsewhere one subagent layer (Claude Code limit not set yet)'],
+    ['root-only', undefined, 'Gates: Toolkit helpers only; elsewhere one subagent layer (Claude Code limit unknown)'],
+    ['broader-native', { state: 'claude-default' }, "Gates: Toolkit helpers only; Toolkit repos: one subagent layer; elsewhere Claude Code's own rules"],
+    ['broader-native', { state: 'toolkit-one-layer', value: '1' }, "Gates: Toolkit helpers only; Toolkit repos: one subagent layer; elsewhere Claude Code's own rules (Toolkit's Claude Code limit of 1 still set)"],
+  ]) {
+    const rows = claude((c) => { c.agentProfile.topology = topology; c.claudeSubagentDepth = depth; });
+    assert.equal(rows['claude-agent-topology'].current_short, expected, `${topology} ${depth?.state}`);
+  }
   assert.match(table, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \| On, 9\.9\.9 \| A\. Keep current \| B\. Show instructions only \|/);
 
   // The plugin folds only when Toolkit is also turned on, at this copy's version, with one install record, and run from

@@ -2439,7 +2439,7 @@ test('hook mode validation uses hook-light smoke validation and skips full bridg
   );
 });
 
-test('agent-rules preflight accepts current managed blocks and ignores literal marker examples', () => {
+test('agent-rules preflight names a governed-rules copy as a leftover and ignores literal marker examples', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const nested = path.join(root, 'nested');
@@ -2461,9 +2461,13 @@ test('agent-rules preflight accepts current managed blocks and ignores literal m
     { hook: true, syncSource: 'codex-plugin' },
     { targetRoot: nested, pluginRoot: repoRoot }
   );
-  assert.equal(result.status, 'ok');
+  // The installed Toolkit delivers the governed rules, so even a current copy is a leftover; the
+  // marker examples are not read as broken markers.
+  assert.equal(result.status, 'needs-attention');
   assert.equal(result.targetRoot, root);
-  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind]), [['AGENTS.md', 'leftover']]);
+  writeFile(path.join(root, 'AGENTS.md'), '# Project rules\n\nOur own.\n');
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: nested, pluginRoot: repoRoot }).status, 'not-managed', 'a repository with only its own rules is quiet');
 });
 
 const NEVER_HALTING = /STOP|stop before repository work|ask the user/i;
@@ -2523,9 +2527,10 @@ test('SessionStart notice is silent outside Toolkit-managed git roots and writes
 });
 
 test('SessionStart notice names a vendored Toolkit check that is older or missing in an ENABLED repository, read-only', () => {
+  // A cleaned governed repository carries no Toolkit block at all; its checks are still compared.
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate());
+  writeFile(path.join(root, 'AGENTS.md'), '# Project rules\n');
   const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
   const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
   writeFile(copy, installer.vendoredText());
@@ -2542,31 +2547,67 @@ test('SessionStart notice names a vendored Toolkit check that is older or missin
   assert.doesNotMatch(message, NEVER_HALTING);
   assert.deepEqual(snapshotTree(root), before);
   const notGoverned = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false });
-  assert.equal(notGoverned.status, 'ok', 'outside an ENABLED repository the vendored checks are not compared');
+  assert.notEqual(notGoverned.status, 'needs-attention', 'outside an ENABLED repository the vendored checks are not compared');
   fs.rmSync(copy);
   const missing = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
   assert.deepEqual(missing.findings.map((finding) => [finding.file, finding.detail]), [['.github/scripts/plain-text-check.cjs', 'missing']]);
   assert.match(formatAgentRulesPreflight(missing), /Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from the running Toolkit /);
-  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false }).status, 'ok', 'a missing copy is not noted outside an ENABLED repository');
+  assert.notEqual(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false }).status, 'needs-attention', 'a missing copy is not noted outside an ENABLED repository');
   writeFile(path.join(root, '.github', 'plain-text.json'), JSON.stringify({ off_reason: 'the owner switched it off for this repository' }));
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
 });
 
-test('SessionStart notice says repository rules from a newer Toolkit are authoritative, at every session start, without writing', () => {
-  // Hub state records a newer Toolkit than the running copy, and the repository block differs.
+test('SessionStart notice compares the vendored checks of an ENABLED repository that carries no Toolkit block', () => {
+  // Turn-on writes no governed block now, so a governed repository's own AGENTS.md (or none) must not
+  // switch the vendored-check comparison off, and its own instruction files are not compared.
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
+  for (const syncSource of ['codex-plugin', 'claude-plugin']) {
+    for (const agents of ['# Project rules\n', null]) {
+      const root = tmpRoot();
+      fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+      if (agents !== null) writeFile(path.join(root, 'AGENTS.md'), agents);
+      const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+      writeFile(copy, installer.vendoredText());
+      const label = `${syncSource}, ${agents === null ? 'no AGENTS.md' : 'own AGENTS.md'}`;
+      const options = { targetRoot: root, pluginRoot: repoRoot, state: {}, governanceEnabled: () => true };
+      const current = runAgentRulesPreflight({ hook: true, syncSource }, options);
+      assert.equal(current.status, 'ok', `${label}: a current copy is quiet and the repository's own files are not compared`);
+      writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
+      const before = snapshotTree(root);
+      // With no newer Toolkit known here, the checks are refreshed from the running copy.
+      const stale = runAgentRulesPreflight({ hook: true, syncSource }, options);
+      assert.equal(stale.status, 'needs-attention', label);
+      assert.equal(stale.direction, 'differs', label);
+      assert.deepEqual(stale.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*next step: refresh them with repository-agent-rules before this task ends\. No files were changed\.$/, label);
+      // With a newer Toolkit on record the copy may be the newer one, so the note says to refresh
+      // Toolkit, never to rewrite the checks from the older running copy.
+      const newerOnRecord = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      assert.equal(newerOnRecord.direction, 'newer', label);
+      assert.deepEqual(newerOnRecord.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      const newerMessage = formatAgentRulesPreflight(newerOnRecord);
+      assert.match(newerMessage, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) may come from a newer Toolkit \(99\.0\.0\) than the running copy \(.+\); next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/, label);
+      assert.doesNotMatch(newerMessage, /repository-agent-rules|repository rules/, label);
+      assert.doesNotMatch(newerMessage, NEVER_HALTING, label);
+      assert.deepEqual(snapshotTree(root), before, `${label}: read-only`);
+      assert.equal(runAgentRulesPreflight({ hook: true, syncSource }, { ...options, governanceEnabled: () => false }).status, 'not-managed', `${label}: not governed and no block is not managed`);
+    }
+  }
+});
+
+test('SessionStart notice: a governed-rules copy is a leftover whatever Toolkit wrote it; a newer source checkout says to refresh Toolkit', () => {
+  // Hub state records a newer Toolkit than the running copy, and the repository still carries a copy.
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Repository-wide CI', 'Repository CI in newer wording'));
   const state = { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } };
   const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, state });
   assert.equal(result.status, 'needs-attention');
-  assert.equal(result.direction, 'newer');
   const message = formatAgentRulesPreflight(result);
   assert.equal(message.split('\n').length, 1);
   assert.doesNotMatch(message, NEVER_HALTING);
-  assert.match(message, /newer Toolkit \(99\.0\.0\) than the running copy/);
-  assert.match(message, /repository rules are authoritative/);
-  assert.match(message, /Next step: refresh Toolkit \(setup toolkit\) before this task ends/);
+  assert.match(message, /still carries Toolkit instruction copies \(AGENTS\.md\)/);
 
   // A Toolkit source checkout newer than the running copy is the same direction, even when current.
   const checkout = tmpRoot();
@@ -2596,7 +2637,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   assert.equal(first.status, 0, first.stderr);
   const notes = first.stdout.split('\n').filter((line) => line.startsWith('Toolkit note:'));
   assert.equal(notes.length, 1);
-  assert.match(notes[0], /newer Toolkit \(99\.0\.0\)/);
+  assert.match(notes[0], /still carries Toolkit instruction copies/);
   assert.doesNotMatch(first.stdout, NEVER_HALTING);
   const second = runSessionStartHook(root, home);
   assert.equal(second.status, 0, second.stderr);
@@ -2621,9 +2662,27 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
       const message = formatAgentRulesPreflight(direct);
       assert.equal(message.split('\n').length, 1);
       assert.doesNotMatch(message, NEVER_HALTING);
-      assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
-      assert.doesNotMatch(message, /are older/);
-      assert.match(message, /next step: refresh them with repository-agent-rules before this task ends/);
+      // A copy is a leftover, never one to refresh. Governance is not on here, so the note names the
+      // leftover scan, never the cleanup command (which refuses here), and asks nothing of this task.
+      if (fixture.name === 'stale managed block') {
+        assert.match(message, /still carries Toolkit instruction copies \(AGENTS\.md\) from an older setup\. Governance is not on here/);
+        assert.match(message, /toolkit-leftover-files\.cjs scan\) lists them, and removing them is the owner's choice; nothing is due in this task/);
+        assert.doesNotMatch(message, /toolkit-governance-cleanup|before this task ends/);
+        // Where governance is on, the note names the owner's Clean up answer and still asks nothing of
+        // this task, matching the bank's Keep current recommendation.
+        const governed = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true }));
+        assert.match(governed, /\(AGENTS\.md\) that the installed Toolkit now delivers itself\. Removing them is the owner's choice: `refresh governance` asks about them/);
+        assert.match(governed, /only a Clean up answer opens the one cleanup pull request; nothing is due in this task/);
+        // The fixture has no plain-text check, which a governed repository carries: that part is due.
+        assert.match(governed, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from/);
+        assert.doesNotMatch(governed, /broken Toolkit markers|toolkit-governance-cleanup/);
+        assert.doesNotMatch(governed, NEVER_HALTING);
+        // With a newer Toolkit on record the checks part says to refresh Toolkit, and the leftover part stays.
+        const newer = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true, state: { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } } }));
+        assert.match(newer, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\)/);
+        assert.match(newer, /next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/);
+      } else assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
+      assert.doesNotMatch(message, /are older|refresh them with repository-agent-rules/);
       assert.match(message, /No files were changed/);
 
       const home = tmpRoot();

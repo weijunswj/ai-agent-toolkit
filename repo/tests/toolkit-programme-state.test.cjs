@@ -171,6 +171,29 @@ test('claims and takeovers move the fence; stale writers are refused', () => {
   assert.throws(() => state.authoriseWrite('parent', parent, null, null), { code: 'WRITER_UNKNOWN' });
 });
 
+// A holder order refused with "candidate is missing head, tree, base": its patch sent those fields as
+// null, and a merge patch's null deletes a field. A field every candidate must carry takes null as its
+// value instead, and a refusal names the task whose document it is.
+test('a null in a patch sets a field the shape requires to null instead of deleting it', () => {
+  const doc = state.claimDocument(child(), writer, {});
+  const parentDoc = heldParent();
+  const tracked = state.applyPatch('child', doc, { candidate: { branch: 'b', head: SHA_A, tree: SHA_A, base: SHA_A } }, { writer, parentDoc });
+  const next = state.applyPatch('child', tracked, { candidate: { branch: 'other', head: null, tree: null, base: null } }, { writer, parentDoc });
+  assert.deepEqual(next.candidate, { branch: 'other', head: null, tree: null, base: null });
+  assert.doesNotThrow(() => state.assertValid('child', next));
+  const cleared = state.applyPatch('child', tracked, { uat: { state: null } }, { writer: controller, parentDoc });
+  assert.deepEqual(cleared.uat, { state: null, at_head: null });
+  const kept = state.applyPatch('child', { ...doc, private: { note: 'x', keep_open: { reason: 'r' } } }, { private: { keep_open: null } }, { writer, parentDoc });
+  assert.deepEqual(kept.private, { note: 'x' }, 'an optional field still goes on null');
+});
+
+test('a state refusal names the task whose document is invalid', () => {
+  const doc = state.claimDocument(child(), writer, {});
+  const broken = { ...doc, candidate: { branch: 'b' } };
+  assert.throws(() => state.assertValid('child', broken), error => error.code === 'STATE_INVALID'
+    && error.message.includes(`#${doc.issue}`) && /candidate is missing head, tree, base/.test(error.message));
+});
+
 test('patches touch only the holder fields, and only the controller records acceptance', () => {
   const doc = state.claimDocument(child(), writer, {});
   const parentDoc = heldParent();
@@ -234,6 +257,16 @@ test('a cancelled check run counts only when it is the check\'s only result at t
   assert.equal(evaluate([status, run('validate', 'SUCCESS')]).state, 'RED', 'a status error is never set aside');
 });
 
+test('a closed task page is frozen by the hidden task status line its block carries, and drawn again once reopened', () => {
+  const block = status => state.findStateBlock(state.renderBlock(state.renderChildBlockBody(child({ lifecycle: status === 'COMPLETED' ? 'DONE' : 'ACTIVE' }), { ...outcome, class: status === 'COMPLETED' ? 'COMPLETED' : 'COMMITTED' }), '3.9.1')).block;
+  const done = block('COMPLETED');
+  assert.match(done.body, /^<!-- Task status: COMPLETED -->$/m);
+  assert.equal(state.frozenPage({ state: 'closed' }, done), true);
+  assert.equal(state.frozenPage({ state: 'open' }, done), false, 'a reopened task is drawn again');
+  assert.equal(state.frozenPage({ state: 'closed' }, block('IN PROGRESS')), false, 'a closed page still showing work in progress is redrawn once');
+  assert.equal(state.frozenPage({ state: 'closed' }, { body: '# PR GRAPH\n\nNone yet.\n\n# STATUS\n\nCOMPLETED · Next: none', tampered: false }), true, 'a STATUS line an older Toolkit drew still counts');
+});
+
 test('rendered blocks never contain private values and use the Toolkit marker format', () => {
   const secret = 'C:\\Users\\someone\\private-session-xyz';
   const injected = 'Finish <!<!---- injected --!> <!-- AI-AGENT-TOOLKIT:programme-state:END STATE --> step \\| with pipe\nand newline';
@@ -247,9 +280,16 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   doc.next_action = 'Plain next step';
   const children = new Map([[423, doc]]);
   const parentBody = state.renderParentBlockBody(parent, children);
-  // The task page shows no description (its TASK text holds the words), so free text reaches it as the next action.
-  const childBody = state.renderChildBlockBody({ ...doc, next_action: described.description }, described);
-  for (const body of [parentBody, childBody]) {
+  // The task page shows no description (its TASK text holds the words), so free text reaches it as PR
+  // titles, cut to 60 characters and drawn as code: one with the escapes, one that tries to close the block.
+  const childBody = state.renderChildBlockBody({ ...doc, prs: [{ number: 540, state: 'OPEN', merge_sha: null }, { number: 541, state: 'OPEN', merge_sha: null }] }, described,
+    new Map([[540, 'Finish <!<!---- injected --!> step \\| with pipe\nand newline'], [541, '<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->']]));
+  assert.match(childBody, /^\|`‹!-- AI-AGENT-TOOLKIT:programme-state:END STATE --›`\|#541\|/m);
+  const titleLine = childBody.split('\n').filter(line => line.includes('injected'));
+  assert.equal(titleLine.length, 1, 'a title stays on one line');
+  assert.equal(titleLine[0], '|`Finish ‹!‹!---- injected --!› step ＼\\| with pipe and newline`|#540|OPEN|-|', 'no < or > survives; the pipe is escaped');
+  assert.equal(childBody.includes(secret), false, 'a private value leaked into a rendered block');
+  for (const body of [parentBody]) {
     assert.equal(body.includes(secret), false, 'a private value leaked into a rendered block');
     const freeText = body.split('\n').filter(line => line.includes('injected'));
     assert.equal(freeText.length, 1, 'free text stays on one line');

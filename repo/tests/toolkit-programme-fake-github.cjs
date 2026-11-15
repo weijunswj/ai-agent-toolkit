@@ -5,10 +5,10 @@
 // 2026-10-23: sub-issue ids (not numbers), 422 for a second parent without replace_parent or a
 // duplicate, 422 for a reorder without an anchor, 409 for a stale Contents sha, 422 for a create
 // over an existing file, and a new commit even for an identical Contents PUT. A Contents GET on a
-// folder lists its files, `commits?path=` gives a file's last commit date, and comments carry their
-// issue URL, author and creation time. With `branchLag` on,
-// a Contents read of the branch serves the files as of the commit before the latest one, as the
-// real API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
+// folder lists its files, `commits?path=` gives the last commit that changed a file (its id and
+// date), and comments carry their issue URL, author and creation time. With `branchLag` on, a
+// Contents read of the branch serves the files as of the commit before the latest one, as the real
+// API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
 
 const crypto = require('node:crypto');
 
@@ -47,6 +47,7 @@ class FakeGitHub {
     this.hooks = [];
     this.nextId = 9000;
     this.fileDates = new Map();
+    this.fileCommits = new Map();
     this.comments = new Map();
     this.commentSequence = 0;
     this.login = 'owner';
@@ -74,8 +75,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main' } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }) });
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
@@ -160,8 +161,10 @@ class FakeGitHub {
     }
     if (/^repos\/[^/]+\/[^/]+\/git\/refs\/heads\//.test(path) && method === 'PATCH') {
       if (body.force || !this.sweepCommits.get(body.sha)?.parents.includes(this.sweepHead)) return ok(422, { message: 'Reference moved' });
+      const before = this.files;
       this.files = new Map(this.snapshots.get(body.sha)); this.commits++;
       this.snapshots.set(`c${this.commits}`, new Map(this.files)); this.sweepHead = body.sha;
+      this.touched(before, body.sha);
       return ok(200, { object: { sha: body.sha } });
     }
     if ((match = /^repos\/[^/]+\/[^/]+\/git\/blobs\/([0-9a-f]{40})$/.exec(path)) && method === 'GET') {
@@ -178,8 +181,8 @@ class FakeGitHub {
     if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
     if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
     if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) {
-      const date = this.fileDates.get(params.get('path'));
-      return ok(200, date ? [{ sha: 'f'.repeat(40), commit: { committer: { date } } }] : []);
+      const [date, sha] = [this.fileDates.get(params.get('path')), this.fileCommits.get(params.get('path'))];
+      return ok(200, date || sha ? [{ sha: sha || 'f'.repeat(40), commit: { committer: { date: date || new Date(this.clock).toISOString() } } }] : []);
     }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
@@ -357,10 +360,19 @@ class FakeGitHub {
   }
 
   commit() {
+    const before = this.snapshots.get(`c${this.commits}`) || new Map();
     this.commits += 1;
     this.snapshots.set(`c${this.commits}`, new Map(this.files));
     this.sweepHead = crypto.createHash('sha1').update(`contents-${this.commits}-${++this.sweepSequence}`).digest('hex');
     this.snapshots.set(this.sweepHead, new Map(this.files));
+    this.touched(before, this.sweepHead);
+  }
+
+  // Every file a commit added, changed or removed now names that commit as its last one.
+  touched(before, sha) {
+    for (const file of new Set([...before.keys(), ...this.files.keys()])) {
+      if (before.get(file)?.sha !== this.files.get(file)?.sha) this.fileCommits.set(file, sha);
+    }
   }
 
   readFile(filePath) {
@@ -395,7 +407,7 @@ class FakeGitHub {
     }
     if (/p\d+: pullRequest/.test(body.query)) {
       const repository = { defaultBranchRef: { name: 'main' } };
-      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: 'pullRequest', variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
+      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: 'pullRequest { title }', variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
       return ok(200, { data: { repository } });
     }
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
@@ -403,17 +415,29 @@ class FakeGitHub {
       const repository = {};
       const node = value => typeof value === 'object' ? value : (() => {
         const pr = this.prs.get(value);
-        return { __typename: 'PullRequest', number: value, body: pr?.body || '', state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
+        return { __typename: 'PullRequest', number: value, title: pr?.title || '', body: pr?.body || '', state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
           mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
       const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
       const fields=[...body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)].map(([,alias,number])=>[alias,Number(number)]);
-      if (/issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      if (/(?<!more: )issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      // A follow-up page of one issue's links, from the cursors the last page returned.
+      if (/more: issue\(number:\s*\$number\)/.test(body.query)) fields.push(['more',body.variables.number]);
+      // One connection page of 100. A list longer than that pages with a cursor; a `...Truncated`
+      // link stands for a list GitHub will not page further, so it has no cursor.
+      const page = (list, after, truncated) => {
+        const start = after ? Number(after) : 0;
+        const more = list.length > start + 100;
+        return { pageInfo: { hasNextPage: Boolean(truncated) || more, endCursor: more && !truncated ? String(start + 100) : null }, slice: list.slice(start, start + 100) };
+      };
       for (const [alias, number] of fields) {
         const links = this.issuePrLinks.get(Number(number)) || {};
+        const cursors = alias === 'more' ? body.variables : {};
+        const closing = page(links.closing || [], cursors.closingAfter, links.closingTruncated);
+        const timeline = page(links.timeline || [], cursors.timelineAfter, links.timelineTruncated);
         repository[alias] = this.issues.has(Number(number)) ? {
-          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
-          timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || (links.timeline || []).length > 100 }, nodes: (links.timeline || []).slice(0,100).map(value => ({ source: node(value) })) },
+          closedByPullRequestsReferences: { pageInfo: closing.pageInfo, nodes: closing.slice.map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
+          timelineItems: { pageInfo: timeline.pageInfo, nodes: timeline.slice.map(value => ({ source: node(value) })) },
         } : null;
       }
       return ok(200, { data: { repository } });
@@ -421,7 +445,8 @@ class FakeGitHub {
     const pr = this.prs.get(body.variables.number);
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
     return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {
-      number: pr.number, body: pr.body || '', state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
+      // Like GitHub, a field is returned only when the query asks for it.
+      number: pr.number, ...(/\btitle\b/.test(body.query) ? { title: pr.title || '' } : {}), body: pr.body || '', state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
       mergedAt: pr.mergedAt, mergeCommit: pr.merged ? {oid:pr.head} : null,
       commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
     } } } });

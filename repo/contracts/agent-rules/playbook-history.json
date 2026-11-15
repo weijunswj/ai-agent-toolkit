@@ -1,0 +1,153 @@
+{
+  "schema": "toolkit.playbook-history.v1",
+  "note": "SHA-256 (first 16 hex) of every playbook text Toolkit ever shipped for copying into a repository docs/agent-playbooks/ folder, LF line endings, INDEX.md from the toolkit-playbooks SKILL.md without its frontmatter. Nothing copies playbooks any more, so the list only grows if a current playbook changes; the leftover scan uses it to prove a repository copy is Toolkit's.",
+  "playbooks": {
+    "INDEX.md": [
+      "1619d57d87cba8ae",
+      "22f000fc59caccc5",
+      "3b2b5f6b6098f451",
+      "407c1682c19d4474",
+      "52326e208c5a5206",
+      "554b3396995d46b5",
+      "626b8fb329d7e460",
+      "670e85beb3cd1070",
+      "677726ed01c31667",
+      "78b30b8d115331b3",
+      "79a240f0be1363ca",
+      "7acf625171d28d83",
+      "a95e996c90b6cd27",
+      "bdd4b25c3b251c77",
+      "c96090af0aa4825a",
+      "cab5be4eec6ebfd1",
+      "cff7f17868feec1b",
+      "f7c90dc9718d29da"
+    ],
+    "baseline-workflow.md": [
+      "0431e8d289df2646"
+    ],
+    "closing-comments.md": [
+      "b47d8692fbf7ee85"
+    ],
+    "decision-trace.md": [
+      "52f9f7080c9370eb",
+      "84ab606f781e3350",
+      "c45eda20b97624ff",
+      "ca3cf9a0e5d6f616",
+      "e46ab488e9d44076",
+      "e990056c7b08978c",
+      "fd4b16107d4ec28f"
+    ],
+    "docs-governance.md": [
+      "1cf0c09bb385795a",
+      "4f034ba96922aef1",
+      "57e8fe03f686c5a9",
+      "5b3639a8e892689a",
+      "7a7bad252dd3d149",
+      "d83859b182bb3246",
+      "de6b68efb8e3d5c6"
+    ],
+    "fast-tests-and-sharding.md": [
+      "17bc45f3689b2561",
+      "41469ea3b49865b9",
+      "55b6660d89a378c2",
+      "576fe56c1d4d2909",
+      "5e149969c5a776f5",
+      "64043a77883fcd69",
+      "6532a5f99f8619f9",
+      "90db00c72b385ae9",
+      "ae386cc73800510a",
+      "c3d0c11c0065822f",
+      "c84f06e1ca5296f1",
+      "c865785ed9a7d468",
+      "f983832d605115b7"
+    ],
+    "generated-files.md": [
+      "9b83d781f728a006"
+    ],
+    "git-completion.md": [
+      "0851d9d6b08278c0",
+      "0e04d08df746d564",
+      "1572e1ef867b6aa1",
+      "18b046448db857fb",
+      "1e743cc29b5bd3a3",
+      "70fa1134c7fb1ff6",
+      "98a052e12845c78d",
+      "b77a4c6f4f7b0a8e",
+      "b87a2ac3ded0ef68",
+      "d13dd04a6ad0ce0c",
+      "f084d93394123b5a",
+      "fb48f76082156d37"
+    ],
+    "invariant-models.md": [
+      "f87337e54146ebb5"
+    ],
+    "local-docs.md": [
+      "295e82fcff87ad56",
+      "798b66ac475a74d0"
+    ],
+    "managed-memory.md": [
+      "2f27a2fa9e4b0df7",
+      "bec21fd697c74431"
+    ],
+    "model-safety-flags.md": [
+      "57cd80ec740a84dc"
+    ],
+    "n8n-workflows.md": [
+      "7b0c4c2f70d00a22"
+    ],
+    "privacy-safe-checks.md": [
+      "04a754ce693103a4",
+      "47a8e0e6d2eb6dda",
+      "605abed7630ee928",
+      "986af398875a4ac6",
+      "a07b64689d7458b9",
+      "a2888d0b1b23531d",
+      "a71d13f0ee50b0de"
+    ],
+    "project-completion-audit.md": [
+      "9d323a8e47cb0349"
+    ],
+    "release-readiness-audit.md": [
+      "1981258f7b9c3a41"
+    ],
+    "safety-gates.md": [
+      "055672c1fa04b2dd",
+      "0fedbc3a3ee78716",
+      "1b3d32a97795840c",
+      "237d21d875ad9e51",
+      "2447015fdc29a58d",
+      "28dd3181c31b167b",
+      "2ac942778a0d014d",
+      "2daf250c0af05e5a",
+      "2eb685f8e467b7e7",
+      "319818f72709578c",
+      "3673275571e058ea",
+      "3a2bfbefbee640d4",
+      "411b09db24539d1a",
+      "5453c79dd3ad94af",
+      "5a5807cee21001c3",
+      "6b0fda6bb444ce60",
+      "6b2997cbfcc57e8d",
+      "864d061334f419d4",
+      "9163ad71d1e7d977",
+      "93439f6cd6cc4a28",
+      "b868c09e758c6610",
+      "b917b42fadb67cbb",
+      "ba1a94f71431903f",
+      "c67300d511473ea5",
+      "c7f19de2bb3cbf0d",
+      "c9fa106c9566dc39",
+      "ce0b4551af577d23",
+      "ceb0d735789f8ed7",
+      "dc8b523275c06e90",
+      "e7033e7ff515db78",
+      "ec3086a56bd12a46",
+      "ed80ba553f5e068c",
+      "f5406ad675a6d094"
+    ],
+    "windows-command-hygiene.md": [
+      "82560ee1a6693611",
+      "8b7f495378558a6d"
+    ]
+  }
+}

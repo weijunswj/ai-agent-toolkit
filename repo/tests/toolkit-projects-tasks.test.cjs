@@ -459,9 +459,16 @@ test('only the project that runs the Toolkit repo watches other projects, and on
   assert.match(own, /OTHER PROJECTS: this project runs the Toolkit repo/);
   for (const required of ['reusing the same list_triggers result (no extra calls)', 'Group the cloud tasks by hearth_channel_id',
     '"PROJECT TASKS MISSING: <PROJECT>=<task>[+<task>], ... | "', 'unless state.md already reported the same set',
-    'Report only: that project\'s own coordinator recreates its tasks on its next wake']) {
+    'Report only: that project\'s own coordinator recreates its tasks on its next wake',
+    // The platform refuses a prompt swap from another project, so outdated tasks are reported, not swapped here.
+    'Report only: a task\'s prompt changes only from the thread it posts into, so that project\'s own coordinator swaps them in place on its own check-in, never this one.']) {
     assert.ok(own.includes(required), required);
   }
+  assert.doesNotMatch(own, /so this coordinator swaps them in place/);
+  const reference = fs.readFileSync(path.join(TASKS, '..', 'reference', 'recurring-tasks.md'), 'utf8');
+  assert.ok(reference.includes("Never call `update_trigger` on another project's task."), 'no cross-project swap');
+  const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
+  assert.ok(acting.includes("  - `PROJECT TASKS OUTDATED` (Toolkit project only): another project's enabled check-in or nudge") && acting.includes("own check-in's `TASKS OUTDATED`, never this one."), 'PROJECT TASKS OUTDATED is report only');
 });
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
@@ -1123,6 +1130,8 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
     for (const phrase of ['runs every time, even when step 1 found no change', 'a bot or workflow PR wakes no thread',
       'every open PR on example-owner/example-repo and on the project\'s evidence store', '"store unread"',
       'its owner (the thread that owns or watches it', 'or the merge train holding it', 'its live next step',
+      // Step 2 is skipped on quiet runs, so owners come from step 2b's list_threads read, which always runs.
+      'that step 2b reads on every run, quiet runs included', 'under `GITHUB STEPS OWED` pages list_threads itself',
       'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
     assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
@@ -1133,7 +1142,7 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
     'bot and workflow PRs included', 'the reason `unowned`']) assert.ok(checkIn.includes(phrase), phrase);
   const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
   for (const phrase of ['- `PR UNOWNED`: every open PR needs an owner and a live next step', 'to the merge train',
-    "after the owner's OK", 'the same PR listed again on the next run goes to the owner',
+    "after the owner's OK (an evidence-store PR needs none: the store is agent-managed with standing permission, so merge or close it yourself)", 'the same PR listed again on the next run goes to the owner',
     'an `unowned` PR is routed as for `PR UNOWNED`']) assert.ok(acting.includes(phrase), phrase);
 });
 
@@ -1192,4 +1201,49 @@ test('rendered daily check-ins run workflow health, and the decision trace and C
     assert.ok(step.includes(phrase), phrase);
   }
   assert.ok(text.indexOf('**Checkers:**', text.indexOf('REPORT')) > 0, 'the report has a Checkers bullet');
+});
+
+// A session without repo access once relayed runs and wrote `.done` with the PR sweep unrun, leaving a
+// bot PR unowned. A GitHub step that cannot read GitHub is a prefix, and `.done` waits for a thread with the repos.
+test('periodic runs hand GitHub steps they cannot read to a thread with the repos before .done', () => {
+  for (const session of ['bound', 'fresh']) {
+    const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    const step = text.split('\n').find(line => line.startsWith('5. PRs'));
+    assert.ok(step.includes('this step is not done: start the first line with "GITHUB STEPS OWED: <steps> | "'), `${session}: step 5`);
+    assert.doesNotMatch(step, /If GitHub MCP is unavailable, say so\./, `${session}: step 5 no longer just says so`);
+    assert.ok(text.includes('"THREAD SCAN INCOMPLETE: <read> of <total> | ", "GITHUB STEPS OWED: <steps> | "'), `${session}: first line`);
+  }
+  const checkIn = rendered('daily-check-in');
+  assert.ok(checkIn.includes('start the first line with "GITHUB STEPS OWED: <steps> | ", naming each step that could not read GitHub (11, 11b)'));
+  assert.ok(checkIn.includes('NUDGE NOT ARMED, GITHUB STEPS OWED, PROJECT TASKS MISSING'));
+  const reference = path.join(TASKS, '..', 'reference');
+  const recurring = fs.readFileSync(path.join(reference, 'recurring-tasks.md'), 'utf8');
+  for (const phrase of ['- **GitHub steps need repo access.**', 'a relay alone does not complete it',
+    'hand every GitHub step of the run', 'Write `.done` only after that thread reports back']) assert.ok(recurring.includes(phrase), phrase);
+  const periodic = fs.readFileSync(path.join(reference, 'periodic-runs.md'), 'utf8');
+  assert.ok(periodic.includes('  - `GITHUB STEPS OWED`:') && periodic.includes('- `GITHUB STEPS OWED`: as in **Acting on the check-in report**'));
+  assert.ok(fs.readFileSync(SKILL, 'utf8').includes("Without repo access, hand the run's GitHub steps to a thread with the repos; `.done` waits for its report."));
+});
+
+// GitHub can skip a scheduled workflow run, and a skipped run wakes no one, so the hourly PR step
+// flags a workflow whose newest run is older than its longest scheduled gap, and the coordinator starts it by hand.
+test('the hourly nudge flags a skipped scheduled workflow for a manual run', () => {
+  for (const session of ['bound', 'fresh']) {
+    const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    const step = text.split('\n').find(line => line.startsWith('   Scheduled workflows'));
+    assert.ok(step, `${session}: scheduled workflows check`);
+    for (const phrase of ['part of step 5, so it runs every time', 'a scheduled time passed more than 30 minutes ago',
+      'no run of it started since that time', '"SCHEDULE MISSED: <names> | "', 'whether it takes `workflow_dispatch`',
+      'a disabled workflow is listed once as off', "needs the owner's approval by name for anything that acts outside the repository",
+      'this task never starts workflows itself']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
+    assert.ok(text.includes('"GITHUB STEPS OWED: <steps> | ", "SCHEDULE MISSED: <names> | "'), `${session}: first line`);
+    const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
+    assert.ok(!none.includes('Scheduled workflows'), `${session}: no-repo nudge has no workflow check`);
+  }
+  const periodic = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
+  const missed = periodic.split('\n').find(line => line.startsWith('- `SCHEDULE MISSED`:'));
+  // A generic guidebook must never hand-start a project's deploy, publish, sync or mail workflow without the owner naming it.
+  for (const phrase of ['Re-read its newest run first', "stays inside the repository's own GitHub state", 'or one the owner approved by name',
+    "is never started without the owner's approval naming it", 'with the file, ref and effect', 'A disabled workflow is not missed',
+    'with a default-branch-only job guard']) assert.ok(missed.includes(phrase), phrase);
 });

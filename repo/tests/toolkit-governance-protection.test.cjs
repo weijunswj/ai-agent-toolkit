@@ -678,7 +678,9 @@ test('P-11: the reader asks GitHub only with GETs and maps classic protection an
   const free = (command, args) => (args[1].startsWith('repos/o/r/rules/') ? { status: 1, stdout: '', stderr: 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' } : spawn(command, args));
   assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: free }), { ok: false, reason: 'plan-has-no-protection' });
   const forbidden = (command, args) => (args[1].startsWith('repos/o/r/rules/') ? { status: 1, stdout: '', stderr: 'gh: Resource not accessible (HTTP 403)' } : spawn(command, args));
-  assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: forbidden }), { ok: false, reason: 'gh-request-failed' });
+  assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: forbidden }), { ok: false, reason: 'forbidden' });
+  const limited = (command, args) => (args[1].startsWith('repos/o/r/rules/') ? { status: 1, stdout: '', stderr: 'gh: API rate limit exceeded (HTTP 403)' } : spawn(command, args));
+  assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: limited }), { ok: false, reason: 'gh-request-failed' }, 'a rate limit passes, so it is not a refusal');
 });
 
 test('P-16: nothing still points at the removed CI Gate machinery or control-plane kernel', () => {
