@@ -1,12 +1,14 @@
 name: Source Watch PR Notifier
 
-# Scheduled only: this workflow is intentionally not manually dispatchable
-# because it has contents: write and pull-requests: write permissions.
+# Scheduled, and startable by hand on main only: GitHub can skip a scheduled run, and a skipped run
+# leaves a stale review notification open until the next schedule. A manual run on any other branch
+# does nothing, because this workflow has contents: write and pull-requests: write permissions.
 on:
   schedule:
     - cron: "17 3 * * *"
     - cron: "43 9 * * *"
     - cron: "29 15 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,6 +20,7 @@ concurrency:
 
 jobs:
   notify:
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

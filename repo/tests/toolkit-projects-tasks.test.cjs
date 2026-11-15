@@ -1215,3 +1215,20 @@ test('periodic runs hand GitHub steps they cannot read to a thread with the repo
   assert.ok(periodic.includes('  - `GITHUB STEPS OWED`:') && periodic.includes('- `GITHUB STEPS OWED`: as in **Acting on the check-in report**'));
   assert.ok(fs.readFileSync(SKILL, 'utf8').includes("Without repo access, hand the run's GitHub steps to a thread with the repos; `.done` waits for its report."));
 });
+
+// GitHub can skip a scheduled workflow run, and a skipped run wakes no one, so the hourly PR step
+// flags a workflow whose newest run is older than its longest scheduled gap, and the coordinator starts it by hand.
+test('the hourly nudge flags a skipped scheduled workflow for a manual run', () => {
+  for (const session of ['bound', 'fresh']) {
+    const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    const step = text.split('\n').find(line => line.startsWith('   Scheduled workflows'));
+    assert.ok(step, `${session}: scheduled workflows check`);
+    for (const phrase of ['part of step 5, so it runs every time', 'older than its longest gap between two scheduled times',
+      '"SCHEDULE MISSED: <names> | "', 'whether it takes `workflow_dispatch`', 'this task never starts workflows itself']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
+    assert.ok(text.includes('"GITHUB STEPS OWED: <steps> | ", "SCHEDULE MISSED: <names> | "'), `${session}: first line`);
+    const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
+    assert.ok(!none.includes('Scheduled workflows'), `${session}: no-repo nudge has no workflow check`);
+  }
+  const periodic = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
+  assert.ok(periodic.includes('- `SCHEDULE MISSED`: GitHub skipped a scheduled workflow\'s run.') && periodic.includes('start each listed workflow by hand on the default branch'));
+});
