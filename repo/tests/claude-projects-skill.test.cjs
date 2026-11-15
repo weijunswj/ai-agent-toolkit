@@ -481,9 +481,12 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Its closing checklist carries "coordinator: refresh the guidebook"/);
   assert.match(text, /`SKILL UPDATE`: the guidebook's Version is newer than the one on the BINDING line\./);
   assert.match(text, /a guidebook refresh reports BLOCK CHANGED, or the daily check-in reports BLOCK OUTDATED/);
-  // The skill card route for the account copy is gone, with its brief.
+  // The old skill card thread route stays gone; the coordinator offers one card per Version on SKILL CARD OUTDATED.
   assert.ok(!fs.existsSync(path.join(repoRoot, REFERENCE_DIR, 'skill-card.md')));
-  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|SKILL CARD|propose_skills|skill-card|skill card|card due|damaged card|tap Save/);
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|skill-card|card due|damaged card|tap Save/);
+  assert.match(text, /call `propose_skills` once with kind `improvement`, name and target `web-controller-projects`/);
+  assert.match(text, /Record `skill card <guidebook Version> offered <date>`/);
+  assert.match(text, /never a hand upload\. Never offer a Version that has a `skill card` line again\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
   assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
@@ -501,7 +504,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /A hook-change advisory is one plain note only, with no prefix, card or automatic thread rotation/);
   assert.match(text, /confirm the account copy using a fresh session's observation against main today; an old session's pinned report cannot confirm the release reached the account/);
   assert.doesNotMatch(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`/);
-  assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
+  assert.match(text, /Only the plugin \(two clicks\) and the saved skill card \(one Save\) need the owner: no agent can update them, so you guide the owner with the exact step\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.ok(text.includes('Relay each hourly nudge run too, one line when nothing needs the owner (**Communication**).'));
   assert.doesNotMatch(text, /stays silent/);
@@ -752,7 +755,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PROJECT TASKS OUTDATED`', '`PLUGIN BEHIND`', '`TASK FAILING`', '`PR ATTENTION`'];
+  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`SKILL CARD OUTDATED`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PROJECT TASKS OUTDATED`', '`PLUGIN BEHIND`', '`TASK FAILING`', '`PR ATTENTION`'];
   // The prefix list moved word for word from the skill's Daily check-in section into reference/periodic-runs.md.
   const section = text.slice(text.indexOf('## Acting on the check-in report'), text.indexOf('## Hourly nudge home thread'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
