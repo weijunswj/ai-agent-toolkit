@@ -3,7 +3,7 @@
 // The handover file: one generated file per task in the private evidence store, so a fresh controller,
 // executor or computer can resume a task from its issue number alone. It is rewritten from the
 // programme state by this script at each gate end, with the gate's own plan and evidence links; it
-// holds no secret and no device path. The task's AGENT CONTEXT line links it.
+// holds no secret and no device path. handoverUrl gives the link a page's AGENT CONTEXT line carries.
 //
 //   programme.cjs handover --issue <n> [--gate G0|G1|G2|controller] [--plan <https url>]
 //                          [--evidence <https url>]... [--note <text>] [--apply] [--json] [--repo-root <dir>]
