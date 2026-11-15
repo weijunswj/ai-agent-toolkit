@@ -283,6 +283,17 @@ test('generated candidate body requires gates and names pending evidence without
   assert.doesNotMatch(body, /\b(passed|approved|verified)\b/i);
 });
 
+test('generated candidate body carries the UAT and Bump lines the merge check and train finder read', () => {
+  const { prBody } = loadWithCommands('refresh-shard-timings.cjs', ['prBody'], spawnSync, __dirname);
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  const body = prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: ['linux: trigger crossed'] });
+  const uat = uatVerdict(body);
+  assert.equal(uat.state, 'NOT_REQUIRED', uat.problem || 'no UAT line');
+  assert.ok(uat.ready);
+  // The train finder's own pattern: exactly one Bump line, and a manifest-only refresh bumps nothing.
+  assert.deepEqual([...body.matchAll(/^Bump: (patch|minor|major|none)[ \t]*$/gm)].map((match) => match[1]), ['none']);
+});
+
 for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resolution-failure', 'worktree-failure', 'cleanup-failure']) {
   test(`refresh worktree owns its fetched commit: ${mode}`, () => {
     const fixture = fetchFixture();

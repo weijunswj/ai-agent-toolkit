@@ -325,6 +325,11 @@ function prBody(run, plan, profile = V1) {
     '- Owner UAT: NOT_REQUIRED for manifest-only redistribution because both CI systems exercise the entire changed surface.',
     '- Full G2: pending before merge.',
     'Budget or generator changes need their own impact assessment.',
+    '',
+    // The merge check reads the UAT line and the train finder the Bump line; without them the
+    // pull request can neither auto-merge nor board a train. A manifest-only change bumps nothing.
+    'UAT: NOT_REQUIRED (manifest-only shard redistribution; both CI systems run every changed shard)',
+    'Bump: none',
   ].join('\n');
 }
 

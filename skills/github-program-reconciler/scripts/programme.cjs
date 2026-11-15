@@ -58,7 +58,7 @@
 //   run-order --order <file> --session <this session's own id> [--dry-run]
 //
 // Moving the documents to the public state branch (once per repository, before the binding gains
-// `state`): anyone may run the dry run; the apply is the controller's and asks for the owner's typed yes
+// `state`): anyone may run the dry run; the apply is the controller's and asks for the owner's fresh Enter
 // in a terminal, in that run:
 //   migrate-state --dry-run                            print the public documents, sidecars and digests
 //   migrate-state --apply --plan-digest <digest>       create the branch from the dry run it names
@@ -568,28 +568,21 @@ function migrationPlan(context, source) {
   return { parentDoc, documents, problems, digest, privateBlobs, branchExists: branch.status === 200 };
 }
 
-// The owner's typed yes, read from this terminal. In a shell a coding agent started (the same exact
-// markers toolkit env show refuses on), or without a terminal (a pipe), the question is never asked
-// and nothing is written.
-function askTyped(question, deps = {}) {
+// The owner's fresh Enter on this terminal (owner-terminal.cjs pressEnterSync). In a shell a coding
+// agent started, or without a terminal (a pipe), the prompt is never shown and nothing is written; a
+// pasted blank line never answers it.
+function confirmOwner(effect, deps = {}, summary = '') {
   const environment = deps.environment || process.env;
-  let markers;
-  try { markers = require('../../../repo/scripts/toolkit-env.cjs').AGENT_MARKERS; } catch {
-    throw new ProgrammeError('NOT_CONFIRMED', 'This copy cannot tell an agent\'s shell from the owner\'s terminal, so the owner\'s typed yes is not asked. Use a full Toolkit install. Nothing was written.');
+  let ownerTerminal;
+  try { ownerTerminal = require('../../../repo/scripts/owner-terminal.cjs'); } catch {
+    throw new ProgrammeError('NOT_CONFIRMED', 'This copy cannot tell an agent\'s shell from the owner\'s terminal, so the owner\'s Enter is not asked. Use a full Toolkit install. Nothing was written.');
   }
-  const marker = markers.find(name => Boolean(environment[name]));
-  if (marker) throw new ProgrammeError('NOT_CONFIRMED', `This shell was started by a coding agent (${marker}), so the owner's typed yes is not asked here. The owner runs this in their own terminal. Nothing was written.`);
-  if (deps.ask) return deps.ask(question);
-  if (!process.stdin.isTTY) throw new ProgrammeError('NOT_CONFIRMED', 'This step needs the owner\'s typed yes in a terminal; run it yourself there. Nothing was written.');
-  process.stderr.write(question);
-  const buffer = Buffer.alloc(256);
-  let text = '';
-  while (!text.includes('\n')) {
-    const read = fs.readSync(0, buffer, 0, buffer.length, null);
-    if (!read) break;
-    text += buffer.toString('utf8', 0, read);
-  }
-  return text.trim();
+  const marker = ownerTerminal.AGENT_MARKERS.find(name => Boolean(environment[name]));
+  if (marker) throw new ProgrammeError('NOT_CONFIRMED', `This shell was started by a coding agent (${marker}), so the owner's Enter is not asked here. The owner runs this in their own terminal. Nothing was written.`);
+  if (deps.confirm) return deps.confirm(effect) === true;
+  if (!process.stdin.isTTY) throw new ProgrammeError('NOT_CONFIRMED', 'This step needs the owner\'s Enter in a terminal; run it yourself there. Nothing was written.');
+  if (summary) process.stderr.write(`${summary}\n`);
+  return ownerTerminal.pressEnterSync(effect, { environment });
 }
 
 function redact(doc) {
@@ -748,7 +741,7 @@ const commands = {
   },
 
   // The documents in the private store, moved to the public state branch. The dry run writes nothing;
-  // the apply needs the dry run's plan digest, the parent's holder and the owner's typed yes in this
+  // the apply needs the dry run's plan digest, the parent's holder and the owner's fresh Enter in this
   // run, then writes the sidecars, one orphan commit and the checkpoint, reads every document back
   // and prints the binding change. Readers keep the private store until that change is merged.
   'migrate-state'(args, context, deps = {}) {
@@ -768,8 +761,8 @@ const commands = {
     if (args['plan-digest'] !== plan.digest) throw new ProgrammeError('MIGRATION_CHANGED', `The documents changed since the dry run (plan digest ${plan.digest}, not ${args['plan-digest']}). Nothing was written; run the dry run again.`);
     if (plan.problems.length) throw new ProgrammeError('MIGRATION_HELD', `The migration stops before anything is written: ${plan.problems[0]}${plan.problems.length > 1 ? ` (and ${plan.problems.length - 1} more; the dry run lists them)` : ''}.`);
     if (plan.branchExists && !since) throw new ProgrammeError('STATE_BRANCH_EXISTS', `The state branch ${state.STATE_BRANCH} already exists on ${context.repository} and has been written since its move; nothing was replaced.`);
-    const answer = askTyped(`${since ? 'Move these documents again onto' : 'Create'} the public state branch ${state.STATE_BRANCH} on ${context.repository} with these ${plan.documents.length} document(s), and their private sidecars in ${context.binding.store.repository}? Type yes to confirm: `, deps);
-    if (String(answer || '').trim().toLowerCase() !== 'yes') throw new ProgrammeError('NOT_CONFIRMED', 'Not confirmed. Nothing was written.');
+    const effects = `${since ? 'Move again onto' : 'Create'} ${state.STATE_BRANCH} on ${context.repository}: ${plan.documents.length} document(s); private sidecars in ${context.binding.store.repository}.`;
+    if (!confirmOwner(since ? 'move them' : 'create the branch', deps, effects)) throw new ProgrammeError('NOT_CONFIRMED', 'Not confirmed. Nothing was written.');
     target.requirePrivateStore();
     for (const entry of plan.documents) target.putSidecar(entry.name, entry.doc, entry.sha256);
     const head = target.createCommit(plan.documents.map(entry => [`${state.STATE_PATH}${entry.name}.json`, entry.text]), `programme-state: ${since ? 'migrate again' : 'migrate'} ${plan.documents.length} document(s) [skip ci]`, since ? [since] : []);

@@ -1,5 +1,39 @@
 # Toolkit Changelog
 
+## 3.130.0 (periodic runs hand GitHub steps to a thread with the repos and recover skipped schedules)
+
+### Fixed
+
+- **A queued holder order could be filed twice or lose its receipts:** when the cloud sweep filed an order's result and read it back but then failed to take the order off the queue, the next run ran the order again. After the order's expiry that filed a completed order as both done and refused, or replaced a stopped result and its write receipts with a bare refusal; before expiry it replaced the receipts with "done earlier". Result files now name the commit that queued the order, and the next run finds the result for that same commit and only removes the file. The same order queued again comes with a new commit and still runs, so a stopped order continues from its refused write. The sweep also runs a pending file exactly as listed, read at the commit that queued it, so a file replaced mid-run never hides the replacement or gets a result for an order that did not run.
+- A shard timing refresh pull request now ends with `UAT: NOT_REQUIRED` and `Bump: none` lines, so the auto-merge check accepts it and the merge train finder can board it once its review passes. Before, every such pull request needed both lines added by hand.
+
+### Claude Projects
+
+- **Added:** the hourly nudge and the daily check-in start their first line with `GITHUB STEPS OWED: <steps> | ` when a step could not read GitHub (the nudge's CI waits, PR sweep and programme sweep; the check-in's GitHub and checker steps), instead of only saying so.
+- **Changed:** a coordinator without repo access no longer finishes a task run by relaying it: the same turn it hands every GitHub step of the run to a thread that has the repos, and writes `.done` only after that thread reports back (**GitHub steps need repo access** in the recurring-tasks reference, and the skill's **Every task run reaches the project chat** line).
+- **Added:** the hourly nudge's PR step also reads each scheduled workflow's newest run and raises `SCHEDULE MISSED: <names> | ` when a scheduled time passed more than 30 minutes ago with no run since, because GitHub can skip a scheduled run. The coordinator re-reads the newest run, then has a thread with the repos start it by hand on the default branch only when the workflow stays inside the repository's own GitHub state or the owner approved it by name; anything else waits for the owner.
+
+### Changed
+
+- The Source Watch PR Notifier can now also be started by hand, on `main` only (a manual run on any other branch does nothing), so a skipped scheduled run can be recovered without waiting for the next schedule. A test now requires every scheduled workflow in the repository to take `workflow_dispatch`.
+- The global rules' root-cause principle now also says to fix problems upstream: where it matters, the fix goes in the shared source that copies, prompts and later runs inherit, not a local patch. The global block's byte cap rises to 21,900 to hold it.
+
+## 3.129.0 (Enter-only owner terminal steps)
+
+### Added
+
+- `repo/scripts/owner-terminal.cjs` is the one place Toolkit scripts print to, and confirm with, the owner's own terminal: a title line, a few `label: value` facts, at most one sentence wrapped to the window, and an OK or STOP line. Colour and markers show only on a terminal with `NO_COLOR` unset.
+- Every owner confirmation is a fresh Enter, and Ctrl+C stops with nothing changed. The prompt drops anything typed or pasted before it and anything that arrives before the input has been quiet for a moment, and a pasted block never confirms, so the blank line at the end of a pasted command no longer answers it.
+- The governance App setup command has a `--save both|variable|secret` step for an App made by hand: it saves the Client ID and the key file's key on the repository, reads both names back, and overwrites an App already there only with `--replace`, which `toolkit governance check` prints only on its replace route.
+
+### Changed
+
+- `toolkit permissions --apply` and `--remove`, the governance App setup, `toolkit governance disable` in a terminal, the `toolkit governance migrate` rulesets, `programme.cjs migrate-state --apply`, the setup RAM approval and the Codex configuration approval wait for Enter instead of a typed `apply`, `create`, `yes` or `approve`. Answer files and flags work as before.
+- `toolkit env` remove, apply, connect, revoke and retire-codex-env wait for Enter when run in your own terminal; your agent still passes your chat yes or no on stdin. `toolkit env show` asks for Enter instead of the key's name. Typing a secret value stays hidden typed input.
+- The governance App setup screen is a title, four facts and one sentence instead of two long paragraphs.
+- The App's by-hand save commands are the setup command's `--save` step instead of long pasted PowerShell and shell lines that asked you to type `replace`.
+- The global Development Principles say owner terminal steps are short and Enter-only.
+
 ## 3.128.2
 
 ### Fixed
