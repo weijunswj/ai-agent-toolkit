@@ -5,6 +5,7 @@
 // never reaches the screen, the command line or a file, and an existing App is never overwritten.
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const http = require('node:http');
 const test = require('node:test');
 
 const setup = require('../scripts/toolkit-governance-app-setup.cjs');
@@ -14,7 +15,7 @@ const SLUG = 'example-owner/example-repo';
 const STORE = 'example-owner/example-store';
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs1', format: 'pem' });
-const MADE = { id: 4242, slug: 'example-repo-governance', client_id: 'Iv23example', client_secret: 'unused-secret', webhook_secret: null, pem: PEM, html_url: 'https://github.com/apps/example-repo-governance' };
+const MADE = { id: 4242, owner: { login: 'example-owner' }, slug: 'example-repo-governance', client_id: 'Iv23example', client_secret: 'unused-secret', webhook_secret: null, pem: PEM, html_url: 'https://github.com/apps/example-repo-governance' };
 
 // A fake gh: the repository, its variable and secret names, the manifest conversion and the two saves.
 function fakeGh({ ownerType = 'User', names = [], namesAfterConversion = null, convert = MADE } = {}) {
@@ -157,6 +158,36 @@ test('an App not yet installed on the repository is not finished', async t => {
   const run = owner(t, { installedOn: [STORE] });
   assert.equal(await setup.main(['--repo', SLUG, '--store', STORE], run.deps), 1);
   assert.match(run.said.join('\n'), /example-owner\/example-repo: not installed yet; add it on https:\/\/github\.com\/apps\/example-repo-governance\/installations\/new\..*Not finished/s);
+});
+
+// A request with any Host header, which fetch cannot set.
+function hostGet(url, host) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    http.get({ hostname: target.hostname, port: target.port, path: `${target.pathname}${target.search}`, headers: { host } }, response => { response.resume(); resolve(response.statusCode); }).on('error', reject);
+  });
+}
+
+test('the loopback server answers only requests addressed to its own 127.0.0.1 address (no DNS rebinding)', async t => {
+  let delivered = false;
+  const server = await setup.serveLoopback({ page: () => '<p>form with state</p>', state: 'expected-state' });
+  t.after(() => server.close());
+  server.code.then(() => { delivered = true; });
+  const own = new URL(server.url).host;
+  for (const host of ['attacker.example', `attacker.example:${new URL(server.url).port}`, 'localhost', '127.0.0.1', `localhost:${new URL(server.url).port}`]) {
+    assert.equal(await hostGet(`${server.url}/`, host), 404, `page for Host ${JSON.stringify(host)}`);
+    assert.equal(await hostGet(`${server.url}/callback?code=abc&state=expected-state`, host), 404, `callback for Host ${JSON.stringify(host)}`);
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(delivered, false, 'a code from another Host is never taken');
+  assert.equal(await hostGet(`${server.url}/`, own), 200);
+});
+
+test('an App made under another account than the repository owner is not saved', async t => {
+  const run = owner(t, { gh: fakeGh({ convert: { ...MADE, owner: { login: 'someone-else' } } }) });
+  assert.equal(await setup.main(['--repo', SLUG], run.deps), 1);
+  assert.match(run.said.join('\n'), /belongs to someone-else, not example-owner/);
+  assert.ok(!run.gh.calls.some(call => ['variable', 'secret'].includes(call.args[0])), 'nothing is saved');
 });
 
 test('the loopback server serves the form and takes only the code with the right state', async t => {

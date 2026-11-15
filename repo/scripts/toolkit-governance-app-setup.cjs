@@ -75,19 +75,22 @@ function formPage(action, body) {
 }
 
 // A loopback server for the form (`page()`) and GitHub's return. Resolves `code` with the code GitHub
-// sends back with the right state; anything else gets a 404.
+// sends back with the right state; anything else gets a 404. Only requests addressed to its own
+// 127.0.0.1 address count, so a web page that rebinds its own name to this computer cannot read the
+// state or hand in a code.
 function serveLoopback({ page, state }) {
   let deliver;
   const code = new Promise(resolve => { deliver = resolve; });
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
-    if (request.method === 'GET' && url.pathname === '/') {
+    const own = request.headers.host === `127.0.0.1:${server.address().port}`;
+    if (own && request.method === 'GET' && url.pathname === '/') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       response.end(page());
       return;
     }
     const value = url.searchParams.get('code');
-    if (request.method === 'GET' && url.pathname === '/callback' && url.searchParams.get('state') === state && CODE.test(String(value))) {
+    if (own && request.method === 'GET' && url.pathname === '/callback' && url.searchParams.get('state') === state && CODE.test(String(value))) {
       response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
       response.end('GitHub made the App. Go back to your terminal to finish.');
       deliver(value);
@@ -190,6 +193,11 @@ async function setup(argv, deps = {}) {
   const pem = made && typeof made.pem === 'string' && made.pem.includes('PRIVATE KEY') ? made.pem : null;
   if (!made || !pem || typeof made.client_id !== 'string' || !made.id || typeof made.html_url !== 'string') {
     throw new SetupStop('GitHub did not hand over the new App\'s Client ID and key.', 'if GitHub made the App, delete it (Settings, Developer settings, GitHub Apps) and run this again. Nothing was saved on the repository.');
+  }
+  // The App must belong to the repository's owner, the account whose create page the form posted to.
+  const madeBy = typeof made.owner?.login === 'string' ? made.owner.login : '';
+  if (madeBy.toLowerCase() !== repo.split('/')[0].toLowerCase()) {
+    throw new SetupStop(`the new App belongs to ${madeBy || 'an unknown account'}, not ${repo.split('/')[0]}, so nothing was saved.`, `delete that App (${made.html_url}, its settings, Advanced) and run this again signed in to GitHub as ${repo.split('/')[0]} or one of its owners.`);
   }
   const appPage = made.html_url;
   const settings = `https://github.com/${owner === 'Organization' ? `organizations/${repo.split('/')[0]}/` : ''}settings/apps/${made.slug}`;
