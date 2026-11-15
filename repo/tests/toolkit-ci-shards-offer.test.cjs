@@ -376,3 +376,47 @@ test('governance check: copies left after never are drift; a copy at an old work
   assert.equal(left.length, 2);
   for (const message of left) assert.match(message, /no longer copied: the merged binding answers never to parallel CI shards \(ci_shards\)\. Repair the shard list and refresh the repository rules, or remove the shard copies in a pull request\./);
 });
+
+// ---- the retired schedule_folder key ------------------------------------------------------------
+
+test('bank: the shards pull request drops the retired schedule_folder line, alone or with a switch, and its text says so', async t => {
+  const withRetired = text => text.replace('  "required_checks"', '  "schedule_folder": "TOOLKIT",\n  "required_checks"');
+  const stamp = text => text.replace(/"offered_at": "[^"]*"/, '"offered_at": "T"');
+  for (const reply of ['1.4=B', '1.2=B, 1.4=B']) {
+    const plain = governedFixture(t);
+    const before = recorder();
+    assert.equal((await answer(plain, reply, { transport: before })).code, 0);
+    const carried = governedFixture(t);
+    carried.merge(withRetired(bindingText()));
+    const after = recorder();
+    const result = await answer(carried, reply, { transport: after });
+    assert.equal(result.code, 0, result.err);
+    const [, mergedText, text] = after.calls[0];
+    assert.equal(mergedText, carried.mergedText, `${reply}: the pull request starts from the exact merged text`);
+    assert.match(carried.mergedText, /"schedule_folder"/);
+    assert.equal(stamp(text), stamp(before.calls[0][2]), `${reply}: the only other change is the removed schedule_folder line`);
+  }
+  // The transport's pull request text names the deleted line only when one goes.
+  const proposal = offer.ciShardsText(bindingText(), JSON.parse(bindingText()), { answer: 'never' });
+  const body = merged => {
+    let sent = null;
+    const runner = (args, input) => {
+      const endpoint = args[1];
+      if (args[0] === 'auth') return '';
+      if (endpoint === 'user') return JSON.stringify({ login: 'toolkit-test-fixture' });
+      if (endpoint === `repos/${SLUG}`) return JSON.stringify({ default_branch: 'main' });
+      if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'b'.repeat(40) } });
+      if (endpoint.includes('/contents/.github/toolkit-programme.json?ref=')) return JSON.stringify({ type: 'file', encoding: 'base64', sha: 'c'.repeat(40), content: Buffer.from(merged).toString('base64') });
+      if (endpoint.includes('/pulls?state=open')) return '[]';
+      if (endpoint.includes('/git/ref/heads/toolkit/')) throw Object.assign(new Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      if (endpoint.endsWith('/git/refs')) return '{}';
+      if (endpoint.includes('/contents/')) return JSON.stringify({ commit: { sha: 'd'.repeat(40) } });
+      if (endpoint.endsWith('/pulls')) { sent = input.body; return JSON.stringify({ number: 9, html_url: `https://github.com/${SLUG}/pull/9` }); }
+      throw new Error(`unexpected ${endpoint}`);
+    };
+    new GitHubProposalTransport({ run: runner }).publishCiShards(SLUG, merged, proposal, 'never', null);
+    return sent;
+  };
+  assert.match(body(withRetired(bindingText())), /parallel CI shards question\. It also deletes the retired `schedule_folder`, which nothing reads any more\. Nothing else changes\./);
+  assert.match(body(bindingText()), /parallel CI shards question\. Nothing else changes\./);
+});

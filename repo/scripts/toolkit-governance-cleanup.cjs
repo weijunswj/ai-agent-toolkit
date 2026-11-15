@@ -45,12 +45,16 @@ function sweepCopiesWithoutMinToolkit(root) {
   });
 }
 
+// The binding reader and its retired keys, loaded on first use.
+const programmeState = () => require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
 
 // The programme file with min_toolkit set, in its own layout (indent, line endings, byte order mark),
 // so the pull request shows one added or changed line; a layout it cannot follow is written out whole.
-function withMinToolkit(text, binding) {
-  const expected = { ...binding, min_toolkit: MIN_TOOLKIT };
+// A retired key (programme-state.cjs) goes in the same change, as one removed line.
+function withMinToolkit(original, binding) {
+  const text = programmeState().withoutRetiredKeysText(original);
+  const expected = { ...programmeState().withoutRetiredKeys(binding), min_toolkit: MIN_TOOLKIT };
   const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
   const body = text.slice(bom.length);
   const same = candidate => { try { return JSON.stringify(JSON.parse(candidate)) === JSON.stringify(JSON.parse(JSON.stringify(expected))); } catch { return false; } };
@@ -102,12 +106,13 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
       const held = `the pinned Toolkit copies ${old.join(', ')} run a Toolkit that does not know min_toolkit, so after the cleanup they would read the programme file as invalid and the programme board would stop updating`;
       return { ok: false, held, files: changes.length, changes: [], lines: [`Nothing was changed: ${held}. Refresh them first (toolkit-cloud-workflows.cjs --repo <repository>, one pull request the owner merges), then clean up.`] };
     }
-    changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: withMinToolkit(bindingText, binding) });
+    const retired = programmeState().RETIRED_BINDING_KEYS.filter(key => Object.hasOwn(binding, key));
+    changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: withMinToolkit(bindingText, binding), retired });
   }
 
   const words = { delete: 'remove the file', 'remove-block': 'remove the Toolkit block, keeping the rest of the file', 'set-min-toolkit': `set min_toolkit to ${MIN_TOOLKIT}` };
   const lines = [changes.length ? `${write ? 'Changed' : 'Would change'} in ${scan.name}:` : `Nothing to clean in ${scan.name}.`,
-    ...changes.map(change => `- ${change.file}: ${words[change.action]}${change.edited ? ' (the block was edited by hand since Toolkit wrote it, and those edits go with it)' : ''}.`),
+    ...changes.map(change => `- ${change.file}: ${words[change.action]}${change.retired?.length ? `, and delete the retired ${change.retired.join(' and ')}, which nothing reads any more` : ''}${change.edited ? ' (the block was edited by hand since Toolkit wrote it, and those edits go with it)' : ''}.`),
     ...scan.unproven.map(item => `- Left in place: ${item.file}, because ${item.reason}.`)];
   if (write) {
     for (const change of changes) {
