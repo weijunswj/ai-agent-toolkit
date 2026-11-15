@@ -34,7 +34,8 @@ const ANSWERS = Object.freeze(['yes', 'not-now', 'never']);
 function estimateText(estimate) {
   const cost = 'Each shard adds a minute or two of setup, which a private repository pays for.';
   if (!estimate || !Number.isFinite(estimate.minutes)) return `Minutes: unknown, because no green CI run could be read. ${cost}`;
-  return `Minutes: the last green ${estimate.workflow || 'CI'} run used about ${Math.max(1, Math.round(estimate.minutes))} runner minutes. ${cost}`;
+  const minutes = Math.max(1, Math.round(estimate.minutes));
+  return `Minutes: the last green ${estimate.workflow || 'CI'} run used about ${minutes} runner minute${minutes === 1 ? '' : 's'}. ${cost}`;
 }
 
 // The repository's own CI on its default branch, read with read-only gh: for each of its workflows

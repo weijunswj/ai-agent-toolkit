@@ -41,12 +41,14 @@ function missingRules(files) {
 // own workflow files, so it gets nothing and no warning. When the copies cannot be rendered, the
 // existing ones (if any) still travel and the warning names the reason and the fix.
 const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run toolkit governance check';
-// `root` and `commit` (the Toolkit checkout and the commit to pin) are only for tests.
-function cloudWorkflowFiles(cwd, { root = null, commit = null } = {}) {
+// `ciShards` is the proposed binding's ci_shards answer, so the shard copies follow the pull request's
+// own answer rather than this computer's last read of the merged binding. `root` and `commit` (the
+// Toolkit checkout and the commit to pin) are only for tests.
+function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null } = {}) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(cwd)) return { files: {}, warning: null };
   try {
-    const result = workflows.plan({ repo: cwd, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
+    const result = workflows.plan({ repo: cwd, ciShards, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
     const unmanaged = result.rows.find(row => row.state === 'unmanaged');
     if (unmanaged) throw new workflows.InstallError(`${unmanaged.file} exists and is not a Toolkit copy; move it aside first`);
     return { files: Object.fromEntries(result.rows.map(row => [row.file, row.expected])), warning: null };
@@ -80,7 +82,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
     ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
-    ...cloudFiles()];
+    ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     if (rendered && Object.hasOwn(rendered, name)) continue;
@@ -267,7 +269,7 @@ class GovernanceProposals {
     if (checked.canWrite === false) fail('PROPOSAL_WRITE_REQUIRED');
     const matches = checked.proposals.filter(item => item.answer === prepared.request.answer);
     if (checked.proposals.some(item => item.answer !== prepared.request.answer) || matches.length > 1) fail('PROPOSAL_CONFLICT');
-    const cloud = prepared.request.answer === 'yes' && !matches[0] ? this.#cloudWorkflows(cwd) : { files: {}, warning: null };
+    const cloud = prepared.request.answer === 'yes' && !matches[0] ? this.#cloudWorkflows(cwd, { ciShards: prepared.binding.ci_shards?.answer || null }) : { files: {}, warning: null };
     const proposal = matches[0] || this.#transport.publish(prepared.repository, prepared.binding,
       prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text });
     const readback = this.#transport.read(prepared.repository, proposal.number);
@@ -432,7 +434,8 @@ class GitHubProposalTransport {
   }
   // The owner's sharded CI answer: one pull request that changes only ci_shards in the binding, from the
   // exact merged text, and for yes adds a first shard list (`list`) when the default branch has none.
-  publishCiShards(repository, mergedText, text, answer, list = null) {
+  // Switch `changes` from the same answer ({ auto_merge, merge_train }) join it, so the two never conflict.
+  publishCiShards(repository, mergedText, text, answer, list = null, changes = {}) {
     this.#auth();
     const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
     if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
@@ -443,13 +446,15 @@ class GitHubProposalTransport {
     if (Buffer.from(current.content, 'base64').toString('utf8').replace(/\r\n/g, '\n') !== String(mergedText).replace(/\r\n/g, '\n')) fail('SWITCH_BASE_CHANGED');
     const LIST = '.github/toolkit-test-shards.json';
     const addList = typeof list === 'string' && !this.#optional(`repos/${repository}/contents/${LIST}?ref=${base.object.sha}`);
-    const head = `toolkit/ci-shards-${answer}-${key(text + (addList ? list : '') + base.object.sha)}`;
+    const words = switchWords(changes);
+    const head = `toolkit/${words ? `switches-${words.replace(/[^a-z0-9]+/g, '-')}-` : ''}ci-shards-${answer}-${key(text + (addList ? list : '') + base.object.sha)}`;
     const owner = repository.split('/')[0];
     const open = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`);
     if (Array.isArray(open) && open[0]?.number) return { number: open[0].number, url: open[0].html_url, head: open[0].head?.sha || null };
     if (this.#optional(`repos/${repository}/git/ref/heads/${head}`)) fail('SWITCH_BRANCH_EXISTS');
     this.#api(`repos/${repository}/git/refs`, { ref: `refs/heads/${head}`, sha: base.object.sha });
-    const title = answer === 'yes' ? 'Split this repository\'s tests into parallel CI shards' : 'Stop offering parallel CI shards for this repository';
+    const title = words ? `Set ${words} and parallel CI shards ${answer === 'yes' ? 'yes' : 'never ask'} for this repository`
+      : answer === 'yes' ? 'Split this repository\'s tests into parallel CI shards' : 'Stop offering parallel CI shards for this repository';
     let result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: title, content: Buffer.from(text).toString('base64'), branch: head, sha: current.sha }, 'PUT');
     if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
     if (addList) {
@@ -459,7 +464,9 @@ class GitHubProposalTransport {
     const what = answer === 'yes'
       ? `Yes: the next rules refresh copies the Toolkit test shards workflow (its gate job, \`Toolkit test shards\`, checks every test file ran once on each system) and Shard Timings, while \`${LIST}\` is a usable shard list.${addList ? ` This pull request adds a first \`${LIST}\`: Node tests run with node --test, split across Linux shards; Shard Timings rebalances them from measured times.` : ''}`
       : 'Never: Toolkit does not offer parallel CI shards here again. Nothing is copied.';
-    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, the owner's answer to the parallel CI shards question.${addList ? ` It also adds \`${LIST}\`.` : ''} Nothing else changes.\n\n${what}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
+    const switched = words ? ` It also sets ${Object.keys(changes).map(name => `\`task_prs.${name}\``).join(' and ')}.` : '';
+    const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).map(line => `\n\n${line}`).join('');
+    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, the owner's answer to the parallel CI shards question.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
