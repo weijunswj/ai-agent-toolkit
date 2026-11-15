@@ -285,7 +285,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: 0M7J-V80J-ZYKB-3B59
+Bank reference: 2G6A-JP8H-080J-7J8N
 
 Quick index
 
