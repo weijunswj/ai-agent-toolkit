@@ -120,7 +120,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Findings are the controller's work:**",
-      "covers": "The reconciler keeps each programme finding with its controller next action until it is answered, and the Projects daily check-in turns failing tasks, PRs that need a step and long-missing project tasks into first-line prefixes the coordinator must act on. Judging the action and deadline for any other finding is the controller's.",
+      "covers": "The reconciler keeps each programme finding with its controller next action until it is answered, and the Projects daily check-in turns failing tasks, PRs that need a step and long-missing project tasks into first-line prefixes the coordinator must act on. Judging the action and deadline for any other finding is the controller's. The escape-list script writes one checked line for each bug found after merge and refuses a malformed line or one holding a local path, secret or personal data; deciding that a bug is an escape stays the controller's.",
       "enforced_by": [
         {
           "kind": "reconciler",
@@ -131,6 +131,11 @@
           "kind": "script",
           "path": "repo/scripts/toolkit-projects-tasks.cjs",
           "test": "repo/tests/toolkit-projects-tasks.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-escape-ledger.cjs",
+          "test": "repo/tests/toolkit-escape-ledger.test.cjs"
         }
       ]
     },

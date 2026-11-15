@@ -1,7 +1,7 @@
 'use strict';
 
 // The escape list (repo/scripts/toolkit-escape-ledger.cjs): one line per bug found after merge,
-// kept in the private evidence store at escapes/<owner>/<repo>.jsonl.
+// kept in the private evidence store at state/<owner>/<repo>/escapes.jsonl.
 //   E2-a  add writes one valid line; a second add with the same id is refused.
 //   E2-b  a missing field, a bad kind, an unknown key, a wrong type, over-long text, a local path,
 //         a secret-shaped value or personal data is refused, and so is every hostile input shape
@@ -48,10 +48,11 @@ function store(t) {
   return dir;
 }
 
-const ledgerFile = dir => path.join(dir, 'escapes', 'weijunswj', 'ai-agent-toolkit.jsonl');
+const ledgerFile = dir => path.join(dir, 'state', 'weijunswj', 'ai-agent-toolkit', 'escapes.jsonl');
 const book = () => new ledger.EscapeLedger({ today });
 const line = overrides => `${ledger.canonicalLine(entry(overrides))}\n`;
-const refusedRules = text => ledger.readLedger(Buffer.from(text, 'utf8')).errors.map(error => error.rule);
+// The rules and fields a ledger text is refused under.
+const refusedRules = text => ledger.readLedger(Buffer.from(text, 'utf8')).errors.flatMap(error => [error.rule, error.field]).filter(Boolean);
 
 function cli(args) {
   const run = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
@@ -60,6 +61,8 @@ function cli(args) {
 
 // A secret-shaped value assembled at runtime, so this source holds none.
 const fakeToken = () => ['gh', 'p_', 'Q7wK2mZ9xL4vB8nR1tY6uI3oP5aS0dF2gH4jK6lZ'.slice(0, 36)].join('');
+// A provider key shape (upper case and digits only) that only the shared provider formats name.
+const fakeProviderKey = () => ['AK', 'IA', 'Q7WK2MZ7XL4VB6NR'].join('');
 const fakeEmail = () => ['reader.one', ['mailbox', 'sg'].join('.')].join(String.fromCodePoint(0x40));
 
 test('E2-a: add writes one canonical line that check accepts', t => {
@@ -148,6 +151,7 @@ test('E2-b: a local path, secret-shaped value or personal data is refused withou
     'powershell env': 'The command used $env:USERPROFILE instead of the documented folder',
     'cmd env': 'The command used %USERPROFILE% instead of the documented folder path',
     'secret token': `The sweep logged ${fakeToken()} into the shared run report file`,
+    'provider key': `The sweep logged ${fakeProviderKey()} into the shared run report file`,
     'long mixed token': 'The sweep logged aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5 into the run file',
     'email address': `The sweep posted ${fakeEmail()} into a public issue comment`,
   };
@@ -188,6 +192,8 @@ test('E2-b: every line-break and byte-order-mark variant of a valid ledger is re
   const changed = hostile.variants(valid).filter(variant => variant.text !== valid);
   assert.ok(changed.length >= 6);
   for (const variant of changed) assert.equal(ledger.readLedger(Buffer.from(variant.text, 'utf8')).ok, false, variant.id);
+  // The whole-file check names the first line holding a character outside printable ASCII.
+  assert.deepEqual(ledger.readLedger(Buffer.from(changed.find(variant => variant.id === 'bom').text, 'utf8')).errors, [{ line: 1, field: null, rule: 'not-printable-ascii' }]);
 });
 
 test('E2-b: non-canonical JSON is refused: spacing, key order, duplicate keys and escapes', () => {
@@ -203,6 +209,7 @@ test('E2-b: non-canonical JSON is refused: spacing, key order, duplicate keys an
   assert.ok(refusedRules('').length === 0, 'an empty ledger is valid');
   assert.ok(refusedRules(line().slice(0, -1)).includes('no-final-newline'));
   assert.ok(refusedRules(`${line()}\n${line({ id: 'next-one' })}`).includes('blank-line'));
+  assert.deepEqual(ledger.readLedger(Buffer.from(line() + line())).errors, [{ line: 2, field: 'id', rule: 'duplicate-id' }]);
 });
 
 test('E2-b: the reader stays linear on large input and refuses an oversized ledger', () => {
@@ -218,7 +225,7 @@ test('E2-b: a bad repository name or a symlinked ledger is refused', t => {
   for (const repo of ['weijunswj', 'a/b/c', '../x/y', 'owner/..', 'own er/x', '']) {
     assert.throws(() => ledger.ledgerPath('/store', repo), /repository/, repo);
   }
-  assert.equal(ledger.ledgerPath('/store', 'WeiJunSWJ/AI-Agent-Toolkit'), path.join('/store', 'escapes', 'weijunswj', 'ai-agent-toolkit.jsonl'));
+  assert.equal(ledger.ledgerPath('/store', 'weijunswj/ai-agent-toolkit'), path.join('/store', 'state', 'weijunswj', 'ai-agent-toolkit', 'escapes.jsonl'));
   const dir = store(t);
   const outside = path.join(dir, 'outside.jsonl');
   fs.writeFileSync(outside, line());
