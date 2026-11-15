@@ -502,16 +502,16 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
   assert.match(nudge, /no change since <time>/);
   assert.doesNotMatch(nudge, /BINDING|git ls-remote|guidebook checked/);
-  // Toolkit once, plus the project's own repository for the controller check when it is another one.
-  assert.equal((nudge.match(/git clone/g) || []).length, 2);
+  // Toolkit once: decision traces and CI drift, which need the project's own checkout, run daily.
+  assert.equal((nudge.match(/git clone/g) || []).length, 1);
   const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook and controller check'));
   for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
     '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme`', 'adding `--checkout R --repo example-owner/example-repo` when step 9a ran',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,ci`', 'adding `--repo example-owner/example-repo` when step 9a applies',
     '`CONTROLLER CHECK: clear ...`: write "**Guidebook:** current" and "**Controller check:** clear", and read no further',
     '`node TK/repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects`', 'the same with `--check` in place of `--out`',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
-  assert.ok(nudge.includes('9a. Checkout for step 9\'s controller check (before it runs): R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`'), 'repo checkout');
+  assert.ok(nudge.includes('9a. Repository for step 9\'s controller check: it scans example-owner/example-repo for leftover footers, with no checkout'), 'no repository checkout hourly');
   assert.ok(nudge.includes('"SKILL COPY FAILED: <reason> | ", "CONTROLLER CHECK: <n> | "'), 'first-line prefix');
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
   assert.match(nudge, /plus steps 2a, 2b, 4, 5 and 7 to 11 \(and 5b when it applies\)/);
@@ -1171,11 +1171,12 @@ test('rendered hourly nudges list PROGRAMME FINDINGS and CLOUD SWEEP only in the
 });
 
 // The owner's catch-what-was-missed checks run in the daily check-in, each with its own first-line prefix.
-test('rendered daily check-ins run the decision trace, workflow health and CI check-up checkers', () => {
+test('rendered daily check-ins run workflow health, and the decision trace and CI check-up through the controller check', () => {
   const text = rendered('daily-check-in');
   const step = text.slice(text.indexOf('11b. CHECKERS'), text.indexOf('12. Promises'));
-  for (const phrase of ['decision-trace-audit.cjs --repo', 'unlinked_decisions', '"TRACE GAPS: <unlinked> unlinked, <unmarked> unmarked | "',
-    'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', 'ci-checkup.cjs --repo <clone>', '"CI GAPS: <n> | "']) {
+  for (const phrase of ['the hourly controller check skips them', 'R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,footer,refs`',
+    '"TRACE GAPS: <its counts> | "', '--repair --out <file>', 'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', '"CI GAPS: <n> | "']) {
     assert.ok(step.includes(phrase), phrase);
   }
   assert.ok(text.indexOf('**Checkers:**', text.indexOf('REPORT')) > 0, 'the report has a Checkers bullet');
