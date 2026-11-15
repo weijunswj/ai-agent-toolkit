@@ -85,6 +85,11 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.ok(disabled.includes(`1.1 B. Turn on: Toolkit prepares one pull request that turns governance on. It applies only after you merge it. ${after}`), disabled);
   assert.equal(shown.split(after).length, 2, 'named once where Turn on is recommended');
   assert.ok(!bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' } })).includes(after));
+  // A repository with no required checks yet: the status row says protection waits, and the step.
+  const fresh = adoption => questionBank.renderCompactQuestionTable(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' },
+    adoption: { repository: 'owner/app', store: { repository: 'owner/TRANSPORT-app', create: true }, found_store: null, store_name: 'TRANSPORT-app', store_choice: false, parent: { issue: null, create: true }, visibility: 'private', unknown: [], ...adoption } }), true).join('\n');
+  assert.match(fresh({ checks: [] }), /Required checks: none yet\. None enforced on the default branch yet, so default-branch protection waits: once a pull request adds some to required_checks, run node ".*toolkit-governance\.cjs" migrate to add it\./);
+  assert.match(fresh({ checks: ['validate'] }), /Required checks: validate\. Taken from what the default branch already enforces\./);
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);

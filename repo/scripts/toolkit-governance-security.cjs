@@ -783,8 +783,10 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   const off = [scanning, pushProtection].filter(item => item.status === 'drift');
   checks.S4 = off.length ? { status: 'drift', details: off.flatMap(item => item.details) }
     : [scanning, pushProtection].find(item => item.status !== 'ok') || scanning;
+  // by_hand: GitHub answered, and what is left is a check only a person can make (an advanced CodeQL
+  // setup Toolkit cannot place), so reading again changes nothing.
   checks.S5 = online && advanced === 'unreadable' && read.code_scanning === 'disabled'
-    ? { status: 'unverified', details: [read.codeql_uploads
+    ? { status: 'unverified', ...(read.codeql_uploads || read.codeql_unplaced ? { by_hand: true } : {}), details: [read.codeql_uploads
       ? `GitHub has CodeQL results on the default branch from ${read.codeql_uploads} in the last 90 days, not from default setup, so an advanced CodeQL setup is in use somewhere; default setup stays off, so check it by hand`
       : read.codeql_unplaced
       ? `.github/workflows/${read.codeql_unplaced} names CodeQL steps Toolkit could not place or rule out, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check that workflow by hand`
