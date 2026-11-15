@@ -10,14 +10,16 @@
 // A pull request title or body edit changes no code, so when an earlier run of this workflow already
 // tested exactly the same code, the edit run reuses that run's test and hook-pack results instead of
 // running them again. "Exactly the same code" means all of these hold for the earlier run:
-//   - it is a completed pull_request run of this workflow file, for the same head commit and head
-//     repository, and not this run;
+//   - it is the newest completed pull_request run of this workflow file, for the same head commit
+//     and head repository, that ran its test jobs (an earlier light run, whose test and hook-pack
+//     jobs were all skipped, is passed over; a newer run that ran and failed them means a full run),
+//     and not this run;
 //   - in its newest attempt every test and hook-pack job (each matrix member) concluded success;
 //   - it kept a summary artifact for every shard whose name ends with one tested commit, not
 //     expired: this run's own (GITHUB_SHA, the pull request merge commit), or an older merge commit
 //     of the same head into a base commit that today's base still contains. The required check is
-//     not strict (a pull request merges on results from an older base), so before the edit the
-//     pull request already stood on those results; reusing them after a body edit keeps that, while
+//     not strict (a pull request merges on results from an older base), and no later run at
+//     the head tested anything else, so reusing them after a body edit adds no untested code, while
 //     the edit's own run checks the body and the repository checks again. A merge commit that is not
 //     the head merged into an ancestor of today's base, or any doubt reading it, means a full run.
 // The route job reads the event: only the `edited` action without a base change can be light. Any
@@ -141,14 +143,23 @@ async function olderBaseProblem(call, tested, want) {
   return null;
 }
 
+// Whether a run's newest attempt ran any test or hook-pack job: false only for a light run, whose
+// test and hook-pack jobs were all skipped (or never listed).
+function ranTests(jobs, manifest) {
+  const keys = Object.keys(shards.testJobCheckNames(manifest));
+  const testJob = (name) => keys.some((key) => name === key || String(name).startsWith(`${key} (`));
+  return (Array.isArray(jobs) ? jobs : []).some((job) => job && testJob(job.name) && job.conclusion !== 'skipped');
+}
+
 async function checkRun(call, runId, want, manifest) {
   const run = await call(`actions/runs/${runId}`);
   const jobs = (await call(`actions/runs/${runId}/jobs?filter=latest&per_page=100`)).jobs;
   const artifacts = (await call(`actions/runs/${runId}/artifacts?per_page=100`)).artifacts;
-  const checked = reuseProblem({ run, jobs, artifacts, want, manifest });
+  const ran = ranTests(jobs, manifest);
+  const checked = { ...reuseProblem({ run, jobs, artifacts, want, manifest }), ranTests: ran };
   if (checked.problem || !checked.olderBase) return checked;
   const problem = await olderBaseProblem(call, checked.tested, want);
-  return problem ? { problem } : checked;
+  return problem ? { problem, ranTests: ran } : checked;
 }
 
 // The route job's decision: { mode: 'full' | 'light', runId, reason }.
@@ -163,10 +174,12 @@ async function route({ env = process.env, fetchImpl = globalThis.fetch, manifest
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
     .slice(0, MAX_CANDIDATES);
   const reasons = [];
+  // The newest run that ran its tests decides: reuse it, or run in full. Light runs are passed over.
   for (const candidate of candidates) {
-    const { problem, olderBase } = await checkRun(call, candidate.id, want, manifest);
+    const { problem, olderBase, ranTests: ran } = await checkRun(call, candidate.id, want, manifest);
     if (!problem) return { mode: 'light', runId: String(candidate.id), reason: olderBase ? `run ${candidate.id} already tested this head on an older base that today's base contains` : `run ${candidate.id} already tested this exact code` };
     reasons.push(`run ${candidate.id}: ${problem}`);
+    if (ran) return { mode: 'full', runId: '', reason: `the newest run that ran its tests cannot be reused (${reasons.join('; ')})` };
   }
   return { mode: 'full', runId: '', reason: reasons.length ? `no earlier run can be reused (${reasons.join('; ')})` : 'no earlier completed run at this head' };
 }

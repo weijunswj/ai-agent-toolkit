@@ -212,15 +212,42 @@ test('this run never reuses itself, and the route looks at a bounded number of r
   const { fetchImpl: selfOnly } = github([self]);
   assert.equal((await route.route({ env: env(), fetchImpl: selfOnly, manifest: MANIFEST, event: editEvent() })).mode, 'full');
   assert.match(route.reuseProblem({ ...self, want: { head: HEAD, headRepository: REPO, tested: TESTED, currentRunId: '900' }, manifest: MANIFEST }).problem, /it is this run/);
-  const bad = Array.from({ length: route.MAX_CANDIDATES + 2 }, (_, index) => {
-    const entry = fullRun(300 + index, { createdAt: `2026-11-13T1${index}:00:00Z` });
-    entry.jobs[0].conclusion = 'failure';
-    return entry;
-  });
+  const bad = Array.from({ length: route.MAX_CANDIDATES + 2 }, (_, index) => lightRun(300 + index, `2026-11-13T1${index}:00:00Z`));
   const { fetchImpl, calls } = github(bad);
   const decision = await route.route({ env: env(), fetchImpl, manifest: MANIFEST, event: editEvent() });
   assert.equal(decision.mode, 'full');
   assert.equal(calls.filter((call) => /^actions\/runs\/\d+$/.test(call)).length, route.MAX_CANDIDATES);
+});
+
+// An earlier light run: its test and hook-pack jobs were all skipped.
+function lightRun(id, createdAt) {
+  const entry = fullRun(id, { createdAt });
+  entry.jobs = entry.jobs.map((job) => (job.name === 'personal-data' || job.name === 'validate' ? job : { ...job, conclusion: 'skipped' }));
+  entry.artifacts = [];
+  return entry;
+}
+
+test('the newest run that ran its tests decides: a failed full run is never skipped for an older pass', async () => {
+  // Same code: an older pass, then a newer full run at the same head whose shard failed.
+  const passed = fullRun(501, { createdAt: '2026-11-13T09:00:00Z' });
+  const failed = fullRun(502, { createdAt: '2026-11-13T10:00:00Z' });
+  failed.jobs.find((job) => job.name === 'tests-linux (linux-1)').conclusion = 'failure';
+  const same = await route.route({ env: env(), fetchImpl: github([passed, failed]).fetchImpl, manifest: MANIFEST, event: editEvent() });
+  assert.equal(same.mode, 'full');
+  assert.match(same.reason, /the newest run that ran its tests cannot be reused \(run 502: tests-linux \(linux-1\) finished as failure, not success\)/);
+  // After main moved: the older pass tested an older base, the newer full run tested today's and failed.
+  const { entry, commits, compares } = olderBase();
+  entry.run.created_at = '2026-11-13T09:00:00Z';
+  const moved = await route.route({ env: env(), fetchImpl: github([entry, failed], { commits, compares }).fetchImpl, manifest: MANIFEST, event: editEvent() });
+  assert.equal(moved.mode, 'full');
+  assert.match(moved.reason, /run 502: tests-linux \(linux-1\) finished as failure/);
+  // A newer cancelled full run decides too.
+  const cancelled = fullRun(503, { createdAt: '2026-11-13T11:00:00Z' });
+  cancelled.jobs.find((job) => job.name === 'tests-windows (windows-1)').conclusion = 'cancelled';
+  assert.equal((await route.route({ env: env(), fetchImpl: github([passed, cancelled]).fetchImpl, manifest: MANIFEST, event: editEvent() })).mode, 'full');
+  // Light runs in between are passed over: the full run behind them decides.
+  const light = await route.route({ env: env(), fetchImpl: github([passed, lightRun(504, '2026-11-13T12:00:00Z'), lightRun(505, '2026-11-13T13:00:00Z')]).fetchImpl, manifest: MANIFEST, event: editEvent() });
+  assert.deepEqual([light.mode, light.runId], ['light', '501']);
 });
 
 async function withFiles(fn) {
