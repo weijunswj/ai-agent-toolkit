@@ -103,7 +103,7 @@ test('no printed line holds a never class, and the never list catches each class
   assert.ok(lines.includes('Bash(node "C:/tk/repo/scripts/toolkit-store.cjs" *)') && lines.includes('PowerShell(node "C:/tk/repo/scripts/toolkit-store.cjs" *)'), 'the store line is printed for a Windows path');
   for (const line of lines) {
     assert.equal(permissions.NEVER.find(([, pattern]) => pattern.test(line)), undefined, line);
-    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)? \*|gh pr comment \*|gh issue comment \*)\)$/);
+    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)? \*|node "C:\/tk\/repo\/scripts\/toolkit-governance\.cjs" setup(?: --answers \*)?|gh pr comment \*|gh issue comment \*)\)$/);
   }
   assert.ok(built.blocks[0].allow.every(line => !/owner|"C:\/store"|work\/repo/i.test(line)), 'the computer block names no repository');
   const bad = ['Bash', 'Bash(*)', 'PowerShell(*)', 'Bash(node *)', 'Bash(python3 *)', 'Bash(* --version)', 'Bash(gh pr close *)', 'Bash(gh issue close *)', 'Bash(rm *)',
@@ -190,7 +190,7 @@ test('the real script prints the allowed-tools form and refuses unknown argument
   const run = args => spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions.cjs'), ...args], { encoding: 'utf8', env: { ...process.env, HOME: deps.home, USERPROFILE: deps.home }, cwd: os.tmpdir() });
   const listed = run(['--scope', 'computer', '--format', 'allowed-tools']);
   assert.equal(listed.status, 0, listed.stderr);
-  assert.ok(listed.stdout.trim().split('\n').every(line => /^(?:Bash|PowerShell)\(node ".+\.cjs"(?: [a-z-]+)?(?: \*| --apply| --json| --apply --json)?\)$/.test(line)));
+  assert.ok(listed.stdout.trim().split('\n').every(line => /^(?:Bash|PowerShell)\(node ".+\.cjs"(?: [a-z-]+)?(?: \*| --apply| --json| --apply --json| --answers \*)?\)$/.test(line)));
   assert.equal(run(['--write']).status, 2);
   assert.equal(run(['--host', 'cursor']).status, 2);
 });
@@ -291,4 +291,21 @@ test('Codex gets no allow rule for a command that needs an exact form or an ask 
   const spaced = new permissions.PermissionBlocks({ ...computer(t, { platform: 'win32', managed: 'C:\\Users\\A Dev\\tk' }), fs: { ...fs, existsSync: () => true } }).build({ host: 'codex', scope: 'computer' });
   for (const [, pattern, example] of spaced.blocks[0].text.matchAll(/pattern = (\[[^\n]+\]),\n[^\n]+\n[^\n]+\n {4}match = \[(\[[^\n]+\])\],/g)) assert.deepEqual(JSON.parse(example), JSON.parse(pattern));
   assert.match(spaced.blocks[0].text, /match = \[\["node","C:\/Users\/A Dev\/tk\//);
+});
+
+test('the governance question bank is two exact lines: showing it, and sending the reply with its ticket', t => {
+  const deps = { ...computer(t, { platform: 'win32', managed: 'C:\\tk' }), fs: { ...governedFs(), existsSync: () => true }, run: fakeGit() };
+  const { blocks, table } = new permissions.PermissionBlocks(deps).build({ scope: 'computer' });
+  const bank = 'node "C:/tk/repo/scripts/toolkit-governance.cjs"';
+  for (const tool of ['Bash', 'PowerShell']) {
+    for (const command of [`${bank} setup`, `${bank} setup --answers "ABCD-EFGH-JKMN-PQRS: all recommended" --ticket ${'a'.repeat(32)}`]) assert.equal(verdict(blocks, tool, command), 'allow', `${tool}: ${command}`);
+    for (const command of [`${bank} refresh`, `${bank} setup --json`, `${bank} status`, `${bank} enable`, `${bank} disable`, `${bank} migrate --root C:/repo`, `${bank} publish --run ${'a'.repeat(32)}`, `${bank} finish`,
+      'node "C:/elsewhere/repo/scripts/toolkit-governance.cjs" setup', `${bank}`]) assert.equal(verdict(blocks, tool, command), 'prompt', `${tool}: ${command}`);
+  }
+  assert.match(permissions.ROWS.find(row => row.id === 'governance-bank').guard, /live one-use bank ticket/);
+  assert.ok(table.some(row => /Governance question bank/.test(row.name)));
+  // Codex would allow any flag after `setup`, so it gets a prompt rule there and no allow rule.
+  const codex = new permissions.PermissionBlocks(deps).build({ host: 'codex', scope: 'computer' });
+  assert.ok(!/toolkit-governance\.cjs","setup"\],\n {4}decision = "allow"/.test(codex.blocks[0].text));
+  assert.match(codex.blocks[0].text, /toolkit-governance\.cjs","setup"\],\n {4}decision = "prompt"/);
 });

@@ -41,6 +41,9 @@ test('the owner\'s next own message after a bank gets one ticket, bound to that 
     `${command}; echo done`,
     `node "${SCRIPT}" setup --answers "${REFERENCE}: all recommended" --ticket ${'f'.repeat(32)}`,
     `node "${SCRIPT}" setup --answers "$X" --ticket ${ticket}`,
+    // PowerShell reads curly quotes as quotes, so this would run calc.exe as its own statement.
+    `& node "${SCRIPT}" setup --answers "${REFERENCE}: x\u201d ; calc.exe ; echo \u201dy" --ticket ${ticket}`,
+    `& node "${SCRIPT}" setup --answers "${REFERENCE}: x\u2019 all recommended" --ticket ${ticket}`,
     `node "/elsewhere/toolkit-governance.cjs" setup --answers "${REFERENCE}: all recommended" --ticket ${ticket}`,
   ]) assert.ok(tools(ctx).decide(bash(sessionId, forged))?.deny, forged);
   assert.ok(tools(ctx).decide(bash('another-session', command))?.deny, 'another session cannot use it');

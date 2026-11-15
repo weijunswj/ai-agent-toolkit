@@ -350,7 +350,7 @@ test('Claude reuses successful evidence reads only within one hook invocation an
   let reads = 0;
   let betweenPasses = () => {};
   const options = { ...ctx.options, environment: {},
-    gate: { ToolGate: class { decide() { betweenPasses(); return null; } allow() { return null; } } },
+    gate: { ToolGate: class { decide() { betweenPasses(); return null; } } },
     readEvidenceGitHub(api) {
       reads += 1;
       return { status: 200, json: api.endsWith('/pulls/17')

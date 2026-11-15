@@ -9,7 +9,6 @@
 //   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs),
 //                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs).
-//                     Its one approval is Toolkit's own governance bank command (ToolGate.allow).
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
 //   SessionStart      adds context stating the effective governance state, exports the session's
@@ -107,21 +106,15 @@ function respond(event, input, options = {}) {
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
-      const tools = cloud ? null : new gate.ToolGate(options);
-      const decision = tools ? tools.decide(input) : null;
+      const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
       // Notes an exact merge card so its answer can count; it refuses nothing.
       if (input.tool_name === 'AskUserQuestion') try { (options.mergeHold || mergeHold()).cardAsked(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* an unnoted card records nothing */ }
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
-      if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
-      // Toolkit's own bank command, approved only once nothing above refused it, so a permission
-      // prompt or auto mode does not stop it (ToolGate.allow). Never in the cloud.
-      const approved = tools ? tools.allow(input, { environment: options.environment || process.env }) : null;
-      if (approved) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: approved } };
       // A cloud closure advisory (closure.systemMessage) shows only when nothing refuses the call.
-      return closure;
+      return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : closure;
     }
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};

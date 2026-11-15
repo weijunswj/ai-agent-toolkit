@@ -40,7 +40,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
-const { BankTickets, bankTicketContext, bankTicketCommand, bankRunApproved } = require('./toolkit-governance-bank.cjs');
+const { BankTickets, bankTicketContext, bankTicketCommand } = require('./toolkit-governance-bank.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
 // removes the file, which is Toolkit's own, because its text is never delivered again.
@@ -1376,9 +1376,6 @@ function sessionIdOf(input) {
 // The governance answer as text a scheduled prompt could carry.
 const SCHEDULED_ANSWER = /toolkit\s+governance\s+(?:enable|disable|decline)/i;
 
-const APPROVABLE_KEYS = new Set(['command', 'description', 'timeout']);
-const BANK_APPROVED = 'Toolkit approved its own governance bank command: it shows the bank, or sends your reply with this session\'s one-use ticket.';
-
 class ToolGate {
   #gate; #epochs; #notes; #tickets; #asked; #bank;
 
@@ -1456,24 +1453,6 @@ class ToolGate {
       }
     }
     return null;
-  }
-
-  // The one approval the gate gives, read by Claude Code's PreToolUse hook only after every refusal
-  // check passed: Toolkit's own bank command, so neither a permission prompt nor auto mode stops it
-  // (bankRunApproved). A Bash or PowerShell call carrying only its command, a description and a
-  // timeout; any other option set (a background run, a sandbox switch) leaves it to the normal prompt.
-  // Returns the reason shown with the approval, or null.
-  allow(input, { environment = process.env } = {}) {
-    const tool = String(input && (input.tool_name || input.toolName) || '');
-    if (tool !== 'Bash' && tool !== 'PowerShell') return null;
-    const args = input.tool_input;
-    if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.command !== 'string') return null;
-    if (Object.entries(args).some(([key, value]) => !APPROVABLE_KEYS.has(key) && value !== false && value !== null && value !== undefined)) return null;
-    const call = ShellCall.from(input);
-    if (call.unreadable) return null;
-    const folders = [input.cwd, environment.CLAUDE_PROJECT_DIR];
-    try { if (!bankRunApproved(toolText(input), sessionIdOf(input), this.#bank, { folders })) return null; } catch { return null; }
-    return BANK_APPROVED;
   }
 
   // 'reply' while this run has a live reply ticket, a pending confirmation or an open reply window;
