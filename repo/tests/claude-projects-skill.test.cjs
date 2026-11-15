@@ -487,7 +487,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /call `propose_skills` once with kind `improvement`, name and target `web-controller-projects`/);
   assert.match(text, /Record `skill card <guidebook Version> offered <date>`/);
   assert.match(text, /never a hand upload\. Never offer a Version that has a `skill card` line again\./);
-  assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved\./);
+  assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
   assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
   // Setup reads the guidebook first, refreshing it when missing or not current.
@@ -597,8 +597,15 @@ test('Projects keeps its Toolkit base layer current without touching the project
   for (const surface of [text, body, ...templates]) {
     assert.doesNotMatch(surface, /resolve window|idle window|default 2 days|IDLE-2D|thread default|weekday check-in|\* \* 1-5/i);
   }
-  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: \(a\) it has its own Claude session \(never your own project-chat post or the reply thread under it, as resolving it hides that message\) and is no task's home thread; \(b\) its output is durably recorded[^\n]*and every PR it lists is merged or closed; \(c\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(d\) no owner test, card, question, decision or promised work is still owed; \(e\) its last report is final, not "waiting on CI"\. A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
-  assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread on relaying its final result or in the hourly pass, once its output is recorded[^\n]*its result reached project chat or the owner replied after it, and nothing is open \(owner ask or card, a PR it owns or watches, promised work\)/);
+  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: \(a\) it has its own Claude session \(never your own project-chat post or the reply thread under it, as resolving it hides that message\) and is no task's home thread; \(b\) its output is durably recorded[^\n]*and every PR it lists is merged or closed; \(c\) this turn you read its final message in full \(`full_bodies`, no preview or summary\), acted on or recorded every item and relayed its result in project chat, or the owner replied after it; \(d\) no owner test, card, question, decision or promised work is still owed; \(e\) its last report is final, not "waiting on CI"\. A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
+  assert.match(body, /Threads never resolve themselves\. The coordinator resolves one on relay or in the hourly pass, once it has read its final message in full \(`full_bodies`, no preview\) and acted on every item, its output is recorded[^\n]*its result reached project chat or the owner replied after it, and nothing is open \(owner ask or card, a PR it owns or watches, a promise\)/);
+  // A wake preview cut the tail of a result the coordinator then resolved: the full read sits in the resolve
+  // conditions themselves, in the read rule, and in the hourly pass that lists and resolves candidates.
+  assert.match(text, /\*\*Read every thread result in full\*\* \(`full_bodies: true`\) and every named report file before relaying, acting or resolving/);
+  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
+  assert.match(nudge, /Read the latest messages \(read_thread, limit 2, full_bodies true: previews cut endings\)/);
+  assert.match(nudge, /with the evidence for each from its final message read in full/);
+  assert.match(text, /`RESOLVE DUE`: in this turn, for each listed thread, read its final message in full \(read_thread, full_bodies true; never this report's summary\), act on or record every item in it, and resolve it once its result is relayed/);
   assert.match(text, /resolving threads that meet the resolve conditions are reversible housekeeping/);
   // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
@@ -728,7 +735,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // thread (no session of its own: resolving it hides the chat message); home threads never.
   assert.doesNotMatch(text, /QUIET-6H/);
   assert.match(text, /Idleness alone never closes a work thread/);
-  assert.match(text, /a task's home thread is never resolved/);
+  assert.match(text, /and is no task's home thread;/);
   // Instructions sync applies itself under safeguards.
   for (const required of ['**Apply it yourself, without asking, with these safeguards.**', 'No saved copy, no change.',
     '`--place <file>`', 'under the instructions limit (16,000 characters)', 'restore the saved copy and report',
