@@ -1,0 +1,3 @@
+### Fixed
+
+- **Programme Sweep footer cleaning after a held pass that saved nothing:** A cloud sweep pass that holds and lands no state save no longer reports `refreshed`, even when the reconciler does not report it as saving nothing. A pass held because a newer Toolkit drew the board (`BLOCK_NEWER_TOOLKIT`, a worker older than the board) never reports `refreshed` either, since it left the page as it was. The footer step then edits no posts, and the pass is still reported as held. A regression runs an older worker against a newer board in a real cloud pass and checks that `refreshed` stays unset and footer cleaning is skipped.
