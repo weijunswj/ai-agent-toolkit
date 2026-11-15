@@ -1467,6 +1467,26 @@
       "status": "pass"
     },
     {
+      "id": "MERGE.card-agent-merge-question-task-auto-merge",
+      "source": "merge card first try: with task auto-merge on, an agent's merge question is shown, since a merge could pass with no card",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_round","tool_input":{"questions":[{"question":"toolkit-test-fixture/hook-pack-fixture#5 has two FAIL verdicts. Merge with the open items as follow-ups, run one more round, or split it?","header":"Next","multiSelect":false,"options":[{"label":"Merge with follow-ups","description":"Merge with follow-ups."},{"label":"One more round","description":"One more round."},{"label":"Split the PR","description":"Split the PR."}]}]}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-merged-pull-request-question",
+      "source": "merge card first try: a question about a pull request already merged is shown",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_after","tool_input":{"questions":[{"question":"PR #5 merged at 16:20. Close issue #7 now?","header":"Next","multiSelect":false,"options":[{"label":"Close it","description":"Close it."},{"label":"Leave open","description":"Leave open."}]}]}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.card-shown-is-never-refused",
       "source": "merge by card: showing the card is never refused, whoever shows it",
       "kind": "benign",

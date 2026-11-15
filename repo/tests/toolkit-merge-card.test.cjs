@@ -524,8 +524,10 @@ test('an agent\'s own merge question is pointed at the merge card before the use
       const input = ask(questions);
       const out = claudeHook.respond('PreToolUse', input, options).hookSpecificOutput;
       assert.equal(out && out.permissionDecision, 'deny', 'the question is not shown');
-      assert.match(out.permissionDecisionReason, /not Toolkit's merge card/);
-      assert.match(out.permissionDecisionReason, /run the merge naming the pull request's full 40 character head SHA/);
+      assert.match(out.permissionDecisionReason, /cannot approve a merge; only Toolkit's merge card can/);
+      assert.match(out.permissionDecisionReason, /If the user asked you to merge this pull request, .*run that merge naming its full 40 character head SHA/);
+      assert.match(out.permissionDecisionReason, /If the user has not asked, do not merge/);
+      assert.doesNotMatch(out.permissionDecisionReason, /asks the user about merging|Ask no merge question of your own: after/, 'it neither claims what the question means nor orders a merge');
       // Even if a host showed it anyway, its answer records nothing.
       const answers = { [questions[questions.length - 1].question]: questions[questions.length - 1].options[0].label };
       const after = claudeHook.respond('PostToolUse', { ...input, tool_response: { questions, answers } }, options);
@@ -540,6 +542,14 @@ test('an agent\'s own merge question is pointed at the merge card before the use
     'git merge wording': [question('Use git merge or a rebase to update #618?', ['Rebase', 'Merge commit'], 'Update')],
     'a pull request with no merge wording': [question('Should #618 get a changelog line?', ['Yes', 'No'], 'Changelog')],
     'a heading-like number with no merge wording': [question('Keep section #2 of the plan?', ['Keep', 'Drop'], 'Plan')],
+    // Reports about a pull request already merged, and merges of other things.
+    'an already merged pull request, then an issue': [question('PR #1172 merged at 16:20. Close issue #1035 now?', ['Close it', 'Leave open'], 'Close')],
+    'merged with a failing check': [question('#618 was merged with a failing Windows check. Fix forward or revert?', ['Fix forward', 'Revert'], 'Next')],
+    'is merged, UAT next': [question('#1165 is merged; ready to run UAT on it now?', ['Run UAT', 'Later'], 'UAT')],
+    'a merge train': [question('Board #1172 on the next merge train, or wait?', ['Board it', 'Wait'], 'Train')],
+    'merging issues': [question('Issue #44 duplicates #45. Merge them into one issue?', ['Merge them', 'Keep both'], 'Issues')],
+    'merging plan steps': [question('Merge steps #3 and #4 of the plan into one step?', ['Merge steps', 'Keep apart'], 'Plan')],
+    'merging main into a pull request': [question('Bring #618 up to date by merging main into it, or rebase?', ['Merge main', 'Rebase'], 'Update')],
   };
   for (const [name, questions] of Object.entries(ORDINARY)) {
     await t.test(`untouched: ${name}`, t => {
@@ -582,6 +592,50 @@ test('an agent\'s own merge question is pointed at the merge card before the use
       assert.ok(timed.ok, `${name}: ${timed.message}`);
     }
   });
+});
+
+// A repository whose merged binding sets task auto-merge, with an owner-started chat in it.
+const governance = require('../scripts/toolkit-governance-state.cjs');
+const bindingCache = require('../scripts/toolkit-governance-binding.cjs');
+function standingContext(t, autoMerge) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-merge-card-standing-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const run = (cwd, args) => { const result = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' }); assert.equal(result.status, 0, result.stderr); return result.stdout.trim(); };
+  const commit = (repo, file, text) => { fs.writeFileSync(path.join(repo, file), text); run(repo, ['add', file]); run(repo, ['commit', '-q', '-m', file]); return run(repo, ['rev-parse', 'HEAD']); };
+  const registryOptions = { registryPath: path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true, host: 'claude-code', home: path.join(root, 'home') };
+  const repo = path.join(root, 'a');
+  fs.mkdirSync(repo, { recursive: true });
+  run(repo, ['init', '-q', '-b', 'feature']);
+  run(repo, ['remote', 'add', 'origin', 'https://github.com/owner/a.git']);
+  const main = commit(repo, 'README.md', 'a\n');
+  run(repo, ['update-ref', 'refs/remotes/origin/main', main]);
+  run(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  const head = commit(repo, 'notes.md', 'task change\n');
+  const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'owner/a', governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-A-' }],
+    store: { kind: 'github', repository: 'owner/TRANSPORT-a', branch: 'main', path: 'state/owner/a/' }, required_checks: ['validate'], task_prs: { auto_merge: autoMerge } });
+  const identity = governance.readIdentity(repo);
+  const file = bindingCache.cacheFileFor(governance.userStateDirectory(registryOptions), identity.repository_id);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ schema: bindingCache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical, default_branch: 'main', commit: main,
+    fetched_at: new Date().toISOString(), status: 'present', bytes_sha256: require('node:crypto').createHash('sha256').update(text, 'utf8').digest('hex'), text, problem: null }));
+  gate.startSession({ session_id: 'user', source: 'startup', cwd: repo }, { registryOptions, environment: {} });
+  return { repo, head, options: { registryOptions, environment: {}, closureGuard } };
+}
+
+test('where task auto-merge would take the merge with no card, an agent\'s merge question is shown', t => {
+  const roundCap = ctx => ({ cwd: ctx.repo, session_id: 'user', tool_name: 'AskUserQuestion', tool_use_id: 'toolu_round', tool_input: { questions: [{ question: 'owner/a#5 has two FAIL verdicts. Merge with the open items as follow-ups, run one more round, or split it?', header: 'Next', multiSelect: false,
+    options: ['Merge with follow-ups', 'One more round', 'Split the PR'].map(label => ({ label, description: `${label}.` })) }] } });
+  const merge = ctx => ({ cwd: ctx.repo, session_id: 'user', tool_name: 'Bash', tool_input: { command: `gh pr merge 5 --repo owner/a --merge --match-head-commit ${ctx.head}` } });
+  // Task auto-merge on: the merge would pass with no card, so the owner's question stays.
+  const on = standingContext(t, 'after-gates');
+  assert.deepEqual(claudeHook.respond('PreToolUse', roundCap(on), on.options), {}, 'the question is shown');
+  assert.deepEqual(claudeHook.respond('PreToolUse', merge(on), on.options), {}, 'control: the standing answer would take this merge with no card');
+  // Task auto-merge off: the merge is refused with the card, so the redirect applies and orders no merge.
+  const off = standingContext(t, 'off');
+  const redirected = claudeHook.respond('PreToolUse', roundCap(off), off.options).hookSpecificOutput;
+  assert.equal(redirected.permissionDecision, 'deny');
+  assert.match(redirected.permissionDecisionReason, /If the user has not asked, do not merge/);
+  assert.match(claudeHook.respond('PreToolUse', merge(off), off.options).hookSpecificOutput.permissionDecisionReason, /^Toolkit: Toolkit's merge card is how the user approves this merge/);
 });
 
 test('the tap receipt names Toolkit\'s merge card', t => {
