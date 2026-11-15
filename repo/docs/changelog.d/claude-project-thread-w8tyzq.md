@@ -1,0 +1,3 @@
+### Fixed
+
+- **Daily check-in plugin baseline uses the copy's sync time:** step 10 now measures plugin lag against main as it was when the account plugin copy was synced, read from the synced `ai-agent-toolkit` folder's birth time (its change time when that is missing), instead of the check-in session's start. A home thread can live for days while its container re-syncs the copy, so the old baseline could hide a real lag. Synced files carry a 1980 file time, so a file's own time is never used. With several copies the newest sync time wins and the others are named; with no valid sync time the check compares with main today and says so. The pinned report now reads "pinned copy synced at <time>", and the state record keeps the sync time.
