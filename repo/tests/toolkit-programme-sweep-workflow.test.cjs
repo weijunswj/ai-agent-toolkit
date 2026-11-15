@@ -510,6 +510,30 @@ test('gate: activity (a finished CI run included) starts a sweep when none finis
   }
 });
 
+test('gate: a closed issue starts the sweep at once, skipping the hour\'s wait, but never under the App limit or beside a queued run', () => {
+  const { decide, RESET_WAIT_MS } = gateScript();
+  const closed = facts => decide({ event: 'issues', action: 'closed', now: T, lines: [COMPLETE], changedSince: true, runs: [done(60 * 1000)], ...facts });
+  assert.deepEqual(closed({}), { start: true, reason: 'an issue closed; the board catches up now' });
+  assert.equal(closed({ runs: [] }).start, true, 'no sweep has finished yet');
+  assert.equal(closed({ runs: [{ ...done(60 * 1000), id: 200 }], noPass: new Set([200]) }).start, true, 'a run that made no pass does not hold a close back');
+  // Every other issue action, and a comment, still waits the hour.
+  for (const action of ['opened', 'edited', 'reopened', '']) assert.equal(closed({ action }).start, false, action);
+  assert.equal(decide({ event: 'issue_comment', action: 'closed', now: T, lines: [COMPLETE], changedSince: true, runs: [done(60 * 1000)] }).start, false, 'only an issue close skips the wait');
+  assert.equal(decide({ event: 'pull_request_target', action: 'closed', now: T, lines: [COMPLETE], changedSince: true, runs: [done(60 * 1000)] }).start, false, 'a merged pull request already starts the sweep by its push');
+  // The App limit still holds, and a queued or running sweep is handled as for any activity.
+  assert.deepEqual(closed({ lines: [PAUSED], runs: [done(5 * 60 * 1000, RESET_WAIT_MS - 1)] }), { start: false, reason: 'the last pass paused at GitHub\'s hourly App limit, which has not reset yet' });
+  assert.equal(closed({ lines: [PAUSED], runs: [done(5 * 60 * 1000, RESET_WAIT_MS)] }).start, true);
+  assert.equal(closed({ lines: [TIMED] }).start, true, 'a time-limit stop does not hold a close back');
+  assert.deepEqual(closed({ runs: [{ status: 'queued' }, done(60 * 1000)] }), { start: false, reason: 'a sweep is already queued' });
+  assert.deepEqual(closed({ runs: [{ status: 'in_progress' }, done(60 * 1000)] }), { start: true, reason: 'activity during a running sweep; one more waits behind it' });
+  assert.deepEqual(closed({ runs: [{ status: 'in_progress' }, done(60 * 1000)], followUpWaiting: true }), { start: false, reason: 'a follow-up run is already on its way' });
+});
+
+test('gate workflow: the event\'s action reaches the gate, and nothing else from the event', () => {
+  const text = gateWorkflow();
+  assert.match(text, /^          EVENT_NAME: \$\{\{ github\.event_name \}\}\n          EVENT_ACTION: \$\{\{ github\.event\.action \}\}\n/m);
+});
+
 const actionsToken = ['example', 'actions', 'token'].join('-');
 const gateBinding = JSON.stringify(binding());
 function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [], jobs = [], gateRuns = [], runJobs = {}, notes = {}, answers = {} } = {}) {
@@ -563,6 +587,14 @@ test('gate: a quiet hour reads four small answers and starts nothing; a change s
   const sweeping = fakeGitHub({ runs: [{ id: 78, status: 'in_progress' }, done(2 * HOUR)], jobs: [{ name: 'Refresh the programme', status: 'in_progress' }] });
   assert.equal((await gate({ env: commentEnv, fetchImpl: sweeping.fetchImpl, now: T, log: () => {} })).start, true, 'a sweep still reading: one more waits behind it');
   assert.equal(quiet.calls.filter(call => /jobs$/.test(call)).length, 0);
+  // A closed issue a minute after the last sweep starts the next one at once; any other issue action waits.
+  const justSwept = () => fakeGitHub({ runs: [done(60 * 1000)], changed: [{ updated_at: '2026-11-13T02:59:30Z' }] });
+  const close = justSwept();
+  assert.deepEqual(await gate({ env: { ...gateEnv, EVENT_NAME: 'issues', EVENT_ACTION: 'closed' }, fetchImpl: close.fetchImpl, now: T, log: () => {} }), { start: true, reason: 'an issue closed; the board catches up now' });
+  assert.equal(close.calls.at(-1), 'POST actions/workflows/toolkit-programme-sweep.yml/dispatches');
+  const edit = justSwept();
+  assert.equal((await gate({ env: { ...gateEnv, EVENT_NAME: 'issues', EVENT_ACTION: 'edited' }, fetchImpl: edit.fetchImpl, now: T, log: () => {} })).start, false);
+  assert.ok(!edit.calls.some(call => call.startsWith('POST')));
   const off = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
   assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: () => {} })).start, false);
   assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main', 'GET actions/workflows/toolkit-programme-sweep-gate.yml/runs?event=schedule&status=completed&per_page=2'],

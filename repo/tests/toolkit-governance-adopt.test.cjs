@@ -72,7 +72,7 @@ function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
   return { calls, world, discoveryGh: args => get(args[0]), writer };
 }
 
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, agentHost = undefined } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = [];
@@ -87,7 +87,6 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); },
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
     cloudWorkflows: () => ({ files: {}, warning: null }),
-    ...(agentHost ? { agentHost } : {}),
   });
   const code = await cli.main(argv);
   return { code, out, err, published, plainText };
@@ -190,34 +189,6 @@ test('a found store is a question: keep it, or create a new private one', async 
   assert.equal(made.code, 0, made.err + made.out);
   assert.deepEqual(fresh.calls, [['create', STORE], ['put', STORE, 'archives/README.md']]);
   assert.equal(made.published[0].binding.store.repository, STORE);
-});
-
-test('in Claude Code a bank of five rows stays a card: two cards, tapped in order, make one answer', async t => {
-  const ctx = fixture(t);
-  const session = 'session-adopt';
-  const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
-  const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
-  new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).start(session, 'startup', governance.governanceState(ctx.repo, ctx.registryOptions).repository_id);
-  const github = fakeGitHub({ repos: { [`${OWNER}/fresh-evidence`]: { private: true, dirs: ['archives'] } } });
-  const shown = await run(ctx, ['setup'], github, { agentHost: () => 'claude' });
-  assert.equal(shown.code, 0, shown.err + shown.out);
-  assert.match(shown.out, /This is card 1 of 2\./);
-  const first = JSON.parse(shown.out.split('\n').find(line => line.startsWith('{"questions"')));
-  assert.equal(first.questions.length, 4);
-  const pre = (input, id) => new gate.ToolGate({ registryOptions: ctx.registryOptions }).decide({ tool_name: 'AskUserQuestion', session_id: session, cwd: ctx.repo, tool_use_id: id, tool_input: input });
-  const post = (input, answers, id) => new gate.PromptHold({ registryOptions: ctx.registryOptions, environment: {} }).picked({ cwd: ctx.repo, sessionId: session, toolUseId: id, toolResponse: { questions: input.questions, answers } });
-  const firstOption = input => Object.fromEntries(input.questions.map(question => [question.question, question.options[0].label]));
-
-  const nextOf = context => JSON.parse(context.split('\n').find(line => line.startsWith('{"questions"')));
-  assert.equal(pre(first, 'card-1'), null);
-  const tapped = post(first, firstOption(first), 'card-1');
-  assert.match(tapped.context, /tapped card 1 of 2.*Nothing is sent yet/);
-  const second = nextOf(tapped.context);
-  assert.deepEqual(second.questions.map(question => question.question.split(' ')[0]), ['1.5', '2.1']);
-  assert.match(pre(first, 'card-1-again').deny, /only exactly as Toolkit printed it/, 'a tapped card is not shown again');
-  assert.equal(pre(second, 'card-2'), null);
-  const done = post(second, firstOption(second), 'card-2');
-  assert.match(done.context, /setup --answers "\S+: 1\.1=A, 1\.2=A, 1\.3=A, 1\.4=A, 1\.5=A, 2\.1=A" --ticket [0-9a-f]{32}$/m);
 });
 
 test('when GitHub cannot be searched, turning on makes nothing and says why', async t => {

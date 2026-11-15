@@ -735,6 +735,19 @@ test('speed: a route job that gates the test legs is a light edit run; one that 
   assert.match(skipped[0].fix, /!cancelled\(\)/);
 });
 
+test('speed: a route that gates fewer jobs than it leaves running is raised; a gated job is not called skipped', () => {
+  const edits = (text) => hits(report({ '.github/workflows/ci.yml': text, 'route.js': '', 'body.js': '', 'verify.js': '' }), 'speed.edits');
+  const extra = (jobs) => ROUTED().replace('  validate:\n', `${jobs}  validate:\n`);
+  const plain = (id) => `  ${id}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm run ${id}\n`;
+  const many = edits(extra(plain('build') + plain('lint')));
+  assert.equal(many.length, 1, 'build, lint and body left running against one gated leg');
+  assert.match(many[0].message, /reruns 3 jobs/);
+  assert.match(edits(extra(plain('build')))[0].message, /reruns 2 jobs/, 'body and build outnumber the one gated leg');
+  assert.deepEqual(edits(ROUTED()), [], 'one light check against one gated leg is fine');
+  const chained = `  more:\n    needs: [route, tests]\n    if: \${{ needs.route.outputs.mode != 'light' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm run more\n`;
+  assert.deepEqual(edits(extra(chained)), [], 'a route-gated job that needs a skipped leg skips on purpose');
+});
+
 test('speed: the Toolkit Validate workflow passes the edit check', () => {
   const text = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'validate.yml'), 'utf8');
   assert.deepEqual(hits(report({ '.github/workflows/validate.yml': text }), 'speed.edits'), []);
