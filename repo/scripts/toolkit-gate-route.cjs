@@ -50,6 +50,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const transcriptHead = require('./toolkit-transcript-head.cjs');
 
 const REGISTRY_PATH = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
 const EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -57,7 +58,6 @@ const ROLE_MEMBER = Object.freeze({ G0: 'DISCOVERY', G1: 'BUILDER', DESIGN_CHALL
 // The effort a G2 brief with `Review class: wording-only` may run at on the reviewer's pinned model;
 // the merge train finder accepts its stamp only when every changed file is a LIGHT `.md` file.
 const WORDING_EFFORT = 'high';
-const HEAD_BYTES = 2 * 1024 * 1024;
 const TAIL_BYTES = 1024 * 1024;
 
 // The stamp line. Groups: proof, model, effort, profile, member, override.
@@ -135,15 +135,6 @@ function parseBrief(text) {
   return out;
 }
 
-function readSlice(file, start, length) {
-  const handle = fs.openSync(file, 'r');
-  try {
-    const buffer = Buffer.alloc(length);
-    const read = fs.readSync(handle, buffer, 0, length, start);
-    return buffer.subarray(0, read).toString('utf8');
-  } finally { fs.closeSync(handle); }
-}
-
 function entryText(entry) {
   const content = entry && entry.message && entry.message.content;
   if (typeof content === 'string') return content;
@@ -160,23 +151,10 @@ function readTranscript(file, parts = { brief: true, served: true }) {
   let size;
   try { size = fs.statSync(file).size; } catch { return out; }
   const parse = line => { try { return JSON.parse(line); } catch { return null; } };
-  // The first prompt sits near the top: read in steps, so a long transcript is not read whole on
-  // every tool call. A slice may end mid-line; that line is read again with the next, longer slice.
-  for (let length = 128 * 1024, done = !parts.brief; !done; length *= 4) {
-    const head = readSlice(file, 0, Math.min(size, length, HEAD_BYTES));
-    const lines = head.split('\n');
-    const whole = length >= size || length >= HEAD_BYTES;
-    for (const line of whole ? lines : lines.slice(0, -1)) {
-      const entry = parse(line);
-      if (!entry || entry.type !== 'user' || entry.isSidechain) continue;
-      const text = entryText(entry);
-      if (text !== null) { out.brief = text; break; }
-    }
-    done = out.brief !== null || whole;
-  }
+  if (parts.brief) out.brief = entryText(transcriptHead.firstUserEntry(file, entry => entryText(entry) !== null));
   if (!parts.served) return out;
   const start = Math.max(0, size - TAIL_BYTES);
-  const lines = readSlice(file, start, size - start).split('\n');
+  const lines = transcriptHead.readSlice(file, start, size - start).split('\n');
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const entry = parse(lines[index]);
     if (!entry || entry.type !== 'assistant' || entry.isSidechain) continue;
