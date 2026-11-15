@@ -399,7 +399,7 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
-  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued)' },
+  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -926,11 +926,67 @@ function validateChild(doc) {
     }
     check(errors, Array.isArray(doc.blockers) && doc.blockers.every(isText), 'blockers must be a list of text');
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
+    if (isObject(doc.private) && doc.private.keep_open !== undefined) validateKeepOpen(errors, doc.private.keep_open);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
       && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
   return errors;
 }
+
+// A merged task the controller keeps open on purpose: why, since when, and the merged or closed PRs
+// it was set over (the write stamps both). It lives in the child's private part, which every Toolkit
+// reader accepts, so no reader refuses a document that carries it; this Toolkit shows it on the task
+// page and leaves the task off the work queue's TASK_MERGED_OPEN while the task's finished PRs are
+// the ones it covers. A later merge is a new condition: the mark lapses and the finding returns.
+// Removed with {"private":{"keep_open":null}}; set again with a new reason to cover a later merge.
+function validateKeepOpen(errors, keep) {
+  check(errors, isObject(keep), 'private.keep_open must be an object with a reason');
+  if (!isObject(keep)) return;
+  checkShape(errors, keep, { all: ['reason', 'at', 'covers'], optional: ['at', 'covers'] }, 'private.keep_open');
+  check(errors, isText(keep.reason) && keep.reason.length <= ATTENTION_NOTE_LIMIT, `private.keep_open.reason must be text of at most ${ATTENTION_NOTE_LIMIT} characters`);
+  // The reason is drawn on the public task page, so it gets the public free-text screen.
+  if (isText(keep.reason)) {
+    for (const [held, what] of [['\\', 'a path'], ['@', 'an @ (an address or a mention)'], ['://', 'an address']]) check(errors, !keep.reason.includes(held), `private.keep_open.reason holds ${what}`);
+    check(errors, !HOST_LIKE.test(keep.reason), 'private.keep_open.reason holds something that reads as a host name');
+  }
+  check(errors, keep.at === undefined || (isText(keep.at) && Number.isFinite(Date.parse(keep.at))), 'private.keep_open.at must be a date and time');
+  check(errors, keep.covers === undefined || (Array.isArray(keep.covers) && keep.covers.length <= KEEP_OPEN_COVERS && keep.covers.every(number => isInt(number, 1))
+    && new Set(keep.covers).size === keep.covers.length), `private.keep_open.covers must list at most ${KEEP_OPEN_COVERS} different PR numbers`);
+}
+
+// The task's merged or closed PR numbers, in order.
+const finishedPrs = doc => [...new Set([doc?.pr, ...(Array.isArray(doc?.prs) ? doc.prs : [])]
+  .filter(pr => isInt(pr?.number, 1) && ['MERGED', 'CLOSED'].includes(pr.state)).map(pr => pr.number))].sort((a, b) => a - b);
+
+// Stamps a keep-open mark on every write: one that adds it or changes its reason gets the write time
+// and the task's finished PRs; one that keeps the reason keeps both from the stored mark, whatever the
+// write supplied.
+function stampKeepOpen(previous, next, now) {
+  const keep = next?.private?.keep_open;
+  if (!isObject(keep)) return next;
+  const before = previous?.private?.keep_open;
+  const kept = isObject(before) && before.reason === keep.reason && before.at && Array.isArray(before.covers);
+  next.private = { ...next.private, keep_open: { ...keep, at: kept ? before.at : now, covers: kept ? before.covers : finishedPrs(next).slice(-KEEP_OPEN_COVERS) } };
+  return next;
+}
+
+// The write-time stamps of a child document's private part.
+function stampChild(previous, next, now) {
+  drift().stampNextAction(previous, next, now);
+  return stampKeepOpen(previous, next, now);
+}
+
+// A mark holds while every finished PR on the task is one it was set over.
+const keptOpen = doc => {
+  const keep = doc?.private?.keep_open;
+  if (!isObject(keep) || !isText(keep.reason) || !Array.isArray(keep.covers)) return false;
+  const covered = new Set(keep.covers);
+  return finishedPrs(doc).every(number => covered.has(number));
+};
+const keptSince = doc => {
+  const at = Date.parse(doc.private.keep_open.at || '');
+  return Number.isFinite(at) ? ` (since ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')}Z)` : '';
+};
 
 const isOptionalText = (value, limit = JOURNAL_TEXT_LIMIT) => value === null || (isText(value) && value.length <= limit);
 
@@ -973,7 +1029,8 @@ function validateJournal(doc) {
 
 function assertValid(kind, doc) {
   const errors = kind === 'parent' ? validateParent(doc) : kind === 'journal' ? validateJournal(doc) : validateChild(doc);
-  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The ${kind} state document is invalid: ${errors[0]}`, { errors });
+  const which = kind === 'parent' ? doc?.parent_issue : doc?.issue;
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The ${kind} state document${isInt(which, 1) ? ` for #${which}` : ''} is invalid: ${errors[0]}`, { errors });
   return doc;
 }
 
@@ -1046,7 +1103,8 @@ function validateBinding(binding) {
     // nothing acts on it in this release, so a copy that knows the key is out before any writer sets it.
     const ciShards = binding.ci_shards;
     if (ciShards !== undefined) check(errors, v2 && isObject(ciShards) && Object.keys(ciShards).every(key => ['answer', 'offered_at'].includes(key)) && ['yes', 'not-now', 'never'].includes(ciShards.answer) && optional(ciShards.offered_at, value => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value)), 'ci_shards may hold only answer (yes, not-now or never) and offered_at (a date and time), in a version 2 binding');
-    // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
+    // Retired: the Task Scheduler folder of the old computer tasks. Nothing reads it; it stays
+    // accepted so a binding that carries it stays valid.
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
     if (projection !== undefined) {
@@ -1459,12 +1517,16 @@ function foldJournals(doc, observation) {
   return { doc: next, findings, holds };
 }
 
-// RFC 7386 merge patch, limited to the named top-level fields.
-function mergePatch(target, patch) {
+// RFC 7386 merge patch, limited to the named top-level fields. One exception: in a fixed-shape
+// field (a candidate, UAT or review), a null for a key the shape requires sets that key to null.
+// Deleting it could only end in a refused write, and "head": null is how a patch says "no head yet".
+function mergePatch(target, patch, shape = null) {
   if (!isObject(patch)) return clone(patch);
+  const required = shape ? shape.all.filter(key => !(shape.optional || []).includes(key)) : [];
   const result = isObject(target) ? clone(target) : {};
   for (const [key, value] of Object.entries(patch)) {
-    if (value === null) delete result[key];
+    if (value === null && required.includes(key)) result[key] = null;
+    else if (value === null) delete result[key];
     else result[key] = mergePatch(result[key], value);
   }
   return result;
@@ -1487,7 +1549,7 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
   for (const [key, value] of Object.entries(patch)) {
     // Lists and plain values are replaced whole; objects are merge-patched.
     if (Array.isArray(value) || !isObject(value)) next[key] = clone(value);
-    else next[key] = mergePatch(next[key], value);
+    else next[key] = mergePatch(next[key], value, Object.hasOwn(SHAPES, key) ? SHAPES[key] : null);
   }
   if (kind === 'parent') refuseNewLegacy(doc, next);
   return next;
@@ -1890,7 +1952,8 @@ function renderChildBlockBody(child, outcome) {
   // segment (` · UAT: <state>`) is read by issue-closure.cjs owedUat: change both together.
   const line = [status, status === 'IN PROGRESS' && gate ? `Gate: ${publicText(gate)}` : null, wait ? `Waiting on you: ${wait}` : null,
     child.uat?.state ? `UAT: ${publicText(uatText(child))}` : null, child.review?.state ? `Review: ${publicText(reviewText(child))}` : null,
-    child.next_action ? `Next: ${publicText(child.next_action)}` : null, child.release ? `Release: ${publicText(child.release)}` : null].filter(Boolean).join(' · ');
+    child.next_action ? `Next: ${publicText(child.next_action)}` : null, child.release ? `Release: ${publicText(child.release)}` : null,
+    keptOpen(child) ? `Kept open: ${publicText(child.private.keep_open.reason)}${keptSince(child)}` : null].filter(Boolean).join(' · ');
   return [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
     `<!-- State revision ${child.revision} (issue-${child.issue}.json) -->`,
@@ -2453,6 +2516,15 @@ const CHANGED_PAGES = 10;
 // A runaway guard on one PR list (100 PRs a page), far above any real repository; the pass's own
 // request budget is what normally bounds it.
 const LIST_PAGE_GUARD = 1000;
+// Pages of 100 read per issue link connection: 1,000 closing references or cross-references.
+const LINK_PAGES = 10;
+// The most merged or closed PRs one keep-open mark records as covered (the most link paging reads).
+const KEEP_OPEN_COVERS = 1000;
+const PR_NODE = 'number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner }';
+const LINK_FIELDS = Object.freeze({
+  closing: `pageInfo { hasNextPage endCursor } nodes { ${PR_NODE} }`,
+  timeline: `pageInfo { hasNextPage endCursor } nodes { ... on CrossReferencedEvent { source { __typename ... on PullRequest { ${PR_NODE} } } } }`,
+});
 // PR discovery's own budget: a fixed part for the PR lists' detail reads and the parent, plus one
 // request for each batch of twenty task links and two for each task read this pass (an older PR to
 // reconfirm and a merge to confirm). It grows with the board, so a large board never fails discovery
@@ -2990,7 +3062,7 @@ class StateStore {
     if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
-    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
+    if (kind === 'child') stampChild(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -3110,7 +3182,7 @@ class StateBatch {
       if (!entry.doc || (entry.base && sameState(entry.base, entry.doc))) continue;
       const doc = clone(entry.doc);
       if (entry.kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
-      if (entry.kind === 'child') drift().stampNextAction(entry.base, doc, store.now());
+      if (entry.kind === 'child') stampChild(entry.base, doc, store.now());
       doc.revision = entry.base ? entry.base.revision + (contentDigest(entry.base) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
       doc.volatile = { written_at: store.now(), ...(store.toolkitVersion ? { toolkit: store.toolkitVersion } : {}) };
       assertValid(entry.kind, doc);
@@ -3700,7 +3772,7 @@ class BranchStateStore extends StateStore {
     }
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
-    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
+    if (kind === 'child') stampChild(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -4029,18 +4101,14 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `The programme PR scan reached ${LIST_PAGE_GUARD} full pages.`);
   }
 
-  // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
+  // At most twenty aliases, each with two issue connections of 100. A connection that has more pages
+  // is read on, page by page, up to LINK_PAGES pages; a busy task passes 100 cross-references, and a
+  // task whose links stay unread keeps every sweep pass from finishing. No partial GraphQL data is used.
   issuePullRequestLinks(numbers, spend) {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
-      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
-      }
-      timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
-        pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
-        } }
-      }
+      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) { ${LINK_FIELDS.closing} }
+      timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) { ${LINK_FIELDS.timeline} }
     }`).join('\n');
     spend();
     const response = this.transport.request('POST', 'graphql', {
@@ -4052,8 +4120,7 @@ class ProgrammeGraphReader {
     if (response.json?.errors?.length || !repository) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The issue PR references were not fully readable.');
     return new Map(numbers.map(number => {
       const issue = repository[`i${number}`];
-      const closing = issue?.closedByPullRequestsReferences;
-      const timeline = issue?.timelineItems;
+      const { closing, timeline } = this.moreLinkPages(number, issue?.closedByPullRequestsReferences, issue?.timelineItems, spend);
       const complete = [closing, timeline].every(connection => connection?.pageInfo?.hasNextPage === false && Array.isArray(connection.nodes));
       const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')] : [];
       // A merge train carries its members' work; the member PR, never the train, is the task's PR.
@@ -4062,6 +4129,43 @@ class ProgrammeGraphReader {
       return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(candidate => candidate && kept.has(candidate.number)), history }];
     }));
+  }
+
+  // The rest of one issue's link connections, from the cursors the first page returned. Each page
+  // spends from the discovery budget. A page that cannot be read, a connection with more pages but no
+  // cursor, or LINK_PAGES pages read leaves that connection with a next page, so the task stays
+  // incomplete exactly as before; only a stop for the whole pass is raised.
+  moreLinkPages(number, closing, timeline, spend) {
+    const [owner, name] = this.repository.split('/');
+    const more = connection => connection?.pageInfo?.hasNextPage === true && isText(connection.pageInfo.endCursor) && Array.isArray(connection.nodes);
+    for (let page = 1; page < LINK_PAGES && (more(closing) || more(timeline)); page += 1) {
+      const wanted = { closing: more(closing), timeline: more(timeline) };
+      let next;
+      try {
+        spend();
+        const response = this.transport.request('POST', 'graphql', {
+          query: `query($owner: String!, $name: String!, $number: Int!, $closingAfter: String, $timelineAfter: String, $closing: Boolean!, $timeline: Boolean!) {
+            repository(owner: $owner, name: $name) { more: issue(number: $number) {
+              closedByPullRequestsReferences(first: 100, after: $closingAfter, includeClosedPrs: true) @include(if: $closing) { ${LINK_FIELDS.closing} }
+              timelineItems(first: 100, after: $timelineAfter, itemTypes: [CROSS_REFERENCED_EVENT]) @include(if: $timeline) { ${LINK_FIELDS.timeline} }
+            } } }`,
+          variables: { owner, name, number, closingAfter: wanted.closing ? closing.pageInfo.endCursor : null, timelineAfter: wanted.timeline ? timeline.pageInfo.endCursor : null, ...wanted },
+        });
+        next = response.status === 200 && !response.json?.errors?.length ? response.json?.data?.repository?.more : null;
+      } catch (error) {
+        if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
+        next = null;
+      }
+      const joined = (connection, key) => {
+        const page = next?.[key];
+        return isObject(page?.pageInfo) && Array.isArray(page.nodes) ? { pageInfo: page.pageInfo, nodes: [...connection.nodes, ...page.nodes] } : null;
+      };
+      const nextClosing = wanted.closing ? joined(closing, 'closedByPullRequestsReferences') : closing;
+      const nextTimeline = wanted.timeline ? joined(timeline, 'timelineItems') : timeline;
+      if (!nextClosing || !nextTimeline) break;
+      closing = nextClosing; timeline = nextTimeline;
+    }
+    return { closing, timeline };
   }
 
   // The issues and pull requests GitHub changed at or after `since`, oldest change first. Each
@@ -5118,6 +5222,8 @@ class Reconciler {
       if (!found) continue;
       if ((observed.blockedBy.get(outcome.issue) || []).some(moving)) continue;
       const { doc, open, merged, hours, latest } = found;
+      // Kept open on purpose by the controller: the mark on its page says why, so it is not queued.
+      if (merged && keptOpen(doc)) continue;
       const since = new Date(latest).toISOString().slice(0, 16);
       const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
       findings.push(merged
@@ -6028,8 +6134,8 @@ class Reconciler {
       const existing = children.get(number)?.doc;
       const copy = clone(doc);
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
-      // A next action this pass sets counts as set now, as the write will stamp it.
-      drift().stampNextAction(existing || null, copy, this.now());
+      // A next action or keep-open mark this pass sets counts as set now, as the write will stamp it.
+      stampChild(existing || null, copy, this.now());
       return [number, copy];
     }));
     const blockHoldStart = holds.length;
@@ -7224,7 +7330,9 @@ class Reconciler {
         board_time: this.board?.time || null,
         read: sweep?.read.length ?? 0, tasks: sweep?.read || [], why: sweep?.why || {}, left: sweep ? sweep.left.length + sweep.failed.length : (this.sweepOrder?.length ?? plan.parent?.sweep?.queue.length ?? 0),
         changedCursor: sweep?.changedCursor || null,
-        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null),
+        // A pass that read everything it set out to but could not prove it whole (a task's PR links,
+        // the inventory or an issue read fell short) says so, so the lease never shows a silent stop.
+        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : !plan.complete ? 'an incomplete read' : null),
         // The request limit that bound the stop, kept apart from the reason so a stop whose reason
         // names something else (a document too large for GraphQL) still reads as at the App limit.
         limit: plan.limit || this.pass.stopReason || (this.pausedBy && this.pausedBy !== 'time limit' ? this.pausedBy : null) };

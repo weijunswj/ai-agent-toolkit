@@ -38,7 +38,9 @@
 // Options: --summary <file> writes the run's JSON summary,
 // --report-durations <file> writes seconds per file, --concurrency <n> (default 3), --base <ref>
 // for --changed (default origin/main). In GitHub Actions a shard summary records the commit the run
-// tested (GITHUB_SHA) as `commit`, and --verify-ci there accepts only summaries of the run's own commit.
+// tested (GITHUB_SHA) as `commit`, and --verify-ci there accepts only summaries of the run's own commit,
+// or of TESTED_COMMIT when the gate's legs step names the older merge commit a light run reuses
+// (ci-validate-route.cjs checks that commit is this head merged into an ancestor of today's base).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -306,6 +308,13 @@ function testedCommit(env = process.env) {
   return env.GITHUB_ACTIONS === 'true' && /^[0-9a-f]{40}$/.test(env.GITHUB_SHA || '') ? env.GITHUB_SHA : null;
 }
 
+// The commit --verify-ci requires the summaries to name: TESTED_COMMIT when the workflow passes the
+// legs step's choice, else the run's own.
+function verifyCommit(env = process.env) {
+  const own = testedCommit(env);
+  return own && /^[0-9a-f]{40}$/.test(env.TESTED_COMMIT || '') ? env.TESTED_COMMIT : own;
+}
+
 function verifyCi(root, options, out, err) {
   const manifest = shards.loadManifest(root);
   const discovered = shards.discoverTestFiles(root);
@@ -314,7 +323,7 @@ function verifyCi(root, options, out, err) {
   catch { needs = null; }
   const summaries = fs.existsSync(options.verifyDir) ? readSummaries(options.verifyDir) : [];
   const requiredJobs = shards.LEG_SETS[options.legs || 'validate'];
-  const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs, commit: testedCommit() });
+  const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs, commit: verifyCommit() });
   errors.push(...shards.testFileErrors(root));
   errors.push(...shards.workflowErrors(fs.readFileSync(path.join(root, '.github', 'workflows', 'validate.yml'), 'utf8'), manifest));
   for (const system of Object.keys(totals)) {
@@ -426,4 +435,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });
 
-module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError, testedCommit });
+module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError, testedCommit, verifyCommit });

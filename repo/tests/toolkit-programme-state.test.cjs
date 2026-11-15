@@ -171,6 +171,29 @@ test('claims and takeovers move the fence; stale writers are refused', () => {
   assert.throws(() => state.authoriseWrite('parent', parent, null, null), { code: 'WRITER_UNKNOWN' });
 });
 
+// A holder order refused with "candidate is missing head, tree, base": its patch sent those fields as
+// null, and a merge patch's null deletes a field. A field every candidate must carry takes null as its
+// value instead, and a refusal names the task whose document it is.
+test('a null in a patch sets a field the shape requires to null instead of deleting it', () => {
+  const doc = state.claimDocument(child(), writer, {});
+  const parentDoc = heldParent();
+  const tracked = state.applyPatch('child', doc, { candidate: { branch: 'b', head: SHA_A, tree: SHA_A, base: SHA_A } }, { writer, parentDoc });
+  const next = state.applyPatch('child', tracked, { candidate: { branch: 'other', head: null, tree: null, base: null } }, { writer, parentDoc });
+  assert.deepEqual(next.candidate, { branch: 'other', head: null, tree: null, base: null });
+  assert.doesNotThrow(() => state.assertValid('child', next));
+  const cleared = state.applyPatch('child', tracked, { uat: { state: null } }, { writer: controller, parentDoc });
+  assert.deepEqual(cleared.uat, { state: null, at_head: null });
+  const kept = state.applyPatch('child', { ...doc, private: { note: 'x', keep_open: { reason: 'r' } } }, { private: { keep_open: null } }, { writer, parentDoc });
+  assert.deepEqual(kept.private, { note: 'x' }, 'an optional field still goes on null');
+});
+
+test('a state refusal names the task whose document is invalid', () => {
+  const doc = state.claimDocument(child(), writer, {});
+  const broken = { ...doc, candidate: { branch: 'b' } };
+  assert.throws(() => state.assertValid('child', broken), error => error.code === 'STATE_INVALID'
+    && error.message.includes(`#${doc.issue}`) && /candidate is missing head, tree, base/.test(error.message));
+});
+
 test('patches touch only the holder fields, and only the controller records acceptance', () => {
   const doc = state.claimDocument(child(), writer, {});
   const parentDoc = heldParent();

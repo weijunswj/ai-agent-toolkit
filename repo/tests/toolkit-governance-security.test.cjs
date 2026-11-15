@@ -173,6 +173,8 @@ const MATRIX = [
     expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/odd\.yml names CodeQL steps Toolkit could not place or rule out/] }, fixes: { code_scanning: false } } },
   { id: 'M14e GitHub has recent CodeQL results that default setup did not make: default setup stays off (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable', codeql_uploads: '.github/workflows/ci.yml:scan' },
     expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/CodeQL results on the default branch from \.github\/workflows\/ci\.yml:scan in the last 90 days, not from default setup/] }, fixes: { code_scanning: false } } },
+  { id: 'M14h more CodeQL workflows than Toolkit can place: default setup stays off and a person checks them', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable', codeql_limit: 'the default branch has 51 workflow files, more than the 50 Toolkit reads' },
+    expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/51 workflow files, more than the 50 Toolkit reads, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check the workflows by hand/] }, fixes: { code_scanning: false } } },
   { id: 'M14f private, CodeQL readable and off: default setup is never written (I2)', read: { ...PRIVATE, code_scanning: 'disabled', binding: merged(null, 'on') },
     expect: { status: 'conformant', checks: { S5: 'not-applicable' }, fixes: { code_scanning: false } } },
   { id: 'M14g private, CodeQL workflows unreadable: still not applicable, never unverified', read: { ...PRIVATE, code_scanning: 'disabled', advanced_codeql: 'unreadable' },
@@ -456,6 +458,11 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   assert.deepEqual([mixed.advanced_codeql, mixed.codeql_unplaced], ['unreadable', undefined], 'S5 names one unplaced file only when nothing else was unreadable');
   const twoUnplaced = viaUploads('gh: no analysis found (HTTP 404)', { 'a.yml': 'on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n', 'b.yml': 'on: push\nsteps:\n  - uses: github/codeql-action/analyze@v3\n' });
   assert.deepEqual([twoUnplaced.advanced_codeql, twoUnplaced.codeql_unplaced], ['unreadable', undefined], 'two unplaced files are not reported as one');
+  // Where GitHub answered but Toolkit's own read stops, the limit is named, so a person checks it.
+  assert.equal(twoUnplaced.codeql_limit, '.github/workflows/a.yml and .github/workflows/b.yml both name CodeQL steps Toolkit could not place or rule out');
+  const many = viaUploads('gh: no analysis found (HTTP 404)', Object.fromEntries(Array.from({ length: 51 }, (_, index) => [`w${String(index).padStart(2, '0')}.yml`, 'on: push\njobs:\n  a:\n    steps:\n      - run: echo\n'])));
+  assert.deepEqual([many.advanced_codeql, many.codeql_limit], ['unreadable', 'the default branch has 51 workflow files, more than the 50 Toolkit reads']);
+  assert.equal(mixed.codeql_limit, undefined, 'a file GitHub did not serve is not a limit: it is read again');
   for (const entry of [{ created_at: '2026-10-20T00:00:00Z' }, { analysis_key: null }, { analysis_key: 7 }, null, 'x']) {
     assert.equal(viaUploads([entry], composite).advanced_codeql, 'unreadable', `an analysis entry without a key rules nothing out: ${JSON.stringify(entry)}`);
   }

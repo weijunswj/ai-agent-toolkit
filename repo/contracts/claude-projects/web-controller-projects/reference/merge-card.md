@@ -6,7 +6,7 @@ An owner tap is good for one merge attempt. Anything that starts a required chec
 
 ## Before the card
 1. Bring the branch current: merge `main` in, run `bump-version.cjs --next <level>` from the body's `Bump:` line, push, and wait for green CI.
-2. Run `node repo/scripts/toolkit-auto-merge-eligible.cjs --base <base SHA> --head <head SHA> --body-file <PR body>` at that head. Fix every body line it names (the UAT line must read `NOT_REQUIRED`, `OWNER_TEST_NEEDED` or `PASSED`) and finish every other body edit now: strip platform footers, update the summary and the external-effects note.
+2. Run `node repo/scripts/toolkit-auto-merge-eligible.cjs --base <base SHA> --head <head SHA> --body-file <PR body>` at that head. Fix every body line it names (the UAT line must read `NOT_REQUIRED`, `OWNER_TEST_NEEDED` or `PASSED`) and finish every other body edit now: update the summary and the external-effects note, run the new body through `toolkit-pr-body.cjs` (it strips platform footers) and write it with the connector.
 3. Wait for the Validate run those edits started to go green.
 4. Run `node repo/scripts/toolkit-merge-card-ready.cjs --repo <owner/name> --pr <n> --head <full SHA>`. Post the card only on exit 0, and keep the body sha256 it prints. Exit 1 names what to fix or wait for; exit 2 means GitHub or git could not be read, so nothing is ready.
 

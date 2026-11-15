@@ -1,18 +1,16 @@
 'use strict';
 
 // validate-toolkit.cjs on copied workspaces: validation targets, the retired project and publisher
-// topology, retired-operation wording and enum fields. Split from validate-toolkit.test.cjs so the
-// copied-workspace cases run in parallel files.
+// topology and enum fields. Split from validate-toolkit.test.cjs so the copied-workspace cases run in
+// parallel files; the retired-operation wording cases are in validate-toolkit-retired-wording.test.cjs.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  repoRoot,
   legacyProjectToken,
   legacyCuratedToken,
-  skillCreationOperationalFreeTextFields,
   sharedRetiredOperationVariants,
   copyRepo,
   runValidate,
@@ -52,62 +50,6 @@ test('validator rejects a cross-class normalized policy alias collision', () => 
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /duplicates normalized alias from primitive_definitions\.retired-project-module/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('Skill Creation and published-surface consumers share the retired topology atom detector', async () => {
-  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
-  for (const variant of sharedRetiredOperationVariants) {
-    assert.ok(audit.detectRetiredTopologyAtoms(variant).length > 0, variant);
-  }
-
-  const results = await validateEachCopy(sharedRetiredOperationVariants, (cwd, variant) => {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-program-reconciler'].existing_skill_review += ` ${variant}`;
-    });
-  });
-  for (const { item: variant, result } of results) {
-    assert.notEqual(result.status, 0, variant);
-    assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.existing_skill_review/, variant);
-  }
-});
-
-test('validator rejects the shared retired operation in every applicable operational free-text field', async () => {
-  const injection = 'Current Toolkit conversions use project modules and published skills.';
-  const results = await validateEachCopy(skillCreationOperationalFreeTextFields, (cwd, field) => {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-program-reconciler'][field] += ` ${injection}`;
-    });
-  });
-  for (const { item: field, result } of results) {
-    assert.notEqual(result.status, 0, field);
-    assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-program-reconciler\\.${field}`), field);
-  }
-});
-
-test('validator rejects shared retired-operation variants in validation commands', async () => {
-  const results = await validateEachCopy(sharedRetiredOperationVariants, (cwd, variant) => {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-program-reconciler'].validation.push(`node --test repo/tests/skill-routing.test.cjs ${variant}`);
-    });
-  });
-  for (const { item: variant, result } of results) {
-    assert.notEqual(result.status, 0, variant);
-    assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.validation command/, variant);
-  }
-});
-
-test('Skill Creation operational evidence does not exempt historical retired-operation wording', () => {
-  const cwd = copyRepo();
-  try {
-    updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-program-reconciler'].overlap_boundary += ' Earlier Toolkit operation used project modules and published skills, but that route is not current.';
-    });
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.overlap_boundary/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

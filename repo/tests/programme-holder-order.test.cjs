@@ -171,7 +171,7 @@ test('a dry run reports each write the apply would refuse, with its code, and wr
   const before = f.github.commits;
   const result = f.run(f.order({ ops: [
     { command: 'ack', finding: ADDED, next: 'Confirm #423 in the catalogue today.' },
-    { command: 'update', issue: 423, patch: { candidate: { head: null, tree: null, base: null } } },
+    { command: 'update', issue: 423, patch: { candidate: { head: 'not-a-sha' } } },
     { command: 'ack', finding: NO_TASK, next: 'Link PR 851 to a task.' },
   ] }), ['--dry-run']);
   assert.equal(result.error, null, result.error?.message);

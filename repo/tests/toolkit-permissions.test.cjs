@@ -79,22 +79,19 @@ test('Windows prints Bash and PowerShell twins with the path in forward slashes 
   assert.ok(plain.blocks[0].allow.includes('Bash(node "C:/Users/dev/.ai-agent-toolkit/checkout/skills/github-program-reconciler/scripts/programme.cjs" refresh *)'));
   assert.ok(plain.blocks[0].allow.includes('PowerShell(node "C:/Users/dev/.ai-agent-toolkit/checkout/skills/github-program-reconciler/scripts/programme.cjs" refresh *)'));
   // Toolkit runs no scheduled tasks on a computer any more, so no block carries a task line.
-  assert.ok(!plain.blocks[0].allow.some(line => /toolkit-(?:windows-tasks|tasks|update-scheduled-task)\.cjs/.test(line)));
-  // The old script still runs until it is deleted, so on Windows Codex keeps a prompt rule for each changing form.
+  assert.ok(!plain.blocks[0].allow.some(line => /toolkit-(?:windows-tasks|tasks)\.cjs/.test(line)));
+  // The task scripts are deleted or only remove toolkit's legacy cleaner, so no block names them at all.
   const codex = new permissions.PermissionBlocks({ ...computer(t, { managed: 'C:\\Users\\dev\\.ai-agent-toolkit\\checkout', claude: false, platform: 'win32' }), fs: exists }).build({ host: 'codex', scope: 'computer' });
-  for (const sub of ['apply', 'start', 'remove', 'adopt']) assert.ok(codex.blocks[0].ask.includes(`node "C:/Users/dev/.ai-agent-toolkit/checkout/repo/scripts/toolkit-windows-tasks.cjs" ${sub}`), sub);
+  assert.ok(![...codex.blocks[0].allow, ...codex.blocks[0].ask].some(line => /toolkit-(?:windows-tasks|tasks)\.cjs/.test(line)));
   const spaced = new permissions.PermissionBlocks({ ...computer(t, { managed: 'C:\\Users\\A Dev\\tk', claude: false, platform: 'win32' }), fs: exists }).build({ scope: 'computer' });
   assert.ok(spaced.blocks[0].allow.includes('Bash(node "C:/Users/A Dev/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh *)'));
   const linux = new permissions.PermissionBlocks(computer(t)).build({ scope: 'computer' });
-  assert.ok(linux.blocks[0].allow.every(line => line.startsWith('Bash(') && !/windows-tasks|update-scheduled-task/.test(line)));
+  assert.ok(linux.blocks[0].allow.every(line => line.startsWith('Bash(') && !/windows-tasks|toolkit-tasks/.test(line)));
 });
 
 test('every subcommand of the multi-command programme script is classified as allow or ask', () => {
   const programme = listIn(source('skills/github-program-reconciler/scripts/programme.cjs'), /const COMMANDS = \[([^\]]+)\]/);
   assert.deepEqual([...permissions.PROGRAMME_ALLOW, ...Object.keys(permissions.PROGRAMME_ASK)].sort(), [...programme].sort());
-  // Every changing form of the old Windows-task script asks; only its read-only plan and list have no line.
-  const tasks = listIn(source('repo/scripts/toolkit-windows-tasks.cjs'), /const COMMANDS = Object\.freeze\(\[([^\]]+)\]\)/);
-  assert.deepEqual(['list', 'plan', ...Object.keys(permissions.TASKS_ASK)].sort(), [...tasks].sort());
   for (const row of permissions.ROWS.filter(item => item.kind === 'script')) assert.ok(fs.existsSync(path.join(ROOT, row.script)), row.script);
 });
 
@@ -106,7 +103,7 @@ test('no printed line holds a never class, and the never list catches each class
   assert.ok(lines.includes('Bash(node "C:/tk/repo/scripts/toolkit-store.cjs" *)') && lines.includes('PowerShell(node "C:/tk/repo/scripts/toolkit-store.cjs" *)'), 'the store line is printed for a Windows path');
   for (const line of lines) {
     assert.equal(permissions.NEVER.find(([, pattern]) => pattern.test(line)), undefined, line);
-    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)? \*|node "C:\/tk\/repo\/scripts\/toolkit-(?:tasks|update-scheduled-task)\.cjs"(?: --apply)?(?: --json)?|gh pr comment \*|gh issue comment \*)\)$/);
+    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)? \*|gh pr comment \*|gh issue comment \*)\)$/);
   }
   assert.ok(built.blocks[0].allow.every(line => !/owner|"C:\/store"|work\/repo/i.test(line)), 'the computer block names no repository');
   const bad = ['Bash', 'Bash(*)', 'PowerShell(*)', 'Bash(node *)', 'Bash(python3 *)', 'Bash(* --version)', 'Bash(gh pr close *)', 'Bash(gh issue close *)', 'Bash(rm *)',
@@ -236,7 +233,6 @@ test('script lines allow only what their guard text says; approval-bearing flags
   const rows = [
     // Toolkit runs no scheduled tasks on a computer any more: no task command is in a block.
     [`${node('toolkit-tasks.cjs')}`, 'prompt'], [`${node('toolkit-tasks.cjs')} --json`, 'prompt'],
-    [`${node('toolkit-update-scheduled-task.cjs')} --apply`, 'prompt'],
     [`${node('toolkit-windows-tasks.cjs')} plan --repo-root C:/repo`, 'prompt'], [`${node('toolkit-windows-tasks.cjs')} start --task demo-footer-sweep`, 'prompt'],
     [`${node('toolkit-windows-tasks.cjs')} apply --repo-root C:/repo`, 'prompt'], [`${node('toolkit-windows-tasks.cjs')} remove --repo-root C:/repo`, 'prompt'],
     [`${node('toolkit-windows-tasks.cjs')} adopt --folder F --task T --id t --purpose p`, 'prompt'],
@@ -278,12 +274,12 @@ test('Codex gets no allow rule for a command that needs an exact form or an ask 
     [...push, 'origin', 'main'], [...push, '--force'], [...push, '--mirror'], [...push, '--delete', 'origin', 'x'], [...push, 'origin', '+main'], [...push, '--receive-pack=evil', 'origin', 'main'], ['git', 'push', 'origin', 'main'],
     ['gh', 'pr', 'comment', '12', '--delete-last'], ['gh', 'pr', 'comment', '12', '--body', 'x'], ['gh', 'issue', 'comment', '12', '--delete-last'],
     [...tk('toolkit-windows-tasks.cjs'), 'apply', '--repair-owned'], [...tk('toolkit-windows-tasks.cjs'), 'apply', '--folder', 'X'], [...tk('toolkit-windows-tasks.cjs'), 'apply'],
-    [...tk('toolkit-tasks.cjs'), '--forget', 'x'], [...tk('toolkit-tasks.cjs')], [...tk('toolkit-update-scheduled-task.cjs'), '--apply', '--answers', 'f'],
+    [...tk('toolkit-tasks.cjs'), '--forget', 'x'], [...tk('toolkit-tasks.cjs')],
     [...tk('toolkit-windows-tasks.cjs'), 'remove'], [...tk('toolkit-windows-tasks.cjs'), 'adopt'],
   ];
   for (const tokens of mustNotBeAllowed) assert.notEqual(decide(tokens), 'allow', tokens.join(' '));
-  for (const tokens of [['gh', 'pr', 'comment', '1'], [...tk('toolkit-windows-tasks.cjs'), 'apply', '--repair-owned'], [...tk('toolkit-windows-tasks.cjs'), 'start', '--task', 'x']]) assert.equal(decide(tokens), 'prompt', tokens.join(' '));
-  for (const tokens of [[...tk('toolkit-windows-tasks.cjs'), 'plan'], [...tk('toolkit-tasks.cjs'), '--json']]) assert.equal(decide(tokens), 'none', `${tokens.join(' ')}: no task rule at all`);
+  assert.equal(decide(['gh', 'pr', 'comment', '1']), 'prompt');
+  for (const tokens of [[...tk('toolkit-windows-tasks.cjs'), 'apply'], [...tk('toolkit-tasks.cjs'), '--json']]) assert.equal(decide(tokens), 'none', `${tokens.join(' ')}: no task rule at all`);
   // The store command is one allow rule, and no store or push rule prompts: a prompt rule would win
   // over the allow rule and ask on every store step.
   assert.equal(decide([...tk('toolkit-store.cjs'), 'save', '--store', 'C:/store', '--path', 'archives/x', '--message', 'x']), 'allow');
