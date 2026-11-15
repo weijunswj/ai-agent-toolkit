@@ -5,3 +5,5 @@
 ### Fixed
 
 - **Curly quotes in a bank answer:** the tool gate no longer counts a bank answer command that holds a curly quote as the exact answer command, because PowerShell reads curly quotes as quotes, so such a line could run a second command after the answer. The command is refused instead.
+- **Refused bank replies:** a bank reply that is not in the exact form now says what makes it exact (its own line, its live ticket, and no curly quote, straight double quote, `$`, backtick or `%` in the answer), instead of the general "only the user answers" refusal, so the agent sends it again rather than telling the owner it cannot be sent.
+- **Test time budget after a re-run:** the CI test duration check now counts only the newest run attempt of each shard, as the shard check does, so re-running a shard that ran slow once can clear it.

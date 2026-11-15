@@ -190,6 +190,8 @@ function answerCommand(text) {
 // The governance CLI given a decision word anywhere after it in the same command, so options before
 // the decision (`--json enable`, `--repo . disable`) count too. Read word by word, in linear time.
 // `--answers` and `--ticket` answer the governance bank; only the exact ticketed command passes (ToolGate).
+// A governance bank reply (`setup --answers`) on one line, exact or not.
+const BANK_ANSWER_ATTEMPT = /toolkit-governance\.cjs\b[^\r\n]*?\s--answers\b/i;
 const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'migrate', '--answers', '--ticket']);
 function decisionAfterScript(text) {
   const pattern = /toolkit-governance\.cjs/gi;
@@ -1426,6 +1428,11 @@ class ToolGate {
       // by the session it was given to, on its own.
       if (/toolkit-governance-answer/i.test(text) && TICKET_ARGUMENTS.test(text)) {
         return { deny: `Toolkit: the answer script runs only as the exact command Toolkit gave this session with the user's reply, on its own line and with nothing added. Nothing was recorded. ${NEVER_OWNER}` };
+      }
+      // A bank reply in any other form: say what makes it exact, so a stray character in the user's
+      // reply is not read as a ban on sending it.
+      if (tool !== 'Monitor' && BANK_ANSWER_ATTEMPT.test(text)) {
+        return { deny: `Toolkit: a governance bank reply runs only as the exact command Toolkit gave this session with the user's reply and its live ticket, on its own with nothing added, and the answer between its straight double quotes holds no curly quote, straight double quote, $, backtick or %. Nothing was sent. If the answer held one of those, run the same command again without it; if the ticket was not given to this session, tell the user in one line that it was not sent. ${NEVER_OWNER}` };
       }
       if (answerCommand(text)) {
         return { deny: `Toolkit: only the user answers the governance question, on Toolkit's card or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. If they asked you to decide it, tell them that in plain words. ${NEVER_OWNER}` };

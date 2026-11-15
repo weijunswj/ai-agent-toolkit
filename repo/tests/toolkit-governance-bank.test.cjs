@@ -46,6 +46,10 @@ test('the owner\'s next own message after a bank gets one ticket, bound to that 
     `& node "${SCRIPT}" setup --answers "${REFERENCE}: x\u2019 all recommended" --ticket ${ticket}`,
     `node "/elsewhere/toolkit-governance.cjs" setup --answers "${REFERENCE}: all recommended" --ticket ${ticket}`,
   ]) assert.ok(tools(ctx).decide(bash(sessionId, forged))?.deny, forged);
+  // The refusal says what makes the reply exact, so the agent sends it again rather than telling
+  // the user it cannot be sent.
+  assert.match(tools(ctx).decide(bash(sessionId, `node "${SCRIPT}" setup --answers "${REFERENCE}: x\u2019 all recommended" --ticket ${ticket}`)).deny,
+    /exact command .* no curly quote, .* run the same command again without it/);
   assert.ok(tools(ctx).decide(bash('another-session', command))?.deny, 'another session cannot use it');
   const next = prompts.decide({ cwd: repo, prompt: 'and also fix the readme', sessionId });
   assert.equal(ticketIn(next.context), undefined, 'only the first reply after the bank gets a ticket');
