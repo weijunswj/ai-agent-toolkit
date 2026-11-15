@@ -418,14 +418,14 @@ class ToolkitGovernanceCli {
     const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
     const epoch = sessionId ? epochs.get(sessionId) : null;
     // Claude Code answers on its own question card; Codex reads a typed reply.
-    const card = this.#cardHost() ? governanceBank.bankCardInput(specs) : null;
+    const cards = this.#cardHost() ? governanceBank.bankCards(specs) : null;
     let noted = false;
     try {
       noted = Boolean(sessionId) && new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).shown(sessionId, {
-        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs), card,
+        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs), cards,
       });
     } catch { noted = false; }
-    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs, { card: noted && card !== null })}\n`);
+    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs, { card: noted && cards !== null })}\n`);
     if (!noted) this.#stdout.write(`\nToolkit could not note this bank for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
     return BANK_SHOWN;
   }
@@ -556,8 +556,18 @@ function switchText(mergedText, parsed, changes) {
     edited = text;
     for (const [name, value] of Object.entries(changes)) {
       const pattern = new RegExp(`("${name}"\\s*:\\s*)"[^"]*"`, 'g');
-      if ((text.match(pattern) || []).length !== 1) { edited = null; break; }
-      edited = edited.replace(pattern, `$1"${value}"`);
+      const found = (text.match(pattern) || []).length;
+      if (found === 1) { edited = edited.replace(pattern, `$1"${value}"`); continue; }
+      // A switch task_prs does not hold yet goes in at the end of its (flat) object, in its layout.
+      const open = /"task_prs"\s*:\s*\{([^{}]*)\}/g;
+      const objects = [...edited.matchAll(open)];
+      if (found !== 0 || Object.hasOwn(parsed.task_prs || {}, name) || objects.length !== 1) { edited = null; break; }
+      const inner = objects[0][1];
+      const trimmed = inner.replace(/\s+$/, '');
+      const line = /(\r?\n)([ \t]+)"/.exec(inner);
+      const member = line ? `,${line[1]}${line[2]}"${name}": "${value}"` : `${trimmed.trim() ? ',' : ''} "${name}": "${value}"`;
+      const start = objects[0].index + objects[0][0].length - 1 - inner.length;
+      edited = `${edited.slice(0, start)}${trimmed}${member}${inner.slice(trimmed.length)}${edited.slice(start + inner.length)}`;
     }
   } else {
     const close = text.lastIndexOf('}');

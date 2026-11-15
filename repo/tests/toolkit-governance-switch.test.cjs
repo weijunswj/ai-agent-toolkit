@@ -287,6 +287,15 @@ test('the switch pull request keeps the merged formatting: a compact binding gai
   ctx.merge(crlf);
   assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
   assert.equal(texts.at(-1), crlf.replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates" }\r\n}\r\n'));
+  // A switch task_prs does not hold yet joins it in place, in its layout.
+  const inline = bindingText({ task_prs: { auto_merge: 'off' } }).replace(/"task_prs": \{[^}]*\}/, '"task_prs": { "auto_merge": "off" }');
+  ctx.merge(inline);
+  assert.equal((await answerBank(ctx, '1.3=B', { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), inline.replace('"auto_merge": "off" }', '"auto_merge": "off", "merge_train": "off" }'));
+  const lines = bindingText({ task_prs: { auto_merge: 'off' } });
+  ctx.merge(lines);
+  assert.equal((await answerBank(ctx, '1.3=B', { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), lines.replace(/("auto_merge": "off")(\n)(\s*)\}/, '$1,$2$3  "merge_train": "off"$2$3}'));
 });
 
 test('turning governance on in the bank carries the switch in the same enable proposal, for a version 1 or 2 working binding', async t => {

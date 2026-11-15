@@ -212,30 +212,31 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
 
 // ---- the card (Claude Code) ----------------------------------------------------------------------
 
-// In Claude Code the owner answers on the app's own question card (AskUserQuestion) instead of typing.
-// The card carries every answerable row, its options lettered as in the bank; the tool gate lets only
-// this exact card through for the bank shown last, and the owner's taps come back as one bank answer
-// with a one-use ticket (toolkit-governance-gate.cjs PromptHold.bankPicked).
+// In Claude Code the owner answers on the app's own question cards (AskUserQuestion) instead of typing.
+// The cards carry every answerable row in bank order, its options lettered as in the bank, at most four
+// rows a card; the tool gate lets only the next exact card through for the bank shown last, and once
+// every card is tapped the taps come back as one bank answer with a one-use ticket
+// (toolkit-governance-gate.cjs PromptHold.bankPicked).
 const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'merge-train': 'Trains', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
-// The app's card holds at most four questions; a bank with more is answered as a typed reply.
+// The app's card holds at most four questions; a bank with more is split over several cards.
 const CARD_MAX = 4;
 const CARD_KEYS = Object.freeze(['questions', 'metadata']);
 const CARD_QUESTION = /^(\d+\.\d+) /;
 const CARD_OPTION = /^([A-D])\. /;
 
-function bankCardInput(specs) {
-  if (specs.filter(spec => !spec.report_only).length > CARD_MAX) return null;
-  return {
-    questions: specs.filter(spec => !spec.report_only).map(spec => ({
-      question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})`,
-      header: CARD_HEADERS[spec.id] || 'Governance',
-      multiSelect: false,
-      options: spec.choices.map(choice => ({
-        label: `${choice.presentation_ref}. ${choice.label}${choice.value === spec.recommended ? ' (Recommended)' : ''}`,
-        description: choice.consequence,
-      })),
+function bankCards(specs) {
+  const questions = specs.filter(spec => !spec.report_only).map(spec => ({
+    question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})`,
+    header: CARD_HEADERS[spec.id] || 'Governance',
+    multiSelect: false,
+    options: spec.choices.map(choice => ({
+      label: `${choice.presentation_ref}. ${choice.label}${choice.value === spec.recommended ? ' (Recommended)' : ''}`,
+      description: choice.consequence,
     })),
-  };
+  }));
+  const cards = [];
+  for (let at = 0; at < questions.length; at += CARD_MAX) cards.push({ questions: questions.slice(at, at + CARD_MAX) });
+  return cards;
 }
 
 // The card's questions in one fixed form, or null when the input carries anything else (an answer
@@ -275,13 +276,26 @@ function cardAnswer(questions, answers) {
   return parts.join(', ');
 }
 
-// What the agent is told after the bank in Claude Code.
+// What the agent is told after the bank in Claude Code: the first card; the next one comes with the
+// owner's taps (cardNextContext).
 function cardInstruction(specs) {
   const status = specs.some(spec => spec.report_only);
+  const cards = bankCards(specs);
   return [
     `Agents (Claude Code): do not repeat this table${status ? '; tell the owner the Status lines above in one plain sentence each' : ''}, then call AskUserQuestion once with exactly this input, adding no answers field, and stop:`,
-    JSON.stringify(bankCardInput(specs)),
-    'Their taps come back to you with the exact command to send. If the card cannot be shown, show the table above instead, as plain text and never in a code block.',
+    JSON.stringify(cards[0]),
+    cards.length > 1 ? `This is card 1 of ${cards.length}. Their taps come back to you with the next card, and after the last card with the exact command to send.` : 'Their taps come back to you with the exact command to send.',
+    'If the card cannot be shown, show the table above instead, as plain text and never in a code block.',
+  ].join('\n');
+}
+
+// What the agent is told after the owner tapped a card that is not the bank's last.
+function cardNextContext(entry, index) {
+  return [
+    `Toolkit governance: the owner tapped card ${index + 1} of ${entry.cards.length} of governance bank ${entry.bank_reference}. Nothing is sent yet.`,
+    'Call AskUserQuestion once with exactly this input, adding no answers field, and stop:',
+    JSON.stringify(entry.card_inputs[index + 1]),
+    'Never act as the user: never answer the card yourself.',
   ].join('\n');
 }
 
@@ -334,13 +348,16 @@ class BankTickets {
 
   // Notes that this run of the session was shown this bank. A newer bank replaces an older one and
   // drops any live ticket of the session, so a ticket always answers the bank shown last.
-  // `card` is the bank's card input where the host shows one (bankCardInput).
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, card = null }) {
+  // `cards` are the bank's card inputs where the host shows them (bankCards).
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, cards = null }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
     data.shown[sessionId] = {
       epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, at: this.#now().toISOString(),
-      ...(card ? { card: cardHash(card), card_questions: card.questions.map(question => question.question) } : {}),
+      ...(cards && cards.length ? {
+        cards: cards.map(cardHash), card_inputs: cards, card_taps: [],
+        card_questions: cards.flatMap(card => card.questions.map(question => question.question)),
+      } : {}),
     };
     delete data.tickets[sessionId];
     this.#save(data);
@@ -372,6 +389,17 @@ class BankTickets {
     data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, at: this.#now().toISOString() };
     this.#save(data);
     return ticket;
+  }
+
+  // Notes the owner's taps on one card of the shown bank, which must be the next card. Returns the
+  // updated entry, or null.
+  tap(sessionId, epoch, index, answer) {
+    const data = this.#read();
+    const entry = Object.hasOwn(data.shown, sessionId) ? data.shown[sessionId] : null;
+    if (!this.#fresh(entry) || entry.epoch !== epoch || !Array.isArray(entry.card_taps) || entry.card_taps.length !== index) return null;
+    entry.card_taps = [...entry.card_taps, answer];
+    this.#save(data);
+    return entry;
   }
 
   // Ends the shown note without a ticket (the reply could not count).
@@ -444,5 +472,5 @@ function bankTicketCommand(text, sessionId, tickets) {
 
 module.exports = Object.freeze({
   APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  bankTicketContext, bankTicketCommand, bankCardInput, bankCardContext, cardAnswer, cardHash, cardInstruction,
+  bankTicketContext, bankTicketCommand, bankCards, bankCardContext, cardAnswer, cardHash, cardInstruction, cardNextContext,
 });
