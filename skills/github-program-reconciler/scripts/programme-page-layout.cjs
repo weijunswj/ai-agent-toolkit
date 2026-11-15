@@ -1,28 +1,39 @@
 'use strict';
 
 // The fixed order of a task page: the PATH block, then `# TASK` holding the task's spec sections,
-// then the other generated blocks (PR GRAPH and STATUS, AGENT CONTEXT), then everything else people
-// wrote under `# More`. Pure text functions: no GitHub call and no state read happens here. A page
-// that cannot be split safely throws PAGE_LAYOUT_HELD, and the caller updates the blocks where they
-// are instead.
+// then `# PLAN`, then the other generated blocks (PR GRAPH, AGENT CONTEXT), then everything else
+// people wrote, under their own headings. Pure text functions: no GitHub call and no state read
+// happens here. A page that cannot be split safely throws PAGE_LAYOUT_HELD, and the caller updates
+// the blocks where they are instead.
 //
 // Hand-written words are never changed. A label line (`**The problem:** ...`, `## Done when`)
-// becomes its part of TASK; the words after or under it are kept byte for byte. Under TASK, WHAT,
-// WHY, DONE WHEN and PLAN are `##` headings; the problem, the fix, what happens if we skip it and
-// what is not in scope are bold labels inside WHY and DONE WHEN.
+// becomes its part of TASK; the words after or under it are kept byte for byte. Under TASK, WHY and
+// DONE WHEN are `##` headings; the problem, the fix and what happens if we skip it are `###`
+// headings inside WHY, and what is not in scope is a bold label inside DONE WHEN. PLAN is a `#`
+// heading of its own after TASK. WHAT is no longer written for new tasks (the problem and the fix
+// say it); a page that still has one keeps it as `## WHAT` at the top of TASK.
+//
+// Heading rule: generated headings are in capitals; a heading people write below the generated
+// blocks is in Title Case. Only a hand-written heading there that reuses a generated name in
+// capitals (RESERVED) holds the page, naming it, since it would read as a generated part; any other
+// heading is left as written.
 
 const SPEC_SECTIONS = Object.freeze(['WHAT', 'WHY', 'PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE', 'PLAN']);
 const TASK_HEADING = 'TASK';
+const PLAN_HEADING = 'PLAN';
+// Older Toolkit versions put the hand-written text under this heading. It is read and dropped.
 const MORE_HEADING = 'More';
 const TASK_BLOCKS = Object.freeze(['NAV', 'STATE', 'TRACE']);
 // The generated blocks printed above TASK; the rest follow it.
 const ABOVE_TASK = Object.freeze(['NAV']);
+// The WHY parts, printed as `###` headings. Inside `## WHY` they are read from a `###` heading too.
+const WHY_PARTS = Object.freeze(['PROBLEM', 'FIX', 'IF WE SKIP']);
 const KNOWN_BLOCKS = Object.freeze(['STATE', 'TRACE', 'NAV', 'CURRENT', 'CONTEXT']);
 const LABELS = new Map([...SPEC_SECTIONS.map(label => [label, label]), ['THE PROBLEM', 'PROBLEM'], ['THE FIX', 'FIX'], ['IF WE SKIP IT', 'IF WE SKIP']]);
 // Parts that only a heading opens: a bold `**Plan:**` in someone's notes stays where it is.
 const HEADING_ONLY = new Set(['WHAT', 'WHY', 'PLAN']);
-// The parts printed as bold labels, and their words.
-const LABEL_TEXT = Object.freeze({ PROBLEM: 'The problem', FIX: 'The fix', 'IF WE SKIP': 'If we skip it', 'NOT IN SCOPE': 'Not in scope' });
+// The part printed as a bold label, and its words.
+const LABEL_TEXT = Object.freeze({ 'NOT IN SCOPE': 'Not in scope' });
 // A bold label opens a section that any later heading closes.
 const LABEL_LEVEL = 7;
 
@@ -37,6 +48,10 @@ function held(reason) {
 }
 
 const normalLabel = text => text.trim().replace(/[:.]$/, '').trim().toUpperCase();
+
+// The names generated headings use, on task pages and the programme page.
+const RESERVED = new Set(['PATH', 'TASK', 'WHAT', 'WHY', 'PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE', 'PLAN', 'PR GRAPH', 'STATUS', 'AGENT CONTEXT', 'DECISIONS', 'CURRENT', 'PROGRAMME GRAPH']);
+const reserved = text => RESERVED.has(text.trim().replace(/[:.]$/, '').trim());
 
 // Every line with its offsets, and whether it is top-level Markdown. Text inside code fences,
 // lists, quotes, indented code, HTML blocks and details is never read as a heading or a marker.
@@ -163,17 +178,20 @@ function splitPage(source, names = TASK_BLOCKS) {
     specs.set(section, { text: joined });
   };
   let more = false;
-  // Under `# TASK` (a page this layout drew), only a part's own heading or label, an H1 or a block
-  // ends a part: a heading people write inside a part stays in it, and text under the blocks is
-  // never taken into the last part.
+  // Under `# TASK` or `# PLAN` (a page this layout drew), only a part's own heading or label, an H1
+  // or a block ends a part: a heading people write inside a part stays in it. The first block below
+  // them ends that reading, so text under the blocks is never taken into the last part.
   let task = false, tasks = 0;
+  // Headings people wrote with a generated name in the text that goes below the generated blocks.
+  const taken = [];
+  const other = (line, heading) => { if (reserved(heading[2])) taken.push(line.text.trim()); };
   for (const line of lines) {
     if (!line.top) continue;
     const cut = cuts.find(span => span.start <= line.start && line.start < span.end);
     if (cut) {
       if (cut.start === line.start) {
         keep(line.start, task);
-        if (task) { section = null; level = 0; }
+        if (task) { section = null; level = 0; task = false; }
         start = cut.end;
       }
       continue;
@@ -183,7 +201,11 @@ function splitPage(source, names = TASK_BLOCKS) {
     if (!heading && !label) continue;
     const name = normalLabel(heading ? heading[2] : label[2]);
     const depth = heading ? heading[1].length : LABEL_LEVEL;
-    const known = (depth <= 2 || depth === LABEL_LEVEL && !HEADING_ONLY.has(LABELS.get(name))) && LABELS.get(name) || null;
+    // A `###` WHY part is read only inside `## WHY` (or another WHY part), with or without `# TASK`:
+    // the same heading in PLAN, DONE WHEN or someone's notes stays where it is.
+    const inWhy = section === 'WHY' || WHY_PARTS.includes(section);
+    const known = (depth <= 2 || depth === LABEL_LEVEL && !HEADING_ONLY.has(LABELS.get(name))
+      || inWhy && depth === 3 && WHY_PARTS.includes(LABELS.get(name))) && LABELS.get(name) || null;
     if (depth === 1 && name === TASK_HEADING) {
       if ((tasks += 1) > 1) throw held('the TASK heading appears more than once');
       keep(line.start);
@@ -196,6 +218,8 @@ function splitPage(source, names = TASK_BLOCKS) {
       parts = [];
       section = known; level = depth;
       start = label && label[3] ? line.start + label[1].length : line.end;
+      // The generated `# PLAN` heading reads like `# TASK`: what follows the blocks is not the plan.
+      if (heading && depth === 1 && heading[2] === PLAN_HEADING) task = true;
       continue;
     }
     if (!heading) continue;
@@ -207,15 +231,18 @@ function splitPage(source, names = TASK_BLOCKS) {
       continue;
     }
     if (task) {
-      if (depth > 1) continue;
+      if (depth > 1) { if (section === null) other(line, heading); continue; }
       keep(line.start); task = false; section = null; level = 0; start = line.start;
+      other(line, heading);
       continue;
     }
     // Someone's own heading ends a spec section opened at its level or deeper; the heading and
     // what follows it are other text.
     if (section !== null && depth <= level) { keep(line.start); section = null; level = 0; start = line.start; }
+    if (section === null) other(line, heading);
   }
   keep(text.length);
+  if (taken.length) throw held(`the hand-written heading ${taken.map(entry => `\`${entry}\``).join(', ')} reuses a generated heading's name: write it in Title Case or rename it`);
   return { specs, extra, eol };
 }
 
@@ -240,17 +267,20 @@ function buildPage(layout, generated, version, render = null) {
     const first = body.split(/\r?\n/, 1)[0];
     return /^\S/.test(first) && !BLOCK_START.test(first) ? `**${LABEL_TEXT[name]}:** ${body}` : `**${LABEL_TEXT[name]}:**${eol}${eol}${body}`;
   };
-  const part = (name, labels) => {
-    if (![name, ...labels].some(key => specs.has(key))) return '';
+  // A part with its `##` heading, then its sub-parts: `###` headings, or bold labels.
+  const part = (name, subs, labels = []) => {
+    if (![name, ...subs, ...labels].some(key => specs.has(key))) return '';
     const head = specs.has(name) ? under(name, specs.get(name).text, 2) : `## ${name}`;
-    return labels.filter(key => specs.has(key)).reduce((body, key) => append(body, labelled(key)), head);
+    const withSubs = subs.filter(key => specs.has(key)).reduce((body, key) => append(body, under(key, specs.get(key).text, 3)), head);
+    return labels.filter(key => specs.has(key)).reduce((body, key) => append(body, labelled(key)), withSubs);
   };
   const blocks = names => generated.filter(([name]) => names(name)).reduce((body, [name, content]) => append(body, draw(name, content).replace(/\n/g, eol)), '');
   let text = blocks(name => ABOVE_TASK.includes(name));
-  const parts = [part('WHAT', []), part('WHY', ['PROBLEM', 'FIX', 'IF WE SKIP']), part('DONE WHEN', ['NOT IN SCOPE']), part('PLAN', [])].filter(Boolean);
+  const parts = [part('WHAT', []), part('WHY', WHY_PARTS), part('DONE WHEN', [], ['NOT IN SCOPE'])].filter(Boolean);
   if (parts.length) text = append(text, parts.reduce(append, `# ${TASK_HEADING}`));
+  if (specs.has('PLAN')) text = append(text, under(PLAN_HEADING, specs.get('PLAN').text));
   text = append(text, blocks(name => !ABOVE_TASK.includes(name)));
-  if (extra.length) text = append(text, under(MORE_HEADING, extra.reduce((body, span) => append(body, span.text), '')));
+  if (extra.length) text = append(text, extra.reduce((body, span) => append(body, span.text), ''));
   // The page ends with one line ending, whatever blank lines the last piece of text carried.
   return text.replace(/(?:\r?\n[ \t]*)+$/, '') + eol;
 }
@@ -340,4 +370,4 @@ function layoutTaskPage(original, generated, version, { archiveLink = null } = {
   return { body, sections: [...layout.specs.keys()], more: layout.extra.length > 0, archived: source !== original, moves: withoutBlocks(body) !== withoutBlocks(original) };
 }
 
-module.exports = Object.freeze({ SPEC_SECTIONS, TASK_HEADING, MORE_HEADING, TASK_BLOCKS, ARCHIVE_LINE, markdownLines, splitPage, buildPage, inOrder, authoredText, withoutBlocks, archiveArea, withoutArchive, layoutTaskPage });
+module.exports = Object.freeze({ SPEC_SECTIONS, TASK_HEADING, PLAN_HEADING, MORE_HEADING, TASK_BLOCKS, ARCHIVE_LINE, markdownLines, splitPage, buildPage, inOrder, authoredText, withoutBlocks, archiveArea, withoutArchive, layoutTaskPage });

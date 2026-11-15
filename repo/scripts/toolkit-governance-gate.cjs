@@ -1559,6 +1559,7 @@ function decidedLine(state) {
   if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED automatically (it ${whereText(state)}, so GitHub governance cannot run here). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
+  if (state.state === 'ERROR' && state.reason === 'toolkit-too-old') return `Toolkit governance: ERROR for this repository: it needs Toolkit ${state.merged?.min_toolkit} or later, and this copy is older, so it cannot give this session the governed rules. Update Toolkit (setup toolkit). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until Toolkit is updated.`;
   if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
   const enabled = 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the Toolkit-governed rules below (GitHub governance: records and evidence).';
@@ -1641,6 +1642,7 @@ function insideRepository(cwd) {
 
 module.exports = Object.freeze({
   ANSWER,
+  decidedLine,
   FINDING_ACTIONS,
   HOST_SESSION_VARIABLE,
   LAUNCHER_MARKERS,

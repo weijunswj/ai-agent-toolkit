@@ -344,3 +344,26 @@ test('H-15, H-16 (unit): no subprocess, no writes, no raw remote in the result',
   assert.doesNotMatch(text, /example-owner/, 'the raw remote is not in the result');
   assert.doesNotMatch(text, /github\.com/);
 });
+
+// A cleaned repository names the first Toolkit release that delivers the governed rules. A copy older
+// than that reads the binding as ERROR with an update line, never as ENABLED without the rules.
+test('min_toolkit: a binding asking for a newer Toolkit is an update ERROR; an older or equal one is enabled', () => {
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const running = require('../contracts/toolkit-local-bridge/version.json').version;
+  const identity = { root: '/r', repository_id: 'a'.repeat(64), valid: true, remote: { host: 'github.com', path: '/example-owner/example-repo.git' } };
+  const binding = { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-EX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: [] };
+  const entry = extra => ({ text: JSON.stringify({ ...binding, ...extra }), commit: 'c'.repeat(40), fetched_at: new Date().toISOString() });
+  const [major, minor] = running.split('.').map(Number);
+  assert.equal(governance.judgeMerged(entry({ min_toolkit: '3.127.0' }), identity, new Date()).status, 'enabled');
+  assert.equal(governance.judgeMerged(entry({ min_toolkit: running }), identity, new Date()).status, 'enabled');
+  const ahead = `${major}.${minor + 1}.0`;
+  const merged = governance.judgeMerged(entry({ min_toolkit: ahead }), identity, new Date());
+  assert.deepEqual([merged.status, merged.min_toolkit], ['invalid', ahead]);
+  const state = governance.GovernanceState.derive({ identity, materials: { governed_block: { present: false }, binding: { present: false, valid: false, problems: [] } }, merged });
+  assert.deepEqual([state.state, state.reason, state.governed_effects_hold], ['ERROR', 'toolkit-too-old', true]);
+  const line = gate.decidedLine(state);
+  assert.ok(line.includes(`needs Toolkit ${ahead} or later`), line);
+  assert.match(line, /setup toolkit/);
+  assert.equal(governance.judgeMerged(entry({ min_toolkit: '3.127' }), identity, new Date()).status, 'invalid', 'a version that is not x.y.z is invalid');
+});

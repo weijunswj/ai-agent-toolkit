@@ -43,7 +43,7 @@ test('parent rows stay short and name no PR however many a task has; its task pa
   assert.doesNotMatch(render(), /#5\d{3}\b|#2\d{3}\b|\/commit\//, 'the parent names no PR (Waiting on names one only for an owner UAT)');
   const detail = state.renderChildBlockBody(child, f.parent.outcomes[0]);
   // The task page's PR GRAPH names every PR: a row each for the latest ten finished, the rest on its Earlier line.
-  for (const pr of [child.pr, ...child.prs]) assert.ok(new RegExp(`^\\|#${pr.number}\\|`, 'm').test(detail) || new RegExp(`^Earlier: .*#${pr.number}\\b`, 'm').test(detail), `#${pr.number}`);
+  for (const pr of [child.pr, ...child.prs]) assert.ok(new RegExp(`^\\|[^|\\n]*\\|#${pr.number}\\|`, 'm').test(detail) || new RegExp(`^Earlier: .*#${pr.number}\\b`, 'm').test(detail), `#${pr.number}`);
   assert.match(detail, /\/commit\/ccccccc/);
 });
 
