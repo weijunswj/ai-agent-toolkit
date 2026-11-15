@@ -12,6 +12,10 @@
 //     whose first line is exactly `Toolkit-G2: PASS <40-hex head> tier=LIGHT|NORMAL|RISKY` (or FAIL),
 //     written by an account that can write to the repository (author association OWNER, MEMBER or
 //     COLLABORATOR); every other comment is ignored;
+//   - its route stamps hold (toolkit-gate-route.cjs): the verdict's second line and the body's one
+//     `Route:` stamp line (the G1 builder's) are on their stack-registry pin, or carry an owner
+//     override; an off-pin stamp never boards, and a RISKY pull request also needs both stamps
+//     host-verified or launcher-attested, never missing or UNVERIFIED;
 //   - every required check the merged binding lists has a successful latest run;
 //   - its body has exactly one `Bump:` line and a `UAT:` line the auto-merge check accepts;
 //   - it carries no version bump of its own and no open train pull request holds it.
@@ -34,6 +38,7 @@ const { spawnSync } = require('node:child_process');
 const governance = require('./toolkit-governance-state.cjs');
 const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const riskTier = require('./toolkit-risk-tier.cjs');
+const gateRoute = require('./toolkit-gate-route.cjs');
 const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 
 const VERDICT = /^Toolkit-G2: (PASS|FAIL) ([0-9a-f]{40}) tier=(LIGHT|NORMAL|RISKY)[ \t]*$/;
@@ -80,12 +85,13 @@ class LiveFacts {
 function verdictFor(comments, head) {
   const found = comments
     .filter(comment => WRITERS.includes(comment.author_association))
-    .map(comment => ({ comment, match: VERDICT.exec(String(comment.body || '').split(/\r?\n/, 1)[0]) }))
+    .map(comment => ({ comment, lines: String(comment.body || '').split(/\r?\n/, 2) }))
+    .map(({ comment, lines }) => ({ comment, route: lines[1] ?? null, match: VERDICT.exec(lines[0]) }))
     .filter(entry => entry.match && entry.match[2] === head)
     // An edited verdict counts from its edit.
     .sort((a, b) => Date.parse(a.comment.updated_at || a.comment.created_at) - Date.parse(b.comment.updated_at || b.comment.created_at));
   const last = found[found.length - 1];
-  return last ? { verdict: last.match[1], tier: last.match[3], link: last.comment.html_url || `verdict for ${head}` } : null;
+  return last ? { verdict: last.match[1], tier: last.match[3], route: last.route, link: last.comment.html_url || `verdict for ${head}` } : null;
 }
 
 // The required checks that have no successful latest run, by name.
@@ -109,8 +115,21 @@ function packChanges(body) {
   return out;
 }
 
+// Why the route stamps keep the pull request off a train, or null. The G2 stamp is the verdict's
+// second line; the G1 stamp is the body's one `Route:` stamp line.
+function routeProblem(verdict, body, tier, registry) {
+  const lines = gateRoute.stampLines(body);
+  if (lines.length > 1) return `its body has ${lines.length} route stamp lines; the G1 builder's one stays`;
+  const stamps = [['G2', gateRoute.stampStatus(verdict.route, 'reviewer', registry)], ['G1', gateRoute.stampStatus(lines[0] ?? null, 'BUILDER', registry)]];
+  for (const [gate, stamp] of stamps) {
+    if (stamp.status === 'off-pin') return `its ${gate} route stamp is off the stack-registry pin: ${stamp.stamp}`;
+    if (tier === 'RISKY' && stamp.status !== 'on-pin') return `a RISKY pull request needs a verified or launcher-attested ${gate} route stamp (${stamp.status})`;
+  }
+  return null;
+}
+
 // Why the pull request cannot board, or a manifest member.
-function judge(pull, facts, { required, branch, held, tiers }) {
+function judge(pull, facts, { required, branch, held, tiers, registry }) {
   const head = pull.head && pull.head.sha;
   if (pull.draft) return { skip: 'a draft' };
   if (!pull.base || pull.base.ref !== branch) return { skip: `based on ${pull.base && pull.base.ref}, not ${branch}` };
@@ -129,6 +148,8 @@ function judge(pull, facts, { required, branch, held, tiers }) {
   if (files.includes(VERSION_FILE)) return { skip: 'carries its own version bump: it lands alone' };
   const byFiles = riskTier.classify(files.map(file => ({ path: file })), tiers).tier;
   const tier = TIERS.indexOf(byFiles) > TIERS.indexOf(verdict.tier) ? byFiles : verdict.tier;
+  const route = routeProblem(verdict, body, tier, registry);
+  if (route) return { skip: route };
   const links = body.split(/\r?\n/).map(line => line.trim()).filter(line => LINK.test(line));
   const pack = packChanges(body);
   return { member: { pr: pull.number, head, g2: verdict.link, tier, bump: bumps[0][1], uat: uat[0].trim(), links, ...(pack.length ? { pack_changes: pack } : {}) } };
@@ -145,11 +166,12 @@ function find(cwd, options, maxMembers) {
   const pulls = facts.pulls().slice().sort((a, b) => a.number - b.number);
   const held = new Set(pulls.flatMap(pull => mergeTrainMembers(pull.body) || []));
   const tiers = riskTier.loadConfig(governance.findGitRoot(cwd)).config;
+  const registry = gateRoute.loadRegistry();
   const ready = [];
   const skipped = [];
   for (const pull of pulls) {
     if (mergeTrainMembers(pull.body)) continue; // a train pull request itself
-    const outcome = judge(pull, facts, { required, branch, held, tiers });
+    const outcome = judge(pull, facts, { required, branch, held, tiers, registry });
     if (outcome.member) ready.push(outcome.member);
     else skipped.push(`#${pull.number}: ${outcome.skip}`);
   }
