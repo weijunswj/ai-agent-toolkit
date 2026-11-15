@@ -466,7 +466,7 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PROJECT TASKS OUTDATED', 'PLUGIN BEHIND', 'TASK FAILING', 'PR ATTENTION'];
+  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'SKILL CARD OUTDATED', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PROJECT TASKS OUTDATED', 'PLUGIN BEHIND', 'TASK FAILING', 'PR ATTENTION'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
@@ -484,8 +484,13 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     '"SKILL UPDATE: <old> -> <new> | "', 'Read /mnt/project-files/toolkit/web-controller-projects/VERSION and state it.', 'the guidebook\'s VERSION line, main\'s SHA']) {
     assert.ok(text.includes(required), required);
   }
-  // The account copy of the skill is no longer kept: no drift, card or account-skill step remains.
-  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|SKILL CARD|propose_skills|skill-card|skill card|card <|account folder|skills\/synced/);
+  // The saved claude.ai copy of the skill is compared with the guidebook; the check-in only reports, and a Version
+  // already offered, declined or refused (any "skill card <Version>" memory line) is never raised again.
+  for (const required of ['`/root/.claude/skills/synced/*/web-controller-projects/SKILL.md`', '"SKILL CARD OUTDATED: saved <old>, main <new> | "',
+    'unless memory has a "skill card <guidebook Version>" line', '"**Guidebook:** no saved skill copy seen", advice only']) {
+    assert.ok(text.includes(required), required);
+  }
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|propose_skills/);
   // The Claude app steps still equal the shared session-start reminder and install text.
   assert.ok(text.includes(`put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`));
   assert.ok(text.includes('Omit empty bullets except Guidebook, Block, Binding, Tasks, Nudge, Plugin and Run.'));
