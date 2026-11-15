@@ -247,7 +247,8 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   doc.next_action = 'Plain next step';
   const children = new Map([[423, doc]]);
   const parentBody = state.renderParentBlockBody(parent, children);
-  const childBody = state.renderChildBlockBody(doc, described);
+  // The task page shows no description (its TASK text holds the words), so free text reaches it as the next action.
+  const childBody = state.renderChildBlockBody({ ...doc, next_action: described.description }, described);
   for (const body of [parentBody, childBody]) {
     assert.equal(body.includes(secret), false, 'a private value leaked into a rendered block');
     const freeText = body.split('\n').filter(line => line.includes('injected'));

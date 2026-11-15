@@ -25,8 +25,8 @@ test('72-row programme with four PRs per task and 106 waiting findings fits with
   assert.ok(withoutBlocks.replace(/\n{3,}/g, '\n\n').trim() === f.handWritten.trim(), 'keep the owner sections intact');
   assert.ok(body.length < 57000, `applied body: ${body.length}`);
   assert.match(body, /106 waiting on you/);
-  assert.match(f.github.issues.get(500).body, /#2001 MERGED/);
-  assert.match(f.github.issues.get(500).body, /#2003 MERGED/);
+  assert.match(f.github.issues.get(500).body, /\|#2001\|MERGED\|/);
+  assert.match(f.github.issues.get(500).body, /\|#2003\|MERGED\|/);
   const before = { commits: f.github.commits, writes: f.github.mutations() };
   assert.deepEqual(f.reconciler.run({ apply: true }).holds, []);
   assert.deepEqual({ commits: f.github.commits, writes: f.github.mutations() }, before, 'unchanged scale fixture makes no writes');
@@ -51,7 +51,8 @@ test('parent PR cells stay bounded: the three newest PRs, then a count, and none
   assert.equal(rows()[0].split('|')[2], '#5099 merged, #5098, #5097 +101', 'a hundred more PRs still show as three and a count');
   assert.doesNotMatch(render(), /#5000|\/commit\//);
   const detail = state.renderChildBlockBody(child, f.parent.outcomes[0]);
-  for (const pr of child.prs) assert.ok(detail.includes(`#${pr.number} ${pr.state}`));
+  // The task page's PR GRAPH names every PR: a row each for the latest ten finished, the rest on its Earlier line.
+  for (const pr of child.prs) assert.ok(detail.includes(`|#${pr.number}|${pr.state}|`) || new RegExp(`^Earlier: .*#${pr.number}\\b`, 'm').test(detail), `#${pr.number}`);
   assert.match(detail, /\/commit\/ccccccc/);
   child.prs = [];
   assert.equal(rows()[0].split('|')[2], '#2000 closed');
