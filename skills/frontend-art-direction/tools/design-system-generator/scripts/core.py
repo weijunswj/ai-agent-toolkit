@@ -79,6 +79,13 @@ STACK_CONFIG = {
 
 STACK_SEARCH_COLS = ["Category", "Guideline", "Description", "Do", "Don't"]
 
+# Upstream marks rows "active", "supplemental" or "deprecated" in a Status
+# column (styles.csv and stacks/*.csv). Only active rows, or rows from a file
+# without a Status column, may rank; a stack query that names a legacy or
+# deprecated generation also ranks that stack's deprecated rows.
+RANKED_STATUSES = frozenset({"", "active"})
+LEGACY_QUERY = re.compile(r"\b(?:legacy|deprecated)\b", re.IGNORECASE)
+
 DOMAIN_KEYWORDS = {
     "product": [
         "saas",
@@ -166,11 +173,15 @@ def _load_csv(filepath):
         return list(csv.DictReader(handle))
 
 
-def _search_csv(filepath, search_cols, query, max_results):
+def _rankable(row, allowed_statuses):
+    return (row.get("Status") or "").strip().lower() in allowed_statuses
+
+
+def _search_csv(filepath, search_cols, query, max_results, allowed_statuses=RANKED_STATUSES):
     if not filepath.exists():
         return []
 
-    rows = _load_csv(filepath)
+    rows = [row for row in _load_csv(filepath) if _rankable(row, allowed_statuses)]
     documents = [" ".join(str(row.get(column, "")) for column in search_cols) for row in rows]
 
     ranker = BM25()
@@ -236,7 +247,8 @@ def search_stack(query, stack, max_results=MAX_RESULTS):
             "error": f"Unknown stack: {stack}",
         }
 
-    results = _search_csv(DATA_DIR / STACK_CONFIG[stack], STACK_SEARCH_COLS, query, max_results)
+    allowed_statuses = RANKED_STATUSES | {"deprecated"} if LEGACY_QUERY.search(query) else RANKED_STATUSES
+    results = _search_csv(DATA_DIR / STACK_CONFIG[stack], STACK_SEARCH_COLS, query, max_results, allowed_statuses)
     return {
         "domain": "stack",
         "stack": stack,
