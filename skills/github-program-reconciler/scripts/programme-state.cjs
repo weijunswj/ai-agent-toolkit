@@ -1577,8 +1577,16 @@ const shortSha = sha => (isSha(sha) ? sha.slice(0, 7) : '');
 // Free text as one Markdown table-safe line: shortened first, then `&`, `<` and `>` become entities
 // (so no comment, marker or tag can be opened) and backslash and `|` are escaped.
 function publicText(value) {
+  return escapedText(cutText(value, TEXT_LIMIT));
+}
+
+// Free text as one line of at most `limit` characters, ending `...` when cut.
+function cutText(value, limit) {
   const line = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
-  const short = line.length > TEXT_LIMIT ? `${line.slice(0, TEXT_LIMIT - 3)}...` : line;
+  return line.length > limit ? `${line.slice(0, limit - 3)}...` : line;
+}
+
+function escapedText(short) {
   return short.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
@@ -1805,11 +1813,13 @@ function latestDecisionComment(comments, parentPage = false) {
 }
 
 // A task page carries the same link as one AGENT CONTEXT line; the programme page keeps its DECISIONS block.
-function renderTraceBlockBody(number, comments = [], repository = '', parentPage = false) {
+// On a task page the line starts with the link to the task's handover file (`handover`), which
+// holds the gate, review, release, next action and blockers the page no longer shows.
+function renderTraceBlockBody(number, comments = [], repository = '', parentPage = false, handover = null) {
   const latest = latestDecisionComment(comments, parentPage);
   if (!parentPage) {
     return ['# AGENT CONTEXT', `<!-- programme-trace issue=${number} -->`,
-      `Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
+      `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
   }
   return [
     '# DECISIONS',
@@ -1875,26 +1885,31 @@ function renderPrNavBlockBody(chains, pr) {
 const OWED_UAT_STATES = Object.freeze(['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED']);
 
 // The PR GRAPH of a task page: every open PR, then the latest finished ones, older ones on one line.
-// A row is the PR's title, its number, its status and its merge commit. The tracked PR's status
-// cell also carries the task's gate and, while the owner's test is owed, `UAT owed`; review,
+// A row is the PR's title (cut to PR_TITLE_SHOWN characters, so long titles cannot fill the page's
+// budget), its number, its status and its merge commit. The tracked PR's status cell also carries
+// the task's gate and, while the owner's test is owed, `UAT owed`. With no PR yet, or no tracked PR
+// among the rows shown, one line under the graph carries them instead, so they always show. Review,
 // release and the next action are in the task's handover file.
 const PR_GRAPH_FINISHED = 10;
+const PR_TITLE_SHOWN = 60;
 function prGraphLines(child) {
   const listed = child.prs || [];
   const tracked = child.pr?.number && !listed.some(pr => pr.number === child.pr.number)
     ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
   const all = [...tracked, ...listed];
-  const owed = OWED_UAT_STATES.includes(child.uat?.state);
-  if (!all.length) return ['None yet.', ...(owed ? ['', 'UAT owed.'] : [])];
+  const gate = [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ');
+  const task = [gate, OWED_UAT_STATES.includes(child.uat?.state) ? 'UAT owed' : ''].filter(Boolean);
+  if (!all.length) return [task.length ? ['None yet', ...task].join(' · ') : 'None yet.'];
   const open = all.filter(pr => !['MERGED', 'CLOSED'].includes(pr.state));
   const finished = all.filter(pr => ['MERGED', 'CLOSED'].includes(pr.state));
-  const gate = [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ');
-  const status = pr => [pr.state, ...(pr.number === child.pr?.number ? [gate, owed ? 'UAT owed' : ''] : [])].filter(Boolean).join(' · ');
+  const shown = [...open, ...finished.slice(0, PR_GRAPH_FINISHED)];
+  const status = pr => [pr.state, ...(pr.number === child.pr?.number ? task : [])].join(' · ');
   const merged = pr => (pr.state === 'MERGED' && isSha(pr.merge_sha) ? `[${shortSha(pr.merge_sha)}](https://github.com/${child.repository}/commit/${pr.merge_sha})` : '-');
   const earlier = finished.slice(PR_GRAPH_FINISHED);
   return ['| PR Task | PR # | Status | Merged SHA |', '|---|---|---|---|',
-    ...[...open, ...finished.slice(0, PR_GRAPH_FINISHED)].map(pr => `|${pr.title ? publicText(pr.title) : '-'}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
-    ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : [])];
+    ...shown.map(pr => `|${pr.title ? publicText(cutText(pr.title, PR_TITLE_SHOWN)) : '-'}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
+    ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : []),
+    ...(task.length && !shown.some(pr => pr.number === child.pr?.number) ? ['', `Task: ${task.join(' · ')}`] : [])];
 }
 
 // The status block of a task page: its PR GRAPH. The drawn revision, the task status and the UAT
@@ -5510,7 +5525,7 @@ class Reconciler {
   // at the threshold is the caller's to report (BODY_TOO_LARGE).
   projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
     const build = () => {
-      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue);
+      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue, number === this.binding.parent_issue ? null : this.handoverLink(number));
       let layoutHold = null;
       if (layout.relay) {
         // A task page: PATH, then TASK, then the other generated blocks, then everything else.
@@ -5617,7 +5632,7 @@ class Reconciler {
       const relay = this.taskRelay(number, issue);
       const move = !relay.relay && Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
-      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue);
+      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue, number === this.binding.parent_issue ? null : this.handoverLink(number));
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
@@ -7230,7 +7245,7 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
-  evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, frozenPage, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,

@@ -150,18 +150,23 @@ test('text written under the generated blocks of a laid-out page stays there, ne
   assert.equal(lay(second.body).body, second.body);
 });
 
-test('a hand-written heading in capitals below the generated blocks holds the page and names it', () => {
+test('a hand-written heading below the generated blocks that reuses a generated name holds the page and names it', () => {
   const first = lay('**The problem:** Slow.\n');
-  // A part's heading under the blocks is not a part there, so it is held like any other.
-  for (const heading of ['## NOTES', '# UAT CHECKLIST', '### PROBLEM']) {
+  // A part's heading under the blocks is not a part there, so it holds like any other generated name.
+  for (const heading of ['## PR GRAPH', '# STATUS', '### PROBLEM', '## AGENT CONTEXT:']) {
     const page = `${first.body}\n${heading}\n\nWords.\n`;
-    assert.throws(() => lay(page), error => error.code === 'PAGE_LAYOUT_HELD' && error.reason.includes(`\`${heading}\``) && /Title Case/.test(error.reason), heading);
+    assert.throws(() => lay(page), error => error.code === 'PAGE_LAYOUT_HELD' && error.reason.includes(`\`${heading}\``) && /generated heading's name/.test(error.reason), heading);
     assert.throws(() => layout.inOrder(page), error => error.code === 'PAGE_LAYOUT_HELD', heading);
   }
-  assert.throws(() => lay('## TODO\n\nOld notes.\n'), error => error.code === 'PAGE_LAYOUT_HELD', 'text that will move below the blocks counts too');
-  for (const heading of ['## Notes', '## UAT results', '## G2', '## 2026-11-15']) assert.doesNotThrow(() => lay(`${first.body}\nIntro.\n\n${heading}\n\nWords.\n`), heading);
-  assert.doesNotThrow(() => lay('## The problem\n\nSlow.\n\n### DETAIL\n\nInside the part.\n'), 'a heading inside a TASK part is not checked');
-  assert.doesNotThrow(() => lay('Notes.\n\n```\n## IN CODE\n```\n'), 'a heading inside code is no heading');
+  assert.throws(() => lay('## CURRENT\n\nOld notes.\n'), error => error.code === 'PAGE_LAYOUT_HELD', 'text that will move below the blocks counts too');
+  // Other headings in capitals, as on six open pages today, and Title Case names lay out as written.
+  for (const heading of ['# NOTES', '## ELI5', '## PR 1141', '# CONDITIONS FOR BUILD SLICES', '## Notes', '## Status', '## Pr graph']) {
+    const result = lay(`${first.body}\nIntro.\n\n${heading}\n\nWords.\n`);
+    assert.ok(afterBlocks(result.body).includes(`\n${heading}\n`), heading);
+    assert.equal(lay(result.body).body, result.body, heading);
+  }
+  assert.doesNotThrow(() => lay('## The problem\n\nSlow.\n\n### STATUS\n\nInside the part.\n'), 'a heading inside a TASK part is not checked');
+  assert.doesNotThrow(() => lay('Notes.\n\n```\n## PR GRAPH\n```\n'), 'a heading inside code is no heading');
 });
 
 const childDoc = (change = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: { issue: 806, class: 'COMMITTED' } }), revision: 4, ...change });
@@ -204,7 +209,48 @@ test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owe
   }
   assert.doesNotMatch(state.renderChildBlockBody(tracked('PASSED'), OUTCOME), /UAT owed/);
   const none = state.renderChildBlockBody(childDoc({ uat: { state: 'PENDING', at_head: null } }), OUTCOME);
-  assert.match(none, /# PR GRAPH\n\nNone yet\.\n\nUAT owed\.$/, 'with no PR yet the owed UAT still shows');
+  assert.match(none, /# PR GRAPH\n\nNone yet · UAT owed$/, 'with no PR yet the owed UAT still shows');
+  // PRs listed but none tracked: the owed UAT and the gate show on one line under the graph.
+  const untracked = state.renderChildBlockBody(childDoc({ gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] }, uat: { state: 'PENDING', at_head: null },
+    prs: [{ number: 852, state: 'MERGED', merge_sha: SHA_A, title: 'Main change' }] }), OUTCOME);
+  assert.match(untracked, /^\|Main change\|#852\|MERGED\|/m);
+  assert.match(untracked, /\n\nTask: G2 ACTIVE · UAT owed$/);
+  // A tracked PR only on the Earlier line: the same line carries them.
+  const older = Array.from({ length: 11 }, (unused, index) => ({ number: 700 - index, state: 'MERGED', merge_sha: SHA_A }));
+  const earlier = state.renderChildBlockBody(childDoc({ uat: { state: 'PENDING', at_head: null }, pr: { number: 690, state: 'MERGED', head: SHA_A, checks: null }, prs: older }), OUTCOME);
+  assert.match(earlier, /Earlier: #690\n\nTask: UAT owed$/);
+  assert.doesNotMatch(state.renderChildBlockBody(childDoc({ prs: [{ number: 852, state: 'OPEN', merge_sha: null }] }), OUTCOME), /Task:/, 'nothing to carry, no line');
+});
+
+test('a task page\'s AGENT CONTEXT links its handover file when the binding names a GitHub store', () => {
+  const { handoverUrl } = require('../../skills/github-program-reconciler/scripts/programme-handover.cjs');
+  const link = 'https://github.com/acme/state-store/blob/main/handover.md';
+  assert.match(state.renderTraceBlockBody(806, [], 'acme/app', false, link), new RegExp(`\\nHandover: \\[handover file\\]\\(${link.replace(/[.]/g, '\\.')}\\) · Decisions: \`programme\\.cjs trace 806\` · None yet\\.$`));
+  assert.match(state.renderTraceBlockBody(806, [], 'acme/app'), /\nDecisions: `programme\.cjs trace 806` · None yet\.$/, 'no store, no handover link');
+  const f = setup();
+  assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
+  const trace = state.findStateBlock(f.github.issues.get(806).body, 'TRACE').block.body;
+  assert.ok(trace.includes(`Handover: [handover file](${handoverUrl(f.binding.store, 806)}) · Decisions: `), trace);
+  assert.equal(state.findStateBlock(f.github.issues.get(421).body, 'TRACE').block.body.includes('Handover:'), false, 'the programme page links its handover in its own AGENT CONTEXT block');
+});
+
+test('a task with no PR yet shows its gate on the None yet line', () => {
+  const gate = { role: 'G0', state: 'ACTIVE', session_id: null, route: null, returns: [] };
+  assert.match(state.renderChildBlockBody(childDoc({ gate }), OUTCOME), /# PR GRAPH\n\nNone yet · G0 ACTIVE$/);
+  assert.match(state.renderChildBlockBody(childDoc({ gate, uat: { state: 'UAT_FULL_REQUIRED', at_head: null } }), OUTCOME), /\nNone yet · G0 ACTIVE · UAT owed$/);
+});
+
+test('long PR titles are cut to 60 characters, so the PR GRAPH stays well inside the task page budget', () => {
+  const title = n => `${String(n).padEnd(255, 'x')}y`;
+  const child = childDoc({ gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] }, uat: { state: 'PENDING', at_head: null },
+    pr: { number: 900, state: 'OPEN', head: SHA_A, checks: null },
+    prs: [{ number: 900, state: 'OPEN', merge_sha: null, title: title(900) }, ...Array.from({ length: 10 }, (unused, index) => ({ number: 800 - index, state: 'MERGED', merge_sha: SHA_A, title: title(800 - index) }))] });
+  const block = state.renderBlock(state.renderChildBlockBody(child, OUTCOME), VERSION);
+  assert.ok(block.length <= 2250, `the STATE block with its markers is ${block.length} characters`);
+  const cells = block.split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.split('|')[1]);
+  assert.equal(cells.length, 11);
+  for (const cell of cells) assert.ok(cell.length === 60 && cell.endsWith('...'), cell);
+  assert.equal(state.renderChildBlockBody({ ...child, prs: [{ number: 900, state: 'OPEN', merge_sha: null, title: 'x'.repeat(60) }] }, OUTCOME).includes(`|${'x'.repeat(60)}|`), true, 'a 60-character title shows whole');
 });
 
 test('a pass keeps each PR\'s title in the task state and shows it in the PR GRAPH', () => {

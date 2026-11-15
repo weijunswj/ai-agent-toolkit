@@ -14,7 +14,9 @@
 // say it); a page that still has one keeps it as `## WHAT` at the top of TASK.
 //
 // Heading rule: generated headings are in capitals; a heading people write below the generated
-// blocks is in Title Case. One in capitals there holds the page, naming it, and is never rewritten.
+// blocks is in Title Case. Only a hand-written heading there that reuses a generated name in
+// capitals (RESERVED) holds the page, naming it, since it would read as a generated part; any other
+// heading is left as written.
 
 const SPEC_SECTIONS = Object.freeze(['WHAT', 'WHY', 'PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE', 'PLAN']);
 const TASK_HEADING = 'TASK';
@@ -47,8 +49,9 @@ function held(reason) {
 
 const normalLabel = text => text.trim().replace(/[:.]$/, '').trim().toUpperCase();
 
-// A heading in capitals: two or more capital letters and no small one. Generated headings use them.
-const inCapitals = text => (text.match(/\p{Lu}/gu) || []).length >= 2 && !/\p{Ll}/u.test(text);
+// The names generated headings use, on task pages and the programme page.
+const RESERVED = new Set(['PATH', 'TASK', 'WHAT', 'WHY', 'PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE', 'PLAN', 'PR GRAPH', 'STATUS', 'AGENT CONTEXT', 'DECISIONS', 'CURRENT', 'PROGRAMME GRAPH']);
+const reserved = text => RESERVED.has(text.trim().replace(/[:.]$/, '').trim());
 
 // Every line with its offsets, and whether it is top-level Markdown. Text inside code fences,
 // lists, quotes, indented code, HTML blocks and details is never read as a heading or a marker.
@@ -179,9 +182,9 @@ function splitPage(source, names = TASK_BLOCKS) {
   // or a block ends a part: a heading people write inside a part stays in it. The first block below
   // them ends that reading, so text under the blocks is never taken into the last part.
   let task = false, tasks = 0;
-  // Headings people wrote in capitals in the text that goes below the generated blocks.
-  const capitals = [];
-  const other = (line, heading) => { if (inCapitals(heading[2])) capitals.push(line.text.trim()); };
+  // Headings people wrote with a generated name in the text that goes below the generated blocks.
+  const taken = [];
+  const other = (line, heading) => { if (reserved(heading[2])) taken.push(line.text.trim()); };
   for (const line of lines) {
     if (!line.top) continue;
     const cut = cuts.find(span => span.start <= line.start && line.start < span.end);
@@ -236,7 +239,7 @@ function splitPage(source, names = TASK_BLOCKS) {
     if (section === null) other(line, heading);
   }
   keep(text.length);
-  if (capitals.length) throw held(`the hand-written heading ${capitals.map(entry => `\`${entry}\``).join(', ')} is in capitals, which only generated headings use: write it in Title Case`);
+  if (taken.length) throw held(`the hand-written heading ${taken.map(entry => `\`${entry}\``).join(', ')} reuses a generated heading's name: write it in Title Case or rename it`);
   return { specs, extra, eol };
 }
 

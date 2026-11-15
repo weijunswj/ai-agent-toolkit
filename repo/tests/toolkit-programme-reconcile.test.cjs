@@ -1222,9 +1222,9 @@ test('every body keeps one DECISIONS link to its newest tagged comment, never a 
   assert.deepEqual(block.split('\n'), [
     '# AGENT CONTEXT',
     '<!-- programme-trace issue=423 -->',
-    `Decisions: \`programme.cjs trace 423\` · Newest: [${tagged.id}](https://github.com/acme/app/issues/423#issuecomment-${tagged.id})`,
-  ], 'one link, to the newest tagged person comment; untagged and bot comments are not it');
-  assert.equal((block.match(/\]\(/g) || []).length, 1, 'exactly one link');
+    `Handover: [handover file](${require('../../skills/github-program-reconciler/scripts/programme-handover.cjs').handoverUrl({ repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' }, 423)}) · Decisions: \`programme.cjs trace 423\` · Newest: [${tagged.id}](https://github.com/acme/app/issues/423#issuecomment-${tagged.id})`,
+  ], 'the handover link, then one decision link, to the newest tagged person comment; untagged and bot comments are not it');
+  assert.equal((block.match(/\]\(https:\/\/github\.com\/acme\/app\//g) || []).length, 1, 'exactly one decision link');
   assert.equal(github.commentsOf(423).some(entry => entry.body.includes('<!-- decision-trace-index -->')), false, 'no index comment is posted');
   assert.equal(reconciler().run().summary, 'No changes');
   comment(github, 423, 'Another untagged note');
@@ -1244,7 +1244,7 @@ test('an old comment trace on a page is replaced by the DECISIONS block on the n
   reconciler().run({ apply: true });
   const after = github.issues.get(423).body;
   assert.equal(after.includes('COMMENT TRACE'), false);
-  assert.match(after, /# AGENT CONTEXT\n<!-- programme-trace issue=423 -->\nDecisions: /);
+  assert.match(after, /# AGENT CONTEXT\n<!-- programme-trace issue=423 -->\nHandover: \[handover file\]\([^)]+\) · Decisions: /);
   assert.equal(reconciler().run().summary, 'No changes');
 });
 

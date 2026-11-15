@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.128.2 sha256=6e560496c245 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.128.2 sha256=373eec1659f9 -->
 # Toolkit-Governed Repository Rules
 
 On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds these rules: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
@@ -22,7 +22,7 @@ On github.com, only the valid `.github/toolkit-programme.json` merged on origin'
 
 ## Records And Evidence
 
-- Programme tracking: the parent shows queue and status; each child and PR shows SHA, release, gate, review and UAT. Gate ends run `programme.cjs handover`. Keep pending gates open after merge.
+- Programme tracking: the parent shows queue and status; each child's PR GRAPH shows each PR's SHA, gate and owed UAT, and its handover file the release and review. Gate ends run `programme.cjs handover`. Keep pending gates open after merge.
 - Decision traces: records are comments on their own issue; page bodies keep one link, never a trace. Record each owner decision that changes scope, authority or the plan as one tagged comment (tag on the first line, then `---`); other comments need no index entry. `programme.cjs trace <n>` lists them by tag; parent and child traces never mix, the latest comment wins within a tag and `SUPERSEDES=<record ID>` replaces a record. G0 reads both traces and has the owner confirm a live-scope summary first (decision-trace playbook).
 - SHAs: link files and commits with the 7-character short SHA (longer if ambiguous). Write the full 40-character SHA only in review verdicts, UAT results and merge summaries.
 - Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen the one in its area (same page, script or feature; once in progress, one follow-up sibling takes later work), else create a child as a native sub-issue. A child closes as completed once a merge completes every criterion and any owner UAT passed, any remainder moved to its area's open child first: that PR says `Closes #n`, else the controller does. Use `Refs` for staged, UAT-pending, blocked, partial or follow-up PRs.
