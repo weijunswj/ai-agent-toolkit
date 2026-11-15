@@ -161,10 +161,10 @@ class PermissionsApply {
   }
 }
 
-function describePlan(plan) {
+function describePlan(plan, mode) {
   const app = plan.scope === 'repo' ? `${APPS[plan.host]} repo block` : APPS[plan.host];
   if (plan.skip) return [`${app}: skipped. ${plan.skip}`];
-  if (plan.current) return [`${app}: ${plan.target} ${plan.after === null || plan.removed ? 'holds no Toolkit lines' : 'already holds the block'}. Nothing to change.`];
+  if (plan.current) return [`${app}: ${plan.target} ${mode === 'remove' ? 'holds no Toolkit lines' : 'already holds the block'}. Nothing to change.`];
   if (plan.host === 'claude') {
     return [
       `${app}: ${plan.target}${plan.before === null ? ' (new file)' : ''}`,
@@ -214,7 +214,7 @@ async function main(argv, deps = {}) {
       ? 'Toolkit permissions --remove: takes Toolkit\'s permission lines out of this computer\'s app settings.'
       : 'Toolkit permissions --apply: brings Toolkit\'s permission lines in this computer\'s app settings up to date.';
     const look = { stream: deps.stdout ? null : process.stdout, environment };
-    out(`${[ownerTerminal.title(title, look), '', ...plans.flatMap(describePlan), ...notes, ''].join('\n')}\n`);
+    out(`${[ownerTerminal.title(title, look), '', ...plans.flatMap(plan => describePlan(plan, options.mode)), ...notes, ''].join('\n')}\n`);
     const pending = plans.filter(plan => !plan.skip && !plan.current);
     if (!pending.length) { out('Nothing to change. Nothing was written.\n'); return 0; }
 

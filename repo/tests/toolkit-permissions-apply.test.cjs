@@ -79,6 +79,8 @@ test('a second run finds nothing to change, asks nothing and writes nothing', as
   pc.out.length = 0;
   assert.equal(await permissions.main(['--apply'], pc.deps), 0);
   assert.deepEqual(pc.asked, []);
+  assert.match(pc.out.join(''), /Claude Code: .*settings\.json already holds the block\. Nothing to change\./);
+  assert.doesNotMatch(pc.out.join(''), /holds no Toolkit lines/);
   assert.match(pc.out.join(''), /Nothing to change\. Nothing was written\./);
   assert.deepEqual(files(pc.home), listed);
   assert.equal(fs.readFileSync(pc.settings, 'utf8'), text);
@@ -419,6 +421,7 @@ test('--remove takes every Toolkit line out, keeps the owner\'s own, and deletes
   pc.out.length = 0;
   assert.equal(await permissions.main(['--remove'], pc.deps), 0);
   assert.match(pc.out.join(''), /Nothing to change\. Nothing was written\./, 'a second run finds nothing to take out');
+  assert.match(pc.out.join(''), /Claude Code: .*settings\.json holds no Toolkit lines\./);
   const quiet = { ...pc.deps, environment: { CLAUDECODE: '1' }, stdout: () => {}, stderr: text => pc.err.push(text) };
   assert.equal(await permissions.main(['--remove'], quiet), 1);
   assert.match(pc.err.join(''), /Agents never run --remove/);
