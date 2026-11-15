@@ -1039,6 +1039,16 @@ function assertValid(kind, doc) {
 // the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
 // (parent_issue, record_prefix, writer_prefix) taken from its first parent; a disabled one carries
 // only its identity and is never used for programme records.
+// The one refusal for a missing or unsupported store kind: what a store must be and what works
+// without one. Only a plain kind word is echoed, never any other value from the binding.
+const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
+function storeKindProblem(store, enabled) {
+  if (store === undefined) return `the binding names no evidence store: ${STORE_NEEDED}`;
+  const kind = isObject(store) && typeof store.kind === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(store.kind) ? `store.kind "${store.kind}"` : 'store.kind';
+  return enabled ? `${kind} is not supported: ${STORE_NEEDED}`
+    : `${kind} is not supported: a store block must name a private GitHub repository (store.kind "github"). Governance is off here, so it needs no store: remove the block or make it a github store.`;
+}
+
 function validateBinding(binding) {
   const errors = [];
   check(errors, isObject(binding), 'binding must be an object');
@@ -1081,11 +1091,13 @@ function validateBinding(binding) {
     }
     const store = binding.store;
     if (enabled || store !== undefined) {
-      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      if (!isObject(store) || !Object.hasOwn(STORE_BACKENDS, store.kind)) errors.push(storeKindProblem(store, enabled));
+      else {
+        check(errors, REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+        check(errors, isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+        check(errors, /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+        check(errors, String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      }
     }
     if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.

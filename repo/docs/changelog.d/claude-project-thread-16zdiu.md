@@ -1,0 +1,5 @@
+### Changed
+
+- **Evidence store kinds are stated plainly:** a programme file whose store is missing, or names a kind other than `github` (a folder, a drive, `none`), is refused with one message that says governance keeps its state in a private GitHub repository, that a folder or drive can hold evidence copies only, and that without such a store governance stays off. It replaces the terse "not supported (supported: github)" line and the store-field errors that followed it. Only a plain kind word is echoed. Governance still reads such a file as an error, never as on.
+- **How To Use** has an Evidence Store part: when a store is needed (only while governance is on), a table of store kinds with and without governance, and three limits (same owner only, a shared store is shared trust, folders and drives hold copies only). The `toolkit-setup` skill points to it.
+- **Gate rules:** with governance off, progress and decisions go in the pull request and the evidence store, if any, so a repository with no store is no longer told to use one.
