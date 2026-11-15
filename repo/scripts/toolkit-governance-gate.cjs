@@ -40,7 +40,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
-const { BankTickets, bankTicketContext, bankTicketCommand } = require('./toolkit-governance-bank.cjs');
+const { BankTickets, bankTicketContext, bankTicketCommand, bankCardContext, cardAnswer, cardHash } = require('./toolkit-governance-bank.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
 // removes the file, which is Toolkit's own, because its text is never delivered again.
@@ -938,6 +938,7 @@ const REPLY_LOST = 'Toolkit: the local reply state could not be read, so nothing
 // The note that this run was asked could not be saved, so no answer in chat can be matched to it.
 const UNSAVED_LINE = `Toolkit could not note that it asked (its user-state folder could not be written), so an answer in chat cannot be recorded and this question comes with each message until that works. To decide now, run ${terminalCommand('enable')} or ${terminalCommand('disable')} in your own terminal.`;
 const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since the governance bank was shown, so this message cannot answer it. If it was meant as the answer, show the bank again (toolkit governance) and have the user reply to that one.';
+const BANK_CARD_UNCOUNTED = 'Toolkit: that governance card could not be recorded (it was changed, not answered on every row, or the repository moved on), so nothing was sent. The owner can still type their answer to the bank, such as all recommended or 1.2=B; their next own message brings the ticket.';
 const BANK_LOST = 'Toolkit: the reply to the governance bank could not be kept (its local state could not be written), so nothing can be recorded from this message. Show the bank again once that works.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since Toolkit asked, so nothing was recorded and Toolkit asks again.';
 const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card. Carry on with what the user asked; they can still send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
@@ -1051,6 +1052,8 @@ class PromptHold {
   // null when the call was not Toolkit's card. It counts only when the tool gate let this exact call
   // through as a clean card in this run of the session that was asked, as a typed answer would.
   picked({ cwd, sessionId = null, toolUseId = null, toolResponse = null }) {
+    const bankCard = this.#bankPicked(sessionId, toolUseId, toolResponse);
+    if (bankCard) return bankCard;
     const answers = toolResponse && typeof toolResponse === 'object' && toolResponse.answers && typeof toolResponse.answers === 'object' ? toolResponse.answers : {};
     const questions = toolResponse && Array.isArray(toolResponse.questions) ? toolResponse.questions : [];
     if (!questions.some(question => question && question.question === PICKER_QUESTION)) return null;
@@ -1070,6 +1073,28 @@ class PromptHold {
     try { this.#asked.closeWindow(id, sessionId); } catch { /* the window only offers a ticket */ }
     const result = this.#answer(cwd, command, verdict, sessionId, marks);
     return { context: result.action === 'pass' ? `${result.context}\nThen carry on with what the user asked.` : `Tell the user this, word for word, then carry on with what they asked: ${result.reason}${result.reason.endsWith(NEVER_OWNER) ? '' : `\n${NEVER_OWNER}`}` };
+  }
+
+  // The governance bank's card (toolkit-governance-bank.cjs bankCardInput): the owner's taps count
+  // only when the tool gate let this exact card through for the bank this run was shown last, in an
+  // unchanged repository mark, and every row was tapped. They become one bank answer with a one-use
+  // ticket; anything else leaves the bank waiting for the owner's typed reply.
+  #bankPicked(sessionId, toolUseId, toolResponse) {
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    const questions = toolResponse && Array.isArray(toolResponse.questions) ? toolResponse.questions : [];
+    const epoch = this.#epochs.get(sessionId);
+    let shown = null;
+    try { shown = EPOCH.test(String(epoch)) ? this.#bank.pendingFor(sessionId, epoch) : null; } catch { shown = null; }
+    if (!shown || !Array.isArray(shown.card_questions) || !questions.some(question => question && shown.card_questions.includes(question.question))) return null;
+    const noted = this.#notes.take(toolUseId);
+    const answers = toolResponse.answers && typeof toolResponse.answers === 'object' ? toolResponse.answers : {};
+    const answer = cardHash({ questions }) === shown.card ? cardAnswer(questions, answers) : null;
+    const counts = answer !== null && noted !== null && !this.#launched(sessionId) && noted.session_id === sessionId && noted.session === epoch
+      && noted.repository === shown.repository_mark && this.#epochs.repository(shown.repository_id) === shown.repository_mark;
+    if (!counts) return { context: `${BANK_CARD_UNCOUNTED}\n${NEVER_OWNER}` };
+    let ticket = null;
+    try { ticket = this.#bank.issue(sessionId, epoch); } catch { ticket = null; }
+    return { context: ticket ? bankCardContext(shown, ticket, answer) : `${BANK_LOST}\n${NEVER_OWNER}` };
   }
 
   // The question, attached to a message that is let through: the card where the host can show it,
@@ -1403,6 +1428,22 @@ class ToolGate {
     return null;
   }
 
+  // A card that carries a question of the governance bank this run was shown runs only as that
+  // bank's exact card, with no answer filled in; the call is noted so its answer can count
+  // (PromptHold.picked). undefined: not the bank's card.
+  #bankCard(input, sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return undefined;
+    const questions = input.tool_input && Array.isArray(input.tool_input.questions) ? input.tool_input.questions : [];
+    const epoch = this.#epochs.get(sessionId);
+    let shown = null;
+    try { shown = EPOCH.test(String(epoch)) ? this.#bank.pendingFor(sessionId, epoch) : null; } catch { shown = null; }
+    if (!shown || !Array.isArray(shown.card_questions) || !questions.some(question => question && shown.card_questions.includes(question.question))) return undefined;
+    const refused = { deny: `Toolkit: the governance bank's card is shown only exactly as Toolkit printed it, with no answer filled in. Show it again as given, or show the bank as plain text for a typed reply. ${NEVER_OWNER}` };
+    if (cardHash(input.tool_input) !== shown.card) return refused;
+    try { this.#notes.note(input.tool_use_id, { session_id: sessionId, session: epoch, repository: shown.repository_mark }); } catch { return refused; }
+    return null;
+  }
+
   decide(input) {
     const tool = String(input && (input.tool_name || input.toolName) || '');
     const sessionId = sessionIdOf(input);
@@ -1430,7 +1471,7 @@ class ToolGate {
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
       return { deny: `Toolkit: its user-state files (cached observations, pending proposals and asked sessions) are changed only by Toolkit itself. ${NEVER_OWNER}` };
     }
-    if (tool === PICKER_TOOL) return this.#picker(input || {}, sessionId);
+    if (tool === PICKER_TOOL) return this.#bankCard(input || {}, sessionId) ?? this.#picker(input || {}, sessionId);
     // A prompt the agent schedules for itself arrives as bare text and could read as the user's
     // reply. None is scheduled while this run has a reply ticket, a confirmation or the reply window
     // open; after that, only one that carries the full answer is refused, in a run that was asked.

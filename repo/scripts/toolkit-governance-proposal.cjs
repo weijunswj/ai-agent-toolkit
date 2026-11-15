@@ -53,10 +53,17 @@ function bindingV2(binding) {
 }
 
 // Only the instruction skill's prepared surfaces join the binding. Product files and backups do not.
-function adoptionFiles(cwd, text, cloud = { files: {} }) {
+// `rendered` holds the governed rules the governance bank rendered from the templates for a fresh
+// repository (toolkit-governance-adopt.cjs); they take the place of the working tree's copies.
+function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
   const governance = require('./toolkit-governance-state.cjs');
-  const block = governance.readGovernedBlock(cwd);
-  if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  if (rendered) {
+    const { blocks, errors } = require('./toolkit-managed-block.cjs').findBlocks(String(rendered['AGENTS.md'] || ''));
+    if (errors.length || !blocks.some(entry => entry.name === 'TOOLKIT-GOVERNED-RULES')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  } else {
+    const block = governance.readGovernedBlock(cwd);
+    if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  }
   const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md'));
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
@@ -64,6 +71,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }) {
     ...cloudFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
+    if (rendered && Object.hasOwn(rendered, name)) continue;
     const file = path.join(cwd, name);
     if (!fs.existsSync(file)) continue;
     let current = cwd;
@@ -75,7 +83,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }) {
     if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
-  return { ...files, ...cloud.files };
+  return { ...files, ...(rendered || {}), ...cloud.files };
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
@@ -229,7 +237,7 @@ class GovernanceProposals {
     if (!proposal || governance.bindingProblems(proposal, identity).length || (request.answer === 'yes' && proposal.governance === 'disabled')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     return { identity, request, repository, binding: proposal, text: `${JSON.stringify(proposal, null, 2)}\n` };
   }
-  publish(cwd, run, binding = null) {
+  publish(cwd, run, binding = null, rendered = null) {
     this.prepare(cwd, run, binding);
     if (!this.#transport) fail('PROPOSAL_TRANSPORT_UNAVAILABLE');
     const checked = this.refresh(cwd);
@@ -241,7 +249,7 @@ class GovernanceProposals {
     if (checked.proposals.some(item => item.answer !== prepared.request.answer) || matches.length > 1) fail('PROPOSAL_CONFLICT');
     const cloud = prepared.request.answer === 'yes' && !matches[0] ? this.#cloudWorkflows(cwd) : { files: {}, warning: null };
     const proposal = matches[0] || this.#transport.publish(prepared.repository, prepared.binding,
-      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud) : { [cache.BINDING_PATH]: prepared.text });
+      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text });
     const readback = this.#transport.read(prepared.repository, proposal.number);
     if (!validProposal(readback, prepared.repository) || readback.head !== proposal.head || readback.answer !== prepared.request.answer) fail('PROPOSAL_PUBLISH_READBACK_FAILED');
     this.#update(prepared.identity.repository_id, value => {

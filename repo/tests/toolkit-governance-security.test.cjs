@@ -81,7 +81,7 @@ function binding(policy, paid = null) {
 
 const merged = (policy, paid) => ({ status: 'ok', text: binding(policy, paid) });
 const ON = Object.freeze({
-  ok: true, visibility: 'public', allow_auto_merge: true, alerts: 'enabled', security_updates: 'enabled',
+  ok: true, visibility: 'public', allow_auto_merge: true, delete_branch_on_merge: 'enabled', alerts: 'enabled', security_updates: 'enabled',
   secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
   binding: merged(), advanced_codeql: null,
 });
@@ -136,6 +136,8 @@ test('SE-02: a hand-written dependabot.yml or .yaml is read in block and inline 
 const MATRIX = [
   { id: 'M01 public, everything on, binding merged', files: { 'package.json': '{}', '.github/dependabot.yml': COVERED }, protection: CONFORMANT,
     expect: { status: 'conformant', policy_source: 'default-branch', fixes: { alerts: false, secret_scanning: false, code_scanning: false, private_reporting: false, allow_auto_merge: false } } },
+  { id: 'M02b merged head branches are kept: S8 drift, and the free setting is planned on', read: { delete_branch_on_merge: 'disabled' },
+    expect: { status: 'drift', checks: { S8: 'drift' }, details: { S8: ['Automatically delete head branches is off'] }, fixes: { delete_branch_on_merge: true } } },
   { id: 'M02 public, free settings off (I1)', read: { alerts: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', allow_auto_merge: false },
     expect: { status: 'drift', checks: { S1: 'drift', S2: 'ok', S4: 'drift', S5: 'drift', S6: 'drift', S7: 'ok' }, details: { S4: ['Push protection is off'] },
       fixes: { alerts: true, security_updates: false, secret_scanning: true, code_scanning: true, private_reporting: true, allow_auto_merge: false } } },
@@ -259,7 +261,7 @@ test('SE-03 (MATRIX): the verdict for every row of the closure matrix', async (t
       if (want.readerCalled === false) assert.equal(called, false);
       // I2 on every row: no paid-features check or fix exists, and a private or internal repository
       // never plans secret scanning or CodeQL.
-      assert.equal(result.checks.S8, undefined, 'no paid-features check');
+      assert.deepEqual(Object.keys(result.checks).sort(), ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], 'no paid-features check');
       assert.doesNotMatch(JSON.stringify(result.checks), /buy|paid|billed|billing|Secret Protection|Code Security/i, 'no paid wording in any check');
       if (result.fixes) assert.ok(!('code_security' in result.fixes) && !('paid' in result.fixes), 'no paid fix');
       if (result.visibility && result.visibility !== 'public') {
@@ -396,7 +398,7 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     'repos/o/r/contents/.github/workflows/scan.yml?ref=main': { encoding: 'base64', content: Buffer.from('steps:\n  - uses: github/codeql-action/upload-sarif@v3\n').toString('base64') },
   }, calls) });
   assert.deepEqual(read, {
-    ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'disabled', security_updates: 'enabled', secret_scanning: 'enabled',
+    ok: true, visibility: 'public', allow_auto_merge: false, delete_branch_on_merge: 'unreadable', alerts: 'disabled', security_updates: 'enabled', secret_scanning: 'enabled',
     push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', binding: { status: 'ok', text: binding(PATCH_MINOR) },
     advanced_codeql: null,
   }, 'an upload-sarif step for another scanner is not an advanced CodeQL setup');
