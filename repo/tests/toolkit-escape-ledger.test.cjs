@@ -24,6 +24,8 @@ const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-escape-ledger.cjs'
 const REPO = 'weijunswj/ai-agent-toolkit';
 const TODAY = '2026-11-15';
 const today = () => TODAY;
+// The reader with today pinned, so date checks do not move with the real clock.
+const readAt = bytes => ledger.readLedger(bytes, TODAY);
 
 const BROKE = 'The hourly sweep re-rendered the page but never wrote closes into state';
 const MISSED = 'Tests used a fake page writer and never checked the stored state documents';
@@ -52,7 +54,7 @@ const ledgerFile = dir => path.join(dir, 'state', 'weijunswj', 'ai-agent-toolkit
 const book = () => new ledger.EscapeLedger({ today });
 const line = overrides => `${ledger.canonicalLine(entry(overrides))}\n`;
 // The rules and fields a ledger text is refused under.
-const refusedRules = text => ledger.readLedger(Buffer.from(text, 'utf8')).errors.flatMap(error => [error.rule, error.field]).filter(Boolean);
+const refusedRules = text => readAt(Buffer.from(text, 'utf8')).errors.flatMap(error => [error.rule, error.field]).filter(Boolean);
 
 function cli(args) {
   const run = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
@@ -156,7 +158,7 @@ test('E2-b: a local path, secret-shaped value or personal data is refused withou
     'email address': `The sweep posted ${fakeEmail()} into a public issue comment`,
   };
   for (const [name, text] of Object.entries(bad)) {
-    const errors = ledger.readLedger(Buffer.from(line({ what_broke: text }))).errors;
+    const errors = readAt(Buffer.from(line({ what_broke: text }))).errors;
     assert.ok(errors.some(error => error.field === 'what_broke'), `${name} accepted`);
     const shown = errors.map(ledger.formatError).join('\n');
     assert.ok(!shown.includes(text.slice(10, 40)), `${name} echoed`);
@@ -164,7 +166,7 @@ test('E2-b: a local path, secret-shaped value or personal data is refused withou
   // A short commit hash, a lower-case full hash, a URL and a slash command are fine.
   for (const text of ['Merged at 625355e but the page kept the old order', 'Full head 625355e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6 was not the reviewed one',
     'The link https://github.com/weijunswj/ai-agent-toolkit/pull/763 lost its anchor', 'Typing /loop in a thread started the wrong command']) {
-    assert.deepEqual(ledger.readLedger(Buffer.from(line({ what_broke: text }))).errors, [], text);
+    assert.deepEqual(readAt(Buffer.from(line({ what_broke: text }))).errors, [], text);
   }
   const dir = store(t);
   const run = cli(['add', '--store', dir, '--repo', REPO, '--id', 'leaky', '--kind', 'unit', '--found-by', 'owner',
@@ -175,28 +177,28 @@ test('E2-b: a local path, secret-shaped value or personal data is refused withou
 });
 
 test('E2-b: every hostile input shape is refused as a whole ledger', () => {
-  hostile.expectDefaultDeny(assert, text => ledger.readLedger(Buffer.from(text, 'utf8')).ok, hostile.shapes);
+  hostile.expectDefaultDeny(assert, text => readAt(Buffer.from(text, 'utf8')).ok, hostile.shapes);
   for (const shape of hostile.shapes.filter(item => item.bytes)) {
-    assert.equal(ledger.readLedger(shape.bytes).ok, false, shape.id);
+    assert.equal(readAt(shape.bytes).ok, false, shape.id);
   }
 });
 
 test('E2-b: hostile shapes with any character outside printable ASCII are refused inside a text field', () => {
   const unusual = hostile.shapes.filter(shape => shape.points.length > 0 || /\n/.test(shape.text));
-  hostile.expectDefaultDeny(assert, text => ledger.readLedger(Buffer.from(line({ what_broke: `Broke: ${text} in the run`.slice(0, ledger.MAX_TEXT) }))).ok, unusual);
+  hostile.expectDefaultDeny(assert, text => readAt(Buffer.from(line({ what_broke: `Broke: ${text} in the run`.slice(0, ledger.MAX_TEXT) }))).ok, unusual);
 });
 
 test('E2-b: a ledger whose line ends are all CRLF is read; every other line-break and byte-order-mark variant is refused', () => {
   const valid = line() + line({ id: 'second-escape' });
-  assert.equal(ledger.readLedger(Buffer.from(valid)).ok, true);
+  assert.equal(readAt(Buffer.from(valid)).ok, true);
   const changed = hostile.variants(valid).filter(variant => variant.text !== valid);
   assert.ok(changed.length >= 6);
-  const crlf = ledger.readLedger(Buffer.from(changed.find(variant => variant.id === 'crlf').text, 'utf8'));
+  const crlf = readAt(Buffer.from(changed.find(variant => variant.id === 'crlf').text, 'utf8'));
   assert.equal(crlf.ok, true, JSON.stringify(crlf.errors));
   assert.deepEqual(crlf.entries.map(item => item.id), ['graph-state-never-written', 'second-escape']);
-  for (const variant of changed.filter(item => item.id !== 'crlf')) assert.equal(ledger.readLedger(Buffer.from(variant.text, 'utf8')).ok, false, variant.id);
+  for (const variant of changed.filter(item => item.id !== 'crlf')) assert.equal(readAt(Buffer.from(variant.text, 'utf8')).ok, false, variant.id);
   // The whole-file check names the first line holding a character outside printable ASCII.
-  assert.deepEqual(ledger.readLedger(Buffer.from(changed.find(variant => variant.id === 'bom').text, 'utf8')).errors, [{ line: 1, field: null, rule: 'not-printable-ascii' }]);
+  assert.deepEqual(readAt(Buffer.from(changed.find(variant => variant.id === 'bom').text, 'utf8')).errors, [{ line: 1, field: null, rule: 'not-printable-ascii' }]);
 });
 
 test('E2-b: mixed or lone-CR line ends are refused with a plain reason', () => {
@@ -209,7 +211,7 @@ test('E2-b: mixed or lone-CR line ends are refused with a plain reason', () => {
     'CR inside CRLF lines': ending('\r\r\n'),
   };
   for (const [name, text] of Object.entries(cases)) {
-    const read = ledger.readLedger(Buffer.from(text, 'utf8'));
+    const read = readAt(Buffer.from(text, 'utf8'));
     assert.equal(read.ok, false, name);
     assert.deepEqual(read.errors.map(error => error.rule), ['mixed-line-ends'], name);
     assert.match(ledger.formatError(read.errors[0]), /mixed-line-ends: .*LF.*CRLF/, name);
@@ -254,21 +256,21 @@ test('E2-b: non-canonical JSON is refused: spacing, key order, duplicate keys an
   const escaped = line().replace('"kind":"integration"', '"kind":"\\u0069ntegration"');
   for (const [name, text] of Object.entries({ spaced, reordered, duplicate, escaped })) {
     assert.ok(refusedRules(text).includes('not-canonical') || refusedRules(text).length > 0, name);
-    assert.equal(ledger.readLedger(Buffer.from(text)).ok, false, name);
+    assert.equal(readAt(Buffer.from(text)).ok, false, name);
   }
   assert.ok(refusedRules('').length === 0, 'an empty ledger is valid');
   assert.ok(refusedRules(line().slice(0, -1)).includes('no-final-newline'));
   assert.ok(refusedRules(`${line()}\n${line({ id: 'next-one' })}`).includes('blank-line'));
-  assert.deepEqual(ledger.readLedger(Buffer.from(line() + line())).errors, [{ line: 2, field: 'id', rule: 'duplicate-id' }]);
+  assert.deepEqual(readAt(Buffer.from(line() + line())).errors, [{ line: 2, field: 'id', rule: 'duplicate-id' }]);
 });
 
 test('E2-b: the reader stays linear on large input and refuses an oversized ledger', () => {
   const build = size => `${line({ what_broke: `x${'y'.repeat(Math.max(12, size))}` })}`;
-  const timed = hostile.timing(text => ledger.readLedger(Buffer.from(text)), build, { maxSize: 1 << 19 });
+  const timed = hostile.timing(text => readAt(Buffer.from(text)), build, { maxSize: 1 << 19 });
   assert.ok(timed.ok, timed.message);
   const big = Buffer.alloc(ledger.MAX_FILE_BYTES + 1, 0x61);
-  assert.ok(ledger.readLedger(big).errors.some(error => error.rule === 'too-large'));
-  assert.equal(ledger.readLedger(Buffer.from(line())).ok, true);
+  assert.ok(readAt(big).errors.some(error => error.rule === 'too-large'));
+  assert.equal(readAt(Buffer.from(line())).ok, true);
 });
 
 test('E2-b: a bad repository name or a symlinked ledger is refused', t => {
