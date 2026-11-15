@@ -409,7 +409,7 @@ test('every scheduled workflow can also be started by hand', () => {
   const dir = path.join(repoRoot, '.github', 'workflows');
   const scheduled = fs.readdirSync(dir).filter(name => /\.ya?ml$/.test(name))
     .map(name => [name, fs.readFileSync(path.join(dir, name), 'utf8').replace(/\r\n/g, '\n')])
-    .filter(([, text]) => /^  schedule:\s*$/m.test(text));
+    .filter(([, text]) => /^\s+schedule:\s*$/m.test(text));
   assert.ok(scheduled.length > 0, 'at least one scheduled workflow');
-  for (const [name, text] of scheduled) assert.match(text, /^  workflow_dispatch:\s*$/m, `${name} takes workflow_dispatch`);
+  for (const [name, text] of scheduled) assert.match(text, /^\s+workflow_dispatch:/m, `${name} takes workflow_dispatch`);
 });

@@ -1223,12 +1223,18 @@ test('the hourly nudge flags a skipped scheduled workflow for a manual run', () 
     const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
     const step = text.split('\n').find(line => line.startsWith('   Scheduled workflows'));
     assert.ok(step, `${session}: scheduled workflows check`);
-    for (const phrase of ['part of step 5, so it runs every time', 'older than its longest gap between two scheduled times',
-      '"SCHEDULE MISSED: <names> | "', 'whether it takes `workflow_dispatch`', 'this task never starts workflows itself']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
+    for (const phrase of ['part of step 5, so it runs every time', 'a scheduled time passed more than 30 minutes ago',
+      'no run of it started since that time', '"SCHEDULE MISSED: <names> | "', 'whether it takes `workflow_dispatch`',
+      'a disabled workflow is listed once as off', "needs the owner's approval by name for anything that acts outside the repository",
+      'this task never starts workflows itself']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
     assert.ok(text.includes('"GITHUB STEPS OWED: <steps> | ", "SCHEDULE MISSED: <names> | "'), `${session}: first line`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
     assert.ok(!none.includes('Scheduled workflows'), `${session}: no-repo nudge has no workflow check`);
   }
   const periodic = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
-  assert.ok(periodic.includes('- `SCHEDULE MISSED`: GitHub skipped a scheduled workflow\'s run.') && periodic.includes('start each listed workflow by hand on the default branch'));
+  const missed = periodic.split('\n').find(line => line.startsWith('- `SCHEDULE MISSED`:'));
+  // A generic guidebook must never hand-start a project's deploy, publish, sync or mail workflow without the owner naming it.
+  for (const phrase of ['Re-read its newest run first', "stays inside the repository's own GitHub state", 'or one the owner approved by name',
+    "is never started without the owner's approval naming it", 'with the file, ref and effect', 'A disabled workflow is not missed',
+    'with a default-branch-only job guard']) assert.ok(missed.includes(phrase), phrase);
 });
