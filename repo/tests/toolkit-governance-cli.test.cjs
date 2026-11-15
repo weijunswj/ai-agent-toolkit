@@ -75,7 +75,7 @@ const BRANCH_PROTECTED = () => ({
   repository: { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true },
   rules: [
     { type: 'pull_request', ruleset_id: 1, parameters: { allowed_merge_methods: ['merge'] } },
-    { type: 'required_status_checks', ruleset_id: 1, parameters: { required_status_checks: [{ context: 'validate', integration_id: 15368 }] } },
+    { type: 'required_status_checks', ruleset_id: 1, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } },
   ],
 });
 const WORKFLOW = [
@@ -336,9 +336,13 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   const loose = await run(ctx, conformant, ['check', '--json'], { protectionReader: squash });
   assert.equal(loose.code, 1);
   assert.deepEqual(JSON.parse(loose.stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge), ['PROTECTION_MERGE_METHODS']);
+  // A branch that merges heads without the latest main is drift: a check made at the head may not hold for the merge.
+  const behind = await run(ctx, conformant, ['check', '--json'], { protectionReader: () => { const read = BRANCH_PROTECTED(); read.rules[1].parameters.strict_required_status_checks_policy = false; return read; } });
+  assert.equal(behind.code, 1);
+  assert.deepEqual(JSON.parse(behind.stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge), ['PROTECTION_UP_TO_DATE']);
   const unread = JSON.parse((await run(ctx, conformant, ['check', '--json'], { protectionReader: () => ({ ok: false, reason: 'gh-unavailable' }) })).stdout);
   assert.equal(unread.default_branch_protection.status, 'unverified');
-  assert.deepEqual(unread.findings.map(entry => entry.id).filter(notTaskAutoMerge), ['PROTECTION_CHECKS_MISMATCH_UNVERIFIED', 'PROTECTION_CHECK_UNPINNED_UNVERIFIED', 'PROTECTION_MERGE_METHODS_UNVERIFIED']);
+  assert.deepEqual(unread.findings.map(entry => entry.id).filter(notTaskAutoMerge), ['PROTECTION_CHECKS_MISMATCH_UNVERIFIED', 'PROTECTION_CHECK_UNPINNED_UNVERIFIED', 'PROTECTION_MERGE_METHODS_UNVERIFIED', 'PROTECTION_UP_TO_DATE_UNVERIFIED']);
   assert.match((await run(ctx, conformant, ['check'])).stdout, /Default-branch protection: conformant/);
 
   // An ENABLED repository needs a current plain-text check, unless its settings record why it is off.
