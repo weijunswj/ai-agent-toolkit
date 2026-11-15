@@ -251,7 +251,7 @@ test('a lost lease, a spent budget or a code-less error mid-order ends the pass 
     const b = bareQueue(t, () => { throw error; });
     assert.throws(() => b.q.run(), thrown => thrown === error);
     assert.equal(b.pending().length, 1);
-    assert.equal(b.github.calls.filter(call => call.path.includes('/orders/done/') || call.path.includes('/orders/refused/')).length, 0);
+    assert.equal(b.github.calls.filter(call => call.method !== 'GET' && (call.path.includes('/orders/done/') || call.path.includes('/orders/refused/'))).length, 0, 'nothing is filed');
   }
 });
 
@@ -343,4 +343,67 @@ test('a queued order that expires mid-run stops at the deadline, files its recei
   assert.deepEqual(again.report.orders.results, []);
   assert.equal(childWrites(), before);
   assert.equal(f.store.read('child', 500).doc.next_action, plan);
+});
+
+// SQAG: a result was filed and read back, but taking the order off the queue failed. A later run
+// finishes that removal from the filed result; it never runs the order again or files a second result.
+function failFirstRemoval(f) {
+  const request = f.github.request.bind(f.github);
+  let failed = false;
+  f.github.request = (method, endpoint, body, options) => {
+    if (!failed && method === 'DELETE' && endpoint.includes('/orders/pending/')) { failed = true; return { status: 502, json: { message: 'Bad gateway' } }; }
+    return request(method, endpoint, body, options);
+  };
+}
+const EXPIRED = () => NOW + 3 * 3600 * 1000;
+for (const [label, clock] of [['after the order expires', EXPIRED], ['before the order expires', () => NOW]]) {
+  test(`a done order whose removal failed is taken off the queue ${label}, keeping its one result`, t => {
+    const f = fixture(t);
+    f.enqueue('ack-500-1.json', f.order());
+    failFirstRemoval(f);
+    const first = f.run();
+    assert.equal(first.error, null, first.error?.message);
+    assert.equal(first.report.orders.results[0].outcome, 'PENDING');
+    assert.ok(f.file('pending/ack-500-1.json'), 'the removal failed, so the order is still queued');
+    const filed = f.file('done/ack-500-1.json');
+    const second = f.run({ clock });
+    assert.equal(second.error, null, second.error?.message);
+    assert.deepEqual(second.report.orders.results, [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'DONE' }]);
+    assert.equal(f.file('pending/ack-500-1.json'), null);
+    assert.equal(f.file('refused/ack-500-1.json'), null, 'a done order is never also filed as refused');
+    assert.deepEqual(f.file('done/ack-500-1.json'), filed, 'the filed result and its receipts are kept');
+    assert.equal(f.parentDoc().private.holder_orders.length, 1);
+  });
+}
+
+test('a stopped order whose removal failed keeps its receipts when a later run finds it expired', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order({ ops: [
+    { command: 'update', issue: 500, patch: { next_action: 'First write' } },
+    { command: 'dispose', finding: 'abcdefabcdef', reason: 'No such finding.' },
+  ] }));
+  failFirstRemoval(f);
+  const first = f.run();
+  assert.equal(first.error, null, first.error?.message);
+  assert.ok(f.file('pending/ack-500-1.json'));
+  const filed = f.file('refused/ack-500-1.json');
+  assert.equal(filed.outcome, 'STOPPED');
+  const second = f.run({ clock: EXPIRED });
+  assert.equal(second.error, null, second.error?.message);
+  assert.equal(second.report.orders.results[0].outcome, 'STOPPED');
+  assert.equal(f.file('pending/ack-500-1.json'), null);
+  assert.deepEqual(f.file('refused/ack-500-1.json'), filed, 'the stopped result keeps its operation receipts');
+  assert.deepEqual(f.file('refused/ack-500-1.json').results.map(entry => entry.outcome), ['WRITTEN', 'REFUSED']);
+  assert.equal(f.file('done/ack-500-1.json'), null);
+});
+
+test('a new order that reuses a filed order id still runs', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order());
+  f.run();
+  assert.equal(f.file('done/ack-500-1.json').outcome, 'DONE');
+  f.enqueue('ack-500-1.json', f.order({ expires_at: new Date(NOW - 1000).toISOString() }));
+  const again = f.run();
+  assert.equal(again.report.orders.results[0].code, 'ORDER_EXPIRED', 'a different order under the same name is judged on its own');
+  assert.equal(f.file('pending/ack-500-1.json'), null);
 });

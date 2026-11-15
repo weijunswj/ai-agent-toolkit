@@ -93,6 +93,24 @@ class OrderQueue {
     }
   }
 
+  // The result an earlier run filed for this very pending file, or null. A run that filed its result
+  // but failed to take the order off the queue leaves both; the next run only finishes the removal, so
+  // an order is never run again, filed twice (DONE and REFUSED) or stripped of its receipts. A result
+  // matches by the pending file's blob, or, filed before results kept it, by an equal order.
+  filed(entry, order) {
+    for (const folder of ['done', 'refused']) {
+      const file = `${this.dir}${folder}/${entry.name}`;
+      const response = this.transport.request('GET', `${this.contents(file)}?ref=${encodeURIComponent(this.store.store.branch)}`);
+      if (response.status === 404) continue;
+      if (response.status !== 200) throw new state.ProgrammeError('GH_FAILED', `Reading ${file} failed (${response.status}).`);
+      let doc;
+      try { doc = JSON.parse(Buffer.from(response.json?.content || '', 'base64').toString('utf8')); } catch { continue; }
+      if (doc?.schema !== RESULT_SCHEMA) continue;
+      if (doc.pending_sha ? doc.pending_sha === entry.sha : doc.order && JSON.stringify(doc.order) === JSON.stringify(order)) return doc;
+    }
+    return null;
+  }
+
   remove(entry) {
     const response = this.transport.request('DELETE', this.contents(entry.path), { message: `programme order: take ${entry.name} off the queue`, sha: entry.sha, branch: this.store.store.branch });
     if (response.status !== 200 && response.status !== 404) throw new state.ProgrammeError('GH_FAILED', `Removing ${entry.path} failed (${response.status}).`);
@@ -111,6 +129,11 @@ class OrderQueue {
     let order;
     try { order = JSON.parse(text); } catch { return refuse('ORDER_INVALID', 'The order file is not valid JSON.'); }
     if (!order || typeof order !== 'object' || order.order_id !== named.id) return refuse('ORDER_INVALID', 'The file name must match the order\'s order_id.', null, order);
+    const earlier = this.filed(entry, order);
+    if (earlier) {
+      this.remove(entry);
+      return { ...base, outcome: earlier.outcome, ...(earlier.code ? { code: earlier.code } : {}) };
+    }
     let report;
     try { report = this.runOrder({ orderValue: order, session: this.session, dryRun: named.dryRun }); }
     catch (error) {
@@ -130,7 +153,7 @@ class OrderQueue {
 
   settle(entry, folder, result) {
     const { order = null, ...summary } = result;
-    this.writeResult(folder, entry.name, { schema: RESULT_SCHEMA, ...summary, run: this.runId, finished_at: this.now(), order });
+    this.writeResult(folder, entry.name, { schema: RESULT_SCHEMA, ...summary, run: this.runId, finished_at: this.now(), pending_sha: entry.sha, order });
     this.remove(entry);
     return { order_id: summary.order_id, mode: summary.mode, outcome: summary.outcome, ...(summary.code ? { code: summary.code } : {}) };
   }

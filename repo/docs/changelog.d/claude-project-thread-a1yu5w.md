@@ -1,0 +1,3 @@
+### Fixed
+
+- **A queued holder order could be filed twice or lose its receipts:** when the cloud sweep filed an order's result and read it back but then failed to take the order off the queue, the next run ran the order again. After the order's expiry that filed a completed order as both done and refused, or replaced a stopped result and its write receipts with a bare refusal; before expiry it replaced the receipts with "done earlier". The next run now finds the result already filed for that same pending file and only removes the file. Result files now record the pending file's blob, and a result filed before this change matches by an equal order.
