@@ -913,6 +913,7 @@ test('follow-up time: only a pass that read something and left tasks follows up'
   const report = sweep => ({ sweep: { read: 5, left: 10, reason: 'GitHub rate limit', ...sweep } });
   assert.equal(followUpAt(report({}), 1000, 5000), 1000 + RESET_WAIT_MS);
   assert.equal(followUpAt(report({ reason: 'time limit' }), 1000, 5000), 5000);
+  assert.equal(followUpAt(report({ reason: 'request cap' }), 1000, 5000), 5000, 'a pass stopped at its own request cap resumes at once');
   assert.equal(followUpAt(report({ read: 0 }), 1000, 5000), 0, 'no progress, no loop');
   assert.equal(followUpAt(report({ left: 0 }), 1000, 5000), 0);
   assert.equal(followUpAt(report({ reason: 'state branch busy' }), 1000, 5000), 0, 'the hourly start retries');

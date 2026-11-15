@@ -49,7 +49,6 @@ class FakeGitHub {
     this.fileDates = new Map();
     this.comments = new Map();
     this.commentSequence = 0;
-    this.commentsMoveIssue = false;
     this.login = 'owner';
     this.sweepHead = crypto.createHash('sha1').update('initial fake state').digest('hex');
     this.sweepTrees = new Map(); this.sweepCommits = new Map(); this.sweepSequence = 0;
@@ -83,10 +82,9 @@ class FakeGitHub {
   addComment(issue, { body, login = this.login, createdAt = this.tick(), type = 'User', association = 'OWNER' } = {}) {
     const id = 7000000000 + ++this.commentSequence;
     this.comments.set(id, { id, issue, body, login, type, association, created_at: createdAt });
-    // On GitHub a new comment moves the issue's update time. Tests of the read copy turn this on;
-    // the older fixtures were written without it.
+    // On GitHub a new comment moves the issue's update time to the comment's own time.
     const target = this.issues.get(issue);
-    if (this.commentsMoveIssue && target && Date.parse(createdAt) > Date.parse(target.updated_at)) target.updated_at = createdAt;
+    if (target && Date.parse(createdAt) > Date.parse(target.updated_at)) target.updated_at = createdAt;
     return id;
   }
 
@@ -207,8 +205,13 @@ class FakeGitHub {
     if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && ['GET', 'PATCH'].includes(method)) {
       const comment = this.comments.get(Number(match[1]));
       if (!comment) return ok(404, { message: 'Not Found' });
-      if (method === 'PATCH') { comment.body = body.body; comment.updated_at = this.tick(); }
-      return ok(200, { id: comment.id, body: comment.body, created_at: comment.created_at, user: { login: comment.login },
+      // An edited comment moves its issue's update time too, as on GitHub.
+      if (method === 'PATCH') {
+        comment.body = body.body; comment.updated_at = this.tick();
+        const target = this.issues.get(comment.issue);
+        if (target) target.updated_at = comment.updated_at;
+      }
+      return ok(200, { id: comment.id, body: comment.body, created_at: comment.created_at, updated_at: comment.updated_at || comment.created_at, user: { login: comment.login },
         issue_url: `https://api.github.com/repos/${this.repository}/issues/${comment.issue}` });
     }
     if ((match = /^issues\/(\d+)$/.exec(rest))) {
