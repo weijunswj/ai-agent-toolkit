@@ -5,41 +5,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const windows = require('../scripts/toolkit-windows-tasks.cjs');
-const launcher = require('../scripts/toolkit-task-launcher.cjs');
 const removal = require('../scripts/toolkit-remove.cjs');
-const s = require('./support/windows-task-switch-world.cjs');
+const s = require('./support/legacy-task-world.cjs');
 
-// One repository's footer cleaner, enrolled through the real planner and apply, on the fake scheduler.
-// Each checkout keeps its own repository name, so a second repository in one home is not mistaken for the first.
+// One repository's old footer cleaner, as an earlier release's task apply left it on the fake scheduler.
 function enrol(t, world, name) {
   const root = s.checkout(t);
-  world.names = (world.names || new Map()).set(root, name);
-  const governance = { readIdentity: target => ({ valid: true, root: target || root, remote: { host: 'github.com', path: `/example/${world.names.get(target || root) || name}.git` } }),
-    governanceState: () => ({ state: 'DISABLED', merged: { status: 'none', fresh: true } }), readObservation: () => ({ status: 'none', fresh: true }) };
-  const desired = windows.desiredTasks({ checkout: root, toolkitRoot: world.managed, nodePath: s.NODE, home: world.home, deps: { identityReader: s.identityReader, governance } });
-  const applied = windows.applyTasks(desired, { home: world.home, scheduler: world.scheduler });
-  assert.ok(!applied.refused, JSON.stringify(applied));
-  const entry = tasks.readRegistry(world.home).tasks.find(item => item.repository === `example/${name}`);
+  const entry = s.enrolLegacy({ home: world.home, scheduler: world.scheduler, root, name });
   return { root, entry, live: () => world.scheduler.folders.get(entry.folder)?.find(task => task.name === entry.name) };
 }
 
-// The fake scheduler has no method for the launcher-disabled task; it keeps the same two checks the
-// PowerShell side makes: the fixed description, and the exact recorded definition.
-function withDisabledRemoval(scheduler) {
-  scheduler.unregisterDisabled = (folder, name, previous) => {
-    scheduler.calls.push(['unregister-disabled', folder, name]);
-    const list = scheduler.folders.get(folder) || [], task = list.find(item => item.name === name);
-    if (task && task.description !== launcher.DISABLED_DESCRIPTION) throw new Error('marker');
-    if (task && (!previous || !s.assertDefinition(task, previous))) throw new Error('changed before removal');
-    scheduler.folders.set(folder, list.filter(item => item.name !== name));
-    return { removed: Boolean(task) };
-  };
-  return scheduler;
-}
-
 function world(t) {
-  const home = s.tempHome(t);
-  return { home, managed: path.join(home, 'managed'), scheduler: withDisabledRemoval(s.fakeScheduler()) };
+  return { home: s.tempHome(t), scheduler: s.fakeScheduler() };
 }
 
 function fakeRules(states = { 'claude-code': 'current', codex: 'absent' }) {
@@ -58,10 +35,7 @@ function fakeRules(states = { 'claude-code': 'current', codex: 'absent' }) {
 }
 
 const owner = (w, options = {}) => new removal.ToolkitRemoval({ home: w.home, scheduler: w.scheduler, rules: options.rules === undefined ? null : options.rules, include: options.include || [] });
-const adopt = (w, folder, name, id) => {
-  w.scheduler.folders.set(folder, [...(w.scheduler.folders.get(folder) || []), { name, description: 'My own backup job', state: 'Ready', execute: 'C:\\backup.exe', arguments: '', working_directory: '', actions: [{ execute: 'C:\\backup.exe', arguments: '', working_directory: '' }], triggers: [] }]);
-  return windows.adoptTask({ folder, task: name, id, purpose: 'nightly backup' }, { scheduler: w.scheduler, home: w.home });
-};
+const adopt = (w, folder, name, id) => s.adoptLegacy({ home: w.home, scheduler: w.scheduler, folder, name, id });
 const treeOf = folder => {
   const out = {};
   const walk = dir => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) walk(file); else out[path.relative(folder, file)] = fs.readFileSync(file, 'hex'); } };
@@ -87,7 +61,7 @@ test('tasks in three folders: the two Toolkit tasks and their empty folders go, 
   assert.equal(w.scheduler.folders.has(two.entry.folder), false);
   assert.equal(w.scheduler.folders.get('MINE').length, 1);
   assert.deepEqual(tasks.readRegistry(w.home).tasks.map(entry => entry.id), ['nightly-backup']);
-  assert.equal(fs.existsSync(path.dirname(windows.launcherPath(w.home))), false, 'the shared runner goes with the last Toolkit task');
+  assert.equal(fs.existsSync(windows.runnersDir(w.home)), false, 'the shared runner goes with the last Toolkit task');
 });
 
 test('a second run finds nothing and changes nothing', t => {
@@ -129,8 +103,8 @@ const MATRIX = [
 ];
 function disable(w, e) {
   const live = e.live();
-  live.state = 'Disabled'; live.description = launcher.DISABLED_DESCRIPTION; live.definition_xml = '<disabled-fixture/>';
-  tasks.updateRegistry(w.home, list => list.map(entry => entry.id === e.entry.id ? { ...entry, toolkit_missing: true, enrolled: { ...entry.enrolled, description: launcher.DISABLED_DESCRIPTION, enabled: false, definition_xml: live.definition_xml } } : entry));
+  live.state = 'Disabled'; live.description = windows.DISABLED_DESCRIPTION; live.definition_xml = '<disabled-fixture/>';
+  tasks.updateRegistry(w.home, list => list.map(entry => entry.id === e.entry.id ? { ...entry, toolkit_missing: true, enrolled: { ...entry.enrolled, description: windows.DISABLED_DESCRIPTION, enabled: false, definition_xml: live.definition_xml } } : entry));
 }
 for (const row of MATRIX) test(`removal matrix: ${row.row}`, t => {
   const w = world(t), e = enrol(t, w, 'widget');
@@ -145,7 +119,7 @@ for (const row of MATRIX) test(`removal matrix: ${row.row}`, t => {
   assert.equal(Boolean(e.live()), !row.gone);
   if (!row.gone && row.kind === 'changed') {
     assert.ok(tasks.readRegistry(w.home).tasks.some(entry => entry.id === e.entry.id), 'a kept task keeps its record');
-    assert.equal(fs.existsSync(windows.launcherPath(w.home)), true, 'a kept task keeps its runner');
+    assert.equal(fs.existsSync(windows.runnersDir(w.home)), true, 'a kept task keeps its runner');
   }
 });
 
@@ -219,7 +193,7 @@ test('a task that changes between the plan read and its removal is left alone an
   assert.match(result.tasks[0].reason, /changed after the plan was read/);
   assert.ok(e.live());
   assert.ok(tasks.readRegistry(w.home).tasks.some(entry => entry.id === e.entry.id));
-  assert.equal(fs.existsSync(windows.launcherPath(w.home)), true);
+  assert.equal(fs.existsSync(windows.runnersDir(w.home)), true);
 });
 
 test('global rules: a present block is removed through the rules owner, a broken file is reported and left', t => {
@@ -241,7 +215,9 @@ test('nothing outside Toolkit\'s own task files changes: a repository, other use
   fs.mkdirSync(outside.settings, { recursive: true }); fs.writeFileSync(path.join(outside.settings, 'settings.json'), '{"permissions":{}}\n');
   fs.mkdirSync(outside.state, { recursive: true }); fs.writeFileSync(path.join(outside.state, 'index.json'), '{"names":["EXAMPLE_KEY"]}\n');
   fs.writeFileSync(path.join(e.root, 'AGENTS.md'), '# rules\n');
-  tasks.writeLastRun(e.entry.id, { schema: 'toolkit.task-last-run.v1', id: e.entry.id, job: 'footer-sweep', started: '2026-11-11T00:00:00.000Z', finished: '2026-11-11T00:00:01.000Z', status: 'ok', exit: 0, summary: [] }, w.home);
+  const runFolder = path.join(tasks.userStateDir(w.home), 'tasks', e.entry.id);
+  fs.mkdirSync(runFolder, { recursive: true });
+  fs.writeFileSync(path.join(runFolder, 'last-run.json'), '{"status":"ok"}\n');
   const before = Object.fromEntries(Object.entries(outside).map(([name, folder]) => [name, treeOf(folder)]));
   const plan = owner(w).plan();
   assert.ok(plan.state.includes(`~/.ai-agent-toolkit/user-state/tasks/${e.entry.id}`));
@@ -301,7 +277,7 @@ test('the real scheduler removes a launcher-disabled task only with its exact re
   assert.throws(() => scheduler.unregisterDisabled('WIDGET', 'WIDGET - Footer sweep', { definition_xml: null }), /left alone/);
   assert.equal(payloads.length, 0);
   assert.deepEqual(scheduler.unregisterDisabled('WIDGET', 'WIDGET - Footer sweep', { definition_xml: '<x/>' }), { removed: true });
-  assert.deepEqual(payloads[0], { folder: 'WIDGET', name: 'WIDGET - Footer sweep', marker: launcher.DISABLED_DESCRIPTION, expected_xml: '<x/>' });
+  assert.deepEqual(payloads[0], { folder: 'WIDGET', name: 'WIDGET - Footer sweep', marker: windows.DISABLED_DESCRIPTION, expected_xml: '<x/>' });
 });
 
 // The real global rules owner, in a throwaway home, with Codex's load check stubbed so no Codex starts.
@@ -505,7 +481,7 @@ function scopedRules() {
 test('removal from Codex only, while Claude Code keeps Toolkit: nothing of Claude Code or shared is touched', t => {
   const h = fullHome(t);
   h.installed.codex = true;
-  const w = { home: h.home, managed: path.join(h.home, 'managed'), scheduler: withDisabledRemoval(s.fakeScheduler()) };
+  const w = { home: h.home, scheduler: s.fakeScheduler() };
   const task = enrol(t, w, 'widget');
   const rules = scopedRules();
   const make = () => h.make({ app: 'codex', scheduler: w.scheduler, rules: rules.factory });
