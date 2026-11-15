@@ -261,7 +261,7 @@ function main() {
 
   if (!targets.length) {
     console.log('No AGENTS.md found for --target auto. No files would be created automatically.');
-    console.log('Required next step: Ask whether to install or repair repo-local AGENTS.md with repository-agent-rules, create/update only AGENTS.md with this adapter, or choose none.');
+    console.log('Required next step: Ask whether to create/update only AGENTS.md with this adapter, or choose none.');
     console.log('Do this even during read-only or no-modify tasks. Do not run --write without explicit current-turn approval naming AGENTS.md.');
     return;
   }

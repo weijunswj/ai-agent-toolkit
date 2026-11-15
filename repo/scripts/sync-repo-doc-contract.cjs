@@ -90,6 +90,10 @@ if (require.main === module) {
   console.log(`Source-of-truth contract ${mode === 'write' ? 'sync' : 'check'} passed for ${targets.length} file(s).`);
 }
 
+// Every file this sync writes and the block it compares, for the merge train finder.
+const PROJECTED_OUTPUTS = Object.freeze(targets.map(file => Object.freeze({ path: file, blocks: [BLOCK_NAME] })));
+
 module.exports = {
+  PROJECTED_OUTPUTS,
   validateAndSync
 };

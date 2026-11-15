@@ -459,9 +459,16 @@ test('only the project that runs the Toolkit repo watches other projects, and on
   assert.match(own, /OTHER PROJECTS: this project runs the Toolkit repo/);
   for (const required of ['reusing the same list_triggers result (no extra calls)', 'Group the cloud tasks by hearth_channel_id',
     '"PROJECT TASKS MISSING: <PROJECT>=<task>[+<task>], ... | "', 'unless state.md already reported the same set',
-    'Report only: that project\'s own coordinator recreates its tasks on its next wake']) {
+    'Report only: that project\'s own coordinator recreates its tasks on its next wake',
+    // The platform refuses a prompt swap from another project, so outdated tasks are reported, not swapped here.
+    'Report only: a task\'s prompt changes only from the thread it posts into, so that project\'s own coordinator swaps them in place on its own check-in, never this one.']) {
     assert.ok(own.includes(required), required);
   }
+  assert.doesNotMatch(own, /so this coordinator swaps them in place/);
+  const reference = fs.readFileSync(path.join(TASKS, '..', 'reference', 'recurring-tasks.md'), 'utf8');
+  assert.ok(reference.includes("Never call `update_trigger` on another project's task."), 'no cross-project swap');
+  const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
+  assert.ok(acting.includes("  - `PROJECT TASKS OUTDATED` (Toolkit project only): another project's enabled check-in or nudge") && acting.includes("own check-in's `TASKS OUTDATED`, never this one."), 'PROJECT TASKS OUTDATED is report only');
 });
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
@@ -1123,6 +1130,8 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
     for (const phrase of ['runs every time, even when step 1 found no change', 'a bot or workflow PR wakes no thread',
       'every open PR on example-owner/example-repo and on the project\'s evidence store', '"store unread"',
       'its owner (the thread that owns or watches it', 'or the merge train holding it', 'its live next step',
+      // Step 2 is skipped on quiet runs, so owners come from step 2b's list_threads read, which always runs.
+      'that step 2b reads on every run, quiet runs included', 'under `GITHUB STEPS OWED` pages list_threads itself',
       'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
     assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
@@ -1133,7 +1142,7 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
     'bot and workflow PRs included', 'the reason `unowned`']) assert.ok(checkIn.includes(phrase), phrase);
   const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
   for (const phrase of ['- `PR UNOWNED`: every open PR needs an owner and a live next step', 'to the merge train',
-    "after the owner's OK", 'the same PR listed again on the next run goes to the owner',
+    "after the owner's OK (an evidence-store PR needs none: the store is agent-managed with standing permission, so merge or close it yourself)", 'the same PR listed again on the next run goes to the owner',
     'an `unowned` PR is routed as for `PR UNOWNED`']) assert.ok(acting.includes(phrase), phrase);
 });
 

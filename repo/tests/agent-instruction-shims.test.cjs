@@ -237,7 +237,7 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /\*\*Route proof:\*\* pin model and effort in the launch command or config for every gate session/,
     /stop with a report when either is inherited, missing or different/,
     /Never ask the model which model it is/,
-    /"not checkable on this host"/,
+    /the launcher's brief route line attests it \(`launcher-attested`\); with neither it is `UNVERIFIED`/,
     /Gate models and effort come only from an explicitly selected stack registry revision/,
     /Run parallel builders only on disjoint files with no dependency on work still in review/,
     /No review has a dollar cap/
@@ -288,15 +288,15 @@ test('the repository-agent-rules skill describes the two layers, the opt-in and 
   const readme = readText('skills/repository-agent-rules/README.md');
   assert.match(skill, /Write a repository's own instruction files \(`AGENTS\.md`, `CLAUDE\.md`, `GEMINI\.md`, `\.agents\/rules\/`\) only when its governance state is ENABLED/);
   assert.match(skill, /In other states, report what would change and write nothing/);
-  assert.match(skill, /accepted pending yes also permits preparing exactly the instruction materials for its adoption pull request/);
+  assert.match(skill, /accepted pending yes also permits preparing exactly the CI check files for its adoption pull request/);
   assert.match(skill, /Preparation never activates governance, programme records or standing task auto-merge/);
-  assert.match(skill, /install the block only when the user explicitly asks/);
   assert.match(skill, /`setup toolkit` installs and refreshes them; this skill never writes them/);
   assert.match(skill, /BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex>/);
-  assert.match(skill, /replaces the older `GLOBAL-AGENTS\.MD-TEMPLATE` and `N8N-AGENT-RULES-ADAPTER` v1 blocks/);
   assert.match(skill, /Never create shims for platforms out of scope/);
-  for (const file of ['INDEX.md', 'baseline-workflow.md', 'git-completion.md', 'model-safety-flags.md', 'safety-gates.md']) assert.ok(skill.includes(`\`${file}\``), file);
-  assert.match(skill, /verify every playbook `INDEX\.md` links exists/);
+  // The installed Toolkit delivers the governed rules and the playbooks: nothing copies them into a repository.
+  assert.match(skill, /this skill never adds the governed block, the Antigravity bootstrap or playbook files/);
+  assert.match(skill, /Report them as leftovers and leave them as they are: never refresh, repair or add one/);
+  assert.doesNotMatch(skill, /AGENTS\.managed\.template\.md|antigravity-bootstrap\.template\.md|-> `docs\/agent-playbooks\/`/);
   assert.match(skill, /_agent-toolkit-backups\//);
   assert.match(skill, /legacy `\.agent-toolkit-backups\/`/);
   assert.match(skill, /get approval for that exact preview/);
@@ -334,12 +334,11 @@ test('a rules refresh is carried to a pull request and always stops there for th
   assert.match(skill, /Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write/);
 });
 
-test('install docs point repository installs at the governed template and the global rules', () => {
+test('install docs point repositories at the installed Toolkit and the global rules, not a copied template', () => {
   const text = readText('repo/docs/HOW-TO-USE.md');
   const section = text.slice(text.indexOf('### Manual Skill-Folder Copying'), text.indexOf('### Manual Skill Folder Locations'));
   assert.match(section, /Generic rules reach every session through the global rules that `setup toolkit` installs/);
-  assert.match(section, /\[repo-local\/AGENTS\.managed\.template\.md\]/);
-  assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
+  assert.match(section, /never a copy of the governed rules, and never this toolkit repo's root \[AGENTS\.md\]/);
   assert.doesNotMatch(section, /skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
 });
 

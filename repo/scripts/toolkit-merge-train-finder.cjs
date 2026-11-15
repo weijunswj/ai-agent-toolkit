@@ -12,6 +12,15 @@
 //     whose first line is exactly `Toolkit-G2: PASS <40-hex head> tier=LIGHT|NORMAL|RISKY` (or FAIL),
 //     written by an account that can write to the repository (author association OWNER, MEMBER or
 //     COLLABORATOR); every other comment is ignored;
+//   - its route stamps hold (toolkit-gate-route.cjs): the verdict's second line and the body's one
+//     `Route:` stamp line (the G1 builder's) are on their stack-registry pin, or carry an owner
+//     override; an off-pin stamp never boards, and a RISKY pull request also needs both stamps
+//     host-verified or launcher-attested, never missing or UNVERIFIED;
+//   - or, with no PASS for the head, a scripted review carry (toolkit-review-carry.cjs) stands in: a
+//     FAIL whose `Carry: body-only uat=<state>` line says only the body failed, with the fixed body's
+//     UAT kept or made stricter; the shard-timing bot's manifest-only refresh; or a change to sync
+//     outputs only. A carried pull request's title and body must pass the personal-data guard, and a
+//     G2 stamp at the wording effort counts only when every changed file is a LIGHT `.md` file;
 //   - every required check the merged binding lists has a successful latest run;
 //   - its body has exactly one `Bump:` line and a `UAT:` line the auto-merge check accepts;
 //   - it carries no version bump of its own and no open train pull request holds it.
@@ -27,13 +36,16 @@
 //     "pulls": [ { "number": 12, "draft": false, "base": { "ref": "main" }, "head": { "sha": "<sha>" }, "body": "..." } ],
 //     "comments": { "12": [ { "body": "...", "author_association": "OWNER", "created_at": "<ISO>", "html_url": "..." } ] },
 //     "checks": { "<sha>": [ { "name": "validate", "status": "completed", "conclusion": "success", "id": 1 } ] },
-//     "files": { "12": ["path/a.txt"] } }
+//     "files": { "12": ["path/a.txt"] },
+//     "merge_bases": { "main...<sha>": "<sha>" }, "contents": { "<sha>:<path>": "<text>" } }
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const governance = require('./toolkit-governance-state.cjs');
 const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const riskTier = require('./toolkit-risk-tier.cjs');
+const gateRoute = require('./toolkit-gate-route.cjs');
+const carry = require('./toolkit-review-carry.cjs');
 const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 
 const VERDICT = /^Toolkit-G2: (PASS|FAIL) ([0-9a-f]{40}) tier=(LIGHT|NORMAL|RISKY)[ \t]*$/;
@@ -65,6 +77,21 @@ class GitHubFacts {
     return result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line));
   }
   files(number) { return this.#api(`repos/${this.repository}/pulls/${number}/files?per_page=100`).map(file => file.filename); }
+  mergeBase(base, head) {
+    const result = spawnSync('gh', ['api', `repos/${this.repository}/compare/${base}...${head}`, '--jq', '.merge_base_commit.sha'], { encoding: 'utf8', windowsHide: true });
+    if (result.error || result.status !== 0) throw new Error(`could not compare ${base}...${head}`);
+    return result.stdout.trim();
+  }
+  // A file's text at a commit, or null when it is not there.
+  text(ref, file) {
+    const result = spawnSync('gh', ['api', '-H', 'Accept: application/vnd.github.raw+json', `repos/${this.repository}/contents/${file.split('/').map(encodeURIComponent).join('/')}?ref=${ref}`], { encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    if (result.error) throw new Error(`could not read ${file} at ${ref}: ${result.error.message}`);
+    if (result.status !== 0) {
+      if (/HTTP 404/.test(result.stderr || '')) return null;
+      throw new Error(`could not read ${file} at ${ref}: ${(result.stderr || '').trim()}`);
+    }
+    return result.stdout;
+  }
 }
 
 class LiveFacts {
@@ -74,18 +101,21 @@ class LiveFacts {
   comments(number) { return (this.facts.comments || {})[String(number)] || []; }
   checks(sha) { return (this.facts.checks || {})[sha] || []; }
   files(number) { return (this.facts.files || {})[String(number)] || []; }
+  mergeBase(base, head) { return (this.facts.merge_bases || {})[`${base}...${head}`] || base; }
+  text(ref, file) { const value = (this.facts.contents || {})[`${ref}:${file}`]; return typeof value === 'string' ? value : null; }
 }
 
 // The newest verdict comment for `head` from an account that can write here, or null.
 function verdictFor(comments, head) {
   const found = comments
     .filter(comment => WRITERS.includes(comment.author_association))
-    .map(comment => ({ comment, match: VERDICT.exec(String(comment.body || '').split(/\r?\n/, 1)[0]) }))
+    .map(comment => ({ comment, lines: String(comment.body || '').split(/\r?\n/) }))
+    .map(({ comment, lines }) => ({ comment, route: lines[1] ?? null, carry: carry.carryFloor(lines.slice(2)), match: VERDICT.exec(lines[0]) }))
     .filter(entry => entry.match && entry.match[2] === head)
     // An edited verdict counts from its edit.
     .sort((a, b) => Date.parse(a.comment.updated_at || a.comment.created_at) - Date.parse(b.comment.updated_at || b.comment.created_at));
   const last = found[found.length - 1];
-  return last ? { verdict: last.match[1], tier: last.match[3], link: last.comment.html_url || `verdict for ${head}` } : null;
+  return last ? { verdict: last.match[1], tier: last.match[3], route: last.route, carry: last.carry, link: last.comment.html_url || `verdict for ${head}` } : null;
 }
 
 // The required checks that have no successful latest run, by name.
@@ -109,29 +139,77 @@ function packChanges(body) {
   return out;
 }
 
+// Why the route stamps keep the pull request off a train, or null. The G2 stamp is the verdict's
+// second line; the G1 stamp is the body's one `Route:` stamp line.
+// A scripted carry (shard-timings, generated-sync) had no G2, so only an off-pin G1 stamp counts
+// against it; a wording-only pull request's G2 may stamp the wording effort.
+function routeProblem(verdict, body, tier, registry, { scripted = false, wording = false } = {}) {
+  const lines = gateRoute.stampLines(body);
+  if (lines.length > 1) return `its body has ${lines.length} route stamp lines; the G1 builder's one stays`;
+  const g1 = gateRoute.stampStatus(lines[0] ?? null, 'BUILDER', registry);
+  if (scripted) return g1.status === 'off-pin' ? `its G1 route stamp is off the stack-registry pin: ${g1.stamp}` : null;
+  const stamps = [['G2', gateRoute.stampStatus(verdict.route, 'reviewer', registry, wording ? { effort: carry.WORDING_EFFORT } : {})], ['G1', g1]];
+  for (const [gate, stamp] of stamps) {
+    if (stamp.status === 'off-pin') return `its ${gate} route stamp is off the stack-registry pin: ${stamp.stamp}`;
+    if (tier === 'RISKY' && stamp.status !== 'on-pin') return `a RISKY pull request needs a verified or launcher-attested ${gate} route stamp (${stamp.status})`;
+  }
+  return null;
+}
+
 // Why the pull request cannot board, or a manifest member.
-function judge(pull, facts, { required, branch, held, tiers }) {
+function judge(pull, facts, { required, branch, held, tiers, registry }) {
   const head = pull.head && pull.head.sha;
   if (pull.draft) return { skip: 'a draft' };
   if (!pull.base || pull.base.ref !== branch) return { skip: `based on ${pull.base && pull.base.ref}, not ${branch}` };
   if (held.has(pull.number)) return { skip: 'already on an open train' };
   const verdict = verdictFor(facts.comments(pull.number), head);
-  if (!verdict) return { skip: `no review verdict comment for its head ${String(head).slice(0, 12)}` };
-  if (verdict.verdict !== 'PASS') return { skip: `its newest verdict for ${head.slice(0, 12)} is FAIL` };
+  if (verdict && verdict.verdict !== 'PASS' && !verdict.carry) return { skip: `its newest verdict for ${head.slice(0, 12)} is FAIL` };
   const missing = missingChecks(facts.checks(head), required);
   if (missing.length) return { skip: `required checks not green: ${missing.join(', ')}` };
   const body = String(pull.body || '');
   const bumps = [...body.matchAll(BUMP)];
   if (bumps.length !== 1) return { skip: `needs exactly one Bump: line (has ${bumps.length})` };
   const uat = UAT.exec(body);
-  if (!uat || !uatVerdict(body).mergeable) return { skip: 'no UAT: line the auto-merge check accepts' };
+  const uatState = uatVerdict(body);
+  if (!uat || !uatState.mergeable) return { skip: 'no UAT: line the auto-merge check accepts' };
   const files = facts.files(pull.number);
   if (files.includes(VERSION_FILE)) return { skip: 'carries its own version bump: it lands alone' };
   const byFiles = riskTier.classify(files.map(file => ({ path: file })), tiers).tier;
-  const tier = TIERS.indexOf(byFiles) > TIERS.indexOf(verdict.tier) ? byFiles : verdict.tier;
+  const review = reviewFor(pull, facts, verdict, files, uatState.state, byFiles, tiers);
+  if (review.skip) return review;
+  const route = routeProblem(review.verdict, body, review.tier, registry, review.route);
+  if (route) return { skip: route };
   const links = body.split(/\r?\n/).map(line => line.trim()).filter(line => LINK.test(line));
   const pack = packChanges(body);
-  return { member: { pr: pull.number, head, g2: verdict.link, tier, bump: bumps[0][1], uat: uat[0].trim(), links, ...(pack.length ? { pack_changes: pack } : {}) } };
+  return { member: { pr: pull.number, head, g2: review.g2, tier: review.tier, bump: bumps[0][1], uat: uat[0].trim(), links, ...(pack.length ? { pack_changes: pack } : {}) } };
+}
+
+const higher = (a, b) => (TIERS.indexOf(a) > TIERS.indexOf(b) ? a : b);
+
+// What stands for the review at the head: a G2 PASS, a body-only FAIL carried forward, or a scripted
+// carry (toolkit-review-carry.cjs) when no verdict names the head. { verdict, tier, g2, route } or
+// { skip }. A carried pull request also needs a title and body the personal-data guard passes.
+function reviewFor(pull, facts, verdict, files, uatState, byFiles, tiers) {
+  const head = pull.head.sha;
+  const wording = carry.wordingOnly(files, tiers);
+  if (verdict && verdict.verdict === 'PASS') return { verdict, tier: higher(byFiles, verdict.tier), g2: verdict.link, route: { wording } };
+  const text = carry.textProblem(pull.title, pull.body);
+  if (verdict) {
+    // A FAIL whose Carry line says only the description failed, at the head it reviewed.
+    if (!carry.uatKept(verdict.carry, uatState)) return { skip: `its body-only FAIL named UAT ${verdict.carry}; the body now says ${uatState}, which needs a fresh G2` };
+    if (text) return { skip: text };
+    return { verdict, tier: higher(byFiles, verdict.tier), g2: `body-only FAIL carried forward: ${verdict.link}`, route: {} };
+  }
+  const none = `no review verdict comment for its head ${String(head).slice(0, 12)}`;
+  const base = () => facts.mergeBase(pull.base.ref, head);
+  const read = (ref, file) => facts.text(ref, file);
+  const isShard = String(pull.head && pull.head.ref).startsWith(carry.SHARD_BRANCH);
+  const isSync = files.length > 0 && files.every(file => carry.OUTPUTS.has(file));
+  if (!isShard && !isSync) return { skip: none };
+  const problem = isShard ? carry.shardRefreshProblem(pull, files, read, base()) : carry.generatedSyncProblem(pull, files, read, base());
+  if (problem) return { skip: `${none}, and no scripted carry: ${problem}` };
+  if (text) return { skip: text };
+  return { verdict: null, tier: byFiles, g2: `scripted carry (${isShard ? 'shard-timings' : 'generated-sync'}), no G2`, route: { scripted: true } };
 }
 
 // `maxMembers` is the train's own cap (toolkit-merge-train.cjs).
@@ -145,11 +223,12 @@ function find(cwd, options, maxMembers) {
   const pulls = facts.pulls().slice().sort((a, b) => a.number - b.number);
   const held = new Set(pulls.flatMap(pull => mergeTrainMembers(pull.body) || []));
   const tiers = riskTier.loadConfig(governance.findGitRoot(cwd)).config;
+  const registry = gateRoute.loadRegistry();
   const ready = [];
   const skipped = [];
   for (const pull of pulls) {
     if (mergeTrainMembers(pull.body)) continue; // a train pull request itself
-    const outcome = judge(pull, facts, { required, branch, held, tiers });
+    const outcome = judge(pull, facts, { required, branch, held, tiers, registry });
     if (outcome.member) ready.push(outcome.member);
     else skipped.push(`#${pull.number}: ${outcome.skip}`);
   }
