@@ -1954,3 +1954,70 @@ test('a push is judged in the folder the command names, not in its reading with 
   }
   assert.match(decide(ctx, bash(ctx.repo, 'git push'))?.deny || '', /default branch `main`/);
 });
+
+// Review round 2: line continuations are joined as the shell joins them, ANSI-C strings, braces and
+// expansions are read in deeper folders, and a backslash stays a path separator in PowerShell.
+const FOLDER_SHELLS = [
+  ...FOLDER_HOSTS.map(([host, shape]) => [`${host} (shell unknown)`, (ctx, cwd, command) => decide(ctx, shape(cwd, command))]),
+  ['claude Bash (posix)', (ctx, cwd, command) => hold.decide({ cwd, tool_name: 'Bash', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })],
+];
+
+test('a line continuation, an ANSI-C string, braces or an expansion cannot spell a way to user-state', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const refused = [
+    [f.home, 'cd user\\\n-state && find . -delete'],
+    [f.home, 'cd user-\\\nstate && find . -delete'],
+    [f.home, 'cat user\\\n-state/session.json'],
+    [f.env, 'rm -rf .\\\n./user\\\n-state'],
+    [f.checkout, 'rm -rf ../.\\\n./user-st\\\nate'],
+    [f.env, "rm -rf $'\\x2e\\x2e'/$'user\\x2dstate'"],
+    [f.env, "cd $'\\x2e\\x2e'; cd $'user\\x2dstate' && find . -delete"],
+    [f.checkout, "rm -rf $'\\x2e\\x2e/\\x2e\\x2e/user\\x2dstate'"],
+    [f.env, "rm -rf $'\\056\\056'/user-stat$'\\145'"],
+    [f.env, 'rm -rf .{.,}/user-stat{e,}'],
+    [f.checkout, 'rm -rf .{.,}/.{.,}/user-stat{e,}'],
+    [f.env, 'rm -rf ${PWD%/*}/user?state'],
+    [f.checkout, 'rm -rf ${PWD%/*/*}/user-stat${x:-e}'],
+    [f.env, 'rm -rf ../user?state'],
+    [f.checkout, 'rm -rf ../../user-*'],
+    [f.checkout, `rm -rf ${f.home}/*`],
+  ];
+  const allowed = [
+    [f.checkout, "awk '{print $1}' notes.txt"],
+    [f.checkout, 'echo $HOME'],
+    [f.checkout, "find . -name '*.js'"],
+    [f.checkout, 'ls src/{a,b}'],
+    [f.env, 'cat ./*.json'],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', /^Toolkit: /, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+});
+
+test('a push split by a line continuation is judged as the shell joins it', (t) => {
+  const ctx = context(t);
+  const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });
+  for (const [label, run] of FOLDER_SHELLS) {
+    assert.match(run(ctx, ctx.repo, 'git pu\\\nsh origin main')?.deny || '', /default branch `main`/, label);
+    assert.match(run(ctx, store, `GIT_DIR=${ctx.repo}/.g\\\nit git push origin main`)?.deny || '', /default branch `main`/, label);
+  }
+});
+
+test('in PowerShell a backslash is a path separator, so Windows paths still run in Toolkit\'s folder', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const powershell = command => hold.decide({ cwd: f.home, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  for (const command of ['node current\\repo\\scripts\\toolkit-setup.cjs status', 'Get-Content env\\status.json', 'Get-ChildItem .\\env']) {
+    assert.equal(powershell(command), null, command);
+  }
+  for (const command of ['Get-Content user-state\\session.json', "Get-Content 'user'-state\\session.json", 'Remove-Item -Recurse .\\user-state', 'Get-ChildItem ..\\', 'Get-Content env\\x > out.txt', 'cd user`-state; Remove-Item *']) {
+    assert.match(powershell(command)?.deny || '', /^Toolkit: /, command);
+  }
+  // A shell the host does not name (Codex) is read by the computer's platform: PowerShell's on
+  // Windows, where a backslash is a separator, and bash's elsewhere, where it is an escape.
+  const codex = decide(ctx, { cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: 'node current\\repo\\scripts\\toolkit-setup.cjs status', workdir: f.home } });
+  if (process.platform === 'win32') assert.equal(codex, null);
+  else assert.match(codex?.deny || '', FOLDER_REFUSAL);
+});

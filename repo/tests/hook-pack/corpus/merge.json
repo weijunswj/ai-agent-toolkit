@@ -2322,6 +2322,233 @@
       "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
       "expect": {"decision":"deny"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-continued-cd",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cd user\\\n-state && find . -delete"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-continued-cd-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cd user\\\n-state && find . -delete","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-continued-cat",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cat user-\\\nstate/session.json"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-continued-cat-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cat user-\\\nstate/session.json","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-continued",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf .\\\n./user\\\n-state"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-continued-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf .\\\n./user\\\n-state","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-continued",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf ../.\\\n./user-st\\\nate"},"cwd":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-continued-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf ../.\\\n./user-st\\\nate","workdir":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-ansi-c",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf $'\\x2e\\x2e'/$'user\\x2dstate'"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-ansi-c-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf $'\\x2e\\x2e'/$'user\\x2dstate'","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-ansi-c",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf $'\\x2e\\x2e/\\x2e\\x2e/user\\x2dstate'"},"cwd":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-ansi-c-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf $'\\x2e\\x2e/\\x2e\\x2e/user\\x2dstate'","workdir":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-braces",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf .{.,}/user-stat{e,}"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-braces-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf .{.,}/user-stat{e,}","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-braces",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf .{.,}/.{.,}/user-stat{e,}"},"cwd":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-braces-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf .{.,}/.{.,}/user-stat{e,}","workdir":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-expansion",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rm -rf ${PWD%/*}/user?state"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-subfolder-expansion-workdir",
+      "source": "working-folder guard, review round 2: line continuations, ANSI-C strings, braces and expansions",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"rm -rf ${PWD%/*}/user?state","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-continued-default",
+      "source": "merge hold push reader, review round 2: a push split by a line continuation is judged joined",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git pu\\\nsh origin main"},"cwd":"{work}"},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-continued-default-workdir",
+      "source": "merge hold push reader, review round 2: a push split by a line continuation is judged joined",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git pu\\\nsh origin main","workdir":"{work}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-awk",
+      "source": "working-folder guard, review round 2: braces and variables that name no folder pass deeper in Toolkit's folder (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"awk '{print $1}' notes.txt"},"cwd":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-awk-workdir",
+      "source": "working-folder guard, review round 2: braces and variables that name no folder pass deeper in Toolkit's folder (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"awk '{print $1}' notes.txt","workdir":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-echo-home",
+      "source": "working-folder guard, review round 2: braces and variables that name no folder pass deeper in Toolkit's folder (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo $HOME"},"cwd":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-checkout-echo-home-workdir",
+      "source": "working-folder guard, review round 2: braces and variables that name no folder pass deeper in Toolkit's folder (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"echo $HOME","workdir":"{home}/.ai-agent-toolkit/source/ai-agent-toolkit"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-powershell-script",
+      "source": "working-folder guard, review round 2: a backslash is a folder separator in PowerShell (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"PowerShell","tool_input":{"command":"node current\\repo\\scripts\\toolkit-setup.cjs status"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
     }
   ]
 }
