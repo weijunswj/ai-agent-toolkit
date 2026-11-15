@@ -115,8 +115,8 @@ class GovernanceMaintenance {
     const slug = slugFor(root);
     if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
     const rows = [{ root: path.resolve(root), state, slug }];
-    const ask = this.#ask;
-    this.#ask = async () => 'yes';
+    const confirm = this.#confirm;
+    this.#confirm = async () => true;
     try {
       const rulesets = [...await this.#offerRulesets(rows), ...await this.#offerStateRulesets(rows)];
       const protections = await this.#offerProtection(rows);
@@ -143,7 +143,7 @@ class GovernanceMaintenance {
       // Security files written into this working tree still need a pull request; the result says so.
       const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
       return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, files };
-    } finally { this.#ask = ask; }
+    } finally { this.#confirm = confirm; }
   }
 
   // Where default-branch protection ended after the finish's write. A binding with no required checks

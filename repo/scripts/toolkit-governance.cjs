@@ -320,7 +320,7 @@ class ToolkitGovernanceCli {
     let said = '';
     const out = { write: text => { said += text; return true; } };
     const outcome = await new GovernanceMaintenance({
-      stdout: out, ask: async () => '', interactive: true, registryOptions: this.#registryOptions,
+      stdout: out, confirm: async () => false, interactive: true, registryOptions: this.#registryOptions,
       rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
       protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
       securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
