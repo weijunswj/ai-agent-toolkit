@@ -165,6 +165,8 @@ test('a failed step stops with what was made, and answering again reuses it inst
   assert.equal(failed.code, 2);
   assert.match(failed.out, /The parent issue could not be opened \(gh-request-failed\)\. No pull request was prepared\./);
   assert.match(failed.out, /Already made, and reused when you answer again: private evidence store toolkit-test-fixture\/TRANSPORT-fresh\./);
+  assert.match(failed.out, /^Once the cause is fixed, type toolkit governance and answer again\.$/m);
+  assert.doesNotMatch(failed.out, /Show the bank/, 'the failure never tells an agent to show the bank');
   assert.equal(failed.published.length, 0);
 
   const retry = fakeGitHub({ repos: github.world.repos });
@@ -283,5 +285,5 @@ test('the bank reads the open governance pull requests again: one closed outside
   const open = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], opened: [PROPOSAL] });
   assert.equal(open.code, 0, open.err + open.out);
   assert.equal(open.published.length, 0, 'never a second one');
-  assert.match(open.out, /^A governance pull request is already open, so no second one was prepared: https:\/\/github\.com\/toolkit-test-fixture\/fresh\/pull\/4 \(turns governance on\)\. Merge it, or close it and answer again\. Nothing was written\.$/m);
+  assert.match(open.out, /^A governance pull request is already open, so no second one was prepared: https:\/\/github\.com\/toolkit-test-fixture\/fresh\/pull\/4 \(turns governance on\)\. Merge it, or close it and type toolkit governance to answer again\. Nothing was written, and the rest of this answer was not used\.$/m);
 });

@@ -34,7 +34,9 @@ test('the owner\'s next own message after a bank gets one ticket, bound to that 
   assert.equal(reply.action, 'pass');
   assert.match(reply.context, /first since governance bank ABCD-EFGH-JKMN-PQRS was shown or Toolkit asked them to reply again/);
   // Toolkit checks the reply, so the agent never asks again in its own words or shows the bank again.
-  assert.match(reply.context, /a bare yes, an unknown row, two choices for one row, or explain 1\.4/);
+  // Only a reply whose rows and choices are plain is put in form: a bare yes is sent as typed, never
+  // turned into all recommended.
+  assert.match(reply.context, /only where its rows and choices are plain \(all recommended, or changes such as 1\.2=B in any words\) put it in that form\. Send anything else exactly as typed \(a bare yes or ok, an unknown row, two choices for one row, explain 1\.4, anything unclear\)/);
   assert.match(reply.context, /Never show the bank again yourself/);
   assert.doesNotMatch(reply.context, /run `setup` again|show the bank before|ask one short question/);
   assert.ok(reply.context.includes(`node "${SCRIPT}" setup --answers "${REFERENCE}: ANSWER" --ticket `));

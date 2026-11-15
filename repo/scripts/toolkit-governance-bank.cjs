@@ -342,7 +342,7 @@ function selectionsOf(parsed, specs) {
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
   const parsed = bank.parseConciseQuestionBankAnswer(text, specs, { requireBankReference, label: 'Governance' });
-  if (!parsed) throw new Error('Governance question bank answer was not read: reply with all recommended or only your changes, such as 1.2=B.');
+  if (!parsed) throw new Error('Governance question bank answer was not read.');
   bank.assertQuestionBankAnswerBinding(parsed, specs, 'Governance');
   const chosen = selectionsOf(parsed, specs);
   const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
@@ -492,7 +492,7 @@ class BankTickets {
 function bankTicketContext(entry, ticket) {
   return [
     `Toolkit governance: the user's message above is their first since governance bank ${entry.bank_reference} was shown or Toolkit asked them to reply again. It may answer it, or be ordinary work. Read what they mean first.`,
-    `- If it may answer the bank in any way (all recommended, changes such as 1.2=B in any words, a bare yes, an unknown row, two choices for one row, or explain 1.4), put it in that form where the meaning is plain, else keep their words without quotes, $, % or backticks. Tell them "Sending: <answer> (bank ${entry.bank_reference})" and run exactly this once, with it in place of ANSWER:`,
+    `- If it may answer the bank in any way: only where its rows and choices are plain (all recommended, or changes such as 1.2=B in any words) put it in that form. Send anything else exactly as typed (a bare yes or ok, an unknown row, two choices for one row, explain 1.4, anything unclear), leaving out only quotes, $, % and backticks. Tell them "Sending: <answer> (bank ${entry.bank_reference})" and run exactly this once, with it in place of ANSWER:`,
     `  node "${script()}" setup --answers "${entry.bank_reference}: ANSWER" --ticket ${ticket}`,
     '- Toolkit checks it and prints what was wrong or what it did; do what its Agents line says. Never show the bank again yourself and never ask them to reply in another form.',
     '- If it is clearly about something else, record nothing and carry on.',

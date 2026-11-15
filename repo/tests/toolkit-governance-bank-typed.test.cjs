@@ -137,7 +137,7 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
   const ctx = fixture(t);
   const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
   for (const [answer, line] of [
-    ['yes please', /^Governance question bank answer was not read: reply with all recommended or only your changes, such as 1\.2=B\. Nothing was written\.$/m],
+    ['yes please', /^Governance question bank answer was not read\. Nothing was written\.$/m],
     ['1.12=A', /^Governance question bank answer references unavailable question 1\.12\. Nothing was written\.$/m],
     ['1.5=A', /^1\.5 Evidence store has nothing to answer here\. Nothing was written\.$/m],
     ['explain 1.12', /^This bank has no row 1\.12\.$/m],
@@ -146,6 +146,7 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
     assert.equal(wrong.code, 0, `${answer}: waiting for the owner is not a failure`);
     assert.match(wrong.out, line, answer);
     assert.match(wrong.out, /^Reply again with all recommended or only your changes, such as 1\.2=B\.$/m);
+    assert.equal(wrong.out.match(/only your changes/g).length, 1, `${answer}: the reply instruction is said once`);
     noBank(wrong.out);
     agentsLast(wrong.out);
     assert.match(wrong.out, /post no card, and never show the bank again unless the owner types toolkit governance/);

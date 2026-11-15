@@ -624,7 +624,7 @@ class ToolkitGovernanceCli {
       // A governance pull request is already open: it is the one to merge or close, never a second.
       const open = this.#proposals.pending(this.#cwd)?.proposals || [];
       this.#print(false, {}, [open.length
-        ? `A governance pull request is already open, so no second one was prepared: ${open.map(item => `${item.url} (turns governance ${item.answer === 'yes' ? 'on' : 'off'})`).join(', ')}. Merge it, or close it and answer again. Nothing was written.`
+        ? `A governance pull request is already open, so no second one was prepared: ${open.map(item => `${item.url} (turns governance ${item.answer === 'yes' ? 'on' : 'off'})`).join(', ')}. Merge it, or close it and type toolkit governance to answer again. Nothing was written, and the rest of this answer was not used.`
         : `${String(found.reason).replace(/^Toolkit: /, '')} Nothing was written.`]);
       return open.length ? 0 : 2;
     }
@@ -746,7 +746,7 @@ class ToolkitGovernanceCli {
       if (!(error instanceof adopt.AdoptError)) throw error;
       this.#print(false, {}, [`${error.message} No pull request was prepared.`,
         error.made.length ? `Already made, and reused when you answer again: ${error.made.join(', ')}.` : 'Nothing was made on GitHub.',
-        'Show the bank again with toolkit governance and answer it once the cause is fixed.']);
+        'Once the cause is fixed, type toolkit governance and answer again.']);
       return 2;
     }
     const lines = [...adopted.lines];
@@ -862,9 +862,6 @@ function switchText(mergedText, parsed, changes) {
 
 // The owner's governance App setup command (it refuses under an agent).
 const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs');
-
-// Command output can sit folded away in the app, so the agent repeats the command in its reply. Only
-// the owner runs it (toolkit-permissions-apply.cjs refuses under an agent).
 
 // This app's Toolkit permission lines, read from the settings files the blocks name: how many are
 // missing or stale, and the owner's one command that brings them up to date or takes them out. Only
