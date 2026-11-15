@@ -48,6 +48,7 @@ Last reviewed against `main` `51c6bbe`.
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Shell session check (two booleans, no authority) | `repo/scripts/toolkit-session-shell-check.cjs`; meaning and installed-shell qualification in the [host contract](docs/HOST-CONTRACT.md#check-what-a-shell-received) |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
+| Usage report: token and tool counts per session from Claude Code and Codex transcripts, holding no transcript text | `repo/scripts/toolkit-usage-report.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs`, `repo/scripts/sync-controller-pages.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Plain-text check | Portable check `skills/secure-ci-cd/scripts/plain-text-check.cjs` and installer `skills/secure-ci-cd/scripts/install-plain-text-check.cjs`; Toolkit runs it through `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`) with settings `.github/plain-text.json` and baseline `repo/contracts/plain-references/baseline.json` |

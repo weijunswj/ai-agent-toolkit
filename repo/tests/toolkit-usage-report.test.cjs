@@ -100,12 +100,15 @@ function replyLines({ id, requestId, timestamp, model = 'claude-opus-5-5', block
   }));
 }
 
+// The opening message as a Projects thread receives it: the project context, the host's own
+// initiator line, then the coordinator's relay. The thread title comes in the next message.
 function relayPrompt(gateLine) {
   return [
+    TEXT.context,
     '<wake reason="spawn" current-time="2026-11-15T16:50:41Z">',
     '  <project id="chan_x" name="P" type="project">',
     '    <thread ts="cmsg_a">',
-    '      <message trigger="true" from="agent" trust="relay" role="initiator" id="cmsg_a">Build the LEAKMARK-title thing</message>',
+    '      <message trigger="true" from="system" trust="principal" role="initiator">You are a thread session; a weekly LEAKMARK-system line</message>',
     '    </thread>',
     '  </project>',
     '</wake>',
@@ -119,12 +122,24 @@ function relayPrompt(gateLine) {
   ].join('\n');
 }
 
+function titleWake(title) {
+  return [
+    '<wake reason="project-activity" current-time="2026-11-15T16:50:41Z">',
+    '  <project id="chan_x" name="P" type="project">',
+    '    <thread ts="cmsg_a">',
+    `      <message trigger="true" from="agent" trust="relay" role="initiator" author-id="cse_x" id="cmsg_a">${title}</message>`,
+    '    </thread>',
+    '  </project>',
+    '</wake>',
+  ].join('\n');
+}
+
 function claudeFixture(dir) {
   const main = path.join(dir, 'claude', `${SESSION}.jsonl`);
   writeLines(main, [
     { type: 'queue-operation', operation: 'enqueue', sessionId: SESSION, timestamp: '2026-11-15T10:00:00.000Z', content: TEXT.prompt },
-    userLine('u1', '2026-11-15T10:00:00.100Z', TEXT.context),
-    userLine('u2', '2026-11-15T10:00:00.200Z', relayPrompt('Gate: G1')),
+    { ...userLine('u1', '2026-11-15T10:00:00.100Z', relayPrompt('Gate: G1')), isMeta: true },
+    userLine('u2', '2026-11-15T10:00:00.200Z', titleWake('Run the LEAKMARK-title daily merge train')),
     // Reply 1: three lines, one per block; the first line was written before output finished.
     ...replyLines({
       id: 'msg_01', requestId: 'req_01', timestamp: '2026-11-15T10:00:05.000Z', uuidBase: 'a1',
@@ -310,18 +325,21 @@ test('a secret-shaped string bound for the report refuses the whole report', () 
 
 test('run type: table of title, gate line and override cases', () => {
   const { classifyRunType } = require(SCRIPT);
-  const titled = (title) => [`<wake reason="spawn">\n<thread ts="x">\n<message trigger="true" from="agent" role="initiator" id="x">${title}</message>\n</thread>\n</wake>`];
+  const titled = (title) => [titleWake(title)];
   const rows = [
-    { name: 'relay gate G0', texts: [TEXT.context, relayPrompt('Gate: G0')], want: 'g0' },
-    { name: 'relay gate G2 beats a train title', texts: [titled('Review train 48 release').concat(relayPrompt('Gate: G2')).join('\n')], want: 'g2' },
+    { name: 'relay gate G0', texts: [relayPrompt('Gate: G0')], want: 'g0' },
+    { name: 'relay gate G2 beats a train title', texts: [relayPrompt('Gate: G2'), titleWake('Review train 48 release')], want: 'g2' },
     { name: 'plain prompt opening with a gate line', texts: [`\n  Gate: G1\nRoute: x\n${TEXT.prompt}`], want: 'g1' },
     { name: 'gate line not first in a plain prompt', texts: [`${TEXT.prompt}\nGate: G1`], want: 'other' },
     { name: 'gate words only in a memory note', texts: ['Brief MUST start with `Gate: G0`'], want: 'other' },
+    { name: 'relay without a gate line falls to the title', texts: [relayPrompt('Route only'), titleWake('Hourly reconcile run')], want: 'hourly' },
     { name: 'unknown gate', texts: [relayPrompt('Gate: G7')], want: 'other' },
+    { name: 'host initiator line is not the title', texts: [relayPrompt('Route only')], want: 'other' },
     { name: 'hourly title', texts: titled('Hourly reconcile run'), want: 'hourly' },
     { name: 'daily title', texts: titled('Daily check-in'), want: 'daily' },
     { name: 'weekly title', texts: titled('Add weekly repo health loop'), want: 'weekly' },
     { name: 'train title', texts: titled('Run next merge train'), want: 'train' },
+    { name: 'plain title', texts: titled('Build #1075 usage reader slice 1'), want: 'other' },
     { name: 'schedule words outside the title', texts: [TEXT.context], want: 'other' },
     { name: 'no text', texts: [], want: 'other' },
   ];
