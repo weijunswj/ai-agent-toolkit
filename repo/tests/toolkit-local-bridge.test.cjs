@@ -2652,11 +2652,21 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
       const message = formatAgentRulesPreflight(direct);
       assert.equal(message.split('\n').length, 1);
       assert.doesNotMatch(message, NEVER_HALTING);
-      // The installed Toolkit delivers the governed rules, so a copy in a repository is a leftover to
-      // remove, never one to refresh.
+      // A copy is a leftover, never one to refresh. Governance is not on here, so the note names the
+      // leftover scan, never the cleanup command (which refuses here), and asks nothing of this task.
       if (fixture.name === 'stale managed block') {
-        assert.match(message, /still carries Toolkit instruction copies \(AGENTS\.md\) that the installed Toolkit now delivers/);
-        assert.match(message, /next step: remove them in one pull request \(toolkit-governance-cleanup\.cjs shows what goes\) before this task ends/);
+        assert.match(message, /still carries Toolkit instruction copies \(AGENTS\.md\) from an older setup\. Governance is not on here/);
+        assert.match(message, /toolkit-leftover-files\.cjs scan\) lists them, and removing them is the owner's choice; nothing is due in this task/);
+        assert.doesNotMatch(message, /toolkit-governance-cleanup|before this task ends/);
+        // Where governance is on, the note names the owner's Clean up answer and still asks nothing of
+        // this task, matching the bank's Keep current recommendation.
+        const governed = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true }));
+        assert.match(governed, /\(AGENTS\.md\) that the installed Toolkit now delivers itself\. Removing them is the owner's choice: `refresh governance` asks about them/);
+        assert.match(governed, /only a Clean up answer opens the one cleanup pull request; nothing is due in this task/);
+        // The fixture has no plain-text check, which a governed repository carries: that part is due.
+        assert.match(governed, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from/);
+        assert.doesNotMatch(governed, /broken Toolkit markers|toolkit-governance-cleanup/);
+        assert.doesNotMatch(governed, NEVER_HALTING);
       } else assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
       assert.doesNotMatch(message, /are older|refresh them with repository-agent-rules/);
       assert.match(message, /No files were changed/);
