@@ -138,3 +138,62 @@ test('a catch-up whose main clashes leaves the bumped train exactly as it was', 
   assert.equal(f.git('status', '--porcelain'), '');
   assert.equal(JSON.parse(fs.readFileSync(firstOut, 'utf8')).replaced_bumps, undefined, 'nothing recorded');
 });
+
+test('verify refuses a bumped train whose main moved without a catch-up: the last bump counts from today\'s main', t => {
+  const { f, second, firstOut } = twoTrains(t);
+  land(f, second.head);
+  const stale = train.run(['verify', '--manifest', firstOut, '--head', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts);
+  assert.equal(stale.ok, false);
+  assert.ok(stale.problems.some(problem => /differs from a fresh run of the bump command/.test(problem)), stale.problems.join('\n'));
+});
+
+// A member that also lands on main by another route while its train is held, and the train then
+// catches up with that main: the train must never revert that member's boarding.
+function landedElsewhere(t, { stacked = false } = {}) {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const three = f.branch('pr-3', { 'x.txt': 'x\n' });
+  const out = path.join(f.root, 'held.json');
+  let running = null;
+  if (stacked) {
+    running = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }, 'running-in.json'), '--branch', 'toolkit-train/running', '--main', 'main', '--out', path.join(f.root, 'running.json')], f.repo, f.opts);
+    assert.equal(running.ok, true, JSON.stringify(running));
+  }
+  const members = stacked ? [f.member(2, two), f.member(3, three)] : [f.member(1, one), f.member(3, three)];
+  const held = train.run(['build', '--manifest', f.manifestFile({ members }, 'held-in.json'), '--branch', 'toolkit-train/held', '--main', 'main', ...(stacked ? ['--onto', running.head] : []), '--out', out], f.repo, f.opts);
+  assert.equal(held.ok, true, JSON.stringify(held));
+  // #3 merges alone while the held train waits; then (stacked) the running train lands.
+  land(f, three);
+  if (stacked) land(f, running.head);
+  f.git('switch', '--quiet', 'toolkit-train/held');
+  const caught = train.catchup(f.repo, JSON.parse(fs.readFileSync(out, 'utf8')), { main: 'main', out });
+  assert.equal(caught.ok, true, JSON.stringify(caught));
+  return { f, out, three, caught };
+}
+
+for (const stacked of [false, true]) {
+  test(`after catchup takes in a main that holds a member, eject refuses it and land names the safe step (${stacked ? 'stacked' : 'side by side'})`, t => {
+    const { f, out, three, caught } = landedElsewhere(t, { stacked });
+    const refused = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'landed alone', '--main', 'main'], f.repo, f.opts);
+    assert.equal(refused.ok, false);
+    assert.match(refused.problems.join('\n'), /#3 is already on main .* would undo it on main/);
+    assert.equal(f.git('rev-parse', 'HEAD'), caught.head, 'nothing was ejected');
+    const manifest = JSON.parse(fs.readFileSync(out, 'utf8'));
+    const live = path.join(f.root, 'live.json');
+    fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head }, ...Object.fromEntries(manifest.members.map(member => [member.pr, { state: member.pr === 3 ? 'MERGED' : 'OPEN', head: member.head }])) }));
+    const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo, f.opts);
+    assert.equal(landing.ok, false);
+    assert.ok(landing.problems.some(problem => /#3 is MERGED: .* never eject it .* rebuild this train on main/.test(problem)), landing.problems.join('\n'));
+    // A revert of #3's boarding made by hand after the catch-up never verifies, so it cannot land.
+    const board = f.git('rev-list', '--first-parent', '--parents', 'main..HEAD').split('\n').map(line => line.split(' ')).find(([, , second]) => second === three)[0];
+    f.git('revert', '--no-edit', '-m', '1', board);
+    const revert = f.git('rev-parse', 'HEAD');
+    const member = manifest.members.find(entry => entry.pr === 3);
+    const hand = { ...manifest, members: manifest.members.filter(entry => entry.pr !== 3), ejected: [{ pr: 3, head: three, bump: member.bump, reason: 'landed alone', merge: board, reverts: [{ commit: revert, of: board }] }] };
+    const checked = train.verify(f.repo, train.checkManifest(hand), { main: 'main', head: 'HEAD' });
+    assert.equal(checked.ok, false);
+    assert.ok(checked.problems.some(problem => /reverts the boarding of #3 after the train merged a main that already holds it/.test(problem)), checked.problems.join('\n'));
+    assert.equal(f.git('show', 'main:x.txt'), 'x', '#3 is still on main');
+  });
+}

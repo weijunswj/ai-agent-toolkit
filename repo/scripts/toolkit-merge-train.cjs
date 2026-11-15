@@ -439,6 +439,9 @@ function eject(cwd, manifest, options) {
   if (!remaining.length) throw new TrainError(`#${options.pr} is the train's last member: close the train pull request instead`, 1);
   const main = resolve(cwd, options.main, '--main');
   const start = git(cwd, ['rev-parse', 'HEAD']).stdout;
+  if (isAncestor(cwd, member.head, main)) {
+    return { ok: false, pr: options.pr, head: start, main, problems: [`#${member.pr} is already on main (it landed by another route): reverting its boarding would undo it on main when this train lands. Rebuild the train on main from the other members; build drops #${member.pr} as already on the train base`] };
+  }
   const checked = verify(cwd, manifest, { main: options.main, head: start, stackedNoBump: true });
   if (!checked.ok) return { ok: false, pr: options.pr, head: start, main, problems: ['the checkout does not verify as this train, so nothing was ejected', ...checked.problems] };
   const commits = git(cwd, ['rev-list', '--first-parent', '--reverse', '--parents', `${main}..HEAD`]).stdout.split('\n').map(line => line.trim().split(/\s+/));
@@ -582,6 +585,9 @@ function verify(cwd, manifest, options) {
       const target = onBoard.get(revert.of);
       if (target && revert.bumpOnly) { problems.push(`${short} reverts the boarding of #${target.pr}, but it is recorded as a replaced bump`); return; }
       if (target && target !== revert.entry) { problems.push(`${short} reverts the boarding of #${target.pr}, but the revert is recorded for #${revert.entry.pr}`); return; }
+      // Once the train has merged a main that holds the member, reverting its boarding would undo it
+      // on main when the train lands.
+      if (target && isAncestor(cwd, target.head, base)) { problems.push(`${short} reverts the boarding of #${target.pr} after the train merged a main that already holds it: landing would undo #${target.pr} on main; rebuild the train on main without it`); return; }
       if (!target && !plain.includes(where)) { problems.push(`${short} reverts ${revert.of.slice(0, 12)}, which is neither a boarding merge nor a bump`); return; }
       reverted.add(revert.of);
       onBoard.delete(revert.of);
@@ -591,11 +597,13 @@ function verify(cwd, manifest, options) {
       return;
     }
     plain.push(index);
-    // A bump is made at the level of the members on board at that point, from the version of the
-    // main commit the train had merged then (or of today's main, as eject bumps).
+    // A bump is made at the level of the members on board at that point. The last one must count
+    // from today's main, so a train whose main moved without a catch-up never verifies; an earlier,
+    // replaced bump counts from the main commit the train had merged then (or today's, as eject bumps).
     const atLevel = trainLevel([...onBoard.values()]);
-    let reason = reproducesBump(cwd, manifest, commit, parents[0], atLevel, base);
-    if (reason && base !== main) reason = reproducesBump(cwd, manifest, commit, parents[0], atLevel, main);
+    const from = index === commits.length - 1 ? main : base;
+    let reason = reproducesBump(cwd, manifest, commit, parents[0], atLevel, from);
+    if (reason && from !== main) reason = reproducesBump(cwd, manifest, commit, parents[0], atLevel, main);
     if (reason) problems.push(`${short}: ${reason}`);
   });
   const last = commits.length - 1;
@@ -745,7 +753,8 @@ function land(cwd, manifest, options) {
   if (train.head !== options.head) problems.push(`the train pull request head is ${String(train.head).slice(0, 12)}, not ${options.head.slice(0, 12)}`);
   for (const member of manifest.members) {
     const facts = livePr(manifest.repository, member.pr, options.live);
-    if (facts.state !== 'OPEN') problems.push(`#${member.pr} is ${facts.state}`);
+    if (facts.state === 'MERGED') problems.push(`#${member.pr} is MERGED: it landed by another route, so never eject it (its revert would undo it on main); rebuild this train on main from the other members`);
+    else if (facts.state !== 'OPEN') problems.push(`#${member.pr} is ${facts.state}`);
     if (facts.head !== member.head) problems.push(`#${member.pr} moved to ${String(facts.head).slice(0, 12)} after boarding: eject it until its review passes the new head`);
     if (member.tier === 'RISKY' && !member.owner_ok) problems.push(`#${member.pr} is RISKY and has no owner merge OK recorded`);
   }
