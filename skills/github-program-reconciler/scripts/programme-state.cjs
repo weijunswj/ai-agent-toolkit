@@ -1048,7 +1048,7 @@ function validateBinding(binding) {
     if (ciShards !== undefined) check(errors, v2 && isObject(ciShards) && Object.keys(ciShards).every(key => ['answer', 'offered_at'].includes(key)) && ['yes', 'not-now', 'never'].includes(ciShards.answer) && optional(ciShards.offered_at, value => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value)), 'ci_shards may hold only answer (yes, not-now or never) and offered_at (a date and time), in a version 2 binding');
     // The oldest Toolkit release that may read this binding (a cleaned repository needs the installed
     // Toolkit to give sessions its governed rules). toolkit-governance-state.cjs compares it.
-    check(errors, optional(binding.min_toolkit, value => v2 && typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value)), 'min_toolkit must be a version such as 3.127.0, in a version 2 binding');
+    check(errors, optional(binding.min_toolkit, value => v2 && typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value)), 'min_toolkit must be a Toolkit version written as three whole numbers joined by dots, in a version 2 binding');
     // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
