@@ -4,7 +4,7 @@ Installed by AI Agent Toolkit setup; applies in every folder. Work execution-fir
 
 ## Precedence And Safety Floor
 
-Follow, in order: the user's current request and their own instructions (custom instructions, preferences); the repository's instructions (`AGENTS.md`, `CLAUDE.md` or equivalent, with any Toolkit-governed block) and what they point to; these rules; relevant skills or plugins; best practice. Where repository instructions conflict with these rules, the repository wins on conventions and workflow. Report material conflicts.
+Follow, in order: the user's current request and their own instructions (custom instructions, preferences); the repository's instructions (`AGENTS.md`, `CLAUDE.md` or equivalent) and what they point to, plus the Toolkit-governed rules where ENABLED (from session start, else Toolkit's `toolkit-governed-rules.md`); these rules; relevant skills or plugins; best practice. Where repository instructions conflict with these rules, the repository wins on conventions and workflow. Report material conflicts.
 
 If the repository's `AGENTS.md` is not already in your instructions, read it, and any nested `AGENTS.md` covering your files, before starting.
 
@@ -20,7 +20,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 ## Entry Routing
 
 - **Ordinary task** (documents, research, questions, code examples), even when the working folder is a Toolkit repository (unless held): do it directly. No G0/G1/G2, issue records, controller reads or GitHub writes.
-- **Repository without a Toolkit-governed block**: these rules, Coding Gates included, plus the repository's own. Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance (`repository-agent-rules`); offer that only when the user wants it. GitHub access is transport only; never merge unless the user says so.
+- **Repository not ENABLED**: these rules, Coding Gates included, plus the repository's own. Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance (`repository-agent-rules`); offer that only when the user wants it. GitHub access is transport only; never merge unless the user says so.
 - **Substantial software project with no repository yet:** when a repository and the G0/G1/G2 lifecycle would clearly help, recommend them once; if the user declines, carry on as an ordinary task.
 - **Governance state** (`toolkit-governance.cjs status`): only origin's default-branch programme file decides GitHub governance on/off on every computer. Global rules and coding gates always apply. No Git, non-GitHub, programme-bound stores and ignored .tmp clones: off automatically. Undecided GitHub holds for yes/no/later, except verified read-only: continue. Yes opens the governance bank, whose script makes the one setup PR (build nothing by hand); no prepares an off PR; ask the owner to merge it now. Later asks next chat. Local answers and proposals grant no authority. Unreadable GitHub: continue with a plain note, no governance effects or standing task auto-merge.
 - **Controller role:** inactive unless the user explicitly appoints this session controller for a named repository. A session started by another agent or given a role brief (G0, G1, G2, reviewer, helper) is an executor even if an appointment is visible: follow the brief and repository rules, keep the role, and read only the `CONTROLLER.md` clauses the task needs; if unsure, act as executor and ask. On appointment, in a new session or after lost context, read and bind `repo/CONTROLLER.md` from `weijunswj/ai-agent-toolkit` `main`, never remembered governance. Before each later launch or authority transition, reread it only if its revision changed; while it is unreadable, hold controller actions.
@@ -113,7 +113,7 @@ All development aims at these; repository rules may add, never relax:
 
 ## Scope And Hygiene
 
-Before editing, read the playbook index (e.g. `docs/agent-playbooks/INDEX.md`) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks. Inspect targets; broaden scans only if targeted evidence falls short.
+Before editing, read the `toolkit-playbooks` skill index (or the repository's own) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed rules ask. Inspect targets; broaden scans only if targeted evidence falls short.
 
 Keep the diff narrow and in style. Change order: no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed. Never weaken validation, schemas, guardrails, approvals or error handling to pass. After editing, run the smallest validation first, fix targeted failures, rerun, and review the diff for unrelated changes.
 
@@ -137,7 +137,7 @@ After requested edits in a git repository with a remote, unless the user asked f
 
 After a merge, fast-forward the local default-branch checkout only when it is on that branch and clean, else skip and say why. Never reset or force. Then offer to delete branches of closed unmerged PRs (not default, protected or in use).
 
-Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes; ENABLED repositories add the governed block's issue rules.
+Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes; ENABLED repositories add the governed rules' issue rules.
 
 ## Communication
 

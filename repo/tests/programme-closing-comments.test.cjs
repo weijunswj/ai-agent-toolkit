@@ -167,9 +167,9 @@ test('closing schema, diagnostics and documentation route describe the new comma
   parent.attention=state.foldAttention([],{source:'reconcile',complete:true,now:new Date(START).toISOString(),seen:[{code:'CLOSING_COMMENT_MISSING',kind:'pr',issue:20}]});
   assert.equal(parent.attention.length,1); assert.equal(validate(parent),true,JSON.stringify(validate.errors)); assert.deepEqual(state.validateParent(parent),[]);
   delete parent.attention[0].kind; assert.equal(validate(parent),false); assert.ok(state.validateParent(parent).length);
-  const doc=fs.readFileSync(path.join(ROOT,'skills/repository-agent-rules/repo-local/docs/agent-playbooks/closing-comments.md'),'utf8');
+  const doc=fs.readFileSync(path.join(ROOT,'skills/toolkit-playbooks/closing-comments.md'),'utf8');
   for (const phrase of ['closing-comment','stays subscribed','Refs','full SHAs','24 hours','20']) assert.ok(doc.includes(phrase),phrase);
-  for(const rel of ['repo/docs/agent-playbooks/INDEX.md','skills/repository-agent-rules/repo-local/docs/agent-playbooks/INDEX.md','skills/github-program-reconciler/SKILL.md','repo/contracts/claude-projects/web-controller-projects/reference/owner-asks.md'])
+  for(const rel of ['repo/docs/agent-playbooks/INDEX.md','skills/toolkit-playbooks/SKILL.md','skills/github-program-reconciler/SKILL.md','repo/contracts/claude-projects/web-controller-projects/reference/owner-asks.md'])
     assert.match(fs.readFileSync(path.join(ROOT,rel),'utf8'),/closing-comments\.md/);
 });
 test('merged facts use version at merge, linked issue state, verdicts and deleted branch',()=>{

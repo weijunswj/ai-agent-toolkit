@@ -9,7 +9,8 @@ const leftovers = require('../scripts/toolkit-leftover-files.cjs');
 
 const SCRIPT = require.resolve('../scripts/toolkit-leftover-files.cjs');
 const TEMPLATES = path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
-const template = name => fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
+const PLAYBOOKS = require('../scripts/toolkit-playbooks.cjs').repositoryPlaybooks();
+const template = name => name.startsWith('docs/agent-playbooks/') ? PLAYBOOKS[name.slice('docs/agent-playbooks/'.length)] : fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
 const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(template('AGENTS.managed.template.md'))[0];
 const CHECK = `#!/usr/bin/env node\n// AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED plain-text-check check=3 sha256=0123456789ab\n'use strict';\n`;
 

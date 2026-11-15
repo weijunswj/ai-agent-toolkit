@@ -104,7 +104,8 @@ for (const decision of ['disable', 'enable']) {
         assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
       }
       assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), new RegExp(`^Toolkit governance: ${decision === 'enable' ? 'ENABLED' : 'DISABLED'}`));
-      assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: ctx.options }), /copy/);
+      // The state line itself; an enabled one is followed by the fixed governed rules text.
+      assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: ctx.options }).split('\n\n')[0], /copy/);
       if (type === 'file') assert.equal(fs.readFileSync(placed, 'utf8'), 'not a folder\n');
       else assert.equal(fs.lstatSync(placed).isSymbolicLink(), true, 'the link itself is left in place');
       assert.equal(fs.existsSync(path.join(sibling, 'governance.json')), false);

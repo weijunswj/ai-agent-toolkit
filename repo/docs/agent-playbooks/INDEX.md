@@ -35,25 +35,25 @@ Read: `repo/docs/agent-playbooks/hook-design.md`.
 
 Triggers: a session or subagent switched to a fallback model by a safety classifier, or always-loaded wording that may trigger false safety flags.
 
-Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/model-safety-flags.md`.
+Read: `skills/toolkit-playbooks/model-safety-flags.md`.
 
 ## Match: Programme Decision Traces
 
 Triggers: G0 planning a programme child, governance first enabled on a repository with a programme, or writing a decision comment on a programme issue.
 
-Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md`.
+Read: `skills/toolkit-playbooks/decision-trace.md`.
 
 ## Match: Personal Data In Checks, Fixtures Or Evidence
 
 Triggers: personal or private data in checks, tests, fixtures, queries, logs or evidence, the personal-data guard, or reviewing a change for leaked personal data.
 
-Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/privacy-safe-checks.md`.
+Read: `skills/toolkit-playbooks/privacy-safe-checks.md`.
 
 ## Match: Invariant Models
 
 Triggers: a feature that touches authority, approvals, custody, state machines or host configuration (Codex, Claude Code or other app settings files).
 
-Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/invariant-models.md`.
+Read: `skills/toolkit-playbooks/invariant-models.md`.
 
 ## Docs By Task
 
@@ -124,7 +124,7 @@ Stop before SSHing into a real server, deploying, restarting services, changing 
 
 ## Match: PR Review, CI, Or Merge-Readiness Work
 
-Closing, merging or asking the owner to merge a PR or issue: read [Closing comments](../../../skills/repository-agent-rules/repo-local/docs/agent-playbooks/closing-comments.md).
+Closing, merging or asking the owner to merge a PR or issue: read [Closing comments](../../../skills/toolkit-playbooks/closing-comments.md).
 
 Triggers: PR review, CI status, merge readiness, test failure verification, diff analysis, PR feedback, check runs, workflow logs, or release readiness.
 
@@ -136,7 +136,7 @@ Do not claim CI passed unless checked. Do not do reviews from metadata alone.
 
 Triggers: slow tests or CI, long or background commands, `repo/scripts/run-tests.cjs`, the shard manifest `repo/contracts/ci/test-shards.json`, test jobs in `.github/workflows/validate.yml`, or test time budgets.
 
-Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/fast-tests-and-sharding.md` and the Test Shards section of `repo/docs/VALIDATION-STRATEGY.md`.
+Read: `skills/toolkit-playbooks/fast-tests-and-sharding.md` and the Test Shards section of `repo/docs/VALIDATION-STRATEGY.md`.
 
 ## Match: Project Completion Or Production-Readiness Audit Work
 

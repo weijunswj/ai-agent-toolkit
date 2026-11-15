@@ -116,15 +116,15 @@ class LeftoverScan {
 
   // Playbooks that are still Toolkit's shipped copy. A same-named file that differs may be the owner's.
   #playbooks(root, result) {
-    const folder = path.join(this.#templates, 'docs', 'agent-playbooks');
+    const shipped = require('./toolkit-playbooks.cjs').repositoryPlaybooks();
     // A linked docs or playbook folder is reported once, not once per shipped playbook name.
     const parent = readInside(root, 'docs/agent-playbooks/.');
     if (parent?.skipped === 'it is a symbolic link') { result.unproven.push({ file: 'docs/agent-playbooks', reason: parent.skipped }); return; }
-    for (const name of fs.readdirSync(folder).filter(entry => entry.endsWith('.md')).sort()) {
+    for (const [name, text] of Object.entries(shipped)) {
       const file = `docs/agent-playbooks/${name}`, read = readInside(root, file);
       if (!read) continue;
       if (read.skipped) { result.unproven.push({ file, reason: read.skipped }); continue; }
-      if (unix(read.text) === unix(fs.readFileSync(path.join(folder, name), 'utf8'))) result.files.push({ file, kind: 'file', proof: "same as Toolkit's shipped copy" });
+      if (unix(read.text) === text) result.files.push({ file, kind: 'file', proof: "same as Toolkit's shipped copy" });
       else result.unproven.push({ file, reason: "it differs from Toolkit's shipped copy" });
     }
   }

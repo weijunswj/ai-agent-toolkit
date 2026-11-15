@@ -10,6 +10,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const managedBlock = require('../scripts/toolkit-managed-block.cjs');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -638,14 +639,19 @@ test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) =>
 
 // ---- review findings --------------------------------------------------------------------------------
 
-test('F4: an ENABLED repository without the governed block is drift, however it was enabled', (t) => {
+test('F4: an ENABLED repository needs no governed block, and a block still there is a leftover note', (t) => {
   const ctx = scratch(t);
   const repo = fakeRepo(ctx, 'no-block');
   cache(ctx, repo);
   const state = governance.governanceState(repo, ctx.opts);
   assert.deepEqual([state.state, state.rule, state.materials_complete], ['ENABLED', 'M1', true]);
-  const report = conformance.checkConformance(repo, { ...ctx.opts, offline: true });
-  assert.ok(report.findings.some(entry => entry.id === 'GOVERNED_BLOCK_MISSING'), JSON.stringify(report.findings.map(entry => entry.id)));
+  const ids = () => conformance.checkConformance(repo, { ...ctx.opts, offline: true }).findings;
+  assert.deepEqual(ids().filter(entry => /GOVERNED_BLOCK|MARKERS/.test(entry.id)), []);
+  const rendered = managedBlock.renderBlock({ source: 'repo/contracts/agent-rules/toolkit-governed-rules.md', name: 'TOOLKIT-GOVERNED-RULES', version: '3.8.0', body: '# Rules\n\nOld copy.' });
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), `# Repo\n\n${rendered}\n`);
+  const leftover = ids().filter(entry => /GOVERNED_BLOCK|MARKERS/.test(entry.id));
+  assert.deepEqual(leftover.map(entry => [entry.id, entry.severity]), [['GOVERNED_BLOCK_LEFTOVER', 'info']]);
+  assert.match(leftover[0].message, /remove it by pull request once every app working here runs Toolkit \d+\.\d+\.\d+ or later/);
 });
 
 test('F5: a version 2 binding with an unknown key or a non-string writer prefix is ERROR, never ON', (t) => {
