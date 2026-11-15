@@ -258,9 +258,11 @@ test('governed rules hold only the GitHub governance parts: release lanes, recor
     /order work Now, then Later by priority/,
     /Decision traces:[^\n]*Record each owner decision that changes scope, authority or the plan as one tagged comment[^\n]*other comments need no index entry[^\n]*`SUPERSEDES=<record ID>`/,
     /7-character short SHA[^\n]*Write the full 40-character SHA only in review verdicts, UAT results and merge summaries/,
-    /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen the related one \(same page, script or outcome; once in progress, one follow-up sibling takes later work\), else create a child and attach it as a native sub-issue/,
+    // Review Lows and leftovers fold into their area's open child; a new child per review is what split the parent.
+    /Reuse first:\*\* extend or reopen an existing issue, task or job before adding a new one; Lows and leftovers join their area's open child\./,
+    /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen the one in its area \(same page, script or feature; once in progress, one follow-up sibling takes later work\), else create a child as a native sub-issue/,
     /Programme tracking: the parent shows queue and status; each child and PR shows SHA, release, gate, review and UAT\. Gate ends run `programme\.cjs handover`\./,
-    /A child closes as completed once a merge completes every criterion and any owner UAT passed, any remainder moved to a linked follow-up first: that PR says `Closes #n`, else the controller does\. Use `Refs` for staged, UAT-pending, blocked, partial or follow-up PRs\./,
+    /A child closes as completed once a merge completes every criterion and any owner UAT passed, any remainder moved to its area's open child first: that PR says `Closes #n`, else the controller does\. Use `Refs` for staged, UAT-pending, blocked, partial or follow-up PRs\./,
     /in a Git store the commit is the manifest and a push plus one fetch the read-back/,
     /session folders, side-session notes, scratchpads and temp paths are never custody/,
     /a name or prefix alone grants nothing/,
