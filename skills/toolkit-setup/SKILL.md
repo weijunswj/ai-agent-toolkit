@@ -36,7 +36,7 @@ Write each allowed command exactly as its line shows, one command per call: `nod
 
 ## Evidence store
 
-A store is needed only while GitHub governance is on, and then it must be a separate private GitHub repository under the same owner; with governance off nothing needs one. [How To Use](../../repo/docs/HOW-TO-USE.md#evidence-store) has the table of store kinds.
+A store is needed only while GitHub governance is on, and then it must be a separate private GitHub repository you can write to (turning governance on reuses one only under the same owner); with governance off nothing needs one. [How To Use](../../repo/docs/HOW-TO-USE.md#evidence-store) has the table of store kinds.
 
 For `toolkit store`, run `node "<Toolkit>/repo/scripts/toolkit-store.cjs" <status|sync|save|move|merge-branch|delete-merged-branch> --store <store checkout>` from the governed repository (or name it with `--repo-root`). Every subcommand first checks that the folder is a checkout of the store the merged binding names, on the bound branch, with no push, rewrite or program setting of its own, and that GitHub shows the store private and writable; it writes nothing when a check fails.
 

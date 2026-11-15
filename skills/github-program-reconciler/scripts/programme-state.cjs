@@ -1034,11 +1034,6 @@ function assertValid(kind, doc) {
   return doc;
 }
 
-// A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
-// `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
-// the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
-// (parent_issue, record_prefix, writer_prefix) taken from its first parent; a disabled one carries
-// only its identity and is never used for programme records.
 // The one refusal for a missing or unsupported store kind: what a store must be and what works
 // without one. Only a plain kind word is echoed, never any other value from the binding.
 const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
@@ -1049,6 +1044,11 @@ function storeKindProblem(store, enabled) {
     : `${kind} is not supported: a store block must name a private GitHub repository (store.kind "github"). Governance is off here, so it needs no store: remove the block or make it a github store.`;
 }
 
+// A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
+// `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
+// the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
+// (parent_issue, record_prefix, writer_prefix) taken from its first parent; a disabled one carries
+// only its identity and is never used for programme records.
 function validateBinding(binding) {
   const errors = [];
   check(errors, isObject(binding), 'binding must be an object');
