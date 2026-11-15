@@ -19,6 +19,14 @@ const REFERENCE_READS = 5;
 // Findings the same pass raised that already say why a page was not redrawn.
 const EXPLAINING_CODES = new Set(['MANAGED_BLOCK_BROKEN', 'PAGE_LAYOUT_HELD', 'BODY_TOO_LARGE', 'BODY_OVER_BUDGET']);
 
+// The state revision a task page was drawn from (the STATUS block's `State revision <n>` line), or
+// null when the page shows none. A page drawn at the stored revision shows the stored state, whatever
+// Toolkit version drew it: an older look is redrawn by the sweep's rotation, and is not drift.
+function drawnRevision(body) {
+  const match = /State revision (\d+) \(issue-\d+\.json\)/.exec(String(body || ''));
+  return match ? Number(match[1]) : null;
+}
+
 // pages: [{ number, block: 'missing' | 'behind' | 'current', planned, explained, holding: [effect kinds] }]
 function pageDrift(pages) {
   const findings = [];
@@ -84,4 +92,4 @@ function stampNextAction(previous, next, now) {
   return next;
 }
 
-module.exports = Object.freeze({ DRIFT_CODES, REFERENCE_READS, EXPLAINING_CODES, pageDrift, prNavDrift, referenceCandidates, referenceDrift, nextActionDrift, stampNextAction });
+module.exports = Object.freeze({ drawnRevision, DRIFT_CODES, REFERENCE_READS, EXPLAINING_CODES, pageDrift, prNavDrift, referenceCandidates, referenceDrift, nextActionDrift, stampNextAction });

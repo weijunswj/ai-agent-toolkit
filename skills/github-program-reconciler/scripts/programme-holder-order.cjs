@@ -19,7 +19,8 @@ const MAX_HOURS = 24;
 const LOG_LIMIT = 50;
 const PREFIX_FLAG = 'prefix';
 // The writes an order may carry, each with its required and optional fields. Never: claim, a
-// takeover, init-parent, migrate-state; refresh needs no order, anyone runs it.
+// takeover, init-parent, migrate-state; refresh needs no order, anyone runs it. `mark-archive` is
+// the one write to a page's hand-written text (programme-page-archive markArchive).
 const OPS = Object.freeze({
   ack: { required: ['finding', 'next'], optional: ['due'] },
   dispose: { required: ['finding', 'reason'], optional: [] },
@@ -29,7 +30,12 @@ const OPS = Object.freeze({
   interrupt: { required: ['issue', 'reason'], optional: [] },
   assign: { required: ['issue', 'role', 'assignment'], optional: ['supersede', 'reason'] },
   return: { required: ['issue'], optional: ['record', 'assignment', 'at-head', 'consume', 'verdict'] },
+  'mark-archive': { required: ['issue'], optional: ['before', 'remove'] },
 });
+// A `mark-archive` write names whole lines of the page: the line to put `## Archive` above, or the
+// link lines to remove.
+const LINE_LIMIT = 4000;
+const REMOVE_LIMIT = 200;
 const KEYS = ['schema', 'order_id', 'parent_issue', 'holder_session', 'epoch', 'expires_at', 'record', 'ops'];
 
 const refuse = message => new ProgrammeError('ORDER_INVALID', `The holder order is invalid: ${message}. Nothing was written; ask the controller for a corrected order.`);
@@ -67,6 +73,13 @@ function checkOp(op, at) {
     if (['ack', 'dispose'].includes(op.command) && op[key] !== undefined && op[key].length > ATTENTION_NOTE_LIMIT) throw refuse(`write ${at + 1} (${op.command}) needs ${key} of at most ${ATTENTION_NOTE_LIMIT} characters`);
   }
   if (op.due !== undefined && !DUE_TIME.test(op.due)) throw refuse(`write ${at + 1} (ack) needs due as an ISO 8601 date and time with Z or an offset`);
+  if (op.command === 'mark-archive') {
+    if ((op.before === undefined) === (op.remove === undefined)) throw refuse(`write ${at + 1} (mark-archive) needs exactly one of before or remove`);
+    const line = value => typeof value === 'string' && value.trim() !== '' && value.length <= LINE_LIMIT && !/[\r\n]/.test(value);
+    if (op.before !== undefined && !line(op.before)) throw refuse(`write ${at + 1} (mark-archive) needs before as one line of at most ${LINE_LIMIT} characters`);
+    if (op.remove !== undefined && !(Array.isArray(op.remove) && op.remove.length > 0 && op.remove.length <= REMOVE_LIMIT && op.remove.every(line)))
+      throw refuse(`write ${at + 1} (mark-archive) needs remove as a list of 1 to ${REMOVE_LIMIT} lines`);
+  }
   if (op.command === 'return' && Boolean(op.record) === Boolean(op.consume)) throw refuse(`write ${at + 1} (return) needs exactly one of record or consume`);
   if (op.command === 'return' && op.consume && !op.verdict) throw refuse(`write ${at + 1} (return consume) needs a verdict`);
   return op;

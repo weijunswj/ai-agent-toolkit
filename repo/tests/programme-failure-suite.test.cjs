@@ -200,7 +200,10 @@ test('two or more comments on one page: one pass posts both and writes the page,
   assert.equal(f.github.issues.get(421).updated_at > f.archives()[0].created_at, true, 'the body write came after the posts');
 });
 
-test('two or more comments on one page: a person\'s comment between the posts still holds the page, and the next pass finishes', () => {
+// A busy parent gets comments all the time (decision records, merge records and edits to them), so
+// a comment that lands while a pass runs never holds the write: it does not change the page's text,
+// and the next pass picks up anything it changes. Only a change to the body itself holds the page.
+test('two or more comments on one page: a person\'s comment between the posts does not hold the page', () => {
   const f = twoComments();
   let posts = 0;
   f.github.intercept(call => {
@@ -209,13 +212,13 @@ test('two or more comments on one page: a person\'s comment between the posts st
       f.github.addComment(421, { body: 'A person comments mid-run.', login: 'someone-else', createdAt: new Date(f.github.clock + 5 * 60 * 1000).toISOString() });
     }
   });
-  const held = f.reconciler.run({ apply: true });
+  const result = f.reconciler.run({ apply: true });
   f.github.hooks = [];
-  assert.deepEqual(held.holds.map(hold => hold.code), ['BODY_MOVED']);
-  assert.ok(!f.linked(), 'the page was not written');
+  assert.deepEqual(result.holds, []);
+  assert.equal(f.archives().length, 2);
+  assert.ok(f.linked(), 'the page was written in the same pass');
   assert.deepEqual(f.reconciler.run({ apply: true }).holds, []);
-  assert.equal(f.archives().length, 2, 'the pending archive is reused, never posted twice');
-  assert.ok(f.linked());
+  assert.equal(f.archives().length, 2, 'the archive comments are never posted twice');
 });
 
 test('two or more comments on one page: a body edit between the posts holds the page, and the next pass keeps the edit', () => {

@@ -4,6 +4,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+// The parent's handover file in the fixture's private store (programme-handover.cjs).
+const HANDOVER = 'https://github.com/example.test/store/blob/main/state/handover/issue-12.md';
 const path = require('node:path');
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
@@ -782,7 +784,7 @@ test('the Agent context comment and moved notes are both listed, the comment fir
   const [entry] = noteEntries(f);
   assert.equal(entry.state, 'moved');
   const link = number => `https://github.com/example.test/app/issues/12#issuecomment-${number}`;
-  assert.equal(context(f), `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${link(id)}) · Notes: [${entry.title}](${link(entry.comment_id)}) · Decisions: \`programme.cjs trace 12\``);
+  assert.equal(context(f), `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${link(id)}) · Handover: [handover file](${HANDOVER}) · Notes: [${entry.title}](${link(entry.comment_id)}) · Decisions: \`programme.cjs trace 12\``);
   assert.equal(f.page().includes('Old background.'), false);
   const writes = f.github.mutations();
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
