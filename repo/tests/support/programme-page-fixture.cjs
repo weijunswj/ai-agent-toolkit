@@ -9,7 +9,8 @@ function pageFixture(state, { count = 0, hand = '# Programme\n\nUnmarked notes.\
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(12, { body: hand });
   const outcomes = Array.from({ length: count }, (_, i) => ({ issue: 100 + i, class: groups[i % groups.length] === 'NOW' || groups[i % groups.length] === 'LATER' ? 'COMMITTED' : groups[i % groups.length],
-    name: `Task ${i}`, description: 'x'.repeat(width), parent: 12, order: count - i }));
+    // The graph shows the name, not the description, so the width rides on the name.
+    name: `Task ${i}${width ? ` ${'x'.repeat(width)}` : ''}`, description: 'x'.repeat(width), parent: 12, order: count - i }));
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => NOW, toolkitVersion: '3.57.0' });
   store.write('parent', 12, state.claimDocument(state.newParent({ repository: github.repository, parentIssue: 12, outcomes }), writer, {}), { previous: null, sha: null });
   const children = new Map(), issues = new Map();
