@@ -519,14 +519,35 @@ test('779 closure matrix: piped data blocks, -c argument order, built iex text a
     ['L4r control: block alone', `Write-Output {${close}}`, NONE],
     ['L4r control: pipe in a later statement', `Write-Output {${close}}; gh pr view 7 | Out-String`, NONE],
     ['L4r control: chain operator', `Write-Output {${close}} || echo failed`, NONE],
+    // Quoted text, comments and an escaped line break stay in the statement; a next line that starts
+    // with | carries the pipeline on in PowerShell 7.
+    ['L4r quoted ||', `Write-Output {${close}} 'a||b' |% Invoke`, AMB_ONLY],
+    ['L4r quoted ;', `Write-Output {${close}} 'a;b' |% Invoke`, AMB_ONLY],
+    ['L4r quoted &', `Write-Output {${close}} "a&b" |% Invoke`, AMB_ONLY],
+    ['L4r block comment', `Write-Output {${close}} <# ; #> |% Invoke`, AMB_ONLY],
+    ['L4r line comment ends the line, next line pipes', `Write-Output {${close}} # a; b\n|% Invoke`, AMB_ONLY],
+    ['L4r backtick continuation', `Write-Output {${close}} \`\n|% Invoke`, AMB_ONLY],
+    ['L4r next line starts with |', `Write-Output {${close}}\n| % Invoke`, AMB_ONLY],
+    ['L4r control: pipe inside a later group', `Write-Output {${close}} (Get-Date | Out-String)`, NONE],
+    ['L4r control: next line is another statement', `Write-Output {${close}}\ngh pr view 7 | Out-String`, NONE],
     // L7: positional parameters of a -c script, in any order or glued, including to the script's own text.
     ['L7 $2 $1', `sh -c '$2 $1' x 'issue close 1 -R example.test/app' gh`, ALL],
     ['L7 $1$2', `sh -c '$1$2' x g 'h issue close 1 -R example.test/app'`, ALL],
     ['L7 ${2}${1}', `sh -c '\${2}\${1}' x 'h issue close 1 -R example.test/app' g`, ALL],
     ['L7 $0', `sh -c '$0 issue close 1 -R example.test/app' gh`, ALL],
     ['L7 glued to script text', `sh -c 'g$1 issue close 1 -R example.test/app' x h`, ALL],
-    ['L7 reordered by set', `bash -c 'set -- "$2" "$1"; "$@"' x 'issue close 1 -R example.test/app' gh`, ALL],
+    ['L7 reordered by set', `bash -c 'set -- $2 $1; $@' x 'issue close 1 -R example.test/app' gh`, ALL],
+    ['L7 reordered by shift', `sh -c 'shift; $1$2 issue close 1 -R example.test/app' x y g h`, ALL],
+    ['L7 control: quoted "$@" keeps each word whole', `bash -c 'set -- "$2" "$1"; "$@"' x 'issue close 1 -R example.test/app' gh`, NONE],
+    ['L7 escaped \\$ in a nested -c script', String.raw`sh -c 'sh -c "\$1\$2 \$3" x "$1" "$2" "$3"' _ g h 'issue close 1 -R example.test/app'`, ALL],
     ['L7 control: echo $1', `sh -c 'echo $1' x hello`, NONE],
+    // Words count only whole: gh inside high or ghost, pr inside priority and api inside a URL are not gh writes.
+    ['L7 control: commit message', `sh -c 'git commit -m "$1"' _ 'Fix high-priority bug in new parser'`, NONE],
+    ['L7 control: echo a sentence', `sh -c 'echo "$1"' _ 'Fix high-priority bug in new parser'`, NONE],
+    ['L7 control: file names', `sh -c 'mv "$1" "$2"' _ ghost.txt project-new.txt`, NONE],
+    ['L7 control: many file names', `bash -c 'wc -l "$@"' _ src/graph.js src/http.js src/process.js a.js b.js c.js d.js e.js`, NONE],
+    ['L7 control: URL', `bash -c 'curl -s "$1"' _ https://ghcr.io/v2/api/tags`, NONE],
+    ['L7 control: word edges', `sh -c 'echo $1$2' x debug hello`, NONE],
     ['L7 control: read-only gh', `sh -c 'echo $1' x 'gh pr view 7'`, NONE],
     // L8: iex of a substitution or a built string, and script blocks created from text.
     ['L8 iex $()', `iex $('${close}')`, AMB_ONLY],
@@ -551,6 +572,12 @@ test('779 closure matrix: piped data blocks, -c argument order, built iex text a
     ['785-L1 H6 noun differs', H6, { EXEC: 'refuse', CXB: 'refuse' }],
     ['785-L1 target differs', target, { EXEC: 'refuse', CXB: 'refuse' }],
     ['785-L1 control: one write, both readings', String.raw`gh pr create --title T --body "Refs #9001 \"quoted\"" -R example.test/app`, { EXEC: 'allow', CXB: 'allow' }],
+    // The key holds what decides closure: API method and fields, and closing references in PR text.
+    ['785-L1 API method and state differ', String.raw`echo \" ; gh api repos/example.test/app/issues/1 ; echo \" ; echo "a\" ; gh api -X PATCH repos/example.test/app/issues/1 -f state=closed ; echo \"b"`, { EXEC: 'refuse', CXB: 'refuse' }],
+    ['785-L1 PR body closing reference differs', String.raw`echo \" ; gh pr create -R example.test/app --title T --body Refs ; echo \" ; echo "a\" ; gh pr create -R example.test/app --title T --body 'Closes #1' ; echo \"b"`, { EXEC: 'refuse', CXB: 'refuse' }],
+    ['785-L1 PR edit body differs', String.raw`echo \" ; gh pr edit 7 -R example.test/app --body Refs ; echo \" ; echo "a\" ; gh pr edit 7 -R example.test/app --body 'Fixes #1' ; echo \"b"`, { EXEC: 'refuse', CXB: 'refuse' }],
+    ['785-L1 control: same close in both readings', String.raw`echo \" ; gh issue close 2 -R example.test/app ; echo \" ; echo "a\" ; gh issue close 2 -R example.test/app ; echo \"b"`, { EXEC: 'judged', CXB: 'judged' }],
+    ['785-L1 control: same API read in both readings', String.raw`echo \" ; gh api repos/example.test/app/issues/1 ; echo \" ; echo "a\" ; gh api repos/example.test/app/issues/1 ; echo \"b"`, { EXEC: 'allow', CXB: 'allow' }],
     ['785-L1 control: write only the judged reading sees', String.raw`echo "a\"b" ; ${close}`, { EXEC: 'judged', CXB: 'judged' }],
   );
   const wrong = [];
@@ -570,5 +597,10 @@ test('779 new refusals hold under hostile suffixes and stay bounded', () => {
   for (const [unit, powershell] of [['echo {gh} | ', true], ["sh -c '$1$2' x g h ", false], ['iex $(gh) ', true]]) {
     const result = hostile.timing(text => { try { closureReader.scriptCommands(text, { powershell }); } catch (error) { assert.match(error.message, /bound exceeded/); } }, size => scanInput(size, unit), SCAN_TIMING);
     assert.ok(result.ok, `${unit}: ${result.message}`);
+  }
+  // One long argument after a -c script, read the way Codex Bash reads it (both readings).
+  for (const [head, unit] of [["sh -c '$1' x '", '"gh"'], ["sh -c '$1' x '", 'gh '], ["sh -c 'g$1 $2' x '", 'h issue close ']]) {
+    const result = hostile.timing(text => { try { closureReader.closureWriteCandidate({ tool_name: 'Bash', tool_input: { command: text } }, { host: 'codex' }); } catch (error) { assert.match(error.message, /bound exceeded|two ways/); } }, size => head + unit.repeat(Math.floor((size - head.length - 1) / unit.length)) + "'", SCAN_TIMING);
+    assert.ok(result.ok, `${head}${unit}: ${result.message}`);
   }
 });
