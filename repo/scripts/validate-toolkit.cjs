@@ -231,6 +231,7 @@ function validateSkills(errors) {
     const frontMatter = parseFrontMatter(readText(skillPath));
     if (!frontMatter?.name || !frontMatter.description) fail(errors, `${skillPath} missing frontmatter name or description`);
     if (frontMatter?.name !== path.posix.basename(skillDir)) fail(errors, `${skillPath} frontmatter name does not match its folder`);
+    if (/[<>]/.test(String(frontMatter?.description || '').replace(/^[>|][+-]?\d*$/, ''))) fail(errors, `${skillPath} description contains angle brackets; claude.ai rejects XML tags in skill descriptions and strips them`);
   }
 }
 

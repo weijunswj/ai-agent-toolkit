@@ -232,7 +232,7 @@ test('the permission row: Update and Remove give the owner one command to run th
   const ctx = fixture(t);
   const update = await answerBank(ctx, 'all recommended', { missing: 3 });
   assert.equal(update.code, 0, update.err);
-  assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*type apply\./);
+  assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
   assert.match(update.out, /^node fixture-apply\.cjs --apply$/m, 'the command is printed on its own line, not indented into a code block');
   assert.match(update.out, /never in a code block of your own making; never run it yourself\./);
   assert.doesNotMatch(update.out, /Paste into|Next step/);

@@ -1896,7 +1896,8 @@ function renderChildBlockBody(child, outcome) {
   const status = outcome ? statusText(outcome, child) : '-';
   const gate = [child.gate?.role, child.gate?.state].filter(Boolean).join(' ');
   const wait = ownerWait(child);
-  // UAT and review show once recorded, marked STALE_HEAD when given at an older head.
+  // UAT and review show once recorded, marked STALE_HEAD when given at an older head. The UAT
+  // segment (` · UAT: <state>`) is read by issue-closure.cjs owedUat: change both together.
   const line = [status, status === 'IN PROGRESS' && gate ? `Gate: ${publicText(gate)}` : null, wait ? `Waiting on you: ${wait}` : null,
     child.uat?.state ? `UAT: ${publicText(uatText(child))}` : null, child.review?.state ? `Review: ${publicText(reviewText(child))}` : null,
     child.next_action ? `Next: ${publicText(child.next_action)}` : null, child.release ? `Release: ${publicText(child.release)}` : null].filter(Boolean).join(' · ');

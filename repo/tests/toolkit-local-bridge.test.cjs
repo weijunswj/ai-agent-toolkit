@@ -2575,11 +2575,21 @@ test('SessionStart notice compares the vendored checks of an ENABLED repository 
       assert.equal(current.status, 'ok', `${label}: a current copy is quiet and the repository's own files are not compared`);
       writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
       const before = snapshotTree(root);
-      // Even with a newer Toolkit on record, the note is about the checks, not about repository rules.
-      const stale = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      // With no newer Toolkit known here, the checks are refreshed from the running copy.
+      const stale = runAgentRulesPreflight({ hook: true, syncSource }, options);
       assert.equal(stale.status, 'needs-attention', label);
+      assert.equal(stale.direction, 'differs', label);
       assert.deepEqual(stale.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
-      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit /, label);
+      assert.match(formatAgentRulesPreflight(stale), /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*next step: refresh them with repository-agent-rules before this task ends\. No files were changed\.$/, label);
+      // With a newer Toolkit on record the copy may be the newer one, so the note says to refresh
+      // Toolkit, never to rewrite the checks from the older running copy.
+      const newerOnRecord = runAgentRulesPreflight({ hook: true, syncSource }, { ...options, state: { bridge_versions_by_source: { [syncSource]: '99.0.0' } } });
+      assert.equal(newerOnRecord.direction, 'newer', label);
+      assert.deepEqual(newerOnRecord.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']], label);
+      const newerMessage = formatAgentRulesPreflight(newerOnRecord);
+      assert.match(newerMessage, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) may come from a newer Toolkit \(99\.0\.0\) than the running copy \(.+\); next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/, label);
+      assert.doesNotMatch(newerMessage, /repository-agent-rules|repository rules/, label);
+      assert.doesNotMatch(newerMessage, NEVER_HALTING, label);
       assert.deepEqual(snapshotTree(root), before, `${label}: read-only`);
       assert.equal(runAgentRulesPreflight({ hook: true, syncSource }, { ...options, governanceEnabled: () => false }).status, 'not-managed', `${label}: not governed and no block is not managed`);
     }
@@ -2667,6 +2677,10 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
         assert.match(governed, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from/);
         assert.doesNotMatch(governed, /broken Toolkit markers|toolkit-governance-cleanup/);
         assert.doesNotMatch(governed, NEVER_HALTING);
+        // With a newer Toolkit on record the checks part says to refresh Toolkit, and the leftover part stays.
+        const newer = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true, state: { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } } }));
+        assert.match(newer, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\)/);
+        assert.match(newer, /next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/);
       } else assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
       assert.doesNotMatch(message, /are older|refresh them with repository-agent-rules/);
       assert.match(message, /No files were changed/);

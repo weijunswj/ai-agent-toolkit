@@ -55,6 +55,12 @@ Triggers: a feature that touches authority, approvals, custody, state machines o
 
 Read: `skills/toolkit-playbooks/invariant-models.md`.
 
+## Match: Owner Terminal Steps
+
+Triggers: writing or changing a step the owner runs in their own terminal (a prompt, a confirmation or its printed lines).
+
+Read: `repo/scripts/owner-terminal.cjs` first; its header holds the rule.
+
 ## Docs By Task
 
 - Agent-instruction changes: `repo/docs/FOR_AI_AGENTS.md` and `repo/docs/SOURCE-OF-TRUTH.md`.

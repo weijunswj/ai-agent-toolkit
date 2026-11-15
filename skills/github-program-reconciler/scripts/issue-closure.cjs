@@ -46,13 +46,17 @@ function closingReferences(text, repository) {
 }
 
 // The UAT a task's generated programme STATE block records as still owed by the owner, or null.
-// Only the block's own `- UAT: <state>; review:` line counts; text elsewhere in the body does not.
-// A hand-made block can only add a refusal, never remove one.
+// Only the block's own UAT counts; text elsewhere in the body does not. The renderer
+// (programme-state.cjs renderChildBlockBody) writes it as one segment of the STATUS line,
+// `... · UAT: <state> · Review: ...`; older pages may still carry the legacy `- UAT: <state>; review:`
+// line. Any owed UAT segment in the block refuses, so a hand-made block or a spoofed segment can
+// only add a refusal, never remove one.
 const STATE_BLOCK = /<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v\d+[^\r\n]*?-->([\s\S]*?)<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->/g;
-const OWED_UAT = /^- UAT: (PENDING|UAT_PARTIAL_REQUIRED|UAT_FULL_REQUIRED)\b[^\r\n]*; review: /m;
+const OWED_STATES = '(PENDING|UAT_PARTIAL_REQUIRED|UAT_FULL_REQUIRED)\\b';
+const OWED_UAT = [new RegExp(`(?:^| · )UAT: ${OWED_STATES}`, 'm'), new RegExp(`^- UAT: ${OWED_STATES}[^\\r\\n]*; review: `, 'm')];
 function owedUat(body) {
   if (typeof body !== 'string') return null;
-  for (const block of body.matchAll(STATE_BLOCK)) { const owed = OWED_UAT.exec(block[1]); if (owed) return owed[1]; }
+  for (const block of body.matchAll(STATE_BLOCK)) for (const pattern of OWED_UAT) { const owed = pattern.exec(block[1]); if (owed) return owed[1]; }
   return null;
 }
 
