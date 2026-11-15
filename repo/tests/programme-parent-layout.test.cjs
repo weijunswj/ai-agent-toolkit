@@ -51,6 +51,31 @@ test('Waiting on names the owner ask, a blocker or the gate, and nothing for que
   assert.equal(at(520), '-', 'a finished task waits on nobody');
 });
 
+test('a gate at work is the current step; a UAT still owed on an earlier PR shows after it, never in its place', () => {
+  const f = renderScaleFixture(state);
+  const row = issue => cellsOf(rowsOf(state.renderParentBlockBody(f.parent, f.children, f.issues)).find(line => cellsOf(line)[1] === `#${issue}`))[3];
+  const current = () => state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now);
+  const child = f.children.get(504);
+  Object.assign(child.pr, { number: 2017, state: 'MERGED', head: 'c'.repeat(40) });
+  Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) });
+  Object.assign(child.gate, { role: 'G1', state: 'ACTIVE', assignment: { id: 'a-504-g1', role: 'G1' } });
+  assert.equal(row(504), 'G1, then Owner: UAT on PR #2017');
+  assert.match(current(), /^- #504 [^\n]* · PR #2017 · G1 · then your UAT on PR #2017$/m);
+  child.gate.state = 'ASSIGNED';
+  assert.equal(row(504), 'G1, then Owner: UAT on PR #2017', 'an assigned gate is the next step too');
+  for (const idle of ['SUBMITTED', 'INTERRUPTED', 'RETIRED', null]) {
+    child.gate.state = idle;
+    assert.equal(row(504), 'Owner: UAT on PR #2017', `a ${idle || 'missing'} gate leaves the UAT the current step`);
+    assert.match(current(), /^- #504 [^\n]* · waiting on you: your UAT on PR #2017$/m);
+  }
+  child.gate.state = 'ACTIVE';
+  child.blockers = ['waits for PR 1098'];
+  assert.equal(row(504), 'Owner: UAT on PR #2017', 'a blocked gate is not at work');
+  child.blockers = [];
+  child.gate.state = 'WAITING_OWNER';
+  assert.equal(row(504), 'Owner: decision');
+});
+
 test('CURRENT is slim: in progress, one attention line with holds, no Start next or finding lists', () => {
   const f = renderScaleFixture(state);
   f.children.get(500).blockers = ['waits for PR 1098'];
