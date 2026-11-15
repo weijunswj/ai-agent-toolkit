@@ -105,7 +105,7 @@ test('a marked Archive area is inert on issue-scoped redraws, and ambiguous Mark
     // Only a full pass reads the marker, and then it reports the doubt instead of moving anything.
     assert.deepEqual((f.parent().attention || []).filter(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE').map(entry => entry.diagnostics), only ? [] : [{ reason: 'marker_nested' }]);
     assert.ok(state.findStateBlock(f.page()).block);
-    assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /Archived notes|\]\(https/);
+    assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /Archived notes|Notes: /);
   }
 });
 

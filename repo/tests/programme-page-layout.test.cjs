@@ -2,6 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+// The parent's handover file in the fixture's private store (programme-handover.cjs).
+const HANDOVER = 'https://github.com/example.test/store/blob/main/state/handover/issue-12.md';
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
 const { pageFixture } = require('./support/programme-page-fixture.cjs');
@@ -310,9 +312,9 @@ test('a refusal measures the smallest feasible body within the five-post budget'
 test('the smaller CONTEXT stub retains an exact disjoint size span and 5000 units of safe headroom', () => {
   const f = pageFixture(state);
   const projected = f.project(), context = state.findStateBlock(projected.body, 'CONTEXT').block;
-  assert.equal(context.body, state.renderContextBlockBody(12));
-  assert.equal(context.body.split('\n')[2], 'Agent context: none yet · Decisions: `programme.cjs trace 12`', 'one line');
-  assert.doesNotMatch(context.body, /ARCHIVE_SECTION_UNSAFE|Archived notes:|Notes archived|\]\(https/);
+  assert.equal(context.body, state.renderContextBlockBody(12, [], '', [], HANDOVER));
+  assert.equal(context.body.split('\n')[2], `Agent context: none yet · Handover: [handover file](${HANDOVER}) · Decisions: \`programme.cjs trace 12\``, 'one line');
+  assert.doesNotMatch(context.body, /ARCHIVE_SECTION_UNSAFE|Archived notes:|Notes archived|Notes: /);
   const sizes = state.bodySizeDiagnostics(projected.body, state.SAFE_LIMIT);
   assert.equal(sizes.largest_sections.find(part => part.kind === 'CONTEXT').size, context.end - context.start);
   assert.equal(sizes.largest_sections.reduce((sum, part) => sum + part.size, sizes.remainder), projected.body.length);
@@ -346,7 +348,7 @@ test('one Agent context comment shows under AGENT CONTEXT and is never the DECIS
   const report = f.make().run({ apply: true });
   assert.deepEqual(report.holds, []);
   const { context, trace } = contextBlocks(f);
-  assert.equal(context, `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${contextLink(id)}) · Decisions: \`programme.cjs trace 12\``);
+  assert.equal(context, `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${contextLink(id)}) · Handover: [handover file](${HANDOVER}) · Decisions: \`programme.cjs trace 12\``);
   assert.doesNotMatch(trace, new RegExp(String(id)));
   assert.doesNotMatch(trace, /Agent context/);
   assert.match(trace, new RegExp(`Newest: \\[${decision}\\]`), 'the newest tagged decision is the one link');
@@ -390,7 +392,7 @@ test('a long Agent context hold names five comments and counts the rest', () => 
 
 test('no Agent context comment keeps the fixed lines; bot, index, archive and untagged comments never count', () => {
   const f = pageFixture(state);
-  const fixed = state.renderContextBlockBody(12);
+  const fixed = state.renderContextBlockBody(12, [], '', [], HANDOVER);
   assert.equal(fixed.split('\n').length, 3);
   f.github.addComment(12, { body: 'Agent context\n---\nFrom a bot.', login: 'helper[bot]', type: 'Bot' });
   f.github.addComment(12, { body: 'Agent context without the rule line.' });
