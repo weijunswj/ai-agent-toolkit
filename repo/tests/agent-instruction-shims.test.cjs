@@ -295,7 +295,8 @@ test('the repository-agent-rules skill describes the two layers, the opt-in and 
   assert.match(skill, /Never create shims for platforms out of scope/);
   // The installed Toolkit delivers the governed rules and the playbooks: nothing copies them into a repository.
   assert.match(skill, /this skill never adds the governed block, the Antigravity bootstrap or playbook files/);
-  assert.match(skill, /Report them as leftovers and leave them as they are: never refresh, repair or add one/);
+  assert.match(skill, /Report them as leftovers: never refresh, repair or add one/);
+  assert.match(skill, /toolkit-governance-cleanup\.cjs --repo <repo>` to preview, then, with the owner's OK, `--write`/);
   assert.doesNotMatch(skill, /AGENTS\.managed\.template\.md|antigravity-bootstrap\.template\.md|-> `docs\/agent-playbooks\/`/);
   assert.match(skill, /_agent-toolkit-backups\//);
   assert.match(skill, /legacy `\.agent-toolkit-backups\/`/);

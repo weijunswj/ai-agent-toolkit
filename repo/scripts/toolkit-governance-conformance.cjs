@@ -316,7 +316,7 @@ function leftoverBlockFindings(repoRoot, toolkitRoot) {
   if (materials.marker_errors > 0) out.push(finding('MARKERS_BROKEN', 'drift', 'The Toolkit markers in AGENTS.md are broken; fix them before the leftover governed block can be removed.'));
   let version = 'this';
   try { version = expectedGovernedBlock(toolkitRoot).version; } catch { /* the note still stands */ }
-  out.push(finding('GOVERNED_BLOCK_LEFTOVER', 'info', `AGENTS.md still carries a governed block. The installed Toolkit now gives sessions the governed rules, so the block is a leftover copy: remove it by pull request once every app working here runs Toolkit ${version} or later.`));
+  out.push(finding('GOVERNED_BLOCK_LEFTOVER', 'info', `AGENTS.md still carries a governed block. The installed Toolkit now gives sessions the governed rules, so the block is a leftover copy: remove it by pull request once every app working here runs Toolkit ${version} or later (toolkit-governance-cleanup.cjs previews and makes the changes).`));
   return out;
 }
 
