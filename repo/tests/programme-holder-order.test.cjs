@@ -220,6 +220,7 @@ test('an order that expires mid-run stops before its next write and keeps its re
   const clock = lateAfter(f, 2);
   const order = f.order();
   const plan = f.store.read('child', 423).doc.next_action;
+  const start = f.github.commits;
   const result = f.run(order, [], { clock });
   assert.equal(result.error, null, result.error?.message);
   assert.equal(result.report.outcome, 'STOPPED');
@@ -232,7 +233,8 @@ test('an order that expires mid-run stops before its next write and keeps its re
   assert.equal(f.store.read('child', 423).doc.next_action, plan, 'no write after the deadline');
   const [entry] = f.parentDoc().private.holder_orders;
   assert.deepEqual(entry.done, [0], 'the receipt for the finished write is kept');
-  assert.ok(entry.stopped_at, 'the log says where the order stopped');
+  // Three writes: the log entry, the ack and its receipt. Nothing after the deadline, not even the log.
+  assert.equal(f.github.commits - start, 3);
   // A retry of the same order is refused at once and writes nothing, not even the log.
   const before = f.github.commits;
   const retry = f.run(order, [], { clock });
