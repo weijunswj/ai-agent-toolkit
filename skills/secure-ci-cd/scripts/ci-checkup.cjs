@@ -897,21 +897,32 @@ function recentRuns(root, runs, tools) {
 
 // Whether a title or body edit reruns heavy jobs. A job is light on an edit when its `if` reads
 // github.event.action, or when it reads an output of a job it needs (a route job that reads the event
-// and says whether the run is light). With route-gated jobs, the workflow is judged by its matrix
-// legs: each must be gated, and every job that needs a gated job must still run when it is skipped
-// (`!cancelled()` or `always()`), or the required aggregate skips on an edit.
+// and says whether the run is light). With route-gated jobs, the jobs still running on an edit are
+// the ungated ones other than the route jobs and the aggregates (jobs that need a gated job or an
+// aggregate and run on `!cancelled()` or `always()`) and the jobs skipped with them. The workflow is raised when one of those has a
+// matrix or they outnumber the gated jobs, and any job that needs a gated job without `!cancelled()`
+// or `always()`, and is not gated itself, is raised because it is skipped too and a required check
+// on it never passes after an edit.
 function checkEdits(workflow) {
   const routeGated = (job) => job.needs.some((id) => new RegExp(`\\bneeds\\.${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.outputs\\.`).test(job.if));
   const gated = (job) => /github\.event\.action/.test(job.if) || routeGated(job);
   const heavy = workflow.jobs.filter((job) => !gated(job));
   const advice = 'move the checks that read the title or body into a light workflow of their own and leave edited out of this one, or skip the heavy jobs when github.event.action is edited, or when a route job they need says the run is light';
   const reruns = (jobs) => item('CHECK', 'speed.edits', workflow.rel, `an edit to the pull request title or body reruns ${jobs.length} jobs here${jobs.some((job) => job.matrix) ? ' (more with matrix legs)' : ''}, because edited is in the pull request types`, advice);
-  if (!workflow.jobs.some(routeGated)) return heavy.length >= 2 ? [reruns(heavy)] : [];
-  const legs = heavy.filter((job) => job.matrix);
-  if (legs.length) return [reruns(heavy)];
-  const skipIds = new Set(workflow.jobs.filter(routeGated).map((job) => job.id));
-  const skipped = workflow.jobs.filter((job) => job.needs.some((id) => skipIds.has(id)) && !/!\s*cancelled\(\)|\balways\(\)/.test(job.if));
-  return skipped.map((job) => item('CHECK', 'speed.edits', `${workflow.rel}:${job.line}`, `job ${job.id} needs a job a route skips on a light run and has no !cancelled() or always(), so it is skipped too and a required check on it never passes after an edit`, 'give it if: ${{ !cancelled() }} and have it check the results of the jobs it needs'));
+  const routed = workflow.jobs.filter(routeGated);
+  if (!routed.length) return heavy.length >= 2 ? [reruns(heavy)] : [];
+  const runsAfterSkip = (job) => /!\s*cancelled\(\)|\balways\(\)/.test(job.if);
+  const routes = new Set(routed.flatMap((job) => job.needs.filter((id) => new RegExp(`\\bneeds\\.${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.outputs\\.`).test(job.if))));
+  const skipIds = new Set(workflow.jobs.filter(gated).map((job) => job.id));
+  const aggregates = new Set();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const job of heavy) if (!aggregates.has(job.id) && runsAfterSkip(job) && job.needs.some((id) => skipIds.has(id) || aggregates.has(id))) { aggregates.add(job.id); grew = true; }
+  }
+  const skipped = heavy.filter((job) => job.needs.some((id) => skipIds.has(id)) && !runsAfterSkip(job));
+  const running = heavy.filter((job) => !routes.has(job.id) && !aggregates.has(job.id) && !skipped.includes(job));
+  const out = running.some((job) => job.matrix) || running.length > skipIds.size ? [reruns(running)] : [];
+  return out.concat(skipped.map((job) => item('CHECK', 'speed.edits', `${workflow.rel}:${job.line}`, `job ${job.id} needs a job a route skips on a light run and has no !cancelled() or always(), so it is skipped too and a required check on it never passes after an edit`, 'give it if: ${{ !cancelled() }} and have it check the results of the jobs it needs')));
 }
 
 // Delivery speed read from the workflow files alone: edits that rerun heavy jobs, and concurrency
