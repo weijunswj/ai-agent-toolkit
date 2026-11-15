@@ -1,0 +1,511 @@
+{
+  "schema": "toolkit-test-skips/v1",
+  "description": "Every test in repo/tests that skips or stays todo on a CI system, with the systems it skips on and why. The Validate check fails on a skip this list does not hold and on a listed skip that no longer skips. A test name must match the name the test runner reports exactly.",
+  "skips": [
+    {
+      "file": "repo/tests/bare-name-spawn.test.cjs",
+      "test": "a git.exe planted in the working folder does not run; the PATH copy does",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/bare-name-spawn.test.cjs",
+      "test": "PATH resolution skips relative PATH entries and returns the .exe",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/bare-name-spawn.test.cjs",
+      "test": "the local clone step runs git from PATH, not from the folder setup was started in",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-process-launch.test.cjs",
+      "test": "direct PATH lookup runs the later Windows executable and never the logging wrapper",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-process-launch.test.cjs",
+      "test": "explicit Windows bat path preserves metacharacter arguments without injection",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-process-launch.test.cjs",
+      "test": "explicit Windows cmd path preserves metacharacter arguments without injection",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-process-launch.test.cjs",
+      "test": "explicit Windows exe path in a directory with spaces executes directly",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-process-launch.test.cjs",
+      "test": "Windows bare Claude resolves only from PATH and cannot be shadowed by cwd",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-process-launch.test.cjs",
+      "test": "Windows cwd shadow cannot satisfy an empty PATH",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-toolkit-plugin-setup.test.cjs",
+      "test": "claudeSpawnParts routes PATH-resolved bare Windows commands through an explicit non-shell cmd contract",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/claude-toolkit-plugin-setup.test.cjs",
+      "test": "explicit Windows cmd path with spaces works through version and plugin verification",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-delegation-v2.test.cjs",
+      "test": "generated PowerShell restore command executes outside the Toolkit checkout",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-delegation-v2.test.cjs",
+      "test": "unknown runtime fixtures never start an npm Codex first on PATH",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "Codex Desktop Windows host shape preserves optional-maintenance non-fatal exit behavior",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "Codex Desktop Windows host shape reaches the wrapper and Node launcher without file association",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "old bare-node command reproduces a pre-JavaScript red exit when Node is absent from PATH",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "Windows hook commands never run a planted node or powershell from the opened folder, under cmd and PowerShell",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "Windows launcher rejects unsupported runtime metadata and relative Node paths safely",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "Windows launcher reports an unavailable Node runtime without a red exit or private path",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-session-start-launcher.test.cjs",
+      "test": "Windows launcher uses exact Node metadata, preserves stdin and output, and handles metacharacter paths",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-toolkit-plugin-setup.test.cjs",
+      "test": "Codex Toolkit verification route reports bare Windows alias access denied with remediation",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-toolkit-plugin-setup.test.cjs",
+      "test": "Codex Toolkit Windows alias detection helper recognizes Access denied fallback conditions",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-toolkit-plugin-setup.test.cjs",
+      "test": "real Codex CLI: mismatch is refused with no effects, then the gated rebind replaces once",
+      "systems": [
+        "linux",
+        "windows"
+      ],
+      "reason": "Needs a real Codex CLI, set by CODEX_TOOLKIT_REAL_CODEX_CLI in a qualification run"
+    },
+    {
+      "file": "repo/tests/codex-toolkit-plugin-setup.test.cjs",
+      "test": "Windows hooks freshness rejects every non-command cache difference after launcher normalization",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/codex-toolkit-plugin-setup.test.cjs",
+      "test": "Windows SessionStart preparation installs strict launcher metadata without touching Claude cache",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "npm-only PATH: batchWrite",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows npm command lookup only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "npm-only PATH: config/read",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows npm command lookup only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "npm-only PATH: runtime",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows npm command lookup only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "npm-only PATH: setup",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows npm command lookup only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "PATH lookup skips a refused wrapper before a working executable: batchWrite",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "PATH lookup skips a refused wrapper before a working executable: config/read",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "PATH lookup skips a refused wrapper before a working executable: runtime",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "PATH lookup skips a refused wrapper before a working executable: setup",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "PATH lookup skips a refused wrapper before a working executable: setup spawn",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/local-security-scan.test.cjs",
+      "test": "LS-07: a git.exe planted in the scanned folder does not run",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/n8n-launcher-runtime.test.cjs",
+      "test": "Docker CLI missing exits both CMD launchers after one Enter with identical winget and CI behavior",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (CMD launcher integration requires Windows); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/n8n-launcher-runtime.test.cjs",
+      "test": "Docker Compose missing exits both CMD launchers after one Enter without opening the menu",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (CMD launcher integration requires Windows); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/n8n-launcher-runtime.test.cjs",
+      "test": "Docker ready opens both local and production CMD launcher menus normally",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (CMD launcher integration requires Windows); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/n8n-workflow-transport.test.cjs",
+      "test": "import command wrapper forwards arguments without a restart configuration prompt",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows-only cmd wrapper behavior); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/n8n-workflow-transport.test.cjs",
+      "test": "import command wrapper runs exactly once without stdin after successful import",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows-only cmd wrapper behavior); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/repo-backup-ignore-hygiene.test.cjs",
+      "test": "restore rejects a Windows junctioned files directory when junction capability exists",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/secure-ci-cd-checkup.test.cjs",
+      "test": "a git.exe and gh.exe planted in the repository do not run",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/setup-launch-shells.test.cjs",
+      "test": "the agent setup line starts the real setup script by full path from another folder through cmd.exe and PowerShell",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (cmd.exe and Windows PowerShell exist only on Windows); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/setup-launch-shells.test.cjs",
+      "test": "the exact agent setup line reaches the managed script under a home folder with a space and keeps the chat folder",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (cmd.exe and Windows PowerShell exist only on Windows); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/setup-launch-shells.test.cjs",
+      "test": "the old PowerShell-only setup line works in PowerShell but fails through cmd.exe",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (cmd.exe and Windows PowerShell exist only on Windows); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-claude-subagent-depth.test.cjs",
+      "test": "the same config folder spelled in another case on Windows keeps its ownership",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows paths are case-folded); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-helper-hook.test.cjs",
+      "test": "AT10: broken Windows launcher refuses issue close and pr create, new, edit or merge in any gh spelling, with recovery",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-helper-hook.test.cjs",
+      "test": "Windows launcher treats unreadable, unsupported or relative runtime metadata as a broken install",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-helper-hook.test.cjs",
+      "test": "Windows launcher without Node blocks commit, pull request, merge, push and host-launch shell commands; other shell commands run",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-helper-hook.test.cjs",
+      "test": "Windows launcher without Node blocks helper launches and unreadable input with exit 2 and a deny",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-helper-hook.test.cjs",
+      "test": "Windows: an undecided repository's prompt passes with the governance note and a refused tool call reaches Codex as exit 2 under cmd.exe, Windows PowerShell and PowerShell 7",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-launch-check.test.cjs",
+      "test": "AT24: a named npm codex.cmd runs the script it wraps with no shell, even in a folder whose name holds cmd characters",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-launch-check.test.cjs",
+      "test": "AT25: a named file that is not a Windows program holds with a documented reason",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env-store-names-only.test.cjs",
+      "test": "names-only listing: the names-only listing returns names only, through a real Credential Manager child",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env-store.test.cjs",
+      "test": "Windows Credential Manager works with only the variables Codex gives a header helper",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env-store.test.cjs",
+      "test": "Windows Credential Manager: write, read, list, size limit, delete, nothing left behind",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env.test.cjs",
+      "test": "private folders and files work on Windows paths with non-ASCII characters",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env.test.cjs",
+      "test": "programs start without a shell: npm shims run what they wrap, other command scripts are refused",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env.test.cjs",
+      "test": "the helper command keeps its meaning under cmd.exe /Q /D /C with spaces in both paths",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env.test.cjs",
+      "test": "toolkit-env refusal keeps the first PATH wrapper: Claude feeder",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-env.test.cjs",
+      "test": "toolkit-env refusal keeps the first PATH wrapper: env run",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-push-matrix.test.cjs",
+      "test": "Git Bash drive paths in cd, git -C and file options reach every check in the right folder",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour (Git Bash drive paths are a Windows form); the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-setup-orchestrator-4.test.cjs",
+      "test": "Windows drive-letter path with spaces remains line-by-line detail input",
+      "systems": [
+        "linux"
+      ],
+      "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    }
+  ]
+}

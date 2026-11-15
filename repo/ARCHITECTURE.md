@@ -16,7 +16,7 @@ Last reviewed against `main` `51c6bbe`.
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Lane map | `repo/contracts/lanes/lane-map.json` | Which files the Claude and Codex lanes own and which stay integration-owned |
 | Scripts | `repo/scripts/` | Setup, bridge, hooks, synchronizers, audits and validators |
-| Tests | `repo/tests/` | Focused contract and runtime tests, run by `repo/scripts/run-tests.cjs` from the shard manifest `repo/contracts/ci/test-shards.json` |
+| Tests | `repo/tests/` | Focused contract and runtime tests, run by `repo/scripts/run-tests.cjs` from the shard manifest `repo/contracts/ci/test-shards.json`; every skipped or todo test is listed in `repo/contracts/ci/test-skips.json` |
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
@@ -29,7 +29,7 @@ Last reviewed against `main` `51c6bbe`.
 | Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` (shared core), `repo/scripts/setup-core-claude.cjs`, `repo/scripts/setup-core-codex.cjs` |
 | Native plugin install | `repo/scripts/setup-claude-toolkit-plugin.cjs`, `repo/scripts/setup-codex-toolkit-plugin.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
-| Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state and bundle fingerprint, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` (`--check` also asks the Codex the gate will run, named with `--codex`, once through its app-server, and holds gate launches until the files and that Codex agree every hook is on) |
+| Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-release-identity.cjs` (is a merged fix in each Toolkit copy on this host), `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state and bundle fingerprint, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` (`--check` also asks the Codex the gate will run, named with `--codex`, once through its app-server, and holds gate launches until the files and that Codex agree every hook is on) |
 | Typed commands (`toolkit cmd`, the other phrases both prompt hooks match exactly, and the `toolkit governance <subcommand>` phrases) and the command list | `repo/scripts/toolkit-commands.cjs` |
 | Report-only scan for Toolkit files left in repositories with governance off | `repo/scripts/toolkit-leftover-files.cjs` |
 | Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs`, `repo/scripts/toolkit-env-editor.cjs` |

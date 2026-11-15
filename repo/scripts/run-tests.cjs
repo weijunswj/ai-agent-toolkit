@@ -246,7 +246,16 @@ function readResults(file) {
 
 function summarize(root, system, files, lines, exitCode) {
   const byFile = new Map();
-  for (const line of lines) if (line.file) byFile.set(shards.relativeTestFile(root, line.file), line);
+  const skippedByFile = new Map();
+  for (const line of lines) {
+    const skipped = line.skipped_test;
+    if (skipped) {
+      if (!skipped.file) continue;
+      const file = shards.relativeTestFile(root, skipped.file);
+      if (!skippedByFile.has(file)) skippedByFile.set(file, []);
+      skippedByFile.get(file).push({ name: skipped.name, kind: skipped.kind });
+    } else if (line.file) byFile.set(shards.relativeTestFile(root, line.file), line);
+  }
   const entries = [];
   const missing = [];
   for (const file of files.map((item) => shards.relativeTestFile(root, item))) {
@@ -262,6 +271,7 @@ function summarize(root, system, files, lines, exitCode) {
       todo: counts.todo || 0,
       cancelled: counts.cancelled || 0,
       seconds: Math.round((line.duration_ms || 0) / 100) / 10,
+      skipped_tests: skippedByFile.get(file) || [],
     });
   }
   return { schema: shards.SUMMARY_SCHEMA, system, exit_code: exitCode, node: process.version, files: entries, missing };
@@ -323,7 +333,10 @@ function verifyCi(root, options, out, err) {
   catch { needs = null; }
   const summaries = fs.existsSync(options.verifyDir) ? readSummaries(options.verifyDir) : [];
   const requiredJobs = shards.LEG_SETS[options.legs || 'validate'];
-  const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs, commit: verifyCommit() });
+  let skipList = null;
+  try { skipList = shards.loadSkipList(root); }
+  catch (error) { skipList = null; err.write(`${shards.SKIPS_REL} could not be read: ${error.message}\n`); }
+  const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs, commit: verifyCommit(), skipList });
   errors.push(...shards.testFileErrors(root));
   errors.push(...shards.workflowErrors(fs.readFileSync(path.join(root, '.github', 'workflows', 'validate.yml'), 'utf8'), manifest));
   for (const system of Object.keys(totals)) {
