@@ -20,7 +20,7 @@ const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const OWNER = 'toolkit-test-fixture';
 const SLUG = `${OWNER}/fresh`;
 const STORE = `${OWNER}/TRANSPORT-fresh`;
-const PLAYBOOKS = fs.readdirSync(path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local', 'docs', 'agent-playbooks')).filter(name => name.endsWith('.md'));
+const PLAYBOOKS = Object.keys(require('../scripts/toolkit-playbooks.cjs').repositoryPlaybooks());
 
 // A fresh repository: a github.com origin, no governed rules, no programme file, nothing merged.
 function fixture(t, { agents = null } = {}) {

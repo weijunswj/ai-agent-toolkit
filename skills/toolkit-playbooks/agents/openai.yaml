@@ -1,0 +1,10 @@
+interface:
+  display_name: Toolkit Playbooks
+  short_description: Pick the Toolkit playbook that applies before planning or editing.
+  primary_color: '#0F766E'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - atlas
+  allow_implicit_invocation: true

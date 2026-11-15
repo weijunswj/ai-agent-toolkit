@@ -1,6 +1,6 @@
 # Toolkit-Governed Repository Rules
 
-On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds this block: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
+On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds these rules: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
 
 ## Governance Principles
 
@@ -29,5 +29,4 @@ On github.com, only the valid `.github/toolkit-programme.json` merged on origin'
 
 ## Repository Setup
 
-- If the repository does legitimate security-sensitive work, describe it in an `Authorised context` section outside this block: who owns the code, that the work is development and defensive testing of the repository's own software, and that nothing targets third-party systems.
-- If the playbook index is missing during an instruction install, repair or refresh, report that it needs installing.
+- If the repository does legitimate security-sensitive work, describe it in an `Authorised context` section of its own `AGENTS.md`: who owns the code, that the work is development and defensive testing of the repository's own software, and that nothing targets third-party systems.

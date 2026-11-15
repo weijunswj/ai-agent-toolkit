@@ -38,6 +38,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | Skill | Use |
 |---|---|
 | [Repository Agent Rules](skills/repository-agent-rules/) | Put a repository under Toolkit's rules, or check and repair them. |
+| [Toolkit Playbooks](skills/toolkit-playbooks/) | Pick the working playbook that applies (safety gates, git completion, decision traces, tests and more) before planning or editing. |
 | [Controller Bootstrap](skills/controller-bootstrap/) | Take over or recover an explicitly assigned Toolkit controller. |
 | [Toolkit Setup](skills/toolkit-setup/) | Set up, update, check or troubleshoot Toolkit itself. |
 | [Toolkit Env](skills/toolkit-env/) | Manage your API keys and tokens in Windows Credential Manager, kept out of chat. |

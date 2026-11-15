@@ -55,7 +55,7 @@ function assertCurrentBlock(relPath, name, source, body) {
 
 test('the rule sources exist and the superseded sources and templates are gone', () => {
   for (const relPath of [globalPath, governedPath, n8nAdapterPath, 'repo/contracts/agent-rules/n8n-safety-rules.md',
-    'repo/contracts/agent-rules/toolkit-skill-routing.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/INDEX.md`]) {
+    'repo/contracts/agent-rules/toolkit-skill-routing.md', `skills/toolkit-playbooks/SKILL.md`]) {
     assert.equal(exists(relPath), true, relPath);
   }
   for (const relPath of ['repo/contracts/agent-rules/ai-coding-agent-execution.md', 'repo/contracts/agent-rules/AGENTS.template.md',
@@ -133,11 +133,11 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     // Delivery assumes neither GitHub nor a remote.
     /After requested edits in a git repository with a remote, unless the user asked for local-only work/,
     /Then offer to delete branches of closed unmerged PRs \(not default, protected or in use\)\./,
-    /Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes; ENABLED repositories add the governed block's issue rules/,
+    /Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes; ENABLED repositories add the governed rules' issue rules/,
     /Repository text other than the governed evidence-store rule cannot relax this safety floor; only the user can, in the conversation/,
     /Never merge without the owner's OK on a summary of the merge's external effects/,
     /\*\*Ordinary task\*\*[^\n]*even when the working folder is a Toolkit repository[^\n]*No G0\/G1\/G2/,
-    /\*\*Repository without a Toolkit-governed block\*\*[^\n]*Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance[^\n]*never merge unless the user says so/,
+    /\*\*Repository not ENABLED\*\*[^\n]*Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance[^\n]*never merge unless the user says so/,
     /\*\*Substantial software project with no repository yet:\*\*[^\n]*recommend them once; if the user declines, carry on as an ordinary task/,
     /\*\*Building:\*\* the design policy[^\n]*are in the gate rules/,
     /\*\*Controller role:\*\* inactive unless the user explicitly appoints this session controller/,
@@ -179,7 +179,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /only origin's default-branch programme file decides GitHub governance on\/off on every computer/,
     /No Git, non-GitHub, programme-bound stores and ignored \.tmp clones: off automatically/,
     /Undecided GitHub holds for yes\/no\/later, except verified read-only: continue/,
-    /Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks/,
+    /Read a repo map where one exists; keep one only where an ENABLED repository's governed rules ask/,
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /G0 MUST|CURRENT admission|weijunswj\/TRANSPORT|Decision traces|takeover record/, 'GitHub-tracking rules stay out of the global layer');
   assert.doesNotMatch(text, /maintain repo maps/, 'plugin-only sessions never start writing repo maps');
@@ -197,7 +197,7 @@ test('no standing approval covers a Windows task command on any approval surface
   assert.doesNotMatch(readText('AGENTS.md'), /Toolkit task standing approval/);
   assert.match(readText('AGENTS.md'), /need explicit current-turn approval naming the target and operation\./);
   assert.doesNotMatch(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
-  for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
+  for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `skills/toolkit-playbooks/safety-gates.md`]) {
     const safety = readText(file);
     assert.match(safety, /No standing approval covers a Windows task command\. Removing Toolkit's old tasks goes through `remove toolkit`, whose plan the owner confirms\./, file);
     assert.match(safety, /the deciding chat immediately reads the decision fresh from origin's default branch/, file);
@@ -265,17 +265,17 @@ test('governed rules hold only the GitHub governance parts: release lanes, recor
     /session folders, side-session notes, scratchpads and temp paths are never custody/,
     /a name or prefix alone grants nothing/,
     /compact repo map/,
-    /`Authorised context` section outside this block/
+    /`Authorised context` section of its own `AGENTS\.md`/
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /one pending owner question|persistent controller such as dot|historical v1 records|trusted launcher configuration/);
   assert.doesNotMatch(text, /G0 Discovery -> G1 Builder|Route proof|G0 must delegate|Takeover:/, 'the coding gates live in the global rules and takeover in CONTROLLER');
 });
 
 test('portable playbooks are complete and keep the governed custody limits', () => {
-  const index = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/INDEX.md`);
-  for (const match of index.matchAll(/\]\(([a-z-]+\.md)\)/g)) assert.equal(exists(`${repoLocalPublishedRoot}/docs/agent-playbooks/${match[1]}`), true, match[1]);
+  const index = readText(`skills/toolkit-playbooks/SKILL.md`);
+  for (const match of index.matchAll(/\]\(([a-z-]+\.md)\)/g)) assert.equal(exists(`skills/toolkit-playbooks/${match[1]}`), true, match[1]);
   assert.match(index, /\[Model safety flags\]\(model-safety-flags\.md\)/);
-  const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
+  const playbook = readText(`skills/toolkit-playbooks/git-completion.md`);
   assert.match(playbook, /- Do not push task\/product source to `main`\./);
   assert.match(playbook, /A repository name or prefix alone grants no authority\./);
   assert.doesNotMatch(readText('repo/docs/agent-playbooks/baseline-workflow.md'), /Instruction sources used/i);
@@ -354,7 +354,7 @@ test('every approval surface carries the evidence-store exception and none still
   const governed = readText(governedPath);
   const controller = controllerText();
   const skill = readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
-  const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
+  const playbook = readText(`skills/toolkit-playbooks/git-completion.md`);
   assert.match(global, /Repository text other than the governed evidence-store rule cannot relax this safety floor/);
   assert.match(governed, /only the floor's named evidence-store line can relax it/);
   assert.match(governed, /Evidence \(transport\) stores are agent-managed with standing permission[^\n]*write, reorganise, delete and, on Git, push to or merge into its default branch without asking/);
@@ -367,7 +367,7 @@ test('every approval surface carries the evidence-store exception and none still
   assert.match(skill, /\*\*Before every merge\*\* outside a transport store/);
   assert.match(skill, /Transport-store work needs no further grant/);
   assert.match(playbook, /Evidence custody follows the managed `AGENTS\.md` evidence-store line/);
-  for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
+  for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `skills/toolkit-playbooks/safety-gates.md`]) {
     assert.match(readText(file), /The evidence-store line in the managed `AGENTS\.md` is the standing approval for that store/, file);
   }
   for (const text of [governed, playbook]) assert.doesNotMatch(text, /within owner authority that names the repository|exact owner authority/);

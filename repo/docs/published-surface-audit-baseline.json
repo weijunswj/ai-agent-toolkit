@@ -19,10 +19,11 @@
     "skills/self-hosted-service-safety",
     "skills/skill-product-review",
     "skills/toolkit-env",
+    "skills/toolkit-playbooks",
     "skills/toolkit-setup",
     "skills/windows-local-dev-services"
   ],
-  "skill_count": 20,
+  "skill_count": 21,
   "pack_manifests": [],
   "project_tree_present": false,
   "native_plugins": {

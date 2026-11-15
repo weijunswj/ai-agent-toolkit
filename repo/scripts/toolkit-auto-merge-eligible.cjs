@@ -85,7 +85,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/scripts\/toolkit-(?:repository-identity|user-state)\.cjs$/, 'governance identity and operational state'],
   [/^repo\/scripts\/toolkit-(?:permissions|permissions-apply|cleanup|store)\.cjs$/, 'the permission blocks and the commands they allow'],
   [/^repo\/scripts\/toolkit-(?:remove|remove-parts|commands)\.cjs$/, 'remove toolkit and the typed Toolkit commands'],
-  [/^(?:repo\/docs\/agent-playbooks|skills\/repository-agent-rules\/repo-local\/docs\/agent-playbooks)\/safety-gates\.md$/, 'approval rules'],
+  [/^(?:repo\/docs\/agent-playbooks|skills\/toolkit-playbooks)\/safety-gates\.md$/, 'approval rules'],
   [/^repo\/contracts\/programme-state\//, 'the programme binding schema'],
   [/^skills\/github-program-reconciler\/scripts\/programme-state\.cjs$/, 'the programme binding reader'],
   [/^repo\/scripts\/toolkit-merge-hold\.cjs$/, 'the merge hold'],

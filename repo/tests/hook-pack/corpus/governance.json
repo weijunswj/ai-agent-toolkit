@@ -3,6 +3,50 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.rules-enabled-no-block",
+      "source": "plug-and-play S1: an enabled repository with no governed block gets the governed rules from the installed Toolkit",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-disabled-none",
+      "source": "plug-and-play S1: a disabled repository gets no governed rules",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"disabled"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: DISABLED for this repository"],"context_excludes":["# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-cloud-projects-layout",
+      "source": "plug-and-play S1: a Projects thread starts above its cloned repositories and still gets the governed rules for an enabled one",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{work}/.."},
+      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"files":{"AGENTS.md":"# Repository rules\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance (cloud session)","Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-cloud-disabled-child-none",
+      "source": "plug-and-play S1: a cloud session above a disabled repository gets no governed rules",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{work}/.."},
+      "fixture": {"repo":{"governance":"disabled"},"closure_cloud":true},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance (cloud session)","Toolkit governance: DISABLED for this repository"],"context_excludes":["# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.slow-proposal-allows-prompt",
       "source": "delta review: proposal discovery exceeded the prompt hook timeout",
       "kind": "fault",
