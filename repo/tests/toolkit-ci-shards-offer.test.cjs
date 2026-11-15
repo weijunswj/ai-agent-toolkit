@@ -23,7 +23,7 @@ const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const { GitHubProposalTransport } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
-const { BankTickets, bankCards, bankReference, governanceBankSpecs: bankSpecs } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+const { BankTickets, bankReference, renderGovernanceBank, governanceBankSpecs: bankSpecs } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
 
 const SESSION = 'session-owner-shards';
 const SLUG = 'toolkit-test-fixture/shards';
@@ -46,7 +46,7 @@ function nodeRepo(t, count = 5) {
 }
 
 test('offer: the minutes line shows the last green run, or says the minutes are unknown', () => {
-  assert.match(offer.estimateText({ minutes: 23.4, workflow: 'CI' }), /^Minutes: the last green CI run used about 23 runner minutes\. .*a private repository pays for those minutes\.$/);
+  assert.match(offer.estimateText({ minutes: 23.4, workflow: 'CI' }), /^Minutes: the last green CI run used about 23 runner minutes\. Each shard adds a minute or two of setup, which a private repository pays for\.$/);
   assert.match(offer.estimateText(null), /^Minutes: unknown, because no green CI run could be read\./);
   // The estimate reads the default branch's green push runs, skips Toolkit copies and other branches,
   // takes the newest run of each workflow and keeps the largest, so a small lint job does not stand in.
@@ -171,8 +171,8 @@ test('bank: a governed repository is asked with the minutes estimate; yes prepar
   const transport = recorder();
   const result = await answer(ctx, '1.4=B', { transport });
   assert.match(result.shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now/);
-  assert.match(result.shown.out, /1\.4 asks: Split this repository's tests into parallel CI shards\? .*Minutes: the last green CI run used about 25 runner minutes\./);
-  assert.match(result.shown.out, /"header":"CI shards"/, 'the card carries the question too');
+  assert.match(result.shown.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
+  assert.match(result.shown.out, /^More on 1\.4: .*Minutes: the last green CI run used about 25 runner minutes\./m);
   assert.equal(result.code, 0, result.err);
   assert.equal(transport.calls.length, 1);
   const [repository, mergedText, text, value, list] = transport.calls[0];
@@ -195,7 +195,7 @@ test('bank: the minutes line is display-only, so a CI run that finishes before t
   const specsFor = minutes => bankSpecs({ state: { state: 'ENABLED' }, task: 'off', merged: JSON.parse(bindingText()), ciShards: { estimate: offer.estimateText({ minutes, workflow: 'CI' }) } });
   const twelve = specsFor(12.2), thirteen = specsFor(13.1);
   assert.equal(bankReference(twelve), bankReference(thirteen), 'two estimates give the same bank reference');
-  assert.match(bankCards(thirteen).flatMap(card => card.questions).find(question => /Parallel CI shards/.test(question.question)).question, /about 13 runner minutes/, 'the card still shows the minutes');
+  assert.match(renderGovernanceBank(thirteen), /^More on 1\.4: .*about 13 runner minutes/m, 'the bank still shows the minutes');
   // End to end: the bank is shown at 12 minutes and answered after a run that measured 31.
   const ctx = governedFixture(t);
   const transport = recorder();
