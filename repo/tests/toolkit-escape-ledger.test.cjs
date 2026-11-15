@@ -200,11 +200,13 @@ test('E2-b: a ledger whose line ends are all CRLF is read; every other line-brea
 });
 
 test('E2-b: mixed or lone-CR line ends are refused with a plain reason', () => {
+  // One ledger line with the given line end in place of its LF.
+  const ending = (end, overrides) => `${ledger.canonicalLine(entry(overrides))}${end}`;
   const cases = {
-    'CRLF then LF': `${line().replace('\n', '\r\n')}${line({ id: 'second-escape' })}`,
-    'LF then CRLF': `${line()}${line({ id: 'second-escape' }).replace('\n', '\r\n')}`,
-    'lone CR line end': line().replace('\n', '\r'),
-    'CR inside CRLF lines': `${line().replace('\n', '\r\r\n')}`,
+    'CRLF then LF': `${ending('\r\n')}${line({ id: 'second-escape' })}`,
+    'LF then CRLF': `${line()}${ending('\r\n', { id: 'second-escape' })}`,
+    'lone CR line end': ending('\r'),
+    'CR inside CRLF lines': ending('\r\r\n'),
   };
   for (const [name, text] of Object.entries(cases)) {
     const read = ledger.readLedger(Buffer.from(text, 'utf8'));
