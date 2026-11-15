@@ -83,6 +83,46 @@
       "fixture": { "repo": { "governance": "undecided", "name": "TRANSPORT-ai-agent-toolkit", "branch": "feature", "cached_binding_store": true } },
       "expect": { "decision": "allow" },
       "status": "pass"
+    },
+    {
+      "id": "ATTR.stop-parsing-pr-create",
+      "source": "#779 item 8: PowerShell's stop-parsing word hid gh pr create from the attribution check",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh --% pr create --title x --body \"Co-Authored-By: Claude <noreply@anthropic.com>\""}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.stop-parsing-pr-create-powershell",
+      "source": "#779 item 8: PowerShell's stop-parsing word hid gh pr create from the attribution check",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "PowerShell", "tool_input": {"command": "gh --% pr create --title x --body \"Co-Authored-By: Claude <noreply@anthropic.com>\""}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.stop-parsing-pr-edit-exec-command",
+      "source": "#779 item 8: PowerShell's stop-parsing word hid gh pr create from the attribution check",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name": "exec_command", "tool_input": {"cmd": "gh --% pr edit 12 --body \"Co-Authored-By: Claude <noreply@anthropic.com>\"", "workdir": "{work}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.stop-parsing-pr-create-clean",
+      "source": "#779 item 8: PowerShell's stop-parsing word hid gh pr create from the attribution check (control: a body that only mentions Claude)",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh --% pr create --repo toolkit-test-fixture/fixture --title T --body \"Adds the Claude Code settings question\""}},
+      "fixture": {"repo": {"governance": "none", "remote_main": true}, "issue_closure": "open-child"},
+      "expect": {"decision": "allow"},
+      "status": "pass"
     }
   ]
 }

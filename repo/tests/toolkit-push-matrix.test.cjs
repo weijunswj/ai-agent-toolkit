@@ -418,3 +418,64 @@ test('push check: every target of one command shares one deadline', () => {
   assert.equal(new Set(deadlines).size, 1, 'one deadline');
   assert.ok(deadlines[0] > Date.now() && deadlines[0] <= Date.now() + 5000);
 });
+
+// A command a shell may read two ways: bash reads `\"` as an escaped quote, PowerShell reads the
+// backslash as plain text, so a push hidden inside quotes for bash runs in PowerShell. Where
+// PowerShell may run the command (Claude Code's PowerShell tool, and Codex, which names no shell),
+// the force-push, store-push and credential checks read it both ways; where bash runs it (Claude
+// Code's Bash tool), only the bash reading counts. Each row: [command, Claude Bash, Claude PowerShell,
+// Codex Bash, Codex exec_command], true for a refusal.
+test('two readings: a force push hidden from bash by backslash quoting is refused where PowerShell may run it', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-two-readings-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const governed = path.join(dir, 'governed');
+  fs.mkdirSync(path.join(governed, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(governed, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n');
+  const rows = [
+    ['echo "a\\" ; git push --force origin feature ; echo \\"b"', false, true, true, true],
+    ['echo "a\\" ; git push origin +feature ; echo \\"b"', false, true, true, true],
+    ['echo "a\\" ; git push -f origin feature', false, true, true, true],
+    ['echo "a\\" ; git push --force-with-lease origin feature ; echo \\"b"', false, true, true, true],
+    ['Write-Output "C:\\work\\"; git push --mirror', false, true, true, true],
+    ['git push --force origin feature', true, true, true, true],
+    // Controls: no force push in either reading.
+    ['echo "a\\" ; git push origin feature ; echo \\"b"', false, false, false, false],
+    ['git commit -m "Explain why \\"git push --force\\" is refused"', false, false, false, false],
+    ['echo "C:\\work\\" ; git status', false, false, false, false],
+    ['echo "use git push --force with care"', false, false, false, false],
+  ];
+  const shapes = [
+    ['Claude Bash', 'claude', 'Bash'],
+    ['Claude PowerShell', 'claude', 'PowerShell'],
+    ['Codex Bash', 'codex', 'Bash'],
+    ['Codex exec_command', 'codex', 'exec_command'],
+  ];
+  for (const [command, ...refused] of rows) {
+    shapes.forEach(([label, host, tool_name], index) => {
+      const input = { tool_name, cwd: governed, tool_input: { command } };
+      const reason = attributionDecision(input, { notes: [], host, check: () => ({}) }).hookSpecificOutput?.permissionDecisionReason || '';
+      assert.equal(reason, refused[index] ? FORCE_MESSAGE : '', `${label}: ${command}`);
+    });
+  }
+  // Through both hooks as processes.
+  const [hidden] = rows[0];
+  const claude = runHook(claudeHook, 'PowerShell', governed, hidden);
+  assert.equal(claude.status, 2, claude.stderr);
+  assert.equal(JSON.parse(claude.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason, FORCE_MESSAGE);
+  const codex = spawnSync(process.execPath, [codexHook], { input: JSON.stringify({ tool_name: 'exec_command', cwd: governed, tool_input: { cmd: hidden, workdir: governed } }), encoding: 'utf8' });
+  assert.equal(JSON.parse(codex.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason, FORCE_MESSAGE);
+  assert.equal(runHook(claudeHook, 'Bash', governed, hidden).status, 0, 'bash cannot run the hidden push');
+});
+
+test('two readings: a push hidden from bash by backslash quoting still gets the credential check where PowerShell may run it', (t) => {
+  const { git, clone } = chainRepos(t);
+  const repo = clone();
+  writeFiles(repo, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '--quiet', '-m', 'x');
+  const hidden = 'echo "a\\" ; git push origin feature ; echo \\"b"';
+  for (const shell of [null, 'powershell']) assert.match(outgoingRefusal(hidden, repo, { notes: [], shell }), /uat-config\.txt:1 /, String(shell));
+  assert.equal(outgoingRefusal(hidden, repo, { notes: [], shell: 'posix' }), '', 'bash cannot run the hidden push');
+  const reason = attributionDecision({ tool_name: 'exec_command', cwd: repo, tool_input: { cmd: hidden, workdir: repo } }, { notes: [], sessionFolderOnly: true }).hookSpecificOutput?.permissionDecisionReason || '';
+  assert.match(reason, /uat-config\.txt:1 /);
+});

@@ -2100,6 +2100,50 @@
       },
       "status": "pass",
       "note": "Even a read before HEAD makes the whole line non-plain; unknown-folder HEAD scanning is only allowed for one plain git command."
+    },
+    {
+      "id": "PUSH.two-readings-force",
+      "source": "G2 report on PR 785, P4: a push behind backslash-escaped quotes is hidden from bash but runs in PowerShell",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "echo \"a\\\" ; git push --force origin feature ; echo \\\"b\""}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny"},
+      "expect_by_host": {"claude": {"decision": "allow"}},
+      "note": "Claude Bash reads the backslash quotes as data, so bash never runs the push. Claude PowerShell and Codex (whose Bash name can run PowerShell) also read PowerShell quoting, where the push runs.",
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.two-readings-force-powershell",
+      "source": "G2 report on PR 785, P4: a push behind backslash-escaped quotes is hidden from bash but runs in PowerShell",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "PowerShell", "tool_input": {"command": "Write-Output \"C:\\work\\\"; git push origin +feature"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.two-readings-credential",
+      "source": "G2 report on PR 785, P4: a push behind backslash-escaped quotes is hidden from bash but runs in PowerShell, by the credential check",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "echo \"a\\\" ; git push origin feature ; echo \\\"b\"", "workdir": "{work}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "commits": [{"files": {"uat-config.txt": "token = \"{credential}\"\n"}, "message": "unpushed commit with a credential"}]}},
+      "expect": {"decision": "deny"},
+      "expect_by_host": {"claude": {"decision": "allow"}},
+      "note": "Claude Bash reads the backslash quotes as data, so bash never runs the push. Claude PowerShell and Codex (whose Bash name can run PowerShell) also read PowerShell quoting, where the push runs.",
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.two-readings-quoted-data",
+      "source": "G2 report on PR 785, P4: a push behind backslash-escaped quotes is hidden from bash but runs in PowerShell (control: quoted force-push words in a commit message)",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "git commit -m \"Explain why \\\"git push --force\\\" is refused\""}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
     }
   ]
 }

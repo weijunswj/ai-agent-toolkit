@@ -34,6 +34,10 @@ CI runs the full pack on Linux and one Windows job per family. The nine Windows 
 
 A new hook, or a new rule inside a hook, needs the owner's yes on one line: what it stops, and what it might wrongly stop. Put that line in the pull request body.
 
+## Attribution and force-push reader
+
+The attribution, force-push, evidence-store push and credential checks read a command line as bash does and, where PowerShell may run it (Claude Code's PowerShell tool and every Codex shell call, which names no shell), as PowerShell does too; a check refuses when either reading does. The two readings differ only at a backslash, which escapes in bash and is plain text in PowerShell, so a push hidden from bash inside backslash-escaped quotes is still read. Claude Code's Bash tool keeps the bash reading alone, and a script handed to a POSIX shell (`bash -c`) is read as bash. PowerShell's stop-parsing word `--%`, unquoted, is dropped first, so `gh --% pr create` is judged as `gh pr create`; a quoted one stays an argument that gh refuses.
+
 ## Review
 
 At each release, and at least once a year, list the hooks with their false-block fixes and their real catches since the last review. A hook with repeated false-block fixes and no catch moves to a written rule.
