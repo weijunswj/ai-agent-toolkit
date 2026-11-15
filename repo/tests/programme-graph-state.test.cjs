@@ -242,7 +242,8 @@ test('A2-1: one refresh copies closes, adopts native children and lists merged P
   assert.ok(f.parent().outcomes.at(-2).order > 3);
   assert.deepEqual(f.child(3).prs,[{number:20,state:'MERGED',merge_sha:SHA}]);
   assert.deepEqual(openCodes(f),['CHILD_ADDED','CHILD_ADDED','CLOSED_WITHOUT_ACCEPTANCE']);
-  assert.match(f.github.issues.get(1).body,/\|#3\|-\|-\|RETIRED/);
+  assert.match(f.github.issues.get(1).body,/\n\[Retired \(2\)\]\(https:[^)]+\)\n/,'the retired rows (#3 and the nested #6) sit behind one link');
+  assert.ok(f.github.commentsOf(1).some(comment => /^\|#3 [^|]*\|-\|RETIRED\|/m.test(comment.body)),'its row is in the archive comment');
   assert.doesNotMatch(state.findStateBlock(f.github.issues.get(1).body).block.body,/#20|aaaaaaa/);
   assert.match(f.github.issues.get(3).body,/#20.*aaaaaaa/);
 });
@@ -283,11 +284,11 @@ test('A2-5: 24-hour waiting threshold redraws only changed text; acknowledgement
   assert.doesNotMatch(f.github.issues.get(1).body,/Waiting on you|waiting on you/);
   f.time(epoch+24*3600000); f.run();
   assert.match(state.attentionLine(f.parent().attention,new Date(epoch+24*3600000).toISOString()),/1 waiting on you/);
-  assert.match(f.github.issues.get(1).body,/\*\*Waiting on you\*\*/);
+  assert.match(f.github.issues.get(1).body,/1 waiting on you\*\*/);
   const count = writes(f); f.time(epoch+25*3600000); f.run(); assert.equal(writes(f),count);
   const id=f.parent().attention[0].id;
   f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{next: 'Fixture next step', id,state:'acknowledged',now:new Date(epoch+25*3600000).toISOString()})});
-  f.run(); assert.doesNotMatch(f.github.issues.get(1).body,/\*\*Waiting on you\*\*/);
+  f.run(); assert.doesNotMatch(f.github.issues.get(1).body,/waiting on you/);
 });
 
 test('A2-6: other registered programmes keep their children and duplicate hierarchy finding', () => {

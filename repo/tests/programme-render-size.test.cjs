@@ -32,70 +32,41 @@ test('72-row programme with four PRs per task and 106 waiting findings fits with
   assert.deepEqual({ commits: f.github.commits, writes: f.github.mutations() }, before, 'unchanged scale fixture makes no writes');
 });
 
-test('parent PR cells stay bounded and each row is no larger than the main row format', () => {
+test('parent PR cells stay bounded: the three newest PRs, then a count, and none for a retired task', () => {
   const f = renderScaleFixture(state);
   const render = () => state.renderParentBlockBody(f.parent, f.children, f.issues);
-  const rows = () => render().split('\n').filter(line => /^\|[^|]*\|[^|]*\|#\d+\|/.test(line));
+  const rows = () => render().split('\n').filter(line => /^\|#\d+[ |]/.test(line));
   assert.equal(rows().length, 72);
   for (const row of rows()) {
     const cells = row.slice(1, -1).split('|');
-    const child = f.children.get(Number(cells[2].slice(1)));
-    // One PR per row: the most recently opened one, and none for a retired task.
-    // On a task still open, a merged or closed PR says so; finished rows show the number alone.
-    const shown = [child.pr, ...(child.prs || [])].find(pr => pr?.number === state.latestPr(child))?.state;
-    const finished = ['DONE', 'RETIRED'].includes(child.lifecycle) || cells[4] === '-';
-    const suffix = !finished && shown === 'MERGED' ? ' merged' : !finished && shown === 'CLOSED' ? ' closed' : '';
-    const latest = child.lifecycle === 'RETIRED' ? '-' : `#${state.latestPr(child)}${suffix}`;
-    assert.equal(cells[3], latest);
-    assert.equal(/\+\d/.test(cells[3]), false, 'the cell never counts other PRs');
-    const mainRow = `| ${cells.join(' | ')} |`;
-    assert.ok(row.length <= mainRow.length, `${child.issue}: ${row.length} > main ${mainRow.length}`);
+    const child = f.children.get(Number(/^#(\d+)/.exec(cells[0])[1]));
+    const numbers = [...new Set([child.pr.number, ...child.prs.map(pr => pr.number)])].sort((a, b) => b - a);
+    const shown = [child.pr, ...child.prs].find(pr => pr.number === numbers[0]).state;
+    const suffix = ['DONE', 'RETIRED'].includes(child.lifecycle) ? '' : { MERGED: ' merged', CLOSED: ' closed' }[shown] || '';
+    assert.equal(cells[1], child.lifecycle === 'RETIRED' ? '-' : `#${numbers[0]}${suffix}, ${numbers.slice(1, 3).map(n => `#${n}`).join(', ')} +${numbers.length - 3}`);
+    assert.ok(row.length < 200, `${child.issue}: a row stays short (${row.length})`);
   }
   const child = f.children.get(500);
   child.prs.push(...Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: 'MERGED', merge_sha: 'c'.repeat(40) })));
-  assert.match(rows()[0].split('|')[4], /^#5099(?: merged)?$/, 'a hundred more PRs still show as one: the latest');
+  assert.equal(rows()[0].split('|')[2], '#5099 merged, #5098, #5097 +101', 'a hundred more PRs still show as three and a count');
   assert.doesNotMatch(render(), /#5000|\/commit\//);
   const detail = state.renderChildBlockBody(child, f.parent.outcomes[0]);
   // The task page's PR GRAPH names every PR: a row each for the latest ten finished, the rest on its Earlier line.
   for (const pr of child.prs) assert.ok(detail.includes(`|#${pr.number}|${pr.state}|`) || new RegExp(`^Earlier: .*#${pr.number}\\b`, 'm').test(detail), `#${pr.number}`);
   assert.match(detail, /\/commit\/ccccccc/);
   child.prs = [];
-  assert.match(rows()[0].split('|')[4], /^#2000(?: merged| closed)?$/);
+  assert.equal(rows()[0].split('|')[2], '#2000 closed');
   child.pr.number = null;
-  assert.equal(rows()[0].split('|')[4], '-');
+  assert.equal(rows()[0].split('|')[2], '-');
 });
 
-test('waiting preview lists at most five short items and keeps the full count', () => {
+test('CURRENT keeps only the waiting count; the full list is in the attention command', () => {
   const f = renderScaleFixture(state);
   const body = state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now);
-  const waiting = body.split('**Waiting on you**')[1];
-  assert.ok(waiting);
-  assert.match(body, /106 waiting on you/);
-  assert.equal(waiting.split('\n').filter(line => /^- CHILD_REOPENED #\d+$/.test(line)).length, 5);
-  assert.match(waiting, /and 101 more: run programme.cjs attention/);
-  assert.doesNotMatch(waiting, /Controller:/);
-  assert.equal(body.split('\n').filter(line => /^- CHILD_REOPENED #\d+/.test(line)).length, 5, 'waiting entries do not repeat in the ordinary preview');
+  assert.match(body, /106 waiting on you\*\* · Holds: 0 · Full list: `programme\.cjs attention`/);
+  assert.doesNotMatch(body, /CHILD_REOPENED|\*\*Waiting on you\*\*/);
   for (const entry of f.parent.attention) Object.assign(entry, { state: 'acknowledged', due: new Date(Date.parse(f.now) + 3600000).toISOString() });
-  assert.doesNotMatch(state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now), /Waiting on you|waiting on you/);
-});
-
-test('waiting preview omits absent issue numbers and distinguishes findings at different heads', () => {
-  const parent = state.newParent({ repository: 'example.test/app', parentIssue: 421 });
-  parent.attention = state.foldAttention([], { source: 'reconcile', complete: true, now: '2026-11-06T00:00:00Z', seen: [
-    { code: 'CHECKS_RED', issue: 7, head: 'a'.repeat(40) },
-    { code: 'CHECKS_RED', issue: 7, head: 'b'.repeat(40) },
-  ] });
-  parent.attention = state.foldAttention(parent.attention, { source: 'inventory', complete: false, now: '2026-11-06T00:00:00Z',
-    seen: [{ code: 'INVENTORY_INCOMPLETE', issue: null }] });
-  const body = state.renderCurrentBlockBody(parent, new Map(), new Map(), '2026-11-08T00:00:00Z');
-  assert.match(body, /3 waiting on you/);
-  const waiting = body.split('**Waiting on you**')[1];
-  assert.ok(waiting);
-  assert.deepEqual(waiting.split('\n').filter(line => line.startsWith('- ')).sort(), [
-    '- INVENTORY_INCOMPLETE',
-    '- CHECKS_RED #7 at aaaaaaa',
-    '- CHECKS_RED #7 at bbbbbbb',
-  ].sort());
+  assert.doesNotMatch(state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now), /waiting on you/);
 });
 
 test('deliberately oversized unmarked prose still holds with BODY_TOO_LARGE and preserves the parent page', () => {
