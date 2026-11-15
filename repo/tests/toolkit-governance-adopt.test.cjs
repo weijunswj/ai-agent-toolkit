@@ -2,8 +2,8 @@
 
 // Turning governance on in a fresh repository from the governance question bank: the bank shows the
 // store, parent issue and checks as status lines (or the store as a question when one is found), and
-// the owner's answer makes the missing store and parent issue, renders the governed rules from the
-// templates and publishes one turn-on pull request. Offline fakes stand in for GitHub.
+// the owner's answer makes the missing store and parent issue and publishes one turn-on pull request
+// with the programme file and the CI checks only. Offline fakes stand in for GitHub.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,12 +15,10 @@ const { makeGoverned, recordAbsent } = require('./toolkit-governed-fixture-suppo
 const scripts = path.join(__dirname, '..', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const adopt = require(path.join(scripts, 'toolkit-governance-adopt.cjs'));
-const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 
 const OWNER = 'toolkit-test-fixture';
 const SLUG = `${OWNER}/fresh`;
 const STORE = `${OWNER}/TRANSPORT-fresh`;
-const PLAYBOOKS = Object.keys(require('../scripts/toolkit-playbooks.cjs').repositoryPlaybooks());
 
 // A fresh repository: a github.com origin, no governed rules, no programme file, nothing merged.
 function fixture(t, { agents = null } = {}) {
@@ -125,18 +123,16 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   assert.deepEqual(binding.store, { kind: 'github', repository: STORE, branch: 'main', path: `state/${SLUG}/` });
   assert.deepEqual(binding.task_prs, { auto_merge: 'off', merge_train: 'off' });
   assert.deepEqual(JSON.parse(files['.github/toolkit-programme.json']), binding);
-  const { blocks, errors } = managedBlock.findBlocks(files['AGENTS.md']);
-  assert.equal(errors.length, 0);
-  assert.ok(blocks.some(block => block.name === 'TOOLKIT-GOVERNED-RULES'));
-  assert.ok(files['AGENTS.md'].endsWith('\n\n# My own rules\n\nKeep this exactly.\n'), 'text outside the markers keeps its bytes');
-  assert.equal(files['CLAUDE.md'], '@AGENTS.md\n');
-  for (const name of PLAYBOOKS) assert.ok(files[`docs/agent-playbooks/${name}`], name);
+  // The installed Toolkit delivers the governed rules, so the pull request carries the programme file
+  // and the CI checks only: no AGENTS.md, CLAUDE.md, Antigravity bootstrap or playbooks.
+  assert.deepEqual(Object.keys(files).sort(), ['.github/dependabot.yml', '.github/plain-text.json', '.github/scripts/plain-text-check.cjs',
+    '.github/toolkit-programme.json', '.github/workflows/dependency-auto-merge.yml', '.github/workflows/plain-text.yml']);
   // The dependency security files join the same pull request, so governance never starts with its own
   // security check failing.
   assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/);
   assert.match(files['.github/workflows/dependency-auto-merge.yml'], /^# Toolkit dependency auto-merge v/m);
   assert.match(result.out, /Added \.github\/dependabot\.yml and \.github\/workflows\/dependency-auto-merge\.yml to the working tree/);
-  assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the rules files in the working tree are not changed');
+  assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the repository\'s own AGENTS.md is not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
   // The App row recommends Set up while governance turns on: the owner's one command, with the store,
@@ -219,15 +215,20 @@ test('when GitHub cannot be searched, turning on makes nothing and says why', as
   assert.equal(answered.published.length, 0);
 });
 
-test('a repository that already carries its prepared rules and programme file uses them and makes nothing', t => {
+test('a working tree with a programme file that turns governance on is a prepared adoption; a governed block is not needed', t => {
   const ctx = fixture(t);
+  const file = path.join(ctx.repo, '.github', 'toolkit-programme.json');
   assert.equal(adopt.adoptionPrepared(ctx.repo), false);
   fs.copyFileSync(path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), path.join(ctx.repo, 'AGENTS.md'));
-  assert.equal(adopt.adoptionPrepared(ctx.repo), false, 'the rules alone are not a prepared adoption');
-  fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), '{}\n');
-  assert.equal(adopt.adoptionPrepared(ctx.repo), true);
-  const files = adopt.renderedRules(ctx.repo);
-  assert.equal(files['AGENTS.md'], fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), 'a current block renders unchanged');
+  assert.equal(adopt.adoptionPrepared(ctx.repo), false, 'a governed block alone is not a prepared adoption');
+  fs.rmSync(path.join(ctx.repo, 'AGENTS.md'));
+  fs.writeFileSync(file, `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled' })}\n`);
+  assert.equal(adopt.adoptionPrepared(ctx.repo), true, 'the programme file alone is prepared');
+  // A merged programme file that turns governance off is the repository's decision, not a prepared yes.
+  fs.writeFileSync(file, `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' })}\n`);
+  assert.equal(adopt.adoptionPrepared(ctx.repo), false);
+  fs.writeFileSync(file, 'not json\n');
+  assert.equal(adopt.adoptionPrepared(ctx.repo), false);
 });
 
 test('a fresh repository with slow CI gets Yes recommended for parallel CI shards, and all recommended puts them in the one turn-on pull request', async t => {

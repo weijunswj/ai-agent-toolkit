@@ -28,20 +28,24 @@ function fakeGitHub(f, extra = {}) {
   fs.writeFileSync(file, JSON.stringify({ repository: 'example-owner/example-repo', calls: [], files: {}, ...extra }));
   return { transport: new GitHubProposalTransport({ command: [process.execPath, path.join(__dirname, 'support/governance-fake-github.cjs'), file] }), read: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
 }
-// full: also the rest of the rules set every turn-on carries (all playbooks and the plain-text check).
-function prepareAdoption(f, { full = true } = {}) {
+// full: also the CI files every turn-on carries beside the programme file (the plain-text check).
+// rules: the instruction copies older turn-ons wrote (a governed AGENTS.md block, CLAUDE.md and a
+// playbook), which the installed Toolkit now delivers, so a turn-on leaves them out.
+function prepareAdoption(f, { full = true, rules = false } = {}) {
   const binding = { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'enabled',
     parents: [{ issue: 1, record_prefix: 'INT-FX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' },
     required_checks: ['validate'], dependency_updates: { auto_merge: 'off', github_actions: 'owner' } };
   fs.mkdirSync(path.join(f.cwd, '.github'), { recursive: true });
   fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify(binding));
-  fs.copyFileSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), path.join(f.cwd, 'AGENTS.md'));
-  fs.writeFileSync(path.join(f.cwd, 'CLAUDE.md'), '@AGENTS.md\n');
-  fs.mkdirSync(path.join(f.cwd, 'docs/agent-playbooks'), { recursive: true });
-  fs.writeFileSync(path.join(f.cwd, 'docs/agent-playbooks/INDEX.md'), '# Project playbooks\n');
+  if (rules) {
+    fs.copyFileSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), path.join(f.cwd, 'AGENTS.md'));
+    fs.writeFileSync(path.join(f.cwd, 'CLAUDE.md'), '@AGENTS.md\n');
+    fs.mkdirSync(path.join(f.cwd, 'docs/agent-playbooks'), { recursive: true });
+    fs.writeFileSync(path.join(f.cwd, 'docs/agent-playbooks/INDEX.md'), '# Project playbooks\n');
+  }
   if (full) {
-    const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
-    for (const name of requiredRules().filter(entry => !fs.existsSync(path.join(f.cwd, entry)))) {
+    const { REQUIRED_FILES } = require('../scripts/toolkit-governance-proposal.cjs');
+    for (const name of REQUIRED_FILES.filter(entry => !fs.existsSync(path.join(f.cwd, entry)))) {
       fs.mkdirSync(path.dirname(path.join(f.cwd, name)), { recursive: true });
       fs.writeFileSync(path.join(f.cwd, name), `${name}\n`);
     }
@@ -320,17 +324,15 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
   // A yes receipt from an older Toolkit is never published by an agent's publish --run.
   const stale = f.owner.request(f.cwd, 'yes', run);
-  const binding = prepareAdoption(f, { full: false });
+  const binding = prepareAdoption(f, { full: false, rules: true });
   assert.equal(await cli.main(['publish', '--run', stale.run]), 2);
   assert.match(stderr.join(''), /published only from the governance question bank/);
   assert.equal(github.read().calls.filter(call => call.input).length, 0, 'a hand-built yes causes no GitHub writes');
-  // A working tree prepared with only the programme file and AGENTS.md (a hand-built two-file setup):
-  // the bank still renders the full rules set and adds the plain-text check, so nothing is left out.
-  const rules = fs.readFileSync(path.join(f.cwd, 'AGENTS.md'));
-  fs.rmSync(path.join(f.cwd, 'CLAUDE.md'));
-  fs.rmSync(path.join(f.cwd, 'docs'), { recursive: true });
+  // A working tree prepared with the programme file and the instruction copies older turn-ons wrote:
+  // the bank adds the plain-text check and carries the binding and CI files only. The installed
+  // Toolkit delivers the governed rules, so AGENTS.md, CLAUDE.md and the playbooks stay out.
   require('node:child_process').execFileSync('git', ['init', '--quiet', f.cwd], { stdio: 'ignore', windowsHide: true });
-  fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), rules.toString().replace(/\r?\n/g, '\r\n'));
+  fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), fs.readFileSync(path.join(f.cwd, 'AGENTS.md'), 'utf8').replace(/\r?\n/g, '\r\n'));
   fs.writeFileSync(path.join(f.cwd, 'product.txt'), 'Unrelated work\n');
   answers.push('all recommended');
   { const code = await cli.main(['setup']); assert.equal(code, 0, stdout.join('').slice(-1500) + stderr.join('')); }
@@ -340,18 +342,17 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.equal(published.commits, 1);
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1);
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
-  const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
-  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', '.github/plain-text-baseline.json', '.github/dependabot.yml', '.github/workflows/dependency-auto-merge.yml', ...requiredRules()].sort(), 'the full rules set, the dependency security files and nothing unrelated');
-  assert.equal(published.files['CLAUDE.md'], '@AGENTS.md\n');
+  const { REQUIRED_FILES } = require('../scripts/toolkit-governance-proposal.cjs');
+  assert.deepEqual(Object.keys(published.files).sort(), ['.github/plain-text-baseline.json', '.github/dependabot.yml', '.github/workflows/dependency-auto-merge.yml', ...REQUIRED_FILES].sort(), 'the binding, the CI checks and the dependency security files, and nothing else');
   for (const name of ['.github/plain-text.json', '.github/workflows/plain-text.yml']) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
   // The bank writes both switches off with the turn-on, as it showed them.
   assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, task_prs: { auto_merge: 'off', merge_train: 'off' } });
-  assert.equal(published.files['AGENTS.md'], rules.toString().replace(/\r\n/g, '\n'));
   // The fixed summary: what merging does, what the pull request holds and what finishes after the merge,
   // then one closing line after the owner's commands.
   const said = stdout.join('');
   assert.match(said, /prepared the governance turn-on pull request: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
-  assert.match(said, /It holds: \.github\/toolkit-programme\.json, .*AGENTS\.md/);
+  assert.match(said, /It holds: \.github\/toolkit-programme\.json, .*\.github\/workflows\/plain-text\.yml/);
+  assert.doesNotMatch(said, /It holds: .*(AGENTS|CLAUDE)\.md/, 'no instruction copies');
   assert.match(said, /the next session here finishes on its own: default-branch protection/);
   assert.doesNotMatch(said, /no required checks yet/, 'a binding with required checks has no protection wait line');
   assert.match(said, /before pulling, compare any prepared untracked files/);
@@ -515,16 +516,6 @@ test('a busy proposal lock allows the prompt with a note, keeping the receipt in
   assert.deepEqual(fs.readFileSync(file), before);
 });
 
-// The turn-on set keeps exactly the playbooks repository-agent-rules lists, never the skill's README.
-test('the turn-on rules carry exactly the sixteen playbooks, as INDEX.md and fifteen named files', () => {
-  const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
-  assert.deepEqual(requiredRules().filter(name => name.startsWith('docs/agent-playbooks/')), [
-    'INDEX.md', 'baseline-workflow.md', 'closing-comments.md', 'decision-trace.md', 'docs-governance.md', 'fast-tests-and-sharding.md',
-    'generated-files.md', 'git-completion.md', 'invariant-models.md', 'local-docs.md', 'model-safety-flags.md', 'n8n-workflows.md',
-    'privacy-safe-checks.md', 'release-readiness-audit.md', 'safety-gates.md', 'windows-command-hygiene.md',
-  ].map(name => `docs/agent-playbooks/${name}`));
-});
-
 // The installed Toolkit delivers the governed rules, so a repository needs no copy of them.
 const GOVERNED_RULES = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
 const TOOLKIT_VERSION = require('../contracts/toolkit-local-bridge/version.json').version;
@@ -613,13 +604,13 @@ test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding 
     const transport = { list: () => published ? [proposal('yes')] : [], publish(repository, binding, files) { published = { binding, files }; return proposal('yes'); }, read: () => proposal('yes') };
     const f = fixture(t, transport);
     const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => cloud });
-    prepareAdoption(f);
+    prepareAdoption(f, { rules: true });
     fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify(v1));
     const request = owner.request(f.cwd, 'yes', run);
     const result = owner.publish(f.cwd, request.run, v1);
     assert.equal(published.binding.schema, 'toolkit.programme-binding.v2');
     assert.equal(JSON.parse(published.files['.github/toolkit-programme.json']).schema, 'toolkit.programme-binding.v2');
-    assert.ok(published.files['AGENTS.md']);
+    assert.equal(published.files['AGENTS.md'], undefined, 'the governed rules come from the installed Toolkit, not a repository copy');
     for (const row of workflows.WORKFLOWS) assert.equal(published.files[row.file], cloud.files[row.file], row.file);
     assert.equal(result.warning, expectWarning ? cloud.warning : undefined);
   }
@@ -631,22 +622,23 @@ test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding 
   assert.equal(rendered, 0);
 });
 
-test('a yes missing any of the rules set is refused: the S3 two-file turn-on cannot publish', t => {
-  const { missingRules, requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
-  let writes = 0;
-  const f = fixture(t, { list: () => [], publish() { writes++; return proposal('yes'); }, read: () => proposal('yes') });
+test('a yes publishes the binding and CI files with no instruction copies, and is refused without a CI file', t => {
+  const { missingFiles, REQUIRED_FILES } = require('../scripts/toolkit-governance-proposal.cjs');
+  let published = null;
+  const f = fixture(t, { list: () => published ? [proposal('yes')] : [], publish(repository, binding, files) { published = files; return proposal('yes'); }, read: () => proposal('yes') });
   const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => ({ files: {}, warning: null }) });
-  const binding = prepareAdoption(f, { full: false });
-  fs.rmSync(path.join(f.cwd, 'CLAUDE.md'));
-  fs.rmSync(path.join(f.cwd, 'docs'), { recursive: true });
+  const binding = prepareAdoption(f);
+  fs.rmSync(path.join(f.cwd, '.github/workflows/plain-text.yml'));
   assert.throws(() => owner.publish(f.cwd, owner.request(f.cwd, 'yes', run).run, binding), /PROPOSAL_ADOPTION_INCOMPLETE/);
-  assert.equal(writes, 0);
-  const full = Object.fromEntries(requiredRules().map(name => [name, name === 'CLAUDE.md' ? '@AGENTS.md\n' : 'x']));
-  assert.deepEqual(missingRules(full), []);
-  assert.deepEqual(missingRules({ ...full, 'CLAUDE.md': '# no import\n' }), ['CLAUDE.md'], 'a CLAUDE.md that does not load AGENTS.md does not count');
-  const { 'docs/agent-playbooks/INDEX.md': dropped, ...partial } = full;
+  assert.equal(published, null, 'a set missing a CI file is never published');
+  prepareAdoption(f);
+  owner.publish(f.cwd, owner.request(f.cwd, 'yes', { ...run, sessionId: 'again' }).run, binding);
+  assert.deepEqual(Object.keys(published).sort(), [...REQUIRED_FILES].sort(), 'no AGENTS.md, CLAUDE.md or playbooks are needed');
+  const full = Object.fromEntries(REQUIRED_FILES.map(name => [name, 'x']));
+  assert.deepEqual(missingFiles(full), []);
+  const { '.github/workflows/plain-text.yml': dropped, ...partial } = full;
   assert.ok(dropped);
-  assert.deepEqual(missingRules(partial), ['docs/agent-playbooks/INDEX.md']);
+  assert.deepEqual(missingFiles(partial), ['.github/workflows/plain-text.yml']);
 });
 
 test('the default renderer leaves a Toolkit source checkout alone, renders both copies, and names a reason and fix when it cannot', t => {

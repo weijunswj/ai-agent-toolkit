@@ -1374,7 +1374,8 @@ function toolkitSourceCheckoutVersion(targetRoot) {
 
 // A git root is Toolkit-managed when one of its expected instruction files carries
 // an AI-AGENT-TOOLKIT managed block (complete or broken), or when hub state names it
-// as the managed Toolkit checkout. Everything else is ordinary work and stays silent.
+// as the managed Toolkit checkout. A governed repository with no block is checked for its
+// vendored checks only (runAgentRulesPreflight); everything else stays silent.
 function agentRulesRootIsManaged(targetRoot, specs, state) {
   if (state?.repo_path && path.resolve(state.repo_path) === path.resolve(targetRoot)) return true;
   for (const spec of specs) {
@@ -1401,8 +1402,8 @@ function newestKnownToolkitVersion(state) {
   return versions.reduce((newest, version) => (!newest || compareBridgeVersions(version, newest) > 0 ? version : newest), '');
 }
 
-// Direction is 'newer' when the repository rules may come from a newer Toolkit than
-// the running copy (repository rules stay authoritative), 'differs' when no newer
+// Direction is 'newer' when the repository rules or checks may come from a newer Toolkit
+// than the running copy (they stay authoritative; refresh Toolkit), 'differs' when no newer
 // Toolkit is known on this machine (the rules differ from the running Toolkit's
 // templates; which side is newer is unknown), and 'drift' when a Toolkit source
 // checkout differs from its own canonical templates.
@@ -1417,13 +1418,18 @@ function runAgentRulesPreflight(args, options = {}) {
   const pluginRoot = agentRulesPluginRoot(args, options);
   const runningVersion = options.runningVersion || BRIDGE_VERSION;
   const base = { targetRoot, gitRoot, gitRepoDetected: Boolean(gitRoot), pluginRoot, runningVersion, findings: [] };
-  if (!gitRoot || !agentRulesRootIsManaged(gitRoot, specs, options.state)) return { ...base, status: 'not-managed' };
+  if (!gitRoot) return { ...base, status: 'not-managed' };
+  // A governed repository is managed even with no Toolkit block: turn-on no longer writes one, and
+  // the installed Toolkit delivers the governed rules. There only its vendored checks are compared.
+  const governed = () => (options.governanceEnabled || governanceEnabledAt)(gitRoot);
+  const rulesManaged = agentRulesRootIsManaged(gitRoot, specs, options.state);
+  if (!rulesManaged && !governed()) return { ...base, status: 'not-managed' };
 
   const sourceVersion = toolkitSourceCheckoutVersion(targetRoot);
   const reference = sourceVersion ? 'source-checkout' : 'installed-plugin';
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
-  for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  if (rulesManaged) for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
   if (!sourceVersion) findings.push(...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
   const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
   const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
@@ -1440,14 +1446,21 @@ function runAgentRulesPreflight(args, options = {}) {
 function formatAgentRulesPreflight(result) {
   if (result.status !== 'needs-attention') return '';
   const files = [...new Set((result.findings || []).map((finding) => finding.file))].join(', ');
+  const checksOnly = (result.findings || []).length > 0 && result.findings.every((finding) => finding.kind === 'repo-check');
+  const missingCheck = (result.findings || []).some((finding) => finding.detail === 'missing');
+  // The check installer cannot tell a newer copy from an older one, so with a newer Toolkit on
+  // record the step is to refresh Toolkit, never to rewrite the checks from the running copy.
+  if (result.direction === 'newer' && checksOnly) {
+    return `Toolkit note: this repository's Toolkit checks (${files}) ${missingCheck ? 'are missing or may come from' : 'may come from'} a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); next step: refresh Toolkit (setup toolkit) before this task ends. No files were changed.`;
+  }
   if (result.direction === 'newer') {
     return `Toolkit note: this repository's Toolkit rules may come from a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); the repository rules are authoritative. Next step: refresh Toolkit (setup toolkit) before this task ends. No files were changed.`;
   }
   if (result.direction === 'drift') {
     return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; next step: regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs --write before this task ends. No files were changed.`;
   }
-  if ((result.findings || []).length && result.findings.every((finding) => finding.kind === 'repo-check')) {
-    const state = result.findings.some((finding) => finding.detail === 'missing') ? 'are missing or differ from' : 'differ from';
+  if (checksOnly) {
+    const state = missingCheck ? 'are missing or differ from' : 'differ from';
     return `Toolkit note: this repository's Toolkit checks (${files}) ${state} the running Toolkit ${result.runningVersion}; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`;
   }
   return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`;

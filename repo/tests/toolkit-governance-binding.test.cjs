@@ -575,17 +575,23 @@ test('B: adoption lists what exists from the working tree and keeps the owner te
   write('.github/workflows/uptime-monitor.yml', 'on: push\n');
   write('docs/DEPLOY.md', '# Deploy\n');
   const local = discovery.localInventory(repo);
-  assert.deepEqual([local.agents_md, local.governed_block, local.host_shims, local.scheduled, local.monitoring, local.deploy_docs, local.dependabot],
-    [true, false, [shim], ['nightly.yml'], ['uptime-monitor.yml'], ['docs/DEPLOY.md'], false]);
+  assert.deepEqual([local.agents_md, local.governed_block, local.host_shims, local.scheduled, local.monitoring, local.deploy_docs],
+    [true, false, [shim], ['nightly.yml'], ['uptime-monitor.yml'], ['docs/DEPLOY.md']]);
   const list = discovery.adoptionList({ local, parents: { recommended: null }, stores: { recommended: null }, requiredChecks: [], rulesets: { ok: true, value: [] }, draft: { store: { repository: 'example-owner/TRANSPORT-adopt' } }, pending: false });
-  assert.match(list.add.join('\n'), /your own text stays byte-identical outside it/);
+  // The installed Toolkit delivers the governed rules: turning on adds no block and keeps AGENTS.md as it is.
+  assert.doesNotMatch(Object.values(list).flat().join('\n'), /governed block/);
+  assert.match(list.keep.join('\n'), /AGENTS\.md \(your own rules, unchanged\)/);
+  assert.match(list.add.join('\n'), /the CI checks: the plain-text check and, where missing, the Dependabot config and the dependency auto-merge workflow/);
   assert.match(list.add.join('\n'), /a new private evidence store example-owner\/TRANSPORT-adopt, created after your yes/);
   assert.match(list.keep.join('\n'), /scheduled workflows: nightly\.yml/);
   assert.match(list.keep.join('\n'), /deployment notes: docs\/DEPLOY\.md/);
   assert.match(list.keep.join('\n'), /monitoring workflows: uptime-monitor\.yml/);
   assert.match(list.defer.join('\n'), /required checks: none/);
-  assert.match(list.defer.join('\n'), /Dependabot/);
   assert.equal(fs.readFileSync(path.join(repo, 'AGENTS.md'), 'utf8'), '# Owner rules\n', 'discovery writes nothing');
+  // A governed block an older turn-on wrote is never reused or refreshed: it is a leftover.
+  const leftover = discovery.adoptionList({ local: { ...local, governed_block: true }, parents: { recommended: null }, stores: { recommended: null }, requiredChecks: [], rulesets: { ok: true, value: [] }, draft: { store: { repository: 'example-owner/TRANSPORT-adopt' } }, pending: false });
+  assert.doesNotMatch([...leftover.reuse, ...leftover.add, ...leftover.repair].join('\n'), /governed block/);
+  assert.match(leftover.keep.join('\n'), /the governed block in AGENTS\.md, no longer needed: the installed Toolkit gives sessions the governed rules/);
 });
 
 // ---- matrix C: old local answers -------------------------------------------------------------------

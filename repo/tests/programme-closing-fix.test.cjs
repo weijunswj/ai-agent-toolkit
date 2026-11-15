@@ -143,8 +143,6 @@ test('fix L6: closing tests use OS temp and neither suite retains the builder ov
 });
 
 test('fix L7: playbook discovery and Projects point to a checkout or Remote Control',()=>{
-  const skill=fs.readFileSync(path.join(ROOT,'skills/repository-agent-rules/SKILL.md'),'utf8');
-  assert.match(skill.split('\n').find(line=>line.includes('every Markdown file:')),/`closing-comments\.md`/);
   const pointer=fs.readFileSync(path.join(ROOT,'repo/contracts/claude-projects/web-controller-projects/reference/owner-asks.md'),'utf8').split('\n').find(line=>line.includes('closing-comments.md'));
   assert.match(pointer,/checkout/); assert.match(pointer,/Remote Control/);
 });
