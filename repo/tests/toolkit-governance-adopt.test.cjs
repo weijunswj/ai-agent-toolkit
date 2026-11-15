@@ -107,7 +107,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['governance-app', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
   assert.match(table, /Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on/);
@@ -139,6 +139,22 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the rules files in the working tree are not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
+  // The App row recommends Set up while governance turns on: the owner's one command, with the store,
+  // instead of the by-hand App steps.
+  assert.match(result.out, new RegExp(`^node "[^"]+toolkit-governance-app-setup\\.cjs" --repo ${SLUG} --store ${STORE}$`, 'm'));
+  assert.doesNotMatch(result.out, /pre-filled page/, 'no by-hand App steps beside the command');
+});
+
+test('the governance App row: Not now says so once, and Set up gives no command while governance stays off', async t => {
+  const ctx = fixture(t);
+  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.5=A'] });
+  assert.equal(notNow.code, 0, notNow.err + notNow.out);
+  assert.match(notNow.out, /Governance GitHub App: not now\. Governance works without it/);
+  assert.doesNotMatch(notNow.out, /toolkit-governance-app-setup|pre-filled page/);
+  const off = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A'] });
+  assert.match(off.out, /Governance App: not set up, because governance is not on after this answer\./);
+  assert.doesNotMatch(off.out, /toolkit-governance-app-setup/);
+  assert.equal(off.published.length, 0);
 });
 
 test('a failed step stops with what was made, and answering again reuses it instead of making a second one', async t => {

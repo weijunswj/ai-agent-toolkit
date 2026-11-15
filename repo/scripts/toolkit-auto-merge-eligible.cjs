@@ -46,6 +46,8 @@
 //   - the controller, global and gate rules, and the Approvals section of the Projects controller
 //     skill: they say when a controller may merge;
 //   - CI workflows: they decide what "every required check is green" means;
+//   - the permission-line pin test: a new command, subcommand or flag on a pasted line fails it,
+//     so that change waits for the owner (a changed check behind an existing flag relies on review);
 //   - a major version bump: a breaking release would go out unseen.
 // Hooks, setup, governance and the preference reader/writer also wait for a typed merge:
 // changing the enforcement or setup path must never authorise that same change.
@@ -85,6 +87,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/scripts\/toolkit-(?:repository-identity|user-state)\.cjs$/, 'governance identity and operational state'],
   [/^repo\/scripts\/toolkit-(?:permissions|permissions-apply|cleanup|store)\.cjs$/, 'the permission blocks and the commands they allow'],
   [/^repo\/scripts\/toolkit-(?:remove|remove-parts|commands)\.cjs$/, 'remove toolkit and the typed Toolkit commands'],
+  [/^repo\/tests\/toolkit-permissions\.test\.cjs$/, 'the test that pins what the pasted permission lines allow'],
   [/^(?:repo\/docs\/agent-playbooks|skills\/repository-agent-rules\/repo-local\/docs\/agent-playbooks)\/safety-gates\.md$/, 'approval rules'],
   [/^repo\/contracts\/programme-state\//, 'the programme binding schema'],
   [/^skills\/github-program-reconciler\/scripts\/programme-state\.cjs$/, 'the programme binding reader'],

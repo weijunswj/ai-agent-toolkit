@@ -51,7 +51,7 @@ test('correction rechecks review the fix, and post-PASS deltas are unchanged', (
 });
 
 test('CONTROLLER maps severities, scopes rechecks and batches small fixes', () => {
-  assert.match(CONTROLLER, /ship blocker \(High or Medium, gate rules\), follow-up \(Low or `POST_SHIP`; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days, unless the owner accepted it\)/);
+  assert.match(CONTROLLER, /ship blocker \(High or Medium, gate rules\), follow-up \(Low or `POST_SHIP`; one record per PR, on its area's open child, which joins the lane's next slice or starts within 3 days, unless the owner accepted it\)/);
   assert.match(CONTROLLER, /fresh rechecks target fix commits/);
   assert.match(CONTROLLER, /\*\*Batch small fixes:\*\* a small fix joins the lane's next slice not yet in review/);
   assert.match(CONTROLLER, /the slice takes its highest tier/);

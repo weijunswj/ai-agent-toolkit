@@ -205,4 +205,4 @@ function appFinding(stateName, slug, store, state, others, owner = null) {
   return null;
 }
 
-module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, creationLink, ownerType, manualSteps, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });
+module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, permissionText, creationLink, ownerType, manualSteps, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });
