@@ -80,4 +80,6 @@ The bundled CSV data is a safe subset adapted from `nextlevelbuilder/ui-ux-pro-m
 - `ui-reasoning.csv`
 - `stacks/*.csv`
 
+Upstream marks style and stack rows `active`, `supplemental` or `deprecated` in a `Status` column. Only active rows rank, so a retired or supplemental style never leads a recommendation. A stack query that names a legacy or deprecated generation, such as `legacy slots` for Svelte, also searches that stack's deprecated rows. Each recommended style carries upstream's `rtl_level` (`full`, `partial` or `caveats`) for right-to-left interfaces.
+
 See [third-party notes](LICENSE-THIRD-PARTY-NOTES.md) for attribution.
