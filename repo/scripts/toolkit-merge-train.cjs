@@ -39,7 +39,8 @@
 // the earlier train has merged. Then catchup, run in a clean checkout of the stacked train, merges
 // main in as one merge commit (no rebuild and no force-push) and adds the one bump; a main that does
 // not merge cleanly is refused, never hand-fixed. A stacked train that ejected a member (its head is
-// a recorded eject revert) still catches up; catchup drops the manifest's "stacked" mark. --out writes the boarded manifest, with the
+// a recorded eject revert) still catches up; catchup drops the manifest's "stacked" mark. catchup
+// refuses, leaving the train as it was, when the result would not equal a fresh build (below). --out writes the boarded manifest, with the
 // ejected members and their reasons under "ejected", for catchup, verify, body and land.
 //
 // eject takes a boarded member off a train that is already pushed, without rewriting its history,
@@ -49,7 +50,8 @@
 // level. It moves the member to "ejected" with its boarding merge and every revert it made, and
 // writes the manifest back (or to --out). It refuses, leaving the checkout as it was, when a later
 // member is built on the ejected one (its head holds the ejected head; verify refuses that too) or
-// when a revert does not apply cleanly (a later member changes the same lines). The ejected pull
+// when a revert does not apply cleanly (a later member changes the same lines), or when the result
+// would not equal a fresh build (below): the revert would also undo content main holds. The ejected pull
 // request stays open: its commits are in the train, so GitHub would mark it merged if the train
 // landed with its head at any commit the train holds; land refuses that until its branch moves on or
 // it closes. It rejoins only a later train, after its branch merges main and reverts the eject
@@ -66,6 +68,16 @@
 // an earlier train commit (an ejected member's boarding merge, or a bump that a later bump replaced),
 // and every recorded revert must be there. Each bump is checked at the level of the members on board
 // when it was made.
+// Landing equivalence: whenever main is inside the train, the train's tree must equal a fresh build
+// of its current members on main (each reviewed head merged in manifest order, then one bump unless
+// the train is stacked). A revert keeps removing its content through later merges, so content that
+// reached main by another route (the member landing alone, a pull request built on it, an identical
+// change) would be deleted on landing; the check compares results, so no route needs listing. A
+// difference, or a member that does not merge cleanly onto main, refuses: rebuild the train on main.
+// The guarantee is for a merge onto the main it checked: land requires that main inside the train,
+// and governance's up-to-date check (P6, toolkit-governance-protection.cjs) makes GitHub refuse the
+// merge once main has moved, since a commit the train holds reaching main moves the merge base and
+// lets an eject revert delete it.
 // It also lists every file two or more members change ("overlap") and the review the train needs:
 // none when there is no overlap, else a delta review of the shared files.
 // Trains run only where governance is ENABLED and the merged binding's merge train switch
@@ -73,11 +85,16 @@
 // each ready pull request merges alone. verify, body, split and eject still check or unwind a train.
 // land refuses a stacked train, re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
-// for every RISKY member, then names the pull request and head to merge, with its route: `auto` when
+// for every RISKY member. It re-reads each member's live body: a UAT line the auto-merge check calls
+// missing or invalid refuses, and so does a manifest line weaker than the live one (the manifest says
+// NOT_REQUIRED or PASSED while the body says OWNER_TEST_NEEDED), so a stale or hand-built manifest
+// never drops an owner test; a stricter manifest line only keeps a test owed. Then it names the pull
+// request and head to merge, with its route: `auto` when
 // the repository's task auto-merge switch is on, the train's scope and UAT line pass
 // toolkit-auto-merge-eligible.cjs at the train head and no member is RISKY; else `owner` (a merge
-// card), with the reasons. --live reads those pull request facts from
-// a JSON file ({"<number>": {"state": "OPEN", "head": "<sha>"}}) instead of `gh api` (REST).
+// card), with the reasons. --live reads those pull request facts from a JSON file
+// ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
+// (REST); a member entry with no body is refused, never read as NOT_REQUIRED.
 //
 // Exit 0: done or ready. Exit 1: refused, with every reason. Exit 2: bad arguments or unreadable input.
 
@@ -379,6 +396,12 @@ function catchup(cwd, manifest, options) {
       bump = git(cwd, ['rev-parse', 'HEAD']).stdout;
     }
   }
+  const unequal = landingEquivalence(cwd, manifest, main, 'HEAD', true);
+  if (unequal.length) {
+    git(cwd, ['reset', '--quiet', '--hard', before], { allowFail: true });
+    git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
+    return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, problems: ['nothing was caught up', ...unequal] };
+  }
   // Caught up on main with its bump, the train is no longer stacked, so land no longer refuses it.
   if (manifest.stacked && (options.out || options.manifest)) {
     const { stacked, ...rest } = manifest;
@@ -410,11 +433,11 @@ function eject(cwd, manifest, options) {
   const [lastCommit, ...lastParents] = commits[commits.length - 1];
   const bump = lastParents.length === 1 && !recorded.has(lastCommit) ? lastCommit : null;
   const made = [];
-  const undo = problem => {
+  const undo = (...problems) => {
     git(cwd, ['revert', '--abort'], { allowFail: true });
     git(cwd, ['reset', '--quiet', '--hard', start], { allowFail: true });
     git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
-    return { ok: false, pr: options.pr, head: start, main, problems: [problem] };
+    return { ok: false, pr: options.pr, head: start, main, problems };
   };
   const revert = (target, mainline, message) => {
     const args = ['-c', 'rerere.enabled=false', 'revert', '--no-commit', ...(mainline ? ['-m', '1'] : []), target];
@@ -447,6 +470,9 @@ function eject(cwd, manifest, options) {
       }
     }
   }
+  // Checked only while main is inside the train: otherwise main moved, and verify and land refuse anyway.
+  const unequal = isAncestor(cwd, main, 'HEAD') ? landingEquivalence(cwd, { ...manifest, members: remaining }, main, 'HEAD') : [];
+  if (unequal.length) return undo('nothing was ejected', ...unequal);
   const boardRevert = made.find(entry => entry.of === board).commit;
   const out = {
     ...manifest,
@@ -467,28 +493,68 @@ function eject(cwd, manifest, options) {
   };
 }
 
-function reproducesBump(cwd, manifest, commit, parent, level, main) {
-  const argv = bumpArgv(cwd, manifest, level, main);
-  if (!argv) return 'the train has no bump to make, so a plain commit is not allowed';
+// Runs `work` in a scratch worktree detached at `commit`, then removes it.
+function inScratchTree(cwd, commit, work) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-train-'));
   const tree = path.join(scratch, 'tree');
   try {
-    git(cwd, ['worktree', 'add', '--quiet', '--detach', tree, parent]);
+    git(cwd, ['worktree', 'add', '--quiet', '--detach', tree, commit]);
     try {
+      return work(tree);
+    } finally {
+      git(cwd, ['worktree', 'remove', '--force', tree], { allowFail: true });
+      git(cwd, ['worktree', 'prune'], { allowFail: true });
+    }
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function reproducesBump(cwd, manifest, commit, parent, level, main) {
+  const argv = bumpArgv(cwd, manifest, level, main);
+  if (!argv) return 'the train has no bump to make, so a plain commit is not allowed';
+  try {
+    return inScratchTree(cwd, parent, tree => {
       runBump(tree, argv);
       git(tree, ['add', '--all']);
       const made = git(tree, ['write-tree']).stdout;
       const recorded = git(cwd, ['rev-parse', `${commit}^{tree}`]).stdout;
       return made === recorded ? '' : 'the last commit differs from a fresh run of the bump command';
-    } finally {
-      git(cwd, ['worktree', 'remove', '--force', tree], { allowFail: true });
-      git(cwd, ['worktree', 'prune'], { allowFail: true });
-    }
+    });
   } catch (error) {
     return error instanceof TrainError ? error.message : String(error);
-  } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+// The tree of a fresh build of the current members on `main`: each reviewed head merged in manifest
+// order (the order the train boarded them), then, with `bump`, one bump at their level against main.
+// A member that does not merge cleanly onto main is named instead.
+function freshBuildTree(cwd, manifest, main, bump) {
+  try {
+    return inScratchTree(cwd, main, tree => {
+      for (const member of manifest.members) {
+        const merged = git(tree, ['-c', 'rerere.enabled=false', '-c', 'commit.gpgsign=false', '-c', 'user.name=merge-train', '-c', 'user.email=merge-train@example.invalid',
+          'merge', '--no-ff', '--no-edit', '--no-verify', '-m', memberMessage(member), member.head], { allowFail: true });
+        if (merged.status !== 0) return { tree: null, reason: `#${member.pr} does not merge cleanly onto main` };
+      }
+      const argv = bump ? bumpArgv(cwd, manifest, trainLevel(manifest.members), main) : null;
+      if (argv) { runBump(tree, argv); git(tree, ['add', '--all']); }
+      return { tree: git(tree, ['write-tree']).stdout };
+    });
+  } catch (error) {
+    return { tree: null, reason: error.message };
+  }
+}
+
+// Landing equivalence (see the header): the problems, or none when `head`'s tree equals a fresh
+// build of the members on `main`. A stacked train has no bump until catchup, so its build takes none.
+function landingEquivalence(cwd, manifest, main, head, bump = !manifest.stacked) {
+  const fresh = freshBuildTree(cwd, manifest, main, bump);
+  if (!fresh.tree) return [`a fresh build of the members on main fails (${fresh.reason}): rebuild the train on main`];
+  const actual = git(cwd, ['rev-parse', `${head}^{tree}`]).stdout;
+  if (fresh.tree === actual) return [];
+  const files = git(cwd, ['diff-tree', '-r', '--name-only', fresh.tree, actual]).stdout.split('\n').filter(Boolean);
+  return [`the train differs from a fresh build of its members on main (${files.slice(0, 5).join(', ')}${files.length > 5 ? ', ...' : ''}): landing it would not equal merging those members on main, so it could undo merged work; rebuild the train on main`];
 }
 
 function verify(cwd, manifest, options) {
@@ -576,6 +642,7 @@ function verify(cwd, manifest, options) {
   if (commits.length && !plain.includes(last) && bumpArgv(cwd, manifest, level, main) && !(options.stackedNoBump && manifest.stacked)) {
     problems.push('the train has no bump commit: build it on main, or run catchup on a stacked train, before verify');
   }
+  if (commits.length && isAncestor(cwd, main, head)) problems.push(...landingEquivalence(cwd, manifest, main, head));
   const overlap = memberOverlap(cwd, manifest.members, main);
   const review = overlap.length ? 'delta review of the shared files' : 'none: verify and green CI suffice';
   return { ok: problems.length === 0, head, main, members: manifest.members.map(member => member.pr), level, overlap, review, problems };
@@ -673,14 +740,28 @@ function livePr(repository, number, liveFile) {
   if (liveFile) {
     const facts = JSON.parse(fs.readFileSync(liveFile, 'utf8'))[String(number)];
     if (!facts) throw new TrainError(`--live has no entry for #${number}`);
-    return { state: facts.state, head: facts.head };
+    return { state: facts.state, head: facts.head, body: facts.body };
   }
   if (!repository) throw new TrainError('land needs "repository" in the manifest to read pull requests');
   // REST, not `gh pr view`: some hosts (cloud sessions among them) refuse GitHub's GraphQL API.
   const result = spawnSync('gh', ['api', `repos/${repository}/pulls/${number}`], { encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new TrainError(`could not read #${number}: ${result.error ? result.error.message : (result.stderr || '').trim()}`);
   const value = JSON.parse(result.stdout);
-  return { state: value.merged ? 'MERGED' : String(value.state || '').toUpperCase(), head: value.head && value.head.sha };
+  return { state: value.merged ? 'MERGED' : String(value.state || '').toUpperCase(), head: value.head && value.head.sha, body: typeof value.body === 'string' ? value.body : '' };
+}
+
+// The member's live UAT line, judged by the auto-merge check, against the line its manifest
+// carries into the train body. Strictness: OWNER_TEST_NEEDED above NOT_REQUIRED and PASSED.
+function memberUatProblem(member, facts) {
+  if (typeof facts.body !== 'string') throw new TrainError(`--live has no body for #${member.pr}: land reads each member's live UAT line and never takes a missing one as NOT_REQUIRED`);
+  const live = autoMerge.uatVerdict(facts.body);
+  if (live.state === 'absent') return `#${member.pr}: UAT verdict missing in its live body${live.problem ? ` (${live.problem})` : ''}: add its UAT: line, then rebuild the manifest from find`;
+  if (!live.mergeable) return `#${member.pr}: UAT verdict invalid: ${live.problem}; fix the line, then rebuild the manifest from find`;
+  const recorded = UAT_LINE.exec(member.uat.trim())[1];
+  if (live.state === 'OWNER_TEST_NEEDED' && recorded !== 'OWNER_TEST_NEEDED') {
+    return `#${member.pr}: the manifest records UAT ${recorded}, weaker than its live OWNER_TEST_NEEDED: rebuild the manifest from find so the owner's test stays owed`;
+  }
+  return null;
 }
 
 function land(cwd, manifest, options) {
@@ -698,6 +779,8 @@ function land(cwd, manifest, options) {
     if (facts.state !== 'OPEN') problems.push(`#${member.pr} is ${facts.state}`);
     if (facts.head !== member.head) problems.push(`#${member.pr} moved to ${String(facts.head).slice(0, 12)} after boarding: eject it until its review passes the new head`);
     if (member.tier === 'RISKY' && !member.owner_ok) problems.push(`#${member.pr} is RISKY and has no owner merge OK recorded`);
+    const uat = memberUatProblem(member, facts);
+    if (uat) problems.push(uat);
   }
   // An ejected member's commits stay in the train, reverted: GitHub marks its pull request merged
   // when the train lands if its live head is any commit the train holds.

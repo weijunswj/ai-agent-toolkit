@@ -23,6 +23,9 @@ const BUMP_SCRIPT = [
   '',
 ].join('\n');
 
+// A live member body whose UAT line matches the fixture member's manifest line, for land's --live facts.
+const MEMBER_BODY = 'Change.\n\nBump: patch\nUAT: NOT_REQUIRED (internal)\n';
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-train-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -96,4 +99,4 @@ function built(f, members, extra = {}) {
   return { result, out, boarded: JSON.parse(fs.readFileSync(out, 'utf8')) };
 }
 
-module.exports = { fixture, built };
+module.exports = { fixture, built, MEMBER_BODY };

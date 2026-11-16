@@ -45,9 +45,9 @@
 //                                                      (24 hours ahead unless given, at most 72); past due it is new again and
 //                                                      waiting on the owner; never a work-queue one
 //   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
-//   mark-archive --issue <n> (--before <line> | --remove <link line>)
+//   mark-archive --issue <n> (--before <line> | --remove <link line> [--remove <link line> ...])
 //                                                      the parent or an open task page: put one `## Archive`
-//                                                      line above that line, or remove a link line nothing
+//                                                      line above that line, or remove link lines nothing
 //                                                      uses, after saving a copy of the page; the next
 //                                                      complete sweep moves the marked notes
 //
@@ -108,7 +108,12 @@ function parseArgs(argv) {
     if (!VALUES.has(flag)) throw usage(`Unknown option: ${flag}`);
     const value = rest[index + 1];
     if (value === undefined || value.trim() === '' || value.startsWith('--')) throw usage(`${flag} needs a value`);
-    args[flag.slice(2)] = value;
+    const key = flag.slice(2);
+    // --remove may name several link lines, one per flag; any other value given twice is refused,
+    // never silently replaced by the last one.
+    if (flag === '--remove') args.remove = [...(args.remove || []), value];
+    else if (args[key] !== undefined) throw usage(`${flag} was given more than once; give it once.`);
+    else args[key] = value;
     index += 1;
   }
   if (args.issue !== undefined) {

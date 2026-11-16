@@ -49,6 +49,8 @@
 //   - the permission-line pin test: a new command, subcommand or flag on a pasted line fails it,
 //     so that change waits for the owner (a changed check behind an existing flag relies on review);
 //   - a major version bump: a breaking release would go out unseen.
+//   - the source-watch notice report: a notice pull request closes unmerged once triaged, so one
+//     with a UAT line must still never merge on the standing answer.
 // Hooks, setup, governance and the preference reader/writer also wait for a typed merge:
 // changing the enforcement or setup path must never authorise that same change.
 // A change that only moves version stamps (a managed block's toolkit=<version>, a "Version:
@@ -98,6 +100,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/scripts\/toolkit-merge-train-finder\.cjs$/, 'the merge train finder, which sets the member tiers the auto-merge route reads'],
   [/^repo\/scripts\/toolkit-rebump-(?:prs|report)\.cjs$/, 'the re-bump scripts that run with the push key'],
   [/^repo\/scripts\/toolkit-rebump-action\.sh$/, 'the re-bump scripts that run with the push key'],
+  [/^repo\/source-watch\/reviews\//, 'a source-watch notice report, which closes unmerged once triaged and never merges'],
 ]);
 
 // Files where only one section is on the list: [pattern, heading, why]. The file counts only when

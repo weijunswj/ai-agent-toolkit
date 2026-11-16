@@ -1,5 +1,135 @@
 # Toolkit Changelog
 
+## 3.140.0 (stuck threads get a fresh successor)
+
+### Fixed
+
+- When Task Scheduler fails, `remove toolkit` now names the error inside its "could not be planned; nothing was removed" line, screened for anything secret-shaped, so a denial says what was denied. The message is PowerShell's first real error line, past the progress block Windows PowerShell can write first, which also makes a failed removal's reason readable.
+- Setup's line about old Toolkit tasks now says plainly that `remove toolkit` uninstalls Toolkit from the computer after your OK, and that the old tasks go with it only once no app keeps Toolkit. The setup skill says the same.
+- The 3.132.0 notes now say what an old Toolkit task really does when it fires: it finds its runner gone and exits with an error, then turns itself off after three such runs if Toolkit's record still matches it.
+- **The programme sweep reads the newest result of a required check.** For each app that set the check, the newest run decides: an older failure no longer turns a check red once a newer run passed, and a newer failure or cancelled run is no longer hidden by an older pass. Each run's completion time and app ride in the same GraphQL read, with no extra requests. When either cannot be read, the earlier cautious rule applies.
+- **The REST fallback for pull request checks can read green.** It now judges REST's lower-case states the way it judges GraphQL's, so a passing check read over REST no longer stays pending.
+- **A sweep stopped in planning whose save finds the state branch busy now says it saved nothing.** The lease keeps the stop and the changed-since bookmark for the next pass, which reports it.
+- **Stop-parsing word no longer hides a pull request from the attribution check:** PowerShell's `--%` word, unquoted, is dropped before the attribution, push and credential checks read a command, so `gh --% pr create` with an AI trailer is refused like `gh pr create`, and the Claude Code hook's fallback screen matches it too. A quoted `'--%'` stays an argument that gh refuses.
+- **Backslash quoting no longer hides a push where PowerShell may run it:** bash reads `\"` as an escaped quote and PowerShell as a backslash and a quote, so `echo "a\" ; git push --force ...` hides the push from bash but runs it in PowerShell. The force-push, evidence-store push and credential checks now also read a line with a backslash as PowerShell does, on Claude Code's PowerShell tool and every Codex shell call; Claude Code's Bash tool keeps the bash reading alone.
+- **Daily check-in plugin baseline uses the copy's sync time:** step 10 now measures plugin lag against main as it was when the host last synced the account's plugins, instead of the check-in session's start. A home thread can live for days while its container re-syncs the copy, so the old baseline could hide a real lag. The sync time is the modification time of the host's `manifest.json` beside the copy, which the host rewrites at every container start even when nothing changed; the copy folder's own birth time is only a lower bound, because an unchanged copy keeps its folder from an earlier start, and synced files carry a 1980 file time, so a file's own time is never used. Copies are found by name prefix, since the host can rename one (for example `ai-agent-toolkit~g2`). With several copies the newest sync time wins and each other copy is listed with its version and sync time; with no valid sync time the check compares with main today and says so. The lag age is measured up to the sync time, so a copy synced moments before the account caught up is not reported as more than a day behind. The pinned report now reads "pinned copy synced at <time>", and the state record keeps the sync time.
+
+### Changed
+
+- The old Windows task cleaner now has a fixed end: it goes in the first Toolkit release on or after 1 March 2027.
+- Tests now cover the task record's own guards (secret screening, the file's mode, path and stop-time checks, and the refusal to rewrite a record it could not read), and a hand edit made only in a task's exported XML, which is planned as changed and kept.
+- The contract is the one record of skill classes: the Skill Safety Matrix Packaging table and the Antigravity copier's Toolkit-only list follow it, and validation fails on any mismatch. `repository-agent-rules` and `toolkit-playbooks` are now Toolkit's own, so the Antigravity portable copy leaves them out; setup removes Toolkit's earlier global copies of them.
+- **Hourly nudge default tier:** the hourly nudge now defaults to the mid tier (Sonnet on Claude) instead of small, because the small tier missed threads in its lane sweep. A stored nudge prompt keeps its own tier until it is swapped.
+- **Task kind check:** `toolkit-projects-tasks.cjs --check` now reads a pointer that loads another task kind as malformed, instead of relying on a tier mismatch to catch it.
+
+### Added
+
+- Every skill now has one class in `repo/contracts/skill-publication.json`: portable (works anywhere) or Toolkit's own (runs Toolkit itself). The skill portability audit fails when a portable skill picks up a new Toolkit word, or names an agent app without a written reason; mentions already there sit in a baseline that only shrinks, checked against the change's base commit.
+- The README splits the skill table into portable skills and Toolkit's own skills, and the audit keeps each skill in its class's table.
+- **Stuck threads get a fresh successor:** the Projects hourly nudge now runs `repo/scripts/toolkit-projects-stuck.cjs` every run (step 4a) on what it read: every `list_threads` page, each unresolved work thread and each Remote Control lane's status. A thread is stuck when its Remote Control session ended, or is not connected or served with the session quiet 10 minutes or more while its device is reachable, or when it was failed, stopped or idle while owing work and did nothing of its own after the coordinator's message. A failed or stopped thread gets a continue message first, because a usage-limit or API-error cut-off leaves that state and such threads continue on one message. A working thread, one whose run left output in the last 45 minutes, and one waiting on something recorded (an open owner card, CI, a gate or review) are never stuck; a working thread quiet past twice its expected time goes to the owner instead. The report carries `STUCK THREADS`, `STUCK FOR OWNER` and `STUCK CHECK FAILED` prefixes, and a cut-off thread scan reads `THREAD SCAN INCOMPLETE`.
+- **The coordinator starts the successor itself:** `Successors for stuck threads` in the Projects skill's periodic-runs reference covers the re-check, the successor brief (the old brief with its gate route, the pushed state and a stop when the branch moved), a fresh Remote Control session for Remote Control lanes, the "superseded" message to the old thread and a ledger (`successors.json`) that holds each lane to one successor in 2 hours. A parked Remote Control lane now gets a successor before the owner is asked to type in it.
+
+## 3.139.1
+
+### Fixed
+
+- **Source-watch notices never merge on the standing answer:** a pull request that changes the source-watch notice report (`repo/source-watch/reviews/**`) now waits for the owner's typed merge in the task auto-merge check, and the whole `repo/source-watch/**` folder is in the RISKY tier. A notice closes unmerged once it is triaged, but the report was a LIGHT `.md` file outside the merge-authority list, so one UAT line could have made a notice eligible to merge.
+
+### Changed
+
+- The ui-ux-pro-max reviewed-through cursor moves to upstream `b6a7900`. The upstream commits in that range change the upstream CLI asset sync, its CI path filter, upstream tests, a gallery copy of an already tracked data file, the excluded README, and the adapted `design_system.py`, which gains a preview page writer and design token export. Toolkit's adapted generator is a smaller local-only subset with none of those writers, so nothing is adapted now; no exact-copy data file or licence changed, and the earlier recommendation of a separate data refresh stands.
+
+## 3.139.0
+
+### Changed
+
+- **Evidence store kinds are stated plainly:** a programme file whose store is missing, or names a kind other than `github` (a folder, a drive, `none`), is refused with one message that says governance keeps its state in a private GitHub repository, that a folder or drive can hold evidence copies only, and that without such a store governance stays off. It replaces the terse "not supported (supported: github)" line and the store-field errors that followed it. Only a plain kind word is echoed. Governance still reads such a file as an error, never as on.
+- **How To Use** has an Evidence Store part: when a store is needed (only while governance is on), a table of store kinds with and without governance, and three limits (same owner only, a shared store is shared trust, folders and drives hold copies only). The `toolkit-setup` skill points to it.
+- **Gate and global rules:** with governance off, progress and decisions go in the pull request and the evidence store, if any, and review rounds and long evidence go to the evidence store, if any, so a repository with no store is no longer told to use one.
+- Gate route check: the per-launch `Route override:` brief line is retired, so every gate runs on its stack-registry pin. A gate brief that still carries the line is refused with a plain reason, and an old route stamp carrying ` override=` reads off its pin, so the merge train finder never boards it. The controller roles page, the Projects skill launch rule and the merge train notes drop the override wording.
+
+### Fixed
+
+- Merge card on the first try: the merge hold's refusal now leads with Toolkit's merge card and tells the agent to ask no merge question of its own, with the typed line kept as the fallback. In a chat where the card counts and task auto-merge is off, an agent-written question card that asks to merge a named pull request is refused before the owner sees it; the refusal says to run the merge only if the user asked for it, so one tap merges. Questions about already-merged pull requests, merge trains and merges of issues, steps or branches are not refused. The tap receipt names the merge card. The review playbook says that running the merge is the ask.
+- **Logged acceptance clears the closed-without-acceptance finding:** refresh no longer raises `CLOSED_WITHOUT_ACCEPTANCE` for a completed close whose controller-logged review `PASSED` has passing verdicts at the tracked PR head (with no head tracked, the newest verdict) and whose UAT is `NOT_REQUIRED`, `PASSED` or `UAT_RETAINED` at that head. Before, only an accepted G1 or G2 gate counted, so a disposed finding came back as new whenever the attention list's size cap evicted the disposal.
+
+## 3.138.0 (usage reader)
+
+### Changed
+
+- **Retired `schedule_folder` leaves bindings:** every binding writer now drops this retired programme-file key, which nothing reads. That covers a governance turn-on or refresh proposal, a task auto-merge or merge-train switch pull request, a parallel CI shards answer and the instruction-copies cleanup. A switch, shards or cleanup change keeps the file's own layout, so its diff shows one extra removed line, and its pull request text or preview names it. A binding that still carries the key stays valid. This repository's own programme file no longer carries it.
+- **Report-only lines name who acts:** the CI check-up records each dropped item with its reason; the daily PASS/WARN/FAIL rollup in the secure CI/CD prompt, status template, self-hosted service and managed foundation skills names the owner as reader, the chosen alert channel and same-day action on a FAIL or a WARN three days running; skill product review baselines name who clears each finding and by when; agent cost control gaps are fixed the same turn or handed on with a due date; temporary resources are removed by their cleanup owner by the end date; the controller acts on a governed repository's startup note the same turn, refreshing Toolkit first when the note names a newer one.
+- **Owed Toolkit checks have an owner:** the yearly hook review and the Codex nested-cell re-measure are fixed rows of the controller's release-batch real-host smoke, residual hosts live in the release brief's host matrix, and the controller runs the host drift review when due and picks up source-watch notification pull requests on its periodic run.
+
+### Added
+
+- `repo/scripts/toolkit-usage-report.cjs`: reads Claude Code and Codex session transcripts and writes one JSON report of token and tool counts per session, so the runs that use up usage limits can be measured before anything is changed to save them. Per session it gives the models, first and last activity, model turns (helper turns among them), input, cache-write, cache-read and output tokens, the cache hit share, tool calls by name, repeat reads of one file, shell sleeps, wake-ups scheduled, helpers started and a run type (hourly, daily, weekly, coordinator, G0, G1, G2, merge train or other), plus totals per run type. A reply Claude Code writes as several lines counts once, and a repeated Codex token count is skipped. The report never holds prompt, reply, thinking, tool or file text: file paths become ids that match only within one report, and a report that would hold anything shaped like a secret is refused and not written.
+
+### Fixed
+
+- The reconciler skill again says how to run the standalone decision-trace audit, which flags it takes and what it fails on, and its script header no longer claims the reconcile pass runs it.
+- The reconciler skill now names where an initial nonblocking review finding is recorded: its area's open follow-up child issue.
+- The plain-text check's starting baseline leaves out findings in file names it cannot store (`:`, `\` or control characters) and says how many, so the next run fails on those findings instead of failing to read the baseline.
+- `--migrate-baseline` runs even while the check is switched off, says so, and reminds you that git history still holds the old text, so a real token stored there needs revoking. Running it on a baseline that already uses fingerprints says nothing changed.
+- The old baseline format notice says "old format" instead of "v1", and the installer prints it when it keeps such a baseline, not only on `--check`.
+- Success lines say "1 entry", not "1 entries", and the Toolkit's own plain-text check names a bad option or missing value instead of a vague error.
+- In a Toolkit checkout, the personal-data guard installer warns about a leftover plain-text check copy under `.github/scripts/` and `--check` reports it as drift, as it already did for a leftover guard copy.
+- **Merge trains re-read each member's UAT line:** `toolkit-merge-train.cjs land` now reads each member's live pull request body and refuses when the auto-merge check calls its `UAT:` line missing or invalid, or when the manifest records `NOT_REQUIRED` or `PASSED` while the body says `OWNER_TEST_NEEDED`. A stale or hand-built manifest can no longer drop an owner's test at merge; a stricter manifest line still lands and keeps the test owed. A `--live` member entry with no body is refused, never read as `NOT_REQUIRED`.
+- **The train finder says why a UAT line fails:** its skip reason now ends in `(missing)` or `(invalid: <why>)`.
+- **PR sweeps flag invalid UAT lines:** the Projects hourly and daily PR sweeps now flag `invalid UAT verdict` as well as `missing UAT verdict`, judged by the auto-merge check rather than by a line starting `UAT: `.
+- The n8n workflow validator helper's Pinecone pattern line ends in CRLF like the lines around it.
+
+## 3.137.1
+
+### Fixed
+
+- **Source-watch reports keep old trackers as history:** a test now pins that both report builders (third-party source updates and advisory targets) show a review cursor's tracker only under the "Tracker at last review (history; find the current owner at triage)" label, so a later edit cannot quietly present a closed task as the current owner.
+- The host-change review template now routes each finding to the smallest open task that owns that area now and cites closed or retired tasks only as history, and the source-watch README says a new or advanced cursor names the open task that owns the follow-up.
+
+## 3.137.0 (governance question bank shows once)
+
+### Fixed
+
+- **Governed rules could be cut off at session start:** Claude Code keeps a session-start text only up to 10,000 characters and shows a 2,000-character preview of a longer one, and the governed rules come last. A cloud session started above 12 or more enabled repositories, or a computer with many failed `Checkpoint:` lines, could pass that limit and lose the rules. The text now always stays within 10,000 bytes: failed `Checkpoint:` lines past what fits are counted instead of listed, and in a cloud session the last repositories' state lines shrink to their state word, then are counted, so the rules and the names of the repositories they bind stay whole. Tests pin the limit.
+- `programme.cjs mark-archive` keeps every repeated `--remove`, where it silently kept only the last one; any other option given twice is now refused instead of replaced.
+- The programme reconciler's README and skill no longer describe a Programme Graph PR column the graph dropped, and say that agents mark notes for archiving through a holder order's `mark-archive` write.
+- **Curly quotes in a bank answer:** the tool gate no longer counts a bank answer command that holds a curly quote as the exact answer command, because PowerShell reads curly quotes as quotes, so such a line could run a second command after the answer. The command is refused instead.
+- **Refused bank replies:** a bank reply that is not in the exact form now says what makes it exact (its own line, its live ticket, and no curly quote, straight double quote, `$`, backtick or `%` in the answer), instead of the general "only the user answers" refusal, so the agent sends it again rather than telling the owner it cannot be sent.
+- **Test time budget after a re-run:** the CI test duration check now counts only the newest run attempt of each shard, as the shard check does, so re-running a shard that ran slow once can clear it.
+
+### Added
+
+- **Governance question bank permission lines:** `toolkit permissions` now prints the governance question bank as two exact Claude Code lines in the computer block, so the owner clicks Allow once (for the Update in the bank's permissions row, or the `--apply` command) instead of on every `toolkit governance` run, auto mode included. One line is `toolkit-governance.cjs setup`, which shows the bank. The other is `toolkit-governance.cjs setup --answers *`, which sends the owner's reply and writes nothing without that reply's live one-use ticket. `refresh`, `--json` and every other governance subcommand still ask, and Codex gets a prompt rule for the bank. The lines name the managed checkout's path, like every computer line.
+
+### Changed
+
+- **Bank once:** `toolkit governance` shows its question bank once. A reply that cannot be used (unread, an unknown row, a status row, two choices for one row) now gets one line saying what was wrong and "Reply again", never the bank again, and the owner's next own message still answers the same bank with a new one-use ticket. In the owner's own terminal the same line is printed and the question asked again.
+- **Changed state:** when the governance state changed between showing the bank and the reply, only the rows that changed are named, with their new state and recommendation, and the next reply answers the bank as it is now. Only a bank whose rows were added or taken away needs `toolkit governance` again.
+- **Explain:** a reply of `explain 1.4` prints the full text of that row and keeps the bank open for the answer.
+- **One Agents line:** every output after an answer, results and errors alike, ends with one line for the agent: show the lines above exactly as printed, add nothing, post no card, run no command shown and never show the bank again unless the owner types `toolkit governance`. The agent sends anything that may answer the bank as it is, and Toolkit checks it, instead of asking its own question or showing the bank again.
+- **Shorter bank:** after the table come only the Turn on line where it applies and one reply line. The shards question and minutes moved into `explain 1.4`, with the minutes in short in the row's Current cell, and the permissions note is in that row's own text.
+- **Fixed row numbers:** each governance row keeps its number from run to run, and status rows sit in the table under theirs (1.5 Evidence store, 1.6 Governance App, 1.7 Parent issue, 1.8 Required checks, 1.9 Repository visibility). A row that does not apply leaves its number free, and answering a status row says it has nothing to answer. The heading counts questions and status rows apart. `setup toolkit`'s bank is unchanged.
+- **Stable command path:** governance commands shown to the owner or an agent name the managed Toolkit checkout when this computer records one, not the desktop app's plugin copy, whose path changes with each update. The tool gate accepts the bank answer command from either copy, exactly.
+- **No stray line:** a reply that leaves parallel CI shards out, or answers not now, no longer prints a "not now" line.
+- **Open pull requests read again:** the bank reads the open governance pull requests again before it runs, so a turn-on pull request closed outside Toolkit no longer holds the next turn-on with a misleading "not ready" line. When one is still open, the answer names it to merge or close and prepares no second one. A failed turn-on no longer prints a line telling the agent to show the bank again, and a reply the tool gate cannot count tells the owner they can type `toolkit governance`, instead of the agent showing the bank.
+- **Store reuse:** a test pins that a new repository with an evidence store already found recommends keeping it, with a new private store only the other choice.
+
+## 3.136.1
+
+### Fixed
+
+- **Programme graph current step:** while a task's gate is assigned or active and not blocked, the parent graph's Waiting on cell names that gate first and shows any owner test still owed after it (`G1, then Owner: UAT on PR #<n>`), instead of showing the owner test as the current step. CURRENT's In progress line ends `then your UAT on PR #<n>` in that case. A submitted, interrupted or finished gate, a blocked task or an owner decision keep the old order.
+
+## 3.136.0
+
+### Fixed
+
+- **Merge trains never undo main:** `verify` (and so `land`) now refuses a merge train whose tree differs from a fresh build of its current members on main, and `catchup` and `eject` check their own result the same way, leaving the train as it was on a difference. An eject revert keeps removing its content through later merges, so a change that reached main another way (the ejected member landing alone, a pull request built on it, or an identical change from another pull request) could be deleted when a green train landed. The check compares results, so every such route is closed for a merge onto the main it checked; a refused train is rebuilt on main.
+
+### Changed
+
+- **Governed default branches require branches to be up to date:** the ruleset Toolkit writes now requires a branch to hold the default branch's latest commit before it merges, and `toolkit governance check` reports a default branch that does not require it (`PROTECTION_UP_TO_DATE`), which `migrate` offers to fix with that ruleset. A check that passed at the head then still holds for the merge, which closes the gap between a merge train's `land` and its merge.
+
 ## 3.135.0 (cleanup route for Toolkit instruction copies)
 
 ### Added
@@ -84,7 +214,7 @@
 
 ### Removed
 
-- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now fails to start; say `remove toolkit` to list and remove it after your OK.
+- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now finds its runner gone and exits with an error; after three such runs it turns itself off, if Toolkit's record still matches it. Say `remove toolkit` to uninstall Toolkit from this computer after your OK; the old tasks go with it once no app keeps Toolkit.
 - Setup's retired `--scheduled-task-update` and `--remove-toolkit-tasks` options are gone. Setup still prints one line when old Toolkit tasks are recorded on a Windows computer, pointing to `remove toolkit`.
 - The permission ask rows for the old task commands are gone, since those commands no longer exist.
 

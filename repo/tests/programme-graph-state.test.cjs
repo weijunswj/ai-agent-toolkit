@@ -387,6 +387,35 @@ test('an accepted completion copies the close without a missing-acceptance findi
   f.close(2); f.run(); assert.equal(f.child(2).lifecycle,'DONE'); assert.ok(!openCodes(f).includes('CLOSED_WITHOUT_ACCEPTANCE'));
 });
 
+// Acceptance logged with no gate lifecycle: the review and UAT the controller records. With a PR head
+// tracked, the verdicts and head-bound UAT must speak for that head; with none, the newest verdict counts.
+{
+  const OLD='b'.repeat(40);
+  const v=(verdict,head=SHA)=>({reviewer:'G2 fixture',head,verdict});
+  for (const [label,tracked,review,uat,raised] of [
+    ['PASSED at the head, UAT NOT_REQUIRED',true,['PASSED',[v('PASSED')]],['NOT_REQUIRED',null],false],
+    ['PASSED at the head, UAT PASSED at it',true,['PASSED',[v('PASSED')]],['PASSED',SHA],false],
+    ['PASSED at the head, UAT retained at it',true,['PASSED',[v('PASSED')]],['UAT_RETAINED',SHA],false],
+    ['PASSED at the head, UAT at an older head',true,['PASSED',[v('PASSED')]],['PASSED',OLD],true],
+    ['PASSED at the head, UAT unrecorded',true,['PASSED',[v('PASSED')]],[null,null],true],
+    ['PASSED at the head, UAT owed',true,['PASSED',[v('PASSED')]],['PENDING',null],true],
+    ['PASSED at an older head only',true,['PASSED',[v('PASSED',OLD)]],['NOT_REQUIRED',null],true],
+    ['a NOT_PASSED verdict at the head',true,['PASSED',[v('PASSED'),v('NOT_PASSED')]],['NOT_REQUIRED',null],true],
+    ['review NOT_PASSED',true,['NOT_PASSED',[v('NOT_PASSED')]],['NOT_REQUIRED',null],true],
+    ['no review',true,[null,[]],['NOT_REQUIRED',null],true],
+    ['no head tracked, newest verdict PASSED',false,['PASSED',[v('NOT_PASSED',OLD),v('PASSED')]],['PASSED',OLD],false],
+    ['no head tracked, newest verdict NOT_PASSED',false,['PASSED',[v('PASSED'),v('NOT_PASSED',OLD)]],['NOT_REQUIRED',null],true],
+  ]) test(`logged acceptance matrix: ${label} ${raised?'still raises':'raises no'} closed-without-acceptance`,()=>{
+    const f=fixture(); if(tracked) pr(f,20,{merged:true,body:'Closes #2'});
+    f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,...(tracked?{pr:{...doc.pr,number:20}}:{}),
+      review:{state:review[0],verdicts:review[1]},uat:{state:uat[0],at_head:uat[1]}})});
+    f.close(2); f.run();
+    assert.equal(f.child(2).lifecycle,'DONE'); assert.equal(f.child(2).gate.role,null);
+    assert.equal(f.child(2).pr.head,tracked?SHA:null);
+    assert.equal(openCodes(f).includes('CLOSED_WITHOUT_ACCEPTANCE'),raised);
+  });
+}
+
 for(const race of ['reopen','controller','takeover','partial']) test(`fresh close matrix: ${race} between plan and apply holds lifecycle`,()=>{
   const f=fixture(); f.close(2); const pass=f.pass(); const plan=pass.plan();
   if(race==='reopen') Object.assign(f.github.issues.get(2),{state:'open',closed_at:null});

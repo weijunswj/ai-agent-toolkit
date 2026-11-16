@@ -8,7 +8,8 @@
 //                     context line for a typed Toolkit command (toolkit-commands.cjs).
 //   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs),
-//                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs).
+//                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs);
+//                     points an agent's own merge question (AskUserQuestion) at the merge card.
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
 //   SessionStart      adds context stating the effective governance state, exports the session's
@@ -108,8 +109,15 @@ function respond(event, input, options = {}) {
     if (event === 'PreToolUse') {
       const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
-      // Notes an exact merge card so its answer can count; it refuses nothing.
-      if (input.tool_name === 'AskUserQuestion') try { (options.mergeHold || mergeHold()).cardAsked(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* an unnoted card records nothing */ }
+      if (input.tool_name === 'AskUserQuestion') {
+        const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now };
+        // An agent's own merge question is pointed at the merge card; a reader failure shows it.
+        let redirect = null;
+        try { redirect = (options.mergeHold || mergeHold()).cardRedirect(input, cardOptions); } catch { /* shown: at worst a second tap */ }
+        if (redirect) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: redirect.deny } };
+        // Notes an exact merge card so its answer can count; it refuses nothing.
+        try { (options.mergeHold || mergeHold()).cardAsked(input, cardOptions); } catch { /* an unnoted card records nothing */ }
+      }
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
@@ -129,7 +137,9 @@ function respond(event, input, options = {}) {
     if (cloud) {
       // The start folder's repository, or each repository cloned directly under it (a Projects
       // thread starts in /home/user); the governed rules come once for the ENABLED ones.
-      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding });
+      // The whole text, this cloud line included, stays within the host's session-start limit.
+      const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`${CLOUD_LINE}\n\n`, 'utf8');
+      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit });
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};

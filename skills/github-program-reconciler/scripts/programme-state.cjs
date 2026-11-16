@@ -1034,6 +1034,16 @@ function assertValid(kind, doc) {
   return doc;
 }
 
+// The one refusal for a missing or unsupported store kind: what a store must be and what works
+// without one. Only a plain kind word is echoed, never any other value from the binding.
+const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
+function storeKindProblem(store, enabled) {
+  if (store === undefined) return `the binding names no evidence store: ${STORE_NEEDED}`;
+  const kind = isObject(store) && typeof store.kind === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(store.kind) ? `store.kind "${store.kind}"` : 'store.kind';
+  return enabled ? `${kind} is not supported: ${STORE_NEEDED}`
+    : `${kind} is not supported: a store block must name a private GitHub repository (store.kind "github"). Governance is off here, so it needs no store: remove the block or make it a github store.`;
+}
+
 // A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
 // `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
 // the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
@@ -1081,11 +1091,13 @@ function validateBinding(binding) {
     }
     const store = binding.store;
     if (enabled || store !== undefined) {
-      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      if (!isObject(store) || !Object.hasOwn(STORE_BACKENDS, store.kind)) errors.push(storeKindProblem(store, enabled));
+      else {
+        check(errors, REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+        check(errors, isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+        check(errors, /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+        check(errors, String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      }
     }
     if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.
@@ -1126,6 +1138,42 @@ function validateBinding(binding) {
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
 const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
+
+// Retired binding keys: nothing reads them. The reader above still accepts them, so a binding that
+// carries one stays valid, but every binding writer (a governance proposal, a switch or shards pull
+// request, the cleanup) leaves them out, so a carried key goes with the next change.
+const RETIRED_BINDING_KEYS = Object.freeze(['schedule_folder']);
+// The binding without its retired keys; one that has none comes back as the same object.
+function withoutRetiredKeys(binding) {
+  if (!isObject(binding) || !RETIRED_BINDING_KEYS.some(key => Object.hasOwn(binding, key))) return binding;
+  return Object.fromEntries(Object.entries(binding).filter(([key]) => !RETIRED_BINDING_KEYS.includes(key)));
+}
+// Binding text without its retired keys, in its own layout: each retired top-level member goes with
+// its comma (and its line, when it has one), so the pull request shows only those removed lines. Text
+// that cannot be parsed or has no retired key comes back as it is; a layout this cannot follow is
+// written out whole, so the result always parses to withoutRetiredKeys of the parsed text.
+function withoutRetiredKeysText(text) {
+  const raw = String(text);
+  const bom = raw.startsWith('﻿') ? '﻿' : '';
+  let parsed;
+  try { parsed = JSON.parse(raw.slice(bom.length)); } catch { return raw; }
+  const expected = withoutRetiredKeys(parsed);
+  if (expected === parsed) return raw;
+  const scalar = '(?:"(?:[^"\\\\\\r\\n]|\\\\.)*"|-?\\d[\\d.eE+-]*|true|false|null)';
+  let edited = raw.slice(bom.length);
+  for (const key of RETIRED_BINDING_KEYS.filter(name => Object.hasOwn(parsed, name))) {
+    // A member followed by another goes with its own line and trailing comma; the last member goes
+    // with the comma before it.
+    const before = new RegExp(`(?:\\r?\\n[ \\t]*)?"${key}"\\s*:\\s*${scalar}\\s*,[ \\t]*`, 'g');
+    const after = new RegExp(`,\\s*"${key}"\\s*:\\s*${scalar}`, 'g');
+    const pattern = (edited.match(before) || []).length === 1 ? before : after;
+    if ((edited.match(pattern) || []).length !== 1) { edited = null; break; }
+    edited = edited.replace(pattern, '');
+  }
+  let same = false;
+  try { same = edited !== null && JSON.stringify(JSON.parse(edited)) === JSON.stringify(expected); } catch { same = false; }
+  return same ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
+}
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -1293,6 +1341,16 @@ function currentGateAccepted(child) {
 
 function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
+}
+
+// Acceptance the controller logged without a gate lifecycle: a review PASSED whose verdicts at the
+// tracked PR head all passed (with no head tracked, the newest verdict passed), and UAT settled on
+// record at that head. Only the parent's holder writes review and UAT.
+function acceptanceLogged(child) {
+  const { review, pr } = child;
+  const verdicts = pr.head ? review.verdicts.filter(verdict => verdict.head === pr.head) : review.verdicts.slice(-1);
+  return review.state === 'PASSED' && verdicts.length > 0 && verdicts.every(verdict => verdict.verdict === 'PASSED')
+    && CLOSABLE_UAT.includes(uatText(child));
 }
 
 const GATE_HISTORY_LIMIT = 20;
@@ -1584,8 +1642,10 @@ const FAILED_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION
 
 function contextName(context) { return context.name || context.context || ''; }
 
+function isStatusContext(context) { return context.kind === 'StatusContext' || context.__typename === 'StatusContext'; }
+
 function contextResult(context) {
-  if (context.kind === 'StatusContext' || context.__typename === 'StatusContext') {
+  if (isStatusContext(context)) {
     if (context.state === 'SUCCESS') return 'passed';
     if (context.state === 'PENDING' || context.state === 'EXPECTED') return 'pending';
     return FAILED_CONCLUSIONS.has(context.state) ? 'failed' : 'unknown';
@@ -1597,13 +1657,38 @@ function contextResult(context) {
 
 // A check run that was cancelled, for example by a newer run of the same workflow.
 function isCancelled(context) {
-  return context.kind !== 'StatusContext' && context.__typename !== 'StatusContext' && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+  return !isStatusContext(context) && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+}
+
+// The newest of one app's runs of a check: a run still going, else the run that completed last.
+// Null when that order cannot be read: a completed run with no time, or two runs completed last at once.
+function newestRun(runs) {
+  const going = runs.find(run => run.status !== 'COMPLETED');
+  if (going) return going;
+  const times = runs.map(run => Date.parse(run.completed_at));
+  if (times.some(Number.isNaN)) return null;
+  const last = Math.max(...times);
+  const newest = runs.filter((run, at) => times[at] === last);
+  return newest.length === 1 ? newest[0] : null;
+}
+
+// The results that decide one required check. GitHub names a required check by its name and,
+// optionally, the app that must set it, so a check's runs are grouped by app and the newest run of
+// each app decides; its status contexts (one per name) count beside them. When any run's app or
+// completion time is unreadable, every result counts, except a cancelled run beside another result.
+function checkResults(named) {
+  const runs = named.filter(context => !isStatusContext(context));
+  const apps = new Map();
+  for (const run of runs) apps.set(run.app, [...(apps.get(run.app) || []), run]);
+  const newest = runs.every(run => Number.isSafeInteger(run.app)) ? [...apps.values()].map(newestRun) : [null];
+  if (newest.every(Boolean)) return [...newest, ...named.filter(isStatusContext)].map(contextResult);
+  const replaced = named.some(context => !isCancelled(context));
+  return named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
 }
 
 // Required checks at the exact head. Required = GitHub's isRequired flags plus the binding's list.
-// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN. A cancelled
-// result is set aside when the same check has any other result at the head (a newer run replaced
-// it), so that other result decides; a check whose only results were cancelled stays failed.
+// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN, and any failed
+// deciding result makes the check failed (checkResults says which results decide).
 function evaluateChecks({ head, rollupOid, contexts = [], complete = true, configured = [] }) {
   const empty = { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: isSha(head) ? head : null, missing: [], failing: [], reason: null };
   if (!isSha(head)) return { ...empty, reason: 'NO_HEAD' };
@@ -1613,8 +1698,7 @@ function evaluateChecks({ head, rollupOid, contexts = [], complete = true, confi
   if (!required.length) return { ...empty, reason: 'NO_REQUIRED_CHECKS' };
   const results = required.map(name => {
     const named = contexts.filter(context => contextName(context) === name);
-    const replaced = named.some(context => !isCancelled(context));
-    const found = named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
+    const found = named.length ? checkResults(named) : [];
     if (!found.length) return { name, result: 'missing' };
     if (found.includes('failed')) return { name, result: 'failed' };
     if (found.includes('pending')) return { name, result: 'pending' };
@@ -1813,12 +1897,25 @@ function statusCell(outcome, child) {
   return child?.blockers?.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
 }
 
+// The owner's test a task still owes, as `UAT on PR #n` (or `UAT` with no PR), or null.
+function owedUat(child) {
+  return OWED_UAT_STATES.includes(child?.uat?.state) ? `UAT${child.pr?.number ? ` on PR #${child.pr.number}` : ''}` : null;
+}
+
+// True while a gate is at work on the task: assigned or active, and not blocked. Its work is then
+// the current step, so a UAT still owed (often on an earlier PR) shows after it, not in its place.
+function gateAtWork(child) {
+  return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state) && !child.blockers?.length);
+}
+
 // The Waiting on cell of an active row: the owner's ask, a blocker, else the gate a task in
-// progress is in; `-` for queued and finished rows.
+// progress is in (then any UAT still owed); `-` for queued and finished rows.
 function waitingCell(outcome, child) {
   if (!child || isFinished(outcome, child)) return '-';
   if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'Owner: decision';
-  if (['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'].includes(child.uat?.state)) return `Owner: UAT${child.pr?.number ? ` on PR #${child.pr.number}` : ''}`;
+  const uat = owedUat(child);
+  if (uat && gateAtWork(child)) return `${publicText(child.gate.role)}, then Owner: ${uat}`;
+  if (uat) return `Owner: ${uat}`;
   if (child.blockers?.length) return `Blocked: ${child.blockers.map(publicText).join('; ')}`;
   return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role ? publicText(child.gate.role) : '-';
 }
@@ -1883,13 +1980,19 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
     `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
 }
 
-// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker.
+// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker. A UAT
+// owed while a gate is at work waits for that gate (ownerNext).
 function ownerWait(child) {
   if (!child) return null;
   if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'your decision';
-  if (['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'].includes(child.uat.state)) return `your UAT${child.pr.number ? ` on PR #${child.pr.number}` : ''}`;
+  if (owedUat(child) && !gateAtWork(child)) return `your ${owedUat(child)}`;
   if (child.blockers.length) return `blocked: ${child.blockers.map(publicText).join('; ')}`;
   return null;
+}
+
+// The owner's step after the gate at work, or null: a UAT still owed.
+function ownerNext(child) {
+  return !ownerWait(child) && gateAtWork(child) && owedUat(child) ? `your ${owedUat(child)}` : null;
 }
 
 // The generated CURRENT summary, kept slim: the board line, the tasks in progress in Programme Graph
@@ -1902,7 +2005,8 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
     const wait = ownerWait(row.child);
     return `- ${[`#${row.outcome.issue} ${taskName(row.outcome, issues.get(row.outcome.issue))}`, row.child.pr.number ? `PR #${row.child.pr.number}` : null,
-      row.child.gate.role ? publicText(row.child.gate.role) : null, wait ? `waiting on you: ${wait}` : null].filter(Boolean).join(' · ')}`;
+      row.child.gate.role ? publicText(row.child.gate.role) : null, wait ? `waiting on you: ${wait}` : null,
+      ownerNext(row.child) ? `then ${ownerNext(row.child)}` : null].filter(Boolean).join(' · ')}`;
   });
   const holds = rows.filter(row => row.child && !isFinished(row.outcome, row.child) && (row.child.lifecycle === 'HOLD' || row.child.blockers.length)).length;
   return [
@@ -3888,6 +3992,14 @@ function openStore({ transport, binding, now, toolkitVersion = null, localCheckp
   return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite });
 }
 
+// One rollup node as a check context: a check run carries the app that set it and when it completed.
+function rollupContext(node) {
+  return { kind: node.__typename, name: node.name || node.context, status: node.status || null, conclusion: node.conclusion || null, state: node.state || null,
+    required: node.isRequired === true, ...(node.__typename === 'CheckRun' ? { app: node.checkSuite?.app?.databaseId ?? null, completed_at: node.completedAt || null } : {}) };
+}
+
+const upper = value => (typeof value === 'string' ? value.toUpperCase() : null);
+
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
@@ -3897,7 +4009,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
         pageInfo { hasNextPage }
         nodes {
           __typename
-          ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
+          ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber: $number) }
           ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
         } } } } } }
     }
@@ -3921,7 +4033,7 @@ class ProgrammeGraphReader {
     for (let start = 0; start < unique.length; start += 20) {
       const batch = unique.slice(start, start + 20);
       if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
-      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
       const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
@@ -3938,8 +4050,7 @@ class ProgrammeGraphReader {
           train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
           default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
           complete: !rollup?.contexts?.pageInfo?.hasNextPage,
-          contexts: (rollup?.contexts?.nodes || []).map(node => ({ kind: node.__typename, name: node.name || node.context,
-            status: node.status || null, conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true })) });
+          contexts: (rollup?.contexts?.nodes || []).map(rollupContext) });
       }
     }
     return result;
@@ -3959,8 +4070,10 @@ class ProgrammeGraphReader {
       head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
       train: trainRows(pr.body), merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
       complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
-      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: check.status, conclusion: check.conclusion, required: false })),
-        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
+      // REST spells states in lower case; the GraphQL spelling is the one checks are judged by.
+      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: upper(check.status), conclusion: upper(check.conclusion), required: false,
+        app: check.app?.id ?? null, completed_at: check.completed_at || null })),
+        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: upper(context.state), required: false }))] };
   }
 
   // The login archive comments are written under. The cloud sweep is given its App's login and
@@ -4082,10 +4195,7 @@ class ProgrammeGraphReader {
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
-      contexts: (rollup?.contexts?.nodes || []).map(node => ({
-        kind: node.__typename, name: node.name || node.context, status: node.status || null,
-        conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true,
-      })),
+      contexts: (rollup?.contexts?.nodes || []).map(rollupContext),
     };
   }
 
@@ -5394,7 +5504,7 @@ class Reconciler {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
@@ -7354,7 +7464,9 @@ class Reconciler {
         this.pass.progress?.reported();
       } catch (error) {
         if (error.code !== 'STATE_BRANCH_BUSY') throw error;
+        // Nothing was written: the stop stays outside the state (lease, note) and the pass saved nothing.
         this.stopReason = error.reason;
+        plan.noWrite = true;
       }
     } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || this.sweepChange || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
@@ -7432,7 +7544,7 @@ function bindRepository({ transport, originUrl, binding }) {
 
 module.exports = Object.freeze({
   get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
-  SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
+  SCHEMA, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,

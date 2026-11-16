@@ -190,6 +190,8 @@ function answerCommand(text) {
 // The governance CLI given a decision word anywhere after it in the same command, so options before
 // the decision (`--json enable`, `--repo . disable`) count too. Read word by word, in linear time.
 // `--answers` and `--ticket` answer the governance bank; only the exact ticketed command passes (ToolGate).
+// A governance bank reply (`setup --answers`) on one line, exact or not.
+const BANK_ANSWER_ATTEMPT = /toolkit-governance\.cjs\b[^\r\n]*?\s--answers\b/i;
 const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'migrate', '--answers', '--ticket']);
 function decisionAfterScript(text) {
   const pattern = /toolkit-governance\.cjs/gi;
@@ -941,8 +943,8 @@ const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation
 const REPLY_LOST = 'Toolkit: the local reply state could not be read, so nothing can be recorded from this message. Restore its read/write access or an intact local copy and keep spent delivery receipts; `toolkit governance enable` or `toolkit governance disable` as a message still works.';
 // The note that this run was asked could not be saved, so no answer in chat can be matched to it.
 const UNSAVED_LINE = `Toolkit could not note that it asked (its user-state folder could not be written), so an answer in chat cannot be recorded and this question comes with each message until that works. To decide now, run ${terminalCommand('enable')} or ${terminalCommand('disable')} in your own terminal.`;
-const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since the governance bank was shown, so this message cannot answer it. If it was meant as the answer, show the bank again (toolkit governance) and have the user reply to that one.';
-const BANK_LOST = 'Toolkit: the reply to the governance bank could not be kept (its local state could not be written), so nothing can be recorded from this message. Show the bank again once that works.';
+const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since the governance bank was shown, so this message cannot answer it. If it was meant as the answer, tell the user in one line that it was not recorded because another session started here, and that they can type toolkit governance to see the bank again. Do not show the bank yourself.';
+const BANK_LOST = 'Toolkit: the reply to the governance bank could not be kept (its local state could not be written), so nothing can be recorded from this message. If it was meant as the answer, tell the user in one line that it was not recorded, and that they can type toolkit governance to see the bank again. Do not show the bank yourself.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since Toolkit asked, so nothing was recorded and Toolkit asks again.';
 const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card. Carry on with what the user asked; they can still send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
 // A session the session-start hook never marked cannot be asked once or answer in chat.
@@ -1427,6 +1429,11 @@ class ToolGate {
       if (/toolkit-governance-answer/i.test(text) && TICKET_ARGUMENTS.test(text)) {
         return { deny: `Toolkit: the answer script runs only as the exact command Toolkit gave this session with the user's reply, on its own line and with nothing added. Nothing was recorded. ${NEVER_OWNER}` };
       }
+      // A bank reply in any other form: say what makes it exact, so a stray character in the user's
+      // reply is not read as a ban on sending it.
+      if (tool !== 'Monitor' && BANK_ANSWER_ATTEMPT.test(text)) {
+        return { deny: `Toolkit: a governance bank reply runs only as the exact command Toolkit gave this session with the user's reply and its live ticket, on its own with nothing added, and the answer between its straight double quotes holds no curly quote, straight double quote, $, backtick or %. Nothing was sent. If the answer held one of those, run the same command again without it; if the ticket was not given to this session, tell the user in one line that it was not sent. ${NEVER_OWNER}` };
+      }
       if (answerCommand(text)) {
         return { deny: `Toolkit: only the user answers the governance question, on Toolkit's card or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. If they asked you to decide it, tell them that in plain words. ${NEVER_OWNER}` };
       }
@@ -1484,12 +1491,49 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
   if (verdict.open) {
     return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
   }
+  const { lines, checkpoints } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
   // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
-  const programme = state.programme_records_bind === true ? [...require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps), ...programmeLines(state, registryOptions, programmeDeps)] : [];
-  const line = [decidedLine(state), ...programme].join(' ');
+  const finish = state.programme_records_bind === true ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.
-  return state.state === 'ENABLED' ? `${line}\n\n${governedRules()}` : line;
+  const rules = state.state === 'ENABLED' ? `\n\n${governedRules()}` : '';
+  // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
+  return fitLines(checkpoints, (kept, leftOut) => {
+    const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own programme.cjs show --session <its id> shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
+    return `${[decidedLine(state), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
+  });
+}
+
+// ---- session-start size ----------------------------------------------------------------------
+
+// Claude Code keeps a hook's additionalContext only up to 10,000 characters: over that it saves the
+// text to a file and shows a 2,000-character preview, so the governed rules (about 4,700 characters)
+// would be lost. Session-start text stays within the limit, counted in UTF-8 bytes (never fewer than
+// characters); Codex prints the same text.
+const SESSION_TEXT_LIMIT = 10000;
+const sizeOf = text => Buffer.byteLength(text, 'utf8');
+
+// Keeps `lines` in order within `limit`. From the end, a line first gives way to its short form
+// ({ full, short }), then lines are left out from the end; render(kept, leftOut) words the text and
+// counts what it left out. A plain string line has no short form.
+function fitLines(lines, render, limit = SESSION_TEXT_LIMIT) {
+  const forms = lines.map(line => (typeof line === 'string' ? { full: line, short: null } : line));
+  const fits = kept => {
+    const text = render(kept, forms.length - kept.length);
+    return sizeOf(text) <= limit ? text : null;
+  };
+  for (let full = forms.length; full >= 0; full -= 1) {
+    const rest = forms.slice(full);
+    if (rest.some(form => form.short === null)) break;
+    const text = fits([...forms.slice(0, full).map(form => form.full), ...rest.map(form => form.short)]);
+    if (text !== null) return text;
+  }
+  const shortest = forms.map(form => form.short ?? form.full);
+  for (let count = forms.length - 1; count > 0; count -= 1) {
+    const text = fits(shortest.slice(0, count));
+    if (text !== null) return text;
+  }
+  return render([], forms.length);
 }
 
 // For an ENABLED repository: the attention line from this computer's cache, a Programme sweep line
@@ -1497,7 +1541,8 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
 // each session here whose last turn-end record failed. Each line that reports a problem ends with
 // who acts and when (FINDING_ACTIONS), so it is never left as a bare warning. Reads local files only (no git, gh or network
 // call); a missing or old cache starts `programme.cjs refresh` in the background. Any failure only
-// drops these lines.
+// drops these lines. Returns { lines, checkpoints }: the Checkpoint lines apart, since the session line
+// may have to count some of them instead of listing them.
 const FINDING_ACTIONS = Object.freeze({
   attention: 'Controller: answer each new or overdue finding this turn (fix it, ack it with --next and a due time, or dispose of it with a reason).',
   // Work-queue findings cannot be acknowledged (QUEUE_FINDING_NEEDS_ACTION), so a line with only those
@@ -1508,9 +1553,10 @@ const FINDING_ACTIONS = Object.freeze({
 
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
+  const checkpoints = [];
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
-    if (!binding || !binding.repository) return lines;
+    if (!binding || !binding.repository) return { lines, checkpoints };
     const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
     const attention = cache.sessionAttention(binding.repository, deps);
     // Not where governance reads are switched off (a test run, TOOLKIT_GOVERNANCE_OFFLINE=1, a test
@@ -1525,10 +1571,10 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
     for (const session of checkpoint.localSessionsFor(state.root, deps)) {
-      if (session.errors.pending) lines.push(`Checkpoint: last turn's record failed (${session.errors.pending.code}); see programme.cjs show --session <that session's id> (session ${session.hash.slice(0, 8)}). ${FINDING_ACTIONS.checkpoint}`);
+      if (session.errors.pending) checkpoints.push(`Checkpoint: last turn's record failed (${session.errors.pending.code}); see programme.cjs show --session <that session's id> (session ${session.hash.slice(0, 8)}). ${FINDING_ACTIONS.checkpoint}`);
     }
   } catch { /* no checkpoint line */ }
-  return lines;
+  return { lines, checkpoints };
 }
 
 function decidedLine(state) {
@@ -1592,8 +1638,11 @@ function cloudRepositories(cwd) {
 // repository's merged binding is refreshed first (the start folder's own repository was refreshed by
 // startSession), all before any is judged, so an evidence store is seen as one whatever its order.
 // Each repository's decision comes from the binding merged on its default branch, as on a computer.
-// The governed rules are given once, naming the repositories they bind.
-function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000 } = {}) {
+// The governed rules are given once, naming the repositories they bind. The whole text stays within
+// `limit` (the hook passes what its own cloud line leaves of the host's limit): from the last
+// repository up, a state line first shrinks to its short form, so the rules and every repository
+// they bind are always seen in full.
+function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT } = {}) {
   const { roots, inside } = cloudRepositories(cwd);
   if (!roots.length) return null;
   if (!inside) for (const root of roots) {
@@ -1606,10 +1655,24 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
     try { state = governance.governanceState(root, registryOptions); } catch { state = { state: 'UNAVAILABLE', notes: ['could-not-check-governance'] }; }
     const name = state.repository || path.basename(root);
     if (state.state === 'ENABLED') enabled.push(name);
-    lines.push(`- ${name}: ${CLOUD_OPEN[state.state] || decidedLine(state)}`);
+    lines.push({ full: `- ${name}: ${CLOUD_OPEN[state.state] || decidedLine(state)}`, short: `- ${name}: ${shortState(state)}` });
   }
   const rules = enabled.length ? `\n\nThe Toolkit-governed rules below bind only ${enabled.join(', ')}.\n\n${governedRules()}` : '';
-  return `Repositories in this session:\n${lines.join('\n')}${rules}`;
+  return fitLines(lines, (kept, leftOut) => {
+    const shortened = kept.length < lines.length || kept.some((line, index) => line !== lines[index].full);
+    const note = shortened ? `\n(Shortened to keep this text within the host's session-start limit${leftOut ? `; ${leftOut} more repositor${leftOut === 1 ? 'y' : 'ies'} left out` : ''}. Run toolkit-governance.cjs status in a repository for its full state${enabled.length ? '; the rules below bind every repository they name' : ''}.)` : '';
+    return `Repositories in this session:\n${kept.join('\n')}${note}${rules}`;
+  }, limit);
+}
+
+// One repository's state in a few words, for a cloud line that had to shrink.
+function shortState(state) {
+  if (state.state === 'UNAVAILABLE') return 'could not check governance';
+  if (state.notes?.includes('could-not-check-governance')) return `could not check governance; last decision ${state.state.toLowerCase()}, governed effects hold`;
+  if (state.rule === 'S1') return 'DISABLED (evidence store)';
+  if (state.state === 'ENABLED') return state.governed_effects_hold ? 'ENABLED (binding read over 24 hours ago; governed effects hold)' : 'ENABLED';
+  if (state.state === 'UNDECIDED') return 'not decided yet (counts as off)';
+  return state.state === 'ERROR' ? 'ERROR (governed effects hold)' : 'DISABLED';
 }
 
 // ---- fail-closed fallbacks --------------------------------------------------------------------
@@ -1649,6 +1712,7 @@ module.exports = Object.freeze({
   insideRepository,
   sessionLine,
   cloudSessionText,
+  SESSION_TEXT_LIMIT,
   terminalCommand,
   PICKER_INPUT,
   PICKER_QUESTION, QUESTION,

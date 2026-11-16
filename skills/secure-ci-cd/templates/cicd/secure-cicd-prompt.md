@@ -285,7 +285,7 @@ Phase 5.5: Add privacy-safe deployment and AI-module observability baseline.
 Before enabling deployment, background AI enrichment, scheduled jobs, provider integrations, or notification delivery, document a privacy-safe observability baseline in `docs/ci-cd/CURRENT_CICD_STATUS.md` or the repo's existing operations/status document.
 
 Minimum deployment observability:
-- A daily PASS/WARN/FAIL rollup for CI health, deployment readiness, dependency/security checks, recent failed jobs, and pending manual approvals.
+- A daily PASS/WARN/FAIL rollup for CI health, deployment readiness, dependency/security checks, recent failed jobs, and pending manual approvals. The owner reads it in the alert channel the setup chose and acts the same day on a FAIL, or on a WARN three days running.
 - Metadata-only event allowlist for deployment events, health checks, smoke tests, rollback readiness, and alert decisions.
 - Owner-visible WARN/FAIL criteria that require human review before production deployment, provider changes, notification tests, or auto-retry behavior.
 - No provider calls, notification tests, production mutations, or auto-remediation from observability code unless I explicitly approve the exact target operation in the current turn.
@@ -295,7 +295,7 @@ Minimum AI-module observability when the app uses AI features:
 - A failure taxonomy such as blocked input, provider unavailable, timeout, rate limit, malformed output, validation failed, stale write skipped, and user approval required.
 - Safe output-shape diagnostics only; do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, private connector data, payment data, or private files.
 - AI background work must be non-blocking where practical and stale-write guarded when it can update records.
-- AI observability must support daily PASS/WARN/FAIL review without exposing private payloads.
+- AI observability must support daily PASS/WARN/FAIL review without exposing private payloads, read and acted on as the deployment rollup is.
 
 Phase 6: Deployment planning.
 
