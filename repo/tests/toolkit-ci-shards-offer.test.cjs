@@ -162,9 +162,10 @@ async function answer(ctx, reply, options = {}) {
   return { shown, ...(await run(ctx, ['setup', '--answers', `${reference}: ${reply}`, '--ticket', ticket], options)) };
 }
 
-function recorder() {
+// `open` is what openCiShards reads: the shards answers already waiting in their pull requests.
+function recorder(open = []) {
   const calls = [];
-  return { calls, publishCiShards: (...args) => { calls.push(args); return { number: 5, url: `https://github.com/${SLUG}/pull/5`, head: 'a'.repeat(40) }; } };
+  return { calls, openCiShards: () => open, publishCiShards: (...args) => { calls.push(args); return { number: 5, url: `https://github.com/${SLUG}/pull/5`, head: 'a'.repeat(40) }; } };
 }
 
 test('bank: a governed repository is asked with the minutes estimate; yes prepares one binding pull request with a first list', async t => {
@@ -260,7 +261,7 @@ test('bank: not now writes nothing and asks again; never records the answer and 
   // A merged not-now asks again; a merged never or yes is only a status line.
   ctx.merge(bindingText({ ci_shards: { answer: 'not-now' } }));
   assert.match((await run(ctx, ['setup'])).out, /\| 1\.4 \| Parallel CI shards \| Not now[^|]* \|/);
-  for (const [merged, line] of [['never', /\| 1\.4 \| Parallel CI shards \| Never ask \| Nothing to answer: /], ['yes', /\| 1\.4 \| Parallel CI shards \| Yes \| Nothing to answer: /]]) {
+  for (const [merged, line] of [['never', /^- Parallel CI shards: Never ask\. Bound in the merged programme file/m], ['yes', /^- Parallel CI shards: Yes\. Bound in the merged programme file/m]]) {
     ctx.merge(bindingText({ ci_shards: { answer: merged } }));
     let estimated = 0;
     const shown = await run(ctx, ['setup'], { estimate: () => { estimated += 1; return null; } });
@@ -297,7 +298,7 @@ test('bank: a repository with governance off is asked only alongside turning it 
 test('transport: the answer pull request starts from the exact merged binding and adds the list only when none is there', () => {
   const merged = bindingText();
   const proposal = offer.ciShardsText(merged, JSON.parse(merged), { answer: 'yes', offered_at: '2026-11-15T00:00:00Z' });
-  const fake = ({ base = merged, list = false } = {}) => {
+  const fake = ({ base = merged, list = false, open = [] } = {}) => {
     const calls = [];
     const runner = args => {
       calls.push(args);
@@ -308,6 +309,7 @@ test('transport: the answer pull request starts from the exact merged binding an
       if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'b'.repeat(40) } });
       if (endpoint.includes('/contents/.github/toolkit-programme.json?ref=')) return JSON.stringify({ type: 'file', encoding: 'base64', sha: 'c'.repeat(40), content: Buffer.from(base).toString('base64') });
       if (endpoint.includes('/contents/.github/toolkit-test-shards.json?ref=')) { if (list) return JSON.stringify({ type: 'file' }); throw Object.assign(new Error('missing'), { code: 'PROPOSAL_NOT_FOUND' }); }
+      if (endpoint.includes('/pulls?state=open&per_page=100')) return JSON.stringify(open);
       if (endpoint.includes('/pulls?state=open')) return '[]';
       if (endpoint.includes('/git/ref/heads/toolkit/')) throw Object.assign(new Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
       if (endpoint.endsWith('/git/refs')) return '{}';
@@ -330,6 +332,36 @@ test('transport: the answer pull request starts from the exact merged binding an
   both.transport.publishCiShards(SLUG, merged, proposal, 'yes', null, { auto_merge: 'after-gates' });
   assert.ok(both.calls.some(args => JSON.stringify(args).includes('toolkit/switches-task-auto-merge-on-ci-shards-yes-')), 'the branch names both');
   assert.equal(both.calls.filter(args => args[1] === `repos/${SLUG}/pulls`).length, 1, 'one pull request');
+  // Another shards answer still open is the one to merge or close: no branch and no second pull request.
+  const waiting = { number: 7, url: `https://github.com/${SLUG}/pull/7`, ref: 'toolkit/ci-shards-yes-0123456789ab', repo: SLUG };
+  const others = [{ number: 8, url: 'u8', ref: 'toolkit/ci-shards-yes-0123456789ab', repo: 'someone/fork' }, { number: 9, url: 'u9', ref: 'toolkit/switches-task-auto-merge-on-0123', repo: SLUG }];
+  assert.deepEqual(fake({ open: [...others, waiting] }).transport.openCiShards(SLUG), [{ number: 7, url: waiting.url }], 'only this repository\'s own shards branches');
+  const held = fake({ open: [waiting] });
+  assert.throws(() => held.transport.publishCiShards(SLUG, merged, proposal, 'never', null), { code: 'SHARDS_PR_OPEN', url: waiting.url });
+  assert.equal(held.calls.filter(args => args[1].endsWith('/git/refs') || args[1] === `repos/${SLUG}/pulls`).length, 0, 'nothing is made');
+  assert.equal(fake({ open: others }).transport.publishCiShards(SLUG, merged, proposal, 'yes', null).number, 9, 'a fork or a switches-only branch holds nothing');
+});
+
+test('bank: an answer waiting in its pull request shows as that pull request, a reply that leaves 1.4 out prepares nothing, and a second is never prepared', async t => {
+  const ctx = governedFixture(t);
+  const url = `https://github.com/${SLUG}/pull/7`;
+  const pattern = text => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const waiting = recorder([{ number: 7, url }]);
+  const shown = await answer(ctx, 'all recommended', { transport: waiting });
+  assert.match(shown.shown.out, new RegExp(`^- Parallel CI shards: Pull request #7 open\\. Your answer waits in ${pattern(url)}: merge it, or close it to answer again\\. Toolkit prepares no second one\\.$`, 'm'));
+  assert.doesNotMatch(shown.shown.out, /\| 1\.4 \|/, 'it is not asked again');
+  assert.equal(waiting.calls.length, 0, 'all recommended prepares no second pull request');
+  // Slow CI recommends Yes, but a reply that leaves 1.4 out keeps it as it is: Not now, nothing written.
+  const quiet = recorder();
+  const left = await answer(ctx, '2.1=A', { transport: quiet });
+  assert.match(left.shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI about 25 min\) \| B\. Yes: /);
+  assert.equal(quiet.calls.length, 0);
+  assert.match(left.out, /^Nothing changed: every answer keeps things as they are\.$/m);
+  // A pull request opened between showing the bank and answering it: the answer names it and stops.
+  const raced = { openCiShards: () => [], publishCiShards: () => { throw Object.assign(new Error('SHARDS_PR_OPEN'), { code: 'SHARDS_PR_OPEN', url }); } };
+  const refused = await answer(ctx, '1.4=B', { transport: raced });
+  assert.notEqual(refused.code, 0);
+  assert.match(`${refused.out}${refused.err}`, new RegExp(`A parallel CI shards pull request is already open, so no second one was prepared: ${pattern(url)}\\. Merge it, or close it and answer again\\. Nothing was written\\.`));
 });
 
 // ---- the installer and the governance check ----------------------------------------------------

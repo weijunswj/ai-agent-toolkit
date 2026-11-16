@@ -44,13 +44,17 @@ const EPOCH = /^[0-9a-f]{32}$/;
 const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // The script the agent is told to run: the managed checkout's when there is one, else this copy's.
 const script = () => managedScript('toolkit-governance.cjs');
-// Each row keeps its number from run to run, whichever rows apply (a row that does not apply leaves a
-// gap), so an answer such as 1.6=A means the same row after the evidence store becomes a status row.
+// Each question keeps its number from run to run, whichever questions are asked (one that is not asked
+// leaves a gap), so an answer such as 1.6=A means the same row after the evidence store stops being a
+// question. Status rows take no answer and have no number. Every question needs a number here.
 const FIXED_REFS = Object.freeze({
-  governance: '1.1', 'task-auto-merge': '1.2', 'merge-train': '1.3', 'ci-shards': '1.4', 'evidence-store': '1.5', 'setup-pieces': '1.5',
-  'governance-app': '1.6', 'parent-issue': '1.7', 'required-checks': '1.8', visibility: '1.9', 'instruction-copies': '1.10',
-  'permission-blocks': '2.1',
+  governance: '1.1', 'task-auto-merge': '1.2', 'merge-train': '1.3', 'ci-shards': '1.4', 'evidence-store': '1.5',
+  'governance-app': '1.6', 'instruction-copies': '1.7', 'permission-blocks': '2.1',
 });
+// Every row the merged programme file binds changes the same way, said once under the list.
+const BOUND = 'Bound in the merged programme file';
+const BOUND_CHANGE = 'To change anything bound in the merged programme file, edit .github/toolkit-programme.json in a pull request and merge it.';
+const APP_NAMES_ON_GITHUB = (({ variable, secret }) => `the ${variable} variable and the ${secret} secret`)(require('./toolkit-governance-app.cjs').APP);
 // The line after a reply that could not be used, asking for the reply again.
 const REPLY_AGAIN = 'Reply again with all recommended or only your changes, such as 1.2=B.';
 
@@ -64,7 +68,9 @@ const SLOW_CI_MINUTES = require('./toolkit-ci-shards-offer.cjs').MINUTES_PER_SHA
 
 // ---- the rows -----------------------------------------------------------------------------------
 
-function statusRow({ id, section, title, current, text }) {
+// `change` says how the owner changes or stops something already set; it follows the text.
+function statusRow({ id, section, title, current, text, change = '' }) {
+  if (change) text = `${text}. ${change}`;
   return {
     id, key: id, section, title, whatThisControls: title, report_only: true,
     currentState: { effectiveBehavior: current, verification: 'state-derived' },
@@ -141,9 +147,14 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   // after not now, never again after never), and in the first bank, where a yes joins the one turn-on
   // pull request (toolkit-ci-shards-offer.cjs). `ciShards` is null where it is not offered.
   const answered = merged?.ci_shards?.answer;
+  const pending = ciShards?.open?.[0];
   if (governed && (answered === 'yes' || answered === 'never')) {
     specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
-      text: answered === 'yes' ? 'Bound in the merged programme file; the next rules refresh copies the shard workflows while the shard list is usable' : 'Bound in the merged programme file; Toolkit does not ask again' }));
+      text: answered === 'yes' ? `${BOUND}; the next rules refresh copies the shard workflows while the shard list is usable` : `${BOUND}; Toolkit does not ask again` }));
+  } else if (pending) {
+    // An answer already waits in its own pull request: that one is merged or closed, never a second.
+    specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Pull request #${pending.number} open`,
+      text: `Your answer waits in ${pending.url}: merge it, or close it to answer again. Toolkit prepares no second one` }));
   } else if (ciShards) {
     // Slow CI (SLOW_CI_MINUTES or more on its last green run) is where shards pay off, so Yes is
     // recommended there; fast or unknown CI keeps Not now. The minutes line is display-only and kept
@@ -192,8 +203,9 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     if (adoption.visibility === 'public') specs.push(statusRow({ id: 'visibility', section, title: 'Repository visibility', current: 'Public', text: 'The programme file names your private evidence store (its name only, never its contents) and the parent issue is public. The store stays private' }));
   }
   if (state.state === 'ENABLED' && merged) {
-    specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: 'Bound in the merged programme file' }));
-    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed', text: 'Bound in the merged programme file' }));
+    specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: BOUND }));
+    if (merged.parents?.length) specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: merged.parents.map(parent => `#${parent.issue}`).join(', '), text: BOUND }));
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed', text: BOUND }));
   }
   // The governance App: Set up is recommended whenever governance is on or being turned on. The owner
   // runs the App setup command; Toolkit never makes the App or saves its key.
@@ -201,7 +213,8 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
   if (appSet || appPart) {
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
-      text: appSet ? 'Its variable and secret are on GitHub' : 'toolkit governance check shows how to finish or replace it' }));
+      text: appSet ? 'Its variable and secret are on GitHub' : 'toolkit governance check shows how to finish or replace it',
+      change: appSet ? `To stop using it, delete ${APP_NAMES_ON_GITHUB} under Settings, Secrets and variables, Actions on GitHub; governance works without it` : '' }));
   } else {
     const off = state.state === 'DISABLED';
     specs.push(bank.resolvedQuestion({
@@ -270,26 +283,32 @@ function bankReference(specs) { return specs[0]?.presentation.bank_reference || 
 
 // What the agent is told after every output that follows an answer: the owner sees Toolkit's own lines
 // as printed and nothing else, so the bank is never shown again in reply to an answer.
-// A command above is the owner's to run (permissions, the governance App), so it is shown, never run.
-const AGENTS_AFTER_ANSWER = 'Agents: this line is for you alone. Show the owner the lines above exactly as printed, as plain text, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Never put a command above in a code block of your own making, and never run it yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says.';
+// A command above is the owner's to run (permissions, the governance App), in Toolkit's own code block
+// so the app shows it as typed; it is shown, never run.
+const AGENTS_AFTER_ANSWER = 'Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Add no code block of your own, and never run a command above yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says.';
 
 // The bank as the owner reads it, with the one reply line. Every app takes a typed reply, the same way
-// as `setup toolkit`: the whole list at once, answered in one line. Status rows sit in the table under
-// their fixed numbers; the longer texts are in explain (explainText).
+// as `setup toolkit`: the whole list at once, answered in one line. The table holds only questions;
+// the rows with nothing to answer follow it in one short list, and the longer texts are in explain
+// (explainText).
 function renderGovernanceBank(specs) {
   const reference = bankReference(specs);
   // The shards row's Current cell carries the minutes in short; display only, so it is not in the
   // bank reference (a CI run that finishes before the answer changes nothing).
   const shown = specs.map(spec => (spec.id === 'ci-shards' && spec.estimateShort ? { ...spec, current_short: `${spec.current_short || spec.current} (${spec.estimateShort})` } : spec));
+  const status = specs.filter(spec => spec.report_only);
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
-    ...bank.renderCompactQuestionTable(shown, true),
+    ...bank.renderCompactQuestionTable(shown.filter(spec => !spec.report_only), true),
+    ...(status.length ? ['', specs.some(spec => spec.id === 'governance' && spec.folded_value === 'on') ? 'Already set, nothing to answer here:' : 'Nothing to answer here:',
+      ...status.map(spec => `- ${spec.title}: ${spec.current_short || spec.current}. ${spec.recommended_text}.`),
+      ...(status.some(spec => spec.recommended_text.startsWith(BOUND)) ? [BOUND_CHANGE] : [])] : []),
     // Turn on covers the post-merge settings too, so they are named whenever it is offered, not
     // only when it is the recommendation (the table shows choice text only for that one).
     ...specs.filter(spec => spec.id === 'governance').flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
       .map(choice => `${spec.presentation.question_ref} ${choice.presentation_ref}. ${choice.label}: ${choice.consequence}`)).flatMap(line => ['', line]),
     '',
-    'Reply all recommended, or only your changes such as 1.2=B. Rows you leave out take their recommendation; each change is a pull request you merge. Say "explain 1.4" for the full text of a row.',
+    'Reply all recommended, or only your changes such as 1.2=B. Rows you leave out stay as they are; each change is a pull request you merge. Say "explain 1.4" for the full text of a row.',
     '',
     `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them, and never show this bank again after they reply.`,
   ].join('\n');
@@ -299,7 +318,7 @@ function renderGovernanceBank(specs) {
 function explainText(specs, ref) {
   const spec = specs.find(entry => entry.presentation.question_ref === ref);
   if (!spec) return null;
-  return [bank.renderQuestionRows(specs, ref).replace(/\n+---$/, ''),
+  return [bank.renderQuestionRows(specs, ref, { brief: true }).replace(/\n+---$/, ''),
     ...(spec.id === 'ci-shards' && !spec.report_only ? ['', `**More:** ${shardMoreText(spec)}`] : [])].join('\n');
 }
 
@@ -313,17 +332,17 @@ function explainRequest(text) {
 // can name only the rows that changed (changedRows).
 function rowDigests(specs) {
   const payload = bank.questionBankApprovalPayload(specs);
-  return Object.fromEntries(payload.questions.map(question => [question.question_ref, crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)]));
+  return Object.fromEntries(payload.questions.map(question => [question.id, crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)]));
 }
 
 // The lines that name what changed between the bank the owner was shown (its row digests) and this
 // one, or null when rows were added or taken away (then only a new bank can be answered).
 function changedRows(before, specs) {
   const now = rowDigests(specs);
-  const refs = Object.keys(now);
-  if (!before || typeof before !== 'object' || Object.keys(before).length !== refs.length || refs.some(ref => !Object.hasOwn(before, ref))) return null;
-  return specs.filter(spec => before[spec.presentation.question_ref] !== now[spec.presentation.question_ref]).map(spec => (spec.report_only
-    ? `${spec.presentation.question_ref} ${spec.title} changed: now ${spec.current_short || spec.current}, with nothing to answer.`
+  const ids = Object.keys(now);
+  if (!before || typeof before !== 'object' || Object.keys(before).length !== ids.length || ids.some(id => !Object.hasOwn(before, id))) return null;
+  return specs.filter(spec => before[spec.id] !== now[spec.id]).map(spec => (spec.report_only
+    ? `${spec.title} changed: now ${spec.current_short || spec.current}, with nothing to answer.`
     : `${spec.presentation.question_ref} ${spec.title} changed: now ${spec.current_short || spec.current}, recommended ${spec.presentation.recommended_choice_ref}. ${bank.choiceLabel(spec, spec.recommended)}.`));
 }
 
@@ -340,8 +359,17 @@ function selectionsOf(parsed, specs) {
   return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}), ...(specs.some(spec => spec.id === 'instruction-copies' && !spec.report_only) ? { instructionCopies: value('instruction-copies') } : {}) };
 }
 
+// A row the reply leaves out stays as it is: Keep current, or Not now for a question not answered yet.
+// Only "all recommended" takes every recommendation.
+const LEAVE_AS_IS = Object.freeze(['keep', 'not-now']);
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
-  const parsed = bank.parseConciseQuestionBankAnswer(text, specs, { requireBankReference, label: 'Governance' });
+  let parsed;
+  try {
+    parsed = bank.parseConciseQuestionBankAnswer(text, specs, { requireBankReference, label: 'Governance', leftOut: spec => spec.choices.find(choice => LEAVE_AS_IS.includes(choice.value))?.value });
+  } catch (error) {
+    if (error.code === 'QUESTION_BANK_UNKNOWN_ROW') throw new Error(`This bank has no row ${error.question_ref}.`);
+    throw error;
+  }
   if (!parsed) throw new Error('Governance question bank answer was not read.');
   bank.assertQuestionBankAnswerBinding(parsed, specs, 'Governance');
   const chosen = selectionsOf(parsed, specs);

@@ -245,18 +245,18 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
     }
     if (!spec.report_only) sectionByName.get(spec.section).question_count += 1;
   }
-  // A bank whose rows carry fixed numbers (fixed_ref, such as '1.5') keeps each row's number from run
-  // to run, status rows included, and a row that does not apply leaves a gap. Otherwise a report-only
-  // row is an unnumbered status line at the end of its section, so the numbered questions stay
-  // contiguous and every number has letters.
+  // A bank whose questions carry fixed numbers (fixed_ref, such as '1.5') keeps each question's number
+  // from run to run, and a question that is not asked leaves a gap. A report-only row is always an
+  // unnumbered status line at the end of its section, so every number has letters.
   const fixed = fixedIndexes(specs, sectionByName);
+  const rank = (spec) => (fixed ? fixed.get(spec) ?? Number.MAX_SAFE_INTEGER : Number(Boolean(spec.report_only)));
   specs = [...specs].sort((left, right) => sectionByName.get(left.section).index - sectionByName.get(right.section).index
-    || (fixed ? fixed.get(left) - fixed.get(right) : Number(Boolean(left.report_only)) - Number(Boolean(right.report_only))));
+    || rank(left) - rank(right));
   const questionCount = answerable(specs).length;
   const seenBySection = new Map();
   const presented = specs.map((spec) => {
     const section = sectionByName.get(spec.section);
-    const questionIndex = fixed ? fixed.get(spec) : spec.report_only ? null : (seenBySection.get(spec.section) || 0) + 1;
+    const questionIndex = spec.report_only ? null : fixed ? fixed.get(spec) : (seenBySection.get(spec.section) || 0) + 1;
     if (questionIndex) seenBySection.set(spec.section, questionIndex);
     const choices = spec.choices.map((choice, index) => ({
       ...choice,
@@ -287,15 +287,17 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
   }));
 }
 
-// Each row's fixed question number, or null when the bank does not fix them. Fixed numbers are all or
-// nothing, unique, and must name the row's own section.
+// Each question's fixed number, or null when the bank does not fix them. Fixed numbers are all or
+// nothing across the questions, unique, and must name the row's own section; a report-only row's
+// fixed_ref is unused, since it takes no answer.
 function fixedIndexes(specs, sectionByName) {
-  const count = specs.filter((spec) => spec.fixed_ref !== undefined).length;
+  const questions = answerable(specs);
+  const count = questions.filter((spec) => spec.fixed_ref !== undefined).length;
   if (!count) return null;
-  if (count !== specs.length) throw new Error('Question bank rows must all carry a fixed number or none.');
+  if (count !== questions.length) throw new Error('Question bank questions must all carry a fixed number or none.');
   const indexes = new Map();
   const seen = new Set();
-  for (const spec of specs) {
+  for (const spec of questions) {
     const match = /^(\d+)\.(\d+)$/.exec(String(spec.fixed_ref));
     if (!match || Number(match[1]) !== sectionByName.get(spec.section).index || Number(match[2]) < 1 || seen.has(spec.fixed_ref)) {
       throw new Error(`Question bank row ${spec.id} has an invalid fixed number.`);
@@ -325,7 +327,8 @@ function choiceReference(spec, value) {
 const answerable = (specs) => specs.filter((spec) => !spec.report_only);
 const statusLine = (spec) => `Status (nothing to answer): ${spec.title}: ${spec.current_short || spec.current}. ${spec.recommended_text}.`;
 
-function renderQuestionRows(specs, onlyRef = '') {
+// `brief` leaves out the verification and selected lines (an explain of one row before any answer).
+function renderQuestionRows(specs, onlyRef = '', { brief = false } = {}) {
   specs = ensurePresentationMetadata(specs);
   const lines = [];
   let section = '';
@@ -342,8 +345,7 @@ function renderQuestionRows(specs, onlyRef = '') {
     lines.push('');
     lines.push(`**Current:** ${spec.current}`);
     lines.push('');
-    lines.push(`**Verification:** ${spec.currentState?.verification || 'unverified'}`);
-    lines.push('');
+    if (!brief) lines.push(`**Verification:** ${spec.currentState?.verification || 'unverified'}`, '');
     if (spec.report_only) {
       lines.push(`**What to do:** ${spec.recommended_text}`, '', `**Why:** ${spec.recommendation_reason}`, '', '---', '');
       continue;
@@ -358,10 +360,12 @@ function renderQuestionRows(specs, onlyRef = '') {
     for (const choice of spec.choices) lines.push(`- **${choice.presentation_ref}. ${choice.label}** - ${choice.consequence}`);
     if (spec.afterApplying) lines.push('', `**After applying:** ${spec.afterApplying}`);
     const selectedValue = spec.selected || spec.empty_input || '';
-    lines.push('');
-    lines.push(`**Selected:** ${selectedValue
-      ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
-      : '(answer required)'}`);
+    if (!brief) {
+      lines.push('');
+      lines.push(`**Selected:** ${selectedValue
+        ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
+        : '(answer required)'}`);
+    }
     lines.push('', '---', '');
   }
   return lines.join('\n').trimEnd();
@@ -395,8 +399,7 @@ function renderCompactQuestionTable(specs, markdown = true) {
       lines.push('', ...(markdown ? [`## ${heading}`] : [heading, '='.repeat(heading.length)]));
     }
     // Status lines come after the section's numbered questions (withPresentationMetadata orders them).
-    // A status row with a fixed number is a row in the table, in its place.
-    if (spec.report_only && !(markdown && spec.presentation.question_ref)) {
+    if (spec.report_only) {
       lines.push('', statusLine(spec));
       continue;
     }
@@ -412,10 +415,6 @@ function renderCompactQuestionTable(specs, markdown = true) {
       if (spec.selected) lines.push(`  Selected: ${selected(spec)}`);
       continue;
     }
-    if (spec.report_only) {
-      lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(`Nothing to answer: ${spec.recommended_text}`)} | - |`);
-      continue;
-    }
     const rest = others(spec).map(tableCell).join('<br>') || '-';
     const chosen = spec.selected ? `<br>Selected: ${tableCell(selected(spec))}` : '';
     lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
@@ -429,9 +428,7 @@ function renderCompactQuestionTable(specs, markdown = true) {
 function renderQuestionBankHeader(specs, markdown = true, quickIndex = true, title = 'Toolkit setup choices') {
   const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
   const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
-  // Status rows shown in the table (fixed numbers) are counted apart from the questions.
-  const statusCount = specs.filter((spec) => spec.report_only && spec.presentation.question_ref).length;
-  const heading = `${title} - ${questionCount} questions${statusCount ? ` and ${statusCount} status row${statusCount === 1 ? '' : 's'}` : ''} across ${sectionCount} sections`;
+  const heading = `${title} - ${questionCount} questions across ${sectionCount} sections`;
   const bankReference = specs[0]?.presentation.bank_reference || '';
   const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, ''];
   if (!quickIndex) return lines;
@@ -541,9 +538,6 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     }
   }
   const identity = specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs);
-  // A report-only row takes no answer, so it has no selection; with fixed numbers it has a number,
-  // and answering it says so.
-  const statusRows = new Map(specs.filter((spec) => spec.report_only && spec.presentation.question_ref).map((spec) => [spec.presentation.question_ref, spec]));
   specs = answerable(specs);
   if (isAllRecommendedAnswer(answerText)) {
     return {
@@ -576,8 +570,7 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     if (seen.has(questionRef)) throw new Error(`${label} question bank answer repeats question reference ${questionRef}.`);
     seen.add(questionRef);
     const spec = byReference.get(questionRef);
-    if (!spec && statusRows.has(questionRef)) throw new Error(`${questionRef} ${statusRows.get(questionRef).title} has nothing to answer here.`);
-    if (!spec) throw new Error(`${label} question bank answer references unavailable question ${questionRef}.`);
+    if (!spec) throw Object.assign(new Error(`${label} question bank answer references unavailable question ${questionRef}.`), { code: 'QUESTION_BANK_UNKNOWN_ROW', question_ref: questionRef });
     const choice = choiceByPresentationReference(spec, rawChoiceRef);
     if (!choice) throw new Error(`${label} question bank answer references unavailable choice ${rawChoiceRef.toUpperCase()} for ${questionRef}.`);
     overrides.push({
@@ -588,17 +581,24 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     });
   }
   const byQuestionId = new Map(overrides.map((selection) => [selection.question_id, selection]));
+  // A row the reply leaves out takes its recommendation, or with options.leftOut (spec => the value it
+  // takes instead, such as Keep current) that choice.
+  const leftOut = (spec) => {
+    const choice = options.leftOut ? selectedChoice(spec, options.leftOut(spec)) : null;
+    if (options.leftOut && !choice) throw new Error(`${label} question bank row ${spec.presentation.question_ref} has no choice to keep.`);
+    return {
+      question_id: spec.id,
+      question_ref: spec.presentation.question_ref,
+      choice_ref: choice ? choice.presentation_ref : spec.presentation.recommended_choice_ref,
+      canonical_value: choice ? choice.value : spec.recommended,
+    };
+  };
   return {
     mode: 'recommended-except',
     binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
     bank_reference: suppliedReference,
     bank_identity: identity,
-    selections: specs.map((spec) => byQuestionId.get(spec.id) || ({
-      question_id: spec.id,
-      question_ref: spec.presentation.question_ref,
-      choice_ref: spec.presentation.recommended_choice_ref,
-      canonical_value: spec.recommended,
-    })),
+    selections: specs.map((spec) => byQuestionId.get(spec.id) || leftOut(spec)),
   };
 }
 

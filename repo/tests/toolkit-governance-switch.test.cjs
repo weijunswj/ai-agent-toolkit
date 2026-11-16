@@ -99,14 +99,14 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup row is asked too.
-    assert.match(result.out, /^# Toolkit governance choices - 7 questions and 2 status rows across 2 sections/);
-    assert.match(result.out, /\| 1\.10 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
+    assert.match(result.out, /^# Toolkit governance choices - 7 questions across 2 sections$/m);
+    assert.match(result.out, /\| 1\.7 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
     assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI time unknown\) \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
-    assert.match(result.out, /\| 1\.5 \| Evidence store \| toolkit-test-fixture\/store \| Nothing to answer: Bound in the merged programme file \| - \|/);
-    assert.match(result.out, /\| 1\.8 \| Required checks \| validate \| Nothing to answer: Bound in the merged programme file \| - \|/);
+    assert.match(result.out, /^Already set, nothing to answer here:\n- Evidence store: toolkit-test-fixture\/store\. Bound in the merged programme file\.\n- Parent issue: #1\. Bound in the merged programme file\.\n- Required checks: validate\. Bound in the merged programme file\.\nTo change anything bound in the merged programme file, edit \.github\/toolkit-programme\.json in a pull request and merge it\.$/m);
+    assert.doesNotMatch(result.out, /\| 1\.[58] \|/, 'status rows sit below the table and carry no number');
     assert.match(result.out, /\| 2\.1 \| Toolkit permissions \(Claude Code\) \| Outdated: 6 missing \| B\. Update: .* \| A\. Keep current<br>C\. Remove \|/);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
     assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.2=B\./m);
@@ -234,12 +234,12 @@ test('the permission row: Update and Remove give the owner one command to run th
   const update = await answerBank(ctx, 'all recommended', { missing: 3 });
   assert.equal(update.code, 0, update.err);
   assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
-  assert.match(update.out, /^node fixture-apply\.cjs --apply$/m, 'the command is printed on its own line, not indented into a code block');
-  assert.match(update.out, /Never put a command above in a code block of your own making, and never run it yourself\./);
+  assert.ok(update.out.includes('\n```\nnode fixture-apply.cjs --apply\n```\n'), 'the command sits in Toolkit\'s own code block, so the app keeps its quotes straight');
+  assert.match(update.out, /Add no code block of your own, and never run a command above yourself\./);
   assert.equal(update.out.match(/^Agents: /gm).length, 1, 'one Agents line, the last');
   assert.doesNotMatch(update.out, /Paste into|Next step/);
   const remove = await answerBank(ctx, '2.1=B', { missing: 0 });
-  assert.match(remove.out, /^node fixture-apply\.cjs --remove$/m);
+  assert.ok(remove.out.includes('\n```\nnode fixture-apply.cjs --remove\n```\n'));
   const none = await answerBank(ctx, 'all recommended', { missing: 0 });
   assert.doesNotMatch(none.out, /fixture-apply/);
 });

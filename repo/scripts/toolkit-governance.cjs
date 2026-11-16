@@ -462,7 +462,11 @@ class ToolkitGovernanceCli {
     const offered = state.state === 'ENABLED' ? Boolean(merged) && !['yes', 'never'].includes(merged.ci_shards?.answer) : Boolean(state.root);
     let estimate = null;
     if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = null; } }
-    const ciShards = offered ? { estimate: ciOffer.estimateText(estimate), measured: estimate } : null;
+    // An answer already waiting in its own pull request shows as that pull request; GitHub that cannot
+    // be read leaves the question asked, and publishing then still refuses a second one.
+    let open = [];
+    if (offered && state.state === 'ENABLED' && this.#switchTransport && state.repository) { try { open = this.#switchTransport.openCiShards(state.repository); } catch { open = []; } }
+    const ciShards = offered ? { estimate: ciOffer.estimateText(estimate), measured: estimate, open } : null;
     this.#lastCiEstimate = estimate;
     const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
     // The App row reads its variable and secret only where governance is on or can be turned on here.
@@ -576,7 +580,9 @@ class ToolkitGovernanceCli {
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
         ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
-        : `The parallel CI shards pull request could not be prepared (${error.code || 'unavailable'}). Check GitHub access and open pull requests before retrying.`);
+        : error.code === 'SHARDS_PR_OPEN'
+          ? `A parallel CI shards pull request is already open, so no second one was prepared: ${error.url}. Merge it, or close it and answer again. Nothing was written.`
+          : `The parallel CI shards pull request could not be prepared (${error.code || 'unavailable'}). Check GitHub access and open pull requests before retrying.`);
     }
     return { prepared, lines };
   }
@@ -688,7 +694,7 @@ class ToolkitGovernanceCli {
       if (command) commanded += 1;
       const app = governanceBank.APP_NAMES[permissions.host] || 'this app';
       this.#print(false, {}, command
-        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to press Enter.`, '', command]
+        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to press Enter.`, '', ...fenced(command)]
         : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;
     }
@@ -698,7 +704,7 @@ class ToolkitGovernanceCli {
     if (chosen.governanceApp === 'setup' && !governedAfter) this.#print(false, {}, ['Governance App: not set up, because governance is not on after this answer.']);
     if (chosen.governanceApp === 'setup' && governedAfter && code === 0 && state.repository) {
       this.#print(false, {}, ['', `Governance App: run this once in your own PowerShell or terminal, outside any agent, with gh signed in. You click Create on GitHub; it saves the App's Client ID and key on ${state.repository}, opens the install page and checks the installation.`, '',
-        `node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`]);
+        ...fenced(`node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`)]);
       acted = true;
       commanded += 1;
     }
@@ -871,6 +877,9 @@ function switchText(mergedText, parsed, changes) {
 
 // The owner's governance App setup command (it refuses under an agent).
 const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs');
+// A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
+// quotes, never curly ones) with a copy button.
+const fenced = command => ['```', command, '```'];
 
 // This app's Toolkit permission lines, read from the settings files the blocks name: how many are
 // missing or stale, and the owner's one command that brings them up to date or takes them out. Only
