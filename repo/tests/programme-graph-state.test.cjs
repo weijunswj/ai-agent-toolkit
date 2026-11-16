@@ -916,6 +916,7 @@ test('self-record S1: the one open PR that claims an unrecorded task is recorded
   const report=f.run();
   assert.deepEqual(recorded(f),[20,'OPEN','feature-x','ACTIVE']);
   assert.equal(f.child(2).candidate.head,NEW);
+  assert.deepEqual(f.child(2).private.pr_heads,[{pr:20,head:NEW}]);
   assert.equal(graphRow(f,2),'NOW');
   assert.deepEqual(untracked(report),[]);
   assert.ok(!openCodes(f).includes('PR_UNTRACKED'));
