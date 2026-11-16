@@ -1,5 +1,29 @@
 # Toolkit Changelog
 
+## 3.141.0 (design data refresh; store save recovers from a failed push)
+
+### Added
+
+- External operation preflight keeps the recovery identity of a temporary outside resource that later sessions depend on. A new offline script claims the exact name before creating, records the provider's handle from its read-back, lets a fresh session resolve and check that one resource, and deletes the record only after a read-back shows the resource gone. It keeps one record per resource: a resource or handle another key already holds is refused, and two sessions claiming at once cannot both win. A missing, half-done, damaged or mismatched record holds the work.
+- **Source-lock refresh:** `repo/scripts/refresh-source-lock.cjs` turns a reviewed source-watch notice into a one-command refresh of an active source lock: it copies exact files, moves pins, lists new upstream files as excluded and refuses while an adapted file needs porting by hand.
+- **Escape list:** `repo/scripts/toolkit-escape-ledger.cjs` keeps one line per bug found after merge in the private evidence store (`state/<owner>/<repo>/escapes.jsonl`, beside the repository's programme state): what broke, why the tests missed it, the kind of test that should have caught it, who found it, and the fix and test once they exist. `add` writes a line, `fix` fills the fix and test once, `check` validates the file and `group` prints counts per kind and the escapes with no test yet, never the text. The reader refuses anything outside its exact format, and any text holding a local path, a secret-shaped value, personal data or an AI footer.
+- **Controller findings:** a bug found after merge now also gets its escape-list line the same turn.
+
+### Fixed
+
+- **Task auto-merge in Claude Projects cloud threads:** every cloud Projects thread was forced Off for task auto-merge, so a train with the repository's switch at `after-gates` still needed the owner's card tap. The host writes a thread's session context as the opening record of its session transcript, marked meta, and never submits it as a prompt, so the hook that should have recorded the project line never saw it. The merge hold now reads the `- Task auto-merge` project line at merge time from that record: only the first main-thread user entry, only when it is marked meta, belongs to this session and starts with the session context. A typed first prompt, a later wake carrying a context, tool output, another session's transcript and a missing or unreadable transcript all still force Off. The prompt-based switch store, which was never written on the real host, is removed, and the gate route check and the merge hold now share one read-only transcript head reader. Tests use the host's real transcript shape.
+
+### Changed
+
+- **Design data:** The design-system generator's 28 CSV files now match upstream `nextlevelbuilder/ui-ux-pro-max-skill` at `0e8d408`, byte for byte, and every lock pin is the real upstream blob, so the old line-ending-only pins are gone.
+- **Status filter:** Only rows upstream marks `active` rank in style and stack searches, so deprecated and supplemental styles never lead a recommendation. A stack query naming a legacy or deprecated generation still finds that stack's deprecated rows.
+- **Right-to-left:** A recommended style now carries upstream's `rtl_level`, shown in the Markdown output too.
+- `toolkit store` save, move and merge-branch no longer strand the store checkout after a failed push. A push is tried up to 4 times with waits of 2, 4 and 8 seconds; before each retry the store is read first, so a push that landed is never sent twice, and a store that moved is merged with a merge commit. After the last try the commit stays in the checkout, and running the same save again checks it and pushes it.
+- Commits the store lacks, whether kept by a failed push, made by hand or made by a race merge, are checked again right before every push: every blob and every commit message is secret-scanned, and each change may only add, change or exactly rename plain files inside the store folders. A commit that fails is named and never pushed.
+- A race merge that conflicts is cancelled and made again keeping both versions: the store's copy stays in place and ours is saved under `evidence/store-conflicts/`. No step leaves a half-done merge, and `sync` cancels one an older run left, keeping every commit.
+- The `--message` text is secret-scanned before anything is committed.
+- No store refusal points at a raw push, a reset or a hand merge any more.
+
 ## 3.140.0 (stuck threads get a fresh successor)
 
 ### Fixed
