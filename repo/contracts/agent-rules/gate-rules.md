@@ -15,7 +15,7 @@ Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a r
 
 ## Recoverable work
 
-There are no handover packets. Keep work recoverable: push progress to the branch, update the PR (or brief before a PR exists) at milestones, and post progress and decisions in the PR and, when GitHub governance is ENABLED, programme issue comments; otherwise use the evidence store. All harnesses must be able to read them. Never rely on chat or host memory: a Projects controller may mirror them in project memory, never only there. New controllers and executors load them and changed instructions, with no handover or full history.
+There are no handover packets. Keep work recoverable: push progress to the branch, update the PR (or brief before a PR exists) at milestones, and post progress and decisions in the PR and, when GitHub governance is ENABLED, programme issue comments; otherwise the evidence store, if any. All harnesses must be able to read them. Never rely on chat or host memory: a Projects controller may mirror them in project memory, never only there. New controllers and executors load them and changed instructions, with no handover or full history.
 
 A gate works in the primary checkout unless it needs its own worktree, then uses `.tmp/worktrees/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge. A writing gate's session opens in the folder it writes, never told to escalate into another (Codex: the host contract's gate workspace).
 

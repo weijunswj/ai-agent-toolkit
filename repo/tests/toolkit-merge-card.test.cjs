@@ -73,6 +73,8 @@ function tap(ctx, session, input, label, { ask = true, response = input, toolUse
 const merge = (ctx, session, { pr = 618, sha = SHA, host = 'claude', repo = '' } = {}) => hold.decide(
   { cwd: ctx.repo, session_id: session.id, tool_name: 'Bash', tool_input: { command: `gh pr merge ${pr}${repo ? ` --repo ${repo}` : ''} --merge${sha ? ` --match-head-commit ${sha}` : ''}` } },
   { ...ctx.options, closureGuard, environment: session.environment, host });
+// The card input a refusal offers, wherever it sits in the text.
+const offeredIn = text => JSON.parse(/with exactly this input[^:]*: (\{.*?\}\]\}\]\})/.exec(text)[1]);
 const stored = ctx => { try { return JSON.parse(fs.readFileSync(ctx.file, 'utf8')).approvals; } catch { return []; } };
 
 test('who may approve a merge by card: only a fresh chat the user started', async t => {
@@ -126,7 +128,7 @@ test('a tap approves one pull request at one head; Not now approves nothing and 
   assert.match(merge(ctx, session, { sha: '62405eb' }).deny, /retry this merge naming its full 40 character head SHA/);
   assert.doesNotMatch(merge(ctx, session, { host: 'codex' }).deny, /AskUserQuestion|tap/);
   // The offered input is exactly a card.
-  const offered = JSON.parse(/with exactly this input.*?: (\{.*\})$/.exec(merge(ctx, session).deny)[1]);
+  const offered = offeredIn(merge(ctx, session).deny);
   assert.deepEqual(hold.cardOf(offered), { repository: 'owner/a', pr: 618, sha: SHA, question: 'Merge owner/a#618 at 62405eb?' });
 });
 
@@ -446,7 +448,7 @@ test('through the Claude Code hook: the card is noted, the tap recorded, and a c
   const command = { cwd: ctx.repo, session_id: 'user', tool_name: 'Bash', tool_input: { command: `gh pr merge 618 --repo owner/a --merge --match-head-commit ${SHA}` } };
   const refusal = claudeHook.respond('PreToolUse', command, options).hookSpecificOutput;
   assert.equal(refusal.permissionDecision, 'deny');
-  const offered = JSON.parse(/with exactly this input.*?: (\{.*\})$/.exec(refusal.permissionDecisionReason)[1]);
+  const offered = offeredIn(refusal.permissionDecisionReason);
   const ask = { cwd: ctx.repo, session_id: 'user', tool_name: 'AskUserQuestion', tool_use_id: 'toolu_hook', tool_input: offered };
   assert.deepEqual(claudeHook.respond('PreToolUse', ask, options), {}, 'the card itself is never refused');
   const answer = { ...ask, tool_response: { questions: offered.questions, answers: { [offered.questions[0].question]: 'Merge' } } };
@@ -470,4 +472,175 @@ test('through the Claude Code hook: the card is noted, the tap recorded, and a c
     const reason = claudeHook.respond('PreToolUse', input, cloud).hookSpecificOutput.permissionDecisionReason;
     assert.doesNotMatch(reason, /AskUserQuestion|tap card|may tap instead of typing/, 'no device card offer in a cloud session');
   }
+});
+
+// The merge card on the first try: the refusal leads with the card, an agent's own merge question
+// is pointed at the card before the user sees it, and the receipt names the card.
+test('the refusal leads with the merge card and keeps the typed line as the fallback', t => {
+  const ctx = context(t);
+  const session = SESSIONS['a chat the user started'](ctx);
+  const refusal = merge(ctx, session).deny;
+  const offered = JSON.stringify(card());
+  assert.ok(refusal.startsWith('Toolkit: Toolkit\'s merge card is how the user approves this merge'), refusal.slice(0, 160));
+  assert.match(refusal, /ask no merge question of your own/);
+  assert.ok(refusal.includes(offered), 'the exact card is offered');
+  assert.ok(refusal.indexOf(offered) < refusal.indexOf('Ask the user to type'), 'the card comes before the typed line');
+  assert.match(refusal, /no unused approval/, 'the reason is kept');
+  // A merge with no full head SHA is pointed at the card first, too.
+  const short = merge(ctx, session, { sha: '62405eb' }).deny;
+  assert.ok(short.indexOf('full 40 character head SHA') >= 0 && short.indexOf('full 40 character head SHA') < short.indexOf('Ask the user to type'), short);
+  // Where no card can count, the refusal is the typed line alone, as before.
+  for (const refused of [merge(ctx, session, { host: 'codex' }).deny, merge(ctx, SESSIONS['a session a launcher started'](ctx)).deny]) {
+    assert.doesNotMatch(refused, /merge card|AskUserQuestion/);
+    assert.ok(refused.endsWith('Toolkit\'s user-state files.'));
+  }
+});
+
+test('an agent\'s own merge question is pointed at the merge card before the user sees it', async t => {
+  const start = (t, environment = {}) => {
+    const ctx = context(t);
+    const folder = path.join(ctx.root, 'plain');
+    fs.mkdirSync(folder);
+    ctx.repo = folder;
+    const options = { ...ctx.options, environment, closureGuard };
+    claudeHook.respond('SessionStart', { session_id: 'user', source: 'startup', cwd: folder }, options);
+    let n = 0;
+    const ask = (questions, extra = {}) => ({ cwd: folder, session_id: 'user', tool_name: 'AskUserQuestion', tool_use_id: `toolu_q${n += 1}`, tool_input: { questions }, ...extra });
+    return { ctx, options, ask };
+  };
+  const question = (text, labels, header = 'Merge') => ({ question: text, header, multiSelect: false, options: labels.map(label => ({ label, description: `${label}.` })) });
+  // The incident's shape, and other ways an agent asks for the same approval.
+  const MERGE_QUESTIONS = {
+    'the reported question': [question('Should weijunswj/ai-agent-toolkit#1036 be merged at head c1d6994?', ['Merge at c1d6994 (Recommended)', 'Hold #1036'])],
+    'a yes or no about merging': [question('Merge #618 now?', ['Yes', 'No'], 'Approve')],
+    'a pull request link': [question('Ready to merge https://github.com/owner/a/pull/618?', ['Go ahead', 'Wait'])],
+    'a Merge option for a named pull request': [question('PR 618 has passed review. What next?', ['Merge it', 'Leave it'])],
+    'a reworded card': [question('Merge owner/a#618 at 62405eb?', ['Yes', 'Not now'])],
+    'the second of two questions': [question('Which summary format?', ['Short', 'Long'], 'Format'), question('Shall I merge owner/a#618?', ['Merge', 'Not now'])],
+  };
+  for (const [name, questions] of Object.entries(MERGE_QUESTIONS)) {
+    await t.test(name, t => {
+      const { ctx, options, ask } = start(t);
+      const input = ask(questions);
+      const out = claudeHook.respond('PreToolUse', input, options).hookSpecificOutput;
+      assert.equal(out && out.permissionDecision, 'deny', 'the question is not shown');
+      assert.match(out.permissionDecisionReason, /cannot approve a merge; only Toolkit's merge card can/);
+      assert.match(out.permissionDecisionReason, /If the user asked you to merge this pull request, .*run that merge naming its full 40 character head SHA/);
+      assert.match(out.permissionDecisionReason, /If the user has not asked, do not merge/);
+      assert.doesNotMatch(out.permissionDecisionReason, /asks the user about merging|Ask no merge question of your own: after/, 'it neither claims what the question means nor orders a merge');
+      // Even if a host showed it anyway, its answer records nothing.
+      const answers = { [questions[questions.length - 1].question]: questions[questions.length - 1].options[0].label };
+      const after = claudeHook.respond('PostToolUse', { ...input, tool_response: { questions, answers } }, options);
+      assert.ok(!after.hookSpecificOutput || /no merge approval was recorded/.test(after.hookSpecificOutput.additionalContext));
+      assert.deepEqual(stored(ctx), []);
+    });
+  }
+  // Questions that stay untouched.
+  const ORDINARY = {
+    'a Merge option with no pull request': [question('Merge the two lists or keep them apart?', ['Merge', 'Keep apart'], 'Lists')],
+    'a merge conflict in a pull request': [question('How should I settle the merge conflict in owner/a#618?', ['Keep mine', 'Keep theirs'], 'Conflict')],
+    'git merge wording': [question('Use git merge or a rebase to update #618?', ['Rebase', 'Merge commit'], 'Update')],
+    'a pull request with no merge wording': [question('Should #618 get a changelog line?', ['Yes', 'No'], 'Changelog')],
+    'a heading-like number with no merge wording': [question('Keep section #2 of the plan?', ['Keep', 'Drop'], 'Plan')],
+    // Reports about a pull request already merged, and merges of other things.
+    'an already merged pull request, then an issue': [question('PR #1172 merged at 16:20. Close issue #1035 now?', ['Close it', 'Leave open'], 'Close')],
+    'merged with a failing check': [question('#618 was merged with a failing Windows check. Fix forward or revert?', ['Fix forward', 'Revert'], 'Next')],
+    'is merged, UAT next': [question('#1165 is merged; ready to run UAT on it now?', ['Run UAT', 'Later'], 'UAT')],
+    'a merge train': [question('Board #1172 on the next merge train, or wait?', ['Board it', 'Wait'], 'Train')],
+    'merging issues': [question('Issue #44 duplicates #45. Merge them into one issue?', ['Merge them', 'Keep both'], 'Issues')],
+    'merging plan steps': [question('Merge steps #3 and #4 of the plan into one step?', ['Merge steps', 'Keep apart'], 'Plan')],
+    'merging main into a pull request': [question('Bring #618 up to date by merging main into it, or rebase?', ['Merge main', 'Rebase'], 'Update')],
+  };
+  for (const [name, questions] of Object.entries(ORDINARY)) {
+    await t.test(`untouched: ${name}`, t => {
+      const { options, ask } = start(t);
+      assert.deepEqual(claudeHook.respond('PreToolUse', ask(questions), options), {});
+    });
+  }
+  await t.test('untouched: Toolkit\'s exact card', t => {
+    const { options, ask } = start(t);
+    assert.deepEqual(claudeHook.respond('PreToolUse', ask(card().questions), options), {});
+  });
+  // Where no card can count, an agent's merge question is left alone: the typed line is the route.
+  for (const [name, environment] of [['a cloud session', { CLAUDE_CODE_REMOTE: 'true' }], ['a launched session', { [gate.LAUNCHER_MARKERS[0]]: 'G1' }], ['a session another session started', { [gate.HOST_SESSION_VARIABLE]: 'parent' }]]) {
+    await t.test(`untouched: ${name}`, t => {
+      const { options, ask } = start(t, environment);
+      const out = claudeHook.respond('PreToolUse', ask(MERGE_QUESTIONS['the reported question']), options);
+      assert.notEqual(out.hookSpecificOutput && out.hookSpecificOutput.permissionDecisionReason && /not Toolkit's merge card/.test(out.hookSpecificOutput.permissionDecisionReason), true);
+    });
+  }
+  await t.test('a reader failure shows the question rather than refusing it', t => {
+    const { options, ask } = start(t);
+    const broken = { ...options, mergeHold: { ...hold, cardRedirect: () => { throw new Error('boom'); } } };
+    assert.deepEqual(claudeHook.respond('PreToolUse', ask(MERGE_QUESTIONS['the reported question']), broken), {});
+  });
+  await t.test('the redirect reader refuses nothing for odd input shapes, and stays quick', t => {
+    const { ctx, ask } = start(t);
+    const redirect = toolInput => hold.cardRedirect({ ...ask([]), tool_input: toolInput }, { ...ctx.options, environment: {} });
+    assert.ok(redirect({ questions: [question('Merge #618?', ['Yes'])] }), 'the control is redirected');
+    assert.ok(redirect({ questions: [{ question: 'Merge #618?', options: 'Merge' }] }), 'the question alone is enough');
+    for (const toolInput of [null, 'Merge #618?', [], {}, { questions: 'Merge #618?' }, { questions: [null, 3, 'x'] }, { questions: [{ question: ['Merge #618?'], options: [{ label: 'Merge' }] }] }, { questions: [{ question: 'What next for #618?', options: [{ label: ['Merge'] }, null, 'Merge'] }] }]) {
+      assert.equal(redirect(toolInput), null, JSON.stringify(toolInput));
+    }
+    assert.equal(hold.cardRedirect({ ...ask(MERGE_QUESTIONS['the reported question']), tool_name: 'Bash' }, { ...ctx.options, environment: {} }), null, 'only AskUserQuestion');
+    for (const [name, build] of Object.entries({
+      'merge words': size => `${'merge #'.repeat(Math.ceil(size / 7))}`,
+      'pull request words': size => `${'pull request '.repeat(Math.ceil(size / 13))}`,
+      'git merge words': size => `${'git merge '.repeat(Math.ceil(size / 10))}#1`,
+    })) {
+      const timed = hostile.timing(text => hold.cardRedirect({ ...ask([question(text, ['Merge'])]) }, { ...ctx.options, environment: {} }), build, { startSize: 4096, maxSize: 262144, minMs: 5 });
+      assert.ok(timed.ok, `${name}: ${timed.message}`);
+    }
+  });
+});
+
+// A repository whose merged binding sets task auto-merge, with an owner-started chat in it.
+const governance = require('../scripts/toolkit-governance-state.cjs');
+const bindingCache = require('../scripts/toolkit-governance-binding.cjs');
+function standingContext(t, autoMerge) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-merge-card-standing-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const run = (cwd, args) => { const result = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' }); assert.equal(result.status, 0, result.stderr); return result.stdout.trim(); };
+  const commit = (repo, file, text) => { fs.writeFileSync(path.join(repo, file), text); run(repo, ['add', file]); run(repo, ['commit', '-q', '-m', file]); return run(repo, ['rev-parse', 'HEAD']); };
+  const registryOptions = { registryPath: path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true, host: 'claude-code', home: path.join(root, 'home') };
+  const repo = path.join(root, 'a');
+  fs.mkdirSync(repo, { recursive: true });
+  run(repo, ['init', '-q', '-b', 'feature']);
+  run(repo, ['remote', 'add', 'origin', 'https://github.com/owner/a.git']);
+  const main = commit(repo, 'README.md', 'a\n');
+  run(repo, ['update-ref', 'refs/remotes/origin/main', main]);
+  run(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  const head = commit(repo, 'notes.md', 'task change\n');
+  const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'owner/a', governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-A-' }],
+    store: { kind: 'github', repository: 'owner/TRANSPORT-a', branch: 'main', path: 'state/owner/a/' }, required_checks: ['validate'], task_prs: { auto_merge: autoMerge } });
+  const identity = governance.readIdentity(repo);
+  const file = bindingCache.cacheFileFor(governance.userStateDirectory(registryOptions), identity.repository_id);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ schema: bindingCache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical, default_branch: 'main', commit: main,
+    fetched_at: new Date().toISOString(), status: 'present', bytes_sha256: require('node:crypto').createHash('sha256').update(text, 'utf8').digest('hex'), text, problem: null }));
+  gate.startSession({ session_id: 'user', source: 'startup', cwd: repo }, { registryOptions, environment: {} });
+  return { repo, head, options: { registryOptions, environment: {}, closureGuard } };
+}
+
+test('where task auto-merge would take the merge with no card, an agent\'s merge question is shown', t => {
+  const roundCap = ctx => ({ cwd: ctx.repo, session_id: 'user', tool_name: 'AskUserQuestion', tool_use_id: 'toolu_round', tool_input: { questions: [{ question: 'owner/a#5 has two FAIL verdicts. Merge with the open items as follow-ups, run one more round, or split it?', header: 'Next', multiSelect: false,
+    options: ['Merge with follow-ups', 'One more round', 'Split the PR'].map(label => ({ label, description: `${label}.` })) }] } });
+  const merge = ctx => ({ cwd: ctx.repo, session_id: 'user', tool_name: 'Bash', tool_input: { command: `gh pr merge 5 --repo owner/a --merge --match-head-commit ${ctx.head}` } });
+  // Task auto-merge on: the merge would pass with no card, so the owner's question stays.
+  const on = standingContext(t, 'after-gates');
+  assert.deepEqual(claudeHook.respond('PreToolUse', roundCap(on), on.options), {}, 'the question is shown');
+  assert.deepEqual(claudeHook.respond('PreToolUse', merge(on), on.options), {}, 'control: the standing answer would take this merge with no card');
+  // Task auto-merge off: the merge is refused with the card, so the redirect applies and orders no merge.
+  const off = standingContext(t, 'off');
+  const redirected = claudeHook.respond('PreToolUse', roundCap(off), off.options).hookSpecificOutput;
+  assert.equal(redirected.permissionDecision, 'deny');
+  assert.match(redirected.permissionDecisionReason, /If the user has not asked, do not merge/);
+  assert.match(claudeHook.respond('PreToolUse', merge(off), off.options).hookSpecificOutput.permissionDecisionReason, /^Toolkit: Toolkit's merge card is how the user approves this merge/);
+});
+
+test('the tap receipt names Toolkit\'s merge card', t => {
+  const ctx = context(t);
+  const session = SESSIONS['a chat the user started'](ctx);
+  assert.match(tap(ctx, session, card(), 'Merge').answered.context, /from Toolkit's merge card/);
+  assert.match(tap(ctx, session, card(), 'Not now').answered.context, /on Toolkit's merge card/);
 });

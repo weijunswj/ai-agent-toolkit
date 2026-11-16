@@ -1034,6 +1034,16 @@ function assertValid(kind, doc) {
   return doc;
 }
 
+// The one refusal for a missing or unsupported store kind: what a store must be and what works
+// without one. Only a plain kind word is echoed, never any other value from the binding.
+const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
+function storeKindProblem(store, enabled) {
+  if (store === undefined) return `the binding names no evidence store: ${STORE_NEEDED}`;
+  const kind = isObject(store) && typeof store.kind === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(store.kind) ? `store.kind "${store.kind}"` : 'store.kind';
+  return enabled ? `${kind} is not supported: ${STORE_NEEDED}`
+    : `${kind} is not supported: a store block must name a private GitHub repository (store.kind "github"). Governance is off here, so it needs no store: remove the block or make it a github store.`;
+}
+
 // A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
 // `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
 // the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
@@ -1081,11 +1091,13 @@ function validateBinding(binding) {
     }
     const store = binding.store;
     if (enabled || store !== undefined) {
-      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      if (!isObject(store) || !Object.hasOwn(STORE_BACKENDS, store.kind)) errors.push(storeKindProblem(store, enabled));
+      else {
+        check(errors, REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+        check(errors, isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+        check(errors, /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+        check(errors, String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      }
     }
     if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.
@@ -1329,6 +1341,16 @@ function currentGateAccepted(child) {
 
 function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
+}
+
+// Acceptance the controller logged without a gate lifecycle: a review PASSED whose verdicts at the
+// tracked PR head all passed (with no head tracked, the newest verdict passed), and UAT settled on
+// record at that head. Only the parent's holder writes review and UAT.
+function acceptanceLogged(child) {
+  const { review, pr } = child;
+  const verdicts = pr.head ? review.verdicts.filter(verdict => verdict.head === pr.head) : review.verdicts.slice(-1);
+  return review.state === 'PASSED' && verdicts.length > 0 && verdicts.every(verdict => verdict.verdict === 'PASSED')
+    && CLOSABLE_UAT.includes(uatText(child));
 }
 
 const GATE_HISTORY_LIMIT = 20;
@@ -5450,7 +5472,7 @@ class Reconciler {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
