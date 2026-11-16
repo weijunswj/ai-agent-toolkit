@@ -1554,6 +1554,14 @@ const FINDING_ACTIONS = Object.freeze({
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
   const checkpoints = [];
+  // Stale pins: the governance check's CLOUD_WORKFLOW_OUTDATED rows (the sweep, its gate and the test
+  // shards copies). The repository's cloud sweep runs the Toolkit commit its copies are pinned to, so a
+  // fix released since reaches it only after a rules refresh re-pins them. Local reads only.
+  try {
+    const check = deps.cloudWorkflowFindings || (target => require('./toolkit-governance-conformance.cjs').cloudWorkflowFindings(target, path.join(__dirname, '..', '..'), registryOptions));
+    const stale = check(state).filter(entry => entry.id === 'CLOUD_WORKFLOW_OUTDATED' && entry.file).map(entry => entry.file);
+    if (stale.length) lines.push(staleWorkflowLine(stale, state.root));
+  } catch { /* no stale-pin line */ }
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
     if (!binding || !binding.repository) return { lines, checkpoints };
@@ -1575,6 +1583,10 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
     }
   } catch { /* no checkpoint line */ }
   return { lines, checkpoints };
+}
+
+function staleWorkflowLine(files, root) {
+  return `⚠️ Stale Toolkit pins: ${files.join(', ')} ${files.length === 1 ? 'is' : 'are'} pinned to an older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since. Controller: refresh them this session with \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root}\` from the Toolkit checkout, then land the changed files through a pull request for the owner to merge.`;
 }
 
 function decidedLine(state) {

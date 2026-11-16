@@ -343,7 +343,8 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const out = [];
   for (const row of result.rows) {
     if (row.state === 'current') continue;
-    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`));
+    // The file rides along for the session-start note (toolkit-governance-gate.cjs staleWorkflowLine).
+    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`), file: row.file }));
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
   // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:
