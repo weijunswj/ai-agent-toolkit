@@ -1,0 +1,3 @@
+### Fixed
+
+- Merge card on the first try: the merge hold's refusal now leads with Toolkit's merge card and tells the agent to ask no merge question of its own, with the typed line kept as the fallback. In a chat where the card counts and task auto-merge is off, an agent-written question card that asks to merge a named pull request is refused before the owner sees it; the refusal says to run the merge only if the user asked for it, so one tap merges. Questions about already-merged pull requests, merge trains and merges of issues, steps or branches are not refused. The tap receipt names the merge card. The review playbook says that running the merge is the ask.
