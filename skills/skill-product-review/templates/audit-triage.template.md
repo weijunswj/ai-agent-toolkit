@@ -27,6 +27,7 @@
 - Update baseline: yes / no
 - Reason:
 - Follow-up needed:
+- Who clears it, and by when:
 
 ## Validation Notes
 

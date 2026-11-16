@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.138.0 (usage reader)
+
+### Changed
+
+- **Retired `schedule_folder` leaves bindings:** every binding writer now drops this retired programme-file key, which nothing reads. That covers a governance turn-on or refresh proposal, a task auto-merge or merge-train switch pull request, a parallel CI shards answer and the instruction-copies cleanup. A switch, shards or cleanup change keeps the file's own layout, so its diff shows one extra removed line, and its pull request text or preview names it. A binding that still carries the key stays valid. This repository's own programme file no longer carries it.
+- **Report-only lines name who acts:** the CI check-up records each dropped item with its reason; the daily PASS/WARN/FAIL rollup in the secure CI/CD prompt, status template, self-hosted service and managed foundation skills names the owner as reader, the chosen alert channel and same-day action on a FAIL or a WARN three days running; skill product review baselines name who clears each finding and by when; agent cost control gaps are fixed the same turn or handed on with a due date; temporary resources are removed by their cleanup owner by the end date; the controller acts on a governed repository's startup note the same turn, refreshing Toolkit first when the note names a newer one.
+- **Owed Toolkit checks have an owner:** the yearly hook review and the Codex nested-cell re-measure are fixed rows of the controller's release-batch real-host smoke, residual hosts live in the release brief's host matrix, and the controller runs the host drift review when due and picks up source-watch notification pull requests on its periodic run.
+
+### Added
+
+- `repo/scripts/toolkit-usage-report.cjs`: reads Claude Code and Codex session transcripts and writes one JSON report of token and tool counts per session, so the runs that use up usage limits can be measured before anything is changed to save them. Per session it gives the models, first and last activity, model turns (helper turns among them), input, cache-write, cache-read and output tokens, the cache hit share, tool calls by name, repeat reads of one file, shell sleeps, wake-ups scheduled, helpers started and a run type (hourly, daily, weekly, coordinator, G0, G1, G2, merge train or other), plus totals per run type. A reply Claude Code writes as several lines counts once, and a repeated Codex token count is skipped. The report never holds prompt, reply, thinking, tool or file text: file paths become ids that match only within one report, and a report that would hold anything shaped like a secret is refused and not written.
+
+### Fixed
+
+- The reconciler skill again says how to run the standalone decision-trace audit, which flags it takes and what it fails on, and its script header no longer claims the reconcile pass runs it.
+- The reconciler skill now names where an initial nonblocking review finding is recorded: its area's open follow-up child issue.
+- The plain-text check's starting baseline leaves out findings in file names it cannot store (`:`, `\` or control characters) and says how many, so the next run fails on those findings instead of failing to read the baseline.
+- `--migrate-baseline` runs even while the check is switched off, says so, and reminds you that git history still holds the old text, so a real token stored there needs revoking. Running it on a baseline that already uses fingerprints says nothing changed.
+- The old baseline format notice says "old format" instead of "v1", and the installer prints it when it keeps such a baseline, not only on `--check`.
+- Success lines say "1 entry", not "1 entries", and the Toolkit's own plain-text check names a bad option or missing value instead of a vague error.
+- In a Toolkit checkout, the personal-data guard installer warns about a leftover plain-text check copy under `.github/scripts/` and `--check` reports it as drift, as it already did for a leftover guard copy.
+- **Merge trains re-read each member's UAT line:** `toolkit-merge-train.cjs land` now reads each member's live pull request body and refuses when the auto-merge check calls its `UAT:` line missing or invalid, or when the manifest records `NOT_REQUIRED` or `PASSED` while the body says `OWNER_TEST_NEEDED`. A stale or hand-built manifest can no longer drop an owner's test at merge; a stricter manifest line still lands and keeps the test owed. A `--live` member entry with no body is refused, never read as `NOT_REQUIRED`.
+- **The train finder says why a UAT line fails:** its skip reason now ends in `(missing)` or `(invalid: <why>)`.
+- **PR sweeps flag invalid UAT lines:** the Projects hourly and daily PR sweeps now flag `invalid UAT verdict` as well as `missing UAT verdict`, judged by the auto-merge check rather than by a line starting `UAT: `.
+- The n8n workflow validator helper's Pinecone pattern line ends in CRLF like the lines around it.
+
 ## 3.137.1
 
 ### Fixed
