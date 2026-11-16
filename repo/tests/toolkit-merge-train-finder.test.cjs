@@ -104,6 +104,7 @@ test('find skips each unready pull request with its reason', t => {
     ready(18, { pull: { body: 'Two.\n\nBump: patch\nBump: minor\nUAT: NOT_REQUIRED (x)' } }),
     ready(19, { pull: { body: 'No UAT.\n\nBump: patch' } }),
     ready(20, { files: ['repo/contracts/toolkit-local-bridge/version.json'] }),
+    ready(21, { pull: { body: 'Free text.\n\nBump: patch\nUAT: laptop paste check done' } }),
   ]);
   const { result, out } = find(f, live);
   assert.deepEqual(result.ready, ['#1', '#2']);
@@ -117,7 +118,8 @@ test('find skips each unready pull request with its reason', t => {
   assert.match(reasons['#16'], /required checks not green: validate/);
   assert.match(reasons['#17'], /exactly one Bump: line \(has 0\)/);
   assert.match(reasons['#18'], /exactly one Bump: line \(has 2\)/);
-  assert.match(reasons['#19'], /no UAT: line/);
+  assert.match(reasons['#19'], /^no UAT: line the auto-merge check accepts \(missing\)$/);
+  assert.match(reasons['#21'], /^no UAT: line the auto-merge check accepts \(invalid: the verdict must be NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED, in capitals\)$/);
   assert.match(reasons['#20'], /carries its own version bump/);
   assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).members.map(member => member.pr), [1, 2]);
 });
