@@ -617,6 +617,87 @@ test('superseded T18: the planned effect names the move, in its text and in the 
   assert.deepEqual(report.effects.find(e=>e.kind==='update_state' && e.target.issue===2).replacement.selected,25);
 });
 
+// An owed UAT names the PR it was recorded on (its head), not whichever PR the task tracks now.
+const UAT_HEAD = 'c'.repeat(40);
+const owedOn = (f, n = 2) => {
+  const cells = f.github.issues.get(1).body.split('\n').find(line => line.startsWith(`|`) && line.includes(`|#${n}|`)).slice(1, -1).split('|');
+  const current = f.github.issues.get(1).body.split('\n').find(line => line.startsWith(`- #${n} `));
+  const prRows = f.github.issues.get(n).body.split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.split('|').slice(2, 4).join(' '));
+  const under = f.github.issues.get(n).body.split('\n').filter(line => line.startsWith('Task: '));
+  return { waiting: cells[3], current, prRows, under };
+};
+const owing = (f, change = {}) => f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,uat:{state:'UAT_PARTIAL_REQUIRED',at_head:UAT_HEAD},...change(doc)})});
+
+test('owed UAT T1 (SQAG #334): a UAT owed at merged PR #374\'s head stays on #374 while open PR #357 is tracked',()=>{
+  const f=fixture();
+  pr(f,374,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD})); pr(f,357,{head:NEW,body:'Refs #2'});
+  owing(f, doc=>({pr:{...doc.pr,number:357}}));
+  f.run();
+  assert.deepEqual([...tracked(f),f.child(2).pr.head],[357,'OPEN',NEW]);
+  assert.deepEqual(f.child(2).private.pr_heads,[{pr:357,head:NEW},{pr:374,head:UAT_HEAD}],'the refresh keeps the head of every task PR it read');
+  const seen=owedOn(f);
+  assert.equal(seen.waiting,'Owner: UAT on PR #374');
+  assert.equal(seen.current,'- #2 Issue 2 · PR #357 · waiting on you: your UAT on PR #374');
+  assert.deepEqual(seen.prRows,['#357 OPEN','#374 MERGED · UAT owed'],'the task page puts the owed UAT on #374, not on the tracked #357');
+  assert.deepEqual(seen.under,[]);
+  const writesBefore=writes(f); f.run();
+  assert.equal(writes(f),writesBefore,'a pass that sees no new head writes nothing');
+});
+
+test('owed UAT T2: a head no known PR has shows as the short head SHA, with no PR number',()=>{
+  const f=fixture(); pr(f,357,{head:NEW,body:'Refs #2'});
+  owing(f, doc=>({pr:{...doc.pr,number:357}}));
+  f.run();
+  const seen=owedOn(f);
+  assert.equal(seen.waiting,'Owner: UAT at ccccccc');
+  assert.equal(seen.current,'- #2 Issue 2 · PR #357 · waiting on you: your UAT at ccccccc');
+  assert.deepEqual(seen.prRows,['#357 OPEN']);
+  assert.deepEqual(seen.under,['Task: UAT owed at ccccccc']);
+});
+
+test('owed UAT T3: with no replacement (the tracked PR is the UAT\'s PR) the pages read as before',()=>{
+  const f=fixture(); pr(f,22,{head:UAT_HEAD,body:'Refs #2'});
+  owing(f, doc=>({pr:{...doc.pr,number:22},gate:{...doc.gate,role:'G2',state:'ACTIVE'}}));
+  f.run();
+  const seen=owedOn(f);
+  assert.equal(seen.waiting,'G2, then Owner: UAT on PR #22');
+  assert.equal(seen.current,'- #2 Issue 2 · PR #22 · G2 · then your UAT on PR #22');
+  assert.deepEqual(seen.prRows,['#22 OPEN · G2 ACTIVE · UAT owed']);
+  assert.deepEqual(seen.under,[]);
+});
+
+test('owed UAT T4: the sweep writes only its PR heads into private, and the stored task stays readable by older Toolkit copies',()=>{
+  const f=fixture();
+  pr(f,374,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD})); pr(f,357,{head:NEW,body:'Refs #2'});
+  owing(f, doc=>({pr:{...doc.pr,number:357}}));
+  const pass=f.pass(); const plan=pass.plan();
+  // The controller marks the task after the sweep planned: the apply keeps that mark.
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,keep_open:{reason:'Waiting for the follow-up'}}})});
+  pass.apply(plan);
+  const child=f.child(2);
+  assert.equal(child.private.keep_open.reason,'Waiting for the follow-up');
+  assert.equal(child.private.pr_heads.length,2);
+  // Toolkit 3.144.0 checks these keys strictly; the heads add none, since \`private\` is open to every reader.
+  const OLDER_CHILD_KEYS=['schema','repository','issue','revision','fence','lifecycle','completed_at','release','gate','candidate','pr','uat','review','blockers','next_action','pending_effects','journals_seen','private','volatile','prs','before_close','closed_by_sweep','added_by_sweep'];
+  assert.deepEqual(Object.keys(child).filter(key=>!OLDER_CHILD_KEYS.includes(key)),[]);
+  for (const entry of child.prs) assert.deepEqual(Object.keys(entry).sort(),['merge_sha','number','state']);
+  assert.deepEqual(state.validateChild(child),[]);
+  for (const bad of [[{pr:357,head:'short'}],[{pr:357,head:NEW},{pr:374,head:NEW}],[{pr:357,head:NEW,extra:1}],Array.from({length:21},(_,i)=>({pr:357,head:i.toString(16).padStart(40,'0')}))]) {
+    assert.ok(state.validateChild({...child,private:{...child.private,pr_heads:bad}}).some(error=>error.startsWith('private.pr_heads')),JSON.stringify(bad).slice(0,60));
+  }
+});
+
+test('owed UAT T5: past the limit the oldest heads go first, but never the head an owed UAT names',()=>{
+  const f=fixture(); pr(f,357,{head:NEW,body:'Refs #2'});
+  const old=Array.from({length:20},(_,i)=>({pr:357,head:(i+1).toString(16).padStart(40,'0')}));
+  owing(f, doc=>({pr:{...doc.pr,number:357},uat:{state:'PENDING',at_head:old[0].head},private:{...doc.private,pr_heads:old}}));
+  f.run();
+  const heads=f.child(2).private.pr_heads.map(entry=>entry.head);
+  assert.equal(heads.length,20);
+  assert.deepEqual([heads[0],heads[1],heads.at(-1)],[old[0].head,old[2].head,NEW],'the second-oldest went; the UAT\'s head stayed');
+  assert.equal(owedOn(f).waiting,'Owner: UAT on PR #357');
+});
+
 test('a complete pass advances the private close watermark; old closes and parent links stay excluded',()=>{
   const f=fixture(); f.run(); const watermark=f.parent().private.graph_pr_watermark; assert.ok(watermark);
   pr(f,20,{state:'CLOSED'}); f.github.prs.get(20).closedAt='2026-11-07T00:00:00Z';
