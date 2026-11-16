@@ -152,9 +152,14 @@ function addSkillToCatalogs(cwd, skillName) {
 
   insertBefore(
     path.join(cwd, 'README.md'),
-    '\nHow risky each skill is',
+    "\n| Toolkit's own skill | Use |",
     `| [${skillName}](skills/${skillName}/) | Fixture catalog entry used to prove current-skill gate enforcement. |\n`
   );
+
+  const contractPath = path.join(cwd, 'repo', 'contracts', 'skill-publication.json');
+  const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  contract.skills[skillName] = { class: 'portable', reason: 'Fixture skill used to prove current-skill gate enforcement.' };
+  fs.writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`, 'utf8');
 
   const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
   const matrix = fs.readFileSync(matrixPath, 'utf8').replace(/\r\n/g, '\n');

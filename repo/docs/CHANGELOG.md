@@ -1,5 +1,44 @@
 # Toolkit Changelog
 
+## 3.140.0 (stuck threads get a fresh successor)
+
+### Fixed
+
+- When Task Scheduler fails, `remove toolkit` now names the error inside its "could not be planned; nothing was removed" line, screened for anything secret-shaped, so a denial says what was denied. The message is PowerShell's first real error line, past the progress block Windows PowerShell can write first, which also makes a failed removal's reason readable.
+- Setup's line about old Toolkit tasks now says plainly that `remove toolkit` uninstalls Toolkit from the computer after your OK, and that the old tasks go with it only once no app keeps Toolkit. The setup skill says the same.
+- The 3.132.0 notes now say what an old Toolkit task really does when it fires: it finds its runner gone and exits with an error, then turns itself off after three such runs if Toolkit's record still matches it.
+- **The programme sweep reads the newest result of a required check.** For each app that set the check, the newest run decides: an older failure no longer turns a check red once a newer run passed, and a newer failure or cancelled run is no longer hidden by an older pass. Each run's completion time and app ride in the same GraphQL read, with no extra requests. When either cannot be read, the earlier cautious rule applies.
+- **The REST fallback for pull request checks can read green.** It now judges REST's lower-case states the way it judges GraphQL's, so a passing check read over REST no longer stays pending.
+- **A sweep stopped in planning whose save finds the state branch busy now says it saved nothing.** The lease keeps the stop and the changed-since bookmark for the next pass, which reports it.
+- **Stop-parsing word no longer hides a pull request from the attribution check:** PowerShell's `--%` word, unquoted, is dropped before the attribution, push and credential checks read a command, so `gh --% pr create` with an AI trailer is refused like `gh pr create`, and the Claude Code hook's fallback screen matches it too. A quoted `'--%'` stays an argument that gh refuses.
+- **Backslash quoting no longer hides a push where PowerShell may run it:** bash reads `\"` as an escaped quote and PowerShell as a backslash and a quote, so `echo "a\" ; git push --force ...` hides the push from bash but runs it in PowerShell. The force-push, evidence-store push and credential checks now also read a line with a backslash as PowerShell does, on Claude Code's PowerShell tool and every Codex shell call; Claude Code's Bash tool keeps the bash reading alone.
+- **Daily check-in plugin baseline uses the copy's sync time:** step 10 now measures plugin lag against main as it was when the host last synced the account's plugins, instead of the check-in session's start. A home thread can live for days while its container re-syncs the copy, so the old baseline could hide a real lag. The sync time is the modification time of the host's `manifest.json` beside the copy, which the host rewrites at every container start even when nothing changed; the copy folder's own birth time is only a lower bound, because an unchanged copy keeps its folder from an earlier start, and synced files carry a 1980 file time, so a file's own time is never used. Copies are found by name prefix, since the host can rename one (for example `ai-agent-toolkit~g2`). With several copies the newest sync time wins and each other copy is listed with its version and sync time; with no valid sync time the check compares with main today and says so. The lag age is measured up to the sync time, so a copy synced moments before the account caught up is not reported as more than a day behind. The pinned report now reads "pinned copy synced at <time>", and the state record keeps the sync time.
+
+### Changed
+
+- The old Windows task cleaner now has a fixed end: it goes in the first Toolkit release on or after 1 March 2027.
+- Tests now cover the task record's own guards (secret screening, the file's mode, path and stop-time checks, and the refusal to rewrite a record it could not read), and a hand edit made only in a task's exported XML, which is planned as changed and kept.
+- The contract is the one record of skill classes: the Skill Safety Matrix Packaging table and the Antigravity copier's Toolkit-only list follow it, and validation fails on any mismatch. `repository-agent-rules` and `toolkit-playbooks` are now Toolkit's own, so the Antigravity portable copy leaves them out; setup removes Toolkit's earlier global copies of them.
+- **Hourly nudge default tier:** the hourly nudge now defaults to the mid tier (Sonnet on Claude) instead of small, because the small tier missed threads in its lane sweep. A stored nudge prompt keeps its own tier until it is swapped.
+- **Task kind check:** `toolkit-projects-tasks.cjs --check` now reads a pointer that loads another task kind as malformed, instead of relying on a tier mismatch to catch it.
+
+### Added
+
+- Every skill now has one class in `repo/contracts/skill-publication.json`: portable (works anywhere) or Toolkit's own (runs Toolkit itself). The skill portability audit fails when a portable skill picks up a new Toolkit word, or names an agent app without a written reason; mentions already there sit in a baseline that only shrinks, checked against the change's base commit.
+- The README splits the skill table into portable skills and Toolkit's own skills, and the audit keeps each skill in its class's table.
+- **Stuck threads get a fresh successor:** the Projects hourly nudge now runs `repo/scripts/toolkit-projects-stuck.cjs` every run (step 4a) on what it read: every `list_threads` page, each unresolved work thread and each Remote Control lane's status. A thread is stuck when its Remote Control session ended, or is not connected or served with the session quiet 10 minutes or more while its device is reachable, or when it was failed, stopped or idle while owing work and did nothing of its own after the coordinator's message. A failed or stopped thread gets a continue message first, because a usage-limit or API-error cut-off leaves that state and such threads continue on one message. A working thread, one whose run left output in the last 45 minutes, and one waiting on something recorded (an open owner card, CI, a gate or review) are never stuck; a working thread quiet past twice its expected time goes to the owner instead. The report carries `STUCK THREADS`, `STUCK FOR OWNER` and `STUCK CHECK FAILED` prefixes, and a cut-off thread scan reads `THREAD SCAN INCOMPLETE`.
+- **The coordinator starts the successor itself:** `Successors for stuck threads` in the Projects skill's periodic-runs reference covers the re-check, the successor brief (the old brief with its gate route, the pushed state and a stop when the branch moved), a fresh Remote Control session for Remote Control lanes, the "superseded" message to the old thread and a ledger (`successors.json`) that holds each lane to one successor in 2 hours. A parked Remote Control lane now gets a successor before the owner is asked to type in it.
+
+## 3.139.1
+
+### Fixed
+
+- **Source-watch notices never merge on the standing answer:** a pull request that changes the source-watch notice report (`repo/source-watch/reviews/**`) now waits for the owner's typed merge in the task auto-merge check, and the whole `repo/source-watch/**` folder is in the RISKY tier. A notice closes unmerged once it is triaged, but the report was a LIGHT `.md` file outside the merge-authority list, so one UAT line could have made a notice eligible to merge.
+
+### Changed
+
+- The ui-ux-pro-max reviewed-through cursor moves to upstream `b6a7900`. The upstream commits in that range change the upstream CLI asset sync, its CI path filter, upstream tests, a gallery copy of an already tracked data file, the excluded README, and the adapted `design_system.py`, which gains a preview page writer and design token export. Toolkit's adapted generator is a smaller local-only subset with none of those writers, so nothing is adapted now; no exact-copy data file or licence changed, and the earlier recommendation of a separate data refresh stands.
+
 ## 3.139.0
 
 ### Changed
@@ -175,7 +214,7 @@
 
 ### Removed
 
-- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now fails to start; say `remove toolkit` to list and remove it after your OK.
+- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now finds its runner gone and exits with an error; after three such runs it turns itself off, if Toolkit's record still matches it. Say `remove toolkit` to uninstall Toolkit from this computer after your OK; the old tasks go with it once no app keeps Toolkit.
 - Setup's retired `--scheduled-task-update` and `--remove-toolkit-tasks` options are gone. Setup still prints one line when old Toolkit tasks are recorded on a Windows computer, pointing to `remove toolkit`.
 - The permission ask rows for the old task commands are gone, since those commands no longer exist.
 

@@ -13,6 +13,7 @@ A skill folder must contain enough local context to be useful when copied into a
 - External links may support provenance or further reading.
 - External links must not be required for normal skill execution.
 - A copied skill folder should not require the user or agent to understand the rest of this repository before the skill can be used.
+- Each skill has one class in `repo/contracts/skill-publication.json`: portable (works anywhere) or Toolkit's own (runs Toolkit itself). A portable skill's `SKILL.md`, outside fenced code, uses no Toolkit words and names no agent app unless the contract gives the reason; older mentions sit in a baseline that only shrinks.
 
 ## Fidelity Rules
 
@@ -43,4 +44,4 @@ Run:
 node repo/scripts/audit-skill-portability.cjs
 ```
 
-The audit is deterministic. It checks for skill entrypoints, human install notes, missing local references from `SKILL.md`, thin/link-only skills, placeholder-only local references, required runtime context that appears to exist only behind external URLs, and old removed skill paths.
+The audit is deterministic. It checks for skill entrypoints, human install notes, missing local references from `SKILL.md`, thin/link-only skills, placeholder-only local references, required runtime context that appears to exist only behind external URLs, old removed skill paths, each skill's class, Toolkit words and app names in portable skills, and that the README lists each skill in its class's table.

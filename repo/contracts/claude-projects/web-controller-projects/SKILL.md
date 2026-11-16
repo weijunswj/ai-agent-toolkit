@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-16.2
+Version: 2026-11-16.3
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -137,7 +137,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 ## Hourly nudge
 - Every project also runs an hourly stalled-work nudge, set up at project setup exactly as in **Recurring tasks**, rendered from Toolkit. It must be a recurring routine: one-shot self-reminders have died silently. The hidden self-reminder fallback never applies to it: if no recurring route works, tell the user the nudge could not be set up.
 - **It is bound to its own home thread,** because a fresh-session task posts a run card in project chat every run. Start a thread named `<PROJECT>: Hourly nudge`; that thread creates the task bound to itself (a task fires into the session that creates it), reads it back (`get_trigger`, never a fire) and reports the trigger id. Its guards are under **Hourly nudge home thread** in `reference/periodic-runs.md`.
-- It fires hourly in the user's waking hours only, at a jittered minute (random, not :00 or :30, for example `CRON_TZ=<user zone> 23 8-23 * * *`), on the small tier at medium effort (`agent-cost-control`), and it is read-only apart from its programme sweep step, which brings the programme pages up to date. It does the cheap checks first, always runs its owner-ask and Remote Control steps, and replies in one line when nothing changed since its last run.
+- It fires hourly in the user's waking hours only, at a jittered minute (random, not :00 or :30, for example `CRON_TZ=<user zone> 23 8-23 * * *`), on the mid tier at medium effort (`agent-cost-control`), and it is read-only apart from its programme sweep step, which brings the programme pages up to date. It does the cheap checks first, always runs its owner-ask and Remote Control steps, and replies in one line when nothing changed since its last run.
 - **The sweep, its report, `CHECK-IN NOT ARMED` and the Both gone check on the first wake of each day:** read **Acting on the nudge report** in `reference/periodic-runs.md` and act on it that turn.
 - Relay each run; post all waiting owner items as ONE reminder each run until each is answered; act on the rest that turn: resolve verified candidates, reopen and relay unrelayed threads, post missing pointers, end finished Remote Control sessions, fix stale labels, act on overdue promises, reroute stuck work.
 - This is the backstop resolve pass (`RESOLVE DUE`); each fresh scheduled run resolves its own thread after report delivery. Stop the nudge only when the user asks; mark its `SCHEDULED TASKS:` entry `stopped by owner`.

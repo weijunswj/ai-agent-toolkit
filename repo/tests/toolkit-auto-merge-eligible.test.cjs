@@ -75,6 +75,14 @@ test('merge-authority paths and a major bump wait for the owner; everything else
   assert.notEqual(eligible.withoutStamps("const BRIDGE_VERSION = '3.21.0';\nhook();\n"), eligible.withoutStamps("const BRIDGE_VERSION = '3.22.0';\nother();\n"));
 });
 
+test('the source-watch notice report never merges on the standing answer', () => {
+  // The path the notifier writes, read from the notifier itself so a move cannot leave the list behind.
+  const { report } = require('../scripts/check-project-source-updates.cjs').parseArgs([]);
+  const result = eligible.eligibility({ files: [report], toolkit: true });
+  assert.equal(result.eligible, false, report);
+  assert.match(result.reasons[0].why, /source-watch notice report/);
+});
+
 test('a controller takeover playbook-only change waits for typed merge as controller rules', () => {
   const file = 'repo/docs/agent-playbooks/controller-takeover.md';
   for (const sectionChanged of [[], [file]]) {
