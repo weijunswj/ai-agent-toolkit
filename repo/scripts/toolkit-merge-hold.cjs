@@ -262,7 +262,7 @@ const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\b
 // Toolkit folder and `user-state` anywhere in one command, read as two linear checks.
 function stateWords(text) { return STATE_WORDS.test(text) || (/\.ai-agent-toolkit\b/i.test(text) && /\buser-state\b/i.test(text)); }
 
-const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. In Toolkit\'s own folder only listing, reading, changing folder, read-only git and running a script file with node are allowed, with no wildcards, variables, substitutions, quotes, escapes, redirections or `..`; nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
+const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder (or may end up there) and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. Every folder the command may be in is judged, its starting folder included, and a folder it does not spell out (`cd -`, `~-`, a variable or a wildcard) counts as Toolkit\'s own. In Toolkit\'s own folder only listing, reading, changing folder, read-only git and running a script file with node are allowed, with no wildcards, variables, substitutions, quotes, escapes, redirections or `..`; deeper in it, no wildcards, variables or substitutions and no path back up to it; nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
 // What may run with Toolkit's own folder (the one that holds user-state) as its working folder.
 const HOME_PROGRAMS = /^(?:ls|dir|gci|get-childitem|pwd|get-location|gl|echo|write-output|write-host|cat|type|get-content|gc|head|tail|test-path|stat|wc|cd|chdir|pushd|popd|set-location|sl|push-location|pop-location)$/i;
 const HOME_GIT = /^(?:status|log|diff|show|rev-parse|remote|branch|describe|ls-files)$/;
@@ -279,15 +279,23 @@ const CLIMBS = /(?:^|[\\/=])\.\.(?:[\\/]|$)/;
 // `folder` through its links (symlinks, junctions, 8.3 short names) as far as it exists, with the
 // rest appended; the plain resolved path when no part of it can be read.
 function realFolder(folder) {
-  const rest = [];
-  let head = path.resolve(folder);
-  for (;;) {
-    try { return path.join(fs.realpathSync.native(head), ...rest); } catch { /* not there: try its parent */ }
-    const parent = path.dirname(head);
-    if (parent === head) return path.resolve(folder);
-    rest.unshift(path.basename(head));
-    head = parent;
+  const full = path.resolve(folder);
+  const { root } = path.parse(full);
+  const names = full.slice(root.length).split(path.sep).filter(Boolean);
+  const real = count => { try { return fs.realpathSync.native(path.join(root, ...names.slice(0, count))); } catch { return null; } };
+  // The deepest part that exists, found by halving (a folder exists only when its parent does), so a
+  // long path costs a few lookups, not one per name.
+  let base = real(0);
+  if (base === null) return full;
+  let low = 0;
+  let high = names.length;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    const value = real(middle);
+    if (value === null) high = middle - 1;
+    else { low = middle; base = value; }
   }
+  return path.join(base, ...names.slice(low));
 }
 
 // Whether `folder` is `base` or inside it (case-insensitively on Windows, as path.relative compares).
@@ -298,14 +306,17 @@ function within(folder, base) {
 
 // Toolkit's own folder and its user-state folder, resolved once from the same place the user-state
 // module reads (so a test home works), each by its real path. It judges whether a shell command
-// started in a folder could reach the user-state files: from inside user-state anything could; from
-// Toolkit's own folder only a closed set of plain commands is read as safe (default-deny); deeper in
-// Toolkit's folder only a word naming user-state or a `..` path back up to Toolkit's folder (or
-// above it) could.
+// started in a folder could reach the user-state files, refusing by default: the starting folder
+// always counts (a comment, a pipeline part or a background job can drop a `cd`), every folder a
+// move in the command could reach counts too, and a folder the reader cannot work out from the
+// command alone counts as Toolkit's own folder. In user-state nothing runs; in Toolkit's own folder
+// only a closed set of plain commands does; deeper in it, a word naming user-state, a word the reader
+// cannot read plainly (a wildcard, a brace, a variable, a substitution), or a path back up to
+// Toolkit's folder or above is refused.
 class ToolkitFolders {
   #home;
   #state;
-  // Real paths already read for this command, by folder.
+  // Real paths already read for this command, by path.
   #real = new Map();
 
   constructor(registryOptions = {}) {
@@ -317,104 +328,300 @@ class ToolkitFolders {
   // Whether `folder` is Toolkit's own folder or inside it.
   holds(folder) { return typeof folder === 'string' && within(realFolder(folder), this.#home); }
 
-  // Whether one command segment's words, run in folder `root` (null: a folder this command cannot
-  // show), could reach the user-state files. `raw` is the segment as written, quotes included, and
-  // `shell` the shell reading it (null when the host does not say).
-  reaches(words, root, raw = words.join(' '), shell = null) {
-    if (words.length === 0) return false;
-    const names = words.some(word => /\buser-state\b/i.test(word)) || /\buser-state\b/i.test(unescaped(raw));
-    if (root === null) return names;
-    if (!this.#real.has(root)) this.#real.set(root, realFolder(root));
-    const here = this.#real.get(root);
-    if (within(here, this.#state)) return true;
-    if (!within(here, this.#home)) return false;
-    if (names) return true;
-    // In Toolkit's own folder quotes, escapes and redirections are unreadable too: they can spell a
-    // name the words do not show, or write a file. A backslash is an escape only where the shell
-    // makes it one (bash; a shell not named, except on Windows, where it is PowerShell's path
-    // separator); the reading with escapes undone is judged as well.
-    if (within(this.#home, here)) return (backslashEscapes(shell) ? /['"`\\<>]/ : /['"`<>]/).test(raw) || !homeCommand(words);
-    return words.some(word => this.#climbs(word, here));
+  #realOf(folder) {
+    if (!this.#real.has(folder)) this.#real.set(folder, realFolder(folder));
+    return this.#real.get(folder);
   }
 
-  // A path word that could lead back up to Toolkit's own folder or above it, or into user-state:
-  // read part by part from its literal start, with braces expanded, a wildcard taken as any name it
-  // could match on the way to user-state, and an expansion ($x, ${...}, $(...), backticks, %x%) as any
-  // text. A word starting with an expansion starts in an unknown folder, from which a later part that
-  // could match `user-state` is enough. A plain word without `..` only goes deeper, so it is skipped.
-  #climbs(word, here) {
-    const values = word.includes('=') ? [word, word.slice(word.indexOf('=') + 1)] : [word];
-    return values.some(value => {
-      if (!CLIMBS.test(value) && !/[*?[\]{}$`%]/.test(value)) return false;
-      const expanded = braceWords(value);
-      return expanded === null || expanded.some(one => this.#walk(one, here));
+  // Whether a command started in `cwd` could reach the user-state files, read as `shell` splits it
+  // (bash's and PowerShell's readings both when the host does not say).
+  reaches(text, cwd, shell = null) {
+    // A line break other than LF (a lone CR, NEL, LS or PS) may end a command in one shell and not in
+    // another, so the parts read here may not be the ones that run.
+    const oddBreaks = /\r(?!\n)|[\u0085\u2028\u2029]/.test(text);
+    const kinds = shell === 'powershell' ? ['powershell'] : shell === 'posix' ? ['posix'] : ['posix', 'powershell'];
+    return kinds.some(kind => {
+      const parts = commandParts(text, kind);
+      const folders = this.#folders(parts, cwd, kind, LOOPS.test(text));
+      if (oddBreaks && folders.some(folder => within(folder, this.#home))) return true;
+      const budget = { paths: MOST_PATHS };
+      return parts.some(part => folders.some(folder => this.#reachesFrom(part, folder, shell, budget)));
     });
   }
 
-  #walk(value, here) {
-    const parts = value.replace(EXPANSION, '\0').split(/[\\/]/);
-    const open = part => /[\0*?[\]]/.test(part);
-    let first = parts.findIndex(open);
-    if (first < 0) first = parts.length;
-    let at = first === 0 && parts[0].includes('\0') ? null : realFolder(shellPath(here, parts.slice(0, first).join('/') || '.'));
-    for (const part of parts.slice(at === null ? 1 : first)) {
-      if (part === '' || part === '.') continue;
-      if (at === null) { if (couldName(part, 'user-state')) return true; continue; }
-      if (within(at, this.#state)) return true;
-      if (part === '..') { at = realFolder(path.dirname(at)); continue; }
-      if (!open(part)) { at = realFolder(path.join(at, part)); continue; }
-      // A wildcard or expansion here could be the next folder on the way to user-state.
-      const next = within(this.#state, at) ? path.relative(at, this.#state).split(path.sep)[0] : null;
-      at = next !== null && couldName(part, next) ? realFolder(path.join(at, next)) : path.join(at, '\u0001');
+  // The folders any part of the command could run in: the starting folder, and each folder a move
+  // (cd, pushd, Set-Location and their kin) could reach from a folder found before it, in text order,
+  // or again and again when a loop or function can run a move more than once. A move to a folder the
+  // command does not spell out (`~-`, `$OLDPWD`, a wildcard, a substitution, a bare pushd) adds
+  // Toolkit's own folder, as do more folders or moves than the reader follows. popd and Pop-Location
+  // go back to a folder already counted, or stay put.
+  #folders(parts, cwd, kind, loops) {
+    const folders = [this.#realOf(cwd || process.cwd())];
+    const targets = [];
+    const variables = new Map();
+    let unknown = false;
+    let moves = 0;
+    let backs = 0;
+    for (const part of parts) {
+      const assigned = assignmentOf(part.words.map(word => word.text));
+      if (assigned) { assignVariable(variables, assigned); continue; }
+      const move = moveTarget(part, kind, variables);
+      if (move === null) continue;
+      if (move === MOVE_BACK) {
+        // `cd -` goes back to a folder an earlier move in the same shell left, already counted; with
+        // none (or only moves in a pipeline part, a background job or a subshell) it is the folder
+        // before this command, which the reader cannot see. PowerShell's history steps further back
+        // on each repeat.
+        backs += 1;
+        if (moves === 0 || (kind === 'powershell' && backs > moves)) unknown = true;
+        continue;
+      }
+      if (!part.sub) moves += 1;
+      if (move === MOVE_UNKNOWN || targets.length >= MOST_FOLDERS) unknown = true;
+      else targets.push(move);
     }
-    return at !== null && (within(this.#home, at) || within(at, this.#state));
-  }
-}
-
-// Expansions a path word can hold, read as any text: $name, ${...}, $(...), backticks, cmd's %name%.
-const EXPANSION = /\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]|%[A-Za-z_][A-Za-z0-9_]*%/g;
-
-// Whether a path part with wildcards (and \0 for an expansion) could be `name`.
-function couldName(part, name) {
-  const source = part.replace(/\[[^\]]*\]|[\0*?]|[^\0*?[]+|\[/g, piece => (piece === '\0' || piece === '*' ? '.*' : piece === '?' || (piece.startsWith('[') && piece.length > 1) ? '.' : piece.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  return new RegExp(`^${source}$`, process.platform === 'win32' ? 'is' : 's').test(name);
-}
-
-// A word with bash's brace expansion done (`.{.,}` is `..` and `.`), or null when it makes more than
-// 64 words. Braces after `$` are a parameter expansion, not a list.
-function braceWords(word, limit = 64) {
-  let words = [word];
-  for (let pass = 0; pass < 32; pass += 1) {
-    let changed = false;
-    words = words.flatMap(one => {
-      const list = braceList(one);
-      if (list) changed = true;
-      return list || [one];
-    });
-    if (words.length > limit) return null;
-    if (!changed) return words;
-  }
-  return null;
-}
-
-function braceList(word) {
-  for (let open = word.indexOf('{'); open >= 0; open = word.indexOf('{', open + 1)) {
-    if (word[open - 1] === '$') continue;
-    let depth = 0;
-    const commas = [];
-    for (let at = open; at < word.length; at += 1) {
-      if (word[at] === '{') depth += 1;
-      else if (word[at] === ',' && depth === 1) commas.push(at);
-      else if (word[at] === '}' && --depth === 0) {
-        if (!commas.length) break;
-        const parts = [];
-        let start = open + 1;
-        for (const end of [...commas, at]) { parts.push(word.slice(start, end)); start = end + 1; }
-        return parts.map(part => word.slice(0, open) + part + word.slice(at + 1));
+    const seen = new Set();
+    for (let pass = 0, grew = true; grew && !unknown && pass < MOST_FOLDERS; pass += 1) {
+      grew = false;
+      for (const target of targets) {
+        for (const from of [...folders]) {
+          const key = `${from}\0${target}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const next = this.#realOf(shellPath(from, target));
+          if (folders.includes(next)) continue;
+          if (folders.length >= MOST_FOLDERS) { unknown = true; break; }
+          folders.push(next);
+          grew = loops;
+        }
+        if (unknown) break;
       }
     }
+    if (unknown && !folders.includes(this.#home)) folders.push(this.#home);
+    return folders;
   }
-  return null;
+
+  // Whether one command part, run in `folder`, could reach the user-state files.
+  #reachesFrom(part, folder, shell, budget) {
+    if (within(folder, this.#state)) return true;
+    if (!within(folder, this.#home)) return false;
+    const texts = part.words.map(word => word.text);
+    if (texts.some(item => /\buser-state\b/i.test(item))) return true;
+    if (part.words.some(word => word.open || word.vars)) return true;
+    // In Toolkit's own folder quotes, escapes and redirections are unreadable too: they can spell a
+    // name the words do not show, or write a file. A backslash is an escape only where the shell makes
+    // it one (bash; a shell not named, except on Windows, where Codex runs PowerShell).
+    if (within(this.#home, folder)) return (backslashEscapes(shell) ? /['"`\\<>\u2018-\u201e]/ : /['"`<>\u2018-\u201e]/).test(part.raw) || part.redirect || !homeCommand(texts);
+    // A move's own folder is judged as a folder (#folders), not as a path here.
+    if (moveTarget(part, null, new Map()) !== null) return false;
+    return texts.some(item => this.#climbs(item, folder, budget));
+  }
+
+  // A plain path word that leads to Toolkit's own folder or above it, or into user-state. Only a word
+  // with a `..` part or an absolute (or `~`) start can; one with a `=` is read after it too. Past
+  // MOST_PATHS such words, the rest count as reaching.
+  #climbs(word, folder, budget) {
+    const values = word.includes('=') ? [word, word.slice(word.indexOf('=') + 1)] : [word];
+    return values.some(value => {
+      if (!CLIMBS.test(value) && !absoluteShellPath(value)) return false;
+      budget.paths -= 1;
+      if (budget.paths < 0) return true;
+      const target = this.#realOf(shellPath(folder, value));
+      return within(this.#home, target) || within(target, this.#state);
+    });
+  }
+}
+
+// Most folders, moves and paths read for one command before the rest counts as Toolkit's own folder,
+// and most runner words (bash, pwsh, eval and their kin) before the rest counts as encoded.
+const MOST_FOLDERS = 16;
+const MOST_RUNNERS = 16;
+const MOST_PATHS = 2000;
+// A loop or function can run a move more than once, and from a later folder.
+const LOOPS = /\b(?:for|while|until|select|do|foreach|function|foreach-object)\b|\(\s*\)/i;
+const MOVES = /^(?:cd|chdir|pushd|set-location|sl|push-location)$/i;
+const MOVE_UNKNOWN = Symbol('unknown folder');
+const MOVE_BACK = Symbol('folder before');
+
+// The folder a move part goes to, as written (relative to the folder it runs in) with the variables
+// the command assigned before it, MOVE_BACK for a step back (`cd -`), MOVE_UNKNOWN when the command
+// does not spell it out, or null when the part is not a move. A bare cd goes to the user's home folder.
+function moveTarget(part, kind, variables) {
+  const { words } = part;
+  let at = 0;
+  while (at < words.length - 1 && /^(?:builtin|command)$/.test(words[at].text)) at += 1;
+  if (!words[at] || !MOVES.test(words[at].text)) return null;
+  const texts = words.slice(at).map(word => word.text);
+  const target = locationTarget(texts, kind);
+  if (target.none) return /^(?:pushd|push-location)$/i.test(texts[0]) ? MOVE_UNKNOWN : '~';
+  if (target.back) return MOVE_BACK;
+  if (target.unknown) return MOVE_UNKNOWN;
+  const word = words.slice(at + 1).find(item => item.text === target.word || item.text.endsWith(`:${target.word}`));
+  if (!word || word.open) return MOVE_UNKNOWN;
+  const value = word.vars ? folderWord(word.text, variables, kind) : word.text;
+  return /[$%`]/.test(value) ? MOVE_UNKNOWN : value;
+}
+
+// Programs that run their argument as a command line, and the options that pass it.
+const RUNNERS = /^(?:bash|sh|dash|zsh|ksh|pwsh|powershell|cmd)$/;
+const RUNNER_SCRIPT = { posix: /^-[A-Za-z]*c$/, powershell: /^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i, cmd: /^\/[ckr]$/i };
+const RUNNER_ENCODED = /^-e(?:c|n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?$/i;
+
+// The parts of a command line (shellWords), with the command lines that eval, Invoke-Expression or a
+// shell's -c (pwsh -Command, cmd /c) would run read as parts too, three levels deep. An encoded
+// PowerShell command cannot be read, so its part gets an unreadable word.
+function commandParts(text, kind, depth = 0) {
+  const parts = shellWords(text, kind);
+  if (depth >= 3) return parts;
+  const nested = [];
+  for (const part of parts) {
+    const texts = part.words.map(word => word.text);
+    const program = path.win32.basename(path.posix.basename(texts[0] || '')).replace(/\.exe$/i, '').toLowerCase();
+    if (/^(?:eval|iex|invoke-expression)$/.test(program)) { nested.push(...commandParts(texts.slice(1).join(' '), kind, depth + 1)); continue; }
+    if (!RUNNERS.test(program)) continue;
+    const inner = /^(?:pwsh|powershell)$/.test(program) ? 'powershell' : 'posix';
+    const option = program === 'cmd' ? RUNNER_SCRIPT.cmd : RUNNER_SCRIPT[inner];
+    const at = texts.findIndex((item, index) => index > 0 && (option.test(item) || (inner === 'powershell' && RUNNER_ENCODED.test(item))));
+    if (at < 0) continue;
+    if (inner === 'powershell' && RUNNER_ENCODED.test(texts[at])) { part.words.push({ text: '', open: true, vars: false }); continue; }
+    nested.push(...commandParts(texts.slice(at + 1).join(' '), inner, depth + 1));
+  }
+  return [...parts, ...nested];
+}
+
+// One command line read the way `kind` splits and unquotes it (posix: bash, dash and cmd's plain
+// words; powershell), in one pass. Parts end at a line break, `;`, `|`, `&`, `(` or `)` (and `{` or
+// `}` in PowerShell), and a bash backtick substitution is a part of its own. A part is `sub` when it
+// may run in another shell than the next part: a pipeline part, a background job, or one inside
+// parentheses, braces or a substitution. Each word holds its
+// text with quotes and escapes removed (a line continuation joins with nothing between), `vars` when
+// it uses a plain variable (kept as written), and `open` when an unquoted wildcard, brace, `%`, tilde
+// form other than `~` and `~/`, substitution, `$'...'` string or unclosed quote leaves its value
+// unknown. Each part keeps its raw text and whether it redirects.
+function shellWords(text, kind) {
+  const posix = kind !== 'powershell';
+  const source = String(text);
+  const n = source.length;
+  const parts = [];
+  let words = [];
+  let word = null;
+  let start = 0;
+  let redirect = false;
+  let depth = 0;
+  let piped = false;
+  let tick = false;
+  const take = () => (word ??= { text: '', open: false, vars: false });
+  const endWord = () => { if (word) words.push(word); word = null; };
+  const endPart = (end, sub = false) => {
+    endWord();
+    if (words.length) parts.push({ words, raw: source.slice(start, end), redirect, sub: sub || piped || depth > 0 || tick });
+    words = [];
+    redirect = false;
+    piped = false;
+    start = end + 1;
+  };
+  const nameChar = posix ? /[A-Za-z0-9_]/ : /[A-Za-z0-9_:]/;
+  const singleQuote = c => c === "'" || (!posix && /[\u2018-\u201b]/.test(c));
+  const doubleQuote = c => c === '"' || (!posix && /[\u201c-\u201e]/.test(c));
+  // A `$` at `at`: a plain variable name ($name, ${name}) is kept as written; anything else is open.
+  // Returns where reading goes on.
+  const dollar = at => {
+    const current = take();
+    if (source[at + 1] === '{') {
+      let close = at + 2;
+      while (close < n && nameChar.test(source[close])) close += 1;
+      if (source[close] === '}' && close > at + 2) { current.text += source.slice(at, close + 1); current.vars = true; return close + 1; }
+      current.open = true;
+      return at + 1;
+    }
+    if (/[A-Za-z_]/.test(source[at + 1] || '')) {
+      let end = at + 1;
+      while (end < n && nameChar.test(source[end])) end += 1;
+      current.text += source.slice(at, end);
+      current.vars = true;
+      return end;
+    }
+    current.open = true;
+    return at + 1;
+  };
+  let at = 0;
+  while (at < n) {
+    const c = source[at];
+    if (c === '|' || c === '&') {
+      // `||` and `&&` run in the same shell; a lone `|` pipes into another one, a lone `&` runs a job.
+      if (source[at + 1] === c) { endPart(at); start = at + 2; at += 2; continue; }
+      endPart(at, true);
+      if (c === '|') piped = true;
+      at += 1;
+      continue;
+    }
+    if (c === '(' || (!posix && c === '{')) { endPart(at); depth += 1; at += 1; continue; }
+    if (c === ')' || (!posix && c === '}')) { endPart(at); depth = Math.max(0, depth - 1); at += 1; continue; }
+    if (c === '\n' || c === ';') { endPart(at); at += 1; continue; }
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\f' || c === '\v') { endWord(); at += 1; continue; }
+    if (c === '<' || c === '>') { redirect = true; endWord(); at += 1; continue; }
+    if ((posix && c === '\\') || (!posix && c === '`')) {
+      // A line continuation: bash joins the lines with nothing between, PowerShell with a space.
+      if (source[at + 1] === '\n') { if (!posix) endWord(); } else take().text += source[at + 1] ?? '';
+      at += 2;
+      continue;
+    }
+    if (posix && c === '`') { take().open = true; endPart(at); tick = !tick; at += 1; continue; }
+    if (singleQuote(c)) {
+      const current = take();
+      let end = at + 1;
+      for (;;) {
+        while (end < n && !singleQuote(source[end])) current.text += source[end++];
+        if (end >= n) { current.open = true; break; }
+        // PowerShell reads two quotes in a row as one quote.
+        if (!posix && singleQuote(source[end + 1] || '')) { current.text += "'"; end += 2; continue; }
+        break;
+      }
+      at = end + 1;
+      continue;
+    }
+    if (doubleQuote(c)) {
+      const current = take();
+      let end = at + 1;
+      while (end < n && !doubleQuote(source[end])) {
+        const d = source[end];
+        if (posix && d === '\\' && '$`"\\\n'.includes(source[end + 1] ?? '')) { if (source[end + 1] !== '\n') current.text += source[end + 1]; end += 2; continue; }
+        if (!posix && d === '`') { current.text += source[end + 1] ?? ''; end += 2; continue; }
+        if (d === '$') { end = dollar(end); continue; }
+        if (posix && d === '`') current.open = true;
+        else current.text += d;
+        end += 1;
+      }
+      if (end >= n) current.open = true;
+      at = end + 1;
+      continue;
+    }
+    if (c === '$') {
+      if (posix && source[at + 1] === "'") {
+        take().open = true;
+        let end = at + 2;
+        while (end < n && source[end] !== "'") end += source[end] === '\\' ? 2 : 1;
+        at = end + 1;
+        continue;
+      }
+      at = dollar(at);
+      continue;
+    }
+    if (c === '~' && !word) {
+      const next = source[at + 1];
+      const current = take();
+      current.text += '~';
+      if (!(next === undefined || /[\s;|&()<>/]/.test(next) || (!posix && next === '\\'))) current.open = true;
+      at += 1;
+      continue;
+    }
+    const current = take();
+    if ('*?[]%'.includes(c) || (posix && (c === '{' || c === '}'))) current.open = true;
+    current.text += c;
+    at += 1;
+  }
+  endPart(n);
+  return parts;
 }
 
 // Whether a backslash escapes the next character in `shell`: in bash, and in a shell the host does
@@ -784,7 +991,7 @@ function boundStore(url, registryOptions = {}) {
   try { return governance.evidenceStoreRepositories(registryOptions).stores.has(slug); } catch { return false; }
 }
 
-const UNKNOWN_FOLDER_PUSH = 'this command pushes after `cd -`, `Set-Location -` or `pushd +N`/`-N` returns to a folder Toolkit cannot see from this command alone, so it is refused. Name the folder with `cd <path>` or `git -C <path>` and retry.';
+const UNKNOWN_FOLDER_PUSH = 'this command pushes after `cd -`, `Set-Location -` or `pushd +N`/`-N` returns to a folder Toolkit cannot see from this command alone, or after more folder changes than Toolkit follows, so it is refused. Name the folder with `cd <path>` or `git -C <path>` and retry.';
 
 // What a cd, chdir, pushd, Set-Location, sl or Push-Location segment moves to: { word } for a
 // folder, { back: true } for `-` (also after `--` or as -Path's value, and `+` outside bash,
@@ -1208,50 +1415,21 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
       return refuse('this API call merges or moves a branch in a way an approval cannot cover (GraphQL merges, the merge queue, branch merges or a ref write to the default branch), so it is refused. Use `gh pr merge <number> --match-head-commit <sha>` after the user approves, or ask the user to do it.');
     }
   }
-  // Every refused push is named, each reason once: a command that pushes both a default branch and
-  // a bound store gets the pull request advice and the store-command message.
-  const reasons = [];
-  // The command is walked as written and again with its quotes and escapes undone (unescaped), so
-  // `'user'-state`, `user\-state` or `.\.` cannot hide a folder or a name from either reading. Pushes
-  // are judged in the reading as written only: a backslash is a path separator on Windows, so the
-  // undone reading would move a quoted `C:\...` folder somewhere else and judge the push there.
-  const folders = new ToolkitFolders(registryOptions);
-  const undone = [...new Set(shell === 'powershell' ? [unescaped(text, 'powershell')] : shell === 'posix' ? [unescaped(text)] : [unescaped(text), unescaped(text, 'powershell')])].filter(reading => reading !== text);
-  for (const [reading, pushes] of [[text, true], ...undone.map(reading => [reading, false])]) {
-    const refusal = walkFolders(reading, cwd, { registryOptions, shell, folders, reasons, pushes });
-    if (refusal) return refusal;
-  }
-  return reasons.length ? refuse(reasons.join(' Also: ')) : '';
+  const reasons = pushReasons(text, cwd, { registryOptions, shell });
+  if (reasons.length) return refuse(reasons.join(' Also: '));
+  return new ToolkitFolders(registryOptions).reaches(text, cwd, shell) ? refuse(STATE_FOLDER_MESSAGE) : '';
 }
 
-// The text with quotes and escapes undone as `shell` reads it. Bash decodes `$'...'` (ANSI-C) strings,
-// drops backslash escapes, quotes and backticks, and expands braces, so `"user"-state`, `user\-state`,
-// `.\.`, `$'user\x2dstate'` and `.{.,}` read plainly. PowerShell keeps backslashes (a folder
-// separator there) and drops its backtick escapes and quotes.
-function unescaped(text, shell = 'posix') {
-  const value = String(text);
-  if (shell === 'powershell') return value.replace(/`(.)/gs, '$1').replace(/['"]/g, '');
-  const plain = value.replace(/\$'((?:[^'\\]|\\.)*)'/gs, (_, body) => ansiC(body)).replace(/\$"/g, '"').replace(/\\(.)/gs, '$1').replace(/['"`]/g, '');
-  return plain.split(/(\s+)/).map(part => (/\s/.test(part) ? part : (braceWords(part) || [part]).join(' '))).join('');
-}
+// The text with quotes, backticks and backslash escapes dropped, so the user-state words cannot hide
+// behind `"user"-state` or `user\-state` in the whole-text check (stateWords).
+function unescaped(text) { return String(text).replace(/\\(.)/gs, '$1').replace(/['"`]/g, ''); }
 
-// The text of a bash `$'...'` string.
-function ansiC(body) {
-  const named = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
-  return body.replace(/\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|([0-7]{1,3})|c(.)|(.))/gs, (_, hex, u4, u8, octal, control, other) => {
-    const code = hex ? parseInt(hex, 16) : u4 ? parseInt(u4, 16) : u8 ? parseInt(u8, 16) : octal ? parseInt(octal, 8) : control ? control.charCodeAt(0) & 31 : null;
-    if (code !== null) return code <= 0x10ffff ? String.fromCodePoint(code) : '';
-    return named[other] ?? other;
-  });
-}
-
-// Walks one reading of a command segment by segment, tracking the folders it could be in, and returns
-// a refusal for a segment that could reach Toolkit's user-state files; with `pushes`, push refusals
-// go to `reasons`.
-function walkFolders(text, cwd, { registryOptions, shell, folders, reasons, pushes }) {
+// The reasons each default-branch push in the command is refused, each once: a command that pushes
+// both a default branch and a bound store gets the pull request advice and the store-command message.
+function pushReasons(text, cwd, { registryOptions, shell }) {
   const variables = new Map();
   const parts = segments(text);
-  const raws = rawSegments(text);
+  const reasons = [];
   // The folders the command could be in at each point: usually one, more after a `cd -` whose
   // target depends on the shell, and null for a folder Toolkit cannot see from this command alone
   // (a push judged there is refused). pushd and Push-Location save the folders they leave; popd and
@@ -1268,23 +1446,32 @@ function walkFolders(text, cwd, { registryOptions, shell, folders, reasons, push
   let moves = 0;
   let backs = 0;
   const saved = [];
-  const move = next => { previous = roots; roots = [...new Set(next)]; visited.push(...roots); moves += 1; };
-  // Every folder the command could be in is judged for Toolkit's user-state files (ToolkitFolders).
-  // A line break other than LF (a lone CR, NEL, LS or PS) may end a command in one shell and not in
-  // another, so the segments here may not be the ones that run: none runs in Toolkit's folder.
-  const oddBreaks = /\r(?!\n)|[\u0085\u2028\u2029]/.test(text);
+  // Past MOST_FOLDERS moves the folder is one Toolkit does not follow, so reading stays in step with
+  // the command's length.
+  let followed = 0;
+  const move = next => {
+    followed += 1;
+    previous = roots;
+    roots = [...new Set(next)];
+    visited.push(...roots);
+    moves += 1;
+  };
   // The GIT_DIR values a push could run with. The folder's own repository (null) always stays: a
   // setting may never reach git (bash's `set`, `declare` without -x, a name in another case, a later
   // unset), so a GIT_DIR an earlier segment sets only adds a repository to judge (gitDirSetting).
   let gitDirValues = [null];
-  for (const [at, words] of parts.entries()) {
-    if (roots.some(root => folders.reaches(words, root, raws[at], shell) || (oddBreaks && root !== null && folders.holds(root)))) return refuse(STATE_FOLDER_MESSAGE);
+  for (const words of parts) {
     const setting = gitDirSetting(words);
     if (setting) gitDirValues = [...new Set([...gitDirValues, setting])];
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
+    const moving = /^(?:cd|pushd|chdir|set-location|sl|push-location|popd|pop-location)$/i.test(words[0]);
+    if (moving && followed >= MOST_FOLDERS) {
+      if (roots[0] !== null || roots.length > 1) move([null]);
+      continue;
+    }
     if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) move(saved.pop()); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0])) {
+    if (moving) {
       const target = locationTarget(words, shell);
       if (/^(?:pushd|push-location)$/i.test(words[0])) saved.push(roots);
       if (target.none) {
@@ -1311,19 +1498,14 @@ function walkFolders(text, cwd, { registryOptions, shell, folders, reasons, push
       }
       continue;
     }
-    for (const root of pushes ? roots : []) {
+    for (const root of roots) {
       for (const gitDir of gitDirValues) {
         const reason = pushRefusal(words, root, { registryOptions, variables, shell, gitDir });
         if (reason && !reasons.includes(reason)) reasons.push(reason);
       }
     }
   }
-  return '';
-}
-
-// The raw text of each segment segments() reads, in the same order.
-function rawSegments(text) {
-  return String(text).split(/\r?\n|;|&&|\|\||\||&/).filter(part => wordsOf(part).length > 0);
+  return reasons;
 }
 
 // A GIT_DIR value a segment may set for the commands after it, or null: export, declare, typeset,
@@ -1468,7 +1650,9 @@ function mentionsRunner(text) {
   return /\b(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?\b/i.test(runnerText(text));
 }
 
-function encodedPowerShell(text) {
+// Past MOST_RUNNERS runner words read for one command (nested scripts included), the rest counts as
+// encoded, so reading stays in step with the command's length.
+function encodedPowerShell(text, budget = { runners: MOST_RUNNERS }) {
   // Keep each quoted argument as one shell word: prose is not a runner word, while a
   // quoted encoded option after a real runner is still an option PowerShell reads.
   for (const { words } of shellCommands(runnerText(text, true))) {
@@ -1486,6 +1670,8 @@ function encodedPowerShell(text) {
   for (const { words } of shellCommands(text)) {
     for (let index = 0; index < words.length; index += 1) {
       if (!SHELLS.test(words[index])) continue;
+      budget.runners -= 1;
+      if (budget.runners < 0) return true;
       const program = words[index].split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
       const args = words.slice(index);
       const expression = /^(?:eval|iex|invoke-expression)$/.test(program);
@@ -1495,7 +1681,7 @@ function encodedPowerShell(text) {
         ? args.map(word => /^-[a-z]*c[a-z]*$/i.test(word) ? '-c' : word) : args;
       const script = expression ? args.slice(1).join(' ') : argvText(normalized);
       if (!expression && script === normalized.join(' ')) continue;
-      if (script.length < text.length && encodedPowerShell(script)) return true;
+      if (script.length < text.length && encodedPowerShell(script, budget)) return true;
     }
   }
   return false;
