@@ -1341,6 +1341,11 @@ function isLaneHolder(child, writer, outcome) {
   return Boolean(child && outcome?.owner_prefix && outcome.owner_prefix === writer?.prefix && isHolder(child, writer));
 }
 
+// A recorded head nothing is bound to yet: no gate return, review or UAT names it.
+function headUnbound(child) {
+  return !(child?.gate?.returns || []).length && !child?.uat?.state && !child?.review?.state && !(child?.review?.verdicts || []).length;
+}
+
 function currentGateAccepted(child) {
   const latest = child.gate.returns.at(-1);
   return child.gate.state === 'RETIRED' && Boolean(latest?.consumed && latest.verdict === 'ACCEPT');
@@ -4831,7 +4836,8 @@ function describeEffect(effect) {
   const base = EFFECT_TEXT[effect.kind](effect);
   const move = effect.replacement;
   const followed = move ? `${base}; follow ${move.selected_state === 'OPEN' ? 'open' : 'merged'} PR #${move.selected} in place of ${move.from_state === 'CLOSED' ? 'closed unmerged' : 'merged'} PR #${move.from}, the newer PR that claims the task` : base;
-  const text = effect.record ? `${followed}; record open PR #${effect.record.selected} (branch ${effect.record.branch}), the one PR that claims the task, and move a PLANNED task to ACTIVE` : followed;
+  const recorded = effect.record ? `${followed}; record open PR #${effect.record.selected} (branch ${effect.record.branch}), the one PR that claims the task, and move a PLANNED task to ACTIVE` : followed;
+  const text = effect.follow ? `${recorded}; follow the PR head from ${shortSha(effect.follow.from)} to ${shortSha(effect.follow.to)}, with no gate return, review or UAT bound to it` : recorded;
   return effect.backfill ? `${text}; select merged PR #${effect.backfill.selected} from ${effect.backfill.candidates.map(pr => `#${pr.number} (${pr.merged_at})`).join(', ')}. ${effect.backfill.reason}` : text;
 }
 
@@ -5624,6 +5630,11 @@ class Reconciler {
       // moves a PLANNED task to ACTIVE.
       const record = observed.prGraph?.discovery.get(outcome.issue)?.record;
       if (record?.selected === pr.number) child.candidate = { ...child.candidate, branch: record.branch, head: record.head };
+      // A refresh lets the recorded head follow a push while nothing is bound to it yet, so a new push
+      // raises no PR_HEAD_MOVED when there is no gate return, review or UAT to re-check.
+      else if (this.refreshFacts && ['OPEN', 'DRAFT'].includes(pr.state) && isSha(pr.head) && isSha(child.candidate?.head) && child.candidate.head !== pr.head && headUnbound(child)) {
+        child.candidate = { ...child.candidate, head: pr.head };
+      }
     }
     const journals = observed.journals?.get(outcome.issue) || null;
     if (!journals) return { doc: child, checks, journals, findings: [], holds: [] };
@@ -5643,6 +5654,7 @@ class Reconciler {
       return;
     }
     const record = discovery?.complete && discovery.record ? { record: discovery.record } : {};
+    if (!record.record && existing && isSha(existing.candidate?.head) && isSha(desired.candidate?.head) && existing.candidate.head !== desired.candidate.head) record.follow = { from: existing.candidate.head, to: desired.candidate.head };
     if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired, ...(backfill ? { backfill } : {}), ...record });
     else {
       const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects', ...(this.refreshFacts ? CLOSE_FIELDS : [])].includes(key)
@@ -6813,6 +6825,10 @@ class Reconciler {
         if (effect.record && (freshPr !== null || child?.candidate?.branch || (child && isFinished(outcome, child)))) {
           throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or branch was recorded after planning; run reconciliation again.');
         }
+        // A followed head goes only where the head and branch are still the planned ones and nothing is bound.
+        if (effect.follow && (child?.candidate?.head !== effect.follow.from || child?.candidate?.branch !== effect.doc.candidate?.branch || !headUnbound(child))) {
+          throw new ProgrammeError('PR_BACKFILL_STALE', 'The task head, branch, gate return, review or UAT changed after planning; run reconciliation again.');
+        }
       };
       try {
         const desired = effect.doc;
@@ -7593,7 +7609,7 @@ class Reconciler {
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings.map(withNextAction),
       close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
-      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}), ...(effect.replacement ? { replacement: effect.replacement } : {}), ...(effect.record ? { record: effect.record } : {}) })),
+      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}), ...(effect.replacement ? { replacement: effect.replacement } : {}), ...(effect.record ? { record: effect.record } : {}), ...(effect.follow ? { follow: effect.follow } : {}) })),
       recovered: plan.resolutions,
       holds: plan.holds,
       results: [],

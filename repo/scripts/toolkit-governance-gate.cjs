@@ -1536,11 +1536,12 @@ function fitLines(lines, render, limit = SESSION_TEXT_LIMIT) {
   return render([], forms.length);
 }
 
-// For an ENABLED repository: the attention line from this computer's cache, a Programme sweep line
-// when this computer's hourly sweep is not running well, and a Checkpoint line for
-// each session here whose last turn-end record failed. Each line that reports a problem ends with
-// who acts and when (FINDING_ACTIONS), so it is never left as a bare warning. Reads local files only (no git, gh or network
-// call); a missing or old cache starts `programme.cjs refresh` in the background. Any failure only
+// For an ENABLED repository: a stale-pin line for the cloud workflow copies, the attention line from
+// this computer's cache, a Programme sweep line when this computer's hourly sweep is not running well,
+// and a Checkpoint line for each session here whose last turn-end record failed. Each line that
+// reports a problem ends with who acts and when (FINDING_ACTIONS), so it is never left as a bare
+// warning. Reads local files and runs local git for the stale-pin check (no gh or network call); a
+// missing or old cache starts `programme.cjs refresh` in the background. Any failure only
 // drops these lines. Returns { lines, checkpoints }: the Checkpoint lines apart, since the session line
 // may have to count some of them instead of listing them.
 const FINDING_ACTIONS = Object.freeze({
@@ -1556,11 +1557,12 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
   const checkpoints = [];
   // Stale pins: the governance check's CLOUD_WORKFLOW_OUTDATED rows (the sweep, its gate and the test
   // shards copies). The repository's cloud sweep runs the Toolkit commit its copies are pinned to, so a
-  // fix released since reaches it only after a rules refresh re-pins them. Local reads only.
+  // fix released since reaches it only after a rules refresh re-pins them. Local reads only: git on the
+  // Toolkit checkout and the repository (about ten short processes), no gh or network call.
   try {
-    const check = deps.cloudWorkflowFindings || (target => require('./toolkit-governance-conformance.cjs').cloudWorkflowFindings(target, path.join(__dirname, '..', '..'), registryOptions));
-    const stale = check(state).filter(entry => entry.id === 'CLOUD_WORKFLOW_OUTDATED' && entry.file).map(entry => entry.file);
-    if (stale.length) lines.push(staleWorkflowLine(stale, state.root));
+    const toolkitRoot = deps.toolkitRoot || path.join(__dirname, '..', '..');
+    const check = deps.cloudWorkflowFindings || (target => require('./toolkit-governance-conformance.cjs').cloudWorkflowFindings(target, toolkitRoot, deps.toolkitRoot ? { ...registryOptions, toolkitRoot } : registryOptions));
+    lines.push(...stalePinLines(check(state).filter(entry => entry.id === 'CLOUD_WORKFLOW_OUTDATED' && entry.file), state.root));
   } catch { /* no stale-pin line */ }
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
@@ -1585,8 +1587,16 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
   return { lines, checkpoints };
 }
 
-function staleWorkflowLine(files, root) {
-  return `⚠️ Stale Toolkit pins: ${files.join(', ')} ${files.length === 1 ? 'is' : 'are'} pinned to an older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since. Controller: refresh them this session with \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root}\` from the Toolkit checkout, then land the changed files through a pull request for the owner to merge.`;
+// The refresh command only when it moves every outdated copy forward (each pin is already in this
+// computer's Toolkit checkout, which is on main). Otherwise a refresh from here would roll a newer pin
+// back, so the line asks for the checkout to be updated first and names no refresh.
+function stalePinLines(rows, root) {
+  if (!rows.length) return [];
+  const files = rows.map(entry => entry.file).join(', ');
+  const verb = rows.length === 1 ? 'is' : 'are';
+  if (rows.every(entry => entry.refreshable === true)) return [`⚠️ Stale Toolkit pins: ${files} ${verb} pinned to an older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since. Controller: this session, update the Toolkit checkout to the latest main, then refresh them with \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root}\` from it and land the changed files through a pull request for the owner to merge.`];
+  const head = rows.find(entry => entry.head)?.head;
+  return [`⚠️ Toolkit checkout behind: ${files} ${verb} pinned to a Toolkit commit that this computer's Toolkit checkout${head ? ` (${head.slice(0, 7)})` : ''} does not contain, or the checkout is not on main, so a rules refresh from it would roll them back. Controller: update the Toolkit checkout to the latest main before any rules refresh here; the next session start then says whether the copies are stale.`];
 }
 
 function decidedLine(state) {

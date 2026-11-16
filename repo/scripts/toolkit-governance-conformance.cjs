@@ -21,6 +21,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const managedBlock = require('./toolkit-managed-block.cjs');
 const governance = require('./toolkit-governance-state.cjs');
@@ -325,6 +326,20 @@ function leftoverBlockFindings(repoRoot, toolkitRoot) {
 // list. A missing or hand-edited copy is drift; one rendered from an older Toolkit commit or an older
 // shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
 // own files and is skipped.
+// Whether a rules refresh from this Toolkit checkout moves a copy pinned to `pin` forward: only when
+// the checkout's HEAD is on origin/main and already contains the pin. A newer pin (another computer
+// refreshed from a later main) or a checkout off main would roll the copy back, or the refresh refuses.
+// Two git reads at most per pin, local only.
+function pinDirection(toolkitRoot, head) {
+  const git = args => { const run = spawnSync('git', args, { cwd: toolkitRoot, encoding: 'utf8', windowsHide: true, shell: false }); return !run.error && run.status === 0; };
+  let onMain;
+  return pin => {
+    if (!/^[0-9a-f]{40}$/.test(String(pin || '')) || !/^[0-9a-f]{40}$/.test(String(head || ''))) return false;
+    if (onMain === undefined) onMain = git(['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main']);
+    return onMain && git(['merge-base', '--is-ancestor', pin, head]);
+  };
+}
+
 function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   // From a plugin copy (no git) the check renders from the managed Toolkit checkout, with its own
   // installer, as the turn-on and the rules refresh do.
@@ -333,18 +348,22 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   if (workflows.isToolkitCheckout(state.root)) return [];
   let result;
   let merged = null;
+  let head = null;
   try {
     // The check compares with this checkout's own commit; only an install needs it to be on main.
     merged = (options.mergedBinding || governance.mergedBinding)(state.root, options);
-    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot), ciShards: merged?.ci_shards?.answer || null });
+    head = options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot);
+    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: head, ciShards: merged?.ci_shards?.answer || null });
   } catch (error) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud sweep workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
   }
   const out = [];
+  const direction = pinDirection(toolkitRoot, head);
   for (const row of result.rows) {
     if (row.state === 'current') continue;
-    // The file rides along for the session-start note (toolkit-governance-gate.cjs staleWorkflowLine).
-    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`), file: row.file }));
+    // The file, the copy's pin and whether a refresh from this checkout moves it forward ride along for
+    // the session-start note (toolkit-governance-gate.cjs stalePinLines).
+    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`), file: row.file, pin: row.toolkit || null, head, refreshable: direction(row.toolkit) }));
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
   // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:

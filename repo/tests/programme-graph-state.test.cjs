@@ -859,14 +859,44 @@ test('self-record S3: a draft PR is recorded as DRAFT and shows NOW',()=>{
   assert.equal(graphRow(f,2),'NOW');
 });
 
-test('self-record S4: a PR from a fork or a bot is never recorded; a finding names it',()=>{
-  for(const options of [{headRepository:'someone/app'},{headRepository:null},{author:'renovate[bot]'},{author:'github-actions[bot]'}]) {
+test('self-record S4: a PR from a fork, a bot or a generated branch is never recorded; a finding names it',()=>{
+  for(const options of [{headRepository:'someone/app'},{headRepository:null},{author:'renovate[bot]'},{author:'github-actions[bot]'},{author:'app/github-actions'},{branch:'toolkit/shard-timings-2026-11-16'}]) {
     const f=unrecorded(); pr(f,20,{body:'Refs #2',branch:'patch-1',...options});
     const report=f.run();
     assert.deepEqual(recorded(f),UNRECORDED,JSON.stringify(options));
     const [finding]=untracked(report);
     assert.match(finding.detail,/open PR #20 claims this task but comes from a fork, a bot or a generated branch/,JSON.stringify(options));
   }
+});
+
+test('self-record S4b: an open merge train is never a claimant, so its member is the one PR recorded; a task that records only a branch is left as it is',()=>{
+  const f=unrecorded(); pr(f,21,{body:'Refs #2',branch:'member'}); pr(f,30,{body:trainBody([21],[2]),branch:'claude/train-1'});
+  const report=f.run();
+  assert.deepEqual(recorded(f),[21,'OPEN','member','ACTIVE']);
+  assert.deepEqual(untracked(report),[]);
+  // A train that GitHub links as closing a task its member does not name still claims nothing there.
+  const t=unrecorded([2,3]); pr(t,21,{body:'Refs #3',branch:'member'}); pr(t,30,{body:trainBody([21],[2]),branch:'claude/train-1'});
+  t.github.issuePrLinks.set(2,{closing:[30]});
+  t.run();
+  assert.deepEqual(recorded(t,2),UNRECORDED);
+  assert.deepEqual(recorded(t,3),[21,'OPEN','member','ACTIVE']);
+  const g=unrecorded(); pr(g,20,{body:'Refs #2',branch:'feature-x'});
+  g.store.mutate('child',2,{writer:holder,parentDoc:g.parent(),change:doc=>({...doc,candidate:{...doc.candidate,branch:'hand-picked'}})});
+  const plan=g.pass().plan();
+  assert.ok(!plan.effects.some(e=>e.record),'no record where the controller named a branch');
+  g.run();
+  assert.deepEqual(recorded(g),[null,null,'hand-picked','PLANNED']);
+});
+
+test('self-record S4c: a task with no state yet is created with the one open PR that claims it',()=>{
+  const f=fixture([2]); f.github.addIssue(3,{parent:1});
+  f.store.mutate('parent',1,{writer:holder,change:doc=>({...doc,outcomes:[...doc.outcomes,{issue:3,label:'Task 3',class:'COMMITTED',parent:1,order:2}]})});
+  pr(f,20,{body:'Refs #3',branch:'fresh',head:NEW});
+  const effect=f.pass().plan().effects.find(e=>e.target.issue===3 && e.kind==='create_state');
+  assert.deepEqual(effect.record,{selected:20,branch:'fresh',head:NEW});
+  f.run();
+  const doc=f.child(3);
+  assert.deepEqual([doc.pr.number,doc.pr.state,doc.candidate.branch,doc.candidate.head,doc.lifecycle],[20,'OPEN','fresh',NEW,'ACTIVE']);
 });
 
 test('self-record S5: two open claimants stay report-only, with a finding naming both',()=>{
@@ -900,9 +930,17 @@ test('self-record S7: a pass with incomplete discovery writes nothing',()=>{
   report=g.run();
   assert.deepEqual(recorded(g),UNRECORDED);
   assert.ok(report.findings.some(e=>e.code==='PR_DISCOVERY_INCOMPLETE' && e.issue===2));
+  // The PR is listed open but reads closed.
+  const c=unrecorded(); pr(c,20,{body:'Refs #2',branch:'feature-x'});
+  const graphql=c.github.graphql.bind(c.github);
+  let closedRead=true;
+  c.github.graphql=(query,variables)=>{ const out=graphql(query,variables); return closedRead && variables?.number===20 && out?.repository?.pullRequest ? {...out,repository:{...out.repository,pullRequest:{...out.repository.pullRequest,state:'CLOSED'}}} : out; };
+  report=c.run();
+  assert.deepEqual(recorded(c),UNRECORDED);
+  assert.ok(report.findings.some(e=>e.code==='PR_DISCOVERY_INCOMPLETE' && e.issue===2));
   // The first complete pass records it.
-  down=false; g.github.issuePrLinks.delete(2);
-  for(const h of [f,g]) { h.run(); assert.deepEqual(recorded(h),[20,'OPEN','feature-x','ACTIVE']); }
+  down=false; closedRead=false; g.github.issuePrLinks.delete(2);
+  for(const h of [f,g,c]) { h.run(); assert.deepEqual(recorded(h),[20,'OPEN','feature-x','ACTIVE']); }
 });
 
 test('self-record S8: a recorded PR that merged moves to the one newer open PR that claims the task through its PATH block; with no claimant it keeps its final state',()=>{
@@ -920,4 +958,44 @@ test('self-record S9: a record written after planning is never overwritten',()=>
   const result=pass.apply(plan);
   assert.deepEqual(recorded(f),[null,null,'controller-pick','PLANNED']);
   assert.ok(result.holds.some(h=>h.target==='#2'));
+  // A task finished after planning gets no record either.
+  const g=unrecorded(); pr(g,20,{body:'Refs #2',branch:'feature-x'});
+  const later=g.pass(); const planned=later.plan();
+  g.store.mutate('child',2,{writer:holder,parentDoc:g.parent(),change:doc=>({...doc,lifecycle:'DONE'})});
+  assert.ok(later.apply(planned).holds.some(h=>h.target==='#2'));
+  assert.deepEqual(recorded(g),[null,null,null,'DONE']);
+});
+
+test('self-record S10: while nothing is bound to the recorded head, a push moves it and raises no PR_HEAD_MOVED; a bound head stays and is reported',()=>{
+  const f=unrecorded(); pr(f,20,{body:'Refs #2',branch:'feature-x',head:SHA});
+  f.run(); assert.equal(f.child(2).candidate.head,SHA);
+  f.github.prs.get(20).head=NEW;
+  const effect=f.pass().plan().effects.find(e=>e.kind==='update_state' && e.target.issue===2);
+  assert.deepEqual(effect.follow,{from:SHA,to:NEW});
+  assert.match(effect.text,new RegExp(`follow the PR head from ${SHA.slice(0,7)} to ${NEW.slice(0,7)}, with no gate return, review or UAT bound to it`));
+  const report=f.run();
+  assert.equal(f.child(2).candidate.head,NEW);
+  assert.ok(!report.findings.some(e=>e.code==='PR_HEAD_MOVED'));
+  // A review bound to the head keeps it, and the move is reported.
+  const g=unrecorded(); pr(g,20,{body:'Refs #2',branch:'feature-x',head:SHA}); g.run();
+  g.store.mutate('child',2,{writer:holder,parentDoc:g.parent(),change:doc=>({...doc,review:{state:'PASSED',verdicts:[{reviewer:'g2',verdict:'PASSED',head:SHA}]}})});
+  g.github.prs.get(20).head=NEW;
+  const bound=g.run();
+  assert.equal(g.child(2).candidate.head,SHA);
+  assert.ok(bound.findings.some(e=>e.code==='PR_HEAD_MOVED' && e.issue===2));
+  // A review bound after planning holds the move.
+  const h=unrecorded(); pr(h,20,{body:'Refs #2',branch:'feature-x',head:SHA}); h.run();
+  h.github.prs.get(20).head=NEW;
+  const pass=h.pass(); const plan=pass.plan();
+  h.store.mutate('child',2,{writer:holder,parentDoc:h.parent(),change:doc=>({...doc,uat:{state:'PENDING',at_head:SHA}})});
+  assert.ok(pass.apply(plan).holds.some(e=>e.target==='#2'));
+  assert.equal(h.child(2).candidate.head,SHA);
+  // A head the controller recorded after planning is kept too.
+  const k=unrecorded(); pr(k,20,{body:'Refs #2',branch:'feature-x',head:SHA}); k.run();
+  k.github.prs.get(20).head=NEW;
+  const again=k.pass(); const planned=again.plan();
+  const PICKED='c'.repeat(40);
+  k.store.mutate('child',2,{writer:holder,parentDoc:k.parent(),change:doc=>({...doc,candidate:{...doc.candidate,head:PICKED}})});
+  assert.ok(again.apply(planned).holds.some(e=>e.target==='#2'));
+  assert.equal(k.child(2).candidate.head,PICKED);
 });
