@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const train = require('../scripts/toolkit-merge-train.cjs');
-const { fixture, built } = require('./support/merge-train-fixture.cjs');
+const { fixture, built, MEMBER_BODY } = require('./support/merge-train-fixture.cjs');
 
 test('an ejected member rejoins a later train only once its branch restores the ejected change', t => {
   const f = fixture(t);
@@ -94,7 +94,7 @@ test('land refuses while the ejected pull request points at any commit the train
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
   const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   const live = path.join(f.root, 'live.json');
-  fs.writeFileSync(live, JSON.stringify({ 70: { state: 'OPEN', head: ejected.head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: early } }));
+  fs.writeFileSync(live, JSON.stringify({ 70: { state: 'OPEN', head: ejected.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: early, body: MEMBER_BODY } }));
   const refused = train.run(['land', '--manifest', out, '--pr', '70', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.ok(refused.problems.some(problem => new RegExp(`ejected #2 is still open at ${early.slice(0, 12)}, which the train carries`).test(problem)), refused.problems.join('\n'));
 });
@@ -120,13 +120,13 @@ test('verify refuses a train that drops its bump, stacked or not, and land refus
   assert.ok(stackedCheck.problems.some(problem => /the train has no bump commit: build it on main, or run catchup on a stacked train/.test(problem)), stackedCheck.problems.join('\n'));
   assert.throws(() => train.checkManifest({ members: [f.member(4, '4'.repeat(40))], stacked: 'yes' }), /"stacked" must be true or false/);
   const live = path.join(f.root, 'live.json');
-  fs.writeFileSync(live, JSON.stringify({ 80: { state: 'OPEN', head: stacked.head }, 3: { state: 'OPEN', head: three } }));
+  fs.writeFileSync(live, JSON.stringify({ 80: { state: 'OPEN', head: stacked.head, body: MEMBER_BODY }, 3: { state: 'OPEN', head: three, body: MEMBER_BODY } }));
   const landing = train.run(['land', '--manifest', stackedOut, '--pr', '80', '--head', stacked.head, '--main', result.head, '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, false, 'a stacked train never lands, even against the train it stacks on');
   assert.ok(landing.problems.some(problem => /the train is stacked .* catch it up on main first/.test(problem)), landing.problems.join('\n'));
   const flagged = path.join(f.root, 'flagged.json');
   fs.writeFileSync(flagged, JSON.stringify({ ...JSON.parse(fs.readFileSync(out, 'utf8')), stacked: true }));
-  fs.writeFileSync(live, JSON.stringify({ 81: { state: 'OPEN', head: noBump }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } }));
+  fs.writeFileSync(live, JSON.stringify({ 81: { state: 'OPEN', head: noBump, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
   const dodged = train.run(['land', '--manifest', flagged, '--pr', '81', '--head', noBump, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(dodged.ok, false, 'marking a train on main stacked does not dodge its bump at land');
   assert.ok(dodged.problems.some(problem => /the train is stacked .* catch it up on main first/.test(problem)), dodged.problems.join('\n'));

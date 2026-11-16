@@ -9,7 +9,8 @@ const bank = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
 const questionBank = require(path.join(scripts, 'toolkit-question-bank.cjs'));
 
 const REFERENCE = 'ABCD-EFGH-JKMN-PQRS';
-const SCRIPT = path.join(scripts, 'toolkit-governance.cjs');
+// The script the ticket names: the managed checkout's when this computer records one, else this copy's.
+const SCRIPT = require(path.join(scripts, 'toolkit-user-state.cjs')).managedScript('toolkit-governance.cjs');
 
 function shownFixture(t, environment = {}) {
   const ctx = scratch(t);
@@ -31,7 +32,13 @@ test('the owner\'s next own message after a bank gets one ticket, bound to that 
   const { ctx, repo, sessionId, prompts } = shownFixture(t);
   const reply = prompts.decide({ cwd: repo, prompt: 'use all the recommended ones', sessionId });
   assert.equal(reply.action, 'pass');
-  assert.match(reply.context, /first since you showed them governance bank ABCD-EFGH-JKMN-PQRS/);
+  assert.match(reply.context, /first since governance bank ABCD-EFGH-JKMN-PQRS was shown or Toolkit asked them to reply again/);
+  // Toolkit checks the reply, so the agent never asks again in its own words or shows the bank again.
+  // Only a reply whose rows and choices are plain is put in form: a bare yes is sent as typed, never
+  // turned into all recommended.
+  assert.match(reply.context, /only where its rows and choices are plain \(all recommended, or changes such as 1\.2=B in any words\) put it in that form\. Send anything else exactly as typed \(a bare yes or ok, an unknown row, two choices for one row, explain 1\.4, anything unclear\)/);
+  assert.match(reply.context, /Never show the bank again yourself/);
+  assert.doesNotMatch(reply.context, /run `setup` again|show the bank before|ask one short question/);
   assert.ok(reply.context.includes(`node "${SCRIPT}" setup --answers "${REFERENCE}: ANSWER" --ticket `));
   const ticket = ticketIn(reply.context);
   assert.ok(ticket);
@@ -41,8 +48,15 @@ test('the owner\'s next own message after a bank gets one ticket, bound to that 
     `${command}; echo done`,
     `node "${SCRIPT}" setup --answers "${REFERENCE}: all recommended" --ticket ${'f'.repeat(32)}`,
     `node "${SCRIPT}" setup --answers "$X" --ticket ${ticket}`,
+    // PowerShell reads curly quotes as quotes, so this would run calc.exe as its own statement.
+    `& node "${SCRIPT}" setup --answers "${REFERENCE}: x\u201d ; calc.exe ; echo \u201dy" --ticket ${ticket}`,
+    `& node "${SCRIPT}" setup --answers "${REFERENCE}: x\u2019 all recommended" --ticket ${ticket}`,
     `node "/elsewhere/toolkit-governance.cjs" setup --answers "${REFERENCE}: all recommended" --ticket ${ticket}`,
   ]) assert.ok(tools(ctx).decide(bash(sessionId, forged))?.deny, forged);
+  // The refusal says what makes the reply exact, so the agent sends it again rather than telling
+  // the user it cannot be sent.
+  assert.match(tools(ctx).decide(bash(sessionId, `node "${SCRIPT}" setup --answers "${REFERENCE}: x\u2019 all recommended" --ticket ${ticket}`)).deny,
+    /exact command .* no curly quote, .* run the same command again without it/);
   assert.ok(tools(ctx).decide(bash('another-session', command))?.deny, 'another session cannot use it');
   const next = prompts.decide({ cwd: repo, prompt: 'and also fix the readme', sessionId });
   assert.equal(ticketIn(next.context), undefined, 'only the first reply after the bank gets a ticket');
@@ -88,14 +102,16 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   // A repository with no required checks yet: the status row says protection waits, and the step.
   const fresh = adoption => questionBank.renderCompactQuestionTable(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' },
     adoption: { repository: 'owner/app', store: { repository: 'owner/TRANSPORT-app', create: true }, found_store: null, store_name: 'TRANSPORT-app', store_choice: false, parent: { issue: null, create: true }, visibility: 'private', unknown: [], ...adoption } }), true).join('\n');
-  assert.match(fresh({ checks: [] }), /Required checks: none yet\. None enforced on the default branch yet, so default-branch protection waits: once a pull request adds some to required_checks, run `node ".*toolkit-governance\.cjs" migrate` in your own terminal to add it\./);
-  assert.match(fresh({ checks: ['validate'] }), /Required checks: validate\. Taken from what the default branch already enforces\./);
+  // The migrate step is in the turn-on result (turnOnSummary), not the bank.
+  assert.match(fresh({ checks: [] }), /\| 1\.8 \| Required checks \| None yet \| Nothing to answer: Default-branch protection waits for them \| - \|/);
+  assert.match(fresh({ checks: ['validate'] }), /\| 1\.8 \| Required checks \| validate \| Nothing to answer: Taken from what the default branch already enforces \| - \|/);
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);
-  assert.match(table, /\| 1\.4 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
+  assert.match(table, /\| 1\.6 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
+  assert.doesNotMatch(table, /\| 1\.4 \||\| 1\.5 \|/, 'rows that do not apply leave their numbers free');
   assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.4=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.6=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
   assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.2=B`, undecided).taskAutoMerge, 'on', 'on together with turning governance on');
   assert.throws(() => bank.parseBankAnswer(`${reference}: 1.1=A, 1.2=B`, undecided), /only while governance is on/);
   const outdated = bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', missing: 2, stale: 4 } });

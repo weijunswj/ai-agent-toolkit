@@ -134,6 +134,37 @@ test('a cloud session started above its repositories gets the governed rules onc
   for (const folder of [governed, store, plain, off]) writesNothingIn(folder);
 });
 
+// Claude Code keeps a session-start text only up to 10,000 characters; over that it shows a
+// 2,000-character preview and the governed rules would be lost. At the scan limit of 16 ENABLED
+// repositories with long names the full lines do not fit, so the last ones shrink.
+test('a cloud session at the scan limit stays within the host limit and keeps the whole governed rules and every bound repository', (t) => {
+  const ctx = scratch(t);
+  const environment = { CLAUDE_CODE_REMOTE: 'true' };
+  const seed = require('./support/governance-observations.cjs').seedMerged;
+  const rules = fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
+  const start = () => claudeHook.respond('SessionStart', { cwd: ctx.root, session_id: 's1', source: 'startup' }, { registryOptions: ctx.options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext;
+  const names = [];
+  for (let index = 1; index <= 16; index += 1) {
+    const name = `example-owner/${'long-service-name-'.repeat(5)}${String(index).padStart(2, '0')}`;
+    names.push(name);
+    seed(gitRepo(ctx, `repo-${String(index).padStart(2, '0')}`, { remote: `https://github.com/${name}.git` }), index === 16 ? 'disable' : 'enable', { registryOptions: ctx.options });
+    if (index === 2) {
+      const few = start();
+      assert.doesNotMatch(few, /Shortened/, 'a few repositories keep their full lines');
+      assert.match(few, /-01: Toolkit governance: ENABLED for this repository\./);
+    }
+  }
+  const text = start();
+  assert.ok(Buffer.byteLength(text, 'utf8') <= gate.SESSION_TEXT_LIMIT, `${Buffer.byteLength(text, 'utf8')} bytes`);
+  assert.ok(text.startsWith(claudeHook.CLOUD_LINE));
+  assert.equal(text.split(rules).length, 2, 'the whole governed rules text, once');
+  assert.ok(text.includes(`bind only ${names.slice(0, 15).join(', ')}.`), 'every ENABLED repository is named');
+  assert.match(text, /-01: Toolkit governance: ENABLED for this repository\./, 'the first repositories keep their full lines');
+  assert.match(text, /-15: ENABLED\n/, 'the last ones shrink to their state');
+  assert.match(text, /-16: DISABLED\n\(Shortened to keep this text within the host's session-start limit\. Run toolkit-governance\.cjs status/);
+  for (const name of names) assert.ok(text.includes(`- ${name}: `), `${name} still has a state line`);
+});
+
 test('a cloud session with no repository at or under its start folder gets no governance text', (t) => {
   const ctx = scratch(t);
   fs.mkdirSync(path.join(ctx.root, 'empty'));

@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const train = require('../../scripts/toolkit-merge-train.cjs');
-const { built } = require('./merge-train-fixture.cjs');
+const { built, MEMBER_BODY } = require('./merge-train-fixture.cjs');
 
 const UNEQUAL = /differs from a fresh build of its members on main/;
 
@@ -176,7 +176,7 @@ const MATRIX = [
       const checked = verify(f, out);
       assert.equal(checked.ok, true, checked.problems.join('\n'));
       const live = path.join(f.root, 'live.json');
-      fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head }, 2: { state: 'CLOSED', head: x2 }, 3: { state: 'OPEN', head: z } }));
+      fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head, body: MEMBER_BODY }, 2: { state: 'CLOSED', head: x2, body: MEMBER_BODY }, 3: { state: 'OPEN', head: z, body: MEMBER_BODY } }));
       const landing = run(f, 'land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live);
       assert.equal(landing.ok, true, landing.problems.join('\n'));
       landOnMain(f, caught.head);
@@ -238,7 +238,7 @@ const MATRIX = [
       const ejected = run(f, 'eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main');
       assert.equal(ejected.ok, true, JSON.stringify(ejected));
       const live = path.join(f.root, 'live.json');
-      fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: ejected.head }, 2: { state: 'CLOSED', head: x2 }, 3: { state: 'OPEN', head: z } }));
+      fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: ejected.head, body: MEMBER_BODY }, 2: { state: 'CLOSED', head: x2, body: MEMBER_BODY }, 3: { state: 'OPEN', head: z, body: MEMBER_BODY } }));
       const land = () => run(f, 'land', '--manifest', out, '--pr', '9', '--head', ejected.head, '--main', 'main', '--live', live);
       assert.equal(land().ok, true, 'the train is sound for the main land checked');
       landOnMain(f, commitOn(f, 'pr-4', x1, { 'w.txt': 'w\n' }));

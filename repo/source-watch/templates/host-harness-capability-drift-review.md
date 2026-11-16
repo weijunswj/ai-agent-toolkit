@@ -21,4 +21,5 @@ Host/version reviewed:
 - Do not auto-delete or auto-modify toolkit components from the source-watch PR.
 - If no meaningful drift is found, update only the advisory review/status record in a separate PR.
 - If meaningful drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.
+- Route each finding to the smallest open task that owns that area now. Cite closed or retired tasks only as history, never as the owner.
 - Use `Needs benchmark/eval before decision` when the host feature may be equivalent but behavior or token impact is not yet proven.
