@@ -1127,6 +1127,42 @@ function validateBinding(binding) {
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
 const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
+// Retired binding keys: nothing reads them. The reader above still accepts them, so a binding that
+// carries one stays valid, but every binding writer (a governance proposal, a switch or shards pull
+// request, the cleanup) leaves them out, so a carried key goes with the next change.
+const RETIRED_BINDING_KEYS = Object.freeze(['schedule_folder']);
+// The binding without its retired keys; one that has none comes back as the same object.
+function withoutRetiredKeys(binding) {
+  if (!isObject(binding) || !RETIRED_BINDING_KEYS.some(key => Object.hasOwn(binding, key))) return binding;
+  return Object.fromEntries(Object.entries(binding).filter(([key]) => !RETIRED_BINDING_KEYS.includes(key)));
+}
+// Binding text without its retired keys, in its own layout: each retired top-level member goes with
+// its comma (and its line, when it has one), so the pull request shows only those removed lines. Text
+// that cannot be parsed or has no retired key comes back as it is; a layout this cannot follow is
+// written out whole, so the result always parses to withoutRetiredKeys of the parsed text.
+function withoutRetiredKeysText(text) {
+  const raw = String(text);
+  const bom = raw.startsWith('﻿') ? '﻿' : '';
+  let parsed;
+  try { parsed = JSON.parse(raw.slice(bom.length)); } catch { return raw; }
+  const expected = withoutRetiredKeys(parsed);
+  if (expected === parsed) return raw;
+  const scalar = '(?:"(?:[^"\\\\\\r\\n]|\\\\.)*"|-?\\d[\\d.eE+-]*|true|false|null)';
+  let edited = raw.slice(bom.length);
+  for (const key of RETIRED_BINDING_KEYS.filter(name => Object.hasOwn(parsed, name))) {
+    // A member followed by another goes with its own line and trailing comma; the last member goes
+    // with the comma before it.
+    const before = new RegExp(`(?:\\r?\\n[ \\t]*)?"${key}"\\s*:\\s*${scalar}\\s*,[ \\t]*`, 'g');
+    const after = new RegExp(`,\\s*"${key}"\\s*:\\s*${scalar}`, 'g');
+    const pattern = (edited.match(before) || []).length === 1 ? before : after;
+    if ((edited.match(pattern) || []).length !== 1) { edited = null; break; }
+    edited = edited.replace(pattern, '');
+  }
+  let same = false;
+  try { same = edited !== null && JSON.stringify(JSON.parse(edited)) === JSON.stringify(expected); } catch { same = false; }
+  return same ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
+}
+
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
 // and the checkpoint. A version 1 binding never reads it.
@@ -7452,7 +7488,7 @@ function bindRepository({ transport, originUrl, binding }) {
 
 module.exports = Object.freeze({
   get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
-  SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
+  SCHEMA, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,

@@ -14,6 +14,7 @@ const crypto = require('node:crypto');
 const util = require('node:util');
 const { GovernanceProposals, GitHubProposalTransport, BANK_ONLY } = require('./toolkit-governance-proposal.cjs');
 const governance = require('./toolkit-governance-state.cjs');
+const { withoutRetiredKeys, withoutRetiredKeysText } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const discovery = require('./toolkit-governance-discovery.cjs');
@@ -414,10 +415,11 @@ class ToolkitGovernanceCli {
     let parsed;
     try { parsed = JSON.parse(String(entry?.text).replace(/^\uFEFF/, '')); } catch { parsed = null; }
     if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so the switch cannot be set yet. Nothing was written.');
-    const proposal = { ...parsed, task_prs: { ...(parsed.task_prs || {}), ...changes } };
+    const kept = withoutRetired(entry.text, parsed);
+    const proposal = { ...kept.binding, task_prs: { ...(kept.binding.task_prs || {}), ...changes } };
     if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
     try {
-      return this.#switchTransport.publishSwitch(proposal.repository, entry.text, switchText(entry.text, parsed, changes), changes);
+      return this.#switchTransport.publishSwitch(proposal.repository, entry.text, switchText(kept.text, kept.binding, changes), changes);
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
         ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
@@ -553,7 +555,8 @@ class ToolkitGovernanceCli {
     try { parsed = JSON.parse(String(entry?.text).replace(/^\uFEFF/, '')); } catch { parsed = null; }
     if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so the answer cannot be recorded yet. Nothing was written.');
     const value = { answer, offered_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
-    const switched = Object.keys(changes).length ? { ...parsed, task_prs: { ...(parsed.task_prs || {}), ...changes } } : parsed;
+    const kept = withoutRetired(entry.text, parsed);
+    const switched = Object.keys(changes).length ? { ...kept.binding, task_prs: { ...(kept.binding.task_prs || {}), ...changes } } : kept.binding;
     const proposal = { ...switched, ci_shards: value };
     if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
     const lines = [];
@@ -568,7 +571,7 @@ class ToolkitGovernanceCli {
     }
     let prepared;
     try {
-      const base = Object.keys(changes).length ? switchText(entry.text, parsed, changes) : entry.text;
+      const base = Object.keys(changes).length ? switchText(kept.text, kept.binding, changes) : kept.text;
       prepared = this.#switchTransport.publishCiShards(proposal.repository, entry.text, ciOffer.ciShardsText(base, switched, value), answer, list, changes);
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
@@ -820,6 +823,12 @@ class ToolkitGovernanceCli {
       return 2;
     }
   }
+}
+
+// The merged binding (text and parsed) without its retired keys, in its own layout, so a switch or
+// shards pull request drops a carried key in the same diff and changes nothing else.
+function withoutRetired(mergedText, parsed) {
+  return { text: withoutRetiredKeysText(mergedText), binding: withoutRetiredKeys(parsed) };
 }
 
 // The merged binding text with only the switches changed, so the owner's diff shows only that: each

@@ -69,6 +69,19 @@ test('no prepares the minimal off file; yes refuses missing or foreign adoption'
   for (const binding of [null, {}, { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/foreign', governance: 'disabled' }]) assert.throws(() => f.owner.prepare(f.cwd, yes.run, binding), /ADOPTION_INCOMPLETE/);
   assert.throws(() => f.owner.prepare(f.cwd, '0'.repeat(32)), /RECEIPT_REQUIRED/);
 });
+test('a yes proposal leaves out the retired schedule_folder key, from a v1 or v2 binding, and keeps a binding without it as it is', t => {
+  const f = fixture(t), yes = f.owner.request(f.cwd, 'yes', run);
+  const v2 = prepareAdoption(f);
+  const v1 = { schema: 'toolkit.programme-binding.v1', repository: v2.repository, parent_issue: 1, record_prefix: 'INT-FX-', store: v2.store, required_checks: ['validate'] };
+  for (const binding of [v2, v1]) {
+    const plain = f.owner.prepare(f.cwd, yes.run, binding);
+    const carried = f.owner.prepare(f.cwd, yes.run, { ...binding, schedule_folder: 'TOOLKIT' });
+    assert.equal(Object.hasOwn(carried.binding, 'schedule_folder'), false, binding.schema);
+    assert.deepEqual(carried.binding, plain.binding, `${binding.schema}: nothing else changes`);
+    assert.equal(carried.text, plain.text, `${binding.schema}: the programme file the pull request carries is the same`);
+  }
+  assert.equal(f.owner.prepare(f.cwd, yes.run, v2).binding, v2, 'a v2 binding without the key is used as it is');
+});
 test('publication discovers, writes once and reads back; another chat sees the pending PR', t => {
   let open = [], writes = 0;
   const f = fixture(t, { list: () => open, publish() { writes++; open = [proposal()]; return open[0]; }, read: () => open[0] });
