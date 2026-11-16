@@ -2,12 +2,13 @@
 
 // toolkit store recovery, retries and resume: a failed or raced push never strands the store
 // checkout. The next store step checks the kept commits again and pushes them, a lost race is
-// retried with waits, and a push that landed is never sent twice. Each test is one or more rows of
-// the closure matrix; the checks on kept commits are in toolkit-store-recovery-checks.test.cjs.
+// retried with waits and stops after four tries, and a push that landed is never sent twice. Each
+// test is one or more rows of the closure matrix; the checks on kept commits and the catch-up of
+// save, move and merge-branch are in toolkit-store-recovery-checks.test.cjs.
 // Real Git against a local bare repository.
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { git, commitIn, pushes, world, ahead, settled, keptSave, RAW_ADVICE } = require('./support/toolkit-store-world.cjs');
+const { git, pushes, world, ahead, settled, keptSave, RAW_ADVICE } = require('./support/toolkit-store-world.cjs');
 
 test('R1 R2: a save whose pushes all fail keeps its commit, and the same save run again pushes it', t => {
   const w = world(t);
@@ -63,6 +64,27 @@ test('R4: a store that moves before three pushes is merged each time and lands o
 
 });
 
+test('R4 R1: a store that moves before all four pushes stops after the fourth, keeps the commit, and the next run lands it', t => {
+  const w = world(t);
+  const tip = w.remoteTip();
+  w.hooks.racePushes = [1, 2, 3, 4].map(n => w.raceIn(`archives/s${n}.md`));
+  w.write('archives/mine.md', 'mine\n');
+  const lost = w.act(['save', '--path', 'archives/mine.md', '--message', 'mine']);
+  assert.equal(lost.code, 1, JSON.stringify(lost.result));
+  assert.match(lost.result.stopped, /the push to the store failed 4 times; your commit is kept/);
+  assert.equal(pushes(w.calls).length, 4, 'four attempts, never a fifth');
+  assert.deepEqual(w.waits, [2000, 4000, 8000]);
+  assert.ok(!w.remoteHas('archives/mine.md'), 'nothing of ours landed');
+  assert.ok(w.remoteTip() !== tip && w.remoteHas('archives/s4.md'), 'every race landed');
+  settled(w);
+  w.calls.length = 0; w.waits.length = 0;
+  const next = w.act(['save', '--path', 'archives/mine.md', '--message', 'mine']);
+  assert.equal(next.code, 0, JSON.stringify(next.result));
+  assert.equal(pushes(w.calls).length, 1);
+  assert.ok(w.remoteHas('archives/mine.md') && w.remoteHas('archives/s4.md'));
+  settled(w);
+});
+
 test('R5: a push that timed out but landed is read first and never sent again', t => {
   const w = world(t);
   w.hooks.landButFail = 1;
@@ -102,32 +124,6 @@ test('R5 R1: a last push that landed is not reported as failed, and a dropped ne
   assert.equal(w.act(['save', '--path', 'archives/offline.md', '--message', 'offline']).code, 0, 'back online, the same save lands');
   assert.ok(w.remoteHas('archives/offline.md'));
   settled(w);
-});
-
-test('R11 R14: save, move and merge-branch catch up with a moved store and push kept commits with their own', t => {
-  const w = world(t);
-  for (const command of ['save', 'move', 'merge-branch']) {
-    w.calls.length = 0;
-    keptSave(w, `archives/kept/${command}.md`);
-    w.raceIn(`archives/moved-${command}.md`)();
-    git(w.dir, 'fetch', '--quiet', 'origin');
-    const argv = {
-      save: () => { w.write('archives/step.md', 'step\n'); return ['save', '--path', 'archives/step.md', '--message', 'step']; },
-      move: () => ['move', '--from', 'archives/old/kept.md', '--to', 'archives/older/kept.md', '--message', 'step'],
-      'merge-branch': () => {
-        git(w.other, 'checkout', '--quiet', '-B', 'side', 'origin/main');
-        commitIn(w.other, 'archives/side.md', 'side\n', 'side');
-        git(w.other, 'push', '--quiet', 'origin', 'side');
-        git(w.other, 'checkout', '--quiet', 'main');
-        return ['merge-branch', '--branch', 'side', '--message', 'step'];
-      },
-    }[command]();
-    const run = w.act(argv);
-    assert.equal(run.code, 0, `${command}: ${JSON.stringify(run.result)}`);
-    assert.equal(run.result.resumed, 1, command);
-    assert.ok(w.remoteHas(`archives/kept/${command}.md`) && w.remoteHas(`archives/moved-${command}.md`), command);
-    settled(w);
-  }
 });
 
 test('R15: status shows the kept commits and sync never pushes or merges them', t => {

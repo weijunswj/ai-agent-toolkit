@@ -2,15 +2,16 @@
 
 // toolkit store recovery, checks: nothing unscanned leaves (kept commits, hand commits, merged blobs
 // and commit messages included), a conflicting race merge keeps both versions and never leaves a
-// half-done merge, and no refusal points at a raw push. Each test is one or more rows of the closure
-// matrix; retries and resume are in toolkit-store-recovery.test.cjs. Real Git against a local bare
+// half-done merge, save, move and merge-branch catch up with a moved store, and no refusal points at
+// a raw push. Each test is one or more rows of the closure matrix; retries and resume are in
+// toolkit-store-recovery.test.cjs. Real Git against a local bare
 // repository.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
-const { PLANTED, RAW_ADVICE, git, commitIn, pushes, world, merging, settled, backToStore } = require('./support/toolkit-store-world.cjs');
+const { PLANTED, RAW_ADVICE, git, commitIn, pushes, world, merging, settled, keptSave, backToStore } = require('./support/toolkit-store-world.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const spawnGit = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).status;
@@ -119,6 +120,32 @@ test('R10: a race merge that auto-merges a secret into a new blob is refused bef
   assert.notEqual(w.remoteTip(), git(w.dir, 'rev-parse', 'HEAD'));
   assert.ok(w.remoteTip() !== tip && !w.remoteFile('archives/both.md').startsWith('ours'), 'our merged blob never reached the store');
   settled(w);
+});
+
+test('R11 R14: save, move and merge-branch catch up with a moved store and push kept commits with their own', t => {
+  const w = world(t);
+  for (const command of ['save', 'move', 'merge-branch']) {
+    w.calls.length = 0;
+    keptSave(w, `archives/kept/${command}.md`);
+    w.raceIn(`archives/moved-${command}.md`)();
+    git(w.dir, 'fetch', '--quiet', 'origin');
+    const argv = {
+      save: () => { w.write('archives/step.md', 'step\n'); return ['save', '--path', 'archives/step.md', '--message', 'step']; },
+      move: () => ['move', '--from', 'archives/old/kept.md', '--to', 'archives/older/kept.md', '--message', 'step'],
+      'merge-branch': () => {
+        git(w.other, 'checkout', '--quiet', '-B', 'side', 'origin/main');
+        commitIn(w.other, 'archives/side.md', 'side\n', 'side');
+        git(w.other, 'push', '--quiet', 'origin', 'side');
+        git(w.other, 'checkout', '--quiet', 'main');
+        return ['merge-branch', '--branch', 'side', '--message', 'step'];
+      },
+    }[command]();
+    const run = w.act(argv);
+    assert.equal(run.code, 0, `${command}: ${JSON.stringify(run.result)}`);
+    assert.equal(run.result.resumed, 1, command);
+    assert.ok(w.remoteHas(`archives/kept/${command}.md`) && w.remoteHas(`archives/moved-${command}.md`), command);
+    settled(w);
+  }
 });
 
 test('R12: a half-done merge is refused by every step with a store Next, and sync cancels it keeping the commits', t => {
