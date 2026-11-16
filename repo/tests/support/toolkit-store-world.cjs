@@ -4,6 +4,7 @@
 // of it and a second clone that plays another agent. Only the GitHub read, the binding read, the
 // reported remote address and the wait between push attempts are faked; a test can race the store
 // before a push, refuse a push, or let a push land and still report it failed.
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -114,4 +115,37 @@ function world(t, { branch = 'main' } = {}) {
   return { base, home, tmp, remote, dir, other, calls, reported, hooks, waits, github, deps, remoteHas, remoteFile, remoteTip, act, write, raceIn, branch };
 }
 
-module.exports = { ORIGIN, PLANTED, git, commitIn, pushes, world };
+// ---- recovery helpers ----------------------------------------------------------------------------
+
+const PLAIN_PUSH = ['push', '--quiet', 'origin', 'refs/heads/main:refs/heads/main'];
+// No Next line or store doc line names a raw push, a reset or a hand merge.
+const RAW_ADVICE = /git push|\breset\b|push them yourself|resolve the merge|by hand/i;
+
+const merging = w => fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD'));
+const ahead = w => Number(git(w.dir, 'rev-list', '--count', 'origin/main..HEAD'));
+
+// After every recovery row: only the plain push of the bound branch, no half-done merge, nothing
+// left staged.
+function settled(w) {
+  for (const args of pushes(w.calls)) assert.deepEqual(args, PLAIN_PUSH);
+  assert.ok(!merging(w), 'no half-done merge is left');
+  assert.equal(git(w.dir, 'diff', '--cached', '--name-only'), '', 'nothing is left staged');
+}
+
+// A save whose push fails every time, leaving its commit kept in the checkout.
+function keptSave(w, file = 'archives/kept/report.md', text = 'report\n') {
+  w.write(file, text);
+  w.hooks.refusePushes = 4;
+  const run = w.act(['save', '--path', file, '--message', `save ${file}`]);
+  assert.equal(run.code, 1, JSON.stringify(run.result));
+  return run;
+}
+
+// Drops the checkout's local commits and staged changes between table cases of one world (test
+// set-up only; the store command itself never resets a branch).
+function backToStore(w) {
+  git(w.dir, 'reset', '--quiet', '--hard', 'origin/main');
+  w.calls.length = 0; w.waits.length = 0;
+}
+
+module.exports = { ORIGIN, PLANTED, RAW_ADVICE, git, commitIn, pushes, world, merging, ahead, settled, keptSave, backToStore };
