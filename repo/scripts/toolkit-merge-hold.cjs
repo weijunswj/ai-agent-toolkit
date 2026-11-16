@@ -1302,7 +1302,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   // owner started (gate rules, Task auto-merge), so no origin check applies.
   const cloud = Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true';
   let forcedOff = false;
-  if (cloud) { try { forcedOff = new projectsCloud.ProjectsSwitch({ directory: governance.userStateDirectory(registryOptions), now }).forcedOff(sessionId); } catch { forcedOff = true; } }
+  if (cloud) { try { forcedOff = !['on', 'none'].includes(projectsCloud.transcriptSetting({ transcriptPath: input && input.transcript_path, sessionId })); } catch { forcedOff = true; } }
   const checks = {
     repositoryValid: Boolean(repository && root),
     knownHost: governance.normaliseHost(host) !== null,
