@@ -493,12 +493,12 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // Setup reads the guidebook first, refreshing it when missing or not current.
   assert.match(text, /check guidebook VERSION against a fresh Toolkit main copy using the guidebook reference/);
   assert.match(text, /guidebook VERSION, check-in time, nudge state, latest cloud sweep result when ENABLED, recurring-task home and next work item/);
-  // Genuine lag is measured against the check-in session baseline, with an explicit today fallback.
-  assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when this check-in's own session started/);
-  assert.match(text, /main today only when the report explicitly says "session start unavailable; comparing with main today"/);
+  // Genuine lag is measured against main when the plugin copy was synced, with an explicit today fallback.
+  assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when that copy was synced/);
+  assert.match(text, /main today only when the report explicitly says "sync time unavailable; comparing with main today"/);
   assert.match(text, /No agent can update it: once per selected baseline version, post one plugin card in the project chat with the check-in's steps/);
   assert.match(text, /Keep a genuine gap pending until a check-in verifies current, pinned or ahead/);
-  assert.match(text, /A verified `\*\*Plugin:\*\* home thread copy pinned at <date>` means its copy was current or newer at session start; post no plugin card or owner update steps/);
+  assert.match(text, /A verified `\*\*Plugin:\*\* pinned copy synced at <time>` means its copy was current or newer when it was synced; post no plugin card or owner update steps/);
   assert.match(text, /Retire an obsolete pending card, including a legacy card caused by comparing a pinned copy with main today, without claiming the account was updated/);
   assert.match(text, /Missing copy, missing history or other unverified evidence never clears a card/);
   assert.match(text, /A hook-change advisory is one plain note only, with no prefix, card or automatic thread rotation/);
