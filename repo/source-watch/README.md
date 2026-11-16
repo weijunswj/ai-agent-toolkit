@@ -28,7 +28,7 @@ Required evidence sources:
 
 Antigravity receives a portable skills copy only, so the review covers it only where that copy depends on host behaviour. Add another host to the review once Toolkit qualifies it as supported.
 
-The reviewed-through cursors in `review-state.json` keep the tracker that was current when each review happened. That is history, not ownership: reports label it as the tracker at last review, and triage finds the current owner before acting.
+The reviewed-through cursors in `review-state.json` keep the tracker that was current when each review happened. That is history, not ownership: reports label it as the tracker at last review, and triage finds the current owner before acting. A new or advanced cursor names the open task that owns the follow-up now, so cursors do not keep pointing at a task that has closed.
 
 Allowed classifications are `Keep`, `Shrink`, `Move to hook`, `Move to host-native feature`, `Delete`, and `Needs benchmark/eval before decision`.
 

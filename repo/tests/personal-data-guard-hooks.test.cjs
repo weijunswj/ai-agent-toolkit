@@ -415,6 +415,26 @@ test('installer in a Toolkit checkout: a leftover copy at .github/scripts shadow
   assert.equal(repo.installer(['--check']).status, 0);
 });
 
+test('installer in a Toolkit checkout: a leftover plain-text check copy at .github/scripts shadows the in-repo check, so it is drift and a warning', (t) => {
+  const repo = toolkitRepo(t);
+  assert.equal(repo.installer([]).status, 0);
+  // A stub that passes everything, as a hand copy left behind could.
+  repo.write('.github/scripts/plain-text-check.cjs', '#!/usr/bin/env node\nprocess.exit(0);\n');
+  const result = repo.installer([]);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /Warning: \.github\/scripts\/plain-text-check\.cjs is in this Toolkit checkout, so the pre-push hook runs it instead of the in-repo plain-text check; delete it\./);
+  assert.doesNotMatch(result.all, /personal-data-guard\.cjs is in this Toolkit checkout/);
+  let check = repo.installer(['--check']);
+  assert.equal(check.status, 1, check.all);
+  assert.match(check.all, /Drift: \.github\/scripts\/plain-text-check\.cjs is in this Toolkit checkout/);
+  assert.equal(repo.installer(['--uninstall']).status, 0);
+  check = repo.installer(['--check']);
+  assert.equal(check.status, 1, 'the copy is drift with no hooks installed too');
+  fs.rmSync(path.join(repo.root, '.github', 'scripts'), { recursive: true });
+  check = repo.installer(['--check']);
+  assert.equal(check.status, 0, check.all);
+});
+
 test('installer: the guard source alone does not make a repository the Toolkit, so it gets the copy and workflow', (t) => {
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n', [IN_REPO_GUARD]: fs.readFileSync(GUARD_SOURCE, 'utf8') });

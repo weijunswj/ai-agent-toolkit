@@ -166,7 +166,7 @@ test('--files checks only the named in-scope files and judges no staleness', (t)
 test('the starting baseline is written once, then only shrinks', (t) => {
   const root = tempRepo(t, { 'docs/a.md': `${CODE} and ${CODE}.\n` });
   const config = settings(root, banned());
-  assert.deepEqual(check.initBaseline(root, config), { entries: 1 });
+  assert.deepEqual(check.initBaseline(root, config), { entries: 1, skipped: 0 });
   assert.throws(() => check.initBaseline(root, config), /already exists/);
   assert.deepEqual(check.check(root, config).failures, []);
   fs.writeFileSync(path.join(root, 'docs', 'b.md'), `${CODE}\n`);
@@ -280,7 +280,7 @@ for (const row of closureRows) test(`baseline closure: ${row.baseline} / ${row.m
   } finally { fs.writeFileSync = originalWrite; fs.mkdirSync = originalMkdir; }
   assert.equal(status, row.exit, stderr);
   assert.equal(writes > 0, row.writes, 'only the explicitly selected write mode writes');
-  const notice = `NOTE: baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline\n`;
+  const notice = `NOTE: baseline ${config.baseline}: stores matched text (old format); run the check with --migrate-baseline\n`;
   assert.equal(stdout.includes(notice), row.baseline === 'v1' && row.finding !== 'none' && ['report', 'check'].includes(row.mode));
   for (const stream of [stdout, stderr]) {
     assert.equal(stream.includes(link), false);
@@ -311,11 +311,14 @@ test('legacy migration preserves identities and counts, is explicit, and edited 
   assert.deepEqual(fs.readFileSync(file), before);
   const migrated = run([SCRIPT, '--repo', root, '--migrate-baseline'], root);
   assert.equal(migrated.status, 0, migrated.stderr);
+  assert.equal(migrated.stdout, 'Plain-text baseline uses fingerprints (2 entries); allowances unchanged. Migration does not clean git history: revoke any real token that was stored there.\n');
   const saved = fs.readFileSync(file, 'utf8');
   assert.equal(saved.includes(link), false, 'also discard legacy description metadata');
   assert.deepEqual(JSON.parse(saved).allowed, legacy.allowed.map(({ file, rule, text, count }) => ({ file, rule, fingerprint: digest(file, rule, text), count })));
   assert.deepEqual(check.check(root, config).failures, []);
-  assert.equal(run([SCRIPT, '--repo', root, '--migrate-baseline'], root).status, 0);
+  const again = run([SCRIPT, '--repo', root, '--migrate-baseline'], root);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(again.stdout, 'Plain-text baseline already uses fingerprints (2 entries); nothing changed.\n');
   assert.equal(fs.readFileSync(file, 'utf8'), saved, 'an already migrated baseline is unchanged');
   fs.writeFileSync(path.join(root, 'docs/a.md'), `${link}-edited\n`);
   fs.writeFileSync(path.join(root, 'docs/b.md'), `${link}\n`);
@@ -397,14 +400,15 @@ test('installer refresh keeps a legacy baseline byte-for-byte; the installed cop
   for (const flags of [[], ['--check'], []]) {
     const result = run([INSTALLER, '--repo', root, ...flags], root);
     assert.equal(result.status, 0, result.stderr);
-    if (flags.includes('--check')) assert.match(result.stdout, /NOTE: baseline \.github\/plain-text-baseline\.json: stores matched text \(v1\); run the check with --migrate-baseline/);
+    if (!flags.includes('--check')) assert.match(result.stdout, /^Baseline kept: \.github\/plain-text-baseline\.json\.$/m);
+    assert.match(result.stdout, /^NOTE: baseline \.github\/plain-text-baseline\.json: stores matched text \(old format\); run the check with --migrate-baseline$/m);
     assert.deepEqual(fs.readFileSync(file), before);
     for (const stream of [result.stdout, result.stderr]) assert.equal(stream.includes(link), false);
   }
   const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
   const full = run([copy, '--repo', root], root);
   assert.equal(full.status, 0, full.stderr);
-  assert.match(full.stdout, /NOTE: baseline \.github\/plain-text-baseline\.json: stores matched text \(v1\); run the check with --migrate-baseline/);
+  assert.match(full.stdout, /NOTE: baseline \.github\/plain-text-baseline\.json: stores matched text \(old format\); run the check with --migrate-baseline/);
   assert.deepEqual(fs.readFileSync(file), before);
   for (const stream of [full.stdout, full.stderr]) {
     assert.equal(stream.includes(link), false);
@@ -425,6 +429,11 @@ test('installer refresh keeps a legacy baseline byte-for-byte; the installed cop
     assert.equal(broken.status, 2);
     for (const stream of [broken.stdout, broken.stderr]) assert.equal(stream.includes(link), false);
   }
+  // A refresh keeps a baseline it cannot read, says so, and never echoes it.
+  const unreadable = run([INSTALLER, '--repo', root], root);
+  assert.equal(unreadable.status, 0, unreadable.stderr);
+  assert.match(unreadable.stdout, /^NOTE: baseline \.github\/plain-text-baseline\.json: could not be read or is invalid; fix it, or rewrite it with plain-text-check\.cjs --init-baseline$/m);
+  for (const stream of [unreadable.stdout, unreadable.stderr]) assert.equal(stream.includes(link), false);
   for (const result of [migrated, excess]) for (const stream of [result.stdout, result.stderr]) assert.equal(stream.includes(link), false);
 });
 
@@ -465,7 +474,7 @@ for (const state of ['v1 references', 'v1 empty', 'v1 banned term', 'v2', 'malfo
     assert.equal(stderr, '');
     assert.equal(writes, 0);
     assert.deepEqual(snapshot(), before);
-    assert.equal(stdout.includes(`NOTE: baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline\n`), state === 'v1 references');
+    assert.equal(stdout.includes(`NOTE: baseline ${config.baseline}: stores matched text (old format); run the check with --migrate-baseline\n`), state === 'v1 references');
     assert.equal(stdout.includes(`Drift: baseline ${config.baseline}: could not be read or is invalid; fix it, or rewrite it with plain-text-check.cjs --init-baseline\n`), unreadable);
     for (const stream of [stdout, stderr]) {
       assert.equal(stream.includes(link), false);
@@ -552,4 +561,46 @@ test('installer --check reports unreadable settings as drift, never as "No drift
   assert.equal(status, 1);
   assert.match(stdout, /^Drift: settings \.github\/plain-text\.json: could not be read or are invalid; fix them or reinstall$/m);
   assert.doesNotMatch(stdout, /No drift/);
+});
+
+test('findings in file names the baseline cannot store stay findings: install leaves them out and says so', { skip: process.platform === 'win32' && 'Windows file names cannot hold these characters' }, t => {
+  const root = tempRepo(t, { 'a:b.md': `See ${HASH}12.\n`, 'c\\d.md': `See ${HASH}13.\n`, 'e\tf.md': `See ${HASH}14.\n`, 'docs/ok.md': `See ${HASH}15.\n` });
+  const installed = run([INSTALLER, '--repo', root], root);
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.match(installed.stdout, /^Baseline written: \.github\/plain-text-baseline\.json \(1 existing item\(s\) allowed until rewritten\)\. 3 finding\(s\) left out: file names with ":", "\\" or control characters cannot be stored in the baseline; rename the file or fix the text\.$/m);
+  const file = path.join(root, '.github', 'plain-text-baseline.json');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).allowed.map(entry => entry.file), ['docs/ok.md']);
+  const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+  const next = run([copy, '--repo', root], root);
+  assert.equal(next.status, 1, `${next.stdout}${next.stderr}`);
+  assert.match(next.stderr, /^FAIL: a:b\.md:1: number-reference: /m);
+  assert.match(next.stderr, /^FAIL: c\\d\.md:1: number-reference: /m);
+  assert.match(next.stderr, /^FAIL: e\tf\.md:1: number-reference: /m);
+  assert.match(next.stderr, /3 item\(s\) to rewrite/);
+  const pruned = run([copy, '--repo', root, '--prune-baseline'], root);
+  assert.equal(pruned.status, 0, pruned.stderr);
+  assert.equal(pruned.stdout, 'Plain-text baseline pruned: 0 entries removed, 1 kept.\n');
+  fs.rmSync(file);
+  const init = run([copy, '--repo', root, '--init-baseline'], root);
+  assert.equal(init.status, 0, init.stderr);
+  assert.equal(init.stdout, 'Plain-text baseline written: .github/plain-text-baseline.json (1 entry). 3 finding(s) left out: file names with ":", "\\" or control characters cannot be stored in the baseline; rename the file or fix the text.\n');
+  assert.equal(run([copy, '--repo', root], root).status, 1, 'the next run fails on the left-out findings, never with exit 2');
+});
+
+test('--migrate-baseline runs while the check is switched off, and says the check is still off', t => {
+  const marker = 'RESERVED-OFF-MIGRATION-MARKER';
+  const link = `${GITHUB}/pull/3?reserved=${marker}`;
+  const root = tempRepo(t, { 'docs/a.md': `${link}\n${link}\n` });
+  const reason = 'this repository publishes issue numbers on purpose';
+  const config = settings(root, { off_reason: reason });
+  const file = path.join(root, config.baseline);
+  fs.writeFileSync(file, JSON.stringify({ schema: check.LEGACY_BASELINE_SCHEMA, allowed: [{ file: 'docs/a.md', rule: 'github-link', text: link, count: 2 }] }));
+  const migrated = run([SCRIPT, '--repo', root, '--migrate-baseline'], root);
+  assert.equal(migrated.status, 0, migrated.stderr);
+  assert.equal(migrated.stdout, `Plain-text baseline uses fingerprints (1 entry); allowances unchanged. Migration does not clean git history: revoke any real token that was stored there. The check itself is still switched off in this repository: ${reason}\n`);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).allowed, [{ file: 'docs/a.md', rule: 'github-link', fingerprint: digest('docs/a.md', 'github-link', link), count: 2 }]);
+  const off = run([SCRIPT, '--repo', root], root);
+  assert.equal(off.status, 0, off.stderr);
+  assert.equal(off.stdout, `Plain-text check is switched off in this repository: ${reason}\n`);
+  for (const result of [migrated, off]) for (const stream of [result.stdout, result.stderr]) assert.equal(stream.includes(marker), false);
 });

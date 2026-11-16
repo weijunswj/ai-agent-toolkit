@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 const train = require('../scripts/toolkit-merge-train.cjs');
-const { fixture, built } = require('./support/merge-train-fixture.cjs');
+const { fixture, built, MEMBER_BODY } = require('./support/merge-train-fixture.cjs');
 
 test('a clean train boards each member at its reviewed head, bumps once at the highest level and verifies', t => {
   const f = fixture(t);
@@ -184,7 +184,7 @@ test('a train stacked on a running train combines early, takes no bump and canno
   assert.equal(next.stacked, true);
   assert.equal(next.bump, null);
   const live = path.join(f.root, 'live.json');
-  fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: next.head }, 2: { state: 'OPEN', head: two } }));
+  fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: next.head, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
   const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', next.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, false);
   assert.equal(landing.merge, null);
@@ -215,7 +215,7 @@ test('once the running train lands, catchup merges main into the stacked train, 
   const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, JSON.stringify(checked));
   const live = path.join(f.root, 'live.json');
-  fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head }, 2: { state: 'OPEN', head: two } }));
+  fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
   const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, true, JSON.stringify(landing));
   assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /main is already inside the train/);
@@ -276,14 +276,14 @@ test('land checks live heads, main and RISKY owner OKs before it names the one m
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { result, out } = built(f, [f.member(1, one), f.member(2, two, { tier: 'RISKY', owner_ok: 'owner typed merge 2' })]);
   const live = path.join(f.root, 'live.json');
-  const facts = { 50: { state: 'OPEN', head: result.head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } };
+  const facts = { 50: { state: 'OPEN', head: result.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } };
   fs.writeFileSync(live, JSON.stringify(facts));
   const ready = f.cli('land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live);
   assert.equal(ready.status, 0, ready.stdout);
   assert.deepEqual(JSON.parse(ready.stdout).merge, { repository: 'example/repo', pr: 50, head: result.head, method: 'merge commit', route: 'owner',
     route_reasons: ['task auto-merge is off here (no-switch-set)', "RISKY members wait for the owner's merge card: #2"] });
 
-  fs.writeFileSync(live, JSON.stringify({ ...facts, 1: { state: 'OPEN', head: two } }));
+  fs.writeFileSync(live, JSON.stringify({ ...facts, 1: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
   let refused = train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.ok(refused.problems.some(problem => /#1 moved to .* after boarding/.test(problem)), refused.problems.join('\n'));
 
