@@ -61,7 +61,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Work queue:**",
-      "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for NOW tasks nothing is moving, refuses to acknowledge them and lists them first; picking the lane or next step is the controller's judgement.",
+      "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for NOW tasks nothing is moving, and BATCH_NEXT on the parent when no NOW task needs a gate lane while LATER has work (the batch is done or its next task can start); it refuses to acknowledge them and lists them first. Which tasks form the next batch, their sizes and the L half of the tail guard are the controller's judgement.",
       "enforced_by": [
         {
           "kind": "reconciler",
