@@ -22,5 +22,6 @@
     "after_section": "CURRENT",
     "replace_section": "Programme index"
   },
-  "task_prs": { "auto_merge": "after-gates" }
+  "task_prs": { "auto_merge": "after-gates" },
+  "ci_shards": { "answer": "yes", "offered_at": "2026-11-16T00:45:49Z" }
 }
