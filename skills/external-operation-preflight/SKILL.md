@@ -9,12 +9,13 @@ Check one live change on an outside system before the owner approves it. The ski
 
 ## Steps
 
-1. **Pick the interface** in this order: the service's connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower one may win when clearly better for this operation; say why.
+1. **Pick the interface** in this order: the service's connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower one may win when clearly better; say why.
 2. **Read the live state** of the targets and every resource they use from the provider itself. Discovery stays passive: no writes, test sends or side-effect probes unless an approval names the target, allowed effects and cleanup.
 3. **Write the plan** as JSON from [the example](templates/operation-plan.example.json): one environment, the exact targets, each resource's name environment and provider environment, `temporary` (true or false) on everything, bindings, authority entries, `downstream` (trigger `NONE` when nothing is set off), routes tried, and for production a `rollback` plan and `backup_evidence`. Key names only, never a secret value.
 4. **Run** `node <this skill>/scripts/preflight-check.cjs plan.json`. It prints a verdict, typed reasons, the date checked and the plan's SHA-256.
 5. **Ask for approval only on ALLOW or ALLOW_WITH_NOTICE**, showing the plan, verdict, notices and hash. The owner's current-turn approval covers that hash; any change to the plan goes back to step 3.
 6. **After the change,** read the result back from the provider, never from labels or your own log, and do every `required_read_back` item.
+7. **Temporary resources later sessions need:** follow [the recovery identity rules](references/recovery-identity.md); a hold stops the work.
 
 ## What the checker enforces
 
