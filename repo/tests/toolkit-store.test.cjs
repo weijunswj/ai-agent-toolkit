@@ -12,84 +12,7 @@ const { spawnSync } = require('node:child_process');
 const store = require('../scripts/toolkit-store.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const ORIGIN = 'https://github.com/owner/store.git';
-// Built at run time so this file holds no token shape of its own.
-const PLANTED = ['gh', 'p_', 'Zq7Rk2Lm9Xw4Tv8Bn3Hs6Jd1Pf5Yc0Ga2Ue7'].join('');
-
-function git(cwd, ...args) {
-  const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-  if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
-  return result.stdout.trim();
-}
-
-// A bare "GitHub" store with one commit, a checkout of it and a second clone that plays another agent.
-function world(t, { branch = 'main' } = {}) {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tk-store-')));
-  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
-  const home = path.join(base, 'home');
-  const tmp = path.join(base, 'tmp');
-  fs.mkdirSync(home); fs.mkdirSync(tmp);
-  const remote = path.join(base, 'remote.git');
-  git(base, 'init', '--quiet', '--bare', '-b', branch, remote);
-  const clone = name => {
-    const dir = path.join(base, name);
-    git(base, 'clone', '--quiet', remote, dir);
-    git(dir, 'config', 'user.name', 'Test');
-    git(dir, 'config', 'user.email', 'test@example.invalid');
-    return dir;
-  };
-  const seed = clone('seed');
-  git(seed, 'checkout', '--quiet', '-b', branch);
-  fs.mkdirSync(path.join(seed, 'archives', 'old'), { recursive: true });
-  fs.writeFileSync(path.join(seed, 'archives', 'old', 'kept.md'), 'kept\n');
-  fs.writeFileSync(path.join(seed, 'loose.json'), '{}\n');
-  git(seed, 'add', '-A'); git(seed, 'commit', '--quiet', '-m', 'seed'); git(seed, 'push', '--quiet', 'origin', branch);
-  const dir = clone('store');
-  const other = clone('other');
-  const calls = [];
-  const reported = { origin: ORIGIN, push: ORIGIN };
-  const hooks = { beforePush: null };
-  // Real Git, except the reported remote address (a GitHub URL) and an optional race before a push.
-  const run = (cmd, args, options) => {
-    const at = args.indexOf('-C');
-    const rest = args.slice(at + 2);
-    calls.push(rest);
-    if (rest[0] === 'remote' && rest[1] === 'get-url') return { status: 0, stdout: `${rest.includes('--push') ? reported.push : reported.origin}\n`, stderr: '' };
-    if (rest[0] === 'push' && hooks.beforePush) { const once = hooks.beforePush; hooks.beforePush = null; once(); }
-    calls.env = options && options.env;
-    return spawnSync(cmd, args, options);
-  };
-  const github = { full_name: 'Owner/Store', private: true, permissions: { push: true }, default_branch: branch };
-  // GitHub's compare answer, worked out on the bare "GitHub" repository itself, never the checkout.
-  const inRemote = (...args) => spawnSync('git', ['--git-dir', remote, ...args], { encoding: 'utf8' });
-  const compare = (from, to) => {
-    const [a, b] = [from, to].map(ref => inRemote('rev-parse', '--verify', '--quiet', `${ref}^{commit}`).stdout.trim());
-    if (!a || !b) throw new Error('404');
-    if (a === b) return { status: 'identical' };
-    if (inRemote('merge-base', '--is-ancestor', b, a).status === 0) return { status: 'behind' };
-    if (inRemote('merge-base', '--is-ancestor', a, b).status === 0) return { status: 'ahead' };
-    return { status: 'diverged' };
-  };
-  const deps = {
-    run, tmpdir: tmp, cwd: base,
-    environment: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: '1' },
-    readBinding: () => ({ ok: true, store: { kind: 'github', repository: 'Owner/Store', branch, path: 'state/owner/repo/' } }),
-    readGitHub: apiPath => {
-      const compared = /^repos\/Owner\/Store\/compare\/([^.]+)\.\.\.(.+)$/.exec(apiPath);
-      return compared ? compare(decodeURIComponent(compared[1]), decodeURIComponent(compared[2])) : github;
-    },
-  };
-  const remoteHas = file => spawnSync('git', ['--git-dir', remote, 'cat-file', '-e', `${branch}:${file}`]).status === 0;
-  const act = (argv, extra = {}) => {
-    const out = []; const err = [];
-    const code = store.main([...argv, '--store', dir, '--json'], { ...deps, ...extra, stdout: text => out.push(text), stderr: text => err.push(text) });
-    return { code, result: out.length ? JSON.parse(out.join('')) : null, err: err.join('') };
-  };
-  const write = (file, text) => { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), text); };
-  return { base, home, tmp, remote, dir, other, calls, reported, hooks, github, deps, remoteHas, act, write, branch };
-}
-
-const pushes = calls => calls.filter(args => args[0] === 'push');
+const { ORIGIN, PLANTED, git, commitIn, pushes, world } = require('./support/toolkit-store-world.cjs');
 
 test('save commits only the named new files, scans them, pushes the bound branch and reads it back', t => {
   const w = world(t);
@@ -133,7 +56,7 @@ test('a planted secret, an unreadable large file or a path outside the store fol
   assert.equal(w.act(['save', '--path', 'state/owner/repo/doc.md', '--message', 'doc']).code, 0, 'the binding store path is writable');
 });
 
-test('save never stages a deletion and never pushes unscanned local commits', t => {
+test('save never stages a deletion and never pushes a local commit that fails the checks', t => {
   const w = world(t);
   fs.rmSync(path.join(w.dir, 'archives', 'old', 'kept.md'));
   w.write('archives/old/new.md', 'new\n');
@@ -146,7 +69,9 @@ test('save never stages a deletion and never pushes unscanned local commits', t 
   git(w.dir, 'commit', '--quiet', '-am', 'raw commit');
   w.write('archives/after.md', 'after\n');
   const run = w.act(['save', '--path', 'archives/after.md', '--message', 'after']);
-  assert.match(run.result.stopped, /has 1 commit\(s\) the remote lacks, and they were never scanned here/);
+  assert.match(run.result.stopped, /^commit [0-9a-f]{7}: loose\.json is outside the store folders this command writes/);
+  assert.ok(!w.remoteHas('archives/after.md') && !w.remoteHas('archives/old/after.md'));
+  assert.equal(git(w.dir, 'diff', '--cached', '--name-only'), '', 'nothing is staged by the refused run');
 });
 
 test('a store that moved during the push is merged in once with a merge commit, then pushed', t => {
@@ -305,7 +230,11 @@ test('no step ever force-pushes, mirrors, rewrites or pushes a branch but the bo
     if (deleting) assert.deepEqual(args, ['push', '--quiet', `--force-with-lease=refs/heads/done:${git(w.other, 'rev-parse', 'done')}`, 'origin', '--delete', 'refs/heads/done']);
     else assert.deepEqual(args, ['push', '--quiet', 'origin', 'refs/heads/main:refs/heads/main']);
   }
-  assert.ok(!w.calls.some(args => /^(?:rebase|filter-branch|update-ref)$/.test(args[0]) || (args[0] === 'reset' && args.includes('--hard')) || (args[0] === 'commit' && args.includes('--amend'))));
+  assert.ok(!w.calls.some(args => /^(?:rebase|filter-branch|update-ref)$/.test(args[0]) || (args[0] === 'commit' && args.includes('--amend'))));
+  // The only reset is the one that unstages a refused save: index only, no ref, no mode flag.
+  const source = fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8');
+  assert.deepEqual([...source.matchAll(/\[\s*'reset'[^\]]*\]/g)].map(match => match[0]), ["['reset', '--quiet']", "['reset', '--quiet']"]);
+  assert.ok(w.calls.filter(args => args[0] === 'reset').every(args => args.length === 2 && args[1] === '--quiet'));
 });
 
 test('the command line refuses unknown commands, flags and messages, and the flag table is pinned', () => {
@@ -320,7 +249,7 @@ test('the command line refuses unknown commands, flags and messages, and the fla
     'delete-merged-branch': ['--store', '--repo-root', '--branch'],
   });
   const flags = [...fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
+  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--name-only', '--verify', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
     ['--branch', '--from', '--json', '--message', '--path', '--repo-root', '--store', '--to'], 'every caller flag is in the pinned table');
   assert.equal(store.mergedStoreBinding(os.tmpdir()).ok, false);
 });
@@ -328,11 +257,6 @@ test('the command line refuses unknown commands, flags and messages, and the fla
 // ---- G2 round 1 findings: each test below reproduces one finding and holds the fix ---------------
 
 const zlib = require('node:zlib');
-const commitIn = (dir, file, text, message) => {
-  fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
-  fs.writeFileSync(path.join(dir, file), text);
-  git(dir, 'add', '-A'); git(dir, 'commit', '--quiet', '-m', message);
-};
 
 test('a graft in the store checkout cannot make an unmerged branch look merged, and the merged check is GitHub\'s', t => {
   const w = world(t);
