@@ -673,7 +673,7 @@ test('the status block of a block-holding page never lands inside the PATH block
   assert.equal(state.findStateBlock(body, state.NAV_BLOCK_NAME).block.tampered, false, 'the PATH block is whole');
 });
 
-const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null, keepOpen = null, review = null, outcomes = null } = {}) => {
+const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null, keepOpen = null, review = null, outcomes = null, prContexts = [] } = {}) => {
   const f = setup({ clock: true, ...(outcomes ? { outcomes } : {}) });
   f.reconciler().run({ apply: true });
   const parentDoc = f.store.read('parent', 421).doc;
@@ -685,7 +685,7 @@ const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, hol
     if (review) next.review = review;
     return next;
   } });
-  if (openPr) f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806' });
+  if (openPr) f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806', contexts: prContexts });
   if (openPr && openPrUpdated !== null) f.github.prs.get(900).updated_at = new Date(START + openPrUpdated * HOUR).toISOString();
   if (merged) f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806', merged: true, mergedAt: new Date(START).toISOString() });
   if (comment !== null) f.github.addComment(806, { body: 'A note', createdAt: new Date(START + comment * HOUR).toISOString() });
@@ -907,6 +907,7 @@ test('BATCH_NEXT is a work-queue finding on the parent once no NOW task needs a 
 
 for (const [name, options] of [
   ['waits on the owner', { lifecycle: 'WAITING_OWNER' }],
+  ['has its gate waiting on the owner', { gate: { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'g2-806', role: 'G2' } } }],
   ['has an open PR that passed review at its head', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED(SHA_A) }],
   ['has every PR merged', { merged: true, pr: { number: 900, state: 'MERGED' } }],
   ['has been still for a day (the tail guard)', { hours: 25 }],
@@ -918,6 +919,8 @@ for (const [name, options] of [
   ['has a live gate', { gate: { role: 'G1', state: 'ACTIVE', assignment: { id: 'g1-806', role: 'G1' } } }],
   ['has an open PR that moved today', { openPr: true, openPrUpdated: 1 }],
   ['has an open PR whose review passed at an older head', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED('b'.repeat(40)) }],
+  ['has an open PR that passed review at its head but has red required checks', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED(SHA_A),
+    prContexts: [{ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'FAILURE', required: true }] }],
   ['is idle for less than a day (TASK_IDLE, not yet the tail)', { hours: 7 }],
 ]) test(`a NOW task that ${name} still holds the batch`, () => {
   assert.deepEqual(batch(options), []);
@@ -937,15 +940,50 @@ test('BATCH_NEXT waits for a quiet hour, skips optional work and needs a whole-g
   assert.deepEqual(run(false), [], 'an unread open PR could need a lane');
 });
 
-test('BATCH_NEXT resolves by itself once a task takes a lane', () => {
+const THREE = [...BATCH, { issue: 808, class: 'COMMITTED', order: 3 }];
+const batchEntry = f => f.store.read('parent', 421).doc.attention.find(entry => entry.code === 'BATCH_NEXT');
+const touch = (f, number, next) => f.store.mutate('child', number, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => ({ ...doc, next_action: next }) });
+
+test('BATCH_NEXT resolves by itself once a task takes a lane, even with LATER work left', () => {
+  const f = batchRun({ lifecycle: 'WAITING_OWNER', outcomes: THREE });
+  f.reconciler().run({ apply: true });
+  assert.equal(batchEntry(f).state, 'new');
+  f.store.mutate('child', 807, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
+  f.time.now += 2 * HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(batchEntry(f).state, 'resolved', '#808 is still LATER, but #807 now needs a lane');
+});
+
+test('a disposed BATCH_NEXT survives an unrelated task write, before and after the quiet hour', () => {
   const f = batchRun({ lifecycle: 'WAITING_OWNER' });
   f.reconciler().run({ apply: true });
-  const finding = () => f.store.read('parent', 421).doc.attention.find(entry => entry.code === 'BATCH_NEXT');
-  assert.equal(finding().state, 'new');
-  f.store.mutate('child', 807, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
+  f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, { id: batchEntry(f).id, state: 'disposed', reason: 'Owner paused new work today', now: new Date(f.time.now).toISOString() }) });
+  f.time.now += HOUR / 3;
+  touch(f, 806, 'Controller: wait for the owner UAT');
+  f.time.now += HOUR / 6;
+  f.reconciler().run({ apply: true });
+  assert.equal(batchEntry(f).state, 'disposed', 'inside the quiet hour of the write');
   f.time.now += HOUR;
   f.reconciler().run({ apply: true });
-  assert.equal(finding().state, 'resolved');
+  assert.equal(batchEntry(f).state, 'disposed', 'after it');
+});
+
+test('an open BATCH_NEXT keeps its time across an unrelated task write', () => {
+  const f = batchRun({ lifecycle: 'WAITING_OWNER' });
+  f.reconciler().run({ apply: true });
+  const raised = batchEntry(f);
+  assert.equal(raised.state, 'new');
+  f.time.now += HOUR / 3;
+  touch(f, 806, 'Controller: wait for the owner UAT');
+  f.time.now += HOUR / 6;
+  f.reconciler().run({ apply: true });
+  assert.deepEqual([batchEntry(f).state, batchEntry(f).changed_at], ['new', raised.changed_at]);
+});
+
+test('BATCH_NEXT leaves out a LATER task whose issue is closed', () => {
+  const f = batchRun({ lifecycle: 'WAITING_OWNER' });
+  f.github.issues.get(807).state = 'closed';
+  assert.deepEqual(f.reconciler().run().findings.filter(finding => finding.code === 'BATCH_NEXT'), []);
 });
 
 // Blocks that are only shown: an example of a block inside a code fence, a quote, a list item or

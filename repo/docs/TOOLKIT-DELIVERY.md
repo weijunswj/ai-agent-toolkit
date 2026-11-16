@@ -52,7 +52,7 @@ Work moves from Later to Now in batches. Lanes finish the Now batch first, then 
 
 The controller estimates the size at intake and the task's G0 confirms it. The existing `order` field stays the single sort key: the controller sets it so Later reads tier, then size, then age, and renumbers with one `update-parent` at intake and whenever a priority changes. A task pinned `last` still sorts after every other one.
 
-**When a batch is done.** No Now task still needs a gate lane: each one is merged or closed, on a merge train or waiting for a merge OK after its review passed at its head, or waiting only on the user (UAT, a decision, a merge OK).
+**When a batch is done.** No Now task still needs a gate lane: each one is merged or closed, on a merge train or waiting for a merge OK after its review passed at its head with no red required check, or waiting only on the user (UAT, a decision, a merge OK).
 
 **Picking the next batch.** Read all of Later. Take the highest tier that has work and fill the batch with its quickest tasks first (S, then M), adding same-area tasks that fit, then the next tier if room is left. A batch holds at most 6 PRs, one merge train's worth, and at most one L task, so it stays reviewable and lands as one train. The controller picks; the batch's G0 confirms sizes and slices, and related tasks may share one G0 plan. Set the picked tasks' `order` so they lead Later, and record the pick and its reason as one decision record on the parent. Lanes then start the batch's tasks from the top of Later.
 
@@ -64,7 +64,7 @@ The controller estimates the size at intake and the task's G0 confirms it. The e
 - Jumps: a P0 task joins the current batch at once. A small fix joins the lane's next slice. Any other new user ask goes to the top of the next batch unless the user says it is for now.
 - Rechecks of failed PRs come before new builds. A PR that reaches the two-FAIL round cap goes to the user, and then counts as done for the batch. The merge train keeps its own lane and never waits.
 
-**What enforces it.** In a repository with an enabled programme, the reconciler raises the work-queue finding `BATCH_NEXT` on the parent when the graph has a Later task and no Now task needs a gate lane, after one quiet hour. A Now task needs none while it waits on the user, its open PR passed review at its current head, every PR on it has merged or closed, or it has been still for a day (the tail guard). The finding is answered by starting the batch's next task or picking the next batch, or disposed with a reason, never acknowledged, and it clears by itself once a task takes a lane. Size and the L half of the tail guard stay the controller's judgement.
+**What enforces it.** In a repository with an enabled programme, the reconciler raises the work-queue finding `BATCH_NEXT` on the parent when the graph has a Later task and no Now task needs a gate lane, after one quiet hour (only its first raise waits; once open or disposed it stays while its condition holds). A Now task needs none while it waits on the user, its open PR passed review at its current head with no red required check, every PR on it has merged or closed, or it has been still for a day (the tail guard). The finding is answered by starting the batch's next task or picking the next batch, or disposed with a reason, never acknowledged, and it clears by itself once a task takes a lane. Size and the L half of the tail guard stay the controller's judgement.
 
 ## 4. Where the plan and milestones live
 

@@ -5450,12 +5450,12 @@ class Reconciler {
   // Work queue, batch rule (delivery contract section 3): lanes finish the NOW batch before LATER work
   // starts. BATCH_NEXT, on the parent, says a lane is free for LATER work: the graph has an open LATER
   // task and no open NOW task still needs a gate lane. A NOW task needs none when it waits on the owner
-  // (its lifecycle or gate), its open PR passed review at its current head (on a merge train or waiting
-  // for a merge OK), every one of its PRs has merged or closed (its next step is the controller's, and
+  // (its lifecycle or gate), its open PR passed review at its current head and its required checks are not
+  // red (on a merge train or waiting for a merge OK), every one of its PRs has merged or closed (its next step is the controller's, and
   // TASK_MERGED_OPEN asks for it), or, by the tail guard, it has been still for BATCH_TAIL_HOURS. Optional
-  // tasks never raise it: the owner keeps them, the batch rule does not start them. It waits until no
-  // open task's state document has been written for BATCH_NEXT_HOURS (one without a write time is new,
-  // so it waits too). Only a whole-graph pass that read every open PR checks it; the finding clears
+  // tasks never raise it: the owner keeps them, the batch rule does not start them. Its first raise waits
+  // until no open task's state document has been written for BATCH_NEXT_HOURS (one without a write time
+  // is new, so it waits too); once open or disposed it is reported on while the condition holds. Only a whole-graph pass that read every open PR checks it; the finding clears
   // once a NOW task needs a lane again.
   diffBatch(parent, docs, observed, only, findings) {
     if (only || observed.prGraph?.openComplete === false) return;
@@ -5466,8 +5466,9 @@ class Reconciler {
     if (!later.length) return;
     const needsLane = ({ outcome, doc }) => {
       if (doc.lifecycle === 'WAITING_OWNER' || doc.gate?.state === 'WAITING_OWNER') return false;
+      // Red required checks put the task back on its lane: the lane fixes red CI first.
       const passedAtHead = ['OPEN', 'DRAFT'].includes(doc.pr?.state) && isSha(doc.pr.head) && doc.review?.state === 'PASSED'
-        && (doc.review.verdicts || []).some(verdict => verdict.verdict === 'PASSED' && verdict.head === doc.pr.head);
+        && (doc.review.verdicts || []).some(verdict => verdict.verdict === 'PASSED' && verdict.head === doc.pr.head) && doc.pr.checks?.state !== 'RED';
       if (passedAtHead) return false;
       const still = this.stillness(outcome, doc, observed, now);
       if (still?.merged) return false;
@@ -5475,8 +5476,12 @@ class Reconciler {
     };
     const current = rows.filter(row => row.group === 'NOW');
     if (current.some(needsLane)) return;
+    // The quiet hour holds back only the first raise. An open or disposed BATCH_NEXT is reported on while
+    // its condition holds, so a routine task write never resolves it or drops its dispose.
+    const reported = (parent.attention || []).some(entry => entry.code === 'BATCH_NEXT' && entry.issue === parent.parent_issue
+      && (OPEN_FINDING_STATES.includes(entry.state) || entry.state === 'disposed'));
     const written = rows.filter(row => row.doc).map(row => Date.parse(row.doc.volatile?.written_at || ''));
-    if (written.some(time => !Number.isFinite(time) || now - time < BATCH_NEXT_HOURS * HOUR_MS)) return;
+    if (!reported && written.some(time => !Number.isFinite(time) || now - time < BATCH_NEXT_HOURS * HOUR_MS)) return;
     const top = graphOrder(parent, docs, observed.issues).find(outcome => later.some(row => row.outcome === outcome));
     const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
     findings.push({ code: 'BATCH_NEXT', issue: parent.parent_issue,
