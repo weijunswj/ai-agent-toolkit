@@ -1,0 +1,4 @@
+### Fixed
+
+- **Stop-parsing word no longer hides a pull request from the attribution check:** PowerShell's `--%` word, unquoted, is dropped before the attribution, push and credential checks read a command, so `gh --% pr create` with an AI trailer is refused like `gh pr create`, and the Claude Code hook's fallback screen matches it too. A quoted `'--%'` stays an argument that gh refuses.
+- **Backslash quoting no longer hides a push where PowerShell may run it:** bash reads `\"` as an escaped quote and PowerShell as a backslash and a quote, so `echo "a\" ; git push --force ...` hides the push from bash but runs it in PowerShell. The force-push, evidence-store push and credential checks now also read a line with a backslash as PowerShell does, on Claude Code's PowerShell tool and every Codex shell call; Claude Code's Bash tool keeps the bash reading alone.

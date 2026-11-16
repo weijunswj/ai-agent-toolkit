@@ -172,6 +172,48 @@ test('ordinary commits, PRs and other commands pass, even when they mention Clau
   assert.deepEqual(attributionDecision({ tool_input: {} }), {});
 });
 
+// PowerShell's stop-parsing word `--%` hands the rest of the line to gh as it is, so gh still runs
+// `pr create`. Unquoted, it is dropped before the attribution, push and credential checks read the
+// command; quoted, it is an ordinary argument that gh refuses, so the command stays data.
+test('a stop-parsing --% word does not hide gh pr create, edit or merge from the attribution check', (t) => {
+  const dir = messageFiles(t);
+  const continued = '`\n';
+  for (const command of [
+    `gh --% pr create --title x --body "${trailer}"`,
+    `gh --% pr edit 12 --body "${trailer}"`,
+    `gh --% pr merge 12 --squash --body "${trailer}"`,
+    'gh --% pr create --title x --body-file body.md',
+    'gh --% pr edit 12 --body-file=body.md',
+    'gh --% --% pr create --title x --body-file body.md',
+    `gh ${continued}--% pr create --title x --body-file body.md`,
+    `gh.exe --% pr create --title x --body "${trailer}"`,
+    `git --% commit -m x -m "${trailer}"`,
+    `& gh --% pr create --title x --body "${trailer}"`,
+  ]) {
+    assert.equal(attributionRefusal(command, dir), MESSAGE, command);
+    for (const [tool_name, host] of [['Bash', 'claude'], ['PowerShell', 'claude'], ['Bash', 'codex'], ['exec_command', 'codex']]) {
+      const decision = attributionDecision({ tool_name, cwd: dir, tool_input: { command } }, { notes: [], host, check: () => ({}) });
+      assert.equal(decision.hookSpecificOutput?.permissionDecisionReason, MESSAGE, `${host} ${tool_name}: ${command}`);
+    }
+  }
+  for (const command of [
+    'gh --% pr create --title "Claude Code settings" --body "Adds the Claude Code settings question"',
+    'gh --% pr create --title x --body-file sub/body.md',
+    "gh '--%' pr create --title x --body-file body.md",
+    'gh "--%" pr create --title x --body-file body.md',
+    'echo gh --% pr create',
+  ]) {
+    assert.equal(attributionRefusal(command, dir), '', command);
+  }
+  // Every line-break shape in the shared hostile set still leaves the pull request refused.
+  for (const { id, text } of require('./support/hostile-inputs.cjs').variants(`git status\ngh --% pr create --title x --body "${trailer}"`)) {
+    assert.equal(attributionRefusal(text, dir), MESSAGE, id);
+  }
+  // The push and credential check reads the same pull request.
+  assert.deepEqual(outgoingChanges('gh --% pr create --base release --head owner:topic --title x', dir), [{ folder: dir, pullRequest: true, base: 'release', sources: ['topic'] }]);
+  assert.deepEqual(outgoingChanges("gh '--%' pr create --base release", dir), []);
+});
+
 test('trailers accept colon or equals separators with optional spaces', () => {
   for (const separator of [':', '=', ' : ', ' = ', '\t=\t']) {
     for (const trailer of [`Co-Authored-By${separator}Claude <noreply@anthropic.com>`, `Claude-Session${separator}session_123`]) {
@@ -550,6 +592,18 @@ test('fetch repository URLs are reads, while local refspec writes are retained',
     'git fetch --update-head-ok https://example.com/repo.git main', 'git fetch --depth 1 https://example.com/repo.git main:feature']) {
     assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder)[0].preceding, [{ folder, sub: 'other' }], command);
   }
+});
+
+test('two quotings: each reading keeps its own earlier steps, and a nested script read both ways adds each step once', () => {
+  const folder = os.tmpdir();
+  // A merge after the push in both readings never counts as before it.
+  const targets = [];
+  outgoingRefusal('git push uat HEAD; echo "a\\b"; git merge main', folder, { check: (target) => { targets.push(target); return {}; } });
+  assert.deepEqual(targets, [{ folder, remote: 'uat', sources: ['HEAD'] }]);
+  // A commit in a PowerShell script read both ways is one earlier step for the push after it.
+  targets.length = 0;
+  outgoingRefusal('pwsh -Command "git commit -m x\\y"; git push uat HEAD', folder, { check: (target) => { targets.push(target); return {}; } });
+  assert.deepEqual(targets, [{ folder, remote: 'uat', sources: ['HEAD'], preceding: [{ folder, sub: 'commit' }] }]);
 });
 
 test('outgoing changes retain earlier git mutations and leave reads out', () => {
