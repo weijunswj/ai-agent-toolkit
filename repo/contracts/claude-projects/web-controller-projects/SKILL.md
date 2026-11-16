@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-16.4
+Version: 2026-11-16.5
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -97,8 +97,8 @@ When the skill or Toolkit updates, a guidebook refresh reports BLOCK CHANGED, or
 - **Programme attention before gates, finality and settling.** In an ENABLED repo, before launching a gate, an acceptance or finality step, or calling a turn or the programme settled, read the programme's `Attention:` line: through a thread that runs `programme.cjs attention --refresh` where `gh` is signed in, or from the parent's `CURRENT` block. Treat any hold it prints ("The refresh pass held", exit 1) as a hold on that step. Answer every `new` finding that turn: fix, acknowledge (`ack --finding <id> --next <step>`, due within 72h) or dispose (`dispose --finding <id> --reason <why>`), by the parent's holder; with no shell, as one holder order queued in the store for the cloud sweep (`PROGRAMME FINDINGS` in `reference/periodic-runs.md`). The graph is the work queue (`CONTROLLER.md`): act on each Work queue task, never ack it.
 - **A task the user adds to an ENABLED repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule; elsewhere it goes into project memory's queue. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Check coordinator/worker/thread capabilities before asking for owner action. Only approvals, credentials, typed local rc lines or unreachable settings need their hands.
-- **End finished local Remote Control sessions straight away:** once work is done/superseded and its result relayed, end sessions with nothing left to do.
-- **Resolve on relay; the nudge is the backstop.** Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: (a) it has its own Claude session (never your own project-chat post or the reply thread under it, as resolving it hides that message) and is no task's home thread; (b) its output is durably recorded (pushed, merged, filed or handed off) and every PR it lists is merged or closed; (c) its latest result was relayed to the owner in project chat, or the owner replied after it; (d) no owner test, card, question, decision or promised work is still owed; (e) its last report is final, not "waiting on CI". A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done. Idleness alone never closes a work thread. Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved.
+- **End finished local Remote Control sessions straight away** once their result is relayed and nothing is left to do.
+- **Resolve on relay; the nudge is the backstop.** Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: (a) it has its own Claude session (never your own project-chat post or the reply thread under it, as resolving it hides that message) and is no task's home thread; (b) its output is durably recorded (pushed, merged, filed or handed off) and every PR it lists is merged or closed; (c) this turn you read its final message in full (`full_bodies`, no preview or summary) and acted on or recorded every item, and its result is in project chat or the owner replied after it; (d) no owner test, card, question, decision or promised work is still owed; (e) its last report is final, not "waiting on CI". A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done. Idleness alone never closes a work thread. Fresh-session scheduled runs resolve their own run thread after delivery.
 
 ## Pull requests and CI
 - **The coordinator tracks CI itself.** Never ask the owner to watch/paste checks. For every open PR, bots' too, attach repo access here and subscribe to CI, reviews, merges and closes; each needs an owner and next step (`PR UNOWNED`).
@@ -174,7 +174,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 ## Communication
 - The user talks only to the Controller in the project chat and avoids reading threads.
 - Relay every thread result, blocker, question and decision into the project chat, with a link to the thread. Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or one line when nothing is due. Paste drafts the user must send (such as emails) into the chat in full.
-- **Read every thread result in full.** Wake previews can cut the ending. Before relaying or acting, read the thread/message's full body and every named report file.
+- **Read every thread result in full** (`full_bodies: true`) and every named report file before relaying, acting or resolving: wake previews cut endings.
 - Before routing any feedback to a release, vet it under `CONTROLLER.md` task intake and record only rejections and downgrades, one line each with the reason.
 - Verify a thread's "can't be done" claim before relaying it as a user task.
 - When you answer inside a post's reply thread and the answer carries a decision, a question, an action for the owner or a change of plan, also post a one-line pointer to it in top-level project chat. The owner may close that reply thread, which hides your answer. Plain acknowledgements need no pointer.
