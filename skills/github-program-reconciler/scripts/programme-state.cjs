@@ -1642,8 +1642,10 @@ const FAILED_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION
 
 function contextName(context) { return context.name || context.context || ''; }
 
+function isStatusContext(context) { return context.kind === 'StatusContext' || context.__typename === 'StatusContext'; }
+
 function contextResult(context) {
-  if (context.kind === 'StatusContext' || context.__typename === 'StatusContext') {
+  if (isStatusContext(context)) {
     if (context.state === 'SUCCESS') return 'passed';
     if (context.state === 'PENDING' || context.state === 'EXPECTED') return 'pending';
     return FAILED_CONCLUSIONS.has(context.state) ? 'failed' : 'unknown';
@@ -1655,13 +1657,38 @@ function contextResult(context) {
 
 // A check run that was cancelled, for example by a newer run of the same workflow.
 function isCancelled(context) {
-  return context.kind !== 'StatusContext' && context.__typename !== 'StatusContext' && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+  return !isStatusContext(context) && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+}
+
+// The newest of one app's runs of a check: a run still going, else the run that completed last.
+// Null when that order cannot be read: a completed run with no time, or two runs completed last at once.
+function newestRun(runs) {
+  const going = runs.find(run => run.status !== 'COMPLETED');
+  if (going) return going;
+  const times = runs.map(run => Date.parse(run.completed_at));
+  if (times.some(Number.isNaN)) return null;
+  const last = Math.max(...times);
+  const newest = runs.filter((run, at) => times[at] === last);
+  return newest.length === 1 ? newest[0] : null;
+}
+
+// The results that decide one required check. GitHub names a required check by its name and,
+// optionally, the app that must set it, so a check's runs are grouped by app and the newest run of
+// each app decides; its status contexts (one per name) count beside them. When any run's app or
+// completion time is unreadable, every result counts, except a cancelled run beside another result.
+function checkResults(named) {
+  const runs = named.filter(context => !isStatusContext(context));
+  const apps = new Map();
+  for (const run of runs) apps.set(run.app, [...(apps.get(run.app) || []), run]);
+  const newest = runs.every(run => Number.isSafeInteger(run.app)) ? [...apps.values()].map(newestRun) : [null];
+  if (newest.every(Boolean)) return [...newest, ...named.filter(isStatusContext)].map(contextResult);
+  const replaced = named.some(context => !isCancelled(context));
+  return named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
 }
 
 // Required checks at the exact head. Required = GitHub's isRequired flags plus the binding's list.
-// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN. A cancelled
-// result is set aside when the same check has any other result at the head (a newer run replaced
-// it), so that other result decides; a check whose only results were cancelled stays failed.
+// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN, and any failed
+// deciding result makes the check failed (checkResults says which results decide).
 function evaluateChecks({ head, rollupOid, contexts = [], complete = true, configured = [] }) {
   const empty = { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: isSha(head) ? head : null, missing: [], failing: [], reason: null };
   if (!isSha(head)) return { ...empty, reason: 'NO_HEAD' };
@@ -1671,8 +1698,7 @@ function evaluateChecks({ head, rollupOid, contexts = [], complete = true, confi
   if (!required.length) return { ...empty, reason: 'NO_REQUIRED_CHECKS' };
   const results = required.map(name => {
     const named = contexts.filter(context => contextName(context) === name);
-    const replaced = named.some(context => !isCancelled(context));
-    const found = named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
+    const found = named.length ? checkResults(named) : [];
     if (!found.length) return { name, result: 'missing' };
     if (found.includes('failed')) return { name, result: 'failed' };
     if (found.includes('pending')) return { name, result: 'pending' };
@@ -3966,6 +3992,14 @@ function openStore({ transport, binding, now, toolkitVersion = null, localCheckp
   return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite });
 }
 
+// One rollup node as a check context: a check run carries the app that set it and when it completed.
+function rollupContext(node) {
+  return { kind: node.__typename, name: node.name || node.context, status: node.status || null, conclusion: node.conclusion || null, state: node.state || null,
+    required: node.isRequired === true, ...(node.__typename === 'CheckRun' ? { app: node.checkSuite?.app?.databaseId ?? null, completed_at: node.completedAt || null } : {}) };
+}
+
+const upper = value => (typeof value === 'string' ? value.toUpperCase() : null);
+
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
@@ -3975,7 +4009,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
         pageInfo { hasNextPage }
         nodes {
           __typename
-          ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
+          ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber: $number) }
           ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
         } } } } } }
     }
@@ -3999,7 +4033,7 @@ class ProgrammeGraphReader {
     for (let start = 0; start < unique.length; start += 20) {
       const batch = unique.slice(start, start + 20);
       if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
-      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
       const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
@@ -4016,8 +4050,7 @@ class ProgrammeGraphReader {
           train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
           default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
           complete: !rollup?.contexts?.pageInfo?.hasNextPage,
-          contexts: (rollup?.contexts?.nodes || []).map(node => ({ kind: node.__typename, name: node.name || node.context,
-            status: node.status || null, conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true })) });
+          contexts: (rollup?.contexts?.nodes || []).map(rollupContext) });
       }
     }
     return result;
@@ -4037,8 +4070,10 @@ class ProgrammeGraphReader {
       head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
       train: trainRows(pr.body), merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
       complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
-      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: check.status, conclusion: check.conclusion, required: false })),
-        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
+      // REST spells states in lower case; the GraphQL spelling is the one checks are judged by.
+      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: upper(check.status), conclusion: upper(check.conclusion), required: false,
+        app: check.app?.id ?? null, completed_at: check.completed_at || null })),
+        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: upper(context.state), required: false }))] };
   }
 
   // The login archive comments are written under. The cloud sweep is given its App's login and
@@ -4160,10 +4195,7 @@ class ProgrammeGraphReader {
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
-      contexts: (rollup?.contexts?.nodes || []).map(node => ({
-        kind: node.__typename, name: node.name || node.context, status: node.status || null,
-        conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true,
-      })),
+      contexts: (rollup?.contexts?.nodes || []).map(rollupContext),
     };
   }
 
@@ -7432,7 +7464,9 @@ class Reconciler {
         this.pass.progress?.reported();
       } catch (error) {
         if (error.code !== 'STATE_BRANCH_BUSY') throw error;
+        // Nothing was written: the stop stays outside the state (lease, note) and the pass saved nothing.
         this.stopReason = error.reason;
+        plan.noWrite = true;
       }
     } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || this.sweepChange || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;

@@ -121,6 +121,28 @@
       "lane": "Stop hooks failing open after update",
       "added": "2026-10-30",
       "issue": 1005
+    },
+    {
+      "id": "FAULT.guard-throws-stop-parsing-pr",
+      "source": "G2 review of the two-readings fix: #779 item 8: PowerShell's stop-parsing word hid gh pr create from the attribution check, when the attribution guard cannot load",
+      "kind": "fault",
+      "hosts": ["claude"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh --% pr create --title x --body y"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny", "reason": "toolkit-claude-attribution-hook"},
+      "fault": {"type": "throw-module", "file": "repo/scripts/toolkit-attribution-guard.cjs"},
+      "status": "pass"
+    },
+    {
+      "id": "FAULT.guard-throws-plain-pr",
+      "source": "G2 review of the two-readings fix: control: plain gh pr create when the attribution guard cannot load",
+      "kind": "fault",
+      "hosts": ["claude"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr create --title x --body y"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature"}},
+      "expect": {"decision": "deny", "reason": "toolkit-claude-attribution-hook"},
+      "fault": {"type": "throw-module", "file": "repo/scripts/toolkit-attribution-guard.cjs"},
+      "status": "pass"
     }
   ]
 }
