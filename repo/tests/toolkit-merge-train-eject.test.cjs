@@ -8,7 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 const train = require('../scripts/toolkit-merge-train.cjs');
-const { fixture, built } = require('./support/merge-train-fixture.cjs');
+const { fixture, built, MEMBER_BODY } = require('./support/merge-train-fixture.cjs');
 
 test('eject takes a boarded member off a bumped train with reverts on top, re-bumps without it and verifies', t => {
   const f = fixture(t);
@@ -124,15 +124,15 @@ test('a stacked train ejects with one revert, and land waits until the ejected p
   const solo = built(f, [f.member(1, one), f.member(2, two)]);
   const ejected = train.run(['eject', '--manifest', solo.out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   const live = path.join(f.root, 'live.json');
-  const facts = { 60: { state: 'OPEN', head: ejected.head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } };
+  const facts = { 60: { state: 'OPEN', head: ejected.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } };
   fs.writeFileSync(live, JSON.stringify(facts));
   const waiting = train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(waiting.ok, false);
   assert.ok(waiting.problems.some(problem => /ejected #2 is still open at .* GitHub would mark it merged/.test(problem)), waiting.problems.join('\n'));
-  fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'OPEN', head: 'f'.repeat(40) } }));
+  fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'OPEN', head: 'f'.repeat(40), body: MEMBER_BODY } }));
   const ready = train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(ready.ok, true, ready.problems.join('\n'));
-  fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'CLOSED', head: two } }));
+  fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'CLOSED', head: two, body: MEMBER_BODY } }));
   assert.equal(train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts).ok, true);
 
   // Once the running train lands, the stacked train catches up even though its head is an eject revert.

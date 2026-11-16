@@ -1034,6 +1034,16 @@ function assertValid(kind, doc) {
   return doc;
 }
 
+// The one refusal for a missing or unsupported store kind: what a store must be and what works
+// without one. Only a plain kind word is echoed, never any other value from the binding.
+const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
+function storeKindProblem(store, enabled) {
+  if (store === undefined) return `the binding names no evidence store: ${STORE_NEEDED}`;
+  const kind = isObject(store) && typeof store.kind === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(store.kind) ? `store.kind "${store.kind}"` : 'store.kind';
+  return enabled ? `${kind} is not supported: ${STORE_NEEDED}`
+    : `${kind} is not supported: a store block must name a private GitHub repository (store.kind "github"). Governance is off here, so it needs no store: remove the block or make it a github store.`;
+}
+
 // A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
 // `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
 // the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
@@ -1081,11 +1091,13 @@ function validateBinding(binding) {
     }
     const store = binding.store;
     if (enabled || store !== undefined) {
-      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      if (!isObject(store) || !Object.hasOwn(STORE_BACKENDS, store.kind)) errors.push(storeKindProblem(store, enabled));
+      else {
+        check(errors, REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+        check(errors, isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+        check(errors, /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+        check(errors, String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      }
     }
     if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.
@@ -1126,6 +1138,42 @@ function validateBinding(binding) {
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
 const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
+
+// Retired binding keys: nothing reads them. The reader above still accepts them, so a binding that
+// carries one stays valid, but every binding writer (a governance proposal, a switch or shards pull
+// request, the cleanup) leaves them out, so a carried key goes with the next change.
+const RETIRED_BINDING_KEYS = Object.freeze(['schedule_folder']);
+// The binding without its retired keys; one that has none comes back as the same object.
+function withoutRetiredKeys(binding) {
+  if (!isObject(binding) || !RETIRED_BINDING_KEYS.some(key => Object.hasOwn(binding, key))) return binding;
+  return Object.fromEntries(Object.entries(binding).filter(([key]) => !RETIRED_BINDING_KEYS.includes(key)));
+}
+// Binding text without its retired keys, in its own layout: each retired top-level member goes with
+// its comma (and its line, when it has one), so the pull request shows only those removed lines. Text
+// that cannot be parsed or has no retired key comes back as it is; a layout this cannot follow is
+// written out whole, so the result always parses to withoutRetiredKeys of the parsed text.
+function withoutRetiredKeysText(text) {
+  const raw = String(text);
+  const bom = raw.startsWith('﻿') ? '﻿' : '';
+  let parsed;
+  try { parsed = JSON.parse(raw.slice(bom.length)); } catch { return raw; }
+  const expected = withoutRetiredKeys(parsed);
+  if (expected === parsed) return raw;
+  const scalar = '(?:"(?:[^"\\\\\\r\\n]|\\\\.)*"|-?\\d[\\d.eE+-]*|true|false|null)';
+  let edited = raw.slice(bom.length);
+  for (const key of RETIRED_BINDING_KEYS.filter(name => Object.hasOwn(parsed, name))) {
+    // A member followed by another goes with its own line and trailing comma; the last member goes
+    // with the comma before it.
+    const before = new RegExp(`(?:\\r?\\n[ \\t]*)?"${key}"\\s*:\\s*${scalar}\\s*,[ \\t]*`, 'g');
+    const after = new RegExp(`,\\s*"${key}"\\s*:\\s*${scalar}`, 'g');
+    const pattern = (edited.match(before) || []).length === 1 ? before : after;
+    if ((edited.match(pattern) || []).length !== 1) { edited = null; break; }
+    edited = edited.replace(pattern, '');
+  }
+  let same = false;
+  try { same = edited !== null && JSON.stringify(JSON.parse(edited)) === JSON.stringify(expected); } catch { same = false; }
+  return same ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
+}
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -1293,6 +1341,16 @@ function currentGateAccepted(child) {
 
 function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
+}
+
+// Acceptance the controller logged without a gate lifecycle: a review PASSED whose verdicts at the
+// tracked PR head all passed (with no head tracked, the newest verdict passed), and UAT settled on
+// record at that head. Only the parent's holder writes review and UAT.
+function acceptanceLogged(child) {
+  const { review, pr } = child;
+  const verdicts = pr.head ? review.verdicts.filter(verdict => verdict.head === pr.head) : review.verdicts.slice(-1);
+  return review.state === 'PASSED' && verdicts.length > 0 && verdicts.every(verdict => verdict.verdict === 'PASSED')
+    && CLOSABLE_UAT.includes(uatText(child));
 }
 
 const GATE_HISTORY_LIMIT = 20;
@@ -5414,7 +5472,7 @@ class Reconciler {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
@@ -7452,7 +7510,7 @@ function bindRepository({ transport, originUrl, binding }) {
 
 module.exports = Object.freeze({
   get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
-  SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
+  SCHEMA, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
