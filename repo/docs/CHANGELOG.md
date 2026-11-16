@@ -1,5 +1,15 @@
 # Toolkit Changelog
 
+## 3.141.1
+
+### Changed
+
+- **Projects coordinator reads a thread's result in full before resolving it:** a wake preview can cut the end of a thread's final message, and a thread was once resolved from such a preview, losing the report paths and a follow-up item in its tail. Reading the final message in full (`full_bodies`, never a preview or summary) and acting on or recording every item in it is now a condition of resolving a thread, in the instructions block line, the skill's resolve conditions and read rule, the hourly nudge's thread read and resolve candidates, and the `RESOLVE DUE` step. Wording in the block and skill was tightened elsewhere to stay within their byte budgets, with no rule dropped from the skill; the block's "End finished Remote Control sessions" line now lives only in the skill, beside the resolve rule.
+
+### Fixed
+
+- **Superseded pull requests:** a programme task kept tracking the first pull request it found, even after that pull request closed unmerged and a replacement took its place, so the G1 acceptance check read the dead pull request's head (`EVIDENCE_STALE`) and the close list never offered the task. A refresh now moves a task's tracked pull request only to a newer pull request that claims the task, through a GitHub closing link or `Refs`, `Completes`, `Closes`, `Fixes` or `Resolves` with the task's number in its own body. When the tracked pull request closed unmerged, the task follows the one such open pull request, or else the newest such merged one; when it merged and the task is still open, the task follows the one such open pull request, so a later slice or rebuild is tracked too. A mention without a keyword, an older pull request, two or more such open pull requests and a retired task never move it, a finished task only moves from a closed pull request to a merged one, and a replacement that cannot be read back in the state it was chosen in leaves the task's PR discovery incomplete with the old pull request kept. Each move appears in the pass's planned effects and its JSON report.
+
 ## 3.141.0 (design data refresh)
 
 ### Fixed
