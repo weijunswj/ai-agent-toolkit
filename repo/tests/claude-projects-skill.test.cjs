@@ -1158,3 +1158,11 @@ test('task runs come first, and a partial pass never writes .done', () => {
     assert.ok(rule.includes(phrase), phrase);
   }
 });
+
+test('the hourly and daily PR sweeps flag a missing or invalid UAT line by the auto-merge check, not by its first word', () => {
+  for (const task of ['hourly-nudge', 'daily-check-in']) {
+    const text = read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`);
+    assert.ok(text.includes('`missing UAT verdict` for a ready PR whose body has no UAT line, or `invalid UAT verdict` when the auto-merge check refuses its UAT line (`toolkit-auto-merge-eligible.cjs` prints `Missing UAT verdict` or `UAT verdict invalid: <why>` for the saved body)'), task);
+    assert.ok(!text.includes('no line starting `UAT: `'), `${task} still judges the line by its first word`);
+  }
+});

@@ -13,9 +13,9 @@
 //   Route: <profile> <member> <model>/<effort>
 // naming its stack-registry pin (member: a role name in any case, DISCOVERY, BUILDER,
 // DESIGN_CHALLENGE or REVIEWER for the profile's one reviewer, or a reviewer id; stamps name the
-// registry's own member). A temporary owner change is one more brief line, for that launch only:
-//   Route override: <member> <model>/<effort> owner=<rec N | cmsg_...>
-// citing the owner's record or message; without the citation the override is refused. A G2 of a
+// registry's own member). Every gate runs on its pin: the old `Route override:` brief line is
+// retired, so a brief that still carries one is refused and an old ` override=` stamp reads off-pin
+// (a stale brief must not run off-pin on a citation checked only for shape). A G2 of a
 // wording-only docs pull request may add `Review class: wording-only` and run at high on the pinned
 // model; its stamp boards only a pull request whose every file is a LIGHT `.md` file.
 //
@@ -30,7 +30,7 @@
 //                      a declared gate.
 //
 // The stamp is one line: `Route: <proof> <model>/<effort> pin=<profile>/<member>` (plus
-// ` override=<ref>`, and `, self-check unavailable` when launcher-attested), or `Route: UNVERIFIED`.
+// `, self-check unavailable` when launcher-attested), or `Route: UNVERIFIED`.
 // G0 plans, G1 reports and PR bodies, and G2 verdicts (the line after `Toolkit-G2:`) carry it. The
 // governance hook refuses a declared gate's state-changing tools while it is off its pin (messaging
 // tools stay open so it can report), refuses a verdict or a G1 pull request body whose stamp is not
@@ -39,11 +39,10 @@
 // verdict lines pass. A helper's call (agent_id) is checked against its helper pin, never the gate's.
 //
 // Accepted gaps, written down as the hook design playbook asks: the brief is the launcher's text, so
-// a brief that names no gate is not checked (the Projects skill requires the Gate line); an owner
-// citation is checked for shape, not looked up (G2 checks it); a stamp is text, so a session the
-// hook does not run in, or a body the hook cannot read (a shell variable, a file written in the same
-// command), can carry any stamp (the finder trusts only the line, and RISKY pull requests need a
-// verified or attested one); after /clear the transcript starts again without the brief; until the
+// a brief that names no gate is not checked (the Projects skill requires the Gate line); a stamp is
+// text, so a session the hook does not run in, or a body the hook cannot read (a shell variable, a
+// file written in the same command), can carry any stamp (the finder trusts only the line, and RISKY
+// pull requests need a verified or attested one); after /clear the transcript starts again without the brief; until the
 // transcript has its first assistant entry only effort is checked; a helper's model is not in its
 // hook input, so only its effort is checked, and G2 subagents have no helper pin to check.
 
@@ -60,8 +59,10 @@ const WORDING_EFFORT = 'high';
 const HEAD_BYTES = 2 * 1024 * 1024;
 const TAIL_BYTES = 1024 * 1024;
 
-// The stamp line. Groups: proof, model, effort, profile, member, override.
-const STAMP = /^Route: (host-verified|launcher-attested|UNVERIFIED)(?: ([A-Za-z0-9._-]+)\/(low|medium|high|xhigh|max) pin=([a-z0-9-]+)\/([A-Za-z0-9_-]+)(?: override=((?:rec-\d+)|(?:cmsg_[A-Za-z0-9]+)))?)?(, self-check unavailable)?[ \t]*$/;
+// The stamp line. Groups: proof, model, effort, profile, member, retired override, self-check. The
+// retired ` override=<ref>` tail is still read so an old stamp carrying it reads off-pin; dropping it
+// from the pattern would read that stamp as missing, which a NORMAL pull request may board with.
+const STAMP = /^Route: (host-verified|launcher-attested|UNVERIFIED)(?: ([A-Za-z0-9._-]+)\/(low|medium|high|xhigh|max) pin=([a-z0-9-]+)\/([A-Za-z0-9_-]+)( override=\S+?)?)?(, self-check unavailable)?[ \t]*$/;
 const VERDICT = /Toolkit-G2: (?:PASS|FAIL) [0-9a-f]{40} tier=(?:LIGHT|NORMAL|RISKY)/;
 
 function loadRegistry(file = REGISTRY_PATH) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -106,7 +107,8 @@ function pinFor(registry, profile, member) {
 
 const LINE = name => new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?(?:\\*\\*)?${name}:(?:\\*\\*)?[ \\t]*(.*?)[ \\t]*$`, 'i');
 
-// The Gate, Route and Route override lines of a brief. Each is the first such line.
+// The Gate and Route lines of a brief, and the retired Route override line's text (kept only so the
+// check can refuse it). Each is the first such line.
 function parseBrief(text) {
   const out = { gate: null, route: null, override: null, wording: false, relay: false };
   if (typeof text !== 'string') return out;
@@ -127,11 +129,7 @@ function parseBrief(text) {
   }
   const reviewClass = first('Review class');
   out.wording = reviewClass !== null && reviewClass.toLowerCase().replace(/[`*]/g, '').trim() === 'wording-only';
-  const override = first('Route override');
-  if (override !== null) {
-    const match = /^`?([A-Za-z0-9_-]+) ([A-Za-z0-9._-]+)\/(low|medium|high|xhigh|max) owner=(?:(?:rec|record)[ -]?#?(\d+)|(cmsg_[A-Za-z0-9]+))`?$/i.exec(override);
-    out.override = match ? { member: match[1], model: match[2], effort: match[3], owner: match[4] ? `rec-${match[4]}` : match[5] } : { malformed: override };
-  }
+  out.override = first('Route override');
   return out;
 }
 
@@ -209,6 +207,7 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   if (marked && gate && marked !== gate) return refuse(marked, `the launcher marked this session ${marked} but its brief says Gate: ${gate}. Launch it again with one role.`);
   gate = marked || gate;
   if (!gate) return { gate: null, stamp: 'Route: UNVERIFIED' };
+  if (brief.override !== null) return refuse(gate, `the brief's Route override line "${brief.override}" is retired: every gate runs on its stack-registry pin. Launch it again without that line, on the pin.`);
   if (!brief.route) {
     if (marked && !brief.gate) return { gate, stamp: 'Route: UNVERIFIED' };
     return refuse(gate, `this ${gate} brief has no Route line, so nothing says which pin to check. Launch it again with one line \`Route: <profile> <member> <model>/<effort>\` copied from the stack registry, with model and effort pinned in the launch call.`);
@@ -222,14 +221,11 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   const pinned = pinFor(registry, profile, member);
   if (!pinned) return refuse(gate, `the stack registry has no route ${profile}/${brief.route.member}.${membersOf(registry, profile)} Launch again with \`Route: <profile> <member> <model>/<effort>\` naming one of them.`);
   if (gate === 'G2' ? !pinned.reviewer : pinned.reviewer || ROLE_MEMBER[gate] !== member) return refuse(gate, `${profile}/${member} is not the ${gate} route${gate === 'G2' ? ' (a G2 names a reviewer id)' : ` (${ROLE_MEMBER[gate]})`}. Launch it again on the right route.`);
-  let pin = { model: pinned.model, effort: pinned.effort, override: null };
-  if (brief.override) {
-    if (brief.override.malformed !== undefined || resolveMember(registry, profile, brief.override.member).member !== member) return refuse(gate, `the Route override line "${brief.override.malformed ?? brief.override.member}" is not \`Route override: ${member} <model>/<effort> owner=<rec N | cmsg_...>\` citing the owner's own record or message. Without that citation the registry pin stands.`);
-    pin = { model: brief.override.model, effort: brief.override.effort, override: brief.override.owner };
-  } else if (gate === 'G2' && brief.wording && brief.route.model === pinned.model && brief.route.effort === WORDING_EFFORT) {
-    pin = { model: pinned.model, effort: WORDING_EFFORT, override: null };
+  let pin = { model: pinned.model, effort: pinned.effort };
+  if (gate === 'G2' && brief.wording && brief.route.model === pinned.model && brief.route.effort === WORDING_EFFORT) {
+    pin = { model: pinned.model, effort: WORDING_EFFORT };
   } else if (brief.route.model !== pinned.model || brief.route.effort !== pinned.effort) {
-    return refuse(gate, `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin, or add a Route override line citing the owner's approval.`);
+    return refuse(gate, `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin.`);
   }
   const level = input.effort && typeof input.effort === 'object' ? input.effort.level : null;
   // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but the
@@ -247,10 +243,10 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   const effort = [level, environment.CLAUDE_EFFORT, read.effort].find(value => EFFORTS.includes(value)) || null;
   const model = read.model ? registryModel(read.model) : (typeof input.model === 'string' ? registryModel(input.model) : null);
   const wrong = [effort && effort !== pin.effort ? `effort ${effort}` : null, model && model !== registryModel(pin.model) ? `model ${model}` : null].filter(Boolean);
-  if (wrong.length) return refuse(gate, `this ${gate} runs on ${wrong.join(' and ')}, but its route is ${pin.model}/${pin.effort}${pin.override ? ` (owner override ${pin.override})` : ` (${profile}/${member})`}. Stop here and ask for a fresh launch with model and effort set explicitly; you may still report this.`);
+  if (wrong.length) return refuse(gate, `this ${gate} runs on ${wrong.join(' and ')}, but its route is ${pin.model}/${pin.effort} (${profile}/${member}). Stop here and ask for a fresh launch with model and effort set explicitly; you may still report this.`);
   const proof = effort && model ? 'host-verified' : 'launcher-attested';
-  const stamp = `Route: ${proof} ${pin.model}/${pin.effort} pin=${profile}/${member}${pin.override ? ` override=${pin.override}` : ''}${proof === 'launcher-attested' ? ', self-check unavailable' : ''}`;
-  return { gate, stamp, proof, pin: { profile, member, model: pin.model, effort: pin.effort, override: pin.override } };
+  const stamp = `Route: ${proof} ${pin.model}/${pin.effort} pin=${profile}/${member}${proof === 'launcher-attested' ? ', self-check unavailable' : ''}`;
+  return { gate, stamp, proof, pin: { profile, member, model: pin.model, effort: pin.effort } };
 }
 
 // ---- Stamps in what a session writes ----
@@ -383,22 +379,22 @@ function preToolUse(input, { environment = process.env, registry } = {}) {
 
 // ---- Train acceptance ----
 
-// One stamp line read against the registry: { status, stamp, override } where status is on-pin,
-// off-pin, unverified or missing. `want` is 'reviewer' (a G2 verdict) or 'BUILDER' (a G1 body).
-// `options.effort` is one more effort a reviewer stamp may carry on the pinned model (the finder
-// passes the wording-only effort for a pull request of LIGHT `.md` files only).
+// One stamp line read against the registry: { status, stamp } where status is on-pin, off-pin,
+// unverified or missing; a stamp carrying the retired ` override=` tail is off-pin. `want` is
+// 'reviewer' (a G2 verdict) or 'BUILDER' (a G1 body). `options.effort` is one more effort a reviewer
+// stamp may carry on the pinned model (the finder passes the wording-only effort for a pull request
+// of LIGHT `.md` files only).
 function stampStatus(line, want, registry, options = {}) {
   const match = typeof line === 'string' ? STAMP.exec(line.trim()) : null;
-  if (!match) return { status: 'missing', stamp: null, override: null };
-  const [, proof, model, effort, profile, member, override] = match;
-  if (proof === 'UNVERIFIED') return { status: 'unverified', stamp: match[0], override: null };
-  if (!model || (proof === 'launcher-attested') !== Boolean(match[7])) return { status: 'missing', stamp: null, override: null };
+  if (!match) return { status: 'missing', stamp: null };
+  const [, proof, model, effort, profile, member, retired, attested] = match;
+  if (proof === 'UNVERIFIED') return { status: 'unverified', stamp: match[0] };
+  if (!model || (proof === 'launcher-attested') !== Boolean(attested)) return { status: 'missing', stamp: null };
   const pinned = pinFor(registry || loadRegistry(), profile, member);
   const rightMember = pinned && (want === 'reviewer' ? pinned.reviewer : !pinned.reviewer && member === want);
-  if (!rightMember) return { status: 'off-pin', stamp: match[0], override: override || null };
-  if (override) return { status: 'on-pin', stamp: match[0], override };
+  if (!rightMember || retired) return { status: 'off-pin', stamp: match[0] };
   const efforts = [pinned.effort, ...(pinned.reviewer && options.effort ? [options.effort] : [])];
-  return { status: model === pinned.model && efforts.includes(effort) ? 'on-pin' : 'off-pin', stamp: match[0], override: null };
+  return { status: model === pinned.model && efforts.includes(effort) ? 'on-pin' : 'off-pin', stamp: match[0] };
 }
 
 // ---- Command line ----

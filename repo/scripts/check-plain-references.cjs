@@ -36,13 +36,15 @@ const migrateBaseline = (root) => portable.migrateBaseline(root, CONFIG);
 function parseArgs(argv) {
   const args = { root: process.cwd(), prune: false, migrate: false, files: null };
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === '--root') args.root = argv[++index];
-    else if (argv[index] === '--prune-baseline') args.prune = true;
+    if (argv[index] === '--root') {
+      if (argv[index + 1] === undefined) throw new portable.CheckError('--root needs a value');
+      args.root = argv[++index];
+    } else if (argv[index] === '--prune-baseline') args.prune = true;
     else if (argv[index] === '--migrate-baseline') args.migrate = true;
     else if (argv[index] === '--files') { args.files = argv.slice(index + 1); break; }
-    else throw new Error(`Unknown argument: ${argv[index]}`);
+    else throw new portable.CheckError(`unknown option ${argv[index]}`);
   }
-  if ((args.prune && args.migrate) || ((args.prune || args.migrate) && args.files)) throw new Error('Choose one baseline write mode, without --files.');
+  if ((args.prune && args.migrate) || ((args.prune || args.migrate) && args.files)) throw new portable.CheckError('Choose one baseline write mode, without --files.');
   args.root = path.resolve(args.root);
   return args;
 }
@@ -51,7 +53,7 @@ function run(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.migrate) {
     const result = migrateBaseline(args.root);
-    console.log(`Plain-references baseline uses fingerprints (${result.entries} entries); allowances unchanged.`);
+    console.log(`Plain-references baseline ${portable.migrationSummary(result)}`);
     return 0;
   }
   if (args.prune) {
