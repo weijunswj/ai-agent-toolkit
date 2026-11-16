@@ -38,7 +38,10 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.match(agents, /This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository\./);
   assert.match(agents, /Keep this file short: it loads in every session here/);
   assert.match(agents, /add nothing merely for completeness/);
-  assert.match(agents, /Portable installs use \[`skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
+  // Nothing installs a copy of the governed rules any more: the installed Toolkit delivers them, here too.
+  assert.match(agents, /Governed repositories, this one included, get the Toolkit-governed rules from the installed Toolkit at session start, never from a copy in `AGENTS\.md`\./);
+  assert.doesNotMatch(agents, /Portable installs use|AGENTS\.managed\.template\.md/);
+  assert.match(agents, /Evidence custody follows the Toolkit-governed rules\./);
   assert.match(agents, /Setup or refresh: follow \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\); run the managed checkout's setup script when it exists/);
 });
 

@@ -17,7 +17,6 @@
     ".agents/plugins/**",
     "AGENTS.md",
     "CLAUDE.md",
-    ".agents/rules/**",
     "repo/CONTROLLER.md",
     "repo/controller/**",
     "repo/docs/agent-playbooks/controller-takeover.md",

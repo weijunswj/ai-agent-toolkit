@@ -307,7 +307,8 @@ test('both plugins route shell commands to the attribution check', () => {
   assert.equal(JSON.parse(helper.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecision, 'deny');
 });
 
-// Folders shaped like repositories (a .git folder is enough): Toolkit-governed, guarded, or neither.
+// Folders shaped like repositories (a .git folder is enough): Toolkit-governed (by its working-tree
+// binding), guarded, or neither.
 function guardRepos(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-guard-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -322,7 +323,7 @@ function guardRepos(t) {
     return root;
   };
   return {
-    governed: make('governed', { 'AGENTS.md': '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n' }),
+    governed: make('governed', { '.github/toolkit-programme.json': '{ "schema": "toolkit.programme-binding.v2", "governance": "enabled" }\n' }),
     guarded: make('guarded', { '.github/personal-data-guard.json': '{}\n' }),
     plain: make('plain', { 'AGENTS.md': '# Rules\n' }),
     store: make('store', { '.git/config': '[remote "origin"]\n\turl = https://github.com/owner/TRANSPORT-evidence.git\n' }),
@@ -429,25 +430,37 @@ test('absolute folder confirmation and host-confirmed calls keep their existing 
   ]);
 });
 
-test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
+test('N3: a governed repository is protected by its merged state or its working-tree binding, never by a governed block alone', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const registryOptions = { registryPath: path.join(dir, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
-  const gate = require('../scripts/toolkit-governance-gate.cjs');
-  const repo = (name, { block = false } = {}) => {
+  const repo = (name, { block = false, binding = null } = {}) => {
     const root = path.join(dir, name);
     fs.mkdirSync(root, { recursive: true });
     childProcess.execFileSync('git', ['init', '--quiet', root]);
     childProcess.execFileSync('git', ['-C', root, 'remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
     if (block) fs.writeFileSync(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n');
+    if (binding !== null) {
+      fs.mkdirSync(path.join(root, '.github'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.github', 'toolkit-programme.json'), binding);
+    }
     return root;
   };
+  const bindingText = (name, governance) => JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: `example-owner/${name}`, governance });
   const enabled = repo('enabled');
   require('./support/governance-observations.cjs').seedMerged(enabled, 'enable', { registryOptions });
+  // The working tree says enabled while this computer holds no merged state for the repository.
+  const boundUnread = repo('bound-unread', { binding: bindingText('bound-unread', 'enabled') });
+  const boundDisabled = repo('bound-disabled', { binding: bindingText('bound-disabled', 'disabled') });
+  // A binding that says enabled protects even when the rest of it does not parse.
+  const brokenBinding = repo('broken-binding', { binding: '{"governance": "enabled"' });
+  // A governed block an older setup left is not a governance signal: the binding is.
   const disabledWithBlock = repo('disabled-block', { block: true });
   require('./support/governance-observations.cjs').seedMerged(disabledWithBlock, 'disable', { registryOptions });
+  const undecidedWithBlock = repo('undecided-block', { block: true });
   const undecided = repo('undecided');
-  for (const [root, refused] of [[enabled, true], [disabledWithBlock, true], [undecided, false]]) {
+  for (const [root, refused] of [[enabled, true], [boundUnread, true], [boundDisabled, false], [brokenBinding, true],
+    [disabledWithBlock, false], [undecidedWithBlock, false], [undecided, false]]) {
     assert.equal(forceRefusal('git push --force origin main', root, 0, registryOptions), refused ? FORCE_MESSAGE : '', path.basename(root));
   }
 });

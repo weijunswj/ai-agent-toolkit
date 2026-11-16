@@ -26,6 +26,18 @@
       "status": "pass"
     },
     {
+      "id": "GOV.source-checkout-no-root-block-no-note",
+      "source": "plug-and-play S4: the Toolkit source checkout's root AGENTS.md carries no governed block, and session start must not say to regenerate it",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# AI Agent Toolkit Repo Rules\n\n## This Repository\n\nOwn rules.\n","skills/repository-agent-rules/repo-local/AGENTS.managed.template.md":"<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=1.0.0 sha256=000000000000 -->\nRules.\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:END TOOLKIT-GOVERNED-RULES -->\n","repo/scripts/sync-agent-instruction-shims.cjs":"'use strict';\n","repo/contracts/toolkit-local-bridge/version.json":"{\"version\":\"1.0.0\"}\n"}},
+      "expect": {"decision":"allow","context_contains":["# Toolkit-Governed Repository Rules"],"context_excludes":["Toolkit note:"]},
+      "note": "Codex only: the pack reads Claude Code context from JSON additionalContext, and the bridge prints this note as plain text on both hosts; the Claude Code path runs the same preflight and is covered by the bridge unit test.",
+      "status": "pass"
+    },
+    {
       "id": "GOV.rules-disabled-none",
       "source": "plug-and-play S1: a disabled repository gets no governed rules",
       "kind": "benign",

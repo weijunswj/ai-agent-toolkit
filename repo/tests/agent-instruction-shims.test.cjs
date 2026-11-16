@@ -1,10 +1,13 @@
 'use strict';
 
 // Contract checks for the two instruction layers and their projections: the global rules source,
-// the Toolkit-governed block (root AGENTS.md and the portable template), the host shims and the
-// portable playbooks. These are instruction checks, not native permission or live-operation tests.
+// the Toolkit-governed block (the portable templates; root AGENTS.md carries none), the host shims
+// and the portable playbooks. These are instruction checks, not native permission or live-operation
+// tests.
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { controllerText } = require('./support/controller-text.cjs');
@@ -18,7 +21,7 @@ const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
 const SHIMS = [
-  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', active: '.agents/rules/00-agent-toolkit-bootstrap.md', heading: '# Agent Toolkit Antigravity Bootstrap' }
+  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', heading: '# Agent Toolkit Antigravity Bootstrap' }
 ];
 const safetyComment = [
   '<!--',
@@ -64,18 +67,63 @@ test('the rule sources exist and the superseded sources and templates are gone',
   }
 });
 
-test('the governed block reaches root AGENTS.md and both templates unchanged, inside current v2 markers', () => {
+test('the governed block reaches both templates unchanged, inside current v2 markers; root AGENTS.md carries no Toolkit marker', () => {
   const governed = readText(governedPath).trimEnd();
-  for (const relPath of ['AGENTS.md', `${repoLocalSourceRoot}/AGENTS.managed.template.md`, `${repoLocalPublishedRoot}/AGENTS.managed.template.md`]) {
+  for (const relPath of [`${repoLocalSourceRoot}/AGENTS.managed.template.md`, `${repoLocalPublishedRoot}/AGENTS.managed.template.md`]) {
     assertCurrentBlock(relPath, 'TOOLKIT-GOVERNED-RULES', governedPath, governed);
   }
   const template = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`);
   assert.equal(readText(`${repoLocalPublishedRoot}/AGENTS.managed.template.md`), template);
   assert.ok(template.startsWith(`${safetyComment}\n\n`));
   assert.equal(findBlocks(template).blocks.length, 1, 'the template carries only the governed block');
+  // The installed Toolkit delivers the governed rules here too, so the root file is all hand-written.
   const root = readText('AGENTS.md');
-  assert.ok(root.startsWith('# AI Agent Toolkit Repo Rules\n\n<!-- AI-AGENT-TOOLKIT:'));
-  assert.doesNotMatch(root, /GLOBAL-AGENTS\.MD-TEMPLATE|N8N-AGENT-RULES-ADAPTER|SOURCE-OF-TRUTH-CONTRACT/);
+  assert.ok(root.startsWith('# AI Agent Toolkit Repo Rules\n\n## This Repository\n'));
+  assert.doesNotMatch(root, /^<!-- AI-AGENT-TOOLKIT:/m);
+  assert.equal(exists('.agents/rules/00-agent-toolkit-bootstrap.md'), false, 'Antigravity reads AGENTS.md itself');
+});
+
+// A copy of the files the sync reads and writes, so its check can be run on a changed root.
+function syncWorkspace(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-instruction-sync-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { PROJECTED_OUTPUTS } = require('../scripts/sync-agent-instruction-shims.cjs');
+  for (const relPath of ['repo/contracts/agent-rules', 'repo/contracts/toolkit-local-bridge/version.json', 'AGENTS.md',
+    ...PROJECTED_OUTPUTS.map(output => output.path)]) {
+    fs.cpSync(path.join(repoRoot, relPath), path.join(dir, relPath), { recursive: true });
+  }
+  const sync = (...args) => childProcess.spawnSync(process.execPath, [path.join(repoRoot, 'repo/scripts/sync-agent-instruction-shims.cjs'), ...args, '--workspace', dir], { encoding: 'utf8' });
+  return { dir, sync };
+}
+
+test('the sync check refuses a Toolkit block or the Antigravity bootstrap brought back into the root, and --write never re-adds them', t => {
+  const { dir, sync } = syncWorkspace(t);
+  const check = sync();
+  assert.equal(check.status, 0, check.stderr);
+  const original = fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8');
+  // A stale branch that still carries the governed block (or a broken half of one) must not land.
+  const block = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`).slice(safetyComment.length).trim();
+  for (const [label, text] of [['governed block', original.replace('\n\n## This Repository', `\n\n${block}\n\n## This Repository`)],
+    ['broken marker', `${original}\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=1.0.0 sha256=000000000000 -->\n`]]) {
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), text);
+    for (const args of [[], ['--write']]) {
+      const result = sync(...args);
+      assert.equal(result.status, 1, `${label} ${args}`);
+      assert.match(result.stderr, /FAIL: Root AGENTS\.md carries a Toolkit managed block; the installed Toolkit delivers the governed rules, so remove it by hand\./, `${label} ${args}`);
+      assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), text, `${label} ${args}: never rewritten`);
+    }
+  }
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'), original);
+  fs.mkdirSync(path.join(dir, '.agents/rules'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.agents/rules/00-agent-toolkit-bootstrap.md'), readText(`${repoLocalSourceRoot}/antigravity-bootstrap.template.md`));
+  const bootstrap = sync();
+  assert.equal(bootstrap.status, 1);
+  assert.match(bootstrap.stderr, /FAIL: \.agents\/rules\/00-agent-toolkit-bootstrap\.md is retired: Antigravity reads AGENTS\.md itself, so remove it\./);
+  fs.rmSync(path.join(dir, '.agents'), { recursive: true });
+  // --write leaves the hand-written root as it is.
+  assert.equal(sync('--write').status, 0);
+  assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), original);
+  assert.equal(fs.existsSync(path.join(dir, '.agents')), false);
 });
 
 test('host shims stay tiny, carry current markers and match their templates', () => {
@@ -84,15 +132,12 @@ test('host shims stay tiny, carry current markers and match their templates', ()
     const template = readText(source);
     assert.equal(readText(`${repoLocalPublishedRoot}/${shim.file}`), template);
     assert.ok(template.startsWith(`${safetyComment}\n\n`));
-    const block = onlyBlock(source, shim.name);
-    assertCurrentBlock(shim.active, shim.name, source, block.body);
-    const active = readText(shim.active);
-    assert.ok(active.includes(shim.heading), shim.active);
-    if (shim.importLine) assert.equal(active.split('\n').filter(line => line.trim() === shim.importLine).length, 1, shim.active);
-    assert.match(active, /Root `AGENTS\.md` is (?:canonical|the canonical repo instruction file)\./);
-    assert.ok(Buffer.byteLength(active) < 1024, `${shim.active} under 1 KB`);
+    const block = assertCurrentBlock(source, shim.name, source, onlyBlock(source, shim.name).body);
+    assert.ok(block.body.includes(shim.heading), source);
+    assert.match(block.body, /Root `AGENTS\.md` is (?:canonical|the canonical repo instruction file)\./);
+    assert.doesNotMatch(block.body, /@\.\.\/\.\.\/AGENTS\.md/);
+    assert.ok(Buffer.byteLength(block.body) < 1024, `${source} under 1 KB`);
   }
-  assert.doesNotMatch(readText('.agents/rules/00-agent-toolkit-bootstrap.md'), /@\.\.\/\.\.\/AGENTS\.md/);
 });
 
 test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists', () => {

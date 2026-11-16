@@ -7,7 +7,7 @@
 // that merely mentions Claude passes. Used by the Claude Code PreToolUse hook and the Codex helper hook.
 //
 // It also refuses force pushes (--force, -f, --force-with-lease, --mirror or a +refspec) in a
-// Toolkit-governed (GitHub governance ENABLED, or the governed block present) or personal-data-guarded
+// Toolkit-governed (GitHub governance ENABLED, or the working-tree binding says enabled) or personal-data-guarded
 // repository and to an evidence store (a TRANSPORT-* repository), since they rewrite history. Skipped
 // commit and push checks (--no-verify, core.hooksPath) are a written rule, not a hook: CI is the
 // backstop. This is best effort: CI and branch rules are the backstop. Not covered:
@@ -344,14 +344,22 @@ function storeUrl(url) { return STORE_URL.test(String(url || '').trim()); }
 
 // Whether the repository's GitHub governance state is ENABLED (setup finished or not), or ERROR (a
 // merged binding that cannot be used never quietly drops protection). A state that cannot be read, or
-// a copy without the state module, counts as not enabled here; the block and guard-config checks
-// below still apply.
+// a copy without the state module, counts as not enabled here; the working-tree binding and
+// guard-config checks below still apply.
 function governanceEnabled(root, registryOptions) {
   try { return ['ENABLED', 'ERROR'].includes(require('./toolkit-governance-state.cjs').governanceState(root, registryOptions).state); } catch { return false; }
 }
 
+// Whether the working-tree programme binding says governance is enabled, even if the rest of it does
+// not parse: governed repositories no longer carry a rules block, so the binding is the file signal
+// that keeps one protected while its governance state cannot be read.
+const BINDING_ENABLED = /"governance"\s*:\s*"enabled"/;
+function bindingSaysEnabled(root) {
+  return BINDING_ENABLED.test(readSmallFile(path.join(root, '.github', 'toolkit-programme.json')));
+}
+
 // What protects the repository a folder is in: `checked` when the nearest folder with a .git entry
-// carries the governed rules block in AGENTS.md or the guard config, or its GitHub governance is
+// carries the guard config or a working-tree binding that says enabled, or its GitHub governance is
 // ENABLED, `store` when one of its remotes is an evidence store.
 function repositoryKind(folder, cache, registryOptions = {}) {
   if (cache.has(folder)) return cache.get(folder);
@@ -360,7 +368,7 @@ function repositoryKind(folder, cache, registryOptions = {}) {
   if (current) {
     answer = {
       checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
-        || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
+        || bindingSaysEnabled(current)
         || governanceEnabled(current, registryOptions),
       store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
     };
