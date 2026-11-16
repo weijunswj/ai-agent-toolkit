@@ -11,9 +11,17 @@ const ROOT = path.resolve(__dirname, '../..');
 const SCANNED = /^(?:repo\/scripts\/.*|skills\/.*\/scripts\/.*|skills\/.*\/templates\/helper-scripts\/.*)\.cjs$/;
 
 // Two same-length views of a source: `code` blanks comments; `bare` also blanks the bodies of strings,
-// template literals and regular expressions, so a word inside one never counts as code.
+// template literals and regular expressions, so a word inside one never counts as code. One misread
+// token can blank the rest of a file, so `unclosed` lists every token the lexer could not close (a
+// string or regular expression reaching a line end, a template or comment reaching the end of the
+// file, a brace with no partner); the tree test requires none.
+const lexed = new Map();
 function views(source) {
-  const code = [], bare = [];
+  if (!lexed.has(source)) lexed.set(source, lex(source));
+  return lexed.get(source);
+}
+function lex(source) {
+  const code = [], bare = [], unclosed = [];
   let copied = 0;
   const take = (to, hideCode, hideBare) => {
     const text = source.slice(copied, to), blank = text.replace(/[^\n]/g, ' ');
@@ -42,6 +50,7 @@ function views(source) {
     if (char === '/' && (next === '/' || next === '*')) {
       const end = next === '/' ? source.indexOf('\n', at) : source.indexOf('*/', at + 2);
       const stop = end < 0 ? source.length : next === '/' ? end : end + 2;
+      if (end < 0 && next === '*') unclosed.push({ at, what: 'comment' });
       take(at, false, false);
       take(stop, true, true);
       at = stop;
@@ -49,7 +58,7 @@ function views(source) {
     }
     const resumes = char === '}' && braces.at(-1) === 'template';
     if (char === '{') braces.push('block');
-    else if (char === '}') braces.pop();
+    else if (char === '}' && braces.pop() === undefined) unclosed.push({ at, what: 'brace' });
     if (!(char === '\'' || char === '"' || char === '`' || resumes || (char === '/' && regexStarts(at)))) { at += 1; continue; }
     const close = resumes ? '`' : char;
     let end = at + 1, inClass = false;
@@ -62,6 +71,7 @@ function views(source) {
       else if ((inner === close && !inClass) || (close !== '`' && inner === '\n')) break;
       end += 1;
     }
+    if (end >= source.length || source[end] === '\n') unclosed.push({ at, what: close === '/' ? 'regular expression' : close === '`' ? 'template' : 'string' });
     end = Math.min(end, source.length);
     take(at + 1, false, false);
     take(end, false, true);
@@ -69,7 +79,8 @@ function views(source) {
     at = source[end] === '$' ? end + 2 : end + 1;
   }
   take(source.length, false, false);
-  return { code: code.join(''), bare: bare.join('') };
+  for (const open of braces) unclosed.push({ at: source.length, what: open === 'template' ? 'template' : 'brace' });
+  return { code: code.join(''), bare: bare.join(''), unclosed };
 }
 
 // The repository path a require argument names, or null. It follows string literals, __dirname,
@@ -169,7 +180,13 @@ test('scripts in require cycles export before running their CLI', () => {
   const files = trackedFiles();
   assert.ok(files.includes('repo/scripts/toolkit-tasks.cjs'), 'tracked runtime scripts must be scanned');
   assert.ok(files.includes('skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/n8n-workflow-transport.cjs'), 'helper-script templates must be scanned');
-  const offenders = offendersOf(new Map(files.map(file => [file, fs.readFileSync(path.join(ROOT, file), 'utf8')])));
+  const sources = new Map(files.map(file => [file, fs.readFileSync(path.join(ROOT, file), 'utf8')]));
+  // A token the lexer could not close blanks the rest of its file, which would hide that file's
+  // requires, CLI check and exports line from the guard.
+  const misread = files.flatMap(file => views(sources.get(file)).unclosed
+    .map(({ at, what }) => `${file}:${sources.get(file).slice(0, at).split('\n').length} unclosed ${what}`));
+  assert.deepEqual(misread, [], `The guard's lexer misread these files; teach it the construct:\n${misread.join('\n')}`);
+  const offenders = offendersOf(sources);
   assert.deepEqual(offenders, [], `Export before CLI execution in require cycles:\n${offenders.join('\n')}`);
 });
 
@@ -199,11 +216,31 @@ test('the guard ignores comments and strings', () => {
   assert.deepEqual(offendersOf(cycle(`const note = 'require.main === module';\n${EXPORTS_FIRST}`)), []);
   // An exports line in a comment or a regular expression above the real CLI does not count as exporting.
   assert.deepEqual(offendersOf(cycle(`/* module.exports = later */\n${CLI_FIRST}`)), ['repo/scripts/a.cjs']);
-  assert.deepEqual(offendersOf(cycle(`const re = /module\\.exports = ['"]/;\n${CLI_FIRST}`)), ['repo/scripts/a.cjs']);
+  assert.deepEqual(offendersOf(cycle(`const re = /module.exports = ['"]/;\n${CLI_FIRST}`)), ['repo/scripts/a.cjs']);
+  assert.deepEqual(offendersOf(cycle(`function f(s) { return /module.exports = x/.test(s); }\n${CLI_FIRST}`)), ['repo/scripts/a.cjs'], 'a regular expression after return');
   // A require named only in a comment or a string is no edge.
   const commented = new Map([
     ['repo/scripts/a.cjs', `// require('./b.cjs')\nconst s = "require('./b.cjs')";\n${CLI_FIRST}`],
     ['repo/scripts/b.cjs', "require('./a.cjs');\nmodule.exports = {};\n"],
   ]);
   assert.deepEqual(offendersOf(commented), []);
+  // Code inside a template's ${ ... } is code again: its require is an edge, and a quote or brace in a
+  // string there neither ends the template nor counts as a brace.
+  const templated = new Map([
+    ['repo/scripts/a.cjs', `const s = \`\${ok ? '}\`' : require('./b.cjs').name}\`;\n${CLI_FIRST}`],
+    ['repo/scripts/b.cjs', "require('./a.cjs');\nmodule.exports = {};\n"],
+  ]);
+  assert.deepEqual(views(templated.get('repo/scripts/a.cjs')).unclosed, []);
+  assert.deepEqual(offendersOf(templated), ['repo/scripts/a.cjs']);
+});
+
+test('the guard reports a token its lexer could not close', () => {
+  // A regular expression after a closing parenthesis reads as division, so its backtick opens a
+  // template that never closes and would blank the rest of the file.
+  assert.deepEqual(views("if (ok) /`/.test(s);\nrequire('./b.cjs');\n").unclosed.map(item => item.what), ['template']);
+  assert.deepEqual(views("const s = 'open\nconst t = 1;\n").unclosed.map(item => item.what), ['string']);
+  assert.deepEqual(views('function f() {\n').unclosed.map(item => item.what), ['brace']);
+  assert.deepEqual(views('}\n').unclosed.map(item => item.what), ['brace']);
+  assert.deepEqual(views('/* open\n').unclosed.map(item => item.what), ['comment']);
+  assert.deepEqual(views(`${CLI_FIRST}const re = /a[/]b/g;\nconst t = \`x\${{ a: 1 }.a}\`;\n`).unclosed, []);
 });
