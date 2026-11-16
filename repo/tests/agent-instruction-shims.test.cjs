@@ -103,7 +103,10 @@ test('the sync check refuses a Toolkit block or the Antigravity bootstrap brough
   const original = fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8');
   // A stale branch that still carries the governed block (or a broken half of one) must not land.
   const block = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`).slice(safetyComment.length).trim();
-  for (const [label, text] of [['governed block', original.replace('\n\n## This Repository', `\n\n${block}\n\n## This Repository`)],
+  // A Windows checkout may give the file CRLF line endings, so match either.
+  const withBlock = original.replace(/(\r?\n)\1## This Repository/, (_match, eol) => `${eol}${eol}${block}${eol}${eol}## This Repository`);
+  assert.notEqual(withBlock, original);
+  for (const [label, text] of [['governed block', withBlock],
     ['broken marker', `${original}\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=1.0.0 sha256=000000000000 -->\n`]]) {
     fs.writeFileSync(path.join(dir, 'AGENTS.md'), text);
     for (const args of [[], ['--write']]) {
