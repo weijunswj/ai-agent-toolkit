@@ -338,29 +338,27 @@ class ToolkitFolders {
   }
 
   // Whether a command started in `cwd` could reach the user-state files, read as `shell` splits it
-  // (bash's and PowerShell's readings both when the host does not say).
+  // (bash's and PowerShell's readings both when the host does not say). With both, the folders come
+  // from the moves of both readings together, so a move one shell reads and a move the other reads
+  // can follow each other; every part of each reading is judged in all of them.
   reaches(text, cwd, shell = null) {
     // A line break other than LF (a lone CR, NEL, LS or PS) may end a command in one shell and not in
     // another, so the parts read here may not be the ones that run.
     const oddBreaks = /\r(?!\n)|[\u0085\u2028\u2029]/.test(text);
     const kinds = shell === 'powershell' ? ['powershell'] : shell === 'posix' ? ['posix'] : ['posix', 'powershell'];
-    return kinds.some(kind => {
-      const parts = commandParts(text, kind);
-      const folders = this.#folders(parts, cwd, kind, LOOPS.test(text));
-      if (oddBreaks && folders.some(folder => within(folder, this.#home))) return true;
-      const budget = { paths: MOST_PATHS };
-      return parts.some(part => folders.some(folder => this.#reachesFrom(part, folder, shell, budget)));
-    });
+    const readings = kinds.map(kind => ({ parts: commandParts(text, kind), ...this.#moves(commandParts(text, kind), kind) }));
+    // A move both readings read the same way counts once.
+    const targets = [...new Map(readings.flatMap(reading => reading.targets).sort((a, b) => a.at - b.at).map(item => [`${item.at}\0${item.target}`, item.target])).values()];
+    const folders = this.#folders(targets, cwd, LOOPS.test(text), readings.some(reading => reading.unknown));
+    if (oddBreaks && folders.some(folder => within(folder, this.#home))) return true;
+    const budget = { paths: MOST_PATHS };
+    return readings.some(({ parts }) => parts.some(part => folders.some(folder => this.#reachesFrom(part, folder, shell, budget))));
   }
 
-  // The folders any part of the command could run in: the starting folder, and each folder a move
-  // (cd, pushd, Set-Location and their kin) could reach from a folder found before it, in text order,
-  // or again and again when a loop or function can run a move more than once. A move to a folder the
-  // command does not spell out (`~-`, `$OLDPWD`, a wildcard, a substitution, a bare pushd) adds
-  // Toolkit's own folder, as do more folders or moves than the reader follows. popd and Pop-Location
-  // go back to a folder already counted, or stay put.
-  #folders(parts, cwd, kind, loops) {
-    const folders = [this.#realOf(cwd || process.cwd())];
+  // The moves (cd, pushd, Set-Location and their kin) in one reading, in text order, each with its
+  // place in the text, and whether one goes to a folder the command does not spell out (`~-`,
+  // `$OLDPWD`, a wildcard, a substitution, a bare pushd) or more moves than the reader follows.
+  #moves(parts, kind) {
     const targets = [];
     const variables = new Map();
     let unknown = false;
@@ -382,18 +380,33 @@ class ToolkitFolders {
       }
       if (!part.sub) moves += 1;
       if (move === MOVE_UNKNOWN || targets.length >= MOST_FOLDERS) unknown = true;
-      else targets.push(move);
+      else targets.push({ at: part.at, target: move });
     }
+    return { targets, unknown };
+  }
+
+  // The folders any part of the command could run in: the starting folder, and each folder a move
+  // could reach from a folder found before it, in text order (any move may not run), or again and
+  // again when a loop or function can run a move more than once. A folder outside Toolkit's folder
+  // that the moves after it cannot climb back to Toolkit's folder is left out (only what could lead
+  // there matters). An unknown move, or more folders than the reader follows, adds Toolkit's own
+  // folder. popd and Pop-Location go back to a folder already counted, or stay put.
+  #folders(targets, cwd, loops, unknown) {
+    const folders = [this.#realOf(cwd || process.cwd())];
+    // The `..` steps the moves after each one could take: a folder found there must be at most that
+    // many steps below the folder it shares with Toolkit's folder to matter.
+    const steps = targets.map(climbs);
+    const later = steps.map((_, index) => (loops && steps.some(Boolean) ? Infinity : steps.slice(index + 1).reduce((sum, value) => sum + value, 0)));
     const seen = new Set();
     for (let pass = 0, grew = true; grew && !unknown && pass < MOST_FOLDERS; pass += 1) {
       grew = false;
-      for (const target of targets) {
+      for (const [index, target] of targets.entries()) {
         for (const from of [...folders]) {
           const key = `${from}\0${target}`;
           if (seen.has(key)) continue;
           seen.add(key);
           const next = this.#realOf(shellPath(from, target));
-          if (folders.includes(next)) continue;
+          if (folders.includes(next) || !this.#mayLead(next, later[index])) continue;
           if (folders.length >= MOST_FOLDERS) { unknown = true; break; }
           folders.push(next);
           grew = loops;
@@ -403,6 +416,15 @@ class ToolkitFolders {
     }
     if (unknown && !folders.includes(this.#home)) folders.push(this.#home);
     return folders;
+  }
+
+  // Whether `folder` is in Toolkit's folder, or could get there with at most `steps` steps up (and any
+  // steps down).
+  #mayLead(folder, steps) {
+    if (within(folder, this.#home)) return true;
+    const relative = path.relative(folder, this.#home);
+    if (path.isAbsolute(relative)) return false;
+    return relative.split(path.sep).filter(name => name === '..').length <= steps;
   }
 
   // Whether one command part, run in `folder`, could reach the user-state files.
@@ -444,6 +466,13 @@ const MOST_PATHS = 2000;
 // A loop or function can run a move more than once, and from a later folder.
 const LOOPS = /\b(?:for|while|until|select|do|foreach|function|foreach-object)\b|\(\s*\)/i;
 const MOVES = /^(?:cd|chdir|pushd|set-location|sl|push-location)$/i;
+
+// The `..` steps a move target takes (a target from the root or home takes none: it lands at a
+// folder judged on its own).
+function climbs(target) {
+  if (absoluteShellPath(target) || target.startsWith('~')) return 0;
+  return target.split(/[\\/]+/).filter(name => name === '..').length;
+}
 const MOVE_UNKNOWN = Symbol('unknown folder');
 const MOVE_BACK = Symbol('folder before');
 
@@ -481,14 +510,16 @@ function commandParts(text, kind, depth = 0) {
   for (const part of parts) {
     const texts = part.words.map(word => word.text);
     const program = path.win32.basename(path.posix.basename(texts[0] || '')).replace(/\.exe$/i, '').toLowerCase();
-    if (/^(?:eval|iex|invoke-expression)$/.test(program)) { nested.push(...commandParts(texts.slice(1).join(' '), kind, depth + 1)); continue; }
+    // A nested script's parts take the place of the part that runs it.
+    const inside = (script, scriptKind) => commandParts(script, scriptKind, depth + 1).map(item => ({ ...item, at: part.at }));
+    if (/^(?:eval|iex|invoke-expression)$/.test(program)) { nested.push(...inside(texts.slice(1).join(' '), kind)); continue; }
     if (!RUNNERS.test(program)) continue;
     const inner = /^(?:pwsh|powershell)$/.test(program) ? 'powershell' : 'posix';
     const option = program === 'cmd' ? RUNNER_SCRIPT.cmd : RUNNER_SCRIPT[inner];
     const at = texts.findIndex((item, index) => index > 0 && (option.test(item) || (inner === 'powershell' && RUNNER_ENCODED.test(item))));
     if (at < 0) continue;
     if (inner === 'powershell' && RUNNER_ENCODED.test(texts[at])) { part.words.push({ text: '', open: true, vars: false }); continue; }
-    nested.push(...commandParts(texts.slice(at + 1).join(' '), inner, depth + 1));
+    nested.push(...inside(texts.slice(at + 1).join(' '), inner));
   }
   return [...parts, ...nested];
 }
@@ -518,7 +549,7 @@ function shellWords(text, kind) {
   const endWord = () => { if (word) words.push(word); word = null; };
   const endPart = (end, sub = false) => {
     endWord();
-    if (words.length) parts.push({ words, raw: source.slice(start, end), redirect, sub: sub || piped || depth > 0 || tick });
+    if (words.length) parts.push({ words, raw: source.slice(start, end), at: start, redirect, sub: sub || piped || depth > 0 || tick });
     words = [];
     redirect = false;
     piped = false;

@@ -2050,9 +2050,14 @@ test('refuse by default: a folder change never leaves the starting folder, and a
     [f.home, 'cd env && cd $OLDPWD && find . -delete'],
     [f.env, 'cd ..; cd -; cd -; find . -delete'],
     [f.outside, 'cd -; find . -delete'],
+    // A move that fails leaves the next one to run from the folder before it.
+    [path.dirname(f.home), 'cd missing; cd .ai-agent-toolkit; find . -delete'],
   ];
   const allowed = [
     [f.home, 'cd env && ls'],
+    // Many moves away from Toolkit's folder stay ordinary work.
+    [f.outside, 'cd a && cd b && cd c && cd d && cd e && make'],
+    [f.outside, 'cd a && make && cd .. && cd b && make && cd .. && cd c && make && cd .. && cd d && make && cd .. && cd e && make'],
     [f.outside, 'ls | grep x & ls'],
     [f.outside, `cd ${f.home}; cd -; ls`],
   ];
