@@ -657,15 +657,17 @@ cp.spawnSync = function(file, args, options) {
     require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).startSession({ session_id: 'hook-pack', source: 'startup', cwd: this.work }, { registryOptions: { registryPath, testOnly: true }, environment: {} });
   }
 
-  // Writes the fixture's paths into a payload or transcript value.
-  expand(value) {
+  // Writes the fixture's paths into a payload or transcript value. A payload also gets {plugin}, the
+  // plugin copy its hooks run from, so a row can name Toolkit's own script as the hooks see it.
+  expand(value, plugin) {
     if (typeof value === 'string') {
+      if (plugin !== undefined) value = value.replaceAll('{plugin}', plugin);
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
         .replaceAll('{head7}', (this.head || '').slice(0,7)).replaceAll('{headUpper}', (this.head || '').toUpperCase()).replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
-    if (Array.isArray(value)) return value.map(item => this.expand(item));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key) : key, this.expand(item)]));
+    if (Array.isArray(value)) return value.map(item => this.expand(item, plugin));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key, plugin) : key, this.expand(item, plugin)]));
     return value;
   }
 
@@ -761,7 +763,7 @@ async function runOnHost(row, host, fixture, roots) {
   }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
-  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload) };
+  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload, pluginRoot) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
   const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);

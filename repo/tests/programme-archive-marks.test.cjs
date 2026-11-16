@@ -231,3 +231,9 @@ test('BLOCK_BEHIND compares the drawn revision with the stored one, and only for
   assert.deepEqual(run(stale), [806], 'an older drawn revision is behind');
   assert.deepEqual(run(stale, new Set([999])), [], 'a page outside this pass is not checked');
 });
+
+test('mark-archive on the command line keeps every repeated --remove, and any other value given twice is refused', () => {
+  const args = cli.parseArgs(['mark-archive', '--controller', '--issue', '421', '--remove', '[a]: https://example.test/a', '--remove', '[b]: https://example.test/b']);
+  assert.deepEqual(args.remove, ['[a]: https://example.test/a', '[b]: https://example.test/b']);
+  assert.throws(() => cli.parseArgs(['mark-archive', '--controller', '--issue', '421', '--issue', '806', '--before', 'x']), error => error.code === 'USAGE' && /--issue was given more than once/.test(error.message));
+});

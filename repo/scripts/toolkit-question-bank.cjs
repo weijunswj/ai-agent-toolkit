@@ -245,15 +245,18 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
     }
     if (!spec.report_only) sectionByName.get(spec.section).question_count += 1;
   }
-  // A report-only row is an unnumbered status line at the end of its section, so the numbered
-  // questions stay contiguous and every number has letters.
+  // A bank whose rows carry fixed numbers (fixed_ref, such as '1.5') keeps each row's number from run
+  // to run, status rows included, and a row that does not apply leaves a gap. Otherwise a report-only
+  // row is an unnumbered status line at the end of its section, so the numbered questions stay
+  // contiguous and every number has letters.
+  const fixed = fixedIndexes(specs, sectionByName);
   specs = [...specs].sort((left, right) => sectionByName.get(left.section).index - sectionByName.get(right.section).index
-    || Number(Boolean(left.report_only)) - Number(Boolean(right.report_only)));
+    || (fixed ? fixed.get(left) - fixed.get(right) : Number(Boolean(left.report_only)) - Number(Boolean(right.report_only))));
   const questionCount = answerable(specs).length;
   const seenBySection = new Map();
   const presented = specs.map((spec) => {
     const section = sectionByName.get(spec.section);
-    const questionIndex = spec.report_only ? null : (seenBySection.get(spec.section) || 0) + 1;
+    const questionIndex = fixed ? fixed.get(spec) : spec.report_only ? null : (seenBySection.get(spec.section) || 0) + 1;
     if (questionIndex) seenBySection.set(spec.section, questionIndex);
     const choices = spec.choices.map((choice, index) => ({
       ...choice,
@@ -282,6 +285,25 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
     ...spec,
     presentation: { ...spec.presentation, bank_identity: bankIdentity, bank_reference: bankReference },
   }));
+}
+
+// Each row's fixed question number, or null when the bank does not fix them. Fixed numbers are all or
+// nothing, unique, and must name the row's own section.
+function fixedIndexes(specs, sectionByName) {
+  const count = specs.filter((spec) => spec.fixed_ref !== undefined).length;
+  if (!count) return null;
+  if (count !== specs.length) throw new Error('Question bank rows must all carry a fixed number or none.');
+  const indexes = new Map();
+  const seen = new Set();
+  for (const spec of specs) {
+    const match = /^(\d+)\.(\d+)$/.exec(String(spec.fixed_ref));
+    if (!match || Number(match[1]) !== sectionByName.get(spec.section).index || Number(match[2]) < 1 || seen.has(spec.fixed_ref)) {
+      throw new Error(`Question bank row ${spec.id} has an invalid fixed number.`);
+    }
+    seen.add(spec.fixed_ref);
+    indexes.set(spec, Number(match[2]));
+  }
+  return indexes;
 }
 
 function ensurePresentationMetadata(specs) {
@@ -373,7 +395,8 @@ function renderCompactQuestionTable(specs, markdown = true) {
       lines.push('', ...(markdown ? [`## ${heading}`] : [heading, '='.repeat(heading.length)]));
     }
     // Status lines come after the section's numbered questions (withPresentationMetadata orders them).
-    if (spec.report_only) {
+    // A status row with a fixed number is a row in the table, in its place.
+    if (spec.report_only && !(markdown && spec.presentation.question_ref)) {
       lines.push('', statusLine(spec));
       continue;
     }
@@ -389,6 +412,10 @@ function renderCompactQuestionTable(specs, markdown = true) {
       if (spec.selected) lines.push(`  Selected: ${selected(spec)}`);
       continue;
     }
+    if (spec.report_only) {
+      lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(`Nothing to answer: ${spec.recommended_text}`)} | - |`);
+      continue;
+    }
     const rest = others(spec).map(tableCell).join('<br>') || '-';
     const chosen = spec.selected ? `<br>Selected: ${tableCell(selected(spec))}` : '';
     lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
@@ -402,7 +429,9 @@ function renderCompactQuestionTable(specs, markdown = true) {
 function renderQuestionBankHeader(specs, markdown = true, quickIndex = true, title = 'Toolkit setup choices') {
   const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
   const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
-  const heading = `${title} - ${questionCount} questions across ${sectionCount} sections`;
+  // Status rows shown in the table (fixed numbers) are counted apart from the questions.
+  const statusCount = specs.filter((spec) => spec.report_only && spec.presentation.question_ref).length;
+  const heading = `${title} - ${questionCount} questions${statusCount ? ` and ${statusCount} status row${statusCount === 1 ? '' : 's'}` : ''} across ${sectionCount} sections`;
   const bankReference = specs[0]?.presentation.bank_reference || '';
   const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, ''];
   if (!quickIndex) return lines;
@@ -512,7 +541,9 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     }
   }
   const identity = specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs);
-  // A report-only row takes no answer, so it has no selection and no changed-only reference.
+  // A report-only row takes no answer, so it has no selection; with fixed numbers it has a number,
+  // and answering it says so.
+  const statusRows = new Map(specs.filter((spec) => spec.report_only && spec.presentation.question_ref).map((spec) => [spec.presentation.question_ref, spec]));
   specs = answerable(specs);
   if (isAllRecommendedAnswer(answerText)) {
     return {
@@ -545,6 +576,7 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     if (seen.has(questionRef)) throw new Error(`${label} question bank answer repeats question reference ${questionRef}.`);
     seen.add(questionRef);
     const spec = byReference.get(questionRef);
+    if (!spec && statusRows.has(questionRef)) throw new Error(`${questionRef} ${statusRows.get(questionRef).title} has nothing to answer here.`);
     if (!spec) throw new Error(`${label} question bank answer references unavailable question ${questionRef}.`);
     const choice = choiceByPresentationReference(spec, rawChoiceRef);
     if (!choice) throw new Error(`${label} question bank answer references unavailable choice ${rawChoiceRef.toUpperCase()} for ${questionRef}.`);

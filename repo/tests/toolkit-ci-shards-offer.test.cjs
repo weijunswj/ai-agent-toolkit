@@ -23,7 +23,7 @@ const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const { GitHubProposalTransport } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
-const { BankTickets, bankReference, renderGovernanceBank, governanceBankSpecs: bankSpecs } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+const { BankTickets, bankReference, renderGovernanceBank, explainText, governanceBankSpecs: bankSpecs } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
 
 const SESSION = 'session-owner-shards';
 const SLUG = 'toolkit-test-fixture/shards';
@@ -171,9 +171,8 @@ test('bank: a governed repository is asked with the minutes estimate; yes prepar
   const ctx = governedFixture(t);
   const transport = recorder();
   const result = await answer(ctx, '1.4=B', { transport });
-  assert.match(result.shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| B\. Yes: /, '25 minutes is slow CI, so Yes is recommended');
-  assert.match(result.shown.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
-  assert.match(result.shown.out, /^More on 1\.4: .*Minutes: the last green CI run used about 25 runner minutes\./m);
+  assert.match(result.shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI about 25 min\) \| B\. Yes: /, '25 minutes is slow CI, so Yes is recommended; the minutes sit in the Current cell');
+  assert.doesNotMatch(result.shown.out, /1\.4 asks:|More on 1\.4/, 'the longer text is in explain only');
   assert.equal(result.code, 0, result.err);
   assert.equal(transport.calls.length, 1);
   const [repository, mergedText, text, value, list] = transport.calls[0];
@@ -193,10 +192,11 @@ test('bank: a governed repository is asked with the minutes estimate; yes prepar
 });
 
 test('bank: the minutes line is display-only, so a CI run that finishes before the answer does not change the bank reference', async t => {
-  const specsFor = minutes => bankSpecs({ state: { state: 'ENABLED' }, task: 'off', merged: JSON.parse(bindingText()), ciShards: { estimate: offer.estimateText({ minutes, workflow: 'CI' }) } });
+  const specsFor = minutes => bankSpecs({ state: { state: 'ENABLED' }, task: 'off', merged: JSON.parse(bindingText()), ciShards: { estimate: offer.estimateText({ minutes, workflow: 'CI' }), measured: { minutes, workflow: 'CI' } } });
   const twelve = specsFor(12.2), thirteen = specsFor(13.1);
   assert.equal(bankReference(twelve), bankReference(thirteen), 'two estimates give the same bank reference');
-  assert.match(renderGovernanceBank(thirteen), /^More on 1\.4: .*about 13 runner minutes/m, 'the bank still shows the minutes');
+  assert.match(renderGovernanceBank(thirteen), /\| Not asked yet \(CI about 13 min\) \|/, 'the bank still shows the minutes');
+  assert.match(explainText(thirteen, '1.4'), /\*\*More:\*\* Yes adds a first shard list .*about 13 runner minutes/, 'explain 1.4 has the full minutes line');
   // End to end: the bank is shown at 12 minutes and answered after a run that measured 31.
   const ctx = governedFixture(t);
   const transport = recorder();
@@ -242,7 +242,7 @@ test('bank: Yes is recommended only for slow CI; fast or unknown CI keeps Not no
   assert.equal(recommended({ minutes: 42, workflow: 'CI' }), 'yes');
   assert.equal(recommended({ minutes: 9.4, workflow: 'CI' }), 'not-now');
   assert.equal(recommended(null), 'not-now', 'an unknown time is never guessed slow');
-  assert.match(renderGovernanceBank(specsFor({ minutes: 4, workflow: 'CI' })), /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: /);
+  assert.match(renderGovernanceBank(specsFor({ minutes: 4, workflow: 'CI' })), /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI about 4 min\) \| A\. Not now: /);
 });
 
 test('bank: not now writes nothing and asks again; never records the answer and the question stops', async t => {
@@ -251,7 +251,7 @@ test('bank: not now writes nothing and asks again; never records the answer and 
   const later = await answer(ctx, 'all recommended', { transport, estimate: () => ({ minutes: 4, workflow: 'CI' }) });
   assert.equal(later.code, 0, later.err);
   assert.equal(transport.calls.length, 0);
-  assert.match(later.out, /Parallel CI shards: not now\. Nothing was written; the next refresh asks again\./);
+  assert.doesNotMatch(later.out, /Parallel CI shards/, 'not now writes nothing and says nothing, including when the reply leaves the row out');
   const never = await answer(ctx, '1.4=C', { transport });
   assert.equal(never.code, 0, never.err);
   assert.equal(transport.calls.length, 1);
@@ -259,12 +259,11 @@ test('bank: not now writes nothing and asks again; never records the answer and 
   assert.equal(transport.calls[0][4], null, 'never writes no list');
   // A merged not-now asks again; a merged never or yes is only a status line.
   ctx.merge(bindingText({ ci_shards: { answer: 'not-now' } }));
-  assert.match((await run(ctx, ['setup'])).out, /\| 1\.4 \| Parallel CI shards \| Not now \|/);
-  for (const [merged, line] of [['never', /Status \(nothing to answer\): Parallel CI shards: Never ask\./], ['yes', /Status \(nothing to answer\): Parallel CI shards: Yes\./]]) {
+  assert.match((await run(ctx, ['setup'])).out, /\| 1\.4 \| Parallel CI shards \| Not now[^|]* \|/);
+  for (const [merged, line] of [['never', /\| 1\.4 \| Parallel CI shards \| Never ask \| Nothing to answer: /], ['yes', /\| 1\.4 \| Parallel CI shards \| Yes \| Nothing to answer: /]]) {
     ctx.merge(bindingText({ ci_shards: { answer: merged } }));
     let estimated = 0;
     const shown = await run(ctx, ['setup'], { estimate: () => { estimated += 1; return null; } });
-    assert.doesNotMatch(shown.out, /\| 1\.4 \| Parallel CI shards/);
     assert.match(shown.out, line);
     assert.equal(estimated, 0, 'nothing is read for a question that is not asked');
   }
@@ -275,7 +274,7 @@ test('bank: a repository with governance off is asked only alongside turning it 
   fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), bindingText({ governance: 'disabled' }));
   recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
   const off = await run(ctx, ['setup']);
-  assert.match(off.out, /\| Parallel CI shards \| Not asked yet \| .*Yes \(needs governance on\)/);
+  assert.match(off.out, /\| Parallel CI shards \| Not asked yet[^|]* \| .*Yes \(needs governance on\)/);
   const refused = await answer(ctx, '1.4=B', { transport: recorder() });
   assert.match(refused.out, /Parallel CI shards can be answered only while governance is on/);
   const held = governedFixture(t);
@@ -375,4 +374,48 @@ test('governance check: copies left after never are drift; a copy at an old work
   const left = findings().filter(entry => entry.severity === 'drift').map(entry => entry.message);
   assert.equal(left.length, 2);
   for (const message of left) assert.match(message, /no longer copied: the merged binding answers never to parallel CI shards \(ci_shards\)\. Repair the shard list and refresh the repository rules, or remove the shard copies in a pull request\./);
+});
+
+// ---- the retired schedule_folder key ------------------------------------------------------------
+
+test('bank: the shards pull request drops the retired schedule_folder line, alone or with a switch, and its text says so', async t => {
+  const withRetired = text => text.replace('  "required_checks"', '  "schedule_folder": "TOOLKIT",\n  "required_checks"');
+  const stamp = text => text.replace(/"offered_at": "[^"]*"/, '"offered_at": "T"');
+  for (const reply of ['1.4=B', '1.2=B, 1.4=B']) {
+    const plain = governedFixture(t);
+    const before = recorder();
+    assert.equal((await answer(plain, reply, { transport: before })).code, 0);
+    const carried = governedFixture(t);
+    carried.merge(withRetired(bindingText()));
+    const after = recorder();
+    const result = await answer(carried, reply, { transport: after });
+    assert.equal(result.code, 0, result.err);
+    const [, mergedText, text] = after.calls[0];
+    assert.equal(mergedText, carried.mergedText, `${reply}: the pull request starts from the exact merged text`);
+    assert.match(carried.mergedText, /"schedule_folder"/);
+    assert.equal(stamp(text), stamp(before.calls[0][2]), `${reply}: the only other change is the removed schedule_folder line`);
+  }
+  // The transport's pull request text names the deleted line only when one goes.
+  const proposal = offer.ciShardsText(bindingText(), JSON.parse(bindingText()), { answer: 'never' });
+  const body = merged => {
+    let sent = null;
+    const runner = (args, input) => {
+      const endpoint = args[1];
+      if (args[0] === 'auth') return '';
+      if (endpoint === 'user') return JSON.stringify({ login: 'toolkit-test-fixture' });
+      if (endpoint === `repos/${SLUG}`) return JSON.stringify({ default_branch: 'main' });
+      if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'b'.repeat(40) } });
+      if (endpoint.includes('/contents/.github/toolkit-programme.json?ref=')) return JSON.stringify({ type: 'file', encoding: 'base64', sha: 'c'.repeat(40), content: Buffer.from(merged).toString('base64') });
+      if (endpoint.includes('/pulls?state=open')) return '[]';
+      if (endpoint.includes('/git/ref/heads/toolkit/')) throw Object.assign(new Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      if (endpoint.endsWith('/git/refs')) return '{}';
+      if (endpoint.includes('/contents/')) return JSON.stringify({ commit: { sha: 'd'.repeat(40) } });
+      if (endpoint.endsWith('/pulls')) { sent = input.body; return JSON.stringify({ number: 9, html_url: `https://github.com/${SLUG}/pull/9` }); }
+      throw new Error(`unexpected ${endpoint}`);
+    };
+    new GitHubProposalTransport({ run: runner }).publishCiShards(SLUG, merged, proposal, 'never', null);
+    return sent;
+  };
+  assert.match(body(withRetired(bindingText())), /parallel CI shards question\. It also deletes the retired `schedule_folder`, which nothing reads any more\. Nothing else changes\./);
+  assert.match(body(bindingText()), /parallel CI shards question\. Nothing else changes\./);
 });
