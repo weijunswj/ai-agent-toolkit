@@ -1,5 +1,19 @@
 # Toolkit Changelog
 
+## 3.139.0
+
+### Changed
+
+- **Evidence store kinds are stated plainly:** a programme file whose store is missing, or names a kind other than `github` (a folder, a drive, `none`), is refused with one message that says governance keeps its state in a private GitHub repository, that a folder or drive can hold evidence copies only, and that without such a store governance stays off. It replaces the terse "not supported (supported: github)" line and the store-field errors that followed it. Only a plain kind word is echoed. Governance still reads such a file as an error, never as on.
+- **How To Use** has an Evidence Store part: when a store is needed (only while governance is on), a table of store kinds with and without governance, and three limits (same owner only, a shared store is shared trust, folders and drives hold copies only). The `toolkit-setup` skill points to it.
+- **Gate and global rules:** with governance off, progress and decisions go in the pull request and the evidence store, if any, and review rounds and long evidence go to the evidence store, if any, so a repository with no store is no longer told to use one.
+- Gate route check: the per-launch `Route override:` brief line is retired, so every gate runs on its stack-registry pin. A gate brief that still carries the line is refused with a plain reason, and an old route stamp carrying ` override=` reads off its pin, so the merge train finder never boards it. The controller roles page, the Projects skill launch rule and the merge train notes drop the override wording.
+
+### Fixed
+
+- Merge card on the first try: the merge hold's refusal now leads with Toolkit's merge card and tells the agent to ask no merge question of its own, with the typed line kept as the fallback. In a chat where the card counts and task auto-merge is off, an agent-written question card that asks to merge a named pull request is refused before the owner sees it; the refusal says to run the merge only if the user asked for it, so one tap merges. Questions about already-merged pull requests, merge trains and merges of issues, steps or branches are not refused. The tap receipt names the merge card. The review playbook says that running the merge is the ask.
+- **Logged acceptance clears the closed-without-acceptance finding:** refresh no longer raises `CLOSED_WITHOUT_ACCEPTANCE` for a completed close whose controller-logged review `PASSED` has passing verdicts at the tracked PR head (with no head tracked, the newest verdict) and whose UAT is `NOT_REQUIRED`, `PASSED` or `UAT_RETAINED` at that head. Before, only an accepted G1 or G2 gate counted, so a disposed finding came back as new whenever the attention list's size cap evicted the disposal.
+
 ## 3.138.0 (usage reader)
 
 ### Changed
