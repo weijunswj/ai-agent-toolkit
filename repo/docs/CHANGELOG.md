@@ -1,5 +1,49 @@
 # Toolkit Changelog
 
+## 3.143.0
+
+### Fixed
+
+- **The issue closure check proves a merge train is a train:** a merged train's `OWNER_TEST_NEEDED` line releases an issue its members answer for only when the train's own commits are merges of member heads (each row's pull request merged at that head, never the train itself), catch-up merges of main, eject reverts that exactly undo an earlier boarding, and a last version-only bump, read from GitHub. A pull request that pastes a train table over a merge of a sibling branch (even one that lists the sibling's head as a row), or adds a commit of its own, keeps the issue held.
+
+## 3.142.0 (store save recovers from a failed push)
+
+### Changed
+
+- `toolkit store` save, move and merge-branch no longer strand the store checkout after a failed push. A push is tried up to 4 times with waits of 2, 4 and 8 seconds; before each retry the store is read first, so a push that landed is never sent twice, and a store that moved is merged with a merge commit. After the last try the commit stays in the checkout, and running the same save again checks it and pushes it.
+- Commits the store lacks, whether kept by a failed push, made by hand or made by a race merge, are checked again right before every push: every blob and every commit message is secret-scanned, and each change may only add, change or exactly rename plain files inside the store folders. A commit that fails is named and never pushed.
+- A race merge that conflicts is cancelled and made again keeping both versions: the store's copy stays in place and ours is saved under `evidence/store-conflicts/`. No step leaves a half-done merge, and `sync` cancels one an older run left, keeping every commit.
+- The `--message` text is secret-scanned before anything is committed.
+- No store refusal points at a raw push, a reset or a hand merge any more.
+
+## 3.141.1
+
+### Changed
+
+- **Projects coordinator reads a thread's result in full before resolving it:** a wake preview can cut the end of a thread's final message, and a thread was once resolved from such a preview, losing the report paths and a follow-up item in its tail. Reading the final message in full (`full_bodies`, never a preview or summary) and acting on or recording every item in it is now a condition of resolving a thread, in the instructions block line, the skill's resolve conditions and read rule, the hourly nudge's thread read and resolve candidates, and the `RESOLVE DUE` step. Wording in the block and skill was tightened elsewhere to stay within their byte budgets, with no rule dropped from the skill; the block's "End finished Remote Control sessions" line now lives only in the skill, beside the resolve rule.
+
+### Fixed
+
+- **Superseded pull requests:** a programme task kept tracking the first pull request it found, even after that pull request closed unmerged and a replacement took its place, so the G1 acceptance check read the dead pull request's head (`EVIDENCE_STALE`) and the close list never offered the task. A refresh now moves a task's tracked pull request only to a newer pull request that claims the task, through a GitHub closing link or `Refs`, `Completes`, `Closes`, `Fixes` or `Resolves` with the task's number in its own body. When the tracked pull request closed unmerged, the task follows the one such open pull request, or else the newest such merged one; when it merged and the task is still open, the task follows the one such open pull request, so a later slice or rebuild is tracked too. A mention without a keyword, an older pull request, two or more such open pull requests and a retired task never move it, a finished task only moves from a closed pull request to a merged one, and a replacement that cannot be read back in the state it was chosen in leaves the task's PR discovery incomplete with the old pull request kept. Each move appears in the pass's planned effects and its JSON report.
+
+## 3.141.0 (design data refresh)
+
+### Fixed
+
+- **Task auto-merge in Claude Projects cloud threads:** every cloud Projects thread was forced Off for task auto-merge, so a train with the repository's switch at `after-gates` still needed the owner's card tap. The host writes a thread's session context as the opening record of its session transcript, marked meta, and never submits it as a prompt, so the hook that should have recorded the project line never saw it. The merge hold now reads the `- Task auto-merge` project line at merge time from that record: only the first main-thread user entry, only when it is marked meta, belongs to this session and starts with the session context. A typed first prompt, a later wake carrying a context, tool output, another session's transcript and a missing or unreadable transcript all still force Off. The prompt-based switch store, which was never written on the real host, is removed, and the gate route check and the merge hold now share one read-only transcript head reader. Tests use the host's real transcript shape.
+
+### Changed
+
+- **Design data:** The design-system generator's 28 CSV files now match upstream `nextlevelbuilder/ui-ux-pro-max-skill` at `0e8d408`, byte for byte, and every lock pin is the real upstream blob, so the old line-ending-only pins are gone.
+- **Status filter:** Only rows upstream marks `active` rank in style and stack searches, so deprecated and supplemental styles never lead a recommendation. A stack query naming a legacy or deprecated generation still finds that stack's deprecated rows.
+- **Right-to-left:** A recommended style now carries upstream's `rtl_level`, shown in the Markdown output too.
+
+### Added
+
+- **Source-lock refresh:** `repo/scripts/refresh-source-lock.cjs` turns a reviewed source-watch notice into a one-command refresh of an active source lock: it copies exact files, moves pins, lists new upstream files as excluded and refuses while an adapted file needs porting by hand.
+- **Escape list:** `repo/scripts/toolkit-escape-ledger.cjs` keeps one line per bug found after merge in the private evidence store (`state/<owner>/<repo>/escapes.jsonl`, beside the repository's programme state): what broke, why the tests missed it, the kind of test that should have caught it, who found it, and the fix and test once they exist. `add` writes a line, `fix` fills the fix and test once, `check` validates the file and `group` prints counts per kind and the escapes with no test yet, never the text. The reader refuses anything outside its exact format, and any text holding a local path, a secret-shaped value, personal data or an AI footer.
+- **Controller findings:** a bug found after merge now also gets its escape-list line the same turn.
+
 ## 3.140.0 (stuck threads get a fresh successor)
 
 ### Fixed
