@@ -399,6 +399,7 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
+  BATCH_NEXT: { source: 'reconcile', queue: true, next_action: "Controller: no NOW task needs a gate lane. Start the batch's next task (picked tasks lead LATER); if none is left, read all of LATER and pick the next batch: top priority, then quickest, at most 6 PRs and one large task; set their order to lead LATER and record the pick" },
   TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
@@ -475,6 +476,12 @@ const MAX_RELAYS_PER_PASS = 10;
 const TASK_IDLE_HOURS = 6;
 // A task whose PRs have all merged or closed needs its next step sooner: this long after the last change.
 const TASK_MERGED_OPEN_HOURS = 1;
+// The batch tail guard: a NOW task still for this long, waiting on something other than the owner,
+// stops holding the next batch (it stays NOW and keeps its own work-queue finding).
+const BATCH_TAIL_HOURS = 24;
+// A free lane is reported once no open task's state has changed for this long, so a controller that
+// is already starting the next task, or a batch that has only just finished, is not flagged.
+const BATCH_NEXT_HOURS = 1;
 // An open PR with no update (push, comment, review or edit) for this long no longer counts as moving its task.
 const PR_STALE_HOURS = 24;
 const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
@@ -5372,43 +5379,49 @@ class Reconciler {
     }
   }
 
-  // Work queue: a task the graph shows IN PROGRESS that nothing is moving. Nothing moves it when it has
-  // no live gate assignment, no holder on its state document, and no open or draft PR (tracked, in its
-  // history, or naming it) updated in the last PR_STALE_HOURS. A stale open PR does not hide it, so work
-  // parked behind a stalled PR surfaces. A task whose PRs have all merged or closed is TASK_MERGED_OPEN
-  // after TASK_MERGED_OPEN_HOURS of quiet; any other idle task is TASK_IDLE after TASK_IDLE_HOURS. A task
-  // waiting on the owner is left out: the owner already has it. So is a task natively blocked by another
-  // open task on the graph that is itself moving: the blocker carries the work. A pass that could not
-  // read every open PR raises none, since an unread open PR could be moving the task.
+  // How long a task the graph shows IN PROGRESS has been still, or null when something moves it or it
+  // is not shown IN PROGRESS. Nothing moves it when it has no live gate assignment, no holder on its
+  // state document, and no open or draft PR (tracked, in its history, or naming it) updated in the last
+  // PR_STALE_HOURS; a stale open PR does not count. A task waiting on the owner is left out: the owner
+  // already has it. A document with no write time is new in this pass or cannot be dated, so never still.
+  // `latest` is the newer of the document's write and the last comment on the task.
+  stillness(outcome, doc, observed, now) {
+    if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') return null;
+    if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) return null;
+    const open = [...new Set([
+      ...(['OPEN', 'DRAFT'].includes(doc.pr?.state) ? [doc.pr.number] : []),
+      ...(doc.prs || []).filter(pr => pr.state === 'OPEN').map(pr => pr.number),
+      ...(observed.references.get(outcome.issue) || []),
+    ])].filter(number => isInt(number, 1));
+    // An open PR whose last update cannot be read counts as moving.
+    const updated = number => Date.parse(observed.prUpdated?.get(number) || '');
+    if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * HOUR_MS)) return null;
+    const written = Date.parse(doc.volatile?.written_at || '');
+    if (!Number.isFinite(written)) return null;
+    const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
+      .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
+    const latest = Math.max(written, ...comments);
+    const closedPrs = [doc.pr, ...(doc.prs || [])].filter(pr => isInt(pr?.number, 1));
+    const merged = !open.length && closedPrs.length > 0 && closedPrs.every(pr => ['MERGED', 'CLOSED'].includes(pr.state));
+    return { open, merged, latest };
+  }
+
+  // Work queue: a task the graph shows IN PROGRESS that nothing is moving (see stillness). A task whose
+  // PRs have all merged or closed is TASK_MERGED_OPEN after TASK_MERGED_OPEN_HOURS of quiet; any other
+  // idle task is TASK_IDLE after TASK_IDLE_HOURS. So is a task natively blocked by another open task on
+  // the graph that is itself moving: the blocker carries the work. A pass that could not read every open
+  // PR raises none, since an unread open PR could be moving the task.
   diffIdle(parent, docs, observed, only, findings) {
     if (observed.prGraph?.openComplete === false) return;
     const now = Date.parse(this.now());
-    const hour = 60 * 60 * 1000;
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     // The stall of one task, or null when something moves it (or it is not shown IN PROGRESS).
     const stall = outcome => {
       const doc = docs.get(outcome.issue);
-      if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') return null;
-      if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) return null;
-      const open = [...new Set([
-        ...(['OPEN', 'DRAFT'].includes(doc.pr?.state) ? [doc.pr.number] : []),
-        ...(doc.prs || []).filter(pr => pr.state === 'OPEN').map(pr => pr.number),
-        ...(observed.references.get(outcome.issue) || []),
-      ])].filter(number => isInt(number, 1));
-      // An open PR whose last update cannot be read counts as moving.
-      const updated = number => Date.parse(observed.prUpdated?.get(number) || '');
-      if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * hour)) return null;
-      const written = Date.parse(doc.volatile?.written_at || '');
-      // A document with no write time is new in this pass or cannot be dated; neither is idle.
-      if (!Number.isFinite(written)) return null;
-      const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
-        .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
-      const latest = Math.max(written, ...comments);
-      const closedPrs = [doc.pr, ...(doc.prs || [])].filter(pr => isInt(pr?.number, 1));
-      const merged = !open.length && closedPrs.length > 0 && closedPrs.every(pr => ['MERGED', 'CLOSED'].includes(pr.state));
-      const hours = merged ? TASK_MERGED_OPEN_HOURS : TASK_IDLE_HOURS;
-      if (now - latest < hours * hour) return null;
-      return { doc, open, merged, hours, latest };
+      const still = this.stillness(outcome, doc, observed, now);
+      if (!still) return null;
+      const hours = still.merged ? TASK_MERGED_OPEN_HOURS : TASK_IDLE_HOURS;
+      return now - still.latest < hours * HOUR_MS ? null : { doc, ...still, hours };
     };
     // A blocker moves when it is an open task on this graph shown IN PROGRESS that is not stalled itself
     // (one level only: a blocker skipped for its own blocker still counts as stalled here).
@@ -5432,6 +5445,42 @@ class Reconciler {
         ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}` });
     }
+  }
+
+  // Work queue, batch rule (delivery contract section 3): lanes finish the NOW batch before LATER work
+  // starts. BATCH_NEXT, on the parent, says a lane is free for LATER work: the graph has an open LATER
+  // task and no open NOW task still needs a gate lane. A NOW task needs none when it waits on the owner
+  // (its lifecycle or gate), its open PR passed review at its current head (on a merge train or waiting
+  // for a merge OK), every one of its PRs has merged or closed (its next step is the controller's, and
+  // TASK_MERGED_OPEN asks for it), or, by the tail guard, it has been still for BATCH_TAIL_HOURS. Optional
+  // tasks never raise it: the owner keeps them, the batch rule does not start them. It waits until no
+  // open task's state document has been written for BATCH_NEXT_HOURS (one without a write time is new,
+  // so it waits too). Only a whole-graph pass that read every open PR checks it; the finding clears
+  // once a NOW task needs a lane again.
+  diffBatch(parent, docs, observed, only, findings) {
+    if (only || observed.prGraph?.openComplete === false) return;
+    const now = Date.parse(this.now());
+    const rows = parent.outcomes.filter(outcome => observed.issues.get(outcome.issue)?.state !== 'closed')
+      .map(outcome => ({ outcome, doc: docs.get(outcome.issue), group: graphClass(outcome, docs.get(outcome.issue)) }));
+    const later = rows.filter(row => row.group === 'LATER');
+    if (!later.length) return;
+    const needsLane = ({ outcome, doc }) => {
+      if (doc.lifecycle === 'WAITING_OWNER' || doc.gate?.state === 'WAITING_OWNER') return false;
+      const passedAtHead = ['OPEN', 'DRAFT'].includes(doc.pr?.state) && isSha(doc.pr.head) && doc.review?.state === 'PASSED'
+        && (doc.review.verdicts || []).some(verdict => verdict.verdict === 'PASSED' && verdict.head === doc.pr.head);
+      if (passedAtHead) return false;
+      const still = this.stillness(outcome, doc, observed, now);
+      if (still?.merged) return false;
+      return !(still && now - still.latest >= BATCH_TAIL_HOURS * HOUR_MS);
+    };
+    const current = rows.filter(row => row.group === 'NOW');
+    if (current.some(needsLane)) return;
+    const written = rows.filter(row => row.doc).map(row => Date.parse(row.doc.volatile?.written_at || ''));
+    if (written.some(time => !Number.isFinite(time) || now - time < BATCH_NEXT_HOURS * HOUR_MS)) return;
+    const top = graphOrder(parent, docs, observed.issues).find(outcome => later.some(row => row.outcome === outcome));
+    const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+    findings.push({ code: 'BATCH_NEXT', issue: parent.parent_issue,
+      detail: `${current.length ? `none of the ${count(current.length, 'NOW task')} needs a gate lane` : 'NOW is empty'} and LATER has ${count(later.length, 'task')}, led by #${top.issue}` });
   }
 
   // Drift (programme-drift.cjs): what fell behind its state with nothing in this pass to fix it. Open
@@ -6357,6 +6406,7 @@ class Reconciler {
     const blockHolds = new Set(holds.slice(blockHoldStart));
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
+    this.diffBatch(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
@@ -7600,7 +7650,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, PR_STALE_HOURS, WORK_QUEUE_CODES, workQueue,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, WORK_QUEUE_CODES, workQueue,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });
