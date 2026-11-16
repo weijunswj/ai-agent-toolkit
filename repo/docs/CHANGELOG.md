@@ -1,5 +1,66 @@
 # Toolkit Changelog
 
+## 3.138.0 (usage reader)
+
+### Changed
+
+- **Retired `schedule_folder` leaves bindings:** every binding writer now drops this retired programme-file key, which nothing reads. That covers a governance turn-on or refresh proposal, a task auto-merge or merge-train switch pull request, a parallel CI shards answer and the instruction-copies cleanup. A switch, shards or cleanup change keeps the file's own layout, so its diff shows one extra removed line, and its pull request text or preview names it. A binding that still carries the key stays valid. This repository's own programme file no longer carries it.
+- **Report-only lines name who acts:** the CI check-up records each dropped item with its reason; the daily PASS/WARN/FAIL rollup in the secure CI/CD prompt, status template, self-hosted service and managed foundation skills names the owner as reader, the chosen alert channel and same-day action on a FAIL or a WARN three days running; skill product review baselines name who clears each finding and by when; agent cost control gaps are fixed the same turn or handed on with a due date; temporary resources are removed by their cleanup owner by the end date; the controller acts on a governed repository's startup note the same turn, refreshing Toolkit first when the note names a newer one.
+- **Owed Toolkit checks have an owner:** the yearly hook review and the Codex nested-cell re-measure are fixed rows of the controller's release-batch real-host smoke, residual hosts live in the release brief's host matrix, and the controller runs the host drift review when due and picks up source-watch notification pull requests on its periodic run.
+
+### Added
+
+- `repo/scripts/toolkit-usage-report.cjs`: reads Claude Code and Codex session transcripts and writes one JSON report of token and tool counts per session, so the runs that use up usage limits can be measured before anything is changed to save them. Per session it gives the models, first and last activity, model turns (helper turns among them), input, cache-write, cache-read and output tokens, the cache hit share, tool calls by name, repeat reads of one file, shell sleeps, wake-ups scheduled, helpers started and a run type (hourly, daily, weekly, coordinator, G0, G1, G2, merge train or other), plus totals per run type. A reply Claude Code writes as several lines counts once, and a repeated Codex token count is skipped. The report never holds prompt, reply, thinking, tool or file text: file paths become ids that match only within one report, and a report that would hold anything shaped like a secret is refused and not written.
+
+### Fixed
+
+- The reconciler skill again says how to run the standalone decision-trace audit, which flags it takes and what it fails on, and its script header no longer claims the reconcile pass runs it.
+- The reconciler skill now names where an initial nonblocking review finding is recorded: its area's open follow-up child issue.
+- The plain-text check's starting baseline leaves out findings in file names it cannot store (`:`, `\` or control characters) and says how many, so the next run fails on those findings instead of failing to read the baseline.
+- `--migrate-baseline` runs even while the check is switched off, says so, and reminds you that git history still holds the old text, so a real token stored there needs revoking. Running it on a baseline that already uses fingerprints says nothing changed.
+- The old baseline format notice says "old format" instead of "v1", and the installer prints it when it keeps such a baseline, not only on `--check`.
+- Success lines say "1 entry", not "1 entries", and the Toolkit's own plain-text check names a bad option or missing value instead of a vague error.
+- In a Toolkit checkout, the personal-data guard installer warns about a leftover plain-text check copy under `.github/scripts/` and `--check` reports it as drift, as it already did for a leftover guard copy.
+- **Merge trains re-read each member's UAT line:** `toolkit-merge-train.cjs land` now reads each member's live pull request body and refuses when the auto-merge check calls its `UAT:` line missing or invalid, or when the manifest records `NOT_REQUIRED` or `PASSED` while the body says `OWNER_TEST_NEEDED`. A stale or hand-built manifest can no longer drop an owner's test at merge; a stricter manifest line still lands and keeps the test owed. A `--live` member entry with no body is refused, never read as `NOT_REQUIRED`.
+- **The train finder says why a UAT line fails:** its skip reason now ends in `(missing)` or `(invalid: <why>)`.
+- **PR sweeps flag invalid UAT lines:** the Projects hourly and daily PR sweeps now flag `invalid UAT verdict` as well as `missing UAT verdict`, judged by the auto-merge check rather than by a line starting `UAT: `.
+- The n8n workflow validator helper's Pinecone pattern line ends in CRLF like the lines around it.
+
+## 3.137.1
+
+### Fixed
+
+- **Source-watch reports keep old trackers as history:** a test now pins that both report builders (third-party source updates and advisory targets) show a review cursor's tracker only under the "Tracker at last review (history; find the current owner at triage)" label, so a later edit cannot quietly present a closed task as the current owner.
+- The host-change review template now routes each finding to the smallest open task that owns that area now and cites closed or retired tasks only as history, and the source-watch README says a new or advanced cursor names the open task that owns the follow-up.
+
+## 3.137.0 (governance question bank shows once)
+
+### Fixed
+
+- **Governed rules could be cut off at session start:** Claude Code keeps a session-start text only up to 10,000 characters and shows a 2,000-character preview of a longer one, and the governed rules come last. A cloud session started above 12 or more enabled repositories, or a computer with many failed `Checkpoint:` lines, could pass that limit and lose the rules. The text now always stays within 10,000 bytes: failed `Checkpoint:` lines past what fits are counted instead of listed, and in a cloud session the last repositories' state lines shrink to their state word, then are counted, so the rules and the names of the repositories they bind stay whole. Tests pin the limit.
+- `programme.cjs mark-archive` keeps every repeated `--remove`, where it silently kept only the last one; any other option given twice is now refused instead of replaced.
+- The programme reconciler's README and skill no longer describe a Programme Graph PR column the graph dropped, and say that agents mark notes for archiving through a holder order's `mark-archive` write.
+- **Curly quotes in a bank answer:** the tool gate no longer counts a bank answer command that holds a curly quote as the exact answer command, because PowerShell reads curly quotes as quotes, so such a line could run a second command after the answer. The command is refused instead.
+- **Refused bank replies:** a bank reply that is not in the exact form now says what makes it exact (its own line, its live ticket, and no curly quote, straight double quote, `$`, backtick or `%` in the answer), instead of the general "only the user answers" refusal, so the agent sends it again rather than telling the owner it cannot be sent.
+- **Test time budget after a re-run:** the CI test duration check now counts only the newest run attempt of each shard, as the shard check does, so re-running a shard that ran slow once can clear it.
+
+### Added
+
+- **Governance question bank permission lines:** `toolkit permissions` now prints the governance question bank as two exact Claude Code lines in the computer block, so the owner clicks Allow once (for the Update in the bank's permissions row, or the `--apply` command) instead of on every `toolkit governance` run, auto mode included. One line is `toolkit-governance.cjs setup`, which shows the bank. The other is `toolkit-governance.cjs setup --answers *`, which sends the owner's reply and writes nothing without that reply's live one-use ticket. `refresh`, `--json` and every other governance subcommand still ask, and Codex gets a prompt rule for the bank. The lines name the managed checkout's path, like every computer line.
+
+### Changed
+
+- **Bank once:** `toolkit governance` shows its question bank once. A reply that cannot be used (unread, an unknown row, a status row, two choices for one row) now gets one line saying what was wrong and "Reply again", never the bank again, and the owner's next own message still answers the same bank with a new one-use ticket. In the owner's own terminal the same line is printed and the question asked again.
+- **Changed state:** when the governance state changed between showing the bank and the reply, only the rows that changed are named, with their new state and recommendation, and the next reply answers the bank as it is now. Only a bank whose rows were added or taken away needs `toolkit governance` again.
+- **Explain:** a reply of `explain 1.4` prints the full text of that row and keeps the bank open for the answer.
+- **One Agents line:** every output after an answer, results and errors alike, ends with one line for the agent: show the lines above exactly as printed, add nothing, post no card, run no command shown and never show the bank again unless the owner types `toolkit governance`. The agent sends anything that may answer the bank as it is, and Toolkit checks it, instead of asking its own question or showing the bank again.
+- **Shorter bank:** after the table come only the Turn on line where it applies and one reply line. The shards question and minutes moved into `explain 1.4`, with the minutes in short in the row's Current cell, and the permissions note is in that row's own text.
+- **Fixed row numbers:** each governance row keeps its number from run to run, and status rows sit in the table under theirs (1.5 Evidence store, 1.6 Governance App, 1.7 Parent issue, 1.8 Required checks, 1.9 Repository visibility). A row that does not apply leaves its number free, and answering a status row says it has nothing to answer. The heading counts questions and status rows apart. `setup toolkit`'s bank is unchanged.
+- **Stable command path:** governance commands shown to the owner or an agent name the managed Toolkit checkout when this computer records one, not the desktop app's plugin copy, whose path changes with each update. The tool gate accepts the bank answer command from either copy, exactly.
+- **No stray line:** a reply that leaves parallel CI shards out, or answers not now, no longer prints a "not now" line.
+- **Open pull requests read again:** the bank reads the open governance pull requests again before it runs, so a turn-on pull request closed outside Toolkit no longer holds the next turn-on with a misleading "not ready" line. When one is still open, the answer names it to merge or close and prepares no second one. A failed turn-on no longer prints a line telling the agent to show the bank again, and a reply the tool gate cannot count tells the owner they can type `toolkit governance`, instead of the agent showing the bank.
+- **Store reuse:** a test pins that a new repository with an evidence store already found recommends keeping it, with a new private store only the other choice.
+
 ## 3.136.1
 
 ### Fixed
