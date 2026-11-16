@@ -11,8 +11,8 @@
 // exported definition is byte for byte the one the plan read. An empty Toolkit folder goes with its
 // last task. A task the owner made, or one Toolkit only listed (adopted), is never removed.
 //
-// Removal condition: delete this module and the task part of toolkit-remove.cjs once no supported
-// install can still carry an old Toolkit task (owner: the Toolkit controller).
+// Removal condition: delete this module and the task part of toolkit-remove.cjs in the first Toolkit
+// release on or after 1 March 2027 (owner: the Toolkit controller).
 
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -25,7 +25,7 @@ const MARKER = /\[toolkit-task v1 id=([a-z0-9][a-z0-9-]{0,79}) def=([0-9a-f]{12}
 const DISABLED_DESCRIPTION = 'Disabled: Toolkit removed. Delete this task or re-run setup toolkit.';
 
 class WindowsTasksError extends Error {
-  constructor(message, exitCode = 2) { super(message); this.exitCode = exitCode; }
+  constructor(message, exitCode = 2) { super(message); this.name = 'WindowsTasksError'; this.exitCode = exitCode; }
 }
 
 // Windows keeps each task as a file under System32\Tasks\<folder>\, so a name takes no character a
@@ -99,6 +99,22 @@ function powerShellExe(systemRoot = process.env.SystemRoot || 'C:\\Windows') {
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
+// The first real line of PowerShell's stderr. Windows PowerShell can write a CLIXML block first
+// ("#< CLIXML" and <Objs> markup, such as the "Preparing modules for first use." progress record), so
+// that block is taken out: an error record it holds (<S S="Error">) is used first, then the first
+// plain line outside it. Null when nothing is left.
+function stderrMessage(stderr) {
+  let text = String(stderr || '').replace(/^\s*#< CLIXML\s*$/gm, '');
+  const decode = value => value.replace(/_x([0-9A-Fa-f]{4})_/g, (all, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  const firstLine = value => value.split(/\r?\n/).map(line => line.trim()).find(Boolean) || null;
+  for (const [, value] of text.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)) { const line = firstLine(decode(value)); if (line) return line; }
+  // Innermost <Obj> elements first, so nested records go too; then the <Objs> wrapper and any stream line.
+  for (let before = null; before !== text;) { before = text; text = text.replace(/<Obj\b[^>]*>(?:(?!<Obj\b)[\s\S])*?<\/Obj>/g, ''); }
+  text = text.replace(/<S\b[^>]*>[\s\S]*?<\/S>/g, '').replace(/<\/?Objs\b[^>]*>/g, '');
+  return firstLine(text);
+}
+
 function runPowerShell(op, payload, { run = spawnSync, timeout = 120000 } = {}) {
   if (payload.folder !== null && payload.folder !== undefined && !FOLDER.test(String(payload.folder))) throw new WindowsTasksError(`task folder ${JSON.stringify(payload.folder)} is not valid`, 1);
   if (payload.name !== undefined && nameProblem(payload.name)) throw new WindowsTasksError(`task name ${JSON.stringify(payload.name)} ${nameProblem(payload.name)}`, 1);
@@ -107,7 +123,7 @@ function runPowerShell(op, payload, { run = spawnSync, timeout = 120000 } = {}) 
     env: { ...process.env, TOOLKIT_TASK_PAYLOAD: JSON.stringify(payload) }, encoding: 'utf8', timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024,
   });
   if (result.error) throw new WindowsTasksError(`PowerShell could not run (${result.error.code || result.error.message})`, 1);
-  if (result.status !== 0) throw new WindowsTasksError(String(result.stderr || '').trim().split(/\r?\n/)[0] || `PowerShell ${op} failed`, 1);
+  if (result.status !== 0) throw new WindowsTasksError(stderrMessage(result.stderr) || `PowerShell ${op} failed`, 1);
   const text = String(result.stdout || '').trim();
   return text ? JSON.parse(text) : null;
 }
@@ -143,4 +159,4 @@ function enrolledDefinition(live) {
     triggers: live.triggers || [], logon_type: live.logon_type || null, principal: live.principal || null, settings: live.settings || null, definition_xml: live.definition_xml || null });
 }
 
-module.exports = { DISABLED_DESCRIPTION, SCRIPTS, parseMarker, runnersDir, powerShellScheduler, enrolledDefinition };
+module.exports = { DISABLED_DESCRIPTION, SCRIPTS, parseMarker, runnersDir, powerShellScheduler, enrolledDefinition, stderrMessage };
