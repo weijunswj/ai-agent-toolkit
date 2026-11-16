@@ -1,0 +1,3 @@
+### Fixed
+
+- **Superseded pull requests:** a programme task kept tracking the first pull request it found, even after that pull request closed unmerged and a replacement took its place, so the G1 acceptance check read the dead pull request's head (`EVIDENCE_STALE`) and the close list never offered the task. A refresh now moves a task whose tracked pull request closed unmerged to the one open pull request in the task's own PR history, or else its newest merged one. With two or more open pull requests it keeps the closed one rather than guess, and a replacement that cannot be read back as open or merged leaves the task's PR discovery incomplete with the old pull request kept.

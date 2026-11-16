@@ -4427,6 +4427,16 @@ function referencedIssues(prs) {
   return references;
 }
 
+// The PR that takes over from a tracked PR that closed unmerged, chosen from the task's own PR
+// history with merge trains already removed: its one open PR, else its newest merged PR. Two or more
+// open PRs are ambiguous, so none is chosen and the closed PR stays tracked.
+function replacementPr(history, closed) {
+  const others = history.filter(pr => pr.number !== closed);
+  const open = [...new Set(others.filter(pr => pr.state === 'OPEN').map(pr => pr.number))];
+  if (open.length) return open.length === 1 ? open[0] : null;
+  return mergedSelection(others.filter(pr => pr.state === 'MERGED'))[0]?.number ?? null;
+}
+
 function backfillEligible(outcome, child) {
   return Boolean(outcome && isFinished(outcome, child) && !isRetired(outcome, child) && !child?.pr?.number);
 }
@@ -5154,6 +5164,16 @@ class Reconciler {
           histories.set(number,prHistory(own));
           const candidates=mergedSelection(own.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
           const result={complete:true,candidates}; discovery.set(number,result);
+          // A superseded PR: the tracked PR closed unmerged, so the task follows its replacement.
+          const replacement=current?.state==='CLOSED' ? replacementPr(own,current.number) : null;
+          if(replacement) {
+            try {
+              if(!prCache.has(replacement)) spend();
+              const pr=readPr(replacement);
+              if(!pr || pr.state==='CLOSED') throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','The replacement PR was not confirmed open or merged.');
+              selectedPrs.set(number,pr);
+            } catch(error) { incomplete([number],error); continue; }
+          }
           const outcome=outcomes.find(outcome=>outcome.issue===number);
           if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
             const selected=candidates[0].number;

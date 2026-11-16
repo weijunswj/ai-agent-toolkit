@@ -416,6 +416,57 @@ test('history keeps the current PR and orders open, newest merged, older merged,
   f.run(); assert.equal(f.child(2).pr.number,23); assert.deepEqual(f.child(2).prs.map(p=>p.number),[23,20,21,22]);
 });
 
+// A task tracking PR 22, which closed unmerged; the rest of its PR history is set per test.
+const superseded = () => {
+  const f=fixture(); pr(f,22,{state:'CLOSED',body:'Refs #2'});
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,pr:{...doc.pr,number:22}})});
+  return f;
+};
+const NEW = 'b'.repeat(40);
+
+test('a tracked PR that closed unmerged gives way to the newest merged PR of the task',()=>{
+  const f=superseded();
+  pr(f,20,{head:NEW,merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
+  pr(f,19,{merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'});
+  f.run();
+  assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state,f.child(2).pr.head],[20,'MERGED',NEW]);
+  assert.deepEqual(f.child(2).prs.map(p=>p.number),[20,19,22]);
+  assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+});
+
+test('a tracked PR that closed unmerged gives way to the one open PR of the task before any merged one',()=>{
+  const f=superseded();
+  pr(f,20,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'}); pr(f,23,{head:NEW,body:'Refs #2'});
+  // PR 23 is both a body reference and a timeline link, and still counts as one open PR.
+  f.github.issuePrLinks.set(2,{timeline:[23]});
+  f.run();
+  assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state,f.child(2).pr.head],[23,'OPEN',NEW]);
+});
+
+test('two open PRs on a task are ambiguous, so the closed tracked PR stays tracked',()=>{
+  const f=superseded(); pr(f,23,{body:'Refs #2'}); pr(f,24,{body:'Refs #2'});
+  f.run();
+  assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state],[22,'CLOSED']);
+  assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+});
+
+test('a replacement PR that reads back closed or fails to read keeps the tracked PR and leaves discovery incomplete',()=>{
+  for(const fails of [false,true]) {
+    const f=superseded(); pr(f,20,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
+    // The lists and links show PR 20 merged; only its own read disagrees, once.
+    let read=false;
+    f.github.intercept(call=>{
+      if(read || call.path!=='graphql' || !/pullRequest\(number: \$number\)/.test(call.body.query) || call.body.variables?.number!==20) return null;
+      read=true;
+      if(fails) throw new state.ProgrammeError('GH_FAILED','The PR read failed.');
+      Object.assign(f.github.prs.get(20),{merged:false,state:'CLOSED'}); return null;
+    });
+    const report=f.run();
+    assert.deepEqual(report.findings.filter(e=>e.code==='PR_DISCOVERY_INCOMPLETE').map(e=>e.issue),[2]);
+    assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state],[22,'CLOSED']);
+  }
+});
+
 test('a complete pass advances the private close watermark; old closes and parent links stay excluded',()=>{
   const f=fixture(); f.run(); const watermark=f.parent().private.graph_pr_watermark; assert.ok(watermark);
   pr(f,20,{state:'CLOSED'}); f.github.prs.get(20).closedAt='2026-11-07T00:00:00Z';
