@@ -281,19 +281,21 @@ test('params are strict: known keys, safe values, report folder in the shared fo
 });
 
 test('model tier and effort: cheapest by default, medium floor, every raise carries its reason', () => {
-  // Left out, each kind takes its default tier: the nudge and custom tasks small, the check-in mid.
-  assert.equal(params('hourly-nudge').model, 'small');
+  // Left out, each kind takes its default tier: custom tasks small, the check-in and the nudge mid
+  // (the nudge's stuck check and lane sweep missed threads on small).
+  assert.equal(params('hourly-nudge').model, 'mid');
   assert.equal(params('daily-check-in').model, 'mid');
   assert.equal(params('custom').model, 'small');
   const base = PARAMS['hourly-nudge'];
   for (const bad of [
-    { ...base, effort: 'low' }, { ...base, effort: 'minimal' }, { ...base, model: 'haiku' }, { ...base, model: 'mid' },
+    { ...base, effort: 'low' }, { ...base, effort: 'minimal' }, { ...base, model: 'haiku' }, { ...base, model: 'top' },
     { ...base, effort: 'high' }, { ...base, model: 'top', raise_reason: '' }, { ...base, model: 'top', raise_reason: 'no' },
     { ...base, model: 'top', raise_reason: 'a | b' }, { ...base, model: 'top', raise_reason: 'line\nbreak' },
     { ...base, model: 'top', raise_reason: ' padded ' }, { ...base, model: 'top', raise_reason: '{{project}} leak' }
   ]) assert.throws(() => validateParams('hourly-nudge', bad), JSON.stringify(bad));
   // A step down below the default needs no reason; a raise with one renders it.
   assert.equal(validateParams('daily-check-in', { ...PARAMS['daily-check-in'], model: 'small' }).model, 'small');
+  assert.equal(validateParams('hourly-nudge', { ...base, model: 'small' }).model, 'small');
   const raised = validateParams('hourly-nudge', { ...base, model: 'top', effort: 'high', raise_reason: 'missed checks at small' });
   const prompt = full('hourly-nudge', raised);
   assert.match(prompt, /Model tier for this task: top \(agent-cost-control ladder; on Claude, small is Haiku, mid Sonnet, top Opus\), effort high\./);
@@ -302,7 +304,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.doesNotMatch(rendered('hourly-nudge'), /Raised above/);
   assert.match(rendered('daily-check-in'), /Model tier for this task: mid /);
   // A live prompt rendered before tiers existed still parses: its params take the default tier.
-  const legacy = pointer('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
+  const legacy = pointer('hourly-nudge').replace(/,\n {2}"model": "mid"/, '');
   assert.doesNotMatch(legacy, /"model"/);
   assert.equal(tasks().check('hourly-nudge', legacy).state, 'current');
   // A prompt rendered before tiers (no model key) with any old effort still checks and refreshes.
@@ -325,7 +327,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   // Built-in object property names are unknown keys, in new and pre-tier params alike.
   for (const key of ['constructor', 'toString', '__proto__']) {
     assert.throws(() => validateParams('hourly-nudge', Object.assign(JSON.parse(`{"${key}": "x"}`), PARAMS['hourly-nudge'])), key);
-    const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
+    const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "mid"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
     assert.equal(tasks().check('hourly-nudge', withKey).state, 'malformed', key);
   }
   // A swap carries a recorded raise by writing it into the saved params before the refresh,
@@ -526,7 +528,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.includes('9a. Repository for step 9\'s controller check: it scans example-owner/example-repo for leftover footers, with no checkout'), 'no repository checkout hourly');
   assert.ok(nudge.includes('"SKILL COPY FAILED: <reason> | ", "CONTROLLER CHECK: <n> | "'), 'first-line prefix');
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 2a, 2b, 4, 5 and 7 to 11 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 2a, 2b, 4, 4a, 5 and 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(age\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
@@ -990,7 +992,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
       const text = full('hourly-nudge', validateParams('hourly-nudge', {
         ...PARAMS['hourly-nudge'], repo, session
       }));
-      for (const phrase of ['plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)',
+      for (const phrase of ['plus steps 2a, 2b, 4, 4a, 5 and 7 to 11 (and 5b when it applies)',
         'skip the other checks in steps 2 to 6', '2a. Owner asks (runs every time, including the no-change path)',
         'Page the inventories and read enough source history to identify each ask and any later answer or completed action',
         'also check older asks absent from later relays',
@@ -1133,7 +1135,7 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
       // Step 2 is skipped on quiet runs, so owners come from step 2b's list_threads read, which always runs.
       'that step 2b reads on every run, quiet runs included', 'under `GITHUB STEPS OWED` pages list_threads itself',
       'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
-    assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
+    assert.ok(text.includes('plus steps 2a, 2b, 4, 4a, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
     assert.ok(none.includes('5. PRs: none (no repo).') && !none.includes('every open PR on'), `${session}: no-repo nudge has no PR sweep`);
   }
@@ -1161,8 +1163,8 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
         '"CI WAIT QUIET: <n> | "', 'this task never messages threads itself']) {
         assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
-      assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)'));
-      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
+      assert.ok(text.includes('plus steps 2a, 2b, 4, 4a, 5 and 7 to 11 (and 5b when it applies)'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "STUCK THREADS: <n> | ", "STUCK FOR OWNER: <n> | ", "STUCK CHECK FAILED: <why> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
     }
   }
 });
