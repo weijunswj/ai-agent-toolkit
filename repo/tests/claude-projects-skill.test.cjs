@@ -493,12 +493,12 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // Setup reads the guidebook first, refreshing it when missing or not current.
   assert.match(text, /check guidebook VERSION against a fresh Toolkit main copy using the guidebook reference/);
   assert.match(text, /guidebook VERSION, check-in time, nudge state, latest cloud sweep result when ENABLED, recurring-task home and next work item/);
-  // Genuine lag is measured against the check-in session baseline, with an explicit today fallback.
-  assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when this check-in's own session started/);
-  assert.match(text, /main today only when the report explicitly says "session start unavailable; comparing with main today"/);
+  // Genuine lag is measured against main when the plugin copy was synced, with an explicit today fallback.
+  assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when that copy was synced/);
+  assert.match(text, /main today only when the report explicitly says "sync time unavailable; comparing with main today"/);
   assert.match(text, /No agent can update it: once per selected baseline version, post one plugin card in the project chat with the check-in's steps/);
   assert.match(text, /Keep a genuine gap pending until a check-in verifies current, pinned or ahead/);
-  assert.match(text, /A verified `\*\*Plugin:\*\* home thread copy pinned at <date>` means its copy was current or newer at session start; post no plugin card or owner update steps/);
+  assert.match(text, /A verified `\*\*Plugin:\*\* pinned copy synced at <time>` means its copy was current or newer when it was synced; post no plugin card or owner update steps/);
   assert.match(text, /Retire an obsolete pending card, including a legacy card caused by comparing a pinned copy with main today, without claiming the account was updated/);
   assert.match(text, /Missing copy, missing history or other unverified evidence never clears a card/);
   assert.match(text, /A hook-change advisory is one plain note only, with no prefix, card or automatic thread rotation/);
@@ -1043,7 +1043,7 @@ const ctaRecoveryCases = [
   ['finished superseded resolved cloud or working lane', 'device', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
   ['device or prerequisite unavailable', 'device', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
   ['missing session or failed incomplete inventory', 'device', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not connected or served is the usual parked case']],
-  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 2b, 4, 5 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
+  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 2b, 4, 4a, 5 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
   ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
   ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
   ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],

@@ -54,6 +54,7 @@
     "repo/contracts/cloud-jobs.json",
     "repo/contracts/skill-product-migration-ledger.json",
     "repo/contracts/retired-scripts.json",
+    "repo/contracts/skill-publication.json",
     "!repo/scripts/check-diff-whitespace.cjs",
     "!repo/scripts/check-test-durations.cjs",
     "!repo/scripts/generate-n8n-stack-launcher-flow.cjs",

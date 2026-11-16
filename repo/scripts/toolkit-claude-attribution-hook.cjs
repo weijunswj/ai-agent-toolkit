@@ -15,9 +15,10 @@ const fs = require('node:fs');
 
 const CHECK_FAILED_REASON = 'Toolkit could not check this commit or pull request command for AI attribution lines. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
-// A deliberately broad screen, independent of the guard module: `git ... commit` or `gh pr create|edit|merge`.
+// A deliberately broad screen, independent of the guard module: `git ... commit` or `gh pr create|edit|merge`,
+// also behind PowerShell's stop-parsing word (`gh --% pr create`).
 function mayCarryAttribution(command) {
-  return /\bgit\b[\s\S]*\bcommit\b/.test(command) || /\bgh\s+pr\s+(?:create|edit|merge)\b/.test(command);
+  return /\bgit\b[\s\S]*\bcommit\b/.test(command) || /\bgh\s+(?:--%\s+)*pr\s+(?:create|edit|merge)\b/.test(command);
 }
 
 // The command text as the guard reads it (toolkit-shell-call.cjs), or the raw tool input when there

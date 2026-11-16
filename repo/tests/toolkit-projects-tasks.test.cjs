@@ -281,19 +281,21 @@ test('params are strict: known keys, safe values, report folder in the shared fo
 });
 
 test('model tier and effort: cheapest by default, medium floor, every raise carries its reason', () => {
-  // Left out, each kind takes its default tier: the nudge and custom tasks small, the check-in mid.
-  assert.equal(params('hourly-nudge').model, 'small');
+  // Left out, each kind takes its default tier: custom tasks small, the check-in and the nudge mid
+  // (the nudge's stuck check and lane sweep missed threads on small).
+  assert.equal(params('hourly-nudge').model, 'mid');
   assert.equal(params('daily-check-in').model, 'mid');
   assert.equal(params('custom').model, 'small');
   const base = PARAMS['hourly-nudge'];
   for (const bad of [
-    { ...base, effort: 'low' }, { ...base, effort: 'minimal' }, { ...base, model: 'haiku' }, { ...base, model: 'mid' },
+    { ...base, effort: 'low' }, { ...base, effort: 'minimal' }, { ...base, model: 'haiku' }, { ...base, model: 'top' },
     { ...base, effort: 'high' }, { ...base, model: 'top', raise_reason: '' }, { ...base, model: 'top', raise_reason: 'no' },
     { ...base, model: 'top', raise_reason: 'a | b' }, { ...base, model: 'top', raise_reason: 'line\nbreak' },
     { ...base, model: 'top', raise_reason: ' padded ' }, { ...base, model: 'top', raise_reason: '{{project}} leak' }
   ]) assert.throws(() => validateParams('hourly-nudge', bad), JSON.stringify(bad));
   // A step down below the default needs no reason; a raise with one renders it.
   assert.equal(validateParams('daily-check-in', { ...PARAMS['daily-check-in'], model: 'small' }).model, 'small');
+  assert.equal(validateParams('hourly-nudge', { ...base, model: 'small' }).model, 'small');
   const raised = validateParams('hourly-nudge', { ...base, model: 'top', effort: 'high', raise_reason: 'missed checks at small' });
   const prompt = full('hourly-nudge', raised);
   assert.match(prompt, /Model tier for this task: top \(agent-cost-control ladder; on Claude, small is Haiku, mid Sonnet, top Opus\), effort high\./);
@@ -302,7 +304,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.doesNotMatch(rendered('hourly-nudge'), /Raised above/);
   assert.match(rendered('daily-check-in'), /Model tier for this task: mid /);
   // A live prompt rendered before tiers existed still parses: its params take the default tier.
-  const legacy = pointer('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
+  const legacy = pointer('hourly-nudge').replace(/,\n {2}"model": "mid"/, '');
   assert.doesNotMatch(legacy, /"model"/);
   assert.equal(tasks().check('hourly-nudge', legacy).state, 'current');
   // A prompt rendered before tiers (no model key) with any old effort still checks and refreshes.
@@ -325,7 +327,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   // Built-in object property names are unknown keys, in new and pre-tier params alike.
   for (const key of ['constructor', 'toString', '__proto__']) {
     assert.throws(() => validateParams('hourly-nudge', Object.assign(JSON.parse(`{"${key}": "x"}`), PARAMS['hourly-nudge'])), key);
-    const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
+    const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "mid"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
     assert.equal(tasks().check('hourly-nudge', withKey).state, 'malformed', key);
   }
   // A swap carries a recorded raise by writing it into the saved params before the refresh,
@@ -526,7 +528,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.includes('9a. Repository for step 9\'s controller check: it scans example-owner/example-repo for leftover footers, with no checkout'), 'no repository checkout hourly');
   assert.ok(nudge.includes('"SKILL COPY FAILED: <reason> | ", "CONTROLLER CHECK: <n> | "'), 'first-line prefix');
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 2a, 2b, 4, 5 and 7 to 11 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 2a, 2b, 4, 4a, 5 and 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(age\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
@@ -924,25 +926,34 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
       const text = full('daily-check-in', promptParams);
       const plugin = text.slice(text.indexOf('10. PLUGIN BEHIND:'), text.indexOf('11. GitHub'));
       const rows = [
-        ['own session and nested timestamp', [/get_session` with no session_id and read `ccr\.created_at`, not a top-level created_at/, /never the coordinator's thread, the trigger creation time/]],
-        ['valid timezone and non-future time', [/valid calendar timestamp with an explicit time zone \(Z or a numeric offset\) that is not in the future/]],
-        ['historical first-parent baseline', [/git -C TK rev-list -1 --first-parent --before=<start> HEAD/, /git -C TK show B:\.claude-plugin\/plugin\.json/]],
-        ['missing, malformed or future start falls back explicitly', [/Missing, malformed, future or unavailable session start: use today's HEAD as B/, /session start unavailable; comparing with main today/]],
+        ['copies found by name prefix', [/\/root\/\.claude\/plugins\/synced\/\*\/ai-agent-toolkit\*\//, /the host can rename a copy, for example `ai-agent-toolkit~g2`/, /holds `\.claude-plugin\/plugin\.json`/]],
+        ['pinned until the container restarts', [/stays pinned until the container restarts/]],
+        ['sync time from the host manifest, renewed every start', [/`stat -c %Y <bucket>\/manifest\.json`/, /rewrites at every container start, even when no plugin changed/]],
+        ['never a folder or plugin file time', [/Never use a plugin file's mtime \(synced files read 1980-01-01\) or the copy folder's own birth or change time as the sync time: an unchanged copy keeps its folder from an earlier start/]],
+        ['folder birth time only as a lower bound', [/earlier than the copy folder's birth time \(`stat -c %W <copy>`, when above 0\), use that birth time instead/]],
+        ['never the session start or other clocks', [/Never use this session's start, which stays old while the container re-syncs the copy/, /never the coordinator's thread, the trigger creation time/]],
+        ['valid non-future time in UTC', [/Accept only a whole number of seconds above 0 that is not in the future/, /date -u -d @<seconds> \+%FT%TZ/]],
+        ['newest of several copies, the others with version and sync time', [/Several copies: use the one with the newest sync time, read its version and list each other copy under \*\*Plugin:\*\* with its version and sync time/]],
+        ['historical first-parent baseline', [/git -C TK rev-list -1 --first-parent --before=<sync time> HEAD/, /git -C TK show B:\.claude-plugin\/plugin\.json/]],
+        ['unavailable sync time falls back to today explicitly', [/Missing manifest, zero, invalid, future or unreadable sync time: use today's HEAD as B/, /sync time unavailable; comparing with main today/, /Otherwise baseline mode is sync-time/]],
         ['numeric version comparison', [/Compare version components numerically \(3\.9\.0 is older than 3\.10\.0\), never as strings/]],
         ['current today', [/equal to today's main: "\*\*Plugin:\*\* current \(<version>\)"/]],
-        ['matches or exceeds baseline, below today', [/Equal to or newer than the selected baseline, but older than today's main/, /home thread copy pinned at <date>; observed <account>, baseline <baseline> at <commit7>, main today <main>/, /verified pinned report gets no PLUGIN BEHIND prefix, owner steps or plugin card/]],
+        ['matches or exceeds baseline, below today', [/Equal to or newer than the selected baseline, but older than today's main/, /pinned copy synced at <time>; observed <account>, baseline <baseline> at <commit7>, main today <main>/, /verified pinned report gets no PLUGIN BEHIND prefix, owner steps or plugin card/]],
         ['ahead of today', [/newer than today's main is reported as ahead/, /no prefix, owner steps or card/]],
         ['only real baseline lag is aged', [/Only a copy older than the selected baseline enters the lag-age calculation/, /--format='%h %cI' B -- \.claude-plugin\/plugin\.json/, /next newer commit on the first-parent path up to B/, /oldest commit up to B whose version is above the account's/]],
-        ['at and below the threshold, no card', [/At or below 24 hours ago:[^\n]*no prefix, owner steps or card/]],
-        ['strictly above the threshold', [/Strictly more than 24 hours ago:/, /PLUGIN BEHIND: <account> vs <baseline> \|/, /only for this verified more-than-24-hours gap put the owner's steps/]],
+        ['lag age measured at the sync time', [/Measure the age from that commit's time to the sync time \(to now in baseline mode today\)/]],
+        ['at and below the threshold, no card', [/At or below 24 hours:[^\n]*no prefix, owner steps or card/]],
+        ['strictly above the threshold', [/Strictly more than 24 hours:/, /PLUGIN BEHIND: <account> vs <baseline> \|/, /only for this verified more-than-24-hours gap put the owner's steps/]],
         ['repeat runs dedupe the baseline', [/unless state\.md has "plugin behind <baseline version>"/, /Dedupe once per selected baseline version, even when today's main advances again; retain the genuine gap and its steps on repeat runs/]],
         ['one bounded history retry', [/historical baseline or lag-age evidence is missing from a shallow clone/, /fetch --unshallow` once in total/, /retry the affected reads/]],
         ['failed or unavailable evidence holds', [/A failed unshallow, missing historical baseline or still-missing lag-age evidence is stuck\/unverified/, /no PLUGIN BEHIND prefix, owner steps or plugin card/, /Never substitute today's baseline for missing historical evidence, invent a date\/version or clear an earlier lag marker on uncertainty/, /no proven transition and time, use the stuck\/unverified rule/]],
         ['copy unavailable or invalid', [/Missing\/unreadable copy or invalid version: report unverified and no prefix, owner steps or plugin card/]],
       ];
       for (const [label, patterns] of rows) for (const pattern of patterns) assert.match(plugin, pattern, label);
+      assert.doesNotMatch(plugin, /ccr\.created_at|session start unavailable/, 'the session start is no longer a baseline');
+      assert.doesNotMatch(plugin, /stat -c '%W %Z'|means its change time|synced\/\*\/ai-agent-toolkit\//, 'no folder-time sync source or exact copy name');
       const state = text.split('\n').find(line => line.startsWith('- Overwrite '));
-      for (const pattern of [/baseline mode \(session-start or today\)/, /validated session start in UTC \(or unavailable\)/,
+      for (const pattern of [/baseline mode \(sync-time or today\)/, /validated sync time in UTC \(or unavailable\)/,
         /baseline commit\/version and observed version \(or unverified\)/, /carry it forward while that gap remains, even on an unverified run/,
         /including a legacy "plugin behind <main version>"/, /only when this run verifies current, pinned or ahead; uncertainty never clears it/]) assert.match(state, pattern);
       assert.match(text, /Recompute the baseline in step 10 each run; an old state record is never evidence/);
@@ -954,12 +965,12 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
 test('hook note covers changed, deleted, unchanged and unavailable evidence without new actions', () => {
   const text = rendered('daily-check-in');
   const note = text.split('\n').find(line => line.startsWith('   Hook note:'));
-  for (const pattern of [/observed plugin is older than today's main and the session-start baseline is verified/,
+  for (const pattern of [/observed plugin is older than today's main and the sync-time baseline is verified/,
     /first-parent range `B\.\.HEAD`/, /\.claude-plugin\/hooks\/hooks\.json/, /`hooks\/hooks\.json`/,
     /changed\/deleted hook entry scripts named by either the baseline or current manifests/, /resolve their plugin-root paths/,
     /\*hook\*\.cjs/, /\*hook\*\.ps1/, /exactly one advisory sentence/, /home thread may retain older hooks/,
     /fresh home thread after account sync can load the updated copy/, /No changes: omit the advisory/,
-    /Missing history or manifests needed for this comparison, or unavailable session start/, /hook check unverified/,
+    /changed since this copy was synced/, /Missing history or manifests needed for this comparison, or unavailable sync time/, /hook check unverified/,
     /manifest proven absent at a revision is a deletion\/addition, not a failed read/, /Never infer which hooks ran/,
     /no prefix, plugin card, owner update steps or automatic thread rotation/]) assert.match(note, pattern);
 });
@@ -977,7 +988,7 @@ test('today-only plugin prompts become outdated at the same version and refresh 
       assert.equal(tasks().check('daily-check-in', old).state, 'outdated');
       const refreshed = tasks().refresh('daily-check-in', old, { session });
       assert.equal(tasks().check('daily-check-in', refreshed).state, 'current');
-      assert.ok(tasks().expand('daily-check-in', promptParams).includes('ccr.created_at'));
+      assert.ok(tasks().expand('daily-check-in', promptParams).includes('stat -c %Y <bucket>/manifest.json'));
       assert.ok(refreshed.includes('Keep this owner check.'));
       assert.equal(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1], old.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
     }
@@ -990,7 +1001,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
       const text = full('hourly-nudge', validateParams('hourly-nudge', {
         ...PARAMS['hourly-nudge'], repo, session
       }));
-      for (const phrase of ['plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)',
+      for (const phrase of ['plus steps 2a, 2b, 4, 4a, 5 and 7 to 11 (and 5b when it applies)',
         'skip the other checks in steps 2 to 6', '2a. Owner asks (runs every time, including the no-change path)',
         'Page the inventories and read enough source history to identify each ask and any later answer or completed action',
         'also check older asks absent from later relays',
@@ -1133,7 +1144,7 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
       // Step 2 is skipped on quiet runs, so owners come from step 2b's list_threads read, which always runs.
       'that step 2b reads on every run, quiet runs included', 'under `GITHUB STEPS OWED` pages list_threads itself',
       'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
-    assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
+    assert.ok(text.includes('plus steps 2a, 2b, 4, 4a, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
     assert.ok(none.includes('5. PRs: none (no repo).') && !none.includes('every open PR on'), `${session}: no-repo nudge has no PR sweep`);
   }
@@ -1161,8 +1172,8 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
         '"CI WAIT QUIET: <n> | "', 'this task never messages threads itself']) {
         assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
-      assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)'));
-      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
+      assert.ok(text.includes('plus steps 2a, 2b, 4, 4a, 5 and 7 to 11 (and 5b when it applies)'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "STUCK THREADS: <n> | ", "STUCK FOR OWNER: <n> | ", "STUCK CHECK FAILED: <why> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
     }
   }
 });

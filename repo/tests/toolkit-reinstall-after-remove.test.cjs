@@ -201,7 +201,7 @@ test('setup names leftover Toolkit tasks once and points to remove toolkit, with
   const recorded = [{ host: 'windows', id: 'a' }, { host: 'windows', id: 'b' }, { host: 'windows', adopted: true, id: 'mine' }];
   const [line, ...rest] = leftoverTaskLines({ home: 'H', platform: 'win32', registry: registry(recorded) });
   assert.equal(rest.length, 0);
-  assert.match(line, /2 old Toolkit tasks are still recorded[^]*Say "remove toolkit"/);
+  assert.equal(line, 'Scheduled tasks: 2 old Toolkit tasks are still recorded on this computer. The cloud runs these jobs now, and setup no longer changes them. Say "remove toolkit" to uninstall Toolkit from this computer after your OK; the old tasks go with it once no app keeps Toolkit.');
   assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: registry([{ host: 'windows', adopted: true }]) }), []);
   assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'linux', registry: registry(recorded) }), []);
   assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: { readRegistry: () => { throw new Error('locked'); } } }), []);

@@ -18,7 +18,7 @@ If the whole message is `toolkit cmd` or `toolkit command` and no `Toolkit comma
 
 ## Old scheduled tasks
 
-Toolkit no longer creates, updates or starts scheduled tasks on a computer: the cloud runs the programme sweep, footer cleaning and shard timings, and the old task commands are gone. Setup names any old Toolkit tasks still recorded on this computer; they are removed with `remove toolkit` below, after the user's OK.
+Toolkit no longer creates, updates or starts scheduled tasks on a computer: the cloud runs the programme sweep, footer cleaning and shard timings, and the old task commands are gone. Setup names any old Toolkit tasks still recorded on this computer. They go only with `remove toolkit` below, which uninstalls Toolkit after the user's OK, and only once no app keeps Toolkit.
 
 ## Remove Toolkit from this computer
 

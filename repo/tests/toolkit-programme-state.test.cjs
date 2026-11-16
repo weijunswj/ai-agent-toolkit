@@ -237,7 +237,7 @@ test('checks are GREEN only when every required check passed at the exact head',
   assert.deepEqual([green.required_total, green.required_passed, green.at_head], [1, 1, SHA_A]);
 });
 
-test('a cancelled check run counts only when it is the check\'s only result at the head', () => {
+test('with no readable time or app, a cancelled check run counts only when it is the check\'s only result at the head', () => {
   const run = (name, conclusion, extra = {}) => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion, required: false, ...extra });
   const evaluate = (contexts) => state.evaluateChecks({ head: SHA_A, rollupOid: SHA_A, contexts, configured: ['validate'] });
   const cancelled = run('validate', 'CANCELLED');
@@ -246,7 +246,7 @@ test('a cancelled check run counts only when it is the check\'s only result at t
   const replaced = evaluate([cancelled, run('validate', 'SUCCESS')]);
   assert.equal(replaced.state, 'GREEN', 'a newer run that passed replaces a cancelled one');
   assert.deepEqual([replaced.required_total, replaced.required_passed, replaced.failing], [1, 1, []]);
-  assert.equal(evaluate([run('validate', 'SUCCESS'), cancelled]).state, 'GREEN', 'order does not matter');
+  assert.equal(evaluate([run('validate', 'SUCCESS'), cancelled]).state, 'GREEN', 'with no readable time, list order does not matter');
   assert.equal(evaluate([cancelled, run('validate', null, { status: 'IN_PROGRESS' })]).state, 'PENDING', 'a newer run still going is pending, not red');
   assert.equal(evaluate([cancelled, run('validate', 'FAILURE')]).state, 'RED', 'a newer run that failed still fails');
   assert.equal(evaluate([cancelled, run('validate', 'SUCCESS'), run('validate', 'FAILURE')]).state, 'RED', 'any real failure still fails');
@@ -255,6 +255,66 @@ test('a cancelled check run counts only when it is the check\'s only result at t
   assert.equal(evaluate([run('validate', 'CANCELLED', { status: 'IN_PROGRESS' }), run('validate', 'SUCCESS')]).state, 'PENDING', 'only a completed cancelled run is set aside');
   const status = { kind: 'StatusContext', context: 'validate', state: 'ERROR', required: true };
   assert.equal(evaluate([status, run('validate', 'SUCCESS')]).state, 'RED', 'a status error is never set aside');
+});
+
+// A required check's runs from one app, oldest first in each row: the newest result decides. GitHub
+// names a required check by its name and, optionally, the app that must set it (never a workflow),
+// so runs are grouped by app (two workflows of one app are the same input as one workflow's reruns:
+// the reader carries no workflow). A run with no readable time or app keeps the rule above.
+test('the newest result of a required check decides, per app, when every run has a readable time', () => {
+  const at = minute => `2026-11-15T10:${String(minute).padStart(2, '0')}:00Z`;
+  const run = (conclusion, minute, extra = {}) => ({ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion, required: false, app: 15368, completed_at: at(minute), ...extra });
+  const going = (minute = null) => run(null, minute, { status: 'IN_PROGRESS', completed_at: null });
+  const evaluate = contexts => state.evaluateChecks({ head: SHA_A, rollupOid: SHA_A, contexts, configured: ['validate'] }).state;
+  const rows = [
+    ['failure, then success', [run('FAILURE', 1), run('SUCCESS', 2)], 'GREEN'],
+    ['success, then failure', [run('SUCCESS', 1), run('FAILURE', 2)], 'RED'],
+    ['success, then in progress', [run('SUCCESS', 1), going()], 'PENDING'],
+    ['failure, then in progress', [run('FAILURE', 1), going()], 'PENDING'],
+    ['success, then cancelled', [run('SUCCESS', 1), run('CANCELLED', 2)], 'RED'],
+    ['cancelled, then success', [run('CANCELLED', 1), run('SUCCESS', 2)], 'GREEN'],
+    ['cancelled only', [run('CANCELLED', 1)], 'RED'],
+    ['cancelled, then failure', [run('CANCELLED', 1), run('FAILURE', 2)], 'RED'],
+    ['failure, then skipped', [run('FAILURE', 1), run('SKIPPED', 2)], 'UNKNOWN'],
+    ['listed newest first', [run('SUCCESS', 2), run('FAILURE', 1)], 'GREEN'],
+    ['failure, then success, one run with no time', [run('FAILURE', 1), run('SUCCESS', 2, { completed_at: null })], 'RED'],
+    ['failure, then success, one run with no app', [run('FAILURE', 1), run('SUCCESS', 2, { app: null })], 'RED'],
+    ['failure, then success, every run with no app', [run('FAILURE', 1, { app: null }), run('SUCCESS', 2, { app: null })], 'RED'],
+    ['success and failure completed at the same time', [run('SUCCESS', 1), run('FAILURE', 1)], 'RED'],
+    ['two apps: older failure from one, newer success from another', [run('FAILURE', 1, { app: 1 }), run('SUCCESS', 2, { app: 2 })], 'RED'],
+    ['two apps: each newest passed', [run('FAILURE', 1, { app: 1 }), run('SUCCESS', 2, { app: 1 }), run('SUCCESS', 1, { app: 2 })], 'GREEN'],
+    ['a status context failure beside a newer passing run', [{ kind: 'StatusContext', context: 'validate', state: 'FAILURE', required: true }, run('SUCCESS', 2)], 'RED'],
+    ['a status context success beside a newer failing run', [{ kind: 'StatusContext', context: 'validate', state: 'SUCCESS', required: true }, run('SUCCESS', 1), run('FAILURE', 2)], 'RED'],
+  ];
+  for (const [name, contexts, expected] of rows) assert.equal(evaluate(contexts), expected, name);
+  const two = state.evaluateChecks({ head: SHA_A, rollupOid: SHA_A, configured: ['validate', 'lint'],
+    contexts: [run('FAILURE', 1), run('SUCCESS', 2), run('SUCCESS', 1, { name: 'lint' }), run('FAILURE', 2, { name: 'lint' })] });
+  assert.deepEqual([two.state, two.failing, two.required_passed], ['RED', ['lint'], 1], 'two checks: one passed by its newest run, one failed by its newest run');
+});
+
+// Every way the sweep reads a pull request's checks carries what the newest-result rule needs, so a
+// later edit cannot drop it silently: the time a run completed and the app that set it.
+test('both GraphQL check reads and the REST fallback carry each run\'s completion time and app', () => {
+  const node = { __typename: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', isRequired: true, completedAt: '2026-11-15T10:02:00Z', checkSuite: { app: { databaseId: 15368 } } };
+  const expected = { kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', state: null, required: true, app: 15368, completed_at: '2026-11-15T10:02:00Z' };
+  const pr = { number: 7, title: 't', body: '', state: 'OPEN', isDraft: false, merged: false, mergedAt: null, mergeCommit: null, headRefOid: SHA_A, baseRefName: 'main', mergeable: 'MERGEABLE',
+    commits: { nodes: [{ commit: { oid: SHA_A, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [node] } } } }] } };
+  const queries = [];
+  const fields = /\.\.\. on CheckRun \{[^}]*\bcompletedAt\b[^}]*\bcheckSuite\s*\{\s*app\s*\{\s*databaseId\s*\}\s*\}/;
+  const single = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { graphql: query => { queries.push(query); return { repository: { defaultBranchRef: { name: 'main' }, pullRequest: pr } }; } } });
+  assert.deepEqual(single.pullRequest(7).contexts, [expected]);
+  const batched = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath, body) => { queries.push(body.query); return { status: 200, json: { data: { repository: { defaultBranchRef: { name: 'main' }, p7: pr } } } }; } } });
+  assert.deepEqual(batched.pullRequests([7]).get(7).contexts, [expected]);
+  assert.equal(queries.length, 2);
+  for (const query of queries) assert.match(query, fields);
+  const rest = { 'pulls/7': { number: 7, title: 't', body: '', state: 'open', draft: false, merged: false, head: { sha: SHA_A }, base: { ref: 'main', repo: { default_branch: 'main' } }, mergeable: true },
+    [`commits/${SHA_A}/check-runs?per_page=100`]: { total_count: 1, check_runs: [{ name: 'validate', status: 'completed', conclusion: 'success', completed_at: '2026-11-15T10:02:00Z', app: { id: 15368, slug: 'github-actions' } }] },
+    [`commits/${SHA_A}/status`]: { total_count: 0, statuses: [] } };
+  const fallback = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath) => ({ status: 200, json: rest[apiPath.replace('repos/example.test/app/', '')] }) } });
+  const facts = fallback.restPullRequest(7);
+  assert.deepEqual(facts.contexts, [{ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', required: false, app: 15368, completed_at: '2026-11-15T10:02:00Z' }],
+    'REST\'s lower-case states read as GraphQL spells them');
+  assert.equal(state.evaluateChecks({ head: facts.head, rollupOid: facts.rollupOid, contexts: facts.contexts, configured: ['validate'] }).state, 'GREEN', 'so a passing run read over REST can read GREEN');
 });
 
 test('a closed task page is frozen by the hidden task status line its block carries, and drawn again once reopened', () => {
