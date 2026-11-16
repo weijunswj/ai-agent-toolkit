@@ -934,10 +934,36 @@ function validateChild(doc) {
     check(errors, Array.isArray(doc.blockers) && doc.blockers.every(isText), 'blockers must be a list of text');
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
     if (isObject(doc.private) && doc.private.keep_open !== undefined) validateKeepOpen(errors, doc.private.keep_open);
+    if (isObject(doc.private) && doc.private.pr_heads !== undefined) validatePrHeads(errors, doc.private.pr_heads);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
       && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
   return errors;
+}
+
+// The heads the sweep has seen on the task's PRs, oldest first (notePrHeads), so an owed UAT still
+// names the PR it was recorded on after the task tracks a newer PR (uatPr). Like keep_open it lives
+// in the child's private part, which every Toolkit reader accepts, so an older copy still loads it.
+const PR_HEADS_LIMIT = 20;
+function validatePrHeads(errors, heads) {
+  check(errors, Array.isArray(heads) && heads.length <= PR_HEADS_LIMIT && new Set(heads.map(entry => entry?.head)).size === heads.length
+    && heads.every(entry => isObject(entry) && Object.keys(entry).length === 2 && isInt(entry.pr, 1) && isSha(entry.head)),
+  `private.pr_heads must list at most ${PR_HEADS_LIMIT} different heads, each as a PR number and its full head SHA`);
+}
+
+// Adds the heads a pass saw (`seen`, from PR discovery, then the tracked PR's head) to the task's
+// private.pr_heads. A head already listed keeps its place, so a pass that sees nothing new writes
+// nothing; only the task's own PRs stay listed; past the limit the oldest go first, except the head
+// an owed UAT names.
+function notePrHeads(child, seen = []) {
+  const task = new Set([child.pr?.number, ...(child.prs || []).map(pr => pr.number)].filter(number => isInt(number, 1)));
+  const heads = [];
+  for (const entry of [...(child.private?.pr_heads || []), ...seen, { pr: child.pr?.number, head: child.pr?.head }]) {
+    if (task.has(entry.pr) && isSha(entry.head) && !heads.some(kept => kept.head === entry.head)) heads.push({ pr: entry.pr, head: entry.head });
+  }
+  while (heads.length > PR_HEADS_LIMIT) heads.splice(heads.findIndex(entry => entry.head !== child.uat?.at_head), 1);
+  if (heads.length || child.private?.pr_heads) child.private = { ...child.private, pr_heads: heads };
+  return child;
 }
 
 // A merged task the controller keeps open on purpose: why, since when, and the merged or closed PRs
@@ -1909,9 +1935,23 @@ function statusCell(outcome, child) {
   return child?.blockers?.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
 }
 
-// The owner's test a task still owes, as `UAT on PR #n` (or `UAT` with no PR), or null.
+// The task PR a UAT was recorded on: the one whose head is the UAT's head, from the tracked PR and
+// the heads the sweep saw (private.pr_heads), or null when no known PR has that head.
+function uatPr(child) {
+  const at = child?.uat?.at_head;
+  if (!isSha(at)) return null;
+  if (child.pr?.head === at && child.pr.number) return child.pr.number;
+  return (child.private?.pr_heads || []).find(entry => entry.head === at)?.pr || null;
+}
+
+// The owner's test a task still owes, or null: `UAT on PR #n` for the PR it was recorded on (uatPr),
+// or `UAT at <short head>` when no known PR has its head. A UAT with no recorded head names the
+// tracked PR, or no PR.
 function owedUat(child) {
-  return OWED_UAT_STATES.includes(child?.uat?.state) ? `UAT${child.pr?.number ? ` on PR #${child.pr.number}` : ''}` : null;
+  if (!OWED_UAT_STATES.includes(child?.uat?.state)) return null;
+  if (!isSha(child.uat.at_head)) return `UAT${child.pr?.number ? ` on PR #${child.pr.number}` : ''}`;
+  const pr = uatPr(child);
+  return pr ? `UAT on PR #${pr}` : `UAT at ${shortSha(child.uat.at_head)}`;
 }
 
 // True while a gate is at work on the task: assigned or active, and not blocked. Its work is then
@@ -2090,18 +2130,26 @@ function prGraphLines(child, titles = null) {
     ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
   const all = [...tracked, ...listed];
   const gate = [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ');
-  const task = [gate, OWED_UAT_STATES.includes(child.uat?.state) ? 'UAT owed' : ''].filter(Boolean);
+  // An owed UAT goes on the PR it was recorded on (uatPr); one with no recorded head on the tracked PR.
+  const owed = OWED_UAT_STATES.includes(child.uat?.state);
+  const trackedPr = child.pr?.number ?? null;
+  const uatOn = owed && isSha(child.uat.at_head) ? uatPr(child) : trackedPr;
+  const uat = owed ? `UAT owed${uatOn === null && isSha(child.uat.at_head) ? ` at ${shortSha(child.uat.at_head)}` : ''}` : '';
+  const apart = uat && uatOn !== trackedPr;
+  const task = [gate, apart ? '' : uat].filter(Boolean);
   if (!all.length) return [task.length ? ['None yet', ...task].join(' · ') : 'None yet.'];
   const open = all.filter(pr => !['MERGED', 'CLOSED'].includes(pr.state));
   const finished = all.filter(pr => ['MERGED', 'CLOSED'].includes(pr.state));
   const shown = [...open, ...finished.slice(0, PR_GRAPH_FINISHED)];
-  const status = pr => [pr.state, ...(pr.number === child.pr?.number ? task : [])].join(' · ');
+  const status = pr => [pr.state, ...(pr.number === trackedPr ? task : []), ...(apart && pr.number === uatOn ? [uat] : [])].join(' · ');
+  const hidden = number => !shown.some(pr => pr.number === number);
+  const under = [...(hidden(trackedPr) ? task : []), ...(apart && (uatOn === null || hidden(uatOn)) ? [uatOn ? `${uat} on PR #${uatOn}` : uat] : [])];
   const merged = pr => (pr.state === 'MERGED' && isSha(pr.merge_sha) ? `[${shortSha(pr.merge_sha)}](https://github.com/${child.repository}/commit/${pr.merge_sha})` : '-');
   const earlier = finished.slice(PR_GRAPH_FINISHED);
   return ['| PR Task | PR # | Status | Merged SHA |', '|---|---|---|---|',
     ...shown.map(pr => `|${titleCell(titles?.get(pr.number))}|#${pr.number}|${status(pr)}|${merged(pr)}|`),
     ...(earlier.length ? ['', `Earlier: ${earlier.map(pr => `#${pr.number}`).join(', ')}`] : []),
-    ...(task.length && !shown.some(pr => pr.number === child.pr?.number) ? ['', `Task: ${task.join(' · ')}`] : [])];
+    ...(under.length ? ['', `Task: ${under.join(' · ')}`] : [])];
 }
 
 // The status block of a task page: its PR GRAPH. The drawn revision, the task status and the UAT
@@ -5295,7 +5343,9 @@ class Reconciler {
           const own=withoutCarriers(history);
           histories.set(number,prHistory(own));
           const candidates=mergedSelection(own.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
-          const result={complete:true,candidates}; discovery.set(number,result);
+          // Each PR's head as read now, so an owed UAT can be matched to its PR later (notePrHeads).
+          const heads=own.filter(pr=>isSha(pr.head)).map(pr=>({pr:pr.number,head:pr.head})).sort((a,b)=>a.pr-b.pr);
+          const result={complete:true,candidates,heads}; discovery.set(number,result);
           // A superseded PR: the task follows a newer PR that claims it (closing links and keyword
           // references, read this pass), by the rules in replacementPr. The issue read this pass also
           // counts, so a task closed in this same pass is already finished or retired.
@@ -5636,6 +5686,8 @@ class Reconciler {
         child.candidate = { ...child.candidate, head: pr.head };
       }
     }
+    const seen = observed.prGraph?.discovery.get(outcome.issue);
+    child = notePrHeads(child, seen?.complete ? seen.heads : []);
     const journals = observed.journals?.get(outcome.issue) || null;
     if (!journals) return { doc: child, checks, journals, findings: [], holds: [] };
     const folded = foldJournals(child, journals);
@@ -6836,7 +6888,7 @@ class Reconciler {
         // completion time taken from the issue and the journals read in this pass belong to it: the
         // gate is re-folded from those journals on the document read at apply time, so an
         // assignment issued since planning is never overwritten.
-        const fields = effect.kind === 'create_state' ? ['pr', ...(effect.record ? ['candidate'] : []), ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
+        const fields = effect.kind === 'create_state' ? ['pr', ...(effect.record ? ['candidate'] : []), ...(desired.private?.pr_heads ? ['private'] : []), ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           onConflict: checkFreshState,
@@ -6846,6 +6898,8 @@ class Reconciler {
             const copy = plan.effects.find(entry => entry.kind === 'copy_child_lifecycle' && entry.target.issue === effect.target.issue);
             if (copy) doc = copyLifecycle(doc, copy);
             for (const key of fields) {
+              // Of `private`, the sweep writes only the PR heads; the rest stays as the controller left it.
+              if (key === 'private') { if (desired.private?.pr_heads) doc.private = { ...doc.private, pr_heads: clone(desired.private.pr_heads) }; continue; }
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
             }
