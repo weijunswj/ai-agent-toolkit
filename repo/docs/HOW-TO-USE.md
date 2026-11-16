@@ -83,6 +83,27 @@ Governance has one entry:
 
 `toolkit governance enable` and `toolkit governance disable` are your answers to Toolkit's governance question. Each prepares a pull request for you to merge, and counts only while that question is open for this repository.
 
+### Evidence Store
+
+Do you need an evidence store? Only while GitHub governance is on. With governance off (a plain folder, a repository not on github.com, or a GitHub repository whose governance is off) everything else works with no store: the global rules, the coding gates, pull requests and reviews keep their records in the pull request.
+
+While governance is on, a private GitHub repository store is required. It holds the programme state: the parent and child state documents, checkpoint journals, holder orders, the cloud sweep lease and handover files, and the plans and reviews agents archive. Private repositories cost nothing, and turning governance on reuses a store you already have (a private `TRANSPORT-*` repository of yours, or one another repository's programme file names) or makes a new private `TRANSPORT-<name>` for you, so you never set one up by hand.
+
+| Store kind | Governance on | Governance off |
+|---|---|---|
+| A separate private GitHub repository under the same owner | Works: the full programme engine | Not needed; a valid store block may stay |
+| A GitHub repository that is public, or the governed repository itself | Refused: every state read and write stops, or the programme file is invalid | Not needed |
+| A shared folder | Refused: the programme file is invalid, and governance reads as an error, never as on | Not needed; remove the store block. A folder may still hold evidence copies |
+| A drive (OneDrive, Google Drive and the like) | Same as a shared folder | Same as a shared folder |
+| No store at all | Refused, like a shared folder | Works: nothing needs a store |
+| One store shared by several repositories | Works: each repository gets its own `state/<owner>/<name>/` folder in it | Not needed |
+
+Three limits:
+
+- **Same owner only:** a store under another owner is never reused. A repository in an organisation cannot use a personal store, so turning governance on there needs permission to create a repository in that organisation.
+- **A shared store is shared trust:** each repository's governance App can write anywhere in a store they share, not only in its own folder. Use separate stores when that matters.
+- **Folders and drives hold copies only:** they can keep evidence copies, with their own manifest and read-back, but never programme state.
+
 ### Manual Skill-Folder Copying
 
 Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder into one supported location. It is separate from native plugin setup.

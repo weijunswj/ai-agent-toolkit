@@ -399,6 +399,7 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
+  BATCH_NEXT: { source: 'reconcile', queue: true, next_action: "Controller: no NOW task needs a gate lane. Start the batch's next task (picked tasks lead LATER); if none is left, read all of LATER and pick the next batch: top priority, then quickest, at most 6 PRs and one large task; set their order to lead LATER and record the pick" },
   TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
@@ -475,6 +476,12 @@ const MAX_RELAYS_PER_PASS = 10;
 const TASK_IDLE_HOURS = 6;
 // A task whose PRs have all merged or closed needs its next step sooner: this long after the last change.
 const TASK_MERGED_OPEN_HOURS = 1;
+// The batch tail guard: a NOW task still for this long, waiting on something other than the owner,
+// stops holding the next batch (it stays NOW and keeps its own work-queue finding).
+const BATCH_TAIL_HOURS = 24;
+// A free lane is reported once no open task's state has changed for this long, so a controller that
+// is already starting the next task, or a batch that has only just finished, is not flagged.
+const BATCH_NEXT_HOURS = 1;
 // An open PR with no update (push, comment, review or edit) for this long no longer counts as moving its task.
 const PR_STALE_HOURS = 24;
 const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
@@ -1034,6 +1041,16 @@ function assertValid(kind, doc) {
   return doc;
 }
 
+// The one refusal for a missing or unsupported store kind: what a store must be and what works
+// without one. Only a plain kind word is echoed, never any other value from the binding.
+const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
+function storeKindProblem(store, enabled) {
+  if (store === undefined) return `the binding names no evidence store: ${STORE_NEEDED}`;
+  const kind = isObject(store) && typeof store.kind === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(store.kind) ? `store.kind "${store.kind}"` : 'store.kind';
+  return enabled ? `${kind} is not supported: ${STORE_NEEDED}`
+    : `${kind} is not supported: a store block must name a private GitHub repository (store.kind "github"). Governance is off here, so it needs no store: remove the block or make it a github store.`;
+}
+
 // A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
 // `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
 // the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
@@ -1081,11 +1098,13 @@ function validateBinding(binding) {
     }
     const store = binding.store;
     if (enabled || store !== undefined) {
-      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      if (!isObject(store) || !Object.hasOwn(STORE_BACKENDS, store.kind)) errors.push(storeKindProblem(store, enabled));
+      else {
+        check(errors, REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+        check(errors, isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+        check(errors, /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+        check(errors, String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+      }
     }
     if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.
@@ -1126,6 +1145,42 @@ function validateBinding(binding) {
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
 const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
+
+// Retired binding keys: nothing reads them. The reader above still accepts them, so a binding that
+// carries one stays valid, but every binding writer (a governance proposal, a switch or shards pull
+// request, the cleanup) leaves them out, so a carried key goes with the next change.
+const RETIRED_BINDING_KEYS = Object.freeze(['schedule_folder']);
+// The binding without its retired keys; one that has none comes back as the same object.
+function withoutRetiredKeys(binding) {
+  if (!isObject(binding) || !RETIRED_BINDING_KEYS.some(key => Object.hasOwn(binding, key))) return binding;
+  return Object.fromEntries(Object.entries(binding).filter(([key]) => !RETIRED_BINDING_KEYS.includes(key)));
+}
+// Binding text without its retired keys, in its own layout: each retired top-level member goes with
+// its comma (and its line, when it has one), so the pull request shows only those removed lines. Text
+// that cannot be parsed or has no retired key comes back as it is; a layout this cannot follow is
+// written out whole, so the result always parses to withoutRetiredKeys of the parsed text.
+function withoutRetiredKeysText(text) {
+  const raw = String(text);
+  const bom = raw.startsWith('﻿') ? '﻿' : '';
+  let parsed;
+  try { parsed = JSON.parse(raw.slice(bom.length)); } catch { return raw; }
+  const expected = withoutRetiredKeys(parsed);
+  if (expected === parsed) return raw;
+  const scalar = '(?:"(?:[^"\\\\\\r\\n]|\\\\.)*"|-?\\d[\\d.eE+-]*|true|false|null)';
+  let edited = raw.slice(bom.length);
+  for (const key of RETIRED_BINDING_KEYS.filter(name => Object.hasOwn(parsed, name))) {
+    // A member followed by another goes with its own line and trailing comma; the last member goes
+    // with the comma before it.
+    const before = new RegExp(`(?:\\r?\\n[ \\t]*)?"${key}"\\s*:\\s*${scalar}\\s*,[ \\t]*`, 'g');
+    const after = new RegExp(`,\\s*"${key}"\\s*:\\s*${scalar}`, 'g');
+    const pattern = (edited.match(before) || []).length === 1 ? before : after;
+    if ((edited.match(pattern) || []).length !== 1) { edited = null; break; }
+    edited = edited.replace(pattern, '');
+  }
+  let same = false;
+  try { same = edited !== null && JSON.stringify(JSON.parse(edited)) === JSON.stringify(expected); } catch { same = false; }
+  return same ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
+}
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -1293,6 +1348,16 @@ function currentGateAccepted(child) {
 
 function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
+}
+
+// Acceptance the controller logged without a gate lifecycle: a review PASSED whose verdicts at the
+// tracked PR head all passed (with no head tracked, the newest verdict passed), and UAT settled on
+// record at that head. Only the parent's holder writes review and UAT.
+function acceptanceLogged(child) {
+  const { review, pr } = child;
+  const verdicts = pr.head ? review.verdicts.filter(verdict => verdict.head === pr.head) : review.verdicts.slice(-1);
+  return review.state === 'PASSED' && verdicts.length > 0 && verdicts.every(verdict => verdict.verdict === 'PASSED')
+    && CLOSABLE_UAT.includes(uatText(child));
 }
 
 const GATE_HISTORY_LIMIT = 20;
@@ -1584,8 +1649,10 @@ const FAILED_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION
 
 function contextName(context) { return context.name || context.context || ''; }
 
+function isStatusContext(context) { return context.kind === 'StatusContext' || context.__typename === 'StatusContext'; }
+
 function contextResult(context) {
-  if (context.kind === 'StatusContext' || context.__typename === 'StatusContext') {
+  if (isStatusContext(context)) {
     if (context.state === 'SUCCESS') return 'passed';
     if (context.state === 'PENDING' || context.state === 'EXPECTED') return 'pending';
     return FAILED_CONCLUSIONS.has(context.state) ? 'failed' : 'unknown';
@@ -1597,13 +1664,38 @@ function contextResult(context) {
 
 // A check run that was cancelled, for example by a newer run of the same workflow.
 function isCancelled(context) {
-  return context.kind !== 'StatusContext' && context.__typename !== 'StatusContext' && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+  return !isStatusContext(context) && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+}
+
+// The newest of one app's runs of a check: a run still going, else the run that completed last.
+// Null when that order cannot be read: a completed run with no time, or two runs completed last at once.
+function newestRun(runs) {
+  const going = runs.find(run => run.status !== 'COMPLETED');
+  if (going) return going;
+  const times = runs.map(run => Date.parse(run.completed_at));
+  if (times.some(Number.isNaN)) return null;
+  const last = Math.max(...times);
+  const newest = runs.filter((run, at) => times[at] === last);
+  return newest.length === 1 ? newest[0] : null;
+}
+
+// The results that decide one required check. GitHub names a required check by its name and,
+// optionally, the app that must set it, so a check's runs are grouped by app and the newest run of
+// each app decides; its status contexts (one per name) count beside them. When any run's app or
+// completion time is unreadable, every result counts, except a cancelled run beside another result.
+function checkResults(named) {
+  const runs = named.filter(context => !isStatusContext(context));
+  const apps = new Map();
+  for (const run of runs) apps.set(run.app, [...(apps.get(run.app) || []), run]);
+  const newest = runs.every(run => Number.isSafeInteger(run.app)) ? [...apps.values()].map(newestRun) : [null];
+  if (newest.every(Boolean)) return [...newest, ...named.filter(isStatusContext)].map(contextResult);
+  const replaced = named.some(context => !isCancelled(context));
+  return named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
 }
 
 // Required checks at the exact head. Required = GitHub's isRequired flags plus the binding's list.
-// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN. A cancelled
-// result is set aside when the same check has any other result at the head (a newer run replaced
-// it), so that other result decides; a check whose only results were cancelled stays failed.
+// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN, and any failed
+// deciding result makes the check failed (checkResults says which results decide).
 function evaluateChecks({ head, rollupOid, contexts = [], complete = true, configured = [] }) {
   const empty = { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: isSha(head) ? head : null, missing: [], failing: [], reason: null };
   if (!isSha(head)) return { ...empty, reason: 'NO_HEAD' };
@@ -1613,8 +1705,7 @@ function evaluateChecks({ head, rollupOid, contexts = [], complete = true, confi
   if (!required.length) return { ...empty, reason: 'NO_REQUIRED_CHECKS' };
   const results = required.map(name => {
     const named = contexts.filter(context => contextName(context) === name);
-    const replaced = named.some(context => !isCancelled(context));
-    const found = named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
+    const found = named.length ? checkResults(named) : [];
     if (!found.length) return { name, result: 'missing' };
     if (found.includes('failed')) return { name, result: 'failed' };
     if (found.includes('pending')) return { name, result: 'pending' };
@@ -3908,6 +3999,14 @@ function openStore({ transport, binding, now, toolkitVersion = null, localCheckp
   return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite });
 }
 
+// One rollup node as a check context: a check run carries the app that set it and when it completed.
+function rollupContext(node) {
+  return { kind: node.__typename, name: node.name || node.context, status: node.status || null, conclusion: node.conclusion || null, state: node.state || null,
+    required: node.isRequired === true, ...(node.__typename === 'CheckRun' ? { app: node.checkSuite?.app?.databaseId ?? null, completed_at: node.completedAt || null } : {}) };
+}
+
+const upper = value => (typeof value === 'string' ? value.toUpperCase() : null);
+
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
@@ -3917,7 +4016,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
         pageInfo { hasNextPage }
         nodes {
           __typename
-          ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
+          ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber: $number) }
           ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
         } } } } } }
     }
@@ -3941,7 +4040,7 @@ class ProgrammeGraphReader {
     for (let start = 0; start < unique.length; start += 20) {
       const batch = unique.slice(start, start + 20);
       if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
-      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
       const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
@@ -3958,8 +4057,7 @@ class ProgrammeGraphReader {
           train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
           default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
           complete: !rollup?.contexts?.pageInfo?.hasNextPage,
-          contexts: (rollup?.contexts?.nodes || []).map(node => ({ kind: node.__typename, name: node.name || node.context,
-            status: node.status || null, conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true })) });
+          contexts: (rollup?.contexts?.nodes || []).map(rollupContext) });
       }
     }
     return result;
@@ -3979,8 +4077,10 @@ class ProgrammeGraphReader {
       head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
       train: trainRows(pr.body), merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
       complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
-      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: check.status, conclusion: check.conclusion, required: false })),
-        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
+      // REST spells states in lower case; the GraphQL spelling is the one checks are judged by.
+      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: upper(check.status), conclusion: upper(check.conclusion), required: false,
+        app: check.app?.id ?? null, completed_at: check.completed_at || null })),
+        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: upper(context.state), required: false }))] };
   }
 
   // The login archive comments are written under. The cloud sweep is given its App's login and
@@ -4102,10 +4202,7 @@ class ProgrammeGraphReader {
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
-      contexts: (rollup?.contexts?.nodes || []).map(node => ({
-        kind: node.__typename, name: node.name || node.context, status: node.status || null,
-        conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true,
-      })),
+      contexts: (rollup?.contexts?.nodes || []).map(rollupContext),
     };
   }
 
@@ -4189,7 +4286,11 @@ class ProgrammeGraphReader {
       // A merge train carries its members' work; the member PR, never the train, is the task's PR.
       const history = withoutCarriers(nodes.map(node => graphPr(node, this.repository)).filter(Boolean));
       const kept = new Set(history.map(pr => pr.number));
-      return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
+      // The PRs that claim this task themselves: GitHub's closing links, and timeline PRs whose own
+      // body names the task with a reference keyword. A bare mention claims nothing.
+      const claims = complete ? [...new Set([...closing.nodes.map(node => node?.number),
+        ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest' && claimsIssue(node.body, number)).map(node => node.number)])].filter(n => kept.has(n)) : [];
+      return [number, { claims, complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(candidate => candidate && kept.has(candidate.number)), history }];
     }));
   }
@@ -4425,6 +4526,26 @@ function referencedIssues(prs) {
     }
   }
   return references;
+}
+
+// True when a PR body names the issue with Refs, Completes, Closes, Fixes or Resolves.
+function claimsIssue(body, issue) {
+  return (referencedIssues([{ number: 0, body }]).get(issue) || []).length > 0;
+}
+
+// The PR a task follows in place of its tracked PR (null: keep it). Only PRs that claim the task and
+// were opened after the tracked one count. CLOSED tracked: the one open claimant, else the newest
+// merged one. MERGED tracked on an unfinished task: the one open claimant. Finished tasks only move
+// from a CLOSED PR to a merged one; retired tasks never move.
+function replacementPr(history, tracked, claims, { finished, retired }) {
+  if (retired || !tracked || !['CLOSED', 'MERGED'].includes(tracked.state)) return null;
+  const claimed = new Set(claims);
+  const newer = history.filter(pr => pr.number > tracked.number && claimed.has(pr.number));
+  const open = [...new Set(newer.filter(pr => pr.state === 'OPEN').map(pr => pr.number))];
+  if (!finished && open.length) return open.length === 1 ? { number: open[0], state: 'OPEN' } : null;
+  if (tracked.state !== 'CLOSED') return null;
+  const merged = mergedSelection(newer.filter(pr => pr.state === 'MERGED'))[0];
+  return merged ? { number: merged.number, state: 'MERGED' } : null;
 }
 
 function backfillEligible(outcome, child) {
@@ -4696,7 +4817,9 @@ function staleParts(effect) {
 }
 
 function describeEffect(effect) {
-  const text = EFFECT_TEXT[effect.kind](effect);
+  const base = EFFECT_TEXT[effect.kind](effect);
+  const move = effect.replacement;
+  const text = move ? `${base}; follow ${move.selected_state === 'OPEN' ? 'open' : 'merged'} PR #${move.selected} in place of ${move.from_state === 'CLOSED' ? 'closed unmerged' : 'merged'} PR #${move.from}, the newer PR that claims the task` : base;
   return effect.backfill ? `${text}; select merged PR #${effect.backfill.selected} from ${effect.backfill.candidates.map(pr => `#${pr.number} (${pr.merged_at})`).join(', ')}. ${effect.backfill.reason}` : text;
 }
 
@@ -4859,7 +4982,7 @@ class Reconciler {
       if (number) prs.set(outcome.issue, readPr(number));
     }
     const scoped = sweep ? new Set(outcomes.map(outcome => outcome.issue)) : null;
-    const prGraph = this.refreshFacts ? this.discoverGraph(parent, sweep ? [...all, ...additions] : outcomes, children, prs, prCache, readPr, scoped, sweep?.graph) : null;
+    const prGraph = this.refreshFacts ? this.discoverGraph(parent, sweep ? [...all, ...additions] : outcomes, children, prs, prCache, readPr, scoped, sweep?.graph, issues) : null;
     const discovery = prGraph ? prGraph.discovery : this.discoverMerged(outcomes.filter(outcome => backfillEligible(outcome, children.get(outcome.issue)?.doc)), prs, prCache, readPr);
     const journals = new Map(sweep ? sweep.journals : []);
     for (const outcome of outcomes) {
@@ -5069,7 +5192,7 @@ class Reconciler {
 
   // A queued pass brings its lists and links already read (`pre`) and reads per task only for the
   // tasks in `scoped`; a task outside it adds its known PRs to the linked set and nothing else.
-  discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null) {
+  discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null, issues = new Map()) {
     const discovery = new Map(); const histories = new Map();
     // Each PR's title as this pass read it, for the PR GRAPH only: titles are never saved in state.
     const titles = new Map();
@@ -5154,6 +5277,24 @@ class Reconciler {
           histories.set(number,prHistory(own));
           const candidates=mergedSelection(own.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
           const result={complete:true,candidates}; discovery.set(number,result);
+          // A superseded PR: the task follows a newer PR that claims it (closing links and keyword
+          // references, read this pass), by the rules in replacementPr. The issue read this pass also
+          // counts, so a task closed in this same pass is already finished or retired.
+          const outcomeNow=outcomes.find(outcome=>outcome.issue===number); const docNow=children.get(number)?.doc;
+          const issueNow=issues.get(number); const closedNow=issueNow?.state==='closed';
+          const retired=isRetired(outcomeNow,docNow) || closedNow && String(issueNow.state_reason||'').toUpperCase()!=='COMPLETED';
+          const claims=[...(link.claims||[]),...(references.get(number)||[])];
+          const replacement=current ? replacementPr(own,current,claims,{finished:isFinished(outcomeNow,docNow) || closedNow,retired}) : null;
+          if(replacement) {
+            try {
+              if(!prCache.has(replacement.number)) spend();
+              const pr=readPr(replacement.number);
+              // The read must confirm the state the choice was made on; otherwise the next pass decides.
+              if(!pr || (pr.state==='DRAFT'?'OPEN':pr.state)!==replacement.state) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','The replacement PR was not confirmed in the state it was chosen in.');
+              selectedPrs.set(number,pr);
+              result.replacement={from:current.number,from_state:current.state,selected:replacement.number,selected_state:replacement.state};
+            } catch(error) { incomplete([number],error); continue; }
+          }
           const outcome=outcomes.find(outcome=>outcome.issue===number);
           if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
             const selected=candidates[0].number;
@@ -5238,43 +5379,49 @@ class Reconciler {
     }
   }
 
-  // Work queue: a task the graph shows IN PROGRESS that nothing is moving. Nothing moves it when it has
-  // no live gate assignment, no holder on its state document, and no open or draft PR (tracked, in its
-  // history, or naming it) updated in the last PR_STALE_HOURS. A stale open PR does not hide it, so work
-  // parked behind a stalled PR surfaces. A task whose PRs have all merged or closed is TASK_MERGED_OPEN
-  // after TASK_MERGED_OPEN_HOURS of quiet; any other idle task is TASK_IDLE after TASK_IDLE_HOURS. A task
-  // waiting on the owner is left out: the owner already has it. So is a task natively blocked by another
-  // open task on the graph that is itself moving: the blocker carries the work. A pass that could not
-  // read every open PR raises none, since an unread open PR could be moving the task.
+  // How long a task the graph shows IN PROGRESS has been still, or null when something moves it or it
+  // is not shown IN PROGRESS. Nothing moves it when it has no live gate assignment, no holder on its
+  // state document, and no open or draft PR (tracked, in its history, or naming it) updated in the last
+  // PR_STALE_HOURS; a stale open PR does not count. A task waiting on the owner is left out: the owner
+  // already has it. A document with no write time is new in this pass or cannot be dated, so never still.
+  // `latest` is the newer of the document's write and the last comment on the task.
+  stillness(outcome, doc, observed, now) {
+    if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') return null;
+    if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) return null;
+    const open = [...new Set([
+      ...(['OPEN', 'DRAFT'].includes(doc.pr?.state) ? [doc.pr.number] : []),
+      ...(doc.prs || []).filter(pr => pr.state === 'OPEN').map(pr => pr.number),
+      ...(observed.references.get(outcome.issue) || []),
+    ])].filter(number => isInt(number, 1));
+    // An open PR whose last update cannot be read counts as moving.
+    const updated = number => Date.parse(observed.prUpdated?.get(number) || '');
+    if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * HOUR_MS)) return null;
+    const written = Date.parse(doc.volatile?.written_at || '');
+    if (!Number.isFinite(written)) return null;
+    const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
+      .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
+    const latest = Math.max(written, ...comments);
+    const closedPrs = [doc.pr, ...(doc.prs || [])].filter(pr => isInt(pr?.number, 1));
+    const merged = !open.length && closedPrs.length > 0 && closedPrs.every(pr => ['MERGED', 'CLOSED'].includes(pr.state));
+    return { open, merged, latest };
+  }
+
+  // Work queue: a task the graph shows IN PROGRESS that nothing is moving (see stillness). A task whose
+  // PRs have all merged or closed is TASK_MERGED_OPEN after TASK_MERGED_OPEN_HOURS of quiet; any other
+  // idle task is TASK_IDLE after TASK_IDLE_HOURS. So is a task natively blocked by another open task on
+  // the graph that is itself moving: the blocker carries the work. A pass that could not read every open
+  // PR raises none, since an unread open PR could be moving the task.
   diffIdle(parent, docs, observed, only, findings) {
     if (observed.prGraph?.openComplete === false) return;
     const now = Date.parse(this.now());
-    const hour = 60 * 60 * 1000;
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     // The stall of one task, or null when something moves it (or it is not shown IN PROGRESS).
     const stall = outcome => {
       const doc = docs.get(outcome.issue);
-      if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') return null;
-      if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) return null;
-      const open = [...new Set([
-        ...(['OPEN', 'DRAFT'].includes(doc.pr?.state) ? [doc.pr.number] : []),
-        ...(doc.prs || []).filter(pr => pr.state === 'OPEN').map(pr => pr.number),
-        ...(observed.references.get(outcome.issue) || []),
-      ])].filter(number => isInt(number, 1));
-      // An open PR whose last update cannot be read counts as moving.
-      const updated = number => Date.parse(observed.prUpdated?.get(number) || '');
-      if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * hour)) return null;
-      const written = Date.parse(doc.volatile?.written_at || '');
-      // A document with no write time is new in this pass or cannot be dated; neither is idle.
-      if (!Number.isFinite(written)) return null;
-      const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
-        .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
-      const latest = Math.max(written, ...comments);
-      const closedPrs = [doc.pr, ...(doc.prs || [])].filter(pr => isInt(pr?.number, 1));
-      const merged = !open.length && closedPrs.length > 0 && closedPrs.every(pr => ['MERGED', 'CLOSED'].includes(pr.state));
-      const hours = merged ? TASK_MERGED_OPEN_HOURS : TASK_IDLE_HOURS;
-      if (now - latest < hours * hour) return null;
-      return { doc, open, merged, hours, latest };
+      const still = this.stillness(outcome, doc, observed, now);
+      if (!still) return null;
+      const hours = still.merged ? TASK_MERGED_OPEN_HOURS : TASK_IDLE_HOURS;
+      return now - still.latest < hours * HOUR_MS ? null : { doc, ...still, hours };
     };
     // A blocker moves when it is an open task on this graph shown IN PROGRESS that is not stalled itself
     // (one level only: a blocker skipped for its own blocker still counts as stalled here).
@@ -5298,6 +5445,47 @@ class Reconciler {
         ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}` });
     }
+  }
+
+  // Work queue, batch rule (delivery contract section 3): lanes finish the NOW batch before LATER work
+  // starts. BATCH_NEXT, on the parent, says a lane is free for LATER work: the graph has an open LATER
+  // task and no open NOW task still needs a gate lane. A NOW task needs none when it waits on the owner
+  // (its lifecycle or gate), its open PR passed review at its current head and its required checks are not
+  // red (on a merge train or waiting for a merge OK), every one of its PRs has merged or closed (its next step is the controller's, and
+  // TASK_MERGED_OPEN asks for it), or, by the tail guard, it has been still for BATCH_TAIL_HOURS. Optional
+  // tasks never raise it: the owner keeps them, the batch rule does not start them. Its first raise waits
+  // until no open task's state document has been written for BATCH_NEXT_HOURS (one without a write time
+  // is new, so it waits too); once open or disposed it is reported on while the condition holds. Only a whole-graph pass that read every open PR checks it; the finding clears
+  // once a NOW task needs a lane again.
+  diffBatch(parent, docs, observed, only, findings) {
+    if (only || observed.prGraph?.openComplete === false) return;
+    const now = Date.parse(this.now());
+    const rows = parent.outcomes.filter(outcome => observed.issues.get(outcome.issue)?.state !== 'closed')
+      .map(outcome => ({ outcome, doc: docs.get(outcome.issue), group: graphClass(outcome, docs.get(outcome.issue)) }));
+    const later = rows.filter(row => row.group === 'LATER');
+    if (!later.length) return;
+    const needsLane = ({ outcome, doc }) => {
+      if (doc.lifecycle === 'WAITING_OWNER' || doc.gate?.state === 'WAITING_OWNER') return false;
+      // Red required checks put the task back on its lane: the lane fixes red CI first.
+      const passedAtHead = ['OPEN', 'DRAFT'].includes(doc.pr?.state) && isSha(doc.pr.head) && doc.review?.state === 'PASSED'
+        && (doc.review.verdicts || []).some(verdict => verdict.verdict === 'PASSED' && verdict.head === doc.pr.head) && doc.pr.checks?.state !== 'RED';
+      if (passedAtHead) return false;
+      const still = this.stillness(outcome, doc, observed, now);
+      if (still?.merged) return false;
+      return !(still && now - still.latest >= BATCH_TAIL_HOURS * HOUR_MS);
+    };
+    const current = rows.filter(row => row.group === 'NOW');
+    if (current.some(needsLane)) return;
+    // The quiet hour holds back only the first raise. An open or disposed BATCH_NEXT is reported on while
+    // its condition holds, so a routine task write never resolves it or drops its dispose.
+    const reported = (parent.attention || []).some(entry => entry.code === 'BATCH_NEXT' && entry.issue === parent.parent_issue
+      && (OPEN_FINDING_STATES.includes(entry.state) || entry.state === 'disposed'));
+    const written = rows.filter(row => row.doc).map(row => Date.parse(row.doc.volatile?.written_at || ''));
+    if (!reported && written.some(time => !Number.isFinite(time) || now - time < BATCH_NEXT_HOURS * HOUR_MS)) return;
+    const top = graphOrder(parent, docs, observed.issues).find(outcome => later.some(row => row.outcome === outcome));
+    const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+    findings.push({ code: 'BATCH_NEXT', issue: parent.parent_issue,
+      detail: `${current.length ? `none of the ${count(current.length, 'NOW task')} needs a gate lane` : 'NOW is empty'} and LATER has ${count(later.length, 'task')}, led by #${top.issue}` });
   }
 
   // Drift (programme-drift.cjs): what fell behind its state with nothing in this pass to fix it. Open
@@ -5407,14 +5595,14 @@ class Reconciler {
     else {
       const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects', ...(this.refreshFacts ? CLOSE_FIELDS : [])].includes(key)
         && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
-      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}) });
+      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}), ...(discovery?.replacement ? { replacement: discovery.replacement } : {}) });
     }
     const start = existing || newChild({repository:this.binding.repository,outcome});
     if (this.refreshFacts && CLOSE_FIELDS.some(key=>JSON.stringify(start[key]) !== JSON.stringify(desired[key]))) {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
@@ -6223,6 +6411,7 @@ class Reconciler {
     const blockHolds = new Set(holds.slice(blockHoldStart));
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
+    this.diffBatch(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
@@ -7347,7 +7536,7 @@ class Reconciler {
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings.map(withNextAction),
       close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
-      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}) })),
+      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}), ...(effect.replacement ? { replacement: effect.replacement } : {}) })),
       recovered: plan.resolutions,
       holds: plan.holds,
       results: [],
@@ -7374,7 +7563,9 @@ class Reconciler {
         this.pass.progress?.reported();
       } catch (error) {
         if (error.code !== 'STATE_BRANCH_BUSY') throw error;
+        // Nothing was written: the stop stays outside the state (lease, note) and the pass saved nothing.
         this.stopReason = error.reason;
+        plan.noWrite = true;
       }
     } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || this.sweepChange || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
@@ -7452,7 +7643,7 @@ function bindRepository({ transport, originUrl, binding }) {
 
 module.exports = Object.freeze({
   get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
-  SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
+  SCHEMA, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
@@ -7464,7 +7655,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, PR_STALE_HOURS, WORK_QUEUE_CODES, workQueue,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, WORK_QUEUE_CODES, workQueue,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });

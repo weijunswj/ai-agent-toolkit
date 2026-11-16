@@ -29,11 +29,30 @@ const CI_ARGUMENT = '--ci';
 const CI_COMMAND = `node repo/scripts/check-test-durations.cjs ${CI_ARGUMENT}`;
 const REPORT_SCHEMAS = new Set(['toolkit-test-durations/v1', shards.SUMMARY_SCHEMA]);
 
-// { system, files: { file: seconds } } from either report shape.
+// { system, files: { file: seconds } } from either report shape. A shard summary also keeps its
+// shard and run attempt, so a re-run can replace the older attempt.
 function readReport(value) {
   if (!value || !REPORT_SCHEMAS.has(value.schema) || !shards.SYSTEMS.includes(value.system)) throw new Error('not a run-tests.cjs summary or duration report');
-  if (value.schema === shards.SUMMARY_SCHEMA) return { system: value.system, files: Object.fromEntries(value.files.map((entry) => [entry.file, entry.seconds])) };
+  if (value.schema === shards.SUMMARY_SCHEMA) {
+    const report = { system: value.system, files: Object.fromEntries(value.files.map((entry) => [entry.file, entry.seconds])) };
+    if (value.shard !== undefined) report.shard = value.shard;
+    if (Number.isInteger(value.run_attempt)) report.run_attempt = value.run_attempt;
+    return report;
+  }
   return { system: value.system, files: { ...value.files } };
+}
+
+// Only the newest run attempt of each shard counts, as in run-tests.cjs --verify-ci: re-running a
+// slow shard replaces its older times instead of failing on them forever. Reports without a shard
+// and attempt are all kept.
+function newestAttempts(reports) {
+  const newest = new Map();
+  for (const report of reports) {
+    if (report.shard === undefined || report.run_attempt === undefined) continue;
+    const key = `${report.system}:${report.shard}`;
+    if (!newest.has(key) || report.run_attempt > newest.get(key).run_attempt) newest.set(key, report);
+  }
+  return reports.filter((report) => report.shard === undefined || report.run_attempt === undefined || newest.get(`${report.system}:${report.shard}`) === report);
 }
 
 function budgetErrors(budgets) {
@@ -99,7 +118,7 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     }
   }
   const reports = files.map((file) => readReport(JSON.parse(fs.readFileSync(file, 'utf8'))));
-  const { errors, lines } = checkDurations(reports, shards.loadManifest(root).budgets);
+  const { errors, lines } = checkDurations(newestAttempts(reports), shards.loadManifest(root).budgets);
   for (const line of lines) out.write(`${line}\n`);
   if (errors.length) {
     err.write(`Test duration check failed:\n- ${errors.join('\n- ')}\n`);
@@ -111,4 +130,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ CI_COMMAND, checkDurations, ciReportFiles, main, readReport });
+module.exports = Object.freeze({ CI_COMMAND, checkDurations, ciReportFiles, main, newestAttempts, readReport });

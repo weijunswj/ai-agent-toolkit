@@ -426,7 +426,10 @@ for (const scoped of [false, true]) for (const row of [
     assert.equal(openStop(f).changed_at, refreshedAt);
     assert.equal(fs.existsSync(`${lockFile}.progress`), false);
     assert.ok(f.github.issues.get(421).body.includes(`- ${state.findingText(openStop(f))}`), 'CURRENT shows the later kill with its own full details');
-    assert.deepEqual(cliRun(f, lockFile, {}, ['attention', '--json']).report.counts, { new: 1, acknowledged: 0 });
+    // The other new finding is BATCH_NEXT: the one planned task has waited days with nothing in NOW.
+    const open = f.store.read('parent', 421).doc.attention.filter(entry => entry.state === 'new').map(entry => entry.code).sort();
+    assert.deepEqual(open, ['BATCH_NEXT', 'PASS_STOPPED']);
+    assert.deepEqual(cliRun(f, lockFile, {}, ['attention', '--json']).report.counts, { new: 2, acknowledged: 0 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -875,7 +878,8 @@ test('reads: a child with a pending intent, or with no usable copy, is never reu
 });
 
 test('reads: the parent comments come from a bookmark that must account for every comment', t => {
-  const f = readFixture(t, { count: 2, groups: ['LATER'] });
+  // Optional tasks, so no BATCH_NEXT finding (planned work with nothing in NOW) changes the page draws counted here.
+  const f = readFixture(t, { count: 2, groups: ['OPTIONAL'] });
   for (let i = 0; i < 245; i++) f.github.addComment(12, { body: `Discussion ${i}` });
   // The fake clock gives each comment its own second; leave a gap wider than the bookmark overlap.
   f.github.clock += 3600000;
