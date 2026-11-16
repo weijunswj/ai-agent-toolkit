@@ -1035,6 +1035,28 @@
       "note": "A playbook-only change waits for the owner's typed merge even with task auto-merge On."
     },
     {
+      "id": "MERGE.machine-on-source-watch-notice",
+      "source": "G2 finding: a source-watch notice report requires typed merge with machine On",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n", "repo/source-watch/review-state.json": "{}\n"}, "message": "base"}, {"files": {"repo/source-watch/reviews/active-third-party-updates.md": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass",
+      "note": "A notice report change waits for the owner's typed merge even with task auto-merge On: a notice closes unmerged once triaged."
+    },
+    {
+      "id": "MERGE.machine-on-source-watch-cursor",
+      "source": "G2 finding: a source-watch notice report requires typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n", "repo/source-watch/review-state.json": "{}\n"}, "message": "base"}, {"files": {"repo/source-watch/review-state.json": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "allow"},
+      "status": "pass",
+      "note": "Control: a reviewed-through cursor change is not on the merge-authority list, so it may merge on the standing answer."
+    },
+    {
       "id": "MERGE.date-name-lines",
       "source": "owner approval delivery regression",
       "kind": "state",
