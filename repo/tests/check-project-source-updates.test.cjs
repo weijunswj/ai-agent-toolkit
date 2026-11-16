@@ -173,6 +173,60 @@ test('human reviewed-through cursor suppresses an already reviewed upstream comm
   });
 });
 
+// A cursor's owning_tracker is the task that ran the last review. That task may be closed by
+// the time the next notice opens, so both report builders must print it as history and send
+// triage to find the current owner, never present it as the owner.
+const historyLabel = 'Tracker at last review (history; find the current owner at triage):';
+
+function assertTrackerShownOnlyAsHistory(report, tracker, expectedCount) {
+  const trackerLines = report.split('\n').filter((line) => line.includes(tracker));
+  assert.equal(trackerLines.length, expectedCount, `expected ${expectedCount} line(s) naming ${tracker}:\n${report}`);
+  for (const line of trackerLines) assert.equal(line, `- ${historyLabel} \`${tracker}\``);
+}
+
+test('a cursor tracker shows only as history in both the source-lock and advisory sections', async () => {
+  const workspace = tempWorkspace();
+  writeJson(path.join(workspace, sourceLockRel), activeLock());
+  const state = reviewStateDoc(lockedSha);
+  // Records must sort by target_key, so the advisory record goes first.
+  state.records.unshift({
+    target_key: 'advisory:example-advisory',
+    target_kind: 'advisory',
+    repository: 'example-owner/advisory-repo',
+    ref: 'main',
+    advisory_target_id: 'example-advisory',
+    reviewed_through_sha: lockedSha,
+    reviewed_at: '2026-07-30',
+    disposition: 'NO_ACTION',
+    owning_tracker: '#315'
+  });
+  writeJson(path.join(workspace, 'repo/source-watch/review-state.json'), state);
+  writeJson(path.join(workspace, 'repo/source-watch/advisory-targets.json'), {
+    schema_version: 1,
+    policy: {},
+    targets: [{
+      id: 'example-advisory',
+      name: 'Example Advisory',
+      kind: 'github_repo',
+      repo: 'example-owner/advisory-repo',
+      ref: 'main',
+      recommendation: 'Review on change.',
+      action_taken: 'None.',
+      remaining_work: 'Review.',
+      removal_condition: 'Remove when obsolete.'
+    }]
+  });
+  await withMockGitHub(latestSha, async (apiBaseUrl) => {
+    const result = await runScript(workspace, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PR needed: yes/);
+  });
+  const report = fs.readFileSync(path.join(workspace, 'repo/source-watch/reviews/active-third-party-updates.md'), 'utf8');
+  assert.match(report, /## Active Third-Party Updates/);
+  assert.match(report, /Advisory update detected/);
+  assertTrackerShownOnlyAsHistory(report, '#315', 2);
+});
+
 test('retired migration provenance is ignored and never queried upstream', async () => {
   const workspace = tempWorkspace();
   writeJson(path.join(workspace, 'repo/source-watch/provenance/retired/SOURCE-LOCK.json'), retiredLock());

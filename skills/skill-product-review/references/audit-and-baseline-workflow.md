@@ -1,6 +1,6 @@
 # Audit And Baseline Workflow
 
-Audits make provenance, ownership, and safety drift visible. Baselines make reviewed findings explicit while follow-up cleanup is still in progress.
+Audits make provenance, ownership, and safety drift visible. Baselines make reviewed findings explicit while follow-up cleanup is still in progress. Each baselined finding names who clears it and by when (a release or a date), recorded in the change that baselines it.
 
 ## Audit Targets
 

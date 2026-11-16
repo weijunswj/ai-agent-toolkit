@@ -99,7 +99,7 @@ Optional AI review is advisory only. It can help summarize a diff, but it cannot
 
 GitHub Actions and Codex must not use source-watch as a source write mechanism. Scheduled source-watch may write only the review notification report and PR metadata. Optional AI review can check upstream notes, explain risk, produce a Codex review prompt, and recommend approve/reject/manual review. It must not apply changes or update advisory targets from the notification workflow.
 
-GitHub notifications depend on the user's notification settings. Any separately approved future updater work should request the right reviewer through normal GitHub review settings.
+GitHub notifications depend on the user's notification settings, so the controller does not rely on them: on each periodic run it picks up any open source-watch notification PR and starts each manual advisory review that is due (`last_reviewed_at` plus `review_cadence_days`). Any separately approved future updater work should request the right reviewer through normal GitHub review settings.
 
 ## Hard Rules
 

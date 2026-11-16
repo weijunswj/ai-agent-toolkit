@@ -405,3 +405,56 @@ test('the switch transport refuses a moved default branch and opens a pull reque
   assert.match(pr.input.body, /changes only `task_prs\.auto_merge`.*It applies only after the owner merges it/s);
   assert.ok(pr.input.body.includes(VERSION_LINE), 'the switch pull request warns about older copies');
 });
+
+// schedule_folder is retired: the reader still accepts it, but a switch pull request drops it.
+const RETIRED = '  "schedule_folder": "TOOLKIT",\n';
+const withRetired = text => text.replace('  "required_checks"', `${RETIRED}  "required_checks"`);
+
+test('a switch pull request drops the retired schedule_folder line in the same diff and changes nothing else', async t => {
+  const ctx = fixture(t);
+  const calls = [];
+  const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 4, url: `https://github.com/${SLUG}/pull/4`, head: 'a'.repeat(40) }; } };
+  for (const [layout, extra] of [['pretty, switch added', {}], ['pretty, switch set in place', { task_prs: { auto_merge: 'after-gates' } }]]) {
+    const plain = bindingText(extra);
+    ctx.merge(plain);
+    assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0, layout);
+    const before = calls.at(-1)[2];
+    const carried = withRetired(plain);
+    assert.notEqual(carried, plain, 'the fixture carries the key');
+    ctx.merge(carried);
+    assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0, layout);
+    const [, mergedText, text] = calls.at(-1);
+    assert.equal(mergedText, carried, `${layout}: the pull request starts from the exact merged text`);
+    assert.equal(text, before, `${layout}: the only other change is the removed schedule_folder line`);
+  }
+  // A compact or CRLF binding keeps its layout too, and a key at the end takes the comma before it.
+  const compact = JSON.stringify({ ...JSON.parse(bindingText()), schedule_folder: 'TOOLKIT' });
+  ctx.merge(compact);
+  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
+  assert.equal(calls.at(-1)[2], `${JSON.stringify(JSON.parse(bindingText())).slice(0, -1)},"task_prs":{"auto_merge":"after-gates"}}`);
+  const crlf = withRetired(bindingText()).replace(/\n/g, '\r\n');
+  ctx.merge(crlf);
+  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
+  assert.equal(calls.at(-1)[2], bindingText().replace(/\n/g, '\r\n').replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates" }\r\n}\r\n'));
+});
+
+test('the switch pull request text names the retired line it deletes, and only when it deletes one', () => {
+  const routes = current => [
+    [/^GET user$/, { login: 'owner' }],
+    [/^GET repos\/toolkit-test-fixture\/switch$/, { default_branch: 'main' }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/git\/ref\/heads\/main$/, { object: { sha: 'b'.repeat(40) } }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/contents\/\.github\/toolkit-programme\.json\?ref=/, { type: 'file', encoding: 'base64', content: Buffer.from(current).toString('base64'), sha: 'c'.repeat(40) }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/pulls\?state=open&head=/, []],
+    [/^POST repos\/toolkit-test-fixture\/switch\/git\/refs$/, { ref: 'x' }],
+    [/^PUT repos\/toolkit-test-fixture\/switch\/contents\/\.github\/toolkit-programme\.json$/, { commit: { sha: 'd'.repeat(40) } }],
+    [/^POST repos\/toolkit-test-fixture\/switch\/pulls$/, input => ({ number: 8, html_url: `https://github.com/${SLUG}/pull/8`, body: input.body })],
+  ];
+  const proposal = bindingText({ task_prs: { auto_merge: 'after-gates' } });
+  const body = merged => {
+    const gh = fakeGh(routes(merged));
+    new GitHubProposalTransport({ run: gh.runner }).publishSwitch(SLUG, merged, proposal, { auto_merge: 'after-gates' });
+    return gh.calls.find(call => /pulls$/.test(call.args[1]) && call.input).input.body;
+  };
+  assert.match(body(withRetired(bindingText())), /^This changes only `task_prs\.auto_merge` in `\.github\/toolkit-programme\.json`, and deletes the retired `schedule_folder`, which nothing reads any more\. These are/);
+  assert.match(body(bindingText()), /^This changes only `task_prs\.auto_merge` in `\.github\/toolkit-programme\.json`\. These are/);
+});
