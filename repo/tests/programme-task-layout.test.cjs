@@ -242,6 +242,16 @@ test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owe
   assert.doesNotMatch(state.renderChildBlockBody(childDoc({ prs: [{ number: 852, state: 'OPEN', merge_sha: null }] }), OUTCOME), /Task:/, 'nothing to carry, no line');
 });
 
+test('an owed UAT recorded on a PR shown only on the Earlier line is named on the Task line', () => {
+  const older = Array.from({ length: 11 }, (unused, index) => ({ number: 700 - index, state: 'MERGED', merge_sha: SHA_A }));
+  const child = childDoc({ pr: { number: 852, state: 'OPEN', head: 'b'.repeat(40), checks: null }, uat: { state: 'PENDING', at_head: SHA_A },
+    prs: [{ number: 852, state: 'OPEN', merge_sha: null }, ...older] });
+  child.private = { ...child.private, pr_heads: [{ pr: 690, head: SHA_A }, { pr: 852, head: 'b'.repeat(40) }] };
+  const body = state.renderChildBlockBody(child, OUTCOME);
+  assert.match(body, /^\|-\|#852\|OPEN\|-\|$/m, 'the tracked PR does not carry a UAT recorded on another PR');
+  assert.match(body, /Earlier: #690\n\nTask: UAT owed on PR #690$/);
+});
+
 test('a task page\'s AGENT CONTEXT links its handover file when the binding names a GitHub store', () => {
   const { handoverUrl } = require('../../skills/github-program-reconciler/scripts/programme-handover.cjs');
   const link = 'https://github.com/acme/state-store/blob/main/handover.md';

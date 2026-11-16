@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.145.2
+
+### Fixed
+
+- **Owed UAT stays on its own PR:** the programme graph's Waiting on cell, CURRENT's In progress line and the task page's PR GRAPH now name the PR an owed owner test was recorded on, found by matching the test's head against the task's PRs, instead of whichever PR the task tracks now. A UAT owed on a merged PR no longer moves to a newer replacement PR. A head that no known PR has shows as `UAT at <short head>` with no PR number. The refresh keeps the heads it has seen on each task's PRs (newest 20, never dropping the owed test's head) in the task's private part, which older Toolkit copies already accept, and writes only that key there, so the controller's own private notes are never overwritten.
+
 ## 3.145.1
 
 ### Fixed
