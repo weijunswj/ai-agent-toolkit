@@ -401,7 +401,7 @@ const FINDING_CODES = Object.freeze({
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
   BATCH_NEXT: { source: 'reconcile', queue: true, next_action: "Controller: no NOW task needs a gate lane. Start the batch's next task (picked tasks lead LATER); if none is left, read all of LATER and pick the next batch: top priority, then quickest, at most 6 PRs and one large task; set their order to lead LATER and record the pick" },
   TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
-  PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
+  PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: the sweep records a single open PR from this repository itself; for several PRs, a fork or bot PR, or a finished task, pick the PR and record it with update --patch, or dispose of the finding' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
   RETURN_CAPTURED: { source: 'reconcile', next_action: 'Controller: give the waiting return its verdict' },
@@ -4254,7 +4254,7 @@ class ProgrammeGraphReader {
         // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
         // is descending by updated_at, so nothing after this row can be newer than the cutoff.
         if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
-        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, updated_at:pr.updated_at || null, closed_at:pr.closed_at || pr.merged_at || null});
+        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, head_repo:pr.head?.repo?.full_name || null, updated_at:pr.updated_at || null, closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
     }
@@ -4289,7 +4289,7 @@ class ProgrammeGraphReader {
       // The PRs that claim this task themselves: GitHub's closing links, and timeline PRs whose own
       // body names the task with a reference keyword. A bare mention claims nothing.
       const claims = complete ? [...new Set([...closing.nodes.map(node => node?.number),
-        ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest' && claimsIssue(node.body, number)).map(node => node.number)])].filter(n => kept.has(n)) : [];
+        ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest' && claimsIssue(node.body, number, node.number)).map(node => node.number)])].filter(n => kept.has(n)) : [];
       return [number, { claims, complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(candidate => candidate && kept.has(candidate.number)), history }];
     }));
@@ -4511,26 +4511,37 @@ class ProgrammeInventory {
 }
 
 // Issue numbers each PR body references with Refs, Completes, Closes, Fixes or Resolves, including
-// lists such as "Refs #421, #423": issue -> sorted PR numbers.
+// lists such as "Refs #421, #423": issue -> sorted PR numbers. A body that names no issue that way
+// references the tasks its own PATH block names (pathIssues).
 function referencedIssues(prs) {
   const references = new Map();
   const carriers = carrierNumbers(prs.map(pr => ({ ...pr, state: pr.state || (pr.merged_at ? 'MERGED' : 'OPEN'), head: pr.head || pr.head_sha || null })));
   for (const pr of prs) {
     // A merge train Refs every member's task; the members it carries answer for them, so it names none.
     if (carriers.has(pr.number)) continue;
-    for (const match of String(pr.body || '').matchAll(/\b(?:refs|completes|closes|fixes|resolves)\b:?\s+((?:#\d+(?:\s*(?:,|and)\s*)?)+)/gi)) {
-      for (const [, number] of match[1].matchAll(/#(\d+)/g)) {
-        const list = references.get(Number(number)) || [];
-        if (!list.includes(pr.number)) references.set(Number(number), [...list, pr.number].sort((a, b) => a - b));
-      }
+    const named = [...String(pr.body || '').matchAll(/\b(?:refs|completes|closes|fixes|resolves)\b:?\s+((?:#\d+(?:\s*(?:,|and)\s*)?)+)/gi)]
+      .flatMap(match => [...match[1].matchAll(/#(\d+)/g)].map(([, number]) => Number(number)));
+    for (const number of named.length ? named : pathIssues(pr.body, pr.number)) {
+      const list = references.get(number) || [];
+      if (!list.includes(pr.number)) references.set(number, [...list, pr.number].sort((a, b) => a - b));
     }
   }
   return references;
 }
 
-// True when a PR body names the issue with Refs, Completes, Closes, Fixes or Resolves.
-function claimsIssue(body, issue) {
-  return (referencedIssues([{ number: 0, body }]).get(issue) || []).length > 0;
+// The tasks a PR's own PATH block names: on each path line, the issue just before "PR #<this PR>".
+// The sweep draws that block on a PR it links to a task, so the PR keeps claiming the task after a
+// hand-recorded link, even with no keyword line. A block that names another PR claims nothing.
+function pathIssues(body, number) {
+  const { block } = findStateBlock(String(body || ''), NAV_BLOCK_NAME);
+  if (!block) return [];
+  return [...block.body.matchAll(/#(\d+) > PR #(\d+)[ \t]*$/gm)].filter(([, , pr]) => Number(pr) === number).map(([, issue]) => Number(issue));
+}
+
+// True when PR `number`'s body names the issue with Refs, Completes, Closes, Fixes or Resolves, or
+// (with no such line) in its own PATH block.
+function claimsIssue(body, issue, number) {
+  return (referencedIssues([{ number, body }]).get(issue) || []).length > 0;
 }
 
 // The PR a task follows in place of its tracked PR (null: keep it). Only PRs that claim the task and
@@ -4819,7 +4830,8 @@ function staleParts(effect) {
 function describeEffect(effect) {
   const base = EFFECT_TEXT[effect.kind](effect);
   const move = effect.replacement;
-  const text = move ? `${base}; follow ${move.selected_state === 'OPEN' ? 'open' : 'merged'} PR #${move.selected} in place of ${move.from_state === 'CLOSED' ? 'closed unmerged' : 'merged'} PR #${move.from}, the newer PR that claims the task` : base;
+  const followed = move ? `${base}; follow ${move.selected_state === 'OPEN' ? 'open' : 'merged'} PR #${move.selected} in place of ${move.from_state === 'CLOSED' ? 'closed unmerged' : 'merged'} PR #${move.from}, the newer PR that claims the task` : base;
+  const text = effect.record ? `${followed}; record open PR #${effect.record.selected} (branch ${effect.record.branch}), the one PR that claims the task, and move a PLANNED task to ACTIVE` : followed;
   return effect.backfill ? `${text}; select merged PR #${effect.backfill.selected} from ${effect.backfill.candidates.map(pr => `#${pr.number} (${pr.merged_at})`).join(', ')}. ${effect.backfill.reason}` : text;
 }
 
@@ -5227,6 +5239,7 @@ class Reconciler {
     }
     const references = referencedIssues(listed);
     const openReferences = referencedIssues(openListed);
+    const listedCarriers = carrierNumbers(listed);
     const linked = new Set();
     // The parent's timeline can be arbitrarily long and is not task-discovery evidence.
     // Parent and task links in a PR's own title/body already identify it from the list reads.
@@ -5295,6 +5308,26 @@ class Reconciler {
               result.replacement={from:current.number,from_state:current.state,selected:replacement.number,selected_state:replacement.state};
             } catch(error) { incomplete([number],error); continue; }
           }
+          // A task whose state records no PR and no branch takes the one open PR that claims it, when
+          // that PR comes from a branch of this repository and not from a bot, and the task is not
+          // finished or retired. Anything else stays report-only (PR_UNTRACKED, from `untracked`).
+          if(!current && !docNow?.pr?.number && !docNow?.candidate?.branch) {
+            const open=openListed.filter(pr=>claims.includes(pr.number) && !listedCarriers.has(pr.number)).sort((a,b)=>a.number-b.number);
+            const ownBranch=pr=>isText(pr.branch) && !excludedGraphPr(pr) && !/\[bot\]$/i.test(pr.author || '')
+              && String(pr.head_repo || '').toLowerCase()===this.binding.repository.toLowerCase();
+            const reason=!open.length ? null : isFinished(outcomeNow,docNow) || closedNow ? 'finished' : open.length>1 ? 'several' : ownBranch(open[0]) ? null : 'outside';
+            if(reason) result.untracked={claimants:open.map(pr=>pr.number),reason};
+            else if(open.length) {
+              try {
+                if(!prCache.has(open[0].number)) spend();
+                const pr=readPr(open[0].number);
+                // The read must confirm the PR is still open; otherwise the next pass decides.
+                if(!pr || !['OPEN','DRAFT'].includes(pr.state) || !isSha(pr.head)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','The open PR that claims the task was not confirmed open.');
+                selectedPrs.set(number,pr);
+                result.record={selected:pr.number,branch:open[0].branch,head:pr.head};
+              } catch(error) { incomplete([number],error); continue; }
+            }
+          }
           const outcome=outcomes.find(outcome=>outcome.issue===number);
           if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
             const selected=candidates[0].number;
@@ -5311,7 +5344,6 @@ class Reconciler {
     }
     const complete = listsComplete && [...discovery.values()].every(entry=>entry.complete);
     for(const [number,pr] of selectedPrs) if(discovery.get(number)?.complete) prs.set(number,pr);
-    const listedCarriers = carrierNumbers(listed);
     const withoutTask = complete ? listed.filter(pr=> !excludedGraphPr(pr) && !listedCarriers.has(pr.number) && !linked.has(pr.number)
       && (pr.state==='OPEN' || watermark && Date.parse(pr.closed_at) > Date.parse(watermark))) : [];
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
@@ -5367,15 +5399,30 @@ class Reconciler {
     return results;
   }
 
-  // Report-only: an open PR that says "Refs #n" (or Completes, Closes, Fixes, Resolves) for an open
-  // outcome whose state tracks no PR and no branch. The controller confirms before recording it.
+  // An open PR that claims an outcome whose state records no PR and no branch (it says Refs #n, or
+  // Completes, Closes, Fixes or Resolves, or names the task in its PATH block). A refresh records the one
+  // open PR from a branch of this repository itself (discoverGraph), so this stays only for what it
+  // leaves to the controller: several such PRs, a PR from a fork or a bot, or a finished or retired
+  // task. A pass without the refresh's PR discovery reports any such PR on an unfinished outcome.
   diffUntracked(parent, docs, observed, only, findings) {
+    const list = numbers => numbers.map(number => `#${number}`).join(', ');
     for (const outcome of parent.outcomes) {
       if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
       const doc = docs.get(outcome.issue);
-      if (isFinished(outcome, doc) || doc?.pr?.number || doc?.candidate?.branch) continue;
+      if (doc?.pr?.number || doc?.candidate?.branch) continue;
+      const seen = observed.prGraph?.discovery.get(outcome.issue);
+      const left = seen?.complete ? seen.untracked : null;
+      if (left) {
+        const [one] = left.claimants;
+        const detail = left.reason === 'several' ? `open PRs ${list(left.claimants)} claim this task, whose state records no PR or branch; the sweep records only a single claimant, so the controller picks one and records it with update --patch`
+          : left.reason === 'outside' ? `open PR #${one} claims this task but comes from a fork, a bot or a generated branch, and the sweep records only a PR from a person's branch of this repository; the controller confirms it and records it with update --patch`
+            : `open PR${left.claimants.length > 1 ? 's' : ''} ${list(left.claimants)} claim${left.claimants.length > 1 ? '' : 's'} this finished or retired task, whose state records no PR or branch; the sweep never records one there, so the controller decides`;
+        findings.push({ code: 'PR_UNTRACKED', issue: outcome.issue, detail });
+        continue;
+      }
+      if (seen?.complete || isFinished(outcome, doc)) continue;
       const numbers = observed.references.get(outcome.issue) || [];
-      if (numbers.length) findings.push({ code: 'PR_UNTRACKED', issue: outcome.issue, detail: `open PR ${numbers.map(number => `#${number}`).join(', ')} references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch` });
+      if (numbers.length) findings.push({ code: 'PR_UNTRACKED', issue: outcome.issue, detail: `open PR ${list(numbers)} references this outcome, but its state records no PR or branch; the next refresh records a single open claimant from a branch of this repository, else the controller records it with update --patch` });
     }
   }
 
@@ -5573,6 +5620,10 @@ class Reconciler {
       checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
       child.pr = { number: pr.number, state: pr.state, head: pr.head,
         checks: { state: checks.state, required_total: checks.required_total, required_passed: checks.required_passed, at_head: checks.at_head } };
+      // The open PR this pass recorded on an unrecorded task also gives its branch and head; apply
+      // moves a PLANNED task to ACTIVE.
+      const record = observed.prGraph?.discovery.get(outcome.issue)?.record;
+      if (record?.selected === pr.number) child.candidate = { ...child.candidate, branch: record.branch, head: record.head };
     }
     const journals = observed.journals?.get(outcome.issue) || null;
     if (!journals) return { doc: child, checks, journals, findings: [], holds: [] };
@@ -5591,11 +5642,12 @@ class Reconciler {
       findings.push({ code: 'ISSUE_MISSING', issue: issueNumber, detail: issue ? 'the number is a pull request' : 'the issue could not be read' });
       return;
     }
-    if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired, ...(backfill ? { backfill } : {}) });
+    const record = discovery?.complete && discovery.record ? { record: discovery.record } : {};
+    if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired, ...(backfill ? { backfill } : {}), ...record });
     else {
       const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects', ...(this.refreshFacts ? CLOSE_FIELDS : [])].includes(key)
         && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
-      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}), ...(discovery?.replacement ? { replacement: discovery.replacement } : {}) });
+      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}), ...(discovery?.replacement ? { replacement: discovery.replacement } : {}), ...record });
     }
     const start = existing || newChild({repository:this.binding.repository,outcome});
     if (this.refreshFacts && CLOSE_FIELDS.some(key=>JSON.stringify(start[key]) !== JSON.stringify(desired[key]))) {
@@ -6757,6 +6809,10 @@ class Reconciler {
         if (effect.backfill && (freshPr !== effect.backfill.expected_pr || !backfillEligible(outcome, child))) {
           throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or completion eligibility changed after planning; run reconciliation again.');
         }
+        // A recorded open PR goes only on a task that still records no PR and no branch, unfinished.
+        if (effect.record && (freshPr !== null || child?.candidate?.branch || (child && isFinished(outcome, child)))) {
+          throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or branch was recorded after planning; run reconciliation again.');
+        }
       };
       try {
         const desired = effect.doc;
@@ -6764,7 +6820,7 @@ class Reconciler {
         // completion time taken from the issue and the journals read in this pass belong to it: the
         // gate is re-folded from those journals on the document read at apply time, so an
         // assignment issued since planning is never overwritten.
-        const fields = effect.kind === 'create_state' ? ['pr', ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
+        const fields = effect.kind === 'create_state' ? ['pr', ...(effect.record ? ['candidate'] : []), ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           onConflict: checkFreshState,
@@ -6777,6 +6833,7 @@ class Reconciler {
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
             }
+            if (effect.record && doc.lifecycle === 'PLANNED') doc.lifecycle = 'ACTIVE';
             return effect.journals ? foldJournals(doc, effect.journals).doc : doc;
           },
         });
@@ -7536,7 +7593,7 @@ class Reconciler {
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings.map(withNextAction),
       close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
-      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}), ...(effect.replacement ? { replacement: effect.replacement } : {}) })),
+      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}), ...(effect.replacement ? { replacement: effect.replacement } : {}), ...(effect.record ? { record: effect.record } : {}) })),
       recovered: plan.resolutions,
       holds: plan.holds,
       results: [],

@@ -318,3 +318,16 @@ test('page budget: a capped first pass on a large parent draws pages and finishe
   while (stopped() && passes < 12) { run(); passes += 1; }
   assert.equal(stopped(), false, 'a complete pass clears the stop');
 });
+
+test('self-record: a queued sweep pass records the one open PR that claims an unrecorded task as soon as the PR opens', t => {
+  const f = fixture(t, { count: 12 });
+  f.run(); f.run();
+  f.github.addPr(3000, { head: 'b'.repeat(40), body: 'Refs #507', branch: 'feature-507' });
+  f.github.prs.get(3000).updated_at = f.tick();
+  const result = f.run();
+  assert.equal(result.code, 0);
+  assert.ok(result.report.sweep.tasks.includes(507), 'the task the new PR names is read this pass');
+  const doc = f.store.read('child', 507).doc;
+  assert.deepEqual([doc.pr.number, doc.pr.state, doc.candidate.branch, doc.candidate.head, doc.lifecycle], [3000, 'OPEN', 'feature-507', 'b'.repeat(40), 'ACTIVE']);
+  assert.match(f.page(421), /\|#507\|NOW/);
+});

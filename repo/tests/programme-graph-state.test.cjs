@@ -820,7 +820,7 @@ const unrecorded = (numbers = [2]) => {
   for(const n of numbers) f.store.mutate('child',n,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'PLANNED'})});
   return f;
 };
-const graphRow = (f, n) => (new RegExp(`\\|#${n}\\|([A-Z]+)\\|`).exec(f.github.issues.get(1).body) || [])[1];
+const graphRow = (f, n) => (new RegExp(`\\|#${n}\\|([A-Z]+)[^|]*\\|`).exec(f.github.issues.get(1).body) || [])[1];
 const untracked = (report, n = 2) => report.findings.filter(e=>e.code==='PR_UNTRACKED' && e.issue===n);
 const pathOnly = (number, chain) => state.renderBlock(state.renderPrNavBlockBody([chain],number),'3.55.1',state.NAV_BLOCK_NAME);
 const recorded = (f, n = 2) => { const doc=f.child(n); return [doc.pr.number,doc.pr.state,doc.candidate.branch,doc.lifecycle]; };
@@ -865,7 +865,7 @@ test('self-record S4: a PR from a fork or a bot is never recorded; a finding nam
     const report=f.run();
     assert.deepEqual(recorded(f),UNRECORDED,JSON.stringify(options));
     const [finding]=untracked(report);
-    assert.match(finding.detail,/open PR #20 claims this task but comes from a fork or a bot/,JSON.stringify(options));
+    assert.match(finding.detail,/open PR #20 claims this task but comes from a fork, a bot or a generated branch/,JSON.stringify(options));
   }
 });
 
