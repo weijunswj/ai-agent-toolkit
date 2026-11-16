@@ -445,55 +445,176 @@ test('history keeps the current PR and orders open, newest merged, older merged,
   f.run(); assert.equal(f.child(2).pr.number,23); assert.deepEqual(f.child(2).prs.map(p=>p.number),[23,20,21,22]);
 });
 
-// A task tracking PR 22, which closed unmerged; the rest of its PR history is set per test.
-const superseded = () => {
-  const f=fixture(); pr(f,22,{state:'CLOSED',body:'Refs #2'});
+// Task #2 tracks PR 22, in the given state; the rest of its PR history is set per test.
+const tracking = (prState = 'CLOSED', numbers = [2]) => {
+  const f=fixture(numbers);
+  pr(f,22,prState==='MERGED' ? {merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'} : {state:prState,body:'Refs #2'});
   f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,pr:{...doc.pr,number:22}})});
   return f;
 };
 const NEW = 'b'.repeat(40);
+const tracked = (f, n = 2) => [f.child(n).pr.number, f.child(n).pr.state];
+const merged = (at, body = 'Refs #2', options = {}) => ({merged:true,mergedAt:at,body,...options});
+const closeListed = (report, n = 2) => report.close_list.filter(entry=>entry.issue===n).map(entry=>entry.pr);
 
-test('a tracked PR that closed unmerged gives way to the newest merged PR of the task',()=>{
-  const f=superseded();
-  pr(f,20,{head:NEW,merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
-  pr(f,19,{merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'});
+test('superseded T1: a closed tracked PR gives way to the newest newer merged PR that claims the task',()=>{
+  const f=tracking();
+  pr(f,25,merged('2026-11-07T00:00:00Z','Refs #2',{head:NEW})); pr(f,24,merged('2026-11-06T00:00:00Z'));
   f.run();
-  assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state,f.child(2).pr.head],[20,'MERGED',NEW]);
-  assert.deepEqual(f.child(2).prs.map(p=>p.number),[20,19,22]);
+  assert.deepEqual([...tracked(f),f.child(2).pr.head],[25,'MERGED',NEW]);
+  assert.deepEqual(f.child(2).prs.map(p=>p.number),[25,24,22]);
   assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
 });
 
-test('a tracked PR that closed unmerged gives way to the one open PR of the task before any merged one',()=>{
-  const f=superseded();
-  pr(f,20,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'}); pr(f,23,{head:NEW,body:'Refs #2'});
+test('superseded T2: a closed tracked PR gives way to the one newer open claimant before any merged one',()=>{
+  const f=tracking();
+  pr(f,20,merged('2026-11-07T00:00:00Z')); pr(f,23,{head:NEW,body:'Refs #2'});
   // PR 23 is both a body reference and a timeline link, and still counts as one open PR.
   f.github.issuePrLinks.set(2,{timeline:[23]});
   f.run();
-  assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state,f.child(2).pr.head],[23,'OPEN',NEW]);
+  assert.deepEqual([...tracked(f),f.child(2).pr.head],[23,'OPEN',NEW]);
 });
 
-test('two open PRs on a task are ambiguous, so the closed tracked PR stays tracked',()=>{
-  const f=superseded(); pr(f,23,{body:'Refs #2'}); pr(f,24,{body:'Refs #2'});
+test('superseded T3: two newer open claimants are ambiguous, so the closed tracked PR stays tracked',()=>{
+  const f=tracking(); pr(f,23,{body:'Refs #2'}); pr(f,24,{body:'Refs #2'});
   f.run();
-  assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state],[22,'CLOSED']);
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
   assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
 });
 
-test('a replacement PR that reads back closed or fails to read keeps the tracked PR and leaves discovery incomplete',()=>{
-  for(const fails of [false,true]) {
-    const f=superseded(); pr(f,20,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
-    // The lists and links show PR 20 merged; only its own read disagrees, once.
+test('superseded T4: a replacement read that fails or disagrees with the lists keeps the tracked PR and leaves discovery incomplete',()=>{
+  // [replacement PR, its list entry, what its own read does]
+  for(const [number,listed,answer] of [[25,merged('2026-11-07T00:00:00Z'),'closed'],[25,merged('2026-11-07T00:00:00Z'),'fails'],[23,{body:'Refs #2'},'merged']]) {
+    const f=tracking(); pr(f,number,listed);
     let read=false;
     f.github.intercept(call=>{
-      if(read || call.path!=='graphql' || !/pullRequest\(number: \$number\)/.test(call.body.query) || call.body.variables?.number!==20) return null;
+      if(read || call.path!=='graphql' || !/pullRequest\(number: \$number\)/.test(call.body.query) || call.body.variables?.number!==number) return null;
       read=true;
-      if(fails) throw new state.ProgrammeError('GH_FAILED','The PR read failed.');
-      Object.assign(f.github.prs.get(20),{merged:false,state:'CLOSED'}); return null;
+      if(answer==='fails') throw new state.ProgrammeError('GH_FAILED','The PR read failed.');
+      Object.assign(f.github.prs.get(number),answer==='closed' ? {merged:false,state:'CLOSED'} : {merged:true,mergedAt:'2026-11-07T00:00:00Z'});
+      return null;
     });
     const report=f.run();
-    assert.deepEqual(report.findings.filter(e=>e.code==='PR_DISCOVERY_INCOMPLETE').map(e=>e.issue),[2]);
-    assert.deepEqual([f.child(2).pr.number,f.child(2).pr.state],[22,'CLOSED']);
+    assert.deepEqual(report.findings.filter(e=>e.code==='PR_DISCOVERY_INCOMPLETE').map(e=>e.issue),[2],`${number} ${answer}`);
+    assert.deepEqual(tracked(f),[22,'CLOSED'],`${number} ${answer}`);
   }
+});
+
+test('superseded T5: a merged PR that only mentions the task never replaces its tracked PR',()=>{
+  const f=tracking(); pr(f,30,merged('2026-11-07T00:00:00Z','Touches the code that #2 also changes.'));
+  f.github.issuePrLinks.set(2,{timeline:[30]});
+  const report=f.run();
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+  assert.deepEqual(closeListed(report),[]);
+});
+
+test('superseded T6: another task\'s open PR that mentions the task never replaces it, and gets no rows for it',()=>{
+  const f=tracking('CLOSED',[2,3]); pr(f,31,{body:'Closes #3. It also touches what #2 changes.'});
+  f.github.issuePrLinks.set(2,{timeline:[31]});
+  f.run();
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+  const body=f.github.prs.get(31).body;
+  assert.ok(!body.includes('> #2 >') && !/^#2:/m.test(body),'PR 31 carries only task #3\'s rows');
+});
+
+test('superseded T7: a newer open PR in the task\'s closing links claims it without a keyword',()=>{
+  const f=tracking(); pr(f,23,{head:NEW,body:'A rebuild.'});
+  f.github.issuePrLinks.set(2,{closing:[23]});
+  f.run();
+  assert.deepEqual(tracked(f),[23,'OPEN']);
+});
+
+test('superseded T8: a merged PR known only from the saved history never replaces the tracked PR',()=>{
+  const f=tracking(); pr(f,25,merged('2026-11-07T00:00:00Z','Unrelated.'));
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,prs:[{number:25,state:'MERGED',merge_sha:SHA},{number:22,state:'CLOSED',merge_sha:null}]})});
+  f.run();
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+});
+
+test('superseded T9: an older merged claimant is no fallback, so a replacement opened later is still followed',()=>{
+  const f=fixture(); pr(f,19,merged('2026-11-06T00:00:00Z')); pr(f,22,{body:'Refs #2'});
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,pr:{...doc.pr,number:22}})});
+  f.github.prs.get(22).state='CLOSED';
+  const report=f.run();
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+  assert.deepEqual(closeListed(report),[]);
+  pr(f,23,{body:'Closes #2'});
+  f.run(); assert.deepEqual(tracked(f),[23,'OPEN']);
+  f.run(); assert.deepEqual(tracked(f),[23,'OPEN']);
+});
+
+test('superseded T10: an open leftover PR is followed until it merges, then the open replacement',()=>{
+  const f=tracking(); const seen=[];
+  pr(f,24,{body:'Refs #2'}); f.run(); seen.push(tracked(f));
+  pr(f,25,{body:'Closes #2'}); f.run(); seen.push(tracked(f));
+  Object.assign(f.github.prs.get(24),{merged:true,mergedAt:'2026-11-07T12:00:00Z'}); f.run(); seen.push(tracked(f));
+  assert.deepEqual(seen,[[24,'OPEN'],[24,'OPEN'],[25,'OPEN']]);
+});
+
+test('superseded T11: a merged tracked PR on an open task gives way only to exactly one newer open claimant',()=>{
+  for(const [others,want] of [[[[23,{body:'Refs #2'}]],[23,'OPEN']],[[[21,{body:'Refs #2'}]],[22,'MERGED']],
+    [[[23,{body:'Refs #2'}],[24,{body:'Refs #2'}]],[22,'MERGED']],[[[23,merged('2026-11-07T00:00:00Z')]],[22,'MERGED']]]) {
+    const f=tracking('MERGED'); for(const [n,options] of others) pr(f,n,options);
+    f.run();
+    assert.deepEqual(tracked(f),want,JSON.stringify(others.map(([n])=>n)));
+  }
+});
+
+test('superseded T12: a task closed as completed this pass moves from a closed PR only to a newer merged claimant',()=>{
+  for(const [options,want] of [[merged('2026-11-07T00:00:00Z'),[23,'MERGED']],[{body:'Refs #2'},[22,'CLOSED']]]) {
+    const f=tracking(); pr(f,23,options); f.close(2);
+    f.run();
+    assert.equal(f.child(2).lifecycle,'DONE');
+    assert.deepEqual(tracked(f),want);
+  }
+});
+
+test('superseded T13: a retired task never moves',()=>{
+  const f=tracking(); pr(f,23,merged('2026-11-07T00:00:00Z')); f.close(2,'not_planned');
+  f.run();
+  assert.equal(f.child(2).lifecycle,'RETIRED');
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+});
+
+test('superseded T14: an older claimant never replaces the tracked PR',()=>{
+  const f=tracking(); pr(f,20,merged('2026-11-07T00:00:00Z'));
+  f.run();
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+});
+
+test('superseded T15: a newer claimant that also closed unmerged is no replacement, and discovery stays complete',()=>{
+  const f=tracking(); pr(f,23,{state:'CLOSED',body:'Refs #2'});
+  f.run();
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+  assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+});
+
+test('superseded T16: the replacement read spends from the discovery budget',()=>{
+  const f=tracking(); pr(f,25,merged('2026-11-07T00:00:00Z'));
+  const pass=f.pass(); const links=pass.reader.issuePullRequestLinks.bind(pass.reader);
+  // Use up the rest of the budget after the link read, so the replacement read is the first past it.
+  pass.reader.issuePullRequestLinks=(numbers,spend)=>{ const result=links(numbers,spend); try { for(;;) spend(); } catch { /* budget used up */ } return result; };
+  const report=pass.run({apply:true});
+  assert.deepEqual(report.findings.filter(e=>e.code==='PR_DISCOVERY_INCOMPLETE').map(e=>e.issue),[2]);
+  assert.deepEqual(tracked(f),[22,'CLOSED']);
+});
+
+test('superseded T17: a merge train is never the replacement; the member it carried is',()=>{
+  const f=tracking(); pr(f,23,merged('2026-11-07T00:00:00Z'));
+  pr(f,26,merged('2026-11-07T00:00:00Z',trainBody([23],[2])));
+  f.github.issuePrLinks.set(2,{timeline:[26]});
+  f.run();
+  assert.deepEqual(tracked(f),[23,'MERGED']);
+});
+
+test('superseded T18: the planned effect names the move, in its text and in the JSON report',()=>{
+  const f=tracking(); pr(f,25,merged('2026-11-07T00:00:00Z')); pr(f,24,merged('2026-11-06T00:00:00Z'));
+  const plan=f.pass().plan();
+  const effect=plan.effects.find(e=>e.kind==='update_state' && e.target.issue===2);
+  assert.deepEqual(effect.replacement,{from:22,from_state:'CLOSED',selected:25,selected_state:'MERGED'});
+  assert.match(effect.text,/follow merged PR #25 in place of closed unmerged PR #22/);
+  const report=f.pass().run({apply:false});
+  assert.deepEqual(report.effects.find(e=>e.kind==='update_state' && e.target.issue===2).replacement.selected,25);
 });
 
 test('a complete pass advances the private close watermark; old closes and parent links stay excluded',()=>{

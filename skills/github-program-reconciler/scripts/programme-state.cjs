@@ -4247,7 +4247,11 @@ class ProgrammeGraphReader {
       // A merge train carries its members' work; the member PR, never the train, is the task's PR.
       const history = withoutCarriers(nodes.map(node => graphPr(node, this.repository)).filter(Boolean));
       const kept = new Set(history.map(pr => pr.number));
-      return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
+      // The PRs that claim this task themselves: GitHub's closing links, and timeline PRs whose own
+      // body names the task with a reference keyword. A bare mention claims nothing.
+      const claims = complete ? [...new Set([...closing.nodes.map(node => node?.number),
+        ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest' && claimsIssue(node.body, number)).map(node => node.number)])].filter(n => kept.has(n)) : [];
+      return [number, { claims, complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(candidate => candidate && kept.has(candidate.number)), history }];
     }));
   }
@@ -4485,14 +4489,24 @@ function referencedIssues(prs) {
   return references;
 }
 
-// The PR that takes over from a tracked PR that closed unmerged, chosen from the task's own PR
-// history with merge trains already removed: its one open PR, else its newest merged PR. Two or more
-// open PRs are ambiguous, so none is chosen and the closed PR stays tracked.
-function replacementPr(history, closed) {
-  const others = history.filter(pr => pr.number !== closed);
-  const open = [...new Set(others.filter(pr => pr.state === 'OPEN').map(pr => pr.number))];
-  if (open.length) return open.length === 1 ? open[0] : null;
-  return mergedSelection(others.filter(pr => pr.state === 'MERGED'))[0]?.number ?? null;
+// True when a PR body names the issue with Refs, Completes, Closes, Fixes or Resolves.
+function claimsIssue(body, issue) {
+  return (referencedIssues([{ number: 0, body }]).get(issue) || []).length > 0;
+}
+
+// The PR a task follows in place of its tracked PR (null: keep it). Only PRs that claim the task and
+// were opened after the tracked one count. CLOSED tracked: the one open claimant, else the newest
+// merged one. MERGED tracked on an unfinished task: the one open claimant. Finished tasks only move
+// from a CLOSED PR to a merged one; retired tasks never move.
+function replacementPr(history, tracked, claims, { finished, retired }) {
+  if (retired || !tracked || !['CLOSED', 'MERGED'].includes(tracked.state)) return null;
+  const claimed = new Set(claims);
+  const newer = history.filter(pr => pr.number > tracked.number && claimed.has(pr.number));
+  const open = [...new Set(newer.filter(pr => pr.state === 'OPEN').map(pr => pr.number))];
+  if (!finished && open.length) return open.length === 1 ? { number: open[0], state: 'OPEN' } : null;
+  if (tracked.state !== 'CLOSED') return null;
+  const merged = mergedSelection(newer.filter(pr => pr.state === 'MERGED'))[0];
+  return merged ? { number: merged.number, state: 'MERGED' } : null;
 }
 
 function backfillEligible(outcome, child) {
@@ -4764,7 +4778,9 @@ function staleParts(effect) {
 }
 
 function describeEffect(effect) {
-  const text = EFFECT_TEXT[effect.kind](effect);
+  const base = EFFECT_TEXT[effect.kind](effect);
+  const move = effect.replacement;
+  const text = move ? `${base}; follow ${move.selected_state === 'OPEN' ? 'open' : 'merged'} PR #${move.selected} in place of ${move.from_state === 'CLOSED' ? 'closed unmerged' : 'merged'} PR #${move.from}, the newer PR that claims the task` : base;
   return effect.backfill ? `${text}; select merged PR #${effect.backfill.selected} from ${effect.backfill.candidates.map(pr => `#${pr.number} (${pr.merged_at})`).join(', ')}. ${effect.backfill.reason}` : text;
 }
 
@@ -4927,7 +4943,7 @@ class Reconciler {
       if (number) prs.set(outcome.issue, readPr(number));
     }
     const scoped = sweep ? new Set(outcomes.map(outcome => outcome.issue)) : null;
-    const prGraph = this.refreshFacts ? this.discoverGraph(parent, sweep ? [...all, ...additions] : outcomes, children, prs, prCache, readPr, scoped, sweep?.graph) : null;
+    const prGraph = this.refreshFacts ? this.discoverGraph(parent, sweep ? [...all, ...additions] : outcomes, children, prs, prCache, readPr, scoped, sweep?.graph, issues) : null;
     const discovery = prGraph ? prGraph.discovery : this.discoverMerged(outcomes.filter(outcome => backfillEligible(outcome, children.get(outcome.issue)?.doc)), prs, prCache, readPr);
     const journals = new Map(sweep ? sweep.journals : []);
     for (const outcome of outcomes) {
@@ -5137,7 +5153,7 @@ class Reconciler {
 
   // A queued pass brings its lists and links already read (`pre`) and reads per task only for the
   // tasks in `scoped`; a task outside it adds its known PRs to the linked set and nothing else.
-  discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null) {
+  discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null, issues = new Map()) {
     const discovery = new Map(); const histories = new Map();
     // Each PR's title as this pass read it, for the PR GRAPH only: titles are never saved in state.
     const titles = new Map();
@@ -5222,14 +5238,22 @@ class Reconciler {
           histories.set(number,prHistory(own));
           const candidates=mergedSelection(own.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
           const result={complete:true,candidates}; discovery.set(number,result);
-          // A superseded PR: the tracked PR closed unmerged, so the task follows its replacement.
-          const replacement=current?.state==='CLOSED' ? replacementPr(own,current.number) : null;
+          // A superseded PR: the task follows a newer PR that claims it (closing links and keyword
+          // references, read this pass), by the rules in replacementPr. The issue read this pass also
+          // counts, so a task closed in this same pass is already finished or retired.
+          const outcomeNow=outcomes.find(outcome=>outcome.issue===number); const docNow=children.get(number)?.doc;
+          const issueNow=issues.get(number); const closedNow=issueNow?.state==='closed';
+          const retired=isRetired(outcomeNow,docNow) || closedNow && String(issueNow.state_reason||'').toUpperCase()!=='COMPLETED';
+          const claims=[...(link.claims||[]),...(references.get(number)||[])];
+          const replacement=current ? replacementPr(own,current,claims,{finished:isFinished(outcomeNow,docNow) || closedNow,retired}) : null;
           if(replacement) {
             try {
-              if(!prCache.has(replacement)) spend();
-              const pr=readPr(replacement);
-              if(!pr || pr.state==='CLOSED') throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','The replacement PR was not confirmed open or merged.');
+              if(!prCache.has(replacement.number)) spend();
+              const pr=readPr(replacement.number);
+              // The read must confirm the state the choice was made on; otherwise the next pass decides.
+              if(!pr || (pr.state==='DRAFT'?'OPEN':pr.state)!==replacement.state) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','The replacement PR was not confirmed in the state it was chosen in.');
               selectedPrs.set(number,pr);
+              result.replacement={from:current.number,from_state:current.state,selected:replacement.number,selected_state:replacement.state};
             } catch(error) { incomplete([number],error); continue; }
           }
           const outcome=outcomes.find(outcome=>outcome.issue===number);
@@ -5485,7 +5509,7 @@ class Reconciler {
     else {
       const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects', ...(this.refreshFacts ? CLOSE_FIELDS : [])].includes(key)
         && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
-      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}) });
+      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}), ...(discovery?.replacement ? { replacement: discovery.replacement } : {}) });
     }
     const start = existing || newChild({repository:this.binding.repository,outcome});
     if (this.refreshFacts && CLOSE_FIELDS.some(key=>JSON.stringify(start[key]) !== JSON.stringify(desired[key]))) {
@@ -7425,7 +7449,7 @@ class Reconciler {
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings.map(withNextAction),
       close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
-      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}) })),
+      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}), ...(effect.replacement ? { replacement: effect.replacement } : {}) })),
       recovered: plan.resolutions,
       holds: plan.holds,
       results: [],
