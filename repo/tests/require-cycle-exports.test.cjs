@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '../..');
 // Runtime scripts and the helper-script templates repositories copy and run.
@@ -183,12 +184,20 @@ test('scripts in require cycles export before running their CLI', () => {
   const sources = new Map(files.map(file => [file, fs.readFileSync(path.join(ROOT, file), 'utf8')]));
   // A token the lexer could not close blanks the rest of its file, which would hide that file's
   // requires, CLI check and exports line from the guard.
-  const misread = files.flatMap(file => views(sources.get(file)).unclosed
-    .map(({ at, what }) => `${file}:${sources.get(file).slice(0, at).split('\n').length} unclosed ${what}`));
+  const misread = files.flatMap(file => misreadOf(file, sources.get(file)));
   assert.deepEqual(misread, [], `The guard's lexer misread these files; teach it the construct:\n${misread.join('\n')}`);
   const offenders = offendersOf(sources);
   assert.deepEqual(offenders, [], `Export before CLI execution in require cycles:\n${offenders.join('\n')}`);
 });
+
+// The bare view keeps every delimiter and blanks only bodies and comments, so it compiles exactly
+// when the lexer read the file right; a misread that closes again later still breaks it.
+function misreadOf(file, source) {
+  const view = views(source);
+  const found = view.unclosed.map(({ at, what }) => `${file}:${source.slice(0, at).split('\n').length} unclosed ${what}`);
+  try { vm.compileFunction(view.bare.replace(/^#!.*/, '')); } catch (error) { found.push(`${file}: bare view does not compile (${error.message})`); }
+  return found;
+}
 
 const CLI_FIRST = "if (require.main === module) main();\nmodule.exports = { main };\n";
 const EXPORTS_FIRST = "module.exports = { main };\nif (require.main === module) main();\n";
@@ -204,6 +213,12 @@ test('the guard follows path.join(__dirname, ...) requires and named path consta
     ['skills/x/scripts/b.cjs', "require('../../../repo/scripts/a.cjs');\nmodule.exports = {};\n"],
   ]);
   assert.deepEqual(offendersOf(named), ['repo/scripts/a.cjs']);
+  // A comment inside the argument is not part of the path.
+  const commentedArgument = new Map([
+    ['repo/scripts/a.cjs', `const path = require('node:path');\nrequire(path.join(__dirname, /* the peer */ 'b.cjs'));\n${CLI_FIRST}`],
+    ['repo/scripts/b.cjs', "require('./a.cjs');\nmodule.exports = {};\n"],
+  ]);
+  assert.deepEqual(offendersOf(commentedArgument), ['repo/scripts/a.cjs']);
 });
 
 test('the guard ignores comments and strings', () => {
@@ -238,9 +253,18 @@ test('the guard reports a token its lexer could not close', () => {
   // A regular expression after a closing parenthesis reads as division, so its backtick opens a
   // template that never closes and would blank the rest of the file.
   assert.deepEqual(views("if (ok) /`/.test(s);\nrequire('./b.cjs');\n").unclosed.map(item => item.what), ['template']);
-  assert.deepEqual(views("const s = 'open\nconst t = 1;\n").unclosed.map(item => item.what), ['string']);
+  // A quote never runs on to the next line, even when a later line has one.
+  const open = "const s = 'open\nconst t = 'x';\n";
+  assert.deepEqual(views(open).unclosed.map(({ at, what }) => [open.slice(0, at).split('\n').length, what]), [[1, 'string']]);
   assert.deepEqual(views('function f() {\n').unclosed.map(item => item.what), ['brace']);
   assert.deepEqual(views('}\n').unclosed.map(item => item.what), ['brace']);
   assert.deepEqual(views('/* open\n').unclosed.map(item => item.what), ['comment']);
   assert.deepEqual(views(`${CLI_FIRST}const re = /a[/]b/g;\nconst t = \`x\${{ a: 1 }.a}\`;\n`).unclosed, []);
+  // A slash after a block's closing brace starts a regular expression.
+  assert.deepEqual(misreadOf('a.cjs', "if (a) {}\n/`/.test(s);\n"), []);
+  // A misread that closes again later (at a URL template, or at a block comment after `/[/*]/`): no
+  // token is left open, but the bare view no longer compiles.
+  assert.equal(misreadOf('a.cjs', "if (ok) /`/.test(s);\nrequire('./b.cjs');\nconst u = `https://x`;\n").length, 1);
+  assert.equal(misreadOf('a.cjs', "if (ok) /[/*]/.test(s);\nrequire('./b.cjs');\n/** doc */\n").length, 1);
+  assert.deepEqual(misreadOf('a.cjs', `#!/usr/bin/env node\n${CLI_FIRST}const t = \`x\${{ a: 1 }.a}\`;\n`), []);
 });
