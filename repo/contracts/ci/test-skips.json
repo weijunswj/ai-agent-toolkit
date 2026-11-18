@@ -44,7 +44,7 @@
     },
     {
       "file": "repo/tests/claude-process-launch.test.cjs",
-      "test": "direct PATH lookup runs the later Windows executable and never the logging wrapper",
+      "test": "opted-in Codex PATH lookup runs the later Windows executable and never the logging wrapper",
       "systems": [
         "linux"
       ],
@@ -258,6 +258,14 @@
         "linux"
       ],
       "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/host-config-writes.test.cjs",
+      "test": "config/read: a Codex the system refuses to start stays unverified and does not fall through to a later candidate",
+      "systems": [
+        "windows"
+      ],
+      "reason": "POSIX-only behaviour (needs a #! script with a non-executable interpreter for an async EACCES); the test runs on the Linux leg"
     },
     {
       "file": "repo/tests/host-config-writes.test.cjs",
@@ -1162,6 +1170,14 @@
         "linux"
       ],
       "reason": "Windows-only behaviour; the test runs on the Windows leg"
+    },
+    {
+      "file": "repo/tests/toolkit-codex-install-state.test.cjs",
+      "test": "AT16c: a named Codex the system cannot start holds as cannot be started, not as unreadable",
+      "systems": [
+        "windows"
+      ],
+      "reason": "POSIX-only behaviour (needs a #! script with a missing interpreter for an async ENOENT); the test runs on the Linux leg"
     },
     {
       "file": "repo/tests/toolkit-codex-launch-check.test.cjs",
