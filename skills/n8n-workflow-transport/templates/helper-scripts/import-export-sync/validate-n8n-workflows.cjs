@@ -264,13 +264,13 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
       // A URL written as a quoted literal inside an expression ({{ 'https://host/x' }}) is checked on
       // its own as well, because collapsing would hide it. Each template literal ${ ... } is collapsed
       // the same way, in both, so a space, call or quote inside it does not end the match early; what
-      // was inside it is checked on its own too. A quoted literal at the top of either kind of part
-      // (${'host'}, {{ $env.HOST || 'host' }}) is text the host is built from, so the text is also
-      // read with it in place of its part. Each match is checked with the text just after it, which
+      // was inside it is checked on its own too. A part is also read as each text it can give, from
+      // its quoted and template literals (${'host'}, {{ $env.HOST || 'host' }}, {{ 'https://' + $json.t
+      // + '.host' }}), in place of the part. Each match is checked with the text just after it, which
       // an email needs.
       const matchesIn = (text) => [...text.matchAll(regex)].map((found) => ({ match: found[0], after: text.slice(found.index + found[0].length, found.index + found[0].length + 256) }));
       const candidates = options.collapseExpressions
-        ? [...literalForms(value, expressionParts(value), '{{expr}}'), ...expressionLiterals(value)].flatMap(templateTexts).flatMap(matchesIn)
+        ? [...scanForms(value, expressionParts(value), '{{expr}}'), ...expressionLiterals(value)].flatMap(templateTexts).flatMap(matchesIn)
         : matchesIn(value);
       const unsafe = candidates.filter(({ match, after }) => !isAllowed(match, after)).map(({ match }) => match);
       if (unsafe.length > 0) {
@@ -291,11 +291,11 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
   return { count: values.size, places: shown };
 }
 
-// The text with each balanced ${ ... } as one token, and with each quoted literal at the top of one
-// in its place, then the texts inside each one, the same way. One left open stays as written.
+// The text with each balanced ${ ... } as one token, and with each text one can give in its place,
+// then the texts inside each one, the same way. One left open stays as written.
 function templateTexts(text) {
   const parts = templateParts(text);
-  return [...literalForms(text, parts, '${expr}'), ...parts.flatMap((part) => templateTexts(part.body))];
+  return [...scanForms(text, parts, '${expr}'), ...parts.flatMap((part) => templateTexts(part.body))];
 }
 
 // Each balanced ${ ... } in the text, in order. Reading stops at one left open.
@@ -324,12 +324,42 @@ function expressionParts(text) {
   return [...text.matchAll(/\{\{[\s\S]*?\}\}/g)].map((found) => ({ start: found.index, end: found.index + found[0].length, body: found[0].slice(2, -2) }));
 }
 
-// The text with every part as one token, then once more for each quoted literal at the top of a part:
-// that part is written as the literal and every other part stays one token. Only names, member access
-// and calls are run time; a quoted literal is text the host is built from. A literal joined to run-time
-// code (${'tenant-' + id}) keeps a token on that side; one that is a whole value (${$env.HOST || 'host'},
-// a ternary branch) stands alone.
-function literalForms(text, parts, token) {
+// How far around a part the URL scan reads a text the part can give. A host sits well inside this.
+const formWindow = 1024;
+// Characters that end a URL match, so a match never crosses them.
+const urlStop = /[\s"'<>)]/;
+
+// The text with every part as one token, then, for each text a part can give, only the stretch of
+// that text a URL match through the part can reach, with the part replaced by it. Reading only that
+// stretch keeps a large value with many parts as cheap as reading it once.
+function scanForms(text, parts, token) {
+  let base = '';
+  let at = 0;
+  const places = parts.map((part) => {
+    base += text.slice(at, part.start);
+    const place = base.length;
+    base += token;
+    at = part.end;
+    return place;
+  });
+  base += text.slice(at);
+  const forms = [base];
+  parts.forEach((part, index) => {
+    const values = partValues(part.body, token);
+    if (values.length === 0) return;
+    const tokenStart = places[index];
+    const tokenEnd = tokenStart + token.length;
+    let from = tokenStart;
+    while (from > 0 && tokenStart - from < formWindow && !urlStop.test(base[from - 1])) from -= 1;
+    let to = tokenEnd;
+    while (to < base.length && to - tokenEnd < formWindow && !urlStop.test(base[to])) to += 1;
+    for (const value of values) forms.push(base.slice(from, tokenStart) + value + base.slice(tokenEnd, to));
+  });
+  return forms;
+}
+
+// The whole text once with every part as one token and once for each text a part can give.
+function wholeForms(text, parts, token) {
   const join = (write) => {
     let out = '';
     let at = 0;
@@ -341,44 +371,203 @@ function literalForms(text, parts, token) {
   };
   const forms = [join(() => token)];
   parts.forEach((part, index) => {
-    for (const { literal, before, after } of topLevelLiterals(part.body)) {
-      forms.push(join((which) => (which !== index ? token : (before ? token : '') + literal + (after ? token : ''))));
-    }
+    for (const value of partValues(part.body, token)) forms.push(join((which) => (which === index ? value : token)));
   });
   return forms;
 }
 
-// The quoted literals at the top of a JavaScript expression ('...', "..." or a template literal with
-// no ${ ... } of its own), unescaped, and whether code is joined to each one before and after it: any
-// code but the edge of the expression or one of ? : | & , ; (which pick a whole value). A literal inside
-// brackets, such as a call argument or an index key, counts as run time.
-function topLevelLiterals(source) {
-  const literals = [];
-  const joined = (char) => char !== undefined && !/[?:|&,;]/.test(char);
-  let depth = 0;
+// The texts a part can give that hold something beyond run time: a text that is only the token adds
+// nothing, and one with no letter or digit left once the tokens are dropped (${host || ''}) is no host.
+function partValues(body, token) {
+  return expressionTexts(body, token).filter((value) => value !== token && /[\p{L}\p{N}]/u.test(value.split('{{expr}}').join('').split('${expr}').join('')));
+}
+
+// The texts a JavaScript expression can give, with each run-time piece as the token; the first is the
+// one to use when it is joined to others. The expression is read as its alternatives (split at
+// || ?? && ? : , ;) and each alternative as a + chain. A quoted literal gives its text, a template
+// literal gives its text with its own ${ ... } parts read the same way, and a grouping parenthesis is
+// read inside. Names, member access, calls, index keys, object and array literals and regex literals
+// are run time; an alternative with any other operator (a comparison, -, !) is one run-time piece.
+function expressionTexts(source, token, depth = 0) {
+  if (depth > 8) return [token];
+  const alternatives = [];
+  let terms = [];
+  let term = null;
+  let broken = false;
+  const endTerm = () => {
+    if (term) terms.push(term.runTime ? [token] : term.texts);
+    term = null;
+  };
+  const endAlternative = () => {
+    endTerm();
+    alternatives.push(broken || terms.length === 0 ? [token] : chainTexts(terms, token));
+    terms = [];
+    broken = false;
+  };
+  const runTime = () => {
+    term = { runTime: true };
+  };
   let at = 0;
   while (at < source.length) {
     const char = source[at];
-    if (char === "'" || char === '"' || char === '`') {
+    const next = source[at + 1];
+    if (/\s/.test(char)) {
+      at += 1;
+    } else if (char === '/' && (next === '/' || next === '*')) {
+      const close = source.indexOf(next === '*' ? '*/' : '\n', at + 2);
+      at = close === -1 ? source.length : close + (next === '*' ? 2 : 1);
+    } else if (char === "'" || char === '"') {
+      const close = closingQuote(source, at);
+      if (close === -1) {
+        broken = true;
+        break;
+      }
+      if (term) runTime();
+      else term = { texts: [source.slice(at + 1, close).replace(/\\([\s\S])/g, '$1')] };
+      at = close + 1;
+    } else if (char === '`') {
+      const close = closingBacktick(source, at);
+      if (close === -1) {
+        broken = true;
+        break;
+      }
+      if (term) runTime();
+      else term = { texts: templateLiteralTexts(source.slice(at + 1, close), depth + 1) };
+      at = close + 1;
+    } else if (char === '(') {
+      const close = closingBracket(source, at);
+      if (term) runTime();
+      else term = { texts: expressionTexts(source.slice(at + 1, close - 1), token, depth + 1) };
+      at = close;
+    } else if (char === '[' || char === '{') {
+      at = closingBracket(source, at);
+      runTime();
+    } else if (char === '?' && next === '.' && !/\d/.test(source[at + 2] || '')) {
+      runTime();
+      at += 2;
+    } else if ((char === '|' && next === '|') || (char === '?' && next === '?') || (char === '&' && next === '&')) {
+      endAlternative();
+      at += 2;
+    } else if (char === '?' || char === ':' || char === ',' || char === ';') {
+      endAlternative();
+      at += 1;
+    } else if (char === '+' && next !== '+' && next !== '=') {
+      endTerm();
+      at += 1;
+    } else if (char === '/' && !term) {
       let end = at + 1;
-      while (end < source.length && source[end] !== char) end += source[end] === '\\' ? 2 : 1;
-      if (end >= source.length) break;
-      const body = source.slice(at + 1, end);
-      if (depth === 0 && !(char === '`' && body.includes('${'))) {
-        literals.push({
-          literal: body.replace(/\\([\s\S])/g, '$1'),
-          before: joined(source.slice(0, at).trimEnd().slice(-1) || undefined),
-          after: joined(source.slice(end + 1).trimStart()[0]),
-        });
+      let inClass = false;
+      while (end < source.length && source[end] !== '\n' && (inClass || source[end] !== '/')) {
+        if (source[end] === '\\') end += 1;
+        else if (source[end] === '[') inClass = true;
+        else if (source[end] === ']') inClass = false;
+        end += 1;
       }
       at = end + 1;
+      runTime();
+    } else if (/[\p{L}\p{N}_$.\\]/u.test(char)) {
+      runTime();
+      at += 1;
     } else {
-      if (/[([{]/.test(char)) depth += 1;
-      else if (/[)\]}]/.test(char)) depth = Math.max(0, depth - 1);
+      broken = true;
       at += 1;
     }
   }
-  return literals;
+  endAlternative();
+  const texts = [...new Set(alternatives.flat())];
+  return alternatives.length === 1 ? texts : [token, ...texts.filter((text) => text !== token)];
+}
+
+// The texts of a + chain: every piece as its first text, then each other text of one piece in turn.
+function chainTexts(terms, token) {
+  const firsts = terms.map((texts) => texts[0]);
+  const texts = [firsts.join('')];
+  terms.forEach((options, index) => {
+    for (const option of options.slice(1)) texts.push(firsts.map((first, at) => (at === index ? option : first)).join(''));
+  });
+  return texts;
+}
+
+// The texts of a template literal's content: every ${ ... } as one token first, then each text one
+// part can give in turn. Its run-time pieces are written as ${expr}, the way the template is read
+// on its own, so the same URL is not found twice under two tokens.
+function templateLiteralTexts(content, depth) {
+  const token = '${expr}';
+  const parts = [];
+  let at = 0;
+  while (at < content.length) {
+    if (content[at] === '\\') at += 2;
+    else if (content.startsWith('${', at)) {
+      const close = closingBracket(content, at + 1);
+      parts.push({ start: at, end: close, body: content.slice(at + 2, close - 1) });
+      at = close;
+    } else at += 1;
+  }
+  const join = (write) => {
+    let out = '';
+    let from = 0;
+    parts.forEach((part, index) => {
+      out += content.slice(from, part.start).replace(/\\([\s\S])/g, '$1') + write(index);
+      from = part.end;
+    });
+    return out + content.slice(from).replace(/\\([\s\S])/g, '$1');
+  };
+  const texts = [join(() => token)];
+  parts.forEach((part, index) => {
+    for (const text of expressionTexts(part.body, token, depth)) {
+      if (text !== token) texts.push(join((which) => (which === index ? text : token)));
+    }
+  });
+  return [...new Set(texts)];
+}
+
+// The index of the quote that closes the string opened at the given index, or -1.
+function closingQuote(source, open) {
+  let at = open + 1;
+  while (at < source.length && source[at] !== source[open]) at += source[at] === '\\' ? 2 : 1;
+  return at < source.length ? at : -1;
+}
+
+// The index of the backtick that closes the template literal opened at the given index, or -1.
+function closingBacktick(source, open) {
+  let at = open + 1;
+  while (at < source.length) {
+    if (source[at] === '\\') at += 2;
+    else if (source[at] === '`') return at;
+    else if (source.startsWith('${', at)) at = closingBracket(source, at + 1);
+    else at += 1;
+  }
+  return -1;
+}
+
+// The index just after the bracket that closes the one at the given index (strings, template literals
+// and comments skipped), or the end of the source when it is left open.
+function closingBracket(source, open) {
+  let depth = 0;
+  let at = open;
+  while (at < source.length) {
+    const char = source[at];
+    if (char === "'" || char === '"') {
+      const close = closingQuote(source, at);
+      if (close === -1) return source.length;
+      at = close + 1;
+    } else if (char === '`') {
+      const close = closingBacktick(source, at);
+      if (close === -1) return source.length;
+      at = close + 1;
+    } else if (char === '/' && (source[at + 1] === '/' || source[at + 1] === '*')) {
+      const close = source.indexOf(source[at + 1] === '*' ? '*/' : '\n', at + 2);
+      at = close === -1 ? source.length : close + 1;
+    } else {
+      if (char === '(' || char === '[' || char === '{') depth += 1;
+      else if (char === ')' || char === ']' || char === '}') {
+        depth -= 1;
+        if (depth === 0) return at + 1;
+      }
+      at += 1;
+    }
+  }
+  return source.length;
 }
 
 function trailString(trail) {
@@ -418,9 +607,9 @@ function hostMatches(host, allowedHost) {
 
 function createPolicyHelpers(policy) {
   const placeholderPatterns = compilePlaceholderPatterns(policy);
-  // An allowed literal is also kept as the URL scan sees it: each ${ ... } as one token, or as a quoted
-  // literal at its top.
-  const allowedLiteralValues = new Set(policy.allowedLiteralValues.flatMap((value) => [String(value), ...literalForms(String(value), templateParts(String(value)), '${expr}')]));
+  // An allowed literal is also kept as the URL scan sees it: each ${ ... } as one token, or as a text
+  // it can give.
+  const allowedLiteralValues = new Set(policy.allowedLiteralValues.flatMap((value) => [String(value), ...wholeForms(String(value), templateParts(String(value)), '${expr}')]));
 
   const isAllowedPlaceholder = (value) =>
     typeof value === 'string' && placeholderPatterns.some((pattern) => pattern.test(value));
