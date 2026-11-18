@@ -2645,6 +2645,40 @@ test('SessionStart notice: a governed-rules copy is a leftover whatever Toolkit 
   assert.deepEqual(snapshotTree(root), before);
 });
 
+test('SessionStart notice: a Toolkit source checkout whose root AGENTS.md has no Toolkit block gets no note; its CLAUDE.md is still compared', () => {
+  // The installed Toolkit delivers the governed rules to the Toolkit checkout too, so its root
+  // AGENTS.md is all hand-written. Comparing it with the managed template said to regenerate it,
+  // which would put the block back.
+  const checkout = tmpRoot();
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  const templates = path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local');
+  writeFile(path.join(templates, 'AGENTS.managed.template.md'), managedAgentsTemplate());
+  writeFile(path.join(templates, 'CLAUDE.shim.template.md'), '@AGENTS.md\n');
+  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
+  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '3.0.0' }));
+  writeFile(path.join(checkout, 'AGENTS.md'), '# AI Agent Toolkit Repo Rules\n\n## This Repository\n\nOwn rules.\n');
+  writeFile(path.join(checkout, 'CLAUDE.md'), '@AGENTS.md\n');
+  const before = snapshotTree(checkout);
+  const managedBy = [['hub state', { state: { repo_path: checkout }, governanceEnabled: () => false }], ['governance', { state: {}, governanceEnabled: () => true }]];
+  for (const syncSource of ['codex-plugin', 'claude-plugin']) {
+    for (const [label, managed] of managedBy) {
+      const result = runAgentRulesPreflight({ hook: true, syncSource }, { targetRoot: checkout, pluginRoot: repoRoot, runningVersion: '3.0.0', ...managed });
+      assert.equal(result.reference, 'source-checkout', `${syncSource}, ${label}`);
+      assert.deepEqual(result.findings, [], `${syncSource}, ${label}`);
+      assert.equal(result.status, 'ok', `${syncSource}, ${label}`);
+      assert.equal(formatAgentRulesPreflight(result), '', `${syncSource}, ${label}`);
+    }
+  }
+  // The one-line CLAUDE.md shim is still compared with its own template.
+  writeFile(path.join(checkout, 'CLAUDE.md'), '# Own notes\n');
+  const drift = runAgentRulesPreflight({ hook: true, syncSource: 'claude-plugin' }, { targetRoot: checkout, pluginRoot: repoRoot, runningVersion: '3.0.0', ...managedBy[0][1] });
+  assert.equal(drift.direction, 'drift');
+  assert.deepEqual([...new Set(drift.findings.map((finding) => finding.file))], ['CLAUDE.md']);
+  assert.match(formatAgentRulesPreflight(drift), /^Toolkit note: this Toolkit checkout's managed instruction blocks \(CLAUDE\.md\) differ from its own templates; next step: regenerate them/);
+  writeFile(path.join(checkout, 'CLAUDE.md'), '@AGENTS.md\n');
+  assert.deepEqual(snapshotTree(checkout), before, 'read-only');
+});
+
 test('SessionStart notice offers a refresh for differing or broken repository blocks at every session start, counted per finding, without writing', async (t) => {
   const cases = [
     { name: 'stale managed block', agents: managedAgentsTemplate().replace('Repository-wide CI', 'Keep tests in edited wording') },

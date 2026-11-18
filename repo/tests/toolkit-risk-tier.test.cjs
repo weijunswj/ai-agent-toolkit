@@ -270,7 +270,7 @@ test('a version-like line that can change behaviour, or sits in the wrong kind o
 test('patterns ignore letter case, so a hand-typed Windows path cannot drop the tier', () => {
   assert.equal(tierOf('Skills/secure-ci-cd/SKILL.md'), 'NORMAL');
   assert.equal(tierOf('Repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
-  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', 'docs/claude.md', 'skills/foo/agents.md', '.Agents/Rules/x.md', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
+  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', 'docs/claude.md', 'skills/foo/agents.md', '.Agents/Plugins/x.json', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
     assert.equal(tierOf(rel), 'RISKY', rel);
   }
   assert.equal(tierOf(parseArgs(['--', 'Repo\\Scripts\\Setup-Toolkit.cjs']).paths[0]), 'RISKY');
