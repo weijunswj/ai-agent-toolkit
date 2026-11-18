@@ -262,11 +262,15 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
       // expression does not end the match before a real host (https://{{ $env.U }}@host/...).
       // Emails are matched as written, so one quoted inside an expression is still found.
       // A URL written as a quoted literal inside an expression ({{ 'https://host/x' }}) is checked on
-      // its own as well, because collapsing would hide it.
-      const collapsed = options.collapseExpressions ? value.replace(/\{\{[\s\S]*?\}\}/g, '{{expr}}') : value;
-      const candidates = (collapsed.match(regex) || [])
-        .concat(options.collapseExpressions ? expressionLiterals(value).flatMap((literal) => literal.match(regex) || []) : []);
-      const unsafe = candidates.filter((match) => !isAllowed(match));
+      // its own as well, because collapsing would hide it. Each template literal ${ ... } is collapsed
+      // the same way, in both, so a space, call or quote inside it does not end the match early; what
+      // was inside it is checked on its own too. Each match is checked with the character after it,
+      // which an email needs.
+      const matchesIn = (text) => [...text.matchAll(regex)].map((found) => ({ match: found[0], next: text[found.index + found[0].length] || '' }));
+      const candidates = options.collapseExpressions
+        ? [value.replace(/\{\{[\s\S]*?\}\}/g, '{{expr}}'), ...expressionLiterals(value)].flatMap(templateTexts).flatMap(matchesIn)
+        : matchesIn(value);
+      const unsafe = candidates.filter(({ match, next }) => !isAllowed(match, next)).map(({ match }) => match);
       if (unsafe.length > 0) {
         unsafe.forEach((match) => values.add(match));
         places.push(trail.join('.') || '(root)');
@@ -279,6 +283,30 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
   visit(workflow, []);
   const shown = places.slice(0, 5).join(', ') + (places.length > 5 ? ` and ${places.length - 5} more` : '');
   return { count: values.size, places: shown };
+}
+
+// The text with each balanced ${ ... } as one token, then the texts inside each one, the same way.
+// One left open stays as written.
+function templateTexts(text) {
+  const inner = [];
+  let collapsed = '';
+  let at = 0;
+  while (at < text.length) {
+    const start = text.indexOf('${', at);
+    if (start === -1) break;
+    let depth = 1;
+    let end = start + 2;
+    while (end < text.length && depth > 0) {
+      if (text[end] === '{') depth += 1;
+      else if (text[end] === '}') depth -= 1;
+      end += 1;
+    }
+    if (depth > 0) break;
+    collapsed += text.slice(at, start) + '${expr}';
+    inner.push(text.slice(start + 2, end - 1));
+    at = end;
+  }
+  return [collapsed + text.slice(at), ...inner.flatMap(templateTexts)];
 }
 
 function trailString(trail) {
@@ -318,7 +346,8 @@ function hostMatches(host, allowedHost) {
 
 function createPolicyHelpers(policy) {
   const placeholderPatterns = compilePlaceholderPatterns(policy);
-  const allowedLiteralValues = new Set(policy.allowedLiteralValues.map((value) => String(value)));
+  // An allowed literal is also kept as the URL scan sees it, with each ${ ... } as one token.
+  const allowedLiteralValues = new Set(policy.allowedLiteralValues.flatMap((value) => [String(value), templateTexts(String(value))[0]]));
 
   const isAllowedPlaceholder = (value) =>
     typeof value === 'string' && placeholderPatterns.some((pattern) => pattern.test(value));
@@ -326,14 +355,15 @@ function createPolicyHelpers(policy) {
   const isAllowedLiteral = (value) =>
     typeof value === 'string' && allowedLiteralValues.has(value);
 
-  const allowedEmail = (email) => {
+  const allowedEmail = (email, next = '') => {
     if (isAllowedPlaceholder(email) || isAllowedLiteral(email)) return true;
     // Compare normalised forms, so a look-alike letter from another script never equals an allowed domain.
     const normalise = (domain) => String(domain).normalize('NFKC').toLowerCase();
     const domain = normalise(email.split('@').pop());
     // An address followed straight by letters of another script (user@example.com then Japanese
-    // text) ends where the script changes, so the domain cut there is compared too.
-    const scriptCut = domain.match(/^(.*\.\p{sc=Latin}{2,})(?=(?!\p{sc=Latin})\p{L})/u);
+    // text) ends where the script changes, so the domain cut there is compared too. Not when an @
+    // follows the match: then the cut-off text is the start of another address.
+    const scriptCut = next === '@' ? null : domain.match(/^(.*\.\p{sc=Latin}{2,})(?=(?!\p{sc=Latin})\p{L})/u);
     const domains = scriptCut ? [domain, scriptCut[1]] : [domain];
     return policy.allowedEmailDomains.some((allowedDomain) => domains.includes(normalise(allowedDomain)));
   };
