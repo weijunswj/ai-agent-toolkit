@@ -1440,6 +1440,9 @@ test('validate-n8n-workflows.cjs still fails a real host hidden next to an expre
     'Prod at [https://prod.company.com] today',
     'Use `https://prod.company.com` here',
     '=https://prod.company.com/{{ $json.id }}',
+    '=https://{{ $json.sub }}.prod.company.com/api',
+    '=https://prod.company.com{{ $json.path }}',
+    'https://{{a}}.company.com/',
   ];
   for (const value of rows) {
     const cwd = tempDir();
@@ -1449,11 +1452,11 @@ test('validate-n8n-workflows.cjs still fails a real host hidden next to an expre
     assert.match(result.stderr, /contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/, value);
     assert.doesNotMatch(result.stdout + result.stderr, /prod\.company\.com/, `${value}: the log never prints the host`);
   }
-  for (const value of ['https://{{a}}.company.com/', '=https://{{ $vars.API_HOST }}/v1']) {
+  for (const value of ['https://{{a}}.example.com/', '=https://{{ $vars.API_HOST }}/v1']) {
     const cwd = tempDir();
     writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
     const result = runNode(validateScript, [], { cwd });
-    assert.equal(result.status, 0, `${value} has no real host: ${result.stderr}`);
+    assert.equal(result.status, 0, `${value} has no private host: ${result.stderr}`);
   }
 });
 
@@ -1492,7 +1495,7 @@ test('validate-n8n-workflows.cjs matches non-ASCII email domains and never treat
   assert.doesNotMatch(result.stdout + result.stderr, /ex\u0430mple|b\u00fccher|ops@|user@/, 'the log never prints the address');
 });
 
-test('validate-n8n-workflows.cjs checks the static part of a host built partly with ${...}', () => {
+test('validate-n8n-workflows.cjs checks the literal part of a host built partly at run time', () => {
   const privateHost = ['crm', 'private', 'test'].join('.');
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
@@ -1505,10 +1508,16 @@ test('validate-n8n-workflows.cjs checks the static part of a host built partly w
         position: [0, 0],
         parameters: {
           plain: 'https://${tenant}.' + privateHost + '/api',
+          plainSuffix: 'https://' + privateHost + '${path}',
           template: '={{ `https://${$env.SUB}.' + privateHost + '/x` }}',
+          templateSuffix: '={{ `https://' + privateHost + '${$json.path}` }}',
+          expressionPrefix: '=https://{{ $json.sub }}.' + privateHost + '/api',
+          expressionSuffix: '=https://' + privateHost + '{{ $json.path }}',
           runTimeOnly: 'https://${HOST}/x',
+          expressionOnly: '={{ $env.BASE_URL }}/v1',
           allowedTail: 'https://api-${env}.example.com/v1',
-          expressionHost: 'https://{{a}}.company.com/',
+          allowedExpressionTail: '=https://{{ $json.sub }}.example.com/v1',
+          allowedPrefix: 'https://example.com${path}',
         },
       },
       {
@@ -1519,13 +1528,21 @@ test('validate-n8n-workflows.cjs checks the static part of a host built partly w
         position: [200, 0],
         parameters: { jsCode: 'const u = `https://${sub}.' + privateHost + '/v1`; return [{ json: { u } }];' },
       },
+      {
+        id: 'code_2',
+        name: 'Code 2',
+        type: 'n8n-nodes-base.code',
+        typeVersion: 2,
+        position: [400, 0],
+        parameters: { jsCode: 'const u = `https://' + privateHost + '${route}`; return [{ json: { u } }];' },
+      },
     ],
   }));
 
   const result = runNode(validateScript, [], { cwd });
 
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /contains 3 production-looking URL\(s\) at nodes\.0\.parameters\.plain, nodes\.0\.parameters\.template, nodes\.1\.parameters\.jsCode\./);
+  assert.match(result.stderr, /contains 8 production-looking URL\(s\) at nodes\.0\.parameters\.plain, nodes\.0\.parameters\.plainSuffix, nodes\.0\.parameters\.template, nodes\.0\.parameters\.templateSuffix, nodes\.0\.parameters\.expressionPrefix and 3 more\./);
   assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
 });
 
