@@ -35,6 +35,21 @@ test('a fire with no stamp is missed only once it is more than 20 minutes past',
   assert.deepEqual(missed('2026-11-18T23:31:00Z', [ran]), [], 'a stamp after the fire covers it');
 });
 
+test('the checking run sees its own missed fires: its own time covers only the fire it answers', () => {
+  // The hourly nudge checks itself. Its last stamp is 07:10 Singapore (23:12Z on the 17th); the 08:10
+  // Singapore run (00:10Z) never happened, and this run answers the 09:10 Singapore fire (01:10Z).
+  const self = extra => task({ last_fired_at: '2026-11-18T01:10:04Z', stamps: ['20261117T231200Z'], ...extra });
+  assert.deepEqual(missed('2026-11-18T01:12:00Z', [self({ own_run: '2026-11-18T01:12:00Z' })]), ['Hourly nudge 2026-11-18T00:10Z (fired, no stamp)']);
+  assert.deepEqual(missed('2026-11-18T01:35:00Z', [self({ own_run: '2026-11-18T01:35:00Z' })]), ['Hourly nudge 2026-11-18T00:10Z (fired, no stamp)'],
+    'a run that starts 25 minutes late still covers the fire it answers, and only that one');
+  const three = self({ stamps: ['20261117T151200Z'], own_run: '2026-11-18T02:12:00Z' });
+  assert.deepEqual(missed('2026-11-18T02:12:00Z', [three]).map(line => line.slice(13, 30)), ['2026-11-17T23:10Z', '2026-11-18T00:10Z', '2026-11-18T01:10Z'],
+    'every miss since the last stamp (23:10 Singapore), across the quiet hours');
+  assert.deepEqual(missed('2026-11-18T01:12:00Z', [self({ stamps: ['20261118T001300Z'], own_run: '2026-11-18T01:12:00Z' })]), [], 'nothing missed');
+  assert.deepEqual(missed('2026-11-18T23:31:00Z', [task({ own_run: '2026-11-18T23:31:00Z' })]), [], 'its first run of the morning answers the 07:10 fire');
+  assert.throws(() => check({ now: '2026-11-18T01:12:00Z', tasks: [self({ own_run: 'now' })] }), /^RunInputError: own_run$|own_run/);
+});
+
 test('CRON_TZ is honoured: the same cron without it fires on UTC hours', () => {
   assert.deepEqual(missed('2026-11-18T23:31:00Z', [task()]), ['Hourly nudge 2026-11-18T23:10Z (not fired)']);
   const utc = missed('2026-11-18T23:31:00Z', [task({ cron_expression: '10 7-23 * * *' })]);

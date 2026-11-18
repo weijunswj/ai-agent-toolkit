@@ -1268,9 +1268,11 @@ test('owner waits on the board reach the owner every run, missed runs are flagge
     for (const phrase of ['`programme.cjs attention`', '`Owner waits`', 'under **Waiting on owner:** every run until done', '`UNRELAYED ASK:`',
       "the parent page's PROGRAMME GRAPH rows whose Waiting on cell holds `Owner:`", '"Owner waits: unknown"']) assert.ok(waits.includes(phrase), `${session}: ${phrase}`);
     const runs = nudge.find(line => line.startsWith('10. Task runs'));
-    for (const phrase of ['toolkit-projects-run-missed.cjs', '`cron_expression`', '`last_fired_at`', '"RUN MISSED: <n> | "', '"RUN CHECK FAILED: <why> | "', 'stopped by owner']) {
+    for (const phrase of ['toolkit-projects-run-missed.cjs', '`cron_expression`', '`last_fired_at`', '"RUN MISSED: <n> | "', '"RUN CHECK FAILED: <why> | "', 'stopped by owner',
+      "on this task's own entry only, add `own_run` (this run's own time, never as a stamp"]) {
       assert.ok(runs.includes(phrase), `${session}: ${phrase}`);
     }
+    assert.ok(!/own time included/.test(runs), `${session}: this run's own time as a stamp would hide its own missed runs`);
     const first = nudge.find(line => line.startsWith('- First line:'));
     assert.ok(first.includes('"CHECK-IN NOT ARMED: <why> | ", "RUN MISSED: <n> | ", "RUN CHECK FAILED: <why> | "'), `${session}: first line`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
@@ -1286,5 +1288,13 @@ test('owner waits on the board reach the owner every run, missed runs are flagge
   const missedRun = periodic.split('\n').find(line => line.startsWith('- `RUN MISSED`'));
   assert.ok(missedRun && missedRun.includes('**Moving a task or catching up**') && missedRun.includes('`RUN CHECK FAILED`'), 'the coordinator catches up a missed run');
   const skill = fs.readFileSync(SKILL, 'utf8');
-  assert.match(skill, /\*\*Programme attention before gates, finality and settling\.\*\*[^\n]*the turn a gate thread starts, queue its `assign` holder order, naming the assignment id in the brief/);
+  assert.match(skill, /\*\*Programme attention before gates, finality and settling\.\*\*[^\n]*the turn a gate thread starts, queue its `assign` holder order, naming the assignment id in the brief, and its return the turn it reports \(\*\*Gate assignments\*\*, `reference\/periodic-runs\.md`\)\./);
+  // Every assignment a gate start opens is ended by the controller, and the next gate supersedes a live one; else the next
+  // `assign` is refused (ASSIGNMENT_LIVE) and a finished gate keeps its task in progress (the route itself: programme-parent-layout).
+  const gates = periodic.split('\n').find(line => line.startsWith('- **Gate assignments**'));
+  assert.ok(gates, 'the reference names the gate route');
+  for (const phrase of ['`assign --issue <n> --role <gate> --assignment <id>`', "while the task's previous gate is still live", '`--supersede --reason',
+    '`ASSIGNMENT_LIVE`', 'The turn the thread reports its result, queue in one order `return --issue <n> --record <id>.r<round> --assignment <id>`',
+    'for a G0 or G2 `return --issue <n> --consume <id>.r<round> --verdict ACCEPT`', "a G1's return stays submitted until its G2's `assign --supersede` ends it",
+    '`interrupt --issue <n> --reason <why>`']) assert.ok(gates.includes(phrase), phrase);
 });

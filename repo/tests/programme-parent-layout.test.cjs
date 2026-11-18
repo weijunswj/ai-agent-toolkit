@@ -156,6 +156,40 @@ test('a live gate outranks a listed blocker on the board, and its return puts th
   assert.equal(status(), 'LATER', 'set back to planned with no PR');
 });
 
+// The Projects route has no executor journals: the controller's holder orders open and end every
+// gate (reference/periodic-runs.md, Gate assignments). This walks that route for one task: each gate
+// ends, the board drops it, and the next gate supersedes a G1 return that waits for its G2.
+test('the gate route a Projects controller follows: each gate ends on its return and the next one supersedes a waiting G1', () => {
+  const f = ownerFixture({ 631: child => { child.lifecycle = 'PLANNED'; child.blockers = ['waits for train 76']; } });
+  const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
+  Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
+  const step = change => f.children.set(631, change(f.children.get(631)));
+  const close = (id, verdict = 'ACCEPT') => {
+    step(child => state.recordReturn(child, { returnId: `${id}.r1`, assignment: id }));
+    if (verdict) step(child => state.consumeReturn(child, { returnId: `${id}.r1`, verdict, writer, parentDoc: f.parent }));
+  };
+  const board = () => `${f.cell(631)[2]} | ${f.cell(631)[3]}`;
+  step(child => state.assignGate(child, { assignment: 'g0-631', role: 'G0' }));
+  assert.equal(board(), 'NOW · IN PROGRESS | G0, then Blocked: waits for train 76');
+  close('g0-631');
+  assert.equal(f.children.get(631).gate.state, 'RETIRED');
+  step(child => state.assignGate(child, { assignment: 'g1-631', role: 'G1' }));
+  assert.equal(board(), 'NOW · IN PROGRESS | G1, then Blocked: waits for train 76', 'an accepted G0 needs no supersede');
+  close('g1-631', null);
+  assert.equal(board(), 'NOW · QUEUED | Blocked: waits for train 76', 'the recorded return ends the G1 on the board');
+  assert.throws(() => state.consumeReturn(f.children.get(631), { returnId: 'g1-631.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }), { code: 'EVIDENCE_STALE' }, 'a G1 is accepted only after a G2 PASS');
+  assert.throws(() => state.assignGate(f.children.get(631), { assignment: 'g2-631', role: 'G2' }), { code: 'ASSIGNMENT_LIVE' }, 'the waiting G1 return is still live');
+  step(child => state.assignGate(child, { assignment: 'g2-631', role: 'G2', supersede: true, reason: 'G2 follows G1' }));
+  assert.equal(board(), 'NOW · IN PROGRESS | G2, then Blocked: waits for train 76');
+  close('g2-631');
+  assert.equal(board(), 'NOW · QUEUED | Blocked: waits for train 76', 'the accepted G2 is no longer live');
+  assert.ok(state.completionAccepted(f.children.get(631)), 'an accepted G2 counts toward completion');
+  step(child => state.assignGate(child, { assignment: 'g1-631-r2', role: 'G1' }));
+  assert.equal(board(), 'NOW · IN PROGRESS | G1, then Blocked: waits for train 76', 'a rework round after a G2 needs no supersede');
+  step(child => state.interruptGate(child, { reason: 'the thread stopped with no result' }));
+  assert.equal(board(), 'NOW · QUEUED | Blocked: waits for train 76', 'an interrupted gate is not live');
+});
+
 test('CURRENT lists tasks in progress before queued ones, whatever their priority', () => {
   const outcomes = [{ issue: 2, class: 'COMMITTED', parent: 7, order: 0 }, { issue: 3, class: 'COMMITTED', parent: 7, order: 1 }];
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });

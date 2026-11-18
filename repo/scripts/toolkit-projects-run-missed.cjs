@@ -10,14 +10,16 @@
 //   node repo/scripts/toolkit-projects-run-missed.cjs --input <file>
 //
 // Input: { "now", "tasks": [{ "name", "cron_expression", "created_at", "last_fired_at", "stopped"?,
-// "stamps": [<run UTC>] }] }. `cron_expression` is the trigger's own, five fields with an optional
-// leading `CRON_TZ=<zone>`; each field takes `*`, numbers, ranges, lists and steps. A run UTC is a
-// stamp name (YYYYMMDDTHHMMSSZ) or an ISO time.
+// "stamps": [<run UTC>], "own_run"? }] }. `cron_expression` is the trigger's own, five fields with an
+// optional leading `CRON_TZ=<zone>`; each field takes `*`, numbers, ranges, lists and steps. A run UTC
+// is a stamp name (YYYYMMDDTHHMMSSZ) or an ISO time. `own_run` is the checking run's own time, given
+// only on its own task's entry and never as a stamp: it covers only the fire it answers (the newest
+// at or before it), so the checking task still sees its own earlier missed fires.
 //
 // Each fire time of the cron after the newer of the task's newest stamp and its creation, at most
-// 48 hours back, that is more than 20 minutes past is a missed run: "fired, no stamp" when the
-// trigger fired at or after it, else "not fired". A stopped task is skipped. Hours the cron never
-// fires (an hourly task's night) are never missed.
+// 48 hours back, that is more than 20 minutes past and not the fire `own_run` answers is a missed
+// run: "fired, no stamp" when the trigger fired at or after it, else "not fired". A stopped task is
+// skipped. Hours the cron never fires (an hourly task's night) are never missed.
 // Exit 0 nothing missed, 1 a missed run, 2 bad input or arguments.
 
 const fs = require('node:fs');
@@ -106,6 +108,7 @@ function readTask(raw) {
     lastFired: raw.last_fired_at === null || raw.last_fired_at === undefined ? null : time(raw.last_fired_at, 'last_fired_at'),
     stopped: raw.stopped === true,
     stamps: raw.stamps.map(stamp => time(stamp, 'stamps')),
+    ownRun: raw.own_run === null || raw.own_run === undefined ? null : time(raw.own_run, 'own_run'),
   };
 }
 
@@ -119,7 +122,8 @@ function check(input) {
   const missed = [];
   for (const task of tasks.filter(entry => !entry.stopped)) {
     const from = Math.max(task.created, now - LOOKBACK_HOURS * 60 * MINUTE, ...task.stamps);
-    for (const at of fireTimes(task.cron, from, now - GRACE_MINUTES * MINUTE - 1)) {
+    const answered = task.ownRun === null ? null : fireTimes(task.cron, from, task.ownRun).at(-1);
+    for (const at of fireTimes(task.cron, from, now - GRACE_MINUTES * MINUTE - 1).filter(fire => fire !== answered)) {
       missed.push({ task: task.name, at: minuteText(at), why: task.lastFired !== null && task.lastFired >= at ? 'fired, no stamp' : 'not fired' });
     }
   }
