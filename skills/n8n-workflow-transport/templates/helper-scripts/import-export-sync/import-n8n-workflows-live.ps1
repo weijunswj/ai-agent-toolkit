@@ -1638,7 +1638,7 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
     }
   }
 
-  $targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans
+  $targetUniquenessBlockers = @(Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans)
   if ($targetUniquenessBlockers.Count -gt 0) {
     $blockedWorkflows += $targetUniquenessBlockers
     $plannedImports = @()
@@ -1769,6 +1769,12 @@ Write-Host ("Force import     : {0}" -f ($(if ($ForceImport) { "Yes" } else { "N
 if ($RestartContainerAfterImport) {
   throw "N8N_POLICY_VALIDATION_FAILED: -RestartContainerAfterImport is no longer supported. This helper never restarts n8n."
 }
+if ($RequireConfirmation) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -RequireConfirmation is not supported by the import script. To confirm before an import, run n8n-workflow-sync-menu.ps1 -RequireConfirmation."
+}
+if ($SkipCredentialBindingRefresh) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -SkipCredentialBindingRefresh is not supported by the import script. It never refreshes credential bindings, so there is nothing to skip."
+}
 
 # A run that finishes or fails, including on an error, removes its stored live workflow list in the
 # finally block below; a killed run's leftovers are removed by the next run's first step.
@@ -1792,7 +1798,7 @@ if ($DeploymentPolicyFileWasExplicit) {
   Assert-DeploymentPolicySnapshotCurrent $deploymentPolicySnapshot
 }
 
-$workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
+$workflowFiles = @(Get-RootWorkflowFiles $WorkflowDirPath)
 Assert-NoCaseFoldedWorkflowFileCollisions $workflowFiles
 
 Write-Section "Workflow JSON Validation"
@@ -1811,7 +1817,7 @@ if ($transportResult.ExitCode -ne 0) {
 Write-Step "TRANSPORT" "Selected supported Docker/server CLI transport; helper preparation and validation remain mandatory."
 
 Invoke-LivePreflight
-$liveWorkflows = Get-LiveWorkflows
+$liveWorkflows = @(Get-LiveWorkflows)
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 
 if ($DeploymentPolicyFileWasExplicit) {
@@ -1824,7 +1830,7 @@ if ($DeploymentPolicyFileWasExplicit) {
   $EffectiveDeploymentPolicyFilePath = Join-Path $PreparedDirPath "deployment-policy.snapshot.json"
   Write-Utf8NoBomText $EffectiveDeploymentPolicyFilePath ($deploymentPolicySnapshot.Content.TrimEnd() + "`n")
 }
-$targetResolutionBlockers = Test-PortableTargetResolution $workflowFiles $liveWorkflows
+$targetResolutionBlockers = @(Test-PortableTargetResolution $workflowFiles $liveWorkflows)
 if ($targetResolutionBlockers.Count -gt 0) {
   $targetGate = [PSCustomObject]@{
     PlannedImports = @()

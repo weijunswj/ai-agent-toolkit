@@ -2361,3 +2361,317 @@ test('PowerShell surfaces are PS 5.1-compatible, do not restart, and make valid 
   assert.doesNotMatch(menuScript, /Press Enter to return after reviewing the error/);
   assert.doesNotMatch(importScript, /\?\?=|\?\.|ForEach-Object -Parallel/);
 });
+
+// Windows PowerShell 5.1 gives a lone [pscustomobject] no Count, Length or index, and PowerShell
+// unrolls a script function's one-item result on return. So a value assigned straight from a script
+// function and then counted or indexed must be wrapped in @() where it is assigned.
+const helperSetPowerShellDirs = [
+  helperRoot,
+  path.join(process.cwd(), 'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer'),
+];
+const unwrappedCountExceptions = [
+  {
+    file: 'n8n-workflow-sync-menu.ps1',
+    fn: 'Get-RecordArgs',
+    variable: 'commandArgs',
+    reason: 'returns [string[]]; a lone string keeps Count on PS 5.1, and an empty list must stay $null so the caller refuses it',
+  },
+  {
+    file: 'import-n8n-workflows-live.ps1',
+    fn: 'Read-SafeDeploymentPolicySnapshot',
+    variable: 'current',
+    reason: 'returns one record whose Length property is a file size, not a collection count',
+  },
+];
+
+function findUnwrappedCountedFunctionResults(filePath) {
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+  const functionNames = new Set(lines
+    .map((line) => line.match(/^\s*function\s+([A-Za-z][\w-]*)/i))
+    .filter(Boolean)
+    .map((match) => match[1].toLowerCase()));
+  const findings = [];
+  lines.forEach((line, index) => {
+    const assignment = line.match(/^\s*\$([A-Za-z_]\w*)\s*=\s*([A-Za-z][\w-]*)(?=\s|$)/);
+    if (!assignment || !functionNames.has(assignment[2].toLowerCase())) return;
+    const variable = assignment[1];
+    const reassigned = new RegExp(`^\\s*\\$${variable}\\s*=(?!=)`, 'i');
+    const counted = new RegExp(`\\$${variable}(?:\\.(?:Count|Length)\\b|\\[)`, 'i');
+    for (let next = index + 1; next < lines.length; next += 1) {
+      if (/^function\s/i.test(lines[next]) || reassigned.test(lines[next])) break;
+      if (counted.test(lines[next])) {
+        findings.push({ file: path.basename(filePath), line: index + 1, fn: assignment[2], variable });
+        break;
+      }
+    }
+  });
+  return findings;
+}
+
+test('the PS 5.1 count guard finds an unwrapped counted function result and accepts the wrapped form', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-count-guard-'));
+  try {
+    const probe = path.join(fixtureRoot, 'probe.ps1');
+    fs.writeFileSync(probe, [
+      'function Get-Items { return @() }',
+      '$bad = Get-Items -All',
+      'if ($bad.Count -gt 0) { $bad[0] }',
+      '$good = @(Get-Items)',
+      'if ($good.Count -gt 0) { $good[0] }',
+      '$reused = Get-Items',
+      '$reused = "text"',
+      '$reused.Length',
+    ].join('\n'));
+    assert.deepEqual(findUnwrappedCountedFunctionResults(probe), [
+      { file: 'probe.ps1', line: 2, fn: 'Get-Items', variable: 'bad' },
+    ]);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('n8n helper PowerShell wraps every counted or indexed script-function result in @() for PS 5.1', () => {
+  const files = helperSetPowerShellDirs.flatMap((dir) => fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.ps1'))
+    .sort()
+    .map((name) => path.join(dir, name)));
+  assert.ok(files.length >= 4, 'every helper-set PowerShell script is scanned');
+  const findings = files.flatMap(findUnwrappedCountedFunctionResults);
+  const matches = (finding, exception) =>
+    finding.file === exception.file && finding.fn === exception.fn && finding.variable === exception.variable;
+  for (const exception of unwrappedCountExceptions) {
+    assert.ok(findings.some((finding) => matches(finding, exception)), `stale exception: ${exception.file} ${exception.fn}`);
+  }
+  const unexpected = findings
+    .filter((finding) => !unwrappedCountExceptions.some((exception) => matches(finding, exception)))
+    .map((finding) => `${finding.file}:${finding.line} $${finding.variable} = ${finding.fn}`);
+  assert.deepEqual(unexpected, [], 'wrap these assignments in @(...)');
+});
+
+// On Windows this must be Windows PowerShell 5.1, where the bug lives; a missing shell fails the test.
+function findTestPowerShell() {
+  if (process.platform === 'win32') return 'powershell';
+  const result = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' });
+  return result.status === 0 ? 'pwsh' : null;
+}
+
+function psQuoted(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+const policyBlock = 'N8N_POLICY_VALIDATION_FAILED';
+const ambiguousBlock = 'N8N_WORKFLOW_MATCH_AMBIGUOUS';
+const targetGateRows = [
+  {
+    label: 'no blocker',
+    files: [{ Name: 'fresh.json', workflowName: 'Fresh' }],
+    live: [{ id: 'unrelated-target', name: 'Unrelated' }],
+    blocked: [],
+  },
+  {
+    label: 'one removed dedicated identity',
+    files: [{ Name: 'gone.json', workflowName: 'Shared', localId: 'removed-target' }],
+    live: [{ id: 'same-name-target', name: 'Shared' }],
+    blocked: ['gone.json'],
+    kind: policyBlock,
+  },
+  {
+    label: 'two removed dedicated identities',
+    files: [
+      { Name: 'gone-a.json', workflowName: 'Shared A', localId: 'removed-a' },
+      { Name: 'gone-b.json', workflowName: 'Shared B', localId: 'removed-b' },
+    ],
+    live: [{ id: 'same-name-a', name: 'Shared A' }, { id: 'same-name-b', name: 'Shared B' }],
+    blocked: ['gone-a.json', 'gone-b.json'],
+    kind: policyBlock,
+  },
+  {
+    label: 'one published target',
+    files: [{ Name: 'live.json', workflowName: 'Live', id: 'published-target' }],
+    live: [{ id: 'published-target', name: 'Live', active: true }],
+    blocked: ['live.json'],
+    kind: policyBlock,
+  },
+  {
+    label: 'one ambiguous canonical ID',
+    files: [{ Name: 'dup-id.json', workflowName: 'Dup', id: 'dup-target' }],
+    live: [{ id: 'dup-target', name: 'Dup' }, { id: 'dup-target', name: 'Dup copy' }],
+    blocked: ['dup-id.json'],
+    kind: ambiguousBlock,
+  },
+  {
+    label: 'one ambiguous name',
+    files: [{ Name: 'twin.json', workflowName: 'Twin' }],
+    live: [{ id: 'twin-1', name: 'Twin' }, { id: 'twin-2', name: 'Twin' }],
+    blocked: ['twin.json'],
+    kind: ambiguousBlock,
+  },
+  {
+    label: 'one archived target in Block mode',
+    mode: 'Block',
+    files: [{ Name: 'old.json', workflowName: 'Old' }],
+    live: [{ id: 'old-target', name: 'Old', isArchived: true }],
+    blocked: ['old.json'],
+    kind: ambiguousBlock,
+  },
+  {
+    label: 'mixed kinds report the first blocker kind',
+    files: [
+      { Name: 'dup-id.json', workflowName: 'Dup', id: 'dup-target' },
+      { Name: 'gone.json', workflowName: 'Shared', localId: 'removed-target' },
+    ],
+    live: [{ id: 'dup-target', name: 'Dup' }, { id: 'dup-target', name: 'Dup copy' }, { id: 'same-name-target', name: 'Shared' }],
+    blocked: ['dup-id.json', 'gone.json'],
+    kind: ambiguousBlock,
+  },
+];
+
+test('early target gate blocks every closure-matrix row before credential metadata, including one blocker on Windows PowerShell 5.1', (t) => {
+  const shell = findTestPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-target-gate-'));
+  try {
+    const rowsPath = path.join(fixtureRoot, 'rows.json');
+    const harnessPath = path.join(fixtureRoot, 'target-gate-harness.ps1');
+    fs.writeFileSync(rowsPath, JSON.stringify(targetGateRows.map((row) => ({
+      label: row.label,
+      mode: row.mode || 'CreateNew',
+      files: row.files,
+      live: row.live,
+    }))));
+    fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psQuoted(path.join(helperRoot, 'import-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$functionNames = @("Test-PortableTargetResolution", "Resolve-LiveWorkflowByName")
+$functions = @($ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true))
+if ($functions.Count -ne 2) { throw "target resolution functions not found" }
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+function Write-Step($Status, $Message) {}
+function Read-RepoWorkflowInfo($WorkflowFile) {
+  [PSCustomObject]@{ Name = [string]$WorkflowFile.workflowName; Id = [string]$WorkflowFile.id }
+}
+function Get-LocalWorkflowIdentityId($WorkflowFile, $WorkflowName) {
+  if ([string]::IsNullOrWhiteSpace([string]$WorkflowFile.localId)) { return $null }
+  return [string]$WorkflowFile.localId
+}
+# The real top-level gate statements, found by syntax tree rather than copied.
+$assignment = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$targetResolutionBlockers'
+}, $false)
+$gate = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.IfStatementAst] -and $node.Clauses[0].Item1.Extent.Text -match '\\$targetResolutionBlockers\\b'
+}, $false)
+$credentialRead = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Right.Extent.Text -match '^Get-SafeCredentialMetadata\\b'
+}, $false)
+if ($null -eq $assignment -or $null -eq $gate -or $null -eq $credentialRead) { throw "early target gate statements not found" }
+$kindExpression = $gate.Clauses[0].Item2.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.MemberExpressionAst] -and $node.Expression.Extent.Text -eq '$targetResolutionBlockers[0]' -and $node.Member.Extent.Text -eq 'Kind'
+}, $true)
+if ($null -eq $kindExpression) { throw "gate report kind expression not found" }
+$gateExits = $null -ne $gate.Clauses[0].Item2.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.ExitStatementAst]
+}, $true)
+$rows = Get-Content -Raw -LiteralPath ${psQuoted(rowsPath)} | ConvertFrom-Json
+$results = @()
+foreach ($row in $rows) {
+  $ArchivedByNameMode = [string]$row.mode
+  $workflowFiles = @($row.files)
+  $liveWorkflows = @($row.live)
+  $targetResolutionBlockers = $null
+  Invoke-Expression $assignment.Extent.Text
+  $blocked = [bool](Invoke-Expression $gate.Clauses[0].Item1.Extent.Text)
+  $kind = $null
+  if ($blocked) { $kind = [string](Invoke-Expression $kindExpression.Extent.Text) }
+  $results += [PSCustomObject]@{
+    Label = [string]$row.label
+    Blocked = $blocked
+    Files = @(@($targetResolutionBlockers) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.File })
+    Kind = $kind
+  }
+}
+[PSCustomObject]@{
+  PSVersion = "$($PSVersionTable.PSVersion.Major).$($PSVersionTable.PSVersion.Minor)"
+  GateBeforeCredentialRead = $gate.Extent.StartOffset -lt $credentialRead.Extent.StartOffset
+  GateExits = $gateExits
+  Rows = $results
+} | ConvertTo-Json -Depth 6 -Compress
+`);
+    const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+      cwd: fixtureRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(result.error, undefined, `${shell} must be available: ${result.error && result.error.message}`);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const parsed = JSON.parse(result.stdout.trim());
+    if (process.platform === 'win32') {
+      assert.equal(parsed.PSVersion, '5.1', 'Windows CI must run this gate under Windows PowerShell 5.1');
+    }
+    assert.equal(parsed.GateBeforeCredentialRead, true, 'the gate runs before credential metadata is staged');
+    assert.equal(parsed.GateExits, true, 'a blocked gate exits');
+    assert.equal(parsed.Rows.length, targetGateRows.length);
+    targetGateRows.forEach((row, index) => {
+      const actual = parsed.Rows[index];
+      assert.equal(actual.Label, row.label);
+      assert.equal(actual.Blocked, row.blocked.length > 0, `${row.label}: blocked on PS ${parsed.PSVersion}`);
+      assert.deepEqual([].concat(actual.Files || []), row.blocked, `${row.label}: blocked files`);
+      assert.equal(actual.Kind, row.kind === undefined ? null : row.kind, `${row.label}: report kind`);
+    });
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('import script refuses the unused -RequireConfirmation and -SkipCredentialBindingRefresh switches before any docker call', (t) => {
+  const shell = findTestPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-import-switches-'));
+  try {
+    const scriptsDir = path.join(fixtureRoot, 'n8n-workflows', 'scripts');
+    const binDir = path.join(fixtureRoot, 'fake-bin');
+    const marker = path.join(fixtureRoot, 'docker-called.txt');
+    fs.mkdirSync(path.join(fixtureRoot, '.git'));
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.mkdirSync(binDir);
+    const importCopy = path.join(scriptsDir, 'import-n8n-workflows-live.ps1');
+    fs.copyFileSync(path.join(helperRoot, 'import-n8n-workflows-live.ps1'), importCopy);
+    fs.writeFileSync(path.join(binDir, 'docker.cmd'), `@echo called>> "${marker}"\r\n`);
+    fs.writeFileSync(path.join(binDir, 'docker'), `#!/bin/sh\necho called >> '${marker}'\n`, { mode: 0o755 });
+    const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
+    const env = { ...process.env, [pathKey]: `${binDir}${path.delimiter}${process.env[pathKey] || ''}` };
+    for (const [flag, pointer] of [
+      ['-RequireConfirmation', /n8n-workflow-sync-menu\.ps1 -RequireConfirmation/],
+      ['-SkipCredentialBindingRefresh', /never refreshes credential bindings/],
+    ]) {
+      const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', importCopy, flag], {
+        cwd: fixtureRoot,
+        env,
+        encoding: 'utf8',
+      });
+      const output = result.stdout + result.stderr;
+      assert.equal(result.status, 1, `${flag}: ${output}`);
+      assert.match(output, new RegExp(`N8N_POLICY_VALIDATION_FAILED: ${flag} is not supported by the import script`), flag);
+      assert.match(output, pointer, flag);
+      assert.equal(fs.existsSync(marker), false, `${flag}: no docker call before the refusal`);
+    }
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
