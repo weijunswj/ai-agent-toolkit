@@ -1677,6 +1677,41 @@ test('validate-n8n-workflows.cjs reads grouped, nested and joined literals in a 
   assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
 });
 
+test('validate-n8n-workflows.cjs reads a + chain past arithmetic and unary operators that bind tighter', () => {
+  const privateHost = ['crm', 'private', 'test'].join('.');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [
+      { id: 'code_1', name: 'Code', type: 'n8n-nodes-base.code', typeVersion: 2, position: [0, 0], parameters: { jsCode: "const u = `https://${'" + privateHost + "/items?offset=' + page * 50}`; return [{ json: { u } }];" } },
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [200, 0],
+        parameters: {
+          plainMultiply: "https://${'" + privateHost + "/items?offset=' + page * 50}",
+          expressionMultiply: "={{ 'https://' + $json.tenant + '." + privateHost + "/items?offset=' + $json.page * 50 }}",
+          expressionDivide: "={{ 'https://' + $json.tenant + '." + privateHost + "/t?s=' + Date.now() / 1000 }}",
+          expressionModulo: "={{ 'https://' + $json.tenant + '." + privateHost + "/m?n=' + $json.n % 7 }}",
+          expressionNot: "={{ 'https://' + $json.tenant + '." + privateHost + "/f?off=' + !$json.off }}",
+          expressionNegate: "={{ 'https://' + $json.tenant + '." + privateHost + "/d?v=' + -$json.v }}",
+          multiplyNegated: "`https://${'" + privateHost + "/p?x=' + a * -b}`",
+          allowedMultiply: "={{ 'https://api.example.com/items?offset=' + $json.page * 50 }}",
+          binaryMinus: "={{ 'https://' + '" + privateHost + "/x?n=' + $json.a - 1 }}",
+          comparison: "={{ 'https://' + '" + privateHost + "/x' === $json.u ? 'https://api.example.com/v1' : '' }}",
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 8 production-looking URL\(s\) at nodes\.0\.parameters\.jsCode, nodes\.1\.parameters\.plainMultiply, nodes\.1\.parameters\.expressionMultiply, nodes\.1\.parameters\.expressionDivide, nodes\.1\.parameters\.expressionModulo and 3 more\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
 test('validate-n8n-workflows.cjs reads a large Code node with many run-time parts quickly', () => {
   const cwd = tempDir();
   const lines = Array.from({ length: 4000 }, (_, index) => 'const u' + index + " = `https://${a || 'api.example.com'}/${b || 'v1'}`;");
