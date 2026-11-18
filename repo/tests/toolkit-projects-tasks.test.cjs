@@ -1124,7 +1124,7 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   const daily = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'tasks', 'daily-check-in.md'), 'utf8');
   assert.match(daily, /\[parent\]   Fold check: for each issue opened under #\{\{parent_issue\}\} since LAST, look for an open child in the same area[^\n]*`\*\*Fold:\*\* #<new> into #<open> \(<area>\)`[^\n]*asks the owner once to close the new one as not planned/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
-  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on its area's open child, which joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
+  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on its area's open child, in Later when it holds only Lows, unless the owner accepted it)",
     "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child',
     'Before a merge record is written, the G2 report is archived to the evidence store and read back, and the record (and its brief) names that path and the PASS head.']) assert.ok(gates.includes(required), required);
   // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
