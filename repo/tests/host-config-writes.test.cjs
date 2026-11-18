@@ -350,6 +350,7 @@ test('hostText: unavailable command and native spawn errors keep precise start d
     await assert.rejects(runAppServerRequest(missing, f.codexHome, { method: 'config/read', params: {} },
       { ...quickProbe, settleWithoutExit: true }), error => {
       assert.equal(error.code, 'ENOENT');
+      assert.equal(error.reason, 'start', 'a native error before the spawn event is a start failure');
       assert.equal(error.hostText, '');
       assert.match(error.message, /spawn .* ENOENT/);
       return true;
@@ -417,6 +418,24 @@ test('config/read: an answer survives failed shutdown in the synchronous load pr
   assert.match(fs.readFileSync(f.log, 'utf8'), /method config\/read/);
 });
 
+test('config/read: a Codex the system refuses to start stays unverified and does not fall through to a later candidate',
+  { skip: process.platform === 'win32' }, t => {
+  const f = configFake(t);
+  // Executable script whose interpreter is not executable: spawn fails after it is called (EACCES).
+  const interpreter = path.join(f.root, 'not-executable-interpreter');
+  fs.writeFileSync(interpreter, '');
+  fs.chmodSync(interpreter, 0o644);
+  const refused = path.join(f.root, 'refused-codex');
+  fs.writeFileSync(refused, '#!' + interpreter + '\n');
+  fs.chmodSync(refused, 0o755);
+  const bin = path.join(f.root, 'empty-bin');
+  fs.mkdirSync(bin);
+  const environment = { ...isolatedEnv(f.codexHome, bin), CODEX_TOOLKIT_CODEX_CLI: CONFIG_FAKE };
+  const result = new CodexConfigLoadCheck({ codexCommand: refused, environment }).probe(path.join(f.codexHome, 'config.toml'));
+  assert.equal(result.status, 'unverified', result.detail);
+  assert.equal(fs.existsSync(f.log), false, 'the later working candidate must not be asked');
+});
+
 test('a probe module-load crash is not verified and keeps the written config bytes', t => {
   const f = fixture(t);
   const snapshot = captureCodexConfigSnapshot(f.configPath);
@@ -472,10 +491,13 @@ for (const action of ['setup', 'setup spawn', 'config/read', 'runtime', 'batchWr
   // Both files are in scratch working folders; the launcher must select the later .exe.
   fs.writeFileSync(path.join(f.root, 'plugin'), "process.argv.splice(2, 0, 'plugin');\n" + fs.readFileSync(CONFIG_FAKE, 'utf8'));
   fs.copyFileSync(CONFIG_FAKE, path.join(f.codexHome, 'app-server'));
-  // Logging Node copies pin both the current folder and relative PATH refusal on Windows.
-  const relativeBin = path.join(f.root, 'relative-bin');
-  fs.mkdirSync(relativeBin);
-  const shadowExecutables = [path.join(f.root, 'codex.exe'), path.join(relativeBin, 'codex.exe')];
+  // Logging Node copies pin both the current folder and relative PATH refusal on Windows, for the
+  // harness folder and for the Codex home that config/read and runtime probes use as their cwd.
+  const shadowExecutables = [f.root, f.codexHome].flatMap(folder => {
+    const relativeBin = path.join(folder, 'relative-bin');
+    fs.mkdirSync(relativeBin);
+    return [path.join(folder, 'codex.exe'), path.join(relativeBin, 'codex.exe')];
+  });
   for (const shadow of shadowExecutables) fs.copyFileSync(process.execPath, shadow);
   const shadowLog = path.join(f.root, 'shadow-started');
   const nativeLog = path.join(f.root, 'native-started');

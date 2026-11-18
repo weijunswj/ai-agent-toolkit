@@ -14,7 +14,8 @@
 // files (guard copy, config, workflow) are listed, to remove through a pull request.
 // In the Toolkit's own repository the guard source already sits under skills/secure-ci-cd/scripts and its
 // CI runs it, so only the hooks are installed there: no copy and no workflow. The hooks look for the guard
-// at .github/scripts/ first, then at that in-repo path, and block when neither is there.
+// at .github/scripts/ first, then at that in-repo path, and block when neither is there. A leftover guard or
+// plain-text check copy under .github/scripts/ there would run instead of the source: a warning and drift.
 //
 // Usage: node install-personal-data-guard.cjs --repo <dir> [--identity excluded|included]
 //          [--identity-reason <text>] [--required-check validate|personal-data|none] [--workflow] [--check]
@@ -43,8 +44,14 @@ const SAVED_SUFFIX = '.pre-personal-data-guard';
 const TOOLKIT_GUARD_SOURCE = path.join('skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
 const TOOLKIT_MARKERS = [TOOLKIT_GUARD_SOURCE, path.join('repo', 'scripts', 'toolkit-governance-conformance.cjs')];
 const isToolkitCheckout = top => TOOLKIT_MARKERS.every(marker => fs.existsSync(path.join(top, marker)));
-// In a Toolkit checkout the hooks try .github/scripts first, so a copy there would run instead of the source.
-const SHADOW = `${VENDORED_PATH.split(path.sep).join('/')} is in this Toolkit checkout, so the hooks run it instead of the in-repo guard; delete it`;
+// In a Toolkit checkout the hooks try .github/scripts first, so a copy of the guard or of the plain-text check
+// there would run instead of the source.
+const SHADOWS = [
+  [VENDORED_PATH, 'the hooks run it instead of the in-repo guard'],
+  [path.join('.github', 'scripts', 'plain-text-check.cjs'), 'the pre-push hook runs it instead of the in-repo plain-text check'],
+];
+const shadowsIn = top => SHADOWS.filter(([rel]) => fs.existsSync(path.join(top, rel)))
+  .map(([rel, effect]) => `${rel.split(path.sep).join('/')} is in this Toolkit checkout, so ${effect}; delete it`);
 const TOOLKIT_NOTE = "is the Toolkit's own repository: it keeps the guard source in skills/secure-ci-cd/scripts and its CI runs the guard";
 
 class InstallError extends Error {
@@ -205,7 +212,7 @@ class GuardInstaller {
     }
     if (toolkit) {
       this.#say(`Guard copy skipped: ${top} ${TOOLKIT_NOTE}, so the hooks run ${TOOLKIT_GUARD_SOURCE.split(path.sep).join('/')}.`);
-      if (fs.existsSync(path.join(top, VENDORED_PATH))) this.#say(`Warning: ${SHADOW}.`);
+      for (const shadow of shadowsIn(top)) this.#say(`Warning: ${shadow}.`);
     }
     else {
       writeFile(path.join(top, VENDORED_PATH), vendoredText());
@@ -279,11 +286,11 @@ class GuardInstaller {
   check() {
     const { top, hooks } = this.locate();
     const toolkit = isToolkitCheckout(top);
-    const shadow = toolkit && fs.existsSync(path.join(top, VENDORED_PATH));
-    if (shadow) this.#say(`Drift: ${SHADOW}.`);
+    const shadows = toolkit ? shadowsIn(top) : [];
+    for (const shadow of shadows) this.#say(`Drift: ${shadow}.`);
     // Hooks are optional in the Toolkit's own clone; once any is there, all of them must be current.
     if (toolkit && !this.#guardHooks(hooks).some(hook => hook.text?.includes(HOOK_MARKER))) {
-      if (shadow) return 1;
+      if (shadows.length) return 1;
       this.#say(`No drift: ${top} ${TOOLKIT_NOTE}, and no guard hooks are installed in it.`);
       return 0;
     }
@@ -300,7 +307,7 @@ class GuardInstaller {
       // Any difference from the current hook text, so a hook from before a template change is found too.
       else if (text.replace(/\r\n/g, '\n') !== hookText(name)) problems.push(`hook ${name}: outdated`);
     }
-    if (problems.length || shadow) {
+    if (problems.length || shadows.length) {
       for (const problem of problems) this.#say(`Drift: ${problem}`);
       return 1;
     }

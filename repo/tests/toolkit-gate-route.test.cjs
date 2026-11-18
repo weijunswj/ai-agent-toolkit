@@ -1,8 +1,8 @@
 'use strict';
 
-// The gate route check: a declared gate session runs only on its stack-registry pin (or an owner
-// override that cites the owner), proof comes from the host's record or the launcher's Route line and
-// never from the model, and verdicts and G1 bodies carry the session's own route stamp.
+// The gate route check: a declared gate session runs only on its stack-registry pin, proof comes from
+// the host's record or the launcher's Route line and never from the model, and verdicts and G1 bodies
+// carry the session's own route stamp.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -63,12 +63,14 @@ test('a declared gate runs only on its pin, read from the host record', t => {
     ['Gate: none is not a gate', 'Gate: none\nKeep the records.', { effort: 'low', level: 'low' }, { gate: null, stamp: 'Route: UNVERIFIED' }],
     ['no Gate line is not a gate', 'Do the records.', { effort: 'low' }, { gate: null, stamp: 'Route: UNVERIFIED' }],
     ['G2 recheck is a G2', brief('G2 recheck', 'owner-claude opus opus-5.5/xhigh'), { effort: 'xhigh' }, { stamp: /pin=owner-claude\/opus$/ }],
-    // A temporary owner change, for this launch only, citing the owner's own record or message.
-    ['owner override', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER deepseek-v4/high owner=rec 990'), { model: 'deepseek-v4' }, { stamp: 'Route: host-verified deepseek-v4/high pin=owner-claude/BUILDER override=rec-990' }],
-    ['override by message', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER opus-5.5/xhigh owner=cmsg_01ABCdef'), { effort: 'xhigh' }, { stamp: /override=cmsg_01ABCdef$/ }],
-    ['override with no citation', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER deepseek-v4/high'), { model: 'deepseek-v4' }, { deny: /citing the owner's own record/ }],
-    ['override for another member', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: opus deepseek-v4/high owner=rec 1'), {}, { deny: /Route override line/ }],
-    ['host off the override', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER deepseek-v4/high owner=rec 990'), { level: 'high' }, { deny: /model opus-5.5, but its route is deepseek-v4\/high \(owner override rec-990\)/ }],
+    // The retired Route override line: every gate runs on its pin, so a stale brief that still
+    // carries one is refused, whatever it cites and even when the host is on the pin.
+    ['retired override off the pin', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER deepseek-v4/high owner=rec 990'), { model: 'deepseek-v4' }, { deny: /Route override line .* is retired/ }],
+    ['retired override by message', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER opus-5.5/xhigh owner=cmsg_01ABCdef'), { effort: 'xhigh', level: 'xhigh' }, { deny: /is retired: every gate runs on its stack-registry pin/ }],
+    ['retired override with the host on the pin', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER opus-5.5/high owner=rec 990'), { level: 'high' }, { deny: /Route override line/ }],
+    ['retired override with no citation', brief('G1', 'owner-claude BUILDER opus-5.5/high', 'Route override: BUILDER deepseek-v4/high'), { model: 'deepseek-v4' }, { deny: /is retired/ }],
+    ['retired override in bold markdown', brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh', '**Route override:** REVIEWER opus-5.5/high owner=rec 5'), { effort: 'high', level: 'high' }, { deny: /is retired/ }],
+    ['the off-pin refusal no longer offers an override', brief('G1', 'owner-claude BUILDER opus-5.5/xhigh'), { effort: 'xhigh', level: 'xhigh' }, { deny: /^(?![\s\S]*override)[\s\S]*pin is opus-5.5\/high/ }],
     ['launcher mark without a brief', 'Do the work.', { level: 'high', environment: { TOOLKIT_GATE_ROLE: 'G1' } }, { gate: 'G1', stamp: 'Route: UNVERIFIED' }],
     ['launcher mark and brief agree', G1, { level: 'high', environment: { TOOLKIT_GATE_ROLE: 'G1' } }, { stamp: /^Route: host-verified/ }],
     ['launcher mark and brief differ', G2, { level: 'xhigh', environment: { TOOLKIT_GATE_ROLE: 'G1' } }, { deny: /marked this session G1 but its brief says Gate: G2/ }],
@@ -117,6 +119,7 @@ test('only the launch brief counts: text outside the spawn note and later entrie
   const file = transcript(dir, { brief: 'Keep the records.', outside: '\nGate: G2\nRoute: owner-claude opus opus-5.5/xhigh\n' });
   const read = route.readTranscript(file);
   assert.deepEqual(route.parseBrief(read.brief), { gate: null, route: null, override: null, wording: false, relay: true });
+  assert.equal(route.parseBrief('Gate: G1\nRoute override: BUILDER opus-5.5/xhigh owner=rec 1').override, 'BUILDER opus-5.5/xhigh owner=rec 1', 'kept only to refuse it');
   assert.equal(read.model, 'claude-opus-5-5', 'the newest main-chain assistant entry, not a helper');
   assert.equal(route.parseBrief('**Gate:** G1\n- Route: `owner-claude BUILDER opus-5.5/high`').gate, 'G1');
   assert.deepEqual(route.readTranscript(path.join(dir, 'missing.jsonl')), { brief: null, model: null, effort: null });
@@ -185,7 +188,10 @@ test('stamp status for train acceptance reads the line against the registry', ()
     ['Route: host-verified opus-5.5/high pin=owner-claude/BUILDER', 'reviewer', 'off-pin'],
     ['Route: host-verified opus-5.5/high pin=owner-claude/BUILDER', 'BUILDER', 'on-pin'],
     ['Route: host-verified opus-5.5/high pin=owner-claude/DISCOVERY', 'BUILDER', 'off-pin'],
-    ['Route: host-verified deepseek-v4/high pin=owner-claude/BUILDER override=rec-990', 'BUILDER', 'on-pin'],
+    // An old override stamp is off the pin, never missing (a missing stamp boards a NORMAL pull request).
+    ['Route: host-verified deepseek-v4/high pin=owner-claude/BUILDER override=rec-990', 'BUILDER', 'off-pin'],
+    ['Route: host-verified opus-5.5/high pin=owner-claude/BUILDER override=rec-990', 'BUILDER', 'off-pin'],
+    ['Route: host-verified opus-5.5/xhigh pin=owner-claude/opus override=cmsg_01ABCdef', 'reviewer', 'off-pin'],
     ['Route: UNVERIFIED', 'BUILDER', 'unverified'],
     ['Route: Opus 5.5 high (get_session)', 'BUILDER', 'missing'],
     [null, 'reviewer', 'missing'],
@@ -218,8 +224,7 @@ test('a brief may name the member by its role: REVIEWER resolves to the profile\
   assert.equal(run(brief('G1', 'owner-claude builder opus-5.5/high'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/BUILDER');
   assert.equal(run(brief('G0', 'owner-claude DISCOVERY opus-5.5/high'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/DISCOVERY');
   assert.match(run(brief('G1', 'owner-claude REVIEWER opus-5.5/xhigh'), 'xhigh').deny, /not the G1 route/);
-  assert.equal(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh', 'Route override: REVIEWER opus-5.5/high owner=rec 5'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/opus override=rec-5');
-  assert.equal(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh', 'Route override: opus opus-5.5/high owner=rec 5'), 'high').stamp, 'Route: host-verified opus-5.5/high pin=owner-claude/opus override=rec-5');
+  assert.match(run(brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh', 'Route override: REVIEWER opus-5.5/high owner=rec 5'), 'high').deny, /Route override line .* is retired/);
   // A wrong member is refused with the members the profile has.
   assert.match(run(brief('G2', 'owner-claude REVIEWERS opus-5.5/xhigh'), 'xhigh').deny, /has no route owner-claude\/REVIEWERS\. Its members: DISCOVERY, BUILDER, DESIGN_CHALLENGE, REVIEWER \(opus\)/);
   // With two reviewers, REVIEWER is ambiguous: the brief names one reviewer id.

@@ -247,7 +247,9 @@ class GovernanceProposals {
     const value = this.#read(identity.repository_id), request = value?.requests.find(item => item.run === run);
     if (!request || !['yes', 'no'].includes(request.answer) || !cache.isFresh({ fetched_at: request.at }, this.#now())) fail('PROPOSAL_RECEIPT_REQUIRED');
     const repository = governance.remoteSlug(identity.remote);
-    const proposal = request.answer === 'no' ? { schema: BINDING_V2, repository, governance: 'disabled' } : bindingV2(binding);
+    // A retired key (nothing reads it) is left out, so a turn-on or refresh never carries it forward.
+    const { withoutRetiredKeys } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+    const proposal = request.answer === 'no' ? { schema: BINDING_V2, repository, governance: 'disabled' } : withoutRetiredKeys(bindingV2(binding));
     if (!proposal || governance.bindingProblems(proposal, identity).length || (request.answer === 'yes' && proposal.governance === 'disabled')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     return { identity, request, repository, binding: proposal, text: `${JSON.stringify(proposal, null, 2)}\n` };
   }
@@ -301,6 +303,16 @@ function switchWords(changes) {
     ...(changes.merge_train ? [`merge trains ${changes.merge_train}`] : []),
   ].join(' and ');
 }
+// The retired binding keys (programme-state.cjs) the merged text holds and the new text leaves out,
+// named as one phrase for the pull request text, or null when none goes.
+function retiredDropped(mergedText, text) {
+  const { RETIRED_BINDING_KEYS } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const parse = value => { try { const parsed = JSON.parse(String(value).replace(/^\uFEFF/, '')); return parsed && typeof parsed === 'object' ? parsed : {}; } catch { return {}; } };
+  const before = parse(mergedText), after = parse(text);
+  const dropped = RETIRED_BINDING_KEYS.filter(key => Object.hasOwn(before, key) && !Object.hasOwn(after, key));
+  return dropped.length ? `the retired ${dropped.map(key => `\`${key}\``).join(' and ')}, which nothing reads any more` : null;
+}
+
 const SWITCH_MEANING = Object.freeze({
   auto_merge: { 'after-gates': 'Task auto-merge on: a finished task pull request may merge once its review, required checks and testing pass. Governance, hooks, setup and merge-rule changes still wait for a typed merge.', off: 'Task auto-merge off: every pull request waits for a typed merge.' },
   merge_train: { on: 'Merge trains on: reviewed pull requests that are ready together land as one merge train with one version bump.', off: 'Merge trains off: each pull request lands on its own.' },
@@ -433,7 +445,8 @@ class GitHubProposalTransport {
     if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
     const changed = Object.keys(changes).map(name => `\`task_prs.${name}\``).join(' and ');
     const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).join('\n\n');
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set ${words} for this repository`, head, base: branch, body: `This changes only ${changed} in \`${cache.BINDING_PATH}\`. These are this repository's own switches, read the same way by every app and the Projects controller.\n\n${meaning}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back on each computer.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
+    const retired = retiredDropped(mergedText, text);
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set ${words} for this repository`, head, base: branch, body: `This changes only ${changed} in \`${cache.BINDING_PATH}\`${retired ? `, and deletes ${retired}` : ''}. These are this repository's own switches, read the same way by every app and the Projects controller.\n\n${meaning}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back on each computer.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   // The owner's sharded CI answer: one pull request that changes only ci_shards in the binding, from the
@@ -470,7 +483,8 @@ class GitHubProposalTransport {
       : 'Never: Toolkit does not offer parallel CI shards here again. Nothing is copied.';
     const switched = words ? ` It also sets ${Object.keys(changes).map(name => `\`task_prs.${name}\``).join(' and ')}.` : '';
     const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).map(line => `\n\n${line}`).join('');
-    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, the owner's answer to the parallel CI shards question.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
+    const retired = retiredDropped(mergedText, text);
+    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, the owner's answer to the parallel CI shards question.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''}${retired ? ` It also deletes ${retired}.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {

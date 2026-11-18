@@ -152,7 +152,9 @@ test('the wrapper recognises legacy entries, explicitly migrates without raising
     assert.equal(run(...flags).status, 2);
     assert.deepEqual(fs.readFileSync(file), before);
   }
-  assert.equal(run('--migrate-baseline').status, 0);
+  const migration = run('--migrate-baseline');
+  assert.equal(migration.status, 0, migration.stderr);
+  assert.equal(migration.stdout, 'Plain-references baseline uses fingerprints (1 entry); allowances unchanged. Migration does not clean git history: revoke any real token that was stored there.\n');
   const migrated = fs.readFileSync(file);
   const baseline = JSON.parse(migrated);
   assert.equal(baseline.schema, check.BASELINE_SCHEMA);
@@ -207,4 +209,14 @@ test('this repository passes against its own baseline', () => {
   const result = plain.check(ROOT);
   assert.deepEqual(result.failures.map(plain.describeFailure), []);
   assert.deepEqual(result.unusedKept, []);
+});
+
+test('the command line names a bad option or missing value instead of a vague error', () => {
+  for (const [flags, message] of [[['--bogus'], 'unknown option --bogus'], [['--root'], '--root needs a value'],
+    [['--prune-baseline', '--migrate-baseline'], 'Choose one baseline write mode, without --files.']]) {
+    const result = spawnSync(process.execPath, [SCRIPT, ...flags], { encoding: 'utf8', timeout: 20000 });
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, `Could not check: ${message}\n`);
+  }
 });

@@ -76,6 +76,31 @@ test('a gate at work is the current step; a UAT still owed on an earlier PR show
   assert.equal(row(504), 'Owner: decision');
 });
 
+test('a task waiting on the owner with a UAT still owed waits on that UAT, in the graph and in CURRENT; a gate waiting on the owner is still a decision', () => {
+  const f = renderScaleFixture(state);
+  const row = issue => cellsOf(rowsOf(state.renderParentBlockBody(f.parent, f.children, f.issues)).find(line => cellsOf(line)[1] === `#${issue}`))[3];
+  const current = () => state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now);
+  const child = f.children.get(504);
+  child.lifecycle = 'WAITING_OWNER';
+  Object.assign(child.pr, { number: 2017, state: 'MERGED', head: 'c'.repeat(40) });
+  Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) });
+  assert.equal(row(504), 'Owner: UAT on PR #2017');
+  assert.match(current(), /^- #504 [^\n]* · PR #2017 · waiting on you: your UAT on PR #2017$/m);
+  Object.assign(child.gate, { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'a-504-g2', role: 'G2' } });
+  assert.equal(row(504), 'Owner: decision', 'the gate asked the owner something');
+  assert.match(current(), /^- #504 [^\n]* · PR #2017 · G2 · waiting on you: your decision$/m);
+});
+
+test('CURRENT lists tasks in progress before queued ones, whatever their priority', () => {
+  const outcomes = [{ issue: 2, class: 'COMMITTED', parent: 7, order: 0 }, { issue: 3, class: 'COMMITTED', parent: 7, order: 1 }];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const doc = (outcome, changes) => ({ ...state.newChild({ repository: 'acme/app', outcome }), lifecycle: 'ACTIVE', ...changes });
+  const children = new Map([[2, doc(outcomes[0], { blockers: ['waits for #3'] })], [3, doc(outcomes[1], {})]]);
+  const listed = state.renderCurrentBlockBody(parent, children, new Map(), '2026-11-18T00:00:00Z').split('\n')
+    .filter(line => /^- #\d+ /.test(line)).map(line => Number(/^- #(\d+) /.exec(line)[1]));
+  assert.deepEqual(listed, [3, 2]);
+});
+
 test('CURRENT is slim: in progress, one attention line with holds, no Start next or finding lists', () => {
   const f = renderScaleFixture(state);
   f.children.get(500).blockers = ['waits for PR 1098'];

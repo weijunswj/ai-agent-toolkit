@@ -1266,7 +1266,7 @@ test('task pages and their open PRs start with Parent > Child > PR links; merged
   assert.equal(reconciler().run().summary, 'No changes');
 });
 
-test('an open PR that references an untracked outcome is reported for the controller, never recorded', () => {
+test('a plain reconcile (no refresh) reports an open PR that references an untracked outcome and records nothing', () => {
   const { github, store, reconciler } = setup();
   reconciler().run({ apply: true });
   github.addPr(601, { head: SHA_A, body: 'Work for the shared contract.\n\nRefs #421, #423 and #467' });
@@ -1275,8 +1275,8 @@ test('an open PR that references an untracked outcome is reported for the contro
   const child = store.read('child', 423);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.findings.filter(finding => finding.code === 'PR_UNTRACKED').map(finding => `#${finding.issue}: ${finding.detail}`), [
-    '#423: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
-    '#467: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
+    '#423: open PR #601 references this outcome, but its state records no PR or branch; the next refresh records a single open claimant from a branch of this repository, else the controller records it with update --patch',
+    '#467: open PR #601 references this outcome, but its state records no PR or branch; the next refresh records a single open claimant from a branch of this repository, else the controller records it with update --patch',
   ], 'merged PRs and finished outcomes are left out');
   assert.equal(store.read('child', 423).sha, child.sha, 'nothing is recorded on the task');
   assert.equal(store.read('child', 423).doc.pr.number, null);
@@ -1501,6 +1501,21 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.equal(settled.summary, 'No changes');
   assert.match(settled.next_action, /^Controller: decide on 4 finding\(s\) the reconciler does not change/, 'both priority ties and the completed task with no merged PR wait on the controller');
   assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#12, #16', '#9, #14, #15']);
+});
+
+test('native sub-issues follow the status bands: a task in progress moves ahead of a queued task of higher priority', () => {
+  const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }, { issue: 9, class: 'COMMITTED', parent: 7, order: 1 }];
+  const { github, store, reconciler } = setup({ repository: 'other/tool', parentIssue: 7, outcomes,
+    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: 7 }); } });
+  reconciler().run({ apply: true });
+  assert.deepEqual(github.issues.get(7).subs, [8, 9], 'two LATER tasks by priority');
+  const parentDoc = store.read('parent', 7).doc;
+  store.mutate('child', 8, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: ['waits for #9'] }) });
+  store.mutate('child', 9, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
+  const dry = reconciler().run();
+  assert.deepEqual(dry.findings.filter(finding => finding.code === 'NATIVE_ORDER_DRIFT').map(finding => finding.issue), [7]);
+  reconciler().run({ apply: true });
+  assert.deepEqual(github.issues.get(7).subs, [9, 8], 'NOW · IN PROGRESS, then NOW · QUEUED');
 });
 
 test('merged PRs with green checks list open issues for the controller without closing them', () => {

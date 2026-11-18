@@ -96,8 +96,9 @@ async function probeAppServer(codexHome, explicit) {
       return { status: 'verified', detail: 'Codex config check: Codex loaded config.toml.' };
     } catch (error) {
       // Try the next candidate when this command is unavailable or cannot be started directly.
-      if (error.code === 'ENOENT' || error.reason === 'start') continue;
+      // A program that exists but the system refuses to start proves nothing; a missing one moves on.
       if (['EACCES', 'EPERM', 'ENOEXEC'].includes(error.code)) return { status: 'unverified', detail: UNVERIFIED };
+      if (error.code === 'ENOENT' || error.reason === 'start') continue;
       // Only Codex refusing the file is a rejection; a slow start or stuck shutdown proves nothing.
       // Rejected means Codex refused the file: a config/read error reply, or a start-up error that
       // names a configuration problem. Anything else (a slow start, an initialize failure, an

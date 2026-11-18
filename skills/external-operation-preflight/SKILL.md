@@ -9,23 +9,24 @@ Check one live change on an outside system before the owner approves it. The ski
 
 ## Steps
 
-1. **Pick the interface** in this order: the service's connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower one may win when clearly better for this operation; say why.
+1. **Pick the interface** in this order: the service's connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower one may win when clearly better; say why.
 2. **Read the live state** of the targets and every resource they use from the provider itself. Discovery stays passive: no writes, test sends or side-effect probes unless an approval names the target, allowed effects and cleanup.
 3. **Write the plan** as JSON from [the example](templates/operation-plan.example.json): one environment, the exact targets, each resource's name environment and provider environment, `temporary` (true or false) on everything, bindings, authority entries, `downstream` (trigger `NONE` when nothing is set off), routes tried, and for production a `rollback` plan and `backup_evidence`. Key names only, never a secret value.
 4. **Run** `node <this skill>/scripts/preflight-check.cjs plan.json`. It prints a verdict, typed reasons, the date checked and the plan's SHA-256.
-5. **Ask for approval only on ALLOW or ALLOW_WITH_NOTICE**, showing the plan, verdict, notices and hash. The owner's current-turn approval covers that hash; any change to the plan goes back to step 3.
+5. **Ask for approval only on ALLOW or ALLOW_WITH_NOTICE**, showing the plan, verdict, hash and every notice. The owner's current-turn approval covers that hash; any plan change goes back to step 3.
 6. **After the change,** read the result back from the provider, never from labels or your own log, and do every `required_read_back` item.
+7. **Temporary resources later sessions need:** follow [the recovery identity rules](references/recovery-identity.md); a hold stops the work.
 
 ## What the checker enforces
 
 It fails closed: a missing, unknown or malformed field holds the plan.
 
 - **One environment.** Names and provider read-back must agree; every action and binding stays inside the operation's environment. A store writable from two environments is refused unless an owner exception names the resource, environment, reason and an end date.
-- **Temporary resources** (any environment whose name has test, testing, preview, restore or drill in it, and anything marked temporary) need a temporary name, data rule, cleanup owner, unexpired end date and a provider read-back on removal.
+- **Temporary resources** (any environment whose name has test, testing, preview, restore or drill in it, and anything marked temporary) need a temporary name, data rule, cleanup owner, unexpired end date and a provider read-back on removal; the cleanup owner removes it by the end date or gets the owner's OK for a new one.
 - **Authority is a list** of resource, action, scope and allow or deny, checked for the operation's own action and every extra action. Unlisted means refused.
 - **An action counts with what it sets off.** A merge or push into an auto-deploying branch is a deployment: accept it, pause the trigger first with a read-back, or hold. An evidence freeze holds the deployment unless the approval ends it. An unknown trigger stops the action.
-- **Production** is any environment whose name has a production word (production, prod, prd, live) or none of these words: alpha, beta, staging, stage, dev, development, test, testing, qa, uat, sandbox, preview, restore, drill, local. So `main`, `prd`, `prod-eu` and `qa-prd` count. Names split into words at any character that is not a letter or digit, and only whole words count, so `qa-tests` is not temporary and `qa-prod1` is not production. A plan that touches production anywhere, including a store reached through an owner exception, needs `rollback` with a plan and the operation's environment, and backup evidence at `retrievable` or higher for anything that can touch data (only restart and trigger pause or resume are exempt).
-- **Fallback routes** run only after a route failed before doing anything, and only when pre-approved with the same target, privilege, credential and effect. Tell the user about the failure.
+- **Production** is any environment whose name has a production word (production, prod, prd, live) or none of these words: alpha, beta, staging, stage, dev, development, test, testing, qa, uat, sandbox, preview, restore, drill, local. So `main`, `prod-eu` and `qa-prd` count. Names split into words at anything but a letter or digit; only whole words count, so `qa-tests` is not temporary and `qa-prod1` is not production. A plan that touches production anywhere, including a store reached through an owner exception, needs `rollback` with a plan and the operation's environment, and backup evidence at `retrievable` or higher for anything that can touch data (only restart and trigger pause or resume are exempt).
+- **Fallback routes** run only after a route failed before doing anything, and only when pre-approved with the same target, privilege, credential and effect. Tell the user it failed.
 
 ## Reasons
 
@@ -38,8 +39,6 @@ It fails closed: a missing, unknown or malformed field holds the plan.
 | `ROLLBACK_EVIDENCE_MISSING`, `BACKUP_EVIDENCE_MISSING` | Write the rollback; prove the backup per the contract below. |
 | `ROUTE_FALLBACK_REFUSED`, `PRIOR_ATTEMPT_AMBIGUOUS` | Stop, recover and read back; ask before another route. |
 | `PLAN_INVALID`, `SECRET_IN_PLAN` | Fix the plan; replace any value with its key name and treat a pasted value as exposed. |
-
-ALLOW_WITH_NOTICE: pass every notice to the owner with the approval request.
 
 ## Also
 

@@ -34,9 +34,13 @@ CI runs the full pack on Linux and one Windows job per family. The nine Windows 
 
 A new hook, or a new rule inside a hook, needs the owner's yes on one line: what it stops, and what it might wrongly stop. Put that line in the pull request body.
 
+## Attribution and force-push reader
+
+The attribution, force-push, evidence-store push and credential checks read a command line as bash does and, where PowerShell may run it (Claude Code's PowerShell tool and every Codex shell call, which names no shell), as PowerShell does too; a check refuses when either reading does. The two readings differ only at a backslash, which escapes in bash and is plain text in PowerShell, so a push hidden from bash inside backslash-escaped quotes is still read. Claude Code's Bash tool keeps the bash reading alone, and a script handed to a POSIX shell (`bash -c`) is read as bash. PowerShell's stop-parsing word `--%`, unquoted, is dropped first, so `gh --% pr create` is judged as `gh pr create`; a quoted one stays an argument that gh refuses.
+
 ## Review
 
-At each release, and at least once a year, list the hooks with their false-block fixes and their real catches since the last review. A hook with repeated false-block fixes and no catch moves to a written rule.
+At each release, as a fixed row of the release-batch real-host smoke, and at least once a year, the controller lists the hooks with their false-block fixes and their real catches since the last review. A hook with repeated false-block fixes and no catch moves to a written rule.
 
 ## Closure command reader
 
@@ -52,4 +56,4 @@ Wrapper option forms follow the reader's tables. PowerShell command options conc
 
 A smoke never renames, swaps or edits files inside the installed plugin root. Codex fingerprints the whole bundle, so such edits revoke approval and make an apparent allow result meaningless. Install a candidate through the supported setup path, then let the owner approve its hooks in `/hooks`. Require a positive control refusal in the same fresh chat before counting any ALLOWED result. Record config hashes before and after without recording private config values.
 
-The fixture pack exercises hook processes, not Codex approval or delivery. Nested code-mode shell calls reach the hooks as Bash, including PowerShell commands. In a 29 October 2026 test the outer JavaScript cell reached no hook; the capture planned to re-measure that on Codex 0.166 did not run. That cell, write_stdin into an already allowed shell and opaque Desktop REPL code remain accepted delivery gaps. Before a Codex gate launches, the installed hook-state `--check` must pass as the host contract defines; anything else holds the launch until the owner reviews `/hooks`.
+The fixture pack exercises hook processes, not Codex approval or delivery. Nested code-mode shell calls reach the hooks as Bash, including PowerShell commands. In a 29 October 2026 test the outer JavaScript cell reached no hook; the capture planned to re-measure that on Codex 0.166 did not run, so the controller keeps that re-measure as a fixed row of the release-batch real-host smoke until it runs. That cell, write_stdin into an already allowed shell and opaque Desktop REPL code remain accepted delivery gaps. Before a Codex gate launches, the installed hook-state `--check` must pass as the host contract defines; anything else holds the launch until the owner reviews `/hooks`.

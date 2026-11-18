@@ -1421,7 +1421,7 @@ function newestKnownToolkitVersion(state) {
 // than the running copy (they stay authoritative; refresh Toolkit), 'differs' when no newer
 // Toolkit is known on this machine (the rules differ from the running Toolkit's
 // templates; which side is newer is unknown), and 'drift' when a Toolkit source
-// checkout differs from its own canonical templates.
+// checkout's CLAUDE.md differs from its own canonical template.
 function runAgentRulesPreflight(args, options = {}) {
   if (!args.hook) return { status: 'not-applicable', targetRoot: '', findings: [] };
   const specs = agentRulesPreflightSpecs(args.syncSource);
@@ -1444,10 +1444,11 @@ function runAgentRulesPreflight(args, options = {}) {
   const reference = sourceVersion ? 'source-checkout' : 'installed-plugin';
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
-  // A Toolkit source checkout still builds its own root files from the templates, so they are
-  // compared. Anywhere else the installed Toolkit delivers the governed rules: a copy is a leftover to
-  // remove, and a missing one is the goal.
-  if (sourceVersion) for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  // A Toolkit source checkout still builds its root CLAUDE.md from its template, so that is compared.
+  // Its root AGENTS.md is all hand-written: the installed Toolkit delivers the governed rules there
+  // too, and comparing it with the managed template would say to regenerate the block back in.
+  // Anywhere else a copy is a leftover to remove, and a missing one is the goal.
+  if (sourceVersion) for (const spec of specs) { if (spec.target !== 'AGENTS.md') findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec })); }
   else findings.push(...leftoverRuleCopies(targetRoot), ...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
   const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
   const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;

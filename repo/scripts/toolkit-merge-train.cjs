@@ -85,11 +85,16 @@
 // each ready pull request merges alone. verify, body, split and eject still check or unwind a train.
 // land refuses a stacked train, re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
-// for every RISKY member, then names the pull request and head to merge, with its route: `auto` when
+// for every RISKY member. It re-reads each member's live body: a UAT line the auto-merge check calls
+// missing or invalid refuses, and so does a manifest line weaker than the live one (the manifest says
+// NOT_REQUIRED or PASSED while the body says OWNER_TEST_NEEDED), so a stale or hand-built manifest
+// never drops an owner test; a stricter manifest line only keeps a test owed. Then it names the pull
+// request and head to merge, with its route: `auto` when
 // the repository's task auto-merge switch is on, the train's scope and UAT line pass
 // toolkit-auto-merge-eligible.cjs at the train head and no member is RISKY; else `owner` (a merge
-// card), with the reasons. --live reads those pull request facts from
-// a JSON file ({"<number>": {"state": "OPEN", "head": "<sha>"}}) instead of `gh api` (REST).
+// card), with the reasons. --live reads those pull request facts from a JSON file
+// ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
+// (REST); a member entry with no body is refused, never read as NOT_REQUIRED.
 //
 // Exit 0: done or ready. Exit 1: refused, with every reason. Exit 2: bad arguments or unreadable input.
 
@@ -735,14 +740,28 @@ function livePr(repository, number, liveFile) {
   if (liveFile) {
     const facts = JSON.parse(fs.readFileSync(liveFile, 'utf8'))[String(number)];
     if (!facts) throw new TrainError(`--live has no entry for #${number}`);
-    return { state: facts.state, head: facts.head };
+    return { state: facts.state, head: facts.head, body: facts.body };
   }
   if (!repository) throw new TrainError('land needs "repository" in the manifest to read pull requests');
   // REST, not `gh pr view`: some hosts (cloud sessions among them) refuse GitHub's GraphQL API.
   const result = spawnSync('gh', ['api', `repos/${repository}/pulls/${number}`], { encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new TrainError(`could not read #${number}: ${result.error ? result.error.message : (result.stderr || '').trim()}`);
   const value = JSON.parse(result.stdout);
-  return { state: value.merged ? 'MERGED' : String(value.state || '').toUpperCase(), head: value.head && value.head.sha };
+  return { state: value.merged ? 'MERGED' : String(value.state || '').toUpperCase(), head: value.head && value.head.sha, body: typeof value.body === 'string' ? value.body : '' };
+}
+
+// The member's live UAT line, judged by the auto-merge check, against the line its manifest
+// carries into the train body. Strictness: OWNER_TEST_NEEDED above NOT_REQUIRED and PASSED.
+function memberUatProblem(member, facts) {
+  if (typeof facts.body !== 'string') throw new TrainError(`--live has no body for #${member.pr}: land reads each member's live UAT line and never takes a missing one as NOT_REQUIRED`);
+  const live = autoMerge.uatVerdict(facts.body);
+  if (live.state === 'absent') return `#${member.pr}: UAT verdict missing in its live body${live.problem ? ` (${live.problem})` : ''}: add its UAT: line, then rebuild the manifest from find`;
+  if (!live.mergeable) return `#${member.pr}: UAT verdict invalid: ${live.problem}; fix the line, then rebuild the manifest from find`;
+  const recorded = UAT_LINE.exec(member.uat.trim())[1];
+  if (live.state === 'OWNER_TEST_NEEDED' && recorded !== 'OWNER_TEST_NEEDED') {
+    return `#${member.pr}: the manifest records UAT ${recorded}, weaker than its live OWNER_TEST_NEEDED: rebuild the manifest from find so the owner's test stays owed`;
+  }
+  return null;
 }
 
 function land(cwd, manifest, options) {
@@ -760,6 +779,8 @@ function land(cwd, manifest, options) {
     if (facts.state !== 'OPEN') problems.push(`#${member.pr} is ${facts.state}`);
     if (facts.head !== member.head) problems.push(`#${member.pr} moved to ${String(facts.head).slice(0, 12)} after boarding: eject it until its review passes the new head`);
     if (member.tier === 'RISKY' && !member.owner_ok) problems.push(`#${member.pr} is RISKY and has no owner merge OK recorded`);
+    const uat = memberUatProblem(member, facts);
+    if (uat) problems.push(uat);
   }
   // An ejected member's commits stay in the train, reverted: GitHub marks its pull request merged
   // when the train lands if its live head is any commit the train holds.

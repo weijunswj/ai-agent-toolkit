@@ -1,6 +1,6 @@
 'use strict';
 
-// Claude Projects inputs the merge hold reads in a cloud thread, from the host's own prompt text:
+// Claude Projects inputs the merge hold reads in a cloud thread, from the host's own text:
 //
 //   Merge card tap   A Projects decision card the merge thread posts with the exact question
 //                    `Merge owner/name#N at <full 40 character head SHA>?` and first option `Merge`.
@@ -12,30 +12,26 @@
 //                    whole shape counts, for that pull request at that SHA, once (the decision id
 //                    is the delivery id the approval store keeps a receipt for).
 //   Off override    The project line `- Task auto-merge: Off` in the owner's project instructions,
-//                    which the host puts at the very start of a thread's first prompt inside
-//                    `<session-context nonce="X">` ... `</session-context nonce="X">`, as one
+//                    read at merge time from the host's opening record of the thread's session
+//                    transcript: its first user entry, marked meta (isMeta), of this session, whose
+//                    text starts with `<session-context nonce="X">` ... `</session-context nonce="X">`
+//                    (the hook never sees that record as a submitted prompt). Inside it, as one
 //                    `<project-instructions nonce="Y">` ... `</project-instructions nonce="Y">`
 //                    block. The repository's merged switch (task_prs.auto_merge) is the only grant;
 //                    this line can only force it Off. Only that block counts: the shared-file,
 //                    repository and folder lists beside it, and anything after the context (a
 //                    relay, a citation, a note), are never read. No line defers to the binding; an
 //                    On line grants nothing; an Off line, two lines, a second instructions opener or
-//                    an unclosed block force Off. It is a snapshot from the first prompt: a later
-//                    change reaches only threads started after it, and a session with no snapshot
-//                    (a new container) is forced Off.
+//                    an unclosed block force Off. The record is written when the thread starts: a
+//                    later change reaches only threads started after it, and a session whose
+//                    transcript is missing or unreadable is forced Off.
 //
-// Tripwire, not a lock: a fully forged top-level wake or session context with the right shape
-// would count, as for the typed `merge N` the Projects wake reader already accepts. Required CI and
-// the repository's own rules stay the hard limit.
+// Tripwire, not a lock: a fully forged top-level wake, or an edited session transcript, with the
+// right shape would count, as for the typed `merge N` the Projects wake reader already accepts.
+// Required CI and the repository's own rules stay the hard limit.
 
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
+const transcriptHead = require('./toolkit-transcript-head.cjs');
 
-const SWITCH_BASENAME = 'projects-task-auto-merge.json';
-const SWITCH_SCHEMA = 'toolkit.projects-task-auto-merge.v1';
-const MAX_SESSIONS = 256;
-const MAX_SWITCH_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_PROMPT = 512 * 1024;
 
 const ATTRIBUTES = '((?:\\s+[\\w-]+="[^"<>]*")*)';
@@ -85,9 +81,9 @@ function mergeCardTap(prompt) {
 }
 
 // The project line as read from the owner's project instructions inside the host's session context
-// at the start of this prompt: 'off' forces task auto-merge Off for this thread; 'none' (no line)
+// at the start of this text: 'off' forces task auto-merge Off for this thread; 'none' (no line)
 // and 'on' leave the repository's merged switch (task_prs.auto_merge) in charge, since an On line
-// grants nothing on its own. null when the prompt does not start with a session context. Only the
+// grants nothing on its own. null when the text does not start with a session context. Only the
 // `<project-instructions nonce="Y">` block nested in it counts, up to its own closing tag: the rest
 // of the session context also lists shared files, repositories and folders, which agents can name.
 // Anything unclear (two lines, a second instructions opener, an unclosed block or context) is 'off'.
@@ -110,46 +106,18 @@ function switchSetting(prompt) {
   return /^\s*-\s*Task auto-merge\s*:\s*On\b/.test(lines[0]) ? 'on' : 'off';
 }
 
-// The project line as read for each cloud session on this container. It only ever forces Off: a
-// session whose instructions were read with no Off line defers to the merged binding. A session with
-// no record (its instructions were never read here, or the container restarted) and a store that
-// cannot be read both force Off, so a lost Off line never turns task auto-merge On.
-class ProjectsSwitch {
-  #file; #now;
-
-  constructor({ directory, now = () => new Date() } = {}) {
-    this.#file = path.join(directory, SWITCH_BASENAME);
-    this.#now = now;
-  }
-
-  #read() {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8'));
-      if (!parsed || parsed.schema !== SWITCH_SCHEMA || !parsed.sessions || typeof parsed.sessions !== 'object' || Array.isArray(parsed.sessions)) return {};
-      const oldest = this.#now().getTime() - MAX_SWITCH_AGE_MS;
-      return Object.fromEntries(Object.entries(parsed.sessions).filter(([, entry]) => entry && ['on', 'off', 'none'].includes(entry.value) && Date.parse(entry.at) >= oldest));
-    } catch (error) { return error?.code === 'ENOENT' ? {} : null; }
-  }
-
-  record(sessionId, value) {
-    if (typeof sessionId !== 'string' || !ID.test(sessionId) || !['on', 'off', 'none'].includes(value)) return false;
-    const sessions = this.#read() || {};
-    delete sessions[sessionId];
-    sessions[sessionId] = { value, at: this.#now().toISOString() };
-    const kept = Object.fromEntries(Object.entries(sessions).slice(-MAX_SESSIONS));
-    fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-    const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
-    try {
-      fs.writeFileSync(temp, `${JSON.stringify({ schema: SWITCH_SCHEMA, sessions: kept }, null, 2)}\n`, { mode: 0o600 });
-      fs.renameSync(temp, this.#file);
-    } finally { fs.rmSync(temp, { force: true }); }
-    return true;
-  }
-
-  forcedOff(sessionId) {
-    const sessions = typeof sessionId === 'string' ? this.#read() : null;
-    return !sessions || !['on', 'none'].includes(sessions[sessionId]?.value);
-  }
+// The project line for this cloud session (switchSetting's 'off', 'none' or 'on'), read from the
+// host's opening record of its transcript: the first main-thread user entry, which must be marked
+// meta, belong to `sessionId` and hold text. A typed first prompt, tool output, a later wake or
+// another session's transcript never counts. null (which forces Off) when it is missing, unreadable
+// or not a session context.
+function transcriptSetting({ transcriptPath, sessionId } = {}) {
+  if (typeof transcriptPath !== 'string' || !transcriptPath || typeof sessionId !== 'string' || !sessionId) return null;
+  let entry;
+  try { entry = transcriptHead.firstUserEntry(transcriptPath); } catch { return null; }
+  if (!entry || entry.isMeta !== true || entry.sessionId !== sessionId) return null;
+  const content = entry.message && entry.message.content;
+  return typeof content === 'string' ? switchSetting(content) : null;
 }
 
-module.exports = Object.freeze({ SWITCH_BASENAME, mergeCardQuestion, mergeCardTap, switchSetting, ProjectsSwitch });
+module.exports = Object.freeze({ mergeCardQuestion, mergeCardTap, switchSetting, transcriptSetting });

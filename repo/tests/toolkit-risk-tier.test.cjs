@@ -61,6 +61,12 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
   }
 });
 
+test('the source-watch notice report is RISKY, not a LIGHT .md file', () => {
+  // RISKY code names it by path; it exists only on the notifier's branch, so it is read from the notifier.
+  const { report } = require('../scripts/check-project-source-updates.cjs').parseArgs([]);
+  assert.equal(tierOf(report), 'RISKY', report);
+});
+
 test('the controller takeover playbook is RISKY while other playbooks stay NORMAL', () => {
   assert.equal(tierOf('repo/docs/agent-playbooks/controller-takeover.md'), 'RISKY');
   assert.equal(tierOf('repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
@@ -264,7 +270,7 @@ test('a version-like line that can change behaviour, or sits in the wrong kind o
 test('patterns ignore letter case, so a hand-typed Windows path cannot drop the tier', () => {
   assert.equal(tierOf('Skills/secure-ci-cd/SKILL.md'), 'NORMAL');
   assert.equal(tierOf('Repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
-  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', 'docs/claude.md', 'skills/foo/agents.md', '.Agents/Rules/x.md', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
+  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', 'docs/claude.md', 'skills/foo/agents.md', '.Agents/Plugins/x.json', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
     assert.equal(tierOf(rel), 'RISKY', rel);
   }
   assert.equal(tierOf(parseArgs(['--', 'Repo\\Scripts\\Setup-Toolkit.cjs']).paths[0]), 'RISKY');

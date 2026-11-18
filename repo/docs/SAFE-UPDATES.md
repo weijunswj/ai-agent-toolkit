@@ -73,6 +73,8 @@ Current source-watch output is a review notification only. Advisory target entri
 - Labels such as `source-update` and `third-party-review`.
 - Review from `weijunswj` before merge.
 
+To refresh an active source lock after a reviewed notice, clone the upstream repository and run `node repo/scripts/refresh-source-lock.cjs --lock <SOURCE-LOCK.json> --clone <clone> --commit <full SHA>`. It reads the clone with git only and prints the plan; `--write` copies exact files byte for byte, moves their pins and the lock's commit, drops exclusions for files upstream removed, and lists new upstream files beside tracked ones as excluded, so adopting one stays a separate choice. It refuses `--write` while an exact or adapted file has gone upstream, and while an adapted file changed upstream until the adaptation is ported by hand and `--adapted-reviewed` confirms it. Then run `npm run audit:source-locks` and the skill's own tests.
+
 Active third-party source locks must use `source_lifecycle: "active"`, `source_role: "third_party_attribution_source"`, `source_update_policy: "manual_review_required"`, `public_attribution_required: true`, and a full 40-character `source_commit` SHA. Retired internal source locks are historical provenance only and are not scheduled-watch targets.
 
 For `nextlevelbuilder/ui-ux-pro-max-skill`, the allowlist is:
@@ -99,7 +101,7 @@ Optional AI review is advisory only. It can help summarize a diff, but it cannot
 
 GitHub Actions and Codex must not use source-watch as a source write mechanism. Scheduled source-watch may write only the review notification report and PR metadata. Optional AI review can check upstream notes, explain risk, produce a Codex review prompt, and recommend approve/reject/manual review. It must not apply changes or update advisory targets from the notification workflow.
 
-GitHub notifications depend on the user's notification settings. Any separately approved future updater work should request the right reviewer through normal GitHub review settings.
+GitHub notifications depend on the user's notification settings, so the controller does not rely on them: on each periodic run it picks up any open source-watch notification PR and starts each manual advisory review that is due (`last_reviewed_at` plus `review_cadence_days`). Any separately approved future updater work should request the right reviewer through normal GitHub review settings.
 
 ## Hard Rules
 
