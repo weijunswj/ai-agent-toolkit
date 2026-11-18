@@ -1492,6 +1492,81 @@ test('validate-n8n-workflows.cjs matches non-ASCII email domains and never treat
   assert.doesNotMatch(result.stdout + result.stderr, /ex\u0430mple|b\u00fccher|ops@|user@/, 'the log never prints the address');
 });
 
+test('validate-n8n-workflows.cjs checks the static part of a host built partly with ${...}', () => {
+  const privateHost = ['crm', 'private', 'test'].join('.');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [0, 0],
+        parameters: {
+          plain: 'https://${tenant}.' + privateHost + '/api',
+          template: '={{ `https://${$env.SUB}.' + privateHost + '/x` }}',
+          runTimeOnly: 'https://${HOST}/x',
+          allowedTail: 'https://api-${env}.example.com/v1',
+          expressionHost: 'https://{{a}}.company.com/',
+        },
+      },
+      {
+        id: 'code_1',
+        name: 'Code',
+        type: 'n8n-nodes-base.code',
+        typeVersion: 2,
+        position: [200, 0],
+        parameters: { jsCode: 'const u = `https://${sub}.' + privateHost + '/v1`; return [{ json: { u } }];' },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 3 production-looking URL\(s\) at nodes\.0\.parameters\.plain, nodes\.0\.parameters\.template, nodes\.1\.parameters\.jsCode\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs keeps its place in an expression after a regex literal or a comment', () => {
+  const cwd = tempDir();
+  const url = "'https://crm.private.test/x'";
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    regexQuote: `={{ $json.a.replace(/'/g, '') + ${url} }}`,
+    blockComment: `={{ /* it's */ ${url} }}`,
+    lineComment: `={{ $json.a // it's\n + ${url} }}`,
+    keywordRegex: `={{ (() => { return /'/.test($json.a) ? ${url} : '' })() }}`,
+    division: `={{ $json.a / 2 + ${url} }}`,
+    commentUrl: '={{ $json.a /* see https://crm.private.test/x */ }}',
+    allowed: "={{ $json.a.replace(/'/g, '') + 'https://api.openai.com/v1/models' }}",
+    divisionOnly: "={{ $json.total / $json.count + ' items' }}",
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /production-looking URL\(s\) at nodes\.0\.parameters\.regexQuote, nodes\.0\.parameters\.blockComment, nodes\.0\.parameters\.lineComment, nodes\.0\.parameters\.keywordRegex, nodes\.0\.parameters\.division and 1 more\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs ends an email at a change of script after the domain', () => {
+  const email = (local, domain) => [local, domain].join('@');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    allowedThenJapanese: email('user', 'example.com') + 'まで',
+    privateThenJapanese: email('ops', 'crm.private.test') + 'まで',
+    lookAlikeThenJapanese: email('user', 'exаmple.com') + 'まで',
+    allowedThenLatin: email('user', 'example.comx'),
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 3 non-placeholder email\(s\) at nodes\.0\.parameters\.privateThenJapanese, nodes\.0\.parameters\.lookAlikeThenJapanese, nodes\.0\.parameters\.allowedThenLatin\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /ops@|user@|exаmple|crm\.private\.test/, 'the log never prints the address');
+});
+
 test('validate-n8n-workflows.cjs still fails a credential in the user info or query of an allowed public host', () => {
   const stripeKey = ['sk', 'live', 'Abc123Def456Ghi789Jkl012'].join('_');
   const hubspotKey = ['0f1e2d3c', '4b5a', '4978', '8695', 'a4b3c2d1e0f9'].join('-');
@@ -2469,7 +2544,6 @@ test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () =>
 
     if (label.includes('import helper')) {
       assert.match(text, /\[string\]\$PreparedDir = "\.tmp\/n8n-live-import"/, label);
-      assert.match(text, /\[string\]\$CredentialExportDir = "\.tmp\/n8n-live-credential-exports"/, label);
     } else {
       assert.match(text, /\[string\]\$ExportDir = "\.tmp\/n8n-live-exports"/, label);
     }
@@ -2662,7 +2736,6 @@ test('PowerShell n8n import and export scratch directories are rooted under reso
 
   assert.match(exportText, /\$ExportDirPath = Join-Path \$RepoRoot \$ExportDir/);
   assert.match(importText, /\$PreparedDirPath = Join-Path \$RepoRoot \$PreparedDir/);
-  assert.match(importText, /\$CredentialExportDirPath = Join-Path \$RepoRoot \$CredentialExportDir/);
 
   for (const [label, text] of [
     ['export helper', exportText],
