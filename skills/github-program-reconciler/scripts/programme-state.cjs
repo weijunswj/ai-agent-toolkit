@@ -1811,8 +1811,8 @@ function revisionLine(parent, children) {
 // `LATER`; a finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is
 // COMPLETED or RETIRED. A planned release names where the work merges; it does not change the
 // status. Waiting on names what an active task waits for; PRs, review and UAT are on its own page,
-// which lists every PR. Optional tasks still sort after the rest of LATER.
-const GRAPH_GROUPS = Object.freeze(['NOW', 'LATER', 'OPTIONAL']);
+// which lists every PR. Rows sort by these open bands, then COMPLETED, then RETIRED (graphOrder).
+const GRAPH_BANDS = Object.freeze(['NOW · IN PROGRESS', 'NOW · QUEUED', 'LATER']);
 const GRAPH_HEADER = ['| Task | Child # | Status | Waiting on | Last Updated (SGT) |', '|---|---|---|---|---|'];
 // The parent keeps this many COMPLETED rows, the most recent; older ones and every RETIRED row sit
 // in archive comments behind one link line.
@@ -1887,18 +1887,20 @@ function lastUpdated(outcome, child, issue, comments) {
   return Number.isFinite(newest) ? new Date(newest + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '-';
 }
 
-// Active rows by class (NOW, LATER, OPTIONAL), each by priority (`order`, lowest first) and then
-// child issue number, so the top LATER row starts next; then the active rows pinned last (`last`),
-// in the same class and priority order, so tasks added later still sort before them; then every
-// finished row, oldest completion first and the most recent last (unknown times last). Nested
-// children sort like any other row.
+// Active rows by status band (GRAPH_BANDS: NOW · IN PROGRESS, NOW · QUEUED, LATER), so moving work
+// leads parked work. Inside a band: rows pinned last (`last`) after the rest, so tasks added later
+// still sort before them; optional tasks after the rest of LATER; then priority (`order`, lowest
+// first) and child issue number, so the top LATER row starts next. Then every finished row, oldest
+// completion first and the most recent last (unknown times last). Nested children sort like any
+// other row.
 const pinnedLast = outcome => outcome.last === true;
 function graphOrder(parent, children, issues) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
-  const byPriority = (a, b) => a.order - b.order || a.issue - b.issue;
-  const grouped = rows => GRAPH_GROUPS.map(cls => rows.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byPriority));
-  const groups = [...grouped(active.filter(outcome => !pinnedLast(outcome))), ...grouped(active.filter(pinnedLast))];
+  const band = outcome => GRAPH_BANDS.indexOf(statusCell(outcome, children.get(outcome.issue)));
+  const optional = outcome => Number(graphClass(outcome, children.get(outcome.issue)) === 'OPTIONAL');
+  const byBand = (a, b) => band(a) - band(b) || Number(pinnedLast(a)) - Number(pinnedLast(b)) || optional(a) - optional(b)
+    || a.order - b.order || a.issue - b.issue;
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
   const byCompletion = (a, b) => {
     const left = when(a);
@@ -1909,7 +1911,7 @@ function graphOrder(parent, children, issues) {
   };
   const retired = finished.filter(outcome => isRetired(outcome, children.get(outcome.issue)));
   const completed = finished.filter(outcome => !retired.includes(outcome));
-  return [...groups.flat(), ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
+  return [...active.sort(byBand), ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
 }
 
 // Queued rows (LATER or OPTIONAL) in the same group that share an `order`, the priority: each list
@@ -1960,11 +1962,22 @@ function gateAtWork(child) {
   return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state) && !child.blockers?.length);
 }
 
+// What a task waiting on the owner asks of them, or null when it does not wait on the owner. A gate
+// waiting on the owner asked a question: `decision`, even with a UAT owed. A task waiting on the
+// owner with a UAT still owed waits for that UAT (owedUat); otherwise for a `decision`. The graph's
+// Waiting on cell and CURRENT's In progress line both read it, so they always agree.
+function ownerAsk(child) {
+  if (child.gate?.state === 'WAITING_OWNER') return 'decision';
+  if (child.lifecycle !== 'WAITING_OWNER') return null;
+  return owedUat(child) || 'decision';
+}
+
 // The Waiting on cell of an active row: the owner's ask, a blocker, else the gate a task in
 // progress is in (then any UAT still owed); `-` for queued and finished rows.
 function waitingCell(outcome, child) {
   if (!child || isFinished(outcome, child)) return '-';
-  if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'Owner: decision';
+  const ask = ownerAsk(child);
+  if (ask) return `Owner: ${ask}`;
   const uat = owedUat(child);
   if (uat && gateAtWork(child)) return `${publicText(child.gate.role)}, then Owner: ${uat}`;
   if (uat) return `Owner: ${uat}`;
@@ -2002,7 +2015,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW, LATER by priority (optional tasks after the rest), ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: NOW · IN PROGRESS, NOW · QUEUED, LATER, each by priority (optional tasks last in LATER${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? '; pinned tasks end their band' : ''}), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2032,11 +2045,12 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
     `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
 }
 
-// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker. A UAT
-// owed while a gate is at work waits for that gate (ownerNext).
+// What waits on the owner for one task, or null: the owner's ask (ownerAsk), a UAT, or a blocker. A
+// UAT owed while a gate is at work waits for that gate (ownerNext).
 function ownerWait(child) {
   if (!child) return null;
-  if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'your decision';
+  const ask = ownerAsk(child);
+  if (ask) return `your ${ask}`;
   if (owedUat(child) && !gateAtWork(child)) return `your ${owedUat(child)}`;
   if (child.blockers.length) return `blocked: ${child.blockers.map(publicText).join('; ')}`;
   return null;
@@ -5512,8 +5526,11 @@ class Reconciler {
   // Work queue: a task the graph shows IN PROGRESS that nothing is moving (see stillness). A task whose
   // PRs have all merged or closed is TASK_MERGED_OPEN after TASK_MERGED_OPEN_HOURS of quiet; any other
   // idle task is TASK_IDLE after TASK_IDLE_HOURS. So is a task natively blocked by another open task on
-  // the graph that is itself moving: the blocker carries the work. A pass that could not read every open
-  // PR raises none, since an unread open PR could be moving the task.
+  // the graph that is itself moving: the blocker carries the work. A task whose state lists a blocker
+  // (shown NOW · QUEUED) raises neither: its blocker says why. The skip sits here, not in stillness, so
+  // the batch tail guard still counts it as still and a queued blocker still counts as stalled for the
+  // tasks behind it. A pass that could not read every open PR raises none, since an unread open PR could
+  // be moving the task.
   diffIdle(parent, docs, observed, only, findings) {
     if (observed.prGraph?.openComplete === false) return;
     const now = Date.parse(this.now());
@@ -5536,6 +5553,7 @@ class Reconciler {
     };
     for (const outcome of parent.outcomes) {
       if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
+      if (docs.get(outcome.issue)?.blockers?.length) continue;
       const found = stall(outcome);
       if (!found) continue;
       if ((observed.blockedBy.get(outcome.issue) || []).some(moving)) continue;
