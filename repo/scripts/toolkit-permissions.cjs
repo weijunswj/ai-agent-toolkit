@@ -46,12 +46,14 @@ class PermissionsError extends Error {
 const PROGRAMME = 'skills/github-program-reconciler/scripts/programme.cjs';
 const CLEANUP = 'repo/scripts/toolkit-cleanup.cjs';
 const STORE = 'repo/scripts/toolkit-store.cjs';
+const GOVERNANCE = 'repo/scripts/toolkit-governance.cjs';
 
 const GUARDS = Object.freeze({
   programme: "The script's own controller-holder check, programme lock and merged binding read. A parent lifecycle write needs the merged binding's permission and the closure guard. refresh --scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes, under the same checks and request cap. run-order runs only the writes listed here, from an unexpired order for the parent's current holder and epoch, never a claim, takeover, init-parent or migrate-state.",
   readOnly: 'Read-only: it lists or prints and changes nothing.',
   cleanup: 'The script checks every path itself: inside a scratch root after links are resolved, a clean and fully pushed worktree, and the evidence store read back first. Anything else is reported, never deleted.',
   comment: 'The owner approved comment lines. Nothing checks the target or the words: the footer hook and the footer sweep check only the footer, so the repository rules on what to post still bind the agent.',
+  bank: "Exact `setup` shows the governance question bank and notes it for this session; it reads GitHub and writes nothing there. `setup --answers` writes only with the owner's live one-use bank ticket for this session, repository and bank, which the tool gate and the script both check and the script spends; without it nothing is written. With it, it makes only what the owner's answer asks for: at most one governance pull request for the owner to merge, plus, on a turn-on, the parent issue and private evidence store that pull request needs.",
   store: 'The store command checks every step itself: the merged binding\'s store, a checkout whose fetch and push addresses are that store and whose own config holds no push, rewrite or program setting, a private writable store on its default branch, a secret scan of exactly what it commits, a plain push of the bound branch only, no file deletions, and a branch delete only when the branch is already merged.',
 });
 
@@ -87,6 +89,10 @@ const ROWS = Object.freeze([
   scriptRow('cleanup-plan', CLEANUP, 'plan', GUARDS.readOnly),
   scriptRow('cleanup-apply', CLEANUP, 'apply', GUARDS.cleanup),
   scriptRow('store', STORE, null, GUARDS.store),
+  // The governance question bank, so the owner clicks Allow once, not on every run. Exact forms:
+  // `refresh`, `--json` and every other governance subcommand still prompt. Codex would allow any
+  // flag after `setup`, so it prompts there.
+  scriptRow('governance-bank', GOVERNANCE, 'setup', GUARDS.bank, { forms: ['', ' --answers *'], codex: false }),
   Object.freeze({ id: 'gh-pr-comment', scope: 'repo', kind: 'command', command: 'gh pr comment', guard: GUARDS.comment, codex: false }),
   Object.freeze({ id: 'gh-issue-comment', scope: 'repo', kind: 'command', command: 'gh issue comment', guard: GUARDS.comment, codex: false }),
 ]);
@@ -110,6 +116,7 @@ const TABLE_GROUPS = Object.freeze([
   { key: 'programme', ids: PROGRAMME_ALLOW.map(sub => `programme-${sub}`), name: 'Programme pages (`programme.cjs`)', does: 'Keep the programme issue pages, records and attention list in step on GitHub.', asks: Object.keys(PROGRAMME_ASK), checked: 'Controller check, programme lock and the merged binding.' },
   { key: 'permissions', ids: ['permissions-print'], name: 'Permissions (`toolkit-permissions.cjs`)', does: 'Print these blocks and check a settings file.', asks: [...OWNER_FLAGS], checked: 'Read-only.' },
   { key: 'cleanup', ids: ['cleanup-plan', 'cleanup-apply'], name: 'Cleanup (`toolkit-cleanup.cjs`)', does: "List and remove Toolkit's rebuildable scratch.", asks: [], checked: 'Checks every path; never removes unpushed or unsaved work.' },
+  { key: 'bank', ids: ['governance-bank'], name: 'Governance question bank (`toolkit-governance.cjs setup`)', does: 'Show the bank, and send the owner\'s reply with its one-use ticket.', asks: ['refresh', '--json', 'every other governance subcommand'], checked: 'The reply ticket; changes are pull requests the owner merges.' },
   { key: 'store', ids: ['store'], name: 'Evidence store (`toolkit-store.cjs`)', does: 'Save evidence to the bound evidence store.', asks: [], checked: 'Bound store only, secret scan, plain push, no file deletes.' },
   { key: 'pr-comment', ids: ['gh-pr-comment'], name: '`gh pr comment`', does: "Comment on this repository's pull requests.", asks: ['--delete-last'], checked: 'Footer checks only; the repository rules on what to post.' },
   { key: 'issue-comment', ids: ['gh-issue-comment'], name: '`gh issue comment`', does: "Comment on this repository's issues.", asks: ['--delete-last'], checked: 'Footer checks only; the repository rules on what to post.' },

@@ -12,7 +12,8 @@
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
 // index, in the shape "- <date> · <record> · [<summary>](<issue URL>#issuecomment-<id>)", plus
 // "SUPERSEDES=" and "superseded by" where they apply) to a local file; publishing it is the
-// caller's separately authorised step. The reconcile pass runs the same audit and reports gaps.
+// caller's separately authorised step. The reconcile pass no longer runs it; it is a standalone
+// audit for pages an older Toolkit wrote.
 //
 // Usage: node decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>]
 //          [--threshold <chars>] [--repair --out <file> [--ledger <file>]]

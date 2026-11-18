@@ -1266,7 +1266,7 @@ test('task pages and their open PRs start with Parent > Child > PR links; merged
   assert.equal(reconciler().run().summary, 'No changes');
 });
 
-test('an open PR that references an untracked outcome is reported for the controller, never recorded', () => {
+test('a plain reconcile (no refresh) reports an open PR that references an untracked outcome and records nothing', () => {
   const { github, store, reconciler } = setup();
   reconciler().run({ apply: true });
   github.addPr(601, { head: SHA_A, body: 'Work for the shared contract.\n\nRefs #421, #423 and #467' });
@@ -1275,8 +1275,8 @@ test('an open PR that references an untracked outcome is reported for the contro
   const child = store.read('child', 423);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.findings.filter(finding => finding.code === 'PR_UNTRACKED').map(finding => `#${finding.issue}: ${finding.detail}`), [
-    '#423: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
-    '#467: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
+    '#423: open PR #601 references this outcome, but its state records no PR or branch; the next refresh records a single open claimant from a branch of this repository, else the controller records it with update --patch',
+    '#467: open PR #601 references this outcome, but its state records no PR or branch; the next refresh records a single open claimant from a branch of this repository, else the controller records it with update --patch',
   ], 'merged PRs and finished outcomes are left out');
   assert.equal(store.read('child', 423).sha, child.sha, 'nothing is recorded on the task');
   assert.equal(store.read('child', 423).doc.pr.number, null);

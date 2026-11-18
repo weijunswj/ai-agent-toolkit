@@ -155,7 +155,7 @@ function fixtureErrors(fixture) {
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
-  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
+  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title', 'train-members', 'train-sibling', 'train-sibling-row'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
@@ -547,7 +547,44 @@ class Fixture {
     if (spec.issue_closure === 'target-pr') result[`repos/${repository}/issues/9`] = { number: 9, state: 'open', pull_request: {} };
     if (spec.issue_closure === 'missing-gone') result[`repos/${repository}/issues/999`] = { fixtureStatus: 410 };
     if (spec.issue_closure === 'retained-title') result[`repos/${repository}/pulls/7`].title = 'Closes #1';
+    if (/^train-/.test(spec.issue_closure)) Object.assign(result, this.#mergedTrainFixture(repository, spec.issue_closure.replace(/^train-/, '')));
     return result;
+  }
+
+  // Issue 1 (its child closed) is referenced by merged train #20, whose UAT line waits on member #22,
+  // and by its member #21, which owes nothing. The train's commits board #21 and #22 and end in a
+  // version-only bump (`members`); with `sibling`, #22's boarding is instead a merge of a branch main
+  // never held, and with `sibling-row` the table also lists that branch's head as row #23, a pull
+  // request GitHub does not show merged.
+  #mergedTrainFixture(repository, kind) {
+    const sibling = kind !== 'members';
+    const sha = digit => digit.repeat(40);
+    const [main, head21, head22, other, board21, board22, bump, landed] = ['1', '2', '3', '4', '5', '6', '7', '8'].map(sha);
+    const second = sibling ? other : head22;
+    const body = ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
+      `| #21 | \`${head21}\` | NORMAL | patch | G2 PASS |`, `| #22 | \`${head22}\` | NORMAL | patch | G2 PASS |`,
+      ...(kind === 'sibling-row' ? [`| #23 | \`${other}\` | NORMAL | patch | G2 PASS |`] : []), '',
+      'Tier: NORMAL', 'Bump: patch', "UAT: OWNER_TEST_NEEDED (each member's own test after the merge: #22)", '', 'Refs #1 (member #21, UAT: NOT_REQUIRED)'].join('\n');
+    const reference = (number, text, merged_at) => ({ event: 'cross-referenced', source: { issue: { number, body: text, repository_url: `https://api.github.com/repos/${repository}`, pull_request: { merged_at } } } });
+    const commit = (id, parents, message) => ({ sha: id, parents: parents.map(parent => ({ sha: parent })), commit: { message } });
+    const added = name => [{ filename: `src/${name}.js`, status: 'added', patch: '@@ -0,0 +1 @@\n+module.exports = 1;' }];
+    return {
+      [`repos/${repository}/issues/1/timeline?per_page=100&page=1`]: [reference(20, body, '2026-11-12T10:00:00Z'), reference(21, 'Refs #1\n\nUAT: NOT_REQUIRED (internal)', '2026-11-12T10:00:02Z')],
+      [`repos/${repository}/pulls/20`]: { number: 20, title: 'Merge train', body, merged: true, head: { sha: bump }, merge_commit_sha: landed, commits: 5 },
+      [`repos/${repository}/pulls/21`]: { number: 21, title: 'Member', body: '', merged: true, head: { sha: head21 }, commits: 1 },
+      [`repos/${repository}/pulls/22`]: { number: 22, title: 'Member', body: '', merged: true, head: { sha: head22 }, commits: 1 },
+      [`repos/${repository}/pulls/23`]: { number: 23, title: 'Sibling', body: '', merged: false, head: { sha: other }, commits: 1 },
+      [`repos/${repository}/commits/${landed}`]: { sha: landed, parents: [{ sha: main }, { sha: bump }] },
+      [`repos/${repository}/pulls/20/commits?per_page=100&page=1`]: [commit(head21, [main], 'member 21'), commit(second, [main], 'member 22'),
+        commit(board21, [main, head21], 'Merge train: board #21'), commit(board22, [board21, second], 'Merge train: board #22'), commit(bump, [board22], 'Merge train: bump patch for #21, #22')],
+      [`repos/${repository}/commits/${board21}`]: { sha: board21, files: added('member-21') },
+      [`repos/${repository}/commits/${board22}`]: { sha: board22, files: added('member-22') },
+      [`repos/${repository}/commits/${bump}`]: { sha: bump, files: [{ filename: 'repo/contracts/toolkit-local-bridge/version.json', status: 'modified',
+        patch: '@@ -1,3 +1,3 @@\n {\n-  "version": "3.1.0",\n+  "version": "3.1.1",\n   "name": "x"' }] },
+      // As GitHub answers: the train's branch holds every head it merged, and main holds only itself.
+      [`repos/${repository}/compare/${head21}...${bump}?per_page=1`]: { status: 'ahead' },
+      [`repos/${repository}/compare/${other}...${main}?per_page=1`]: { status: 'diverged' },
+    };
   }
 
   #githubFixture(responses, slowProposal = false, spec = {}) {
@@ -620,15 +657,17 @@ cp.spawnSync = function(file, args, options) {
     require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).startSession({ session_id: 'hook-pack', source: 'startup', cwd: this.work }, { registryOptions: { registryPath, testOnly: true }, environment: {} });
   }
 
-  // Writes the fixture's paths into a payload or transcript value.
-  expand(value) {
+  // Writes the fixture's paths into a payload or transcript value. A payload also gets {plugin}, the
+  // plugin copy its hooks run from, so a row can name Toolkit's own script as the hooks see it.
+  expand(value, plugin) {
     if (typeof value === 'string') {
+      if (plugin !== undefined) value = value.replaceAll('{plugin}', plugin);
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
         .replaceAll('{head7}', (this.head || '').slice(0,7)).replaceAll('{headUpper}', (this.head || '').toUpperCase()).replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
-    if (Array.isArray(value)) return value.map(item => this.expand(item));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key) : key, this.expand(item)]));
+    if (Array.isArray(value)) return value.map(item => this.expand(item, plugin));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key, plugin) : key, this.expand(item, plugin)]));
     return value;
   }
 
@@ -724,7 +763,7 @@ async function runOnHost(row, host, fixture, roots) {
   }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
-  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload) };
+  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload, pluginRoot) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
   const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);

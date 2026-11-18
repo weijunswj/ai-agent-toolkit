@@ -11,6 +11,7 @@ It does not grant permission to run risky actions. Repo rules, skill instruction
 - Create a new Toolkit skill directly under `skills/<skill-name>/` after Skill Creation Center review, with coupled contracts, runtime, tests, and docs directly under canonical `repo/**` paths, only when the use case has a distinct trigger, domain, risk boundary, provenance requirement, local assets, or validation path. Do not add an intermediate ownership, publication, or generic synchronization layer.
 - For third-party skills, skill packs, GitHub skill repos, or adapted external agent material, run `skill-product-review` before copying, installing, executing, or converting anything.
 - The separate generic `skill-product-review` product retains its publication and anti-drift semantics; it is not part of Toolkit operation.
+- Give a new skill its class in `repo/contracts/skill-publication.json`: portable (works anywhere, no Toolkit words or app names without a reason) or Toolkit's own (runs Toolkit itself). The README lists the two classes in separate tables.
 
 ## Legend
 
@@ -48,16 +49,16 @@ It does not grant permission to run risky actions. Repo rules, skill instruction
 
 ## Packaging
 
-Where each skill ships. **portable** skills work in any agent and go in every package; **internal** skills only run Toolkit itself, so the native plugins carry them and the Antigravity portable copy leaves them out. `repo/scripts/toolkit-antigravity-project-skills.cjs` holds the same internal list, and `node repo/scripts/validate-toolkit.cjs` checks that the two agree and that this table covers every skill exactly once.
+Where each skill ships. The class comes from `repo/contracts/skill-publication.json`, the one record of skill classes. **portable** skills work in any agent and go in every package; **toolkit** skills (Toolkit's own) only run Toolkit itself, so the native plugins carry them and the Antigravity portable copy leaves them out. `repo/scripts/toolkit-antigravity-project-skills.cjs` holds the same Toolkit-only list, and `node repo/scripts/validate-toolkit.cjs` checks that this table and that list follow the contract and that this table covers every skill exactly once.
 
 | Skill | Class | Claude Code plugin | Codex plugin | Antigravity copy |
 | --- | --- | --- | --- | --- |
 | [agent-cost-control](../../skills/agent-cost-control/) | portable | Yes | Yes | Yes |
 | [codex-ssh-hostinger-coolify-setup-maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) | portable | Yes | Yes | Yes |
-| [controller-bootstrap](../../skills/controller-bootstrap/) | internal | Yes | Yes | No |
+| [controller-bootstrap](../../skills/controller-bootstrap/) | toolkit | Yes | Yes | No |
 | [external-operation-preflight](../../skills/external-operation-preflight/) | portable | Yes | Yes | Yes |
 | [frontend-art-direction](../../skills/frontend-art-direction/) | portable | Yes | Yes | Yes |
-| [github-program-reconciler](../../skills/github-program-reconciler/) | internal | Yes | Yes | No |
+| [github-program-reconciler](../../skills/github-program-reconciler/) | toolkit | Yes | Yes | No |
 | [host-observability](../../skills/host-observability/) | portable | Yes | Yes | Yes |
 | [local-ai-safety](../../skills/local-ai-safety/) | portable | Yes | Yes | Yes |
 | [managed-app-foundation-review](../../skills/managed-app-foundation-review/) | portable | Yes | Yes | Yes |
@@ -65,13 +66,13 @@ Where each skill ships. **portable** skills work in any agent and go in every pa
 | [n8n-safety-router](../../skills/n8n-safety-router/) | portable | Yes | Yes | Yes |
 | [n8n-workflow-transport](../../skills/n8n-workflow-transport/) | portable | Yes | Yes | Yes |
 | [release-readiness-audit](../../skills/release-readiness-audit/) | portable | Yes | Yes | Yes |
-| [repository-agent-rules](../../skills/repository-agent-rules/) | portable | Yes | Yes | Yes |
+| [repository-agent-rules](../../skills/repository-agent-rules/) | toolkit | Yes | Yes | No |
 | [secure-ci-cd](../../skills/secure-ci-cd/) | portable | Yes | Yes | Yes |
 | [self-hosted-service-safety](../../skills/self-hosted-service-safety/) | portable | Yes | Yes | Yes |
 | [skill-product-review](../../skills/skill-product-review/) | portable | Yes | Yes | Yes |
-| [toolkit-env](../../skills/toolkit-env/) | internal | Yes | Yes | No |
-| [toolkit-playbooks](../../skills/toolkit-playbooks/) | portable | Yes | Yes | Yes |
-| [toolkit-setup](../../skills/toolkit-setup/) | internal | Yes | Yes | No |
+| [toolkit-env](../../skills/toolkit-env/) | toolkit | Yes | Yes | No |
+| [toolkit-playbooks](../../skills/toolkit-playbooks/) | toolkit | Yes | Yes | No |
+| [toolkit-setup](../../skills/toolkit-setup/) | toolkit | Yes | Yes | No |
 | [windows-local-dev-services](../../skills/windows-local-dev-services/) | portable | Yes | Yes | Yes |
 
 ## Description Review Notes

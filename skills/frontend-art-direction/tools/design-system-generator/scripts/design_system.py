@@ -148,6 +148,7 @@ def generate_design_system(query, project_name=None):
             "best_for": best_style.get("Best For", ""),
             "performance": best_style.get("Performance", ""),
             "accessibility": best_style.get("Accessibility", ""),
+            "rtl_level": best_style.get("rtl_level", ""),
         },
         "colors": {
             "primary": best_color.get("Primary", "#2563EB"),
@@ -190,6 +191,8 @@ def format_markdown(design_system):
         f"- Accent color: {colors['accent']}",
         f"- Typography: {typography['heading']} / {typography['body']}",
     ]
+    if style.get("rtl_level"):
+        lines.append(f"- Right-to-left support: {style['rtl_level']}")
     if design_system.get("anti_patterns"):
         lines.append(f"- Avoid: {design_system['anti_patterns']}")
     return "\n".join(lines) + "\n"

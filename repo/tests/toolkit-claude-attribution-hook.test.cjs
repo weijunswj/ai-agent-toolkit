@@ -21,7 +21,7 @@ function brokenHook(t, guardSource) {
     { input: JSON.stringify({ tool_name: 'Bash', cwd: dir, tool_input: { command } }), encoding: 'utf8' });
 }
 
-const GUARDED = ['git commit -m "Fix"', 'git -C sub commit -F msg.txt', 'gh pr create --title x --body y', 'gh pr edit 5 --body y', 'gh pr merge 5'];
+const GUARDED = ['git commit -m "Fix"', 'git -C sub commit -F msg.txt', 'gh pr create --title x --body y', 'gh pr edit 5 --body y', 'gh pr merge 5', 'gh --% pr create --title x --body y'];
 const OTHER = ['git status', 'npm test', 'gh pr view 5', 'git log --oneline', 'echo commit'];
 
 test('A23: when the attribution check cannot run, only commit and pull request commands are refused, with a plain reason', t => {

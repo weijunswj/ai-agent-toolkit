@@ -8,7 +8,8 @@
 //                     context line for a typed Toolkit command (toolkit-commands.cjs).
 //   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs),
-//                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs).
+//                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs);
+//                     points an agent's own merge question (AskUserQuestion) at the merge card.
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
 //   SessionStart      adds context stating the effective governance state, exports the session's
@@ -36,20 +37,7 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in its session context forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
-
-// Records this cloud session's Projects task auto-merge project line (off, none or on) when the
-// prompt starts with the host's session context. Never throws; with no readable record the line
-// forces Off.
-function recordProjectsSwitch(input, options) {
-  try {
-    const projects = require('./toolkit-projects-cloud.cjs');
-    const value = projects.switchSetting(input && input.prompt);
-    if (!value) return;
-    const directory = require('./toolkit-user-state.cjs').userStateDirectory(options.registryOptions || {});
-    new projects.ProjectsSwitch({ directory, now: options.now }).record(input && input.session_id, value);
-  } catch { /* stays Off */ }
-}
+const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in the session context that opens its transcript forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
@@ -68,15 +56,13 @@ function respond(event, input, options = {}) {
   options = { ...options, deadline: options.deadline ?? require('node:perf_hooks').performance.now() + 7500 };
 
   // Cloud sessions run the merge hold as local ones do (local Toolkit is the base). Differences: a
-  // Claude Projects thread's task auto-merge switch is read from the host's session context at the
-  // start of its first prompt (toolkit-projects-cloud.cjs); an issue closure the cloud check cannot
-  // prove unsafe is advisory, since gh there may not be signed in; and the governance question is
-  // not asked, since a cloud container cannot keep the owner's answer (a Projects override).
+  // Claude Projects thread's task auto-merge switch is read at merge time from the host's session
+  // context, the opening record of its session transcript (toolkit-projects-cloud.cjs); an issue
+  // closure the cloud check cannot prove unsafe is advisory, since gh there may not be signed in;
+  // and the governance question is not asked, since a cloud container cannot keep the owner's
+  // answer (a Projects override).
   const cloud = cloudSession(options.environment || process.env);
-  if (cloud) {
-    options = { ...options, cloud: true };
-    if (event === 'UserPromptSubmit') recordProjectsSwitch(input, options);
-  }
+  if (cloud) options = { ...options, cloud: true };
   // The merge hold runs first and on its own, so an error in the governance check never skips it.
   if (event === 'PreToolUse') {
     options = { ...options, evidenceResponses: new Map() };
@@ -108,8 +94,15 @@ function respond(event, input, options = {}) {
     if (event === 'PreToolUse') {
       const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
-      // Notes an exact merge card so its answer can count; it refuses nothing.
-      if (input.tool_name === 'AskUserQuestion') try { (options.mergeHold || mergeHold()).cardAsked(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* an unnoted card records nothing */ }
+      if (input.tool_name === 'AskUserQuestion') {
+        const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now };
+        // An agent's own merge question is pointed at the merge card; a reader failure shows it.
+        let redirect = null;
+        try { redirect = (options.mergeHold || mergeHold()).cardRedirect(input, cardOptions); } catch { /* shown: at worst a second tap */ }
+        if (redirect) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: redirect.deny } };
+        // Notes an exact merge card so its answer can count; it refuses nothing.
+        try { (options.mergeHold || mergeHold()).cardAsked(input, cardOptions); } catch { /* an unnoted card records nothing */ }
+      }
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
@@ -129,7 +122,9 @@ function respond(event, input, options = {}) {
     if (cloud) {
       // The start folder's repository, or each repository cloned directly under it (a Projects
       // thread starts in /home/user); the governed rules come once for the ENABLED ones.
-      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding });
+      // The whole text, this cloud line included, stays within the host's session-start limit.
+      const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`${CLOUD_LINE}\n\n`, 'utf8');
+      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit });
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
