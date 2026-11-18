@@ -49,10 +49,10 @@ function setup({ outcomes = [{ issue: 806, class: 'COMMITTED', order: 1 }], bodi
   const now = clock ? () => new Date(time.now).toISOString() : () => `T${ticks += 1}`;
   const store = new state.StateStore({ transport: github, store: binding.store, now, toolkitVersion: VERSION });
   store.write('parent', 421, state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes: outcomes.map(outcome => ({ parent: 421, ...outcome })) }), writer, {}), { sha: null, previous: null });
-  const reconciler = (version = VERSION) => new state.Reconciler({
+  const reconciler = (version = VERSION, options = {}) => new state.Reconciler({
     store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
     mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer, toolkitVersion: version,
-    ...(clock ? { now } : {}),
+    ...(clock ? { now } : {}), ...options,
   });
   const copies = () => github.calls.filter(call => call.method === 'PUT' && call.path.includes('page-copies'));
   const bodyWrites = number => github.calls.filter(call => call.method === 'PATCH' && call.path.endsWith(`/issues/${number}`));
@@ -904,6 +904,52 @@ test('the blocker rule goes one level only: a task behind a still blocker that l
   f.time.now = START + 7 * HOUR;
   const found = f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code) && finding.issue === 806);
   assert.deepEqual(found.map(finding => finding.code), ['TASK_IDLE'], 'a queued blocker is not moving, so it hides nothing');
+});
+
+test('a task whose state lists a blocker is off the work queue for seven days, then raised saying so', () => {
+  assert.equal(state.BLOCKED_SKIP_DAYS, 7);
+  const blockers = ['waits for #807'];
+  const merged = { merged: true, pr: { number: 900, state: 'MERGED' }, hours: 7 * 24 };
+  assert.deepEqual(idle({ hours: 7 * 24 - 1, blockers }), [], 'under seven days the listed blocker still says why');
+  assert.deepEqual(idle({ ...merged, hours: 7 * 24 - 1, blockers }), []);
+  const why = /; its state lists a blocker, but it has not changed for over 7 days$/;
+  for (const [options, code] of [[{ hours: 7 * 24, blockers }, 'TASK_IDLE'], [{ ...merged, blockers }, 'TASK_MERGED_OPEN']]) {
+    const found = idle(options);
+    assert.deepEqual(found.map(finding => finding.code), [code], 'a blocker that cleared but is still listed cannot hide the task for ever');
+    assert.match(found[0].detail, why);
+  }
+});
+
+for (const [kind, blocker] of [['held by a lane', { lifecycle: 'ACTIVE', fence: { holder_prefix: 'INT-TK421-', holder_session: 'lane-1' } }], ['waiting on the owner', { lifecycle: 'WAITING_OWNER' }]]) test(`a task behind a blocker ${kind} is skipped for seven days, then raised naming the blocker`, () => {
+  assert.equal(state.BLOCKED_SKIP_DAYS, 7);
+  const f = setup({ clock: true, outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });
+  f.github.issues.get(806).blockedBy = [807];
+  f.reconciler().run({ apply: true });
+  const parentDoc = f.store.read('parent', 421).doc;
+  f.store.mutate('child', 806, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
+  f.store.mutate('child', 807, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: blocker.lifecycle, fence: { ...doc.fence, ...blocker.fence } }) });
+  const queue = () => f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code));
+  f.time.now = START + 6 * 24 * HOUR;
+  assert.deepEqual(queue(), [], 'under seven days the blocker still carries the work');
+  f.time.now = START + 7 * 24 * HOUR;
+  const found = queue();
+  assert.deepEqual(found.map(finding => [finding.code, finding.issue]), [['TASK_IDLE', 806]], 'the moving blocker itself stays off the queue');
+  assert.match(found[0].detail, /; blocked by #807 \(moving\), but unchanged for over 7 days$/);
+});
+
+for (const code of ['TASK_IDLE', 'TASK_MERGED_OPEN']) test(`an open ${code} finding stays open and unchanged through a pass that could not read every open PR`, () => {
+  const f = code === 'TASK_IDLE' ? idleRun() : idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
+  const refresh = () => f.reconciler(VERSION, { refreshFacts: true, writer: state.refreshWriter(f.store.read('parent', 421).doc) }).run({ apply: true });
+  refresh();
+  const finding = () => f.store.read('parent', 421).doc.attention.find(entry => entry.code === code && entry.issue === 806);
+  const before = finding();
+  assert.equal(before?.state, 'new', 'control: a refresh that read every open PR raised it');
+  // Only the refresh's whole-list read fails, so the pass goes on with openComplete false.
+  const request = f.github.request.bind(f.github);
+  f.github.request = (method, path, ...rest) => method === 'GET' && /\/pulls\?state=open&per_page=100&sort=updated/.test(path) ? { status: 502, json: null, headers: {} } : request(method, path, ...rest);
+  f.time.now += HOUR;
+  refresh();
+  assert.deepEqual(finding(), before, 'an unread open PR list neither raises nor settles a work-queue finding');
 });
 
 test('the parent page counts the work queue and the graph row is the task, its number and NOW · IN PROGRESS', () => {

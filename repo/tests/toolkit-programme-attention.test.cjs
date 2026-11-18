@@ -872,7 +872,7 @@ test('E3: the session-start line names the longest-stalled work-queue task and i
   cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true,
     queue: { count: 2, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } }, deps);
   const line = cache.sessionAttention('acme/app', deps).line;
-  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN since 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run programme\.cjs attention for the list$/);
+  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run programme\.cjs attention for the list$/);
   // A cache from before this field, or with a malformed one, shows the plain line.
   cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
   assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Run programme\.cjs attention/);
@@ -890,5 +890,5 @@ test('E3: attention writes the longest-stalled work-queue task into this compute
   fx.run(['attention']);
   const written = cache.readCache('acme/app', { attentionDir: fx.attentionDir });
   assert.deepEqual(written.queue, { count: 1, oldest: { issue: 423, code: 'TASK_MERGED_OPEN', since: at, next: state.FINDING_CODES.TASK_MERGED_OPEN.next_action } });
-  assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN since 2026-11-13 00:03Z\); next step: judge/);
+  assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge/);
 });
