@@ -2212,3 +2212,74 @@ test('round 5: a git folder the reader cannot read is judged as the folder\'s ow
   const feature = repository(ctx.root, 'feature', { branch: 'work' });
   assert.equal(decide(ctx, bash(ctx.repo, `git --git-dir=${path.join(feature, '.git')} push origin work`)), null);
 });
+
+test('round 6: a shell whose script the reader cannot find, and every folder reached from Toolkit\'s folder, are judged; elsewhere hidden-move words are ordinary', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const current = path.join(f.home, 'current');
+  fs.mkdirSync(current, { recursive: true });
+  const userHome = path.dirname(f.home);
+  const refused = [
+    // A shell whose script option the reader does not know, or whose script comes from stdin or a file.
+    [f.env, "bash -ce 'cd ..; find . -delete'"],
+    [f.env, "bash -cl 'cd ..; find . -delete'"],
+    [f.env, "sh -ce 'cd ..; find . -delete'"],
+    [f.env, "env bash -ce 'cd ..; find . -delete'"],
+    [f.env, "bash -cex 'cd ..; grep -r MARK .'"],
+    [f.env, "bash -ce 'cd ..; find . -delete' -c"],
+    [f.env, "bash -o pipefail -c 'cd ..; find . -delete'"],
+    [f.env, "echo 'cd ..; find . -delete' | bash"],
+    [f.env, "bash <<< 'cd ..; find . -delete'"],
+    [f.env, 'bash ./s'],
+    [f.env, 'cmd /c"cd .. && rd /s /q ."'],
+    [f.env, "powershell 'Set-Location ..; Remove-Item -Recurse -Force *'"],
+    [f.env, "pwsh -CommandWithArgs 'Set-Location ..; Remove-Item -Recurse -Force *'"],
+    [f.env, "pwsh -cwa 'Set-Location ..; Remove-Item -Recurse -Force *'"],
+    [f.env, "pwsh -WorkingDirectory .. -Command 'Remove-Item -Recurse -Force *'"],
+    [f.checkout, "bash -ce 'cd ../..; find . -delete'"],
+    [current, "nohup bash -ce 'cd ..; find . -delete'"],
+    // From a start in Toolkit's folder, a folder outside it is judged too, with every path word read.
+    [f.env, 'cd ../..; find .ai-agent-toolkit -delete'],
+    [f.env, 'cd ../..; rm -rf .ai-agent-toolkit'],
+    [f.env, 'cd ../..; find . -delete'],
+    [f.env, 'cd ../..; find -delete'],
+    [f.env, 'cd ../..; rm -rf .ai-*'],
+    [f.env, 'cd ../../..; rm -rf home/.ai-agent-toolkit/env'],
+    [f.env, 'cd ../../..; rm -rf home'],
+    [f.checkout, 'cd ../../..; grep -r MARK .ai-agent-toolkit'],
+    [f.checkout, 'cd ../../../../plain; rm -rf ../home/.ai-agent-toolkit'],
+    // Near Toolkit's folder, a hidden move still counts: named, or reached by a folder spelled out.
+    [userHome, "bash -ce 'cd .ai-agent-toolkit; find . -delete'"],
+    [f.outside, "cd ../home/.ai-agent-toolkit/env && bash -ce 'cd ..; find . -delete'"],
+    // git diff given paths in Toolkit's own folder compares folders, as --no-index does.
+    [f.home, 'git diff env .'],
+    [f.home, 'git diff -R env .'],
+  ];
+  const allowed = [
+    [f.home, 'git diff'],
+    [f.env, "bash -c 'ls'"],
+    [f.env, "bash -e -c 'ls'"],
+    [f.checkout, 'cd ../../../../plain && make'],
+    // Far from Toolkit's folder, words that may steer or hide a move are ordinary work.
+    [f.outside, 'grep -rn HOME src'],
+    [f.outside, 'printenv HOME'],
+    [f.outside, 'env | grep PWD'],
+    [f.outside, 'which cd'],
+    [f.outside, 'man cd'],
+    [f.outside, 'git grep -n chdir'],
+    [f.outside, 'rg -w cd docs'],
+    [f.outside, 'alias'],
+    [f.outside, 'docker run --rm -e HOME=/root node:22 npm test'],
+    [f.outside, 'env HOME=/tmp/h npm test'],
+    [f.outside, 'bash build.sh'],
+    [f.outside, 'echo make | bash'],
+    [f.outside, "bash -ce 'make'"],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', FOLDER_REFUSAL, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  const powershell = (cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  assert.match(powershell(f.env, "powershell 'Set-Location ..; Remove-Item -Recurse -Force *'")?.deny || '', FOLDER_REFUSAL);
+  assert.equal(powershell(f.outside, 'Get-ChildItem env:HOME; npm test'), null);
+});

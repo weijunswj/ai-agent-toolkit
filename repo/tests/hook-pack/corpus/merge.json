@@ -3175,6 +3175,186 @@
       "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
       "expect": {"decision":"deny"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-nested-bash-ce",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"bash -ce 'cd ..; find . -delete'"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-nested-bash-ce-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"bash -ce 'cd ..; find . -delete'","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-nested-stdin",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo 'cd ..; find . -delete' | bash"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-nested-stdin-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"echo 'cd ..; find . -delete' | bash","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-nested-powershell-positional",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"powershell 'Set-Location ..; Remove-Item -Recurse -Force *'"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-nested-powershell-positional-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"powershell 'Set-Location ..; Remove-Item -Recurse -Force *'","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-after-move",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cd ../..; find .ai-agent-toolkit -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-after-move-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cd ../..; find .ai-agent-toolkit -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-above-implicit-path",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"cd ../..; find -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-above-implicit-path-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cd ../..; find -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-git-diff-paths",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git diff env ."},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-git-diff-paths-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git diff env .","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-printenv-home",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"printenv HOME"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-printenv-home-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"printenv HOME","workdir":"{work}"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-grep-home",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"grep -rn HOME src"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-grep-home-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"grep -rn HOME src","workdir":"{work}"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-which-cd",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"which cd"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-which-cd-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"which cd","workdir":"{work}"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-bash-script",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"bash build.sh"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-bash-script-workdir",
+      "source": "working-folder guard, review round 6: a shell whose script the reader cannot find hides a move; from Toolkit's folder every folder reached is judged; elsewhere hidden-move words are ordinary (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"bash build.sh","workdir":"{work}"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
     }
   ]
 }

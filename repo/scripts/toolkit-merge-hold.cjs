@@ -152,7 +152,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     Toolkit's user-state folder or runs where it could reach it (ToolkitFolders: anything inside
 //     user-state, anything in Toolkit's own folder but a closed set of plain commands, and a path that
 //     could lead back up from deeper in it through `..`, a wildcard or a variable, or code the shell
-//     runs in itself from a file; a move it does not follow counts as Toolkit's own folder; also read with
+//     runs in itself from a file; near Toolkit's folder a move it does not follow counts as Toolkit's own
+//     folder, and from a start inside it every folder reached is judged too; also read with
 //     quotes, escapes, `$'...'` and braces undone and line continuations joined as the shell joins
 //     them), or the hook scripts together with what would feed them a prompt,
 //     a SessionStart event, or a tool event (PreToolUse, PostToolUse or the card functions) when
@@ -267,7 +268,7 @@ const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\b
 // Toolkit folder and `user-state` anywhere in one command, read as two linear checks.
 function stateWords(text) { return STATE_WORDS.test(text) || (/\.ai-agent-toolkit\b/i.test(text) && /\buser-state\b/i.test(text)); }
 
-const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder (or may end up there) and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. Every folder the command may be in is judged, its starting folder included, and a folder it does not spell out (`cd -`, `~-`, a variable or a wildcard) or a move it does not follow (a move word behind a prefix such as `X=1`, `!` or `if`, a CDPATH, HOME or OLDPWD setting, an alias) counts as Toolkit\'s own. In Toolkit\'s own folder only listing, reading, changing folder, read-only git and running a script file with node are allowed, with no wildcards, variables, substitutions, quotes, escapes, redirections or `..`; deeper in it, no wildcards, variables or substitutions, no path back up to it and no code the shell runs in itself from a file (`source`, `.`, a PowerShell script); nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
+const STATE_FOLDER_MESSAGE = 'this command runs in Toolkit\'s own folder or its user-state folder (or may end up there) and could reach Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals), which only Toolkit itself reads and changes. Every folder the command may be in is judged, its starting folder included, and a folder it does not spell out (`cd -`, `~-`, a variable or a wildcard) counts as Toolkit\'s own, and so does a move it does not follow (a move word behind a prefix such as `X=1`, `!` or `if`, a CDPATH, HOME or OLDPWD setting, an alias set in the command, a shell such as `bash -ce` or `| bash` whose script it cannot find) where the command starts in or names Toolkit\'s folder. In Toolkit\'s own folder only listing, reading, changing folder, read-only git (no `git diff` with paths) and running a script file with node are allowed, with no wildcards, variables, substitutions, quotes, escapes, redirections or `..`; deeper in it, no wildcards, variables or substitutions, no path back up to it and no code the shell runs in itself from a file (`source`, `.`, a PowerShell script); from a start in it, a folder the command reaches outside it is judged the same way, every path word read, and one that holds Toolkit\'s folder as Toolkit\'s own; nothing runs in the user-state folder. Run the command from another folder, and never act as the user.';
 // What may run with Toolkit's own folder (the one that holds user-state) as its working folder.
 const HOME_PROGRAMS = /^(?:ls|dir|gci|get-childitem|pwd|get-location|gl|echo|write-output|write-host|cat|type|get-content|gc|head|tail|test-path|stat|wc|cd|chdir|pushd|popd|set-location|sl|push-location|pop-location)$/i;
 const HOME_GIT = /^(?:status|log|diff|show|rev-parse|remote|branch|describe|ls-files)$/;
@@ -314,10 +315,12 @@ function within(folder, base) {
 // started in a folder could reach the user-state files, refusing by default: the starting folder
 // always counts (a comment, a pipeline part or a background job can drop a `cd`), every folder a
 // move in the command could reach counts too, and a folder the reader cannot work out from the
-// command alone counts as Toolkit's own folder. In user-state nothing runs; in Toolkit's own folder
-// only a closed set of plain commands does; deeper in it, a word naming user-state, a word the reader
-// cannot read plainly (a wildcard, a brace, a variable, a substitution), or a path back up to
-// Toolkit's folder or above is refused.
+// command alone counts as Toolkit's own folder (a move it hides only near Toolkit's folder). In
+// user-state nothing runs; in Toolkit's own folder, or one that holds it reached from a start inside
+// it, only a closed set of plain commands does; deeper in it, or outside it reached from a start
+// inside it, a word naming user-state, a word the reader cannot read plainly (a wildcard, a brace, a
+// variable, a substitution), or a path to Toolkit's folder or above is refused. This is a tripwire
+// for agent mistakes, not a lock: code inside other programs is not read.
 class ToolkitFolders {
   #home;
   #state;
@@ -350,10 +353,21 @@ class ToolkitFolders {
     const readings = kinds.map(kind => ({ parts: commandParts(text, kind), ...this.#moves(commandParts(text, kind), kind) }));
     // A move both readings read the same way counts once.
     const targets = [...new Map(readings.flatMap(reading => reading.targets).sort((a, b) => a.at - b.at).map(item => [`${item.at}\0${item.target}`, item.target])).values()];
-    const folders = this.#folders(targets, cwd, LOOPS.test(text), readings.some(reading => reading.unknown));
+    const start = this.#realOf(cwd || process.cwd());
+    const inside = within(start, this.#home);
+    const folders = this.#folders(targets, start, LOOPS.test(text), readings.some(reading => reading.unknown), inside);
+    // A word that may steer or hide a move counts only near Toolkit's folder: where the command starts
+    // in it, reaches it by a folder it spells out, or names it. Elsewhere it is ordinary work.
+    if (!folders.includes(this.#home) && readings.some(reading => reading.hidden) && (folders.some(folder => within(folder, this.#home)) || this.#names(text, readings))) folders.push(this.#home);
     if ((oddBreaks || (shell !== 'posix' && CALL_OPERATOR.test(text))) && folders.some(folder => within(folder, this.#home))) return true;
     const budget = { paths: MOST_PATHS };
-    return readings.some(({ parts }) => parts.some(part => folders.some(folder => this.#reachesFrom(part, folder, shell, budget))));
+    return readings.some(({ parts }) => parts.some(part => folders.some(folder => this.#reachesFrom(part, folder, shell, budget, inside))));
+  }
+
+  // Whether the command names Toolkit's folder, as written or as a word reads once unquoted.
+  #names(text, readings) {
+    const name = path.basename(this.#home).toLowerCase();
+    return String(text).toLowerCase().includes(name) || readings.some(({ parts }) => parts.some(part => part.words.some(word => word.text.toLowerCase().includes(name))));
   }
 
   // The moves (cd, pushd, Set-Location and their kin) in one reading, in text order, each with its
@@ -363,18 +377,20 @@ class ToolkitFolders {
     const targets = [];
     const variables = new Map();
     let unknown = false;
+    let hidden = false;
     let moves = 0;
     let backs = 0;
     for (const part of parts) {
       // A setting cd reads (CDPATH, HOME, OLDPWD, PWD, autocd, cdable_vars) or an alias can send a
-      // later move somewhere its words do not say.
-      if (part.words.some(word => steersMoves(word.text))) unknown = true;
+      // later move somewhere its words do not say, and a shell whose script the reader cannot find
+      // (commandParts) may move anywhere: each hides a move (counted near Toolkit's folder only).
+      if (part.opaque || part.words.some(word => steersMoves(word.text))) hidden = true;
       const assigned = assignmentOf(part.words.map(word => word.text));
       if (assigned) { assignVariable(variables, assigned); continue; }
       const move = moveTarget(part, kind, variables);
       // A move word anywhere but as the part's own command (behind `X=1`, `!`, `if`, `time`,
       // `command -p`, `{` or any other prefix) is a move this reader does not follow.
-      if (hiddenMoves(part) > (move === null ? 0 : 1)) unknown = true;
+      if (hiddenMoves(part) > (move === null ? 0 : 1)) hidden = true;
       if (move === null) continue;
       if (move === MOVE_BACK) {
         // `cd -` goes back to a folder an earlier move in the same shell left, already counted; with
@@ -389,17 +405,18 @@ class ToolkitFolders {
       if (move === MOVE_UNKNOWN || targets.length >= MOST_FOLDERS) unknown = true;
       else targets.push({ at: part.at, target: move });
     }
-    return { targets, unknown };
+    return { targets, unknown, hidden };
   }
 
   // The folders any part of the command could run in: the starting folder, and each folder a move
   // could reach from a folder found before it, in text order (any move may not run), or again and
   // again when a loop or function can run a move more than once. A folder outside Toolkit's folder
   // that the moves after it cannot climb back to Toolkit's folder is left out (only what could lead
-  // there matters). An unknown move, or more folders than the reader follows, adds Toolkit's own
-  // folder. popd and Pop-Location go back to a folder already counted, or stay put.
-  #folders(targets, cwd, loops, unknown) {
-    const folders = [this.#realOf(cwd || process.cwd())];
+  // there matters), unless the command starts in Toolkit's folder: then every folder counts, since a
+  // path word read there may lead back. An unknown move, or more folders than the reader follows,
+  // adds Toolkit's own folder. popd and Pop-Location go back to a folder already counted, or stay put.
+  #folders(targets, start, loops, unknown, inside) {
+    const folders = [start];
     // The `..` steps the moves after each one could take: a folder found there must be at most that
     // many steps below the folder it shares with Toolkit's folder to matter.
     const steps = targets.map(climbs);
@@ -413,7 +430,7 @@ class ToolkitFolders {
           if (seen.has(key)) continue;
           seen.add(key);
           const next = this.#realOf(shellPath(from, target));
-          if (folders.includes(next) || !this.#mayLead(next, later[index])) continue;
+          if (folders.includes(next) || !(inside || this.#mayLead(next, later[index]))) continue;
           if (folders.length >= MOST_FOLDERS) { unknown = true; break; }
           folders.push(next);
           grew = loops;
@@ -434,10 +451,13 @@ class ToolkitFolders {
     return relative.split(path.sep).filter(name => name === '..').length <= steps;
   }
 
-  // Whether one command part, run in `folder`, could reach the user-state files.
-  #reachesFrom(part, folder, shell, budget) {
+  // Whether one command part, run in `folder`, could reach the user-state files. From a start inside
+  // Toolkit's folder, a folder outside it is judged as one deeper in it (and one that holds it as
+  // Toolkit's own folder), with every path word read, since a plain name there can lead back in.
+  #reachesFrom(part, folder, shell, budget, inside) {
     if (within(folder, this.#state)) return true;
-    if (!within(folder, this.#home)) return false;
+    const outside = !within(folder, this.#home);
+    if (outside && !inside) return false;
     const texts = part.words.map(word => word.text);
     if (texts.some(item => /\buser-state\b/i.test(item))) return true;
     if (part.words.some(word => word.open || word.vars)) return true;
@@ -448,16 +468,17 @@ class ToolkitFolders {
     if (within(this.#home, folder)) return (backslashEscapes(shell) ? /['"`\\<>\u2018-\u201e]/ : /['"`<>\u2018-\u201e]/).test(part.raw) || part.redirect || !homeCommand(texts);
     // A move's own folder is judged as a folder (#folders), not as a path here.
     if (moveTarget(part, null, new Map()) !== null) return false;
-    return texts.some(item => this.#climbs(item, folder, budget));
+    return texts.some(item => this.#climbs(item, folder, budget, outside));
   }
 
-  // A plain path word that leads to Toolkit's own folder or above it, or into user-state. Only a word
-  // with a `..` part or an absolute (or `~`) start can; one with a `=` is read after it too. Past
-  // MOST_PATHS such words, the rest count as reaching.
-  #climbs(word, folder, budget) {
+  // A plain path word that leads to Toolkit's own folder or above it, or into user-state. Inside
+  // Toolkit's folder only a word with a `..` part or an absolute (or `~`) start can; outside it any
+  // word can. One with a `=` is read after it too. Past MOST_PATHS such words, the rest count as
+  // reaching.
+  #climbs(word, folder, budget, any = false) {
     const values = word.includes('=') ? [word, word.slice(word.indexOf('=') + 1)] : [word];
     return values.some(value => {
-      if (!CLIMBS.test(value) && !absoluteShellPath(value)) return false;
+      if (!any && !CLIMBS.test(value) && !absoluteShellPath(value)) return false;
       budget.paths -= 1;
       if (budget.paths < 0) return true;
       const target = this.#realOf(shellPath(folder, value));
@@ -590,6 +611,11 @@ function commandParts(text, kind, depth = 0) {
       if (!RUNNERS.test(program)) continue;
       const inner = /^(?:pwsh|powershell)$/.test(program) ? 'powershell' : 'posix';
       const at = next[program === 'cmd' ? 'cmd' : inner][start];
+      // Fail closed: a shell whose script this reader cannot find exactly (a script option it does
+      // not know, a value or a script file before it, or none, so the script comes from a file or
+      // stdin) runs code that may move anywhere.
+      const option = program === 'cmd' ? /^\// : inner === 'posix' ? /^[-+]/ : /^-/;
+      if (at < 0 || texts.slice(start + 1, at).some(item => !option.test(item))) part.opaque = true;
       if (at < 0) continue;
       part.nests = at + 1;
       if (inner === 'powershell' && RUNNER_ENCODED.test(texts[at])) { part.words.push({ text: '', open: true, vars: false }); break; }
@@ -765,7 +791,9 @@ function homeCommand(words) {
   if (/^git$/i.test(program)) {
     let index = 0;
     while (index < rest.length && rest[index].startsWith('-')) index += GIT_VALUE_OPTIONS.has(rest[index]) ? 2 : 1;
-    // `git diff --no-index` compares plain folders, so it could read user-state.
+    // `git diff` given a path compares plain folders where there is no work tree (as --no-index
+    // does), so it could read user-state.
+    if (rest[index] === 'diff' && rest.slice(index + 1).some(word => !word.startsWith('-'))) return false;
     return HOME_GIT.test(rest[index] || '') && !rest.includes('--no-index');
   }
   if (/^node$/i.test(program)) {
