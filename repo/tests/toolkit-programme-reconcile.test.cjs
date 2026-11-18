@@ -1503,6 +1503,21 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#12, #16', '#9, #14, #15']);
 });
 
+test('native sub-issues follow the status bands: a task in progress moves ahead of a queued task of higher priority', () => {
+  const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }, { issue: 9, class: 'COMMITTED', parent: 7, order: 1 }];
+  const { github, store, reconciler } = setup({ repository: 'other/tool', parentIssue: 7, outcomes,
+    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: 7 }); } });
+  reconciler().run({ apply: true });
+  assert.deepEqual(github.issues.get(7).subs, [8, 9], 'two LATER tasks by priority');
+  const parentDoc = store.read('parent', 7).doc;
+  store.mutate('child', 8, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: ['waits for #9'] }) });
+  store.mutate('child', 9, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
+  const dry = reconciler().run();
+  assert.deepEqual(dry.findings.filter(finding => finding.code === 'NATIVE_ORDER_DRIFT').map(finding => finding.issue), [7]);
+  reconciler().run({ apply: true });
+  assert.deepEqual(github.issues.get(7).subs, [9, 8], 'NOW · IN PROGRESS, then NOW · QUEUED');
+});
+
 test('merged PRs with green checks list open issues for the controller without closing them', () => {
   for (const accepted of [false, true]) {
     const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
