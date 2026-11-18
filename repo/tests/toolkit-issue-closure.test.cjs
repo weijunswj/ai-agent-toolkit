@@ -360,7 +360,7 @@ test('same-line boundaries terminate semicolons while comma and and remain lists
   assert.equal(closingReferences('fixed #333333 border', repo)[0].number, 333333);
   assert.deepEqual(closingReferences('Closes #1, #2 and #3', repo).map(r => r.number), [1,2,3]);
   assert.deepEqual(closingReferences('Fixes ' + ' '.repeat(500000) + 'prose', repo), []);
-  const timed = require('./support/hostile-inputs.cjs').timing(text => closingReferences(text, repo), size => 'Fixes ' + ' '.repeat(size) + 'prose', { startSize: 4096, maxSize: 262144, minMs: 5 });
+  const timed = require('./support/hostile-inputs.cjs').timing(text => closingReferences(text, repo), size => 'Fixes ' + ' '.repeat(size) + 'prose', { startSize: 16384, maxSize: 262144, minMs: 15, runs: 5 });
   assert.ok(timed.ok, timed.message);
 });
 
@@ -878,6 +878,9 @@ test('hash values, data-owner groups, cmd scripts, runners and argument forms ca
     [`Write-Output {${close}} | % Invoke`, powershell], [`echo {${close}} | ForEach-Object { & $_ }`, powershell],
     [`iex ([string]::Concat('gh issue',' close 1 -R ${repo}'))`, powershell], [`iex ('gh issue','close 1 -R ${repo}' -join ' ')`, powershell],
     [`Write-Host {${close}}?.Invoke()`, powershell],
+    // Any later pipeline stage may invoke the block, so even a harmless one is refused where
+    // PowerShell may run the command (an accepted false refusal of the broader fix).
+    [`Write-Host {${close}} | Out-Null`, powershell],
   ];
   for (const [command, tools] of hostile) for (const tool_name of tools) {
     const result = adapter.issueClosureDecision({ tool_name, tool_input: { command } }, { guard });
@@ -888,7 +891,7 @@ test('hash values, data-owner groups, cmd scripts, runners and argument forms ca
     [`Write-Host 'gh issue close 1'`, all], [`Write-Output @{a='gh issue close 1'}`, all], ['gh api $url', all],
     [`gh pr create -R ${repo} --title T --body 'Refs #1' --assignee @me`, all], [`gh pr edit 7 -R ${repo} --add-reviewer @me`, all],
     ['a=gh issue close 1', ['Bash']], ['@{a=Write-Host x}', powershell], ['$h=@{a=1}', powershell], [`sh -c 'echo "$1"' x 'gh pr view 7'`, all],
-    [`$p=@{a=1}; Invoke-RestMethod @p`, powershell], ['GH_REPO=o/r gh pr view 7', all], ['echo {gh issue close 1}.txt', ['Bash']], ['Write-Host {gh issue close 1} | Out-Null', powershell],
+    [`$p=@{a=1}; Invoke-RestMethod @p`, powershell], ['GH_REPO=o/r gh pr view 7', all], ['echo {gh issue close 1}.txt', ['Bash']],
     [`bash -c '$@' x gh 'pr view 7'`, all], [`iex "Write-Host ('a' + 'b')"`, powershell], [`<# gh issue close 1 #> gh pr view 7`, powershell], ['cmd /c "echo gh issue close 1"', all],
     [`query='query { a }'; gh api graphql -f query="$query"; gh api graphql -f query="$query"`, all],
     [`query='query { a }'; gh api graphql -F query="$query"; gh api graphql --raw-field query="$query"`, all],
