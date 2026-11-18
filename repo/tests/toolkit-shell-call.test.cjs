@@ -671,3 +671,27 @@ test('779 recheck: repeated and nested -c placements stay inside one budget', ()
   // A placement past the budget with no gh in reach is not read and not refused.
   assert.equal(matrixDecide('CB', `sh -c '${'echo $1 ; '.repeat(400)}' x ${'a'.repeat(6000)}`), 'allow');
 });
+
+test('779 round 4: every placement is charged the script and words it reads', () => {
+  // M1: a script of empty slots builds almost no text but each reorder step still reads the whole
+  // script (or every word, when $@ is escaped), so 2048 steps were charged nearly nothing.
+  const close = 'gh issue close 1 -R example.test/app';
+  const tail = `$1$2$3' x g h issue close pr new`;
+  for (const [name, command] of [
+    ['empty $9 slots', `${close} ; sh -c '${'$9'.repeat(30720)}${tail}`],
+    ['empty ${9} slots', `${close} ; sh -c '${'${9}'.repeat(15360)}${tail}`],
+    ['escaped $@ and many words', `${close} ; sh -c '\\$@ ${tail} ${'a '.repeat(40000)}`],
+  ]) {
+    for (const reading of ['CXB', 'CB']) {
+      const started = process.hrtime.bigint();
+      const got = matrixDecide(reading, command);
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      assert.equal(got, 'refuse', `${name} on ${reading}`);
+      assert.ok(ms < 5000, `${name} on ${reading} took ${Math.round(ms)} ms`);
+    }
+  }
+  // Empty slots with no gh in reach are still read as plain commands, quickly.
+  const started = process.hrtime.bigint();
+  assert.equal(matrixDecide('CB', `sh -c '${'$9'.repeat(30720)}echo $1' x hello`), 'allow');
+  assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 5000);
+});

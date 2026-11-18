@@ -663,9 +663,10 @@ const POSITIONALS = new RegExp(POSITIONAL.source, 'g');
 // Put a -c script's words in its positional slots. "$@" gives one quoted word per value, as the
 // shell does; every other slot is text in place, so the script's own quotes and spaces still decide
 // where words break. An escaped \$1 stays the text $1, for a -c script nested inside this one.
-// A script that repeats a slot multiplies that word, so every placed text is sized first and charged
-// to the budget its whole command text shares (one step and its length); null means the budget ran
-// out and nothing was built.
+// Every placement is charged to the budget its whole command text shares: one step and the larger
+// of the text it reads (the script and its words; a script of empty slots still reads all of it)
+// and the text it builds (a script that repeats a slot multiplies that word). null means the budget
+// ran out and nothing was built.
 const PLACED_SLOTS = /\\\$|"\$(?:\{@\}|@)"|\$(?:\{([0-9@*])\}|([0-9@*]))/g;
 function placePositional(script, values, budget) {
   const list = values.slice(1);
@@ -680,11 +681,14 @@ function placePositional(script, values, budget) {
   };
   let quotedSize = 0; let joinedSize = 0;
   if (budget) {
+    // Checked before the script is scanned, so a script of empty slots cannot rescan for free.
+    const read = values.reduce((sum, value) => sum + value.length + 1, script.length);
+    if (--budget.steps < 0 || budget.chars < read) return null;
     quotedSize = list.length ? list.reduce((sum, word) => sum + word.length + 2 + (word.match(/'/g) || []).length * 3, list.length - 1) : 2;
     joinedSize = list.reduce((sum, word) => sum + word.length, Math.max(list.length - 1, 0));
     let size = script.length;
     for (const match of script.matchAll(PLACED_SLOTS)) size += slotText(match[0], match[1], match[2], true) - match[0].length;
-    if (--budget.steps < 0 || (budget.chars -= size) < 0) return null;
+    if ((budget.chars -= Math.max(read, size)) < 0) return null;
   }
   return script.replace(PLACED_SLOTS, (whole, braced, bare) => slotText(whole, braced, bare, false));
 }
