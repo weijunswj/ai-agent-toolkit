@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.148.3
+
+### Fixed
+
+- **Issue-close guard reads more hidden shell shapes:** where PowerShell may run a command (its own tool, an unknown shell or Codex Bash), a data command's script block holding a guarded gh write now counts as running when the same statement pipes it on to any further stage (`|% Invoke`, `| foreach Invoke`, `| Where-Object { $_.Invoke() }`, `| Out-String | iex`); even a harmless `| Out-Null` after such a block is refused. Quoted `;` or `||`, comments and an escaped line break no longer end that statement early, and a next line that starts with `|` carries it on. A block inside a group (`(...)`, `$(...)`, `. { }`, `% { }`, `Invoke-Command { }`) counts as piped when the statement around the group pipes on. `iex` text built by a `$(...)` substitution, a character cast or a method call that mentions gh or its pieces is refused, and so is a script block made from such text with `[scriptblock]::Create` or `$ExecutionContext.InvokeCommand`.
+- **POSIX `-c` scripts that reassemble their arguments:** a script that expands its positional parameters (`$0` to `$9`, `${n}`, `$@`, `$*`) is read with them put in place, so `sh -c '$2 $1' x 'issue close 1' gh`, `sh -c '$1$2' x g 'h issue close 1'` and `sh -c 'g$1 issue close 1' x h` are refused, on every shell. A script that reorders its arguments first with `set --` or `shift` is refused when another order puts a guarded gh write in place. A gh command among the arguments, even a read such as `gh api user`, no longer stops the script itself being read. Words count only whole, so ordinary arguments such as `high-priority`, `ghost.txt` or a URL holding `api` pass. Placed, reordered and nested readings share one budget per command, and each placement is charged, before any text is built, for the script and words it reads as well as the text it builds, so long, repeated, nested or empty-slot arguments stay a quick read.
+- **Two readings of escaped quotes compare what closes:** on Codex Bash and unknown shells, text with backslash-escaped quotes is refused when its PowerShell reading runs a guarded write that the judged reading does not see, compared by noun, verb, repository and target (a folder or `GH_REPO` change before a write without `-R` counts as another repository), the API method and fields (such as `-X PATCH` with `state=closed`), and the closing references and UAT line of PR text.
+- **Timing tests:** the shell-reader timing comment now names scheduler preemption as the cause of the old flake, and the closing-reference timing uses the same longer samples.
+
 ## 3.148.2
 
 ### Fixed
