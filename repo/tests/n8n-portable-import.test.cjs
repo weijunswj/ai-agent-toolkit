@@ -2711,11 +2711,20 @@ test('import script refuses every unused switch before any docker call, and the 
       active: false,
     });
     const importCopy = path.join(scriptsDir, 'import-n8n-workflows-live.ps1');
-    // The fake docker records the call and fails, so the run stops at the docker reachability check.
-    fs.writeFileSync(path.join(binDir, 'docker.cmd'), `@echo called>> "${marker}"\r\n@exit /b 1\r\n`);
-    fs.writeFileSync(path.join(binDir, 'docker'), `#!/bin/sh\necho called >> '${marker}'\nexit 1\n`, { mode: 0o755 });
+    // The fake docker records the call and fails, so a run stops at the docker reachability check. The
+    // import starts docker as a process, which finds only a docker.exe on Windows (never a .cmd), so
+    // there the fake is compiled by Windows PowerShell; elsewhere a shell script does.
+    if (process.platform === 'win32') {
+      const buildPath = path.join(fixtureRoot, 'build-fake-docker.ps1');
+      const source = 'public static class FakeDocker { public static int Main() { System.IO.File.AppendAllText(System.Environment.GetEnvironmentVariable("FAKE_DOCKER_MARKER"), "called"); return 1; } }';
+      fs.writeFileSync(buildPath, `Add-Type -TypeDefinition ${psQuoted(source)} -OutputType ConsoleApplication -OutputAssembly ${psQuoted(path.join(binDir, 'docker.exe'))}\n`);
+      const build = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', buildPath], { encoding: 'utf8' });
+      assert.equal(build.status, 0, `fake docker.exe build: ${build.stdout}${build.stderr}`);
+    } else {
+      fs.writeFileSync(path.join(binDir, 'docker'), '#!/bin/sh\necho called >> "$FAKE_DOCKER_MARKER"\nexit 1\n', { mode: 0o755 });
+    }
     const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
-    const env = { ...process.env, [pathKey]: `${binDir}${path.delimiter}${process.env[pathKey] || ''}` };
+    const env = { ...process.env, FAKE_DOCKER_MARKER: marker, [pathKey]: `${binDir}${path.delimiter}${process.env[pathKey] || ''}` };
     const runImport = (args) => {
       const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', importCopy, ...args], {
         cwd: fixtureRoot,
@@ -2750,9 +2759,9 @@ test('import script defines no function that nothing calls', () => {
   const text = fs.readFileSync(path.join(helperRoot, 'import-n8n-workflows-live.ps1'), 'utf8');
   const names = [...text.matchAll(/^\s*function\s+([A-Za-z][\w-]*)/gim)].map((match) => match[1]);
   assert.ok(names.length > 20, 'the import script functions are found');
-  const uncalled = names.filter((name) => {
-    const uses = text.match(new RegExp(`(?<![\\w-])${name.replace(/-/g, '\\-')}(?![\\w-])`, 'gi')) || [];
-    return uses.length < 2;
-  });
+  // PowerShell names are case-insensitive; a function that nothing calls appears once, where it is defined.
+  const uses = new Map();
+  for (const word of text.match(/[A-Za-z][\w-]*/g)) uses.set(word.toLowerCase(), (uses.get(word.toLowerCase()) || 0) + 1);
+  const uncalled = names.filter((name) => uses.get(name.toLowerCase()) < 2);
   assert.deepEqual(uncalled, [], 'remove these unused functions');
 });
