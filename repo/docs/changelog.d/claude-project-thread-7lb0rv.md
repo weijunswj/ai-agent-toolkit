@@ -1,3 +1,0 @@
-### Changed
-
-- **DESIGN.md reference follows the current upstream spec:** the `frontend-art-direction` DESIGN.md contract reference now says tokens can sit in front matter, in fenced `yaml` blocks inside sections, or both, that all blocks merge into one token tree and that a top-level key defined twice is an error. It adds the 10-section order, `motion` tokens (`duration`, `delay` and `timingFunction`) with reduced-motion guidance, and the prose-only Voice & Content Strategy section. The upstream pin moves to `google-labs-code/design.md` 679d301 (Apache-2.0, unchanged), and the source-watch cursor moves there too. Toolkit still adds no upstream CLI or package tooling.
