@@ -695,8 +695,8 @@
       "decision": "new_product",
       "decision_reason": "Live changes on outside services need their own trigger and safety boundary (one environment per operation, provider read-back, coupled effects) and a runnable checker with its own tests, which would bloat any review-only skill.",
       "unique_value": "One offline checker that returns ALLOW, ALLOW_WITH_NOTICE or HOLD with typed reasons and a plan hash the approval binds to, plus one provider-neutral backup and restore evidence contract that platform skills reuse.",
-      "runtime_footprint": "Instructions, a JSON plan example, a reference contract and one Node script with no packages, no network and no writes.",
-      "local_assets": "Canonical README, SKILL.md, host metadata, scripts/preflight-check.cjs, templates/operation-plan.example.json, references/backup-and-recovery.md and focused tests.",
+      "runtime_footprint": "Instructions, a JSON plan example, two reference contracts, an offline checker with no writes, and a recovery identity script that writes only its own record files in a local Toolkit folder; Node only, no packages and no network.",
+      "local_assets": "Canonical README, SKILL.md, host metadata, scripts/preflight-check.cjs, scripts/recovery-identity.cjs, templates/operation-plan.example.json, references/backup-and-recovery.md, references/recovery-identity.md and focused tests.",
       "output_contract": "Report the checker's verdict, every typed reason or notice, the outcome for a merge, the required read-backs and the plan hash; never claim a live change happened.",
       "anti_bloat_review": "One skill and one checker for every outside service; provider-specific steps stay in platform skills, and no SSH broker or provider adapter is built.",
       "safety_boundary": "Planning and checking only. Never runs the change, calls a provider or reads credentials; never auto-renames, deletes or moves a live resource; every live change still needs the owner's approval naming the target and operation on an allowed plan.",
@@ -705,7 +705,7 @@
       "third_party_audit": "Not applicable first-party product; no third-party package, executable or credential is bundled.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node --test repo/tests/external-operation-preflight.test.cjs repo/tests/skill-routing.test.cjs"
+        "node --test repo/tests/external-operation-preflight.test.cjs repo/tests/external-operation-recovery-identity.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
     "toolkit-env": {
