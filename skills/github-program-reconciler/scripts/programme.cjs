@@ -425,6 +425,19 @@ function outcomeFor(parentDoc, issue) {
   return outcome;
 }
 
+// The tasks waiting on the owner (state.ownerWaits), from the children's documents as they stand
+// now; nothing is stored. A child that cannot be read makes the list unknown, never short.
+function ownerWaitsOf(context, parentDoc) {
+  try {
+    const snapshot = context.store.readSnapshot();
+    const children = new Map(parentDoc.outcomes.map(outcome => [outcome.issue, context.store.snapshotDoc(snapshot, 'child', outcome.issue).doc]));
+    return { owner_waits: state.ownerWaits(parentDoc, children) };
+  } catch (error) {
+    if (!error.code) throw error;
+    return { owner_waits: null, owner_waits_unknown: error.code };
+  }
+}
+
 function readParent(context) {
   const { doc } = context.store.read('parent', context.binding.parent_issue);
   if (!doc) throw new ProgrammeError('PARENT_STATE_MISSING', `No parent state document for #${context.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.`);
@@ -742,7 +755,7 @@ const commands = {
       ...(entry.due ? { due: entry.due, overdue: state.ackOverdue(entry, Date.parse(nowText(deps))) } : {}),
       ...(entry.due && parentDoc.private?.attention_notes?.[entry.id] ? { promised: parentDoc.private.attention_notes[entry.id] } : {}),
       ...(entry.diagnostics ? { diagnostics: entry.diagnostics } : {}) }));
-    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open };
+    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open, ...ownerWaitsOf(context, parentDoc) };
   },
 
   // The documents in the private store, moved to the public state branch. The dry run writes nothing;
@@ -1184,6 +1197,10 @@ function formatAttention(result) {
   // Work-queue findings first: each is a task on the graph that needs the controller's next step now.
   const queue = result.findings.filter(entry => state.WORK_QUEUE_CODES.has(entry.code));
   if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id}${entry.state === 'acknowledged' ? ' acknowledged' : ''} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
+  // Each task whose board cell asks something of the owner; the coordinator keeps each one in front of the owner until done.
+  if (result.owner_waits) lines.push(...(queue.length ? [] : ['']), `Owner waits (${result.owner_waits.length})`, ...result.owner_waits.map(wait => `- ${[`#${wait.issue} ${wait.ask}${wait.after ? ` after ${wait.after}` : ''}`,
+    wait.pr ? `PR #${wait.pr}` : null, wait.head ? wait.head.slice(0, 7) : null].filter(Boolean).join(' · ')}`), '');
+  else if (result.owner_waits_unknown) lines.push(...(queue.length ? [] : ['']), `Owner waits: unknown (${result.owner_waits_unknown})`, '');
   for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
     lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
     if (entry.due) lines.push(`  ${entry.overdue ? 'OVERDUE: the step promised by' : 'Promised by'} ${entry.due}${entry.promised ? `: ${entry.promised}` : ''}`);

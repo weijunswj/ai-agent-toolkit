@@ -622,7 +622,7 @@ test('the generated CURRENT summary is slim: work in progress with its PR, gate 
     '- #1 Task 1 · PR #541 · G1',
     '- #2 Task 2 · PR #543 · G1 · then your UAT on PR #543', // the active G1 is the current step; the owed UAT comes after it
     '- #3 Task 3 · waiting on you: your decision',
-    '- #4 Task 4 · waiting on you: blocked: needs the key',
+    '- #4 Task 4 · blocked: needs the key', // a blocker is not an owner step
     '',
     '**Attention: clear** · Holds: 1 · Full list: `programme.cjs attention`',
   ].join('\n'), 'queued work and next actions show in the graph and on the task pages; a finished task is never a hold');

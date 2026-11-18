@@ -91,6 +91,71 @@ test('a task waiting on the owner with a UAT still owed waits on that UAT, in th
   assert.match(current(), /^- #504 [^\n]* · PR #2017 · G2 · waiting on you: your decision$/m);
 });
 
+// A small programme for the owner-step cases: one outcome per child, all committed and in order.
+function ownerFixture(changes) {
+  const outcomes = Object.keys(changes).map((issue, order) => ({ issue: Number(issue), class: 'COMMITTED', parent: 7, order }));
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const children = new Map(outcomes.map(outcome => {
+    const child = { ...state.newChild({ repository: 'acme/app', outcome }), lifecycle: 'ACTIVE' };
+    changes[outcome.issue](child);
+    return [outcome.issue, child];
+  }));
+  const cell = issue => cellsOf(rowsOf(state.renderParentBlockBody(parent, children)).find(line => cellsOf(line)[1] === `#${issue}`));
+  return { parent, children, cell };
+}
+
+test('owner waits: one owner step per task feeds the board and the list, so the Waiting on cell says Owner: exactly for listed tasks', () => {
+  const head = 'c'.repeat(40);
+  const uat = (child, number) => { Object.assign(child.pr, { number, state: 'OPEN', head }); Object.assign(child.uat, { state: 'PENDING', at_head: head }); };
+  const f = ownerFixture({
+    601: child => { Object.assign(child.gate, { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'a-601', role: 'G2' } }); },
+    602: child => { child.lifecycle = 'WAITING_OWNER'; uat(child, 2602); },
+    603: child => { child.lifecycle = 'WAITING_OWNER'; },
+    604: child => { uat(child, 2604); },
+    605: child => { uat(child, 2605); Object.assign(child.gate, { role: 'G2', state: 'ACTIVE', assignment: { id: 'a-605', role: 'G2' } }); },
+    606: child => { child.blockers = ['waits for #605']; },
+    607: child => { child.lifecycle = 'DONE'; uat(child, 2607); },
+    608: child => { child.lifecycle = 'PLANNED'; },
+  });
+  assert.deepEqual(state.ownerWaits(f.parent, f.children), [
+    { issue: 601, ask: 'decision', after: null, pr: null, head: null },
+    { issue: 602, ask: 'UAT on PR #2602', after: null, pr: 2602, head },
+    { issue: 603, ask: 'decision', after: null, pr: null, head: null },
+    { issue: 604, ask: 'UAT on PR #2604', after: null, pr: 2604, head },
+    { issue: 605, ask: 'UAT on PR #2605', after: 'G2', pr: 2605, head },
+  ], 'blocked, finished and queued tasks wait on nobody');
+  const listed = new Set(state.ownerWaits(f.parent, f.children).map(entry => entry.issue));
+  for (const issue of f.children.keys()) {
+    assert.equal(/\bOwner: /.test(f.cell(issue)[3]), listed.has(issue), `#${issue}: ${f.cell(issue)[3]}`);
+  }
+  assert.equal(f.cell(605)[3], 'G2, then Owner: UAT on PR #2605');
+});
+
+test('CURRENT never says a blocked task waits on the owner: a blocker is not an owner step', () => {
+  const f = ownerFixture({ 611: child => { child.blockers = ['waits for #612']; }, 612: child => { child.lifecycle = 'WAITING_OWNER'; } });
+  const current = state.renderCurrentBlockBody(f.parent, f.children, new Map(), '2026-11-18T00:00:00Z');
+  assert.match(current, /^- #611 [^\n]* · blocked: waits for #612$/m);
+  assert.doesNotMatch(current, /waiting on you: blocked/);
+  assert.match(current, /^- #612 [^\n]* · waiting on you: your decision$/m);
+});
+
+test('a live gate outranks a listed blocker on the board, and its return puts the task back in the queue with no blocker write', () => {
+  const f = ownerFixture({ 621: child => { child.lifecycle = 'PLANNED'; child.blockers = ['waits for PR 1098']; } });
+  const status = () => f.cell(621)[2];
+  assert.equal(status(), 'LATER', 'planned with no PR');
+  f.children.set(621, state.assignGate(f.children.get(621), { assignment: 'a-621-g1', role: 'G1' }));
+  assert.equal(status(), 'NOW · IN PROGRESS', 'an assigned gate is work in progress, blocker or not');
+  assert.equal(f.cell(621)[3], 'G1, then Blocked: waits for PR 1098');
+  f.children.get(621).gate.state = 'ACTIVE';
+  assert.equal(status(), 'NOW · IN PROGRESS');
+  f.children.set(621, state.recordReturn(f.children.get(621), { returnId: 'r-621-g1', assignment: 'a-621-g1' }));
+  assert.equal(status(), 'NOW · QUEUED', 'the return leaves the blocker standing');
+  assert.equal(f.cell(621)[3], 'Blocked: waits for PR 1098');
+  assert.deepEqual(f.children.get(621).blockers, ['waits for PR 1098'], 'no blocker was cleared');
+  f.children.get(621).lifecycle = 'PLANNED';
+  assert.equal(status(), 'LATER', 'set back to planned with no PR');
+});
+
 test('CURRENT lists tasks in progress before queued ones, whatever their priority', () => {
   const outcomes = [{ issue: 2, class: 'COMMITTED', parent: 7, order: 0 }, { issue: 3, class: 'COMMITTED', parent: 7, order: 1 }];
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
