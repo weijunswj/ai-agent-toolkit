@@ -1618,6 +1618,19 @@ test('validate-n8n-workflows.cjs reads a quoted literal at the top of a run-time
   assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
 });
 
+test('validate-n8n-workflows.cjs counts a URL once when a literal joined to code repeats it', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    joined: "={{ 'https://crm.private.test/k/' + encodeURIComponent($json.id) }}",
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.joined\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
 test('validate-n8n-workflows.cjs still accepts an allowed literal URL that holds a ${...} part', () => {
   const allowedUrl = 'https://' + ['files', 'private', 'test'].join('.') + '/d/${body.id}/view';
   const cwd = tempDir();

@@ -1,0 +1,3 @@
+### Fixed
+
+- **A quoted host inside a run-time part is checked:** the n8n validator read every `${ ... }` and `{{ ... }}` as run time, so a private host written as a quoted literal inside one (`https://${'private-host'}/x`, `={{ $env.HOST || 'private-host' }}` after `https://`, also in Code nodes and expression template literals) passed. A quoted literal (`'...'`, `"..."` or a template literal with no `${ ... }` of its own) at the top of such a part now counts as host text; only names, member access and calls count as run time, and a literal inside a call or an index key stays run time. `https://${host}/api` still passes, and so does a literal that is an allowed host. A literal that repeats a URL already found, with run-time code after it, is counted once.

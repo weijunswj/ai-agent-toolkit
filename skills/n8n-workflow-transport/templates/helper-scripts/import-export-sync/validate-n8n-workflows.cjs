@@ -264,15 +264,21 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
       // A URL written as a quoted literal inside an expression ({{ 'https://host/x' }}) is checked on
       // its own as well, because collapsing would hide it. Each template literal ${ ... } is collapsed
       // the same way, in both, so a space, call or quote inside it does not end the match early; what
-      // was inside it is checked on its own too. Each match is checked with the text just after it,
-      // which an email needs.
+      // was inside it is checked on its own too. A quoted literal at the top of either kind of part
+      // (${'host'}, {{ $env.HOST || 'host' }}) is text the host is built from, so the text is also
+      // read with it in place of its part. Each match is checked with the text just after it, which
+      // an email needs.
       const matchesIn = (text) => [...text.matchAll(regex)].map((found) => ({ match: found[0], after: text.slice(found.index + found[0].length, found.index + found[0].length + 256) }));
       const candidates = options.collapseExpressions
-        ? [value.replace(/\{\{[\s\S]*?\}\}/g, '{{expr}}'), ...expressionLiterals(value)].flatMap(templateTexts).flatMap(matchesIn)
+        ? [...literalForms(value, expressionParts(value), '{{expr}}'), ...expressionLiterals(value)].flatMap(templateTexts).flatMap(matchesIn)
         : matchesIn(value);
       const unsafe = candidates.filter(({ match, after }) => !isAllowed(match, after)).map(({ match }) => match);
       if (unsafe.length > 0) {
-        unsafe.forEach((match) => values.add(match));
+        // A literal read in place of its part can repeat a URL already found, with only run-time tokens
+        // after it; that is the same URL, so it is counted once.
+        unsafe
+          .filter((match) => { const bare = match.replace(/(?:\{\{expr\}\}|\$\{expr\})+$/, ''); return bare === match || !unsafe.includes(bare); })
+          .forEach((match) => values.add(match));
         places.push(trail.join('.') || '(root)');
       }
       return;
@@ -285,11 +291,16 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
   return { count: values.size, places: shown };
 }
 
-// The text with each balanced ${ ... } as one token, then the texts inside each one, the same way.
-// One left open stays as written.
+// The text with each balanced ${ ... } as one token, and with each quoted literal at the top of one
+// in its place, then the texts inside each one, the same way. One left open stays as written.
 function templateTexts(text) {
-  const inner = [];
-  let collapsed = '';
+  const parts = templateParts(text);
+  return [...literalForms(text, parts, '${expr}'), ...parts.flatMap((part) => templateTexts(part.body))];
+}
+
+// Each balanced ${ ... } in the text, in order. Reading stops at one left open.
+function templateParts(text) {
+  const parts = [];
   let at = 0;
   while (at < text.length) {
     const start = text.indexOf('${', at);
@@ -302,11 +313,72 @@ function templateTexts(text) {
       end += 1;
     }
     if (depth > 0) break;
-    collapsed += text.slice(at, start) + '${expr}';
-    inner.push(text.slice(start + 2, end - 1));
+    parts.push({ start, end, body: text.slice(start + 2, end - 1) });
     at = end;
   }
-  return [collapsed + text.slice(at), ...inner.flatMap(templateTexts)];
+  return parts;
+}
+
+// Each {{ ... }} expression in the text, in order.
+function expressionParts(text) {
+  return [...text.matchAll(/\{\{[\s\S]*?\}\}/g)].map((found) => ({ start: found.index, end: found.index + found[0].length, body: found[0].slice(2, -2) }));
+}
+
+// The text with every part as one token, then once more for each quoted literal at the top of a part:
+// that part is written as the literal and every other part stays one token. Only names, member access
+// and calls are run time; a quoted literal is text the host is built from. A literal joined to run-time
+// code (${'tenant-' + id}) keeps a token on that side; one that is a whole value (${$env.HOST || 'host'},
+// a ternary branch) stands alone.
+function literalForms(text, parts, token) {
+  const join = (write) => {
+    let out = '';
+    let at = 0;
+    parts.forEach((part, index) => {
+      out += text.slice(at, part.start) + write(index);
+      at = part.end;
+    });
+    return out + text.slice(at);
+  };
+  const forms = [join(() => token)];
+  parts.forEach((part, index) => {
+    for (const { literal, before, after } of topLevelLiterals(part.body)) {
+      forms.push(join((which) => (which !== index ? token : (before ? token : '') + literal + (after ? token : ''))));
+    }
+  });
+  return forms;
+}
+
+// The quoted literals at the top of a JavaScript expression ('...', "..." or a template literal with
+// no ${ ... } of its own), unescaped, and whether code is joined to each one before and after it: any
+// code but the edge of the expression or one of ? : | & , ; (which pick a whole value). A literal inside
+// brackets, such as a call argument or an index key, counts as run time.
+function topLevelLiterals(source) {
+  const literals = [];
+  const joined = (char) => char !== undefined && !/[?:|&,;]/.test(char);
+  let depth = 0;
+  let at = 0;
+  while (at < source.length) {
+    const char = source[at];
+    if (char === "'" || char === '"' || char === '`') {
+      let end = at + 1;
+      while (end < source.length && source[end] !== char) end += source[end] === '\\' ? 2 : 1;
+      if (end >= source.length) break;
+      const body = source.slice(at + 1, end);
+      if (depth === 0 && !(char === '`' && body.includes('${'))) {
+        literals.push({
+          literal: body.replace(/\\([\s\S])/g, '$1'),
+          before: joined(source.slice(0, at).trimEnd().slice(-1) || undefined),
+          after: joined(source.slice(end + 1).trimStart()[0]),
+        });
+      }
+      at = end + 1;
+    } else {
+      if (/[([{]/.test(char)) depth += 1;
+      else if (/[)\]}]/.test(char)) depth = Math.max(0, depth - 1);
+      at += 1;
+    }
+  }
+  return literals;
 }
 
 function trailString(trail) {
@@ -346,8 +418,9 @@ function hostMatches(host, allowedHost) {
 
 function createPolicyHelpers(policy) {
   const placeholderPatterns = compilePlaceholderPatterns(policy);
-  // An allowed literal is also kept as the URL scan sees it, with each ${ ... } as one token.
-  const allowedLiteralValues = new Set(policy.allowedLiteralValues.flatMap((value) => [String(value), templateTexts(String(value))[0]]));
+  // An allowed literal is also kept as the URL scan sees it: each ${ ... } as one token, or as a quoted
+  // literal at its top.
+  const allowedLiteralValues = new Set(policy.allowedLiteralValues.flatMap((value) => [String(value), ...literalForms(String(value), templateParts(String(value)), '${expr}')]));
 
   const isAllowedPlaceholder = (value) =>
     typeof value === 'string' && placeholderPatterns.some((pattern) => pattern.test(value));
