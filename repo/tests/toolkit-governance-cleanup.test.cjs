@@ -228,3 +228,15 @@ test('refresh governance asks about the copies; Keep current is recommended and 
   assert.match(cleaned.out, /one pull request for the owner to merge/);
   assert.doesNotMatch((await cli(['setup'])).out, /Toolkit instruction copies \|/, 'nothing left to ask about');
 });
+
+// The floor the cleanup writes is the first release with S2, S3 and the session-start truncation fix,
+// so it can never be newer than this Toolkit; Toolkit's own binding carries the same floor first.
+test('MIN_TOOLKIT is no newer than this Toolkit, and Toolkit\'s own binding carries it', () => {
+  const ROOT = path.join(__dirname, '..', '..');
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;
+  const parts = value => value.split('.').map(Number);
+  const [floor, current] = [parts(cleanup.MIN_TOOLKIT), parts(version)];
+  const order = floor.map((part, index) => Math.sign(part - current[index])).find(sign => sign !== 0) || 0;
+  assert.ok(order <= 0, `MIN_TOOLKIT ${cleanup.MIN_TOOLKIT} is newer than version.json ${version}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, '.github', 'toolkit-programme.json'), 'utf8')).min_toolkit, cleanup.MIN_TOOLKIT);
+});

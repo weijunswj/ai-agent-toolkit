@@ -13,6 +13,9 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const MANIFEST_REL = 'repo/contracts/ci/test-shards.json';
 const MANIFEST_SCHEMA = 'toolkit-test-shards/v1';
 const SUMMARY_SCHEMA = 'toolkit-test-summary/v1';
+// No silent skips: every skipped or todo test is listed here with the systems it skips on and why.
+const SKIPS_REL = 'repo/contracts/ci/test-skips.json';
+const SKIPS_SCHEMA = 'toolkit-test-skips/v1';
 const TEST_DIR_REL = 'repo/tests';
 const TEST_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.test\.cjs$/;
 const SYSTEMS = Object.freeze(['linux', 'windows']);
@@ -130,6 +133,71 @@ function manifestErrors(manifest, discovered) {
   return errors;
 }
 
+function loadSkipList(root = ROOT) {
+  return JSON.parse(fs.readFileSync(path.join(root, ...SKIPS_REL.split('/')), 'utf8'));
+}
+
+const SKIP_KEYS = 'file,reason,systems,test';
+const TEST_NAME = /^[^\r\n]{1,300}$/;
+const skipKey = (file, name) => `${file}\n${name}`;
+
+// Every problem with the skip list; empty when it is usable. The reader is default-deny: only the
+// known keys and types pass, and a test name must match the summary's name exactly.
+function skipListErrors(list, discovered) {
+  if (!list || typeof list !== 'object' || Array.isArray(list)) return ['the skip list is not a JSON object'];
+  const errors = [];
+  if (list.schema !== SKIPS_SCHEMA) errors.push(`schema must be ${SKIPS_SCHEMA}`);
+  for (const key of Object.keys(list)) if (!['schema', 'description', 'skips'].includes(key)) errors.push(`unknown key ${key}`);
+  if (list.description !== undefined && typeof list.description !== 'string') errors.push('description must be text');
+  if (!Array.isArray(list.skips)) return [...errors, 'skips must be a list'];
+  const known = new Set(discovered);
+  const seen = new Set();
+  list.skips.forEach((entry, index) => {
+    const label = `skip ${index + 1}`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).sort().join(',') !== SKIP_KEYS) {
+      errors.push(`${label}: needs exactly file, test, systems and reason`);
+      return;
+    }
+    if (typeof entry.file !== 'string' || !known.has(entry.file)) errors.push(`${label}: ${entry.file} is not a discovered test file`);
+    if (typeof entry.test !== 'string' || !TEST_NAME.test(entry.test)) errors.push(`${label}: test must be the test's name, 1 to 300 characters on one line`);
+    const systems = entry.systems;
+    if (!Array.isArray(systems) || systems.length === 0 || new Set(systems).size !== systems.length || systems.some((system) => !SYSTEMS.includes(system))) {
+      errors.push(`${label}: systems must name ${SYSTEMS.join(' and/or ')} once each`);
+    }
+    if (typeof entry.reason !== 'string' || entry.reason.trim().length < 12 || entry.reason.length > 300 || /[\r\n]/.test(entry.reason)) {
+      errors.push(`${label}: reason must be 12 to 300 characters on one line`);
+    }
+    const key = skipKey(entry.file, entry.test);
+    if (seen.has(key)) errors.push(`${label}: "${entry.test}" in ${entry.file} is listed twice`);
+    seen.add(key);
+  });
+  return errors;
+}
+
+// The skips each system may have, from a usable list: Map of file+name to the set of systems.
+function allowedSkips(list) {
+  const allowed = new Map();
+  for (const entry of list.skips) allowed.set(skipKey(entry.file, entry.test), { entry, systems: new Set(entry.systems) });
+  return allowed;
+}
+
+// The skipped and todo tests a file entry names, or an error when the entry counts more than it names.
+function namedSkips(system, entry, errors) {
+  const counted = (Number(entry.skipped) || 0) + (Number(entry.todo) || 0);
+  const list = Array.isArray(entry.skipped_tests) ? entry.skipped_tests : [];
+  const named = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object' || typeof item.name !== 'string' || !item.name || !['skip', 'todo'].includes(item.kind)) {
+      errors.push(`${system}: ${entry.file} has a skipped test entry that is not { name, kind }`);
+      continue;
+    }
+    named.push(item);
+  }
+  // A skipped suite is named but not counted, so a file may name more than it counts, never fewer.
+  if (list.length < counted) errors.push(`${system}: ${entry.file} counted ${Number(entry.skipped) || 0} skipped and ${Number(entry.todo) || 0} todo tests but its summary names ${list.length}`);
+  return named;
+}
+
 function assertManifest(manifest, discovered) {
   const errors = manifestErrors(manifest, discovered);
   if (errors.length) throw new Error(`The test shard manifest ${MANIFEST_REL} is not usable:\n- ${errors.join('\n- ')}`);
@@ -191,12 +259,17 @@ function relativeTestFile(root, file) {
 // summaries cover the discovered files exactly once, each with at least one test and no failure.
 // requiredJobs: the jobs `needs` must hold (the validate check's by default). commit: when given (in
 // CI, the commit the run tested), every shard summary must say it tested that commit, so results
-// reused from another run only count when that run tested the same code.
-function verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs = REQUIRED_JOBS, commit = null }) {
+// reused from another run only count when that run tested the same code. skipList: the parsed
+// repo/contracts/ci/test-skips.json; a missing or unusable list allows no skip at all.
+function verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs = REQUIRED_JOBS, commit = null, skipList }) {
   const errors = [];
   const totals = {};
   try { assertManifest(manifest, discovered); }
   catch (error) { return { errors: [error.message], totals }; }
+  const listErrors = skipList === undefined ? [] : skipListErrors(skipList, discovered);
+  errors.push(...listErrors.map((error) => `${SKIPS_REL}: ${error}`));
+  const allowed = skipList === undefined || listErrors.length ? new Map() : allowedSkips(skipList);
+  const skippedOn = new Map(SYSTEMS.map((system) => [system, new Set()]));
   if (!needs || typeof needs !== 'object' || Array.isArray(needs) || Object.keys(needs).length === 0) errors.push('the test leg results (needs) are missing');
   else {
     for (const job of requiredJobs) if (!Object.hasOwn(needs, job)) errors.push(`required job ${job} is missing from needs`);
@@ -263,10 +336,22 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJob
         if (entry.failed > 0 || entry.cancelled > 0) errors.push(`${system}: ${file} had ${entry.failed} failed and ${entry.cancelled} cancelled tests`);
         total.files += 1;
         for (const key of ['tests', 'passed', 'failed', 'skipped', 'todo', 'cancelled']) total[key] += Number(entry[key]) || 0;
+        for (const item of namedSkips(system, entry, errors)) {
+          const key = skipKey(file, item.name);
+          skippedOn.get(system).add(key);
+          if (!allowed.get(key)?.systems.has(system)) {
+            errors.push(`${system}: ${file} ${item.kind === 'todo' ? `left "${item.name}" as todo` : `skipped "${item.name}"`}, which ${SKIPS_REL} does not list for ${system}; make it run, or list it with the reason`);
+          }
+        }
       }
     }
     for (const file of discovered) if (!seen.has(file)) errors.push(`${system}: ${file} was not run by any shard`);
     totals[system] = total;
+  }
+  for (const [key, { entry, systems }] of allowed) {
+    for (const system of systems) {
+      if (!skippedOn.get(system).has(key)) errors.push(`${system}: "${entry.test}" in ${entry.file} is listed in ${SKIPS_REL} but did not skip; remove it from the list`);
+    }
   }
   return { errors, totals };
 }
@@ -827,6 +912,8 @@ module.exports = Object.freeze({
   JOB_ORDER,
   LEG_SETS,
   REQUIRED_JOBS,
+  SKIPS_REL,
+  SKIPS_SCHEMA,
   SYSTEMS,
   TEST_JOBS,
   VERIFY_COMMAND,
@@ -837,12 +924,14 @@ module.exports = Object.freeze({
   estimateShardSeconds,
   gateCommands,
   loadManifest,
+  loadSkipList,
   manifestErrors,
   platformSystem,
   relativeTestFile,
   resolveShard,
   runOrder,
   shardIds,
+  skipListErrors,
   systemShards,
   testFileErrors,
   gateJobText,

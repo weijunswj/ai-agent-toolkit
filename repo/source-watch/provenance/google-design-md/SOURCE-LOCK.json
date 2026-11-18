@@ -1,7 +1,7 @@
 {
   "source_repo": "google-labs-code/design.md",
   "source_ref": "main",
-  "source_commit": "9bf8eae67128b6cc55ad9bf86665767deb4c11cd",
+  "source_commit": "679d3018869335b8ef7906b69fccfd4d48991d1b",
   "source_lifecycle": "active",
   "source_role": "third_party_attribution_source",
   "source_update_policy": "manual_review_required",
@@ -11,7 +11,7 @@
       "mode": "adapted",
       "source_path": "docs/spec.md",
       "root_surface_path": "skills/frontend-art-direction/references/design-md-contract.md",
-      "source_blob_sha": "5995e5482fc338a9f9923d5912551241a82e6e8a",
+      "source_blob_sha": "fc04f91a561fbde6be804c9d33defc285b09a976",
       "notes": "Adapted into a concise, Toolkit-local DESIGN.md contract reference for the UI/UX skill. The Toolkit does not vendor or execute upstream package tooling."
     },
     {

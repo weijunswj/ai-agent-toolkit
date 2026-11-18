@@ -22,10 +22,12 @@ const blocks = require('./toolkit-managed-block.cjs');
 const { LeftoverScan } = require('./toolkit-leftover-files.cjs');
 const { oldSweepCopies } = require('./toolkit-ci-shards-offer.cjs');
 
-// The first release whose installed Toolkit gives sessions the governed rules. A copy that knows the
-// key and is older says to update; a copy older than the key reads the binding as ERROR, which also
-// holds governance effects while ordinary work continues.
-const MIN_TOOLKIT = '3.127.0';
+// The floor a cleaned repository needs: the first release whose installed Toolkit gives sessions the
+// governed rules whole (with the session-start truncation fix), turns governance on without writing
+// rule copies and runs this cleanup. A copy that knows the key and is older says to update; a copy
+// older than the key reads the binding as ERROR, which also holds governance effects while ordinary
+// work continues. Toolkit's own binding carries the same floor.
+const MIN_TOOLKIT = '3.137.0';
 const BINDING_FILE = '.github/toolkit-programme.json';
 const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
 

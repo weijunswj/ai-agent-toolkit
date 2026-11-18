@@ -430,7 +430,8 @@ test('two readings: a force push hidden from bash by backslash quoting is refuse
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const governed = path.join(dir, 'governed');
   fs.mkdirSync(path.join(governed, '.git'), { recursive: true });
-  fs.writeFileSync(path.join(governed, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n');
+  fs.mkdirSync(path.join(governed, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(governed, '.github', 'toolkit-programme.json'), '{ "schema": "toolkit.programme-binding.v2", "governance": "enabled" }\n');
   const rows = [
     ['echo "a\\" ; git push --force origin feature ; echo \\"b"', false, true, true, true],
     ['echo "a\\" ; git push origin +feature ; echo \\"b"', false, true, true, true],

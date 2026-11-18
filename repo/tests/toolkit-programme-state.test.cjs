@@ -57,8 +57,8 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const normalized = state.validateBinding(binding);
   assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [binding.parents[0].issue, binding.parents[0].record_prefix, binding.parents[0].writer_prefix]);
   // Version 1 is still read, as enabled with one parent.
-  // schedule_folder, parent_lifecycle, detach_finished_children and task_prs are version 2 fields.
-  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, detach_finished_children: _detach, task_prs: _taskPrs, ...rest } = binding;
+  // schedule_folder, parent_lifecycle, detach_finished_children, task_prs and min_toolkit are version 2 fields.
+  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, detach_finished_children: _detach, task_prs: _taskPrs, min_toolkit: _minToolkit, ...rest } = binding;
   const v1 = { ...rest, schema: state.SCHEMA.binding, parent_issue: 421, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-' };
   assert.equal(validateBindingV1(v1), true, JSON.stringify(validateBindingV1.errors));
   assert.equal(state.validateBinding(v1), v1);
@@ -408,7 +408,7 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
   // Cells: Task (the name), Child # (`#n`), Status (NOW, LATER, OPTIONAL, COMPLETED or RETIRED), Waiting on, Last Updated.
   const rows = lines.filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
   const issueOf = row => /^#(\d+)$/.exec(row[1])[1];
-  assert.deepEqual(rows.map(row => Number(issueOf(row))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
+  assert.deepEqual(rows.map(row => Number(issueOf(row))), [8, 17, 11, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW · IN PROGRESS, NOW · QUEUED, then LATER with optional tasks last, each by priority order and child number; finished oldest first');
   assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
   assert.equal(/OPTIONAL|LATER · /.test(body), false, 'LATER needs no second word, and optional tasks show as LATER');
   const statusOf = Object.fromEntries(rows.map(row => [`#${issueOf(row)}`, row[2]]));
@@ -424,7 +424,7 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
     ['#12', 'COMPLETED', 'a finished row says so'],
     ['#9', 'RETIRED', 'a retired row says so'],
   ]) assert.equal(statusOf[issue], expected, `${issue}: ${why}`);
-  assert.deepEqual(rows[1], ['Shared host contract', '#8', 'NOW · IN PROGRESS', 'G1', '-'], 'the name, then the child number and the gate a task in progress waits on; PRs and description are on the task page');
+  assert.deepEqual(rows[0], ['Shared host contract', '#8', 'NOW · IN PROGRESS', 'G1', '-'], 'the name, then the child number and the gate a task in progress waits on; PRs and description are on the task page');
   assert.equal(body.includes('One contract for both hosts'), false);
   assert.equal(/#549|#552|#553/.test(body), false, 'the parent names no PRs; each task page lists them');
   assert.equal(rows[5][0], 'per-repository governance states', 'a release prefix is not part of the name');
@@ -432,10 +432,50 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
   assert.deepEqual(rows[12], ['#9', '#9', 'RETIRED', '-', '2026-10-01 08:00'], 'retired is its own group below COMPLETED');
   assert.equal(children.get(9).pr.number, 553, 'rendering preserves historical state');
   assert.deepEqual(rows[11].slice(1), ['#16', 'COMPLETED', '-', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
-  assert.deepEqual(rows[2].slice(1), ['#17', 'NOW · IN PROGRESS', 'Owner: decision', '-']);
-  assert.deepEqual(rows[0].slice(1), ['#11', 'NOW · QUEUED', 'Blocked: waits for #8', '-'], 'a NOW task with a blocker is queued behind it');
+  assert.deepEqual(rows[1].slice(1), ['#17', 'NOW · IN PROGRESS', 'Owner: decision', '-']);
+  assert.deepEqual(rows[2].slice(1), ['#11', 'NOW · QUEUED', 'Blocked: waits for #8', '-'], 'a NOW task with a blocker is queued behind it, after every task in progress');
   assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
+});
+
+test('the Programme Graph sorts by status band (NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED, RETIRED); inside a band pinned tasks go last and optional tasks close LATER', () => {
+  const outcomes = [
+    { issue: 2, class: 'COMMITTED', parent: 7, order: 0 },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 0, last: true },
+    { issue: 5, class: 'COMMITTED', parent: 7, order: 0, last: true },
+    { issue: 6, class: 'COMMITTED', parent: 7, order: 2 },
+    { issue: 8, class: 'OPTIONAL', parent: 7, order: 0 },
+    { issue: 9, class: 'COMMITTED', parent: 7, order: 0, last: true },
+    { issue: 10, class: 'OPTIONAL', parent: 7, order: 0, last: true },
+    { issue: 11, class: 'COMPLETED', parent: 7, order: 0 },
+    { issue: 12, class: 'RETIRED', parent: 7, order: 0 },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const doc = (issue, changes) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), lifecycle: 'ACTIVE', ...changes });
+  const children = new Map([
+    [2, doc(2, { blockers: ['waits for #3'] })],
+    [3, doc(3)],
+    [4, doc(4)],
+    [5, doc(5, { blockers: ['waits for #4'] })],
+  ]);
+  const rows = state.renderParentBlockBody(parent, children, new Map()).split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
+  const table = rows.map(row => `${row[1]} ${row[2]}`);
+  assert.deepEqual(table, [
+    '#3 NOW · IN PROGRESS',
+    '#4 NOW · IN PROGRESS',
+    '#2 NOW · QUEUED',
+    '#5 NOW · QUEUED',
+    '#6 LATER',
+    '#8 LATER',
+    '#9 LATER',
+    '#10 LATER',
+    '#11 COMPLETED',
+    '#12 RETIRED',
+  ], 'a task in progress leads a queued one of higher priority; a pinned NOW task stays in its band, never below LATER; LATER keeps today\'s order');
+  const bands = ['NOW · IN PROGRESS', 'NOW · QUEUED', 'LATER', 'COMPLETED', 'RETIRED'];
+  const ranks = rows.map(row => bands.indexOf(row[2]));
+  assert.ok(ranks.every((rank, at) => rank >= 0 && (at === 0 || rank >= ranks[at - 1])), `the Status column never steps back a band: ${table.join(', ')}`);
 });
 
 test('the Programme Graph renders deterministic Singapore update times from task state and comments', () => {
@@ -498,7 +538,7 @@ test('a priority tie is named only among queued rows of one group', () => {
   assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
 });
 
-test('an outcome pinned last sorts after every unpinned open outcome, even ones added after it', () => {
+test('an outcome pinned last sorts after every unpinned open outcome in its status band, even ones added after it', () => {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
   const outcomes = [
@@ -516,7 +556,7 @@ test('an outcome pinned last sorts after every unpinned open outcome, even ones 
   const current = body => state.renderCurrentBlockBody(body, new Map(), new Map());
   const body = state.renderParentBlockBody(parent, new Map(), new Map());
   assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
-  assert.match(body, /Order: NOW, LATER by priority \(optional tasks after the rest\), tasks pinned last, then the latest 10 COMPLETED/);
+  assert.match(body, /Order: NOW · IN PROGRESS, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER; pinned tasks end their band\), then the latest 10 COMPLETED/);
   assert.equal(rows(body)[0], 2, 'the top unpinned task leads, so it starts next');
   assert.doesNotMatch(current(parent), /Start next/, 'CURRENT leaves what starts next to the graph');
   // A task added later takes the next order and still lands before the pinned one.
@@ -528,8 +568,9 @@ test('an outcome pinned last sorts after every unpinned open outcome, even ones 
   const done = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 3, class: 'COMPLETED', parent: 7, order: 2, last: true }, { issue: 2, class: 'COMMITTED', parent: 7, order: 9 }] });
   const doneBody = state.renderParentBlockBody(done, new Map(), new Map());
   assert.deepEqual(rows(doneBody), [2, 3]);
-  assert.doesNotMatch(doneBody, /tasks pinned last/, 'the order line names pinned tasks only while one is open');
-  assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /tasks pinned last/);
+  assert.match(doneBody, /Order: NOW · IN PROGRESS, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER\), then the latest 10 COMPLETED/);
+  assert.doesNotMatch(doneBody, /pinned tasks/, 'the order line names pinned tasks only while one is open');
+  assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /pinned tasks/);
   // Pinned rows tie only with each other.
   const ties = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
     { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },

@@ -45,7 +45,7 @@ function terminateChildTree(child) {
 //   Write callers leave it off: they must see Codex exit before trusting or deleting its folder.
 class AppServerRequest {
   #command; #codexHome; #request; #options;
-  #child; #reader; #stderr=''; #response; #settled=false; #answered=false;
+  #child; #reader; #stderr=''; #response; #settled=false; #answered=false; #started=false;
   #requestTimer=null; #shutdownTimer=null; #forceTimer=null; #pendingError=null;
   #resolve; #reject;
   constructor(command,codexHome,request,options={}) {
@@ -65,7 +65,9 @@ class AppServerRequest {
       this.#requestTimer=setTimeout(()=>this.#shutdown(failure(`${this.#command} app-server ${this.#request.method} timed out`,{reason:'timeout'})),this.#options.timeoutMs||15000);
       this.#child.stderr.on('data',chunk=>{this.#stderr=(this.#stderr+chunk).slice(-16384);});
       this.#child.stdin.on('error',error=>this.#shutdown(error));
-      this.#child.on('error',error=>this.#settle(error));
+      // A native error before the spawn event means the program never started (reason start); after it, reason process.
+      this.#child.on('spawn',()=>{this.#started=true;});
+      this.#child.on('error',error=>this.#settle(Object.assign(error,{reason:this.#started?'process':'start'})));
       this.#child.on('close',code=>{
         if(this.#pendingError)this.#settle(this.#pendingError);
         else if(this.#response!==undefined)this.#settle();

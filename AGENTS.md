@@ -1,50 +1,15 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.140.0 sha256=373eec1659f9 -->
-# Toolkit-Governed Repository Rules
-
-On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds these rules: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
-
-## Governance Principles
-
-- **Only needed files:** the repository holds only the Toolkit files it needs (its binding and CI checks).
-- **Reuse first:** extend or reopen an existing issue, task or job before adding a new one; Lows and leftovers join their area's open child.
-- **Checks, not memory:** merge-commit-only, pinned required checks, grouped dependency updates and security settings are checked by governance.
-- **Owner reads and clicks:** agents do all linking, moving and archiving; everything that closes gets a closing comment.
-- **Per repository:** governance and its auto-merge switch are set per repository, never globally.
-
-## Delivery
-
-- Agree a release plan up front: releases, lanes and order. Keep one open release PR per lane; work outside the plan states its reason.
-- Finish fast: ship the biggest coherent batch that stays reviewable, reconcile records before the next task, and order work Now, then Later by priority.
-- Repository-wide CI, test sharding and time budgets are set here, measured before and after a change.
-- Every governed repository keeps a current compact repo map (parts, entry points, sources of truth, ownership, recorded commit), updated in the change that moves what it describes.
-
-## Records And Evidence
-
-- Programme tracking: the parent shows queue and status; each child's PR GRAPH shows each PR's SHA, gate and owed UAT, and its handover file the release and review. Gate ends run `programme.cjs handover`. Keep pending gates open after merge.
-- Decision traces: records are comments on their own issue; page bodies keep one link, never a trace. Record each owner decision that changes scope, authority or the plan as one tagged comment (tag on the first line, then `---`); other comments need no index entry. `programme.cjs trace <n>` lists them by tag; parent and child traces never mix, the latest comment wins within a tag and `SUPERSEDES=<record ID>` replaces a record. G0 reads both traces and has the owner confirm a live-scope summary first (decision-trace playbook).
-- SHAs: link files and commits with the 7-character short SHA (longer if ambiguous). Write the full 40-character SHA only in review verdicts, UAT results and merge summaries.
-- Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen the one in its area (same page, script or feature; once in progress, one follow-up sibling takes later work), else create a child as a native sub-issue. A child closes as completed once a merge completes every criterion and any owner UAT passed, any remainder moved to its area's open child first: that PR says `Closes #n`, else the controller does. Use `Refs` for staged, UAT-pending, blocked, partial or follow-up PRs.
-- Parent completion: per the `github-program-reconciler` skill's Parent lifecycle rules.
-- Custody: session folders, side-session notes, scratchpads and temp paths are never custody. Plans and reviews reach the selected private evidence store before a record cites them or sessions are archived; in a Git store the commit is the manifest and a push plus one fetch the read-back.
-- Evidence (transport) stores are agent-managed with standing permission, of any backend (repository, folder, drive): once the user-selected store, separate from the task repository, has its identity and privacy verified (a name or prefix alone grants nothing), agents write, reorganise, delete and, on Git, push to or merge into its default branch without asking. Scan every upload for secrets, never delete the sole copy of evidence, never relabel task source as evidence or retry a denied effect.
-
-## Repository Setup
-
-- If the repository does legitimate security-sensitive work, describe it in an `Authorised context` section of its own `AGENTS.md`: who owns the code, that the work is development and defensive testing of the repository's own software, and that nothing targets third-party systems.
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:END TOOLKIT-GOVERNED-RULES -->
-
 ## This Repository
 
-This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Portable installs use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md). Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness.
+This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Governed repositories, this one included, get the Toolkit-governed rules from the installed Toolkit at session start, never from a copy in `AGENTS.md`. Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness.
 
 - **Routing:** read the [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (it replaces the `toolkit-playbooks` skill index here), classify the task, and read only the smallest matching playbook set and the docs it names; with no match, continue baseline-only. If a required playbook is missing or conflicts with this file, stop and report.
 - **Programme:** for the programme, follow the [Toolkit delivery contract](repo/docs/TOOLKIT-DELIVERY.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
 
 ## Safety
 
-- Toolkit source changes go through a non-main branch and PR. Evidence custody follows the governed block above.
+- Toolkit source changes go through a non-main branch and PR. Evidence custody follows the Toolkit-governed rules.
 - Never commit secrets, private values, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, runtime-only files, product code, customer data or business workflow JSON.
 - Live systems, Docker, n8n runtime, import/export, sync, activation, credentials, SSH to real servers, deployment, firewall or production config, and destructive or external-service actions need explicit current-turn approval naming the target and operation.
 - Never weaken tests, validation, schemas, guardrails, attribution, generated-output ownership or approval gates to pass a check, and never claim CI passed without checking it.

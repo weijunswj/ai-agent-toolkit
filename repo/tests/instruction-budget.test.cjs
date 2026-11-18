@@ -104,13 +104,14 @@ test('guidance moved out of root AGENTS.md is still reachable from a loaded laye
     ['G0 Discovery -> G1 Builder, including UAT -> G2 Review', GLOBAL],
     ['gate-rules.md', GLOBAL],
     ['Route proof', read('repo/contracts/agent-rules/gate-rules.md')],
-    ['Decision traces', ROOT_AGENTS],
-    ['global-rules.md', ROOT_AGENTS],
+    // Root AGENTS.md carries no governed block: the installed Toolkit delivers these rules here too.
+    ['Decision traces', GOVERNED],
+    ['global-rules.md', GOVERNED],
     ['repo/contracts/source-of-truth-contract.md', ROOT_AGENTS],
     ['repo/docs/agent-playbooks/INDEX.md', ROOT_AGENTS],
     ['Check long runs early against their usual time', GLOBAL],
     ['## Long Runs', read('skills/toolkit-playbooks/fast-tests-and-sharding.md')],
   ];
   for (const [text, layer] of moved) assert.ok(layer.includes(text), text);
-  assert.doesNotMatch(ROOT_AGENTS, /GLOBAL-AGENTS\.MD-TEMPLATE|N8N-AGENT-RULES-ADAPTER|one pending owner question/);
+  assert.doesNotMatch(ROOT_AGENTS, /^<!-- AI-AGENT-TOOLKIT:|Decision traces|one pending owner question/m);
 });

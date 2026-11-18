@@ -12,7 +12,7 @@ param(
   [string]$ComposeProject,
   [string]$ComposeService,
   [string]$PreparedDir = ".tmp/n8n-live-import",
-  [string]$CredentialExportDir = ".tmp/n8n-live-credential-exports",
+  [string]$CredentialExportDir,
   [string]$ContainerDir = "/tmp",
   [ValidateSet("CreateNew", "UpdateArchived", "Block")]
   [string]$ArchivedByNameMode = "CreateNew",
@@ -786,15 +786,6 @@ function Assert-HelperSetReady {
   }
 }
 
-function Get-FirstOutputLine($CommandResult) {
-  $text = ($CommandResult.Output | Out-String).Trim()
-  if ([string]::IsNullOrWhiteSpace($text)) {
-    return "No output returned."
-  }
-
-  return ($text -split "`r?`n")[0]
-}
-
 function Read-RepoWorkflowInfo($WorkflowFile) {
   $workflow = Read-WorkflowFileSummary $WorkflowFile.FullName
   $workflowId = [string]$workflow.id
@@ -809,14 +800,6 @@ function Read-RepoWorkflowInfo($WorkflowFile) {
     Id = $workflowId
     Name = $workflowName
   }
-}
-
-function Get-WorkflowCheckLabel($WorkflowFile, $WorkflowId) {
-  if ([string]::IsNullOrWhiteSpace($WorkflowId)) {
-    return "$($WorkflowFile.Name) (id: not set, matching by name)"
-  }
-
-  return "$($WorkflowFile.Name) ($WorkflowId)"
 }
 
 function New-WorkflowId {
@@ -1088,322 +1071,6 @@ function Write-WorkflowJson($Workflow, $Path) {
   Write-LiveWorkflowJsonFile $Workflow $Path
 }
 
-function Set-PreparedWorkflowId($PreparedFile, $WorkflowId) {
-  if ([string]::IsNullOrWhiteSpace($WorkflowId)) {
-    return
-  }
-
-  Invoke-CliWorkflowJson @("set-id", "--file", $PreparedFile, "--id", $WorkflowId) "Could not set the target workflow id in $PreparedFile."
-}
-
-function Test-WorkflowHasScheduleTrigger($Workflow) {
-  foreach ($node in @($Workflow.nodes)) {
-    $type = [string]$node.type
-    if ($type -eq "n8n-nodes-base.scheduleTrigger" -or $type -eq "n8n-nodes-base.cron") {
-      return $true
-    }
-  }
-  return $false
-}
-
-function Get-LiveCredentialNodeCount($Workflow) {
-  if ($null -eq $Workflow) {
-    return 0
-  }
-  return @($Workflow.nodes | Where-Object { $_.PSObject.Properties.Name -contains "credentials" }).Count
-}
-
-function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
-  Write-Section "Credential Binding Refresh"
-  Write-Step "START" "Exporting available live workflows only to refresh local credential bindings."
-
-  Initialize-RunDirectory $CredentialExportDirPath
-  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $BindingsFilePath) | Out-Null
-
-  $exportedCount = 0
-  $skippedCount = 0
-  foreach ($workflowFile in $WorkflowFiles) {
-    $workflowInfo = Read-RepoWorkflowInfo $workflowFile
-    $liveWorkflow = $null
-    if (-not [string]::IsNullOrWhiteSpace($workflowInfo.Id)) {
-      $liveWorkflow = $LiveWorkflows | Where-Object { [string]$_.id -eq $workflowInfo.Id } | Select-Object -First 1
-    }
-    if ($null -eq $liveWorkflow) {
-      $nameMatch = Resolve-LiveWorkflowByName $workflowInfo.Name $workflowFile.Name $LiveWorkflows
-      if ($nameMatch.Status -eq "Found" -or $nameMatch.Status -eq "FoundArchived") {
-        $liveWorkflow = $nameMatch.Workflow
-      }
-    }
-
-    if ($null -eq $liveWorkflow) {
-      $skippedCount += 1
-      Write-Step "SKIP" "$($workflowFile.Name) does not exist live for credential binding refresh."
-      continue
-    }
-
-    $exportFile = Join-Path $CredentialExportDirPath "$($workflowFile.BaseName).live-export.json"
-    Write-WorkflowJson $liveWorkflow $exportFile
-    $exportedCount += 1
-    Write-Step "EXPORT" "$($workflowFile.Name) exported for credential binding refresh."
-  }
-
-  $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $CredentialExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
-  if ($syncResult.ExitCode -ne 0) {
-    Write-Step "FAIL" "Could not save refreshed credential bindings."
-    Write-CommandOutput $syncResult.Output
-    return $false
-  }
-
-  Write-Step "DONE" "Credential bindings refreshed at $(Get-DisplayPath $BindingsFilePath). Exported $exportedCount, skipped $skippedCount."
-  return $true
-}
-
-function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $LiveWorkflows) {
-  $plannedImports = @()
-  $blockedWorkflows = @()
-  $skippedCount = 0
-  $comparisonWarningCount = 0
-  $missingLiveWorkflowCount = 0
-  $nameMatchedWorkflowCount = 0
-  $restartWarningCount = 0
-
-  Write-Section "Workflow Check"
-
-  foreach ($workflowFile in $WorkflowFiles) {
-    $preparedFile = Join-Path $PreparedDirPath "$($workflowFile.BaseName).live-import.json"
-    $liveCompareFile = Join-Path $PreparedDirPath "$($workflowFile.BaseName).live-compare.json"
-    $containerFile = "$ContainerDir/$($workflowFile.BaseName).live-import.json"
-    $workflowInfo = Read-RepoWorkflowInfo $workflowFile
-    $repoWorkflow = $workflowInfo.Workflow
-    $workflowId = Get-LocalWorkflowIdentityId $workflowFile $workflowInfo.Name
-    if ([string]::IsNullOrWhiteSpace($workflowId)) { $workflowId = $workflowInfo.Id }
-    $workflowName = $workflowInfo.Name
-    $workflowStatus = "ComparisonFailed"
-    $liveWorkflowForCredentialCheck = $null
-    $liveWorkflowIdForImport = $null
-    $hasBodyChanges = $true
-    $credentialDriftStatus = "UNKNOWN"
-    $shouldImport = $true
-    $wasArchivedInLive = $false
-    $willUpdateArchivedWorkflow = $false
-    $plannedAction = "Import"
-    $targetLiveId = $workflowId
-    $actionNote = ""
-    $hasWorkflowId = -not [string]::IsNullOrWhiteSpace($workflowId)
-    $generatedWorkflowIdForImport = $null
-    $requiresRestartWarning = $false
-
-    Write-Step "CHECK" (Get-WorkflowCheckLabel $workflowFile $workflowId)
-
-    if (Test-Path -Path $preparedFile -PathType Leaf) {
-      Remove-Item -Path $preparedFile -Force
-    }
-    if (Test-Path -Path $liveCompareFile -PathType Leaf) {
-      Remove-Item -Path $liveCompareFile -Force
-    }
-
-    if ($hasWorkflowId) {
-      $idMatches = @($LiveWorkflows | Where-Object { [string]$_.id -eq $workflowId })
-      if ($idMatches.Count -gt 1) {
-        $blockedWorkflows += [PSCustomObject]@{
-          File = $workflowFile.Name
-          Reason = "Multiple live workflows matched repo id $workflowId."
-          Kind = "DuplicateLiveId"
-        }
-        continue
-      }
-
-      if ($idMatches.Count -eq 1) {
-        $liveWorkflowForCredentialCheck = $idMatches[0]
-        Write-WorkflowJson $liveWorkflowForCredentialCheck $liveCompareFile
-        if ($liveWorkflowForCredentialCheck.isArchived -eq $true) {
-          $workflowStatus = "ExistingArchivedById"
-          $wasArchivedInLive = $true
-          $willUpdateArchivedWorkflow = $true
-          $plannedAction = "Update archived by repo id"
-          $actionNote = "Exact repo id exists live but is archived. Unarchive this workflow in n8n if you want to use it."
-          Write-Step "ARCHIVE" "$($workflowFile.Name) ($workflowId) is archived in live n8n; import will update that archived workflow because the ID match is explicit."
-        } else {
-          $workflowStatus = "ExistingById"
-          $plannedAction = "Update by repo id"
-        }
-      }
-    }
-
-    if ($workflowStatus -eq "ComparisonFailed") {
-      $liveWorkflowByName = Resolve-LiveWorkflowByName $workflowName $workflowFile.Name $LiveWorkflows
-      if ($liveWorkflowByName.Status -eq "Blocked") {
-        $blockedWorkflows += [PSCustomObject]@{
-          File = $workflowFile.Name
-          Reason = $liveWorkflowByName.Reason
-          Kind = "ArchivedOrDuplicateName"
-        }
-        continue
-      }
-
-      if ($liveWorkflowByName.Status -eq "Found" -or $liveWorkflowByName.Status -eq "FoundArchived") {
-        $workflowStatus = "ExistingByName"
-        $nameMatchedWorkflowCount += 1
-        $liveWorkflowIdForImport = [string]$liveWorkflowByName.Workflow.id
-        $liveWorkflowForCredentialCheck = $liveWorkflowByName.Workflow
-        $willUpdateArchivedWorkflow = $liveWorkflowByName.Status -eq "FoundArchived"
-        $targetLiveId = $liveWorkflowIdForImport
-        Write-WorkflowJson $liveWorkflowByName.Workflow $liveCompareFile
-        if ($willUpdateArchivedWorkflow) {
-          $plannedAction = "Update archived by name"
-          $actionNote = "ArchivedByNameMode UpdateArchived selected. Unarchive this workflow in n8n if you want to use it."
-          Write-Step "MATCH" "$($workflowFile.Name) matched archived live workflow '$workflowName' by name as $liveWorkflowIdForImport."
-        } else {
-          $plannedAction = "Update by name"
-          Write-Step "MATCH" "$($workflowFile.Name) matched live workflow '$workflowName' by name as $liveWorkflowIdForImport."
-        }
-      } else {
-        $workflowStatus = "MissingLive"
-        $missingLiveWorkflowCount += 1
-        $plannedAction = "Create new"
-        if ($liveWorkflowByName.Status -eq "ArchivedCreateNew" -or -not $hasWorkflowId) {
-          $generatedWorkflowIdForImport = New-WorkflowId
-          $targetLiveId = $generatedWorkflowIdForImport
-          Write-Step "CREATE" "$(Get-WorkflowCheckLabel $workflowFile $workflowId) will be imported as a new unpublished workflow with generated id $generatedWorkflowIdForImport."
-        } else {
-          $targetLiveId = $workflowId
-          Write-Step "CREATE" "$(Get-WorkflowCheckLabel $workflowFile $workflowId) does not exist in live n8n; it will be imported as a new unpublished workflow."
-        }
-
-        if (-not $BindingsFileExists) {
-          $actionNote = "Reattach credentials in n8n if this workflow needs them."
-          Write-Step "WARN" "$($workflowFile.Name) will import without restored credential bindings. Reattach credentials in n8n after import if needed."
-        }
-      }
-    }
-
-    if ($null -ne $liveWorkflowForCredentialCheck) {
-      if ($liveWorkflowForCredentialCheck.active -eq $true -or (Test-WorkflowHasScheduleTrigger $repoWorkflow) -or (Test-WorkflowHasScheduleTrigger $liveWorkflowForCredentialCheck)) {
-        $requiresRestartWarning = $true
-        $restartWarningCount += 1
-        Write-Step "WARN" "This import updates a previously published or scheduled workflow."
-        Write-Step "WARN" "On non multi-main n8n instances, cron triggers may keep running until n8n is restarted."
-        Write-Step "WARN" "Restart the n8n container after import before trusting the published state."
-      }
-    }
-
-    if ($workflowStatus -eq "ExistingById" -or $workflowStatus -eq "ExistingByName" -or $workflowStatus -eq "ExistingArchivedById") {
-      $comparisonResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "should-import-n8n-workflow.cjs"), $workflowFile.FullName, $liveCompareFile)
-      if ($comparisonResult.ExitCode -ne 0) {
-        throw "Failed to compare repo workflow with live workflow for $($workflowFile.FullName).`n$($comparisonResult.Output -join "`n")"
-      }
-
-      if ($comparisonResult.StdOut -contains "UNCHANGED") {
-        $hasBodyChanges = $false
-      }
-
-      $credentialDriftResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "compare-n8n-workflow-credentials.cjs"), $workflowFile.FullName, $liveCompareFile, $BindingsFilePath)
-      if ($credentialDriftResult.ExitCode -ne 0) {
-        throw "Failed to compare live credentials for $($workflowFile.FullName).`n$($credentialDriftResult.Output -join "`n")"
-      }
-
-      $credentialDriftStatus = ($credentialDriftResult.StdOut | Select-Object -First 1).Trim()
-      if ($credentialDriftStatus -ne "MATCH" -and $credentialDriftStatus -ne "DIFF" -and $credentialDriftStatus -ne "UNKNOWN") {
-        throw "Unexpected credential drift result for $($workflowFile.Name): $credentialDriftStatus"
-      }
-
-      $liveCredentialCountForWarning = Get-LiveCredentialNodeCount $liveWorkflowForCredentialCheck
-      if ($credentialDriftStatus -eq "UNKNOWN" -and $liveCredentialCountForWarning -gt 0) {
-        Write-Step "WARN" "$($workflowFile.Name) has $liveCredentialCountForWarning live credential-bound node(s), but credential drift is UNKNOWN because local binding metadata is missing, unavailable, or ambiguous."
-      }
-
-      if (-not $hasBodyChanges -and $credentialDriftStatus -eq "DIFF") {
-        Write-Step "CRED" "$($workflowFile.Name) has credential binding changes; it will be imported."
-      }
-
-      if (-not $hasBodyChanges -and $credentialDriftStatus -ne "DIFF" -and $ForceImport) {
-        Write-Step "FORCE" "$($workflowFile.Name) has no meaningful workflow or credential changes, but ForceImport is set."
-      }
-
-      if (-not $hasBodyChanges -and $credentialDriftStatus -ne "DIFF" -and -not $ForceImport) {
-        Write-Step "SKIP" "$($workflowFile.Name) has no meaningful workflow or credential changes."
-        $skippedCount += 1
-        $shouldImport = $false
-      }
-    }
-
-    if (-not $shouldImport) {
-      continue
-    }
-
-    $liveCredentialCount = Get-LiveCredentialNodeCount $liveWorkflowForCredentialCheck
-    if ($liveCredentialCount -gt 0 -and -not $AllowMissingCredentialBindings) {
-      $bindingsUnavailable = (-not $BindingsFileExists) -or $credentialDriftStatus -eq "UNKNOWN"
-      if ($bindingsUnavailable) {
-        if ($DryRun) {
-          Write-Step "WARN" "$($workflowFile.Name) would need $BindingsFilePath to restore $liveCredentialCount live credential-bound node(s) during a real import."
-        } else {
-          Write-Step "BLOCK" "$($workflowFile.Name) changed, but $liveCredentialCount live credential-bound node(s) need available local credential bindings."
-          $blockedWorkflows += [PSCustomObject]@{
-            File = $workflowFile.Name
-            Reason = "Missing or unavailable credential bindings for $liveCredentialCount live credential-bound node(s)."
-            Kind = "MissingCredentialBindings"
-          }
-          continue
-        }
-      }
-    }
-
-    $prepareArgs = @(
-      (Join-Path $HelperScriptDir "prepare-n8n-live-import.cjs"),
-      $workflowFile.FullName,
-      $BindingsFilePath,
-      $preparedFile
-    )
-
-    if (Test-Path -Path $liveCompareFile -PathType Leaf) {
-      $prepareArgs += $liveCompareFile
-    }
-
-    $prepareResult = Invoke-CapturedCommand "node" $prepareArgs
-    if ($prepareResult.ExitCode -ne 0) {
-      throw "Failed to prepare live import file for $($workflowFile.FullName).`n$($prepareResult.Output -join "`n")"
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($liveWorkflowIdForImport)) {
-      Set-PreparedWorkflowId $preparedFile $liveWorkflowIdForImport
-      if ($willUpdateArchivedWorkflow) {
-        Write-Step "ID" "$($workflowFile.Name) will update archived live workflow id $liveWorkflowIdForImport. Unarchive that workflow in n8n if you want it active/usable."
-      } else {
-        Write-Step "ID" "$($workflowFile.Name) will update existing live workflow id $liveWorkflowIdForImport instead of creating a duplicate."
-      }
-    } elseif (-not [string]::IsNullOrWhiteSpace($generatedWorkflowIdForImport)) {
-      Set-PreparedWorkflowId $preparedFile $generatedWorkflowIdForImport
-      Write-Step "ID" "$($workflowFile.Name) prepared import payload will create new live workflow id $generatedWorkflowIdForImport."
-    } elseif ($willUpdateArchivedWorkflow) {
-      Write-Step "ID" "$($workflowFile.Name) will update archived live workflow id $workflowId. Unarchive that workflow in n8n if you want it active/usable."
-    }
-
-    Write-Step "READY" "$($workflowFile.Name) prepared import payload."
-    $plannedImports += [PSCustomObject]@{
-      File = $workflowFile.Name
-      PreparedFile = $preparedFile
-      ContainerFile = $containerFile
-      IsArchivedInLive = $wasArchivedInLive
-      UpdatesArchivedWorkflow = $willUpdateArchivedWorkflow
-      RequiresRestartWarning = $requiresRestartWarning
-      Action = $plannedAction
-      TargetId = $targetLiveId
-      Note = $actionNote
-    }
-  }
-
-  [PSCustomObject]@{
-    PlannedImports = $plannedImports
-    BlockedWorkflows = $blockedWorkflows
-    SkippedCount = $skippedCount
-    ComparisonWarningCount = $comparisonWarningCount
-    MissingLiveWorkflowCount = $missingLiveWorkflowCount
-    NameMatchedWorkflowCount = $nameMatchedWorkflowCount
-    RestartWarningCount = $restartWarningCount
-  }
-}
-
 function Get-PlannedTargetUniquenessBlockers($PlannedImports) {
   $blockers = @()
   $duplicateGroups = @(
@@ -1638,7 +1305,7 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
     }
   }
 
-  $targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans
+  $targetUniquenessBlockers = @(Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans)
   if ($targetUniquenessBlockers.Count -gt 0) {
     $blockedWorkflows += $targetUniquenessBlockers
     $plannedImports = @()
@@ -1743,7 +1410,6 @@ $ResourceBindingsFilePath = Join-Path $RepoRoot $ResourceBindingsFile
 $WorkflowIdentityFilePath = Join-Path $RepoRoot $WorkflowIdentityFile
 $ReportsDirPath = Join-Path $RepoRoot $ReportsDir
 $PreparedDirPath = Join-Path $RepoRoot $PreparedDir
-$CredentialExportDirPath = Join-Path $RepoRoot $CredentialExportDir
 Assert-StrictRepoChildPath $WorkflowIdentityFilePath "Workflow identity state"
 $deploymentPolicySnapshot = $null
 if ($DeploymentPolicyFileWasExplicit) {
@@ -1769,6 +1435,18 @@ Write-Host ("Force import     : {0}" -f ($(if ($ForceImport) { "Yes" } else { "N
 if ($RestartContainerAfterImport) {
   throw "N8N_POLICY_VALIDATION_FAILED: -RestartContainerAfterImport is no longer supported. This helper never restarts n8n."
 }
+if ($RequireConfirmation) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -RequireConfirmation is not supported by the import script. To confirm before an import, run n8n-workflow-sync-menu.ps1 -RequireConfirmation."
+}
+if ($SkipCredentialBindingRefresh) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -SkipCredentialBindingRefresh is not supported by the import script. It never refreshes credential bindings, so there is nothing to skip."
+}
+if ($AllowMissingCredentialBindings) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -AllowMissingCredentialBindings is not supported by the import script. Credential checks always run in the import preflight and cannot be switched off."
+}
+if ($PSBoundParameters.ContainsKey("CredentialExportDir")) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -CredentialExportDir is not supported by the import script. It never exports credential bindings, so there is no folder to set."
+}
 
 # A run that finishes or fails, including on an error, removes its stored live workflow list in the
 # finally block below; a killed run's leftovers are removed by the next run's first step.
@@ -1792,7 +1470,7 @@ if ($DeploymentPolicyFileWasExplicit) {
   Assert-DeploymentPolicySnapshotCurrent $deploymentPolicySnapshot
 }
 
-$workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
+$workflowFiles = @(Get-RootWorkflowFiles $WorkflowDirPath)
 Assert-NoCaseFoldedWorkflowFileCollisions $workflowFiles
 
 Write-Section "Workflow JSON Validation"
@@ -1811,7 +1489,7 @@ if ($transportResult.ExitCode -ne 0) {
 Write-Step "TRANSPORT" "Selected supported Docker/server CLI transport; helper preparation and validation remain mandatory."
 
 Invoke-LivePreflight
-$liveWorkflows = Get-LiveWorkflows
+$liveWorkflows = @(Get-LiveWorkflows)
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 
 if ($DeploymentPolicyFileWasExplicit) {
@@ -1824,7 +1502,7 @@ if ($DeploymentPolicyFileWasExplicit) {
   $EffectiveDeploymentPolicyFilePath = Join-Path $PreparedDirPath "deployment-policy.snapshot.json"
   Write-Utf8NoBomText $EffectiveDeploymentPolicyFilePath ($deploymentPolicySnapshot.Content.TrimEnd() + "`n")
 }
-$targetResolutionBlockers = Test-PortableTargetResolution $workflowFiles $liveWorkflows
+$targetResolutionBlockers = @(Test-PortableTargetResolution $workflowFiles $liveWorkflows)
 if ($targetResolutionBlockers.Count -gt 0) {
   $targetGate = [PSCustomObject]@{
     PlannedImports = @()

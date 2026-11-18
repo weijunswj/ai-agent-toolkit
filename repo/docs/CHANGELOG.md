@@ -1,5 +1,169 @@
 # Toolkit Changelog
 
+## 3.148.2
+
+### Fixed
+
+- **Work queue behind a blocker:** a task natively blocked by a moving task is now left off the work queue for seven days after it last changed, not for ever; after that `TASK_IDLE` is raised and its detail names the blocker. A blocker waiting on the owner counts as moving, as the reconciler guide now says. A task whose state lists a blocker (`NOW · QUEUED`) gets the same seven days, so a blocker that cleared but is still listed no longer hides it for ever.
+- **Work queue on a partial read:** a refresh that could not read every open PR no longer settles open `TASK_IDLE` and `TASK_MERGED_OPEN` findings; they stay as they stand until a pass reads the whole list.
+- **Session-start work-queue line:** the longest-stalled task now shows when it was `flagged`, not `since`, which matches the time it prints.
+
+## 3.148.1
+
+### Fixed
+
+- **Codex start failures read as start failures:** when the system refuses to start a named Codex after the launch is made (for example a script whose interpreter is missing), the app-server request now reports it as a start failure, as it already did for a Codex it refused before launch. `--check --codex` then holds with "cannot be started directly" instead of "did not give a readable answer (not found)". An error after Codex has started is reported as a process error. The Codex config check still returns "not verified" for a Codex the system refuses to run (permission or format errors) and moves on to the next candidate only when the program is missing or refused before launch.
+
+### Tests
+
+- Pinned the opted-in Codex PATH lookup: with only a refused Windows command script on PATH, the error keeps "not a standard npm shim" rather than "not available", and only the value `true` opts in (look-alikes such as `'yes'` or `1` keep the default refusal).
+- The Windows shadow-executable test now also plants logging copies in the Codex home, which config/read and runtime probes use as their working folder.
+- Renamed two Codex launch tests to say "opted-in Codex PATH lookup" and fixed an escaped line ending in a mocked wrapper script.
+
+## 3.148.0
+
+### Added
+
+- External operation preflight keeps the recovery identity of a temporary outside resource that later sessions depend on. A new offline script claims the exact name before creating, records the provider's handle from its read-back, lets a fresh session resolve and check that one resource, and deletes the record only after a read-back shows the resource gone. It keeps one record per resource: a resource or handle another key already holds is refused, and two sessions claiming at once cannot both win. A missing, half-done, damaged or mismatched record holds the work.
+
+## 3.147.0 (no silent skips and release identity)
+
+### Added
+
+- **No silent skips:** every skipped or todo test in Toolkit's own suite is listed in `repo/contracts/ci/test-skips.json` with the systems it skips on and a reason. The shard summaries now name each skipped and todo test, and the Validate check fails on a skip the list does not hold, on a listed skip that no longer skips, and on a summary that counts skips without naming them. A governed repository's own shard runner judges each test file by its exit code only, so it has no per-test skips to hold.
+- **Release identity:** `node repo/scripts/toolkit-release-identity.cjs --commit <sha>` finds the first Toolkit version that holds a merged commit and reports, for the computer it runs on only, whether each Toolkit copy there has it: the managed checkout, the Claude Code plugin, the claude.ai account copy in the Claude app, a cloud session's synced plugin copy and the Projects guidebook. A copy is delivered, not delivered or unknown; anything it cannot read or prove is unknown, never delivered. `--min-version <x.y.z>` checks a version instead. It exits 0 only when every copy it found is delivered, and reads only.
+- The git-completion playbook asks for this check before an owner test of a merged fix, and for each UAT result to name the version tested.
+
+## 3.146.5 (programme graph status bands)
+
+### Fixed
+
+- **The programme graph sorts by status band:** rows now run `NOW · IN PROGRESS`, then `NOW · QUEUED`, then `LATER`, then the latest `COMPLETED`, then `RETIRED`, so moving work no longer mixes with work parked behind a blocker. Inside each band the order is as before: priority, then child number, optional tasks at the end of `LATER`, and tasks pinned with `last` at the end of their own band, so a pinned task in progress never drops below `LATER`. CURRENT's In progress list and the native sub-issue order follow the same bands, so the first refresh after this release reorders native sub-issues once.
+- **Queued tasks are off the work queue:** a task whose state lists a blocker (shown `NOW · QUEUED`) no longer raises `TASK_IDLE` or `TASK_MERGED_OPEN`; its blocker says why. The batch tail guard and the one-level native blocker rule are unchanged.
+- **An owed UAT reads as a UAT:** a task waiting on the owner with a UAT still owed shows `Owner: UAT on PR #<n>` in the graph and `your UAT on PR #<n>` in CURRENT, not `Owner: decision`. A gate waiting on the owner still shows `Owner: decision`.
+
+## 3.146.4
+
+### Fixed
+
+- **A quoted host inside a run-time part is checked:** the n8n validator read every `${ ... }` and `{{ ... }}` as run time, so a private host written as a quoted literal inside one (`https://${'private-host'}/x`, `https://{{ $env.HOST || 'private-host' }}/x`, also in Code nodes and expression template literals) passed. Each part is now read as the texts it can give: its alternatives (split at `||`, `??`, `&&`, `?`, `:` and `,`), each a `+` chain of quoted literals, template literals (with their own `${ ... }` read the same way) and grouping parentheses. Only names, member access, calls and index keys count as run time; `*`, `/`, `%` and a unary `!`, `~`, `+` or `-` make only their own piece of a chain run time (`'private-host/items?offset=' + page * 50` is still read), while a comparison, an assignment or a binary `-` makes the whole alternative run time, so a host in brackets, in a nested template or split across `+` (`{{ 'https://' + $json.tenant + '.private-host/x' }}`) is found. `https://${host}/api` still passes, and so does a literal that is an allowed host. A text with no letter or digit (`${host || ''}`) is not read as a host, a URL repeated by one of these texts is counted once, and only the stretch of text a URL can reach around each part is read again, so a large Code node stays fast.
+
+## 3.146.3
+
+### Fixed
+
+- **Two more ignored import switches fail loudly:** `-AllowMissingCredentialBindings` and `-CredentialExportDir` on the n8n import script were accepted and ignored, because only an old preflight that nothing called read them. Both now stop with `N8N_POLICY_VALIDATION_FAILED` before any Docker call, and the old preflight, its credential-binding export and the helpers only they used are removed. A test checks that every function in the import script is called.
+- **The PowerShell 5.1 count check sees more call shapes:** besides a bare call, it now finds a counted helper result assigned through `( ... )`, `$( ... )` or `&`, to a `$script:` variable, or after other code on the line. `[array]` casts and `(...) + text` stay accepted.
+- **Partly run-time URL hosts are checked again:** a host built partly at run time, by `{{ ... }}` or by a template literal's `${...}` (`https://${tenant}.private-host/api`, `https://private-host{{ $json.path }}`, also in Code nodes and in expression template literals), is checked on what is left once every run-time part is dropped, so a private domain before or after a run-time part is found. A `${ ... }` holding a space, a call or a quote (`${ sub }`, `${$('Config').item.json.sub}`) is read as one piece, and what it holds is checked on its own. A host with no letter or digit left still passes, and so does one whose literal part is an allowed host.
+- **Expressions are read past regex literals and comments:** an apostrophe inside a regex literal or a comment no longer hides a later URL in the same expression, and a URL written in a comment inside an expression is checked too.
+- **An email ends where the script changes:** an allowed address followed straight by letters of another script (an address at an allowed domain followed by Japanese text) is no longer flagged. The cut is not used when the text cut off, with what follows it, runs on through local-part characters into an `@` or a fullwidth `＠`, because then it starts another address. Any other address is checked as before.
+
+## 3.146.2
+
+### Changed
+
+- **DESIGN.md reference follows the current upstream spec:** the `frontend-art-direction` DESIGN.md contract reference now says tokens can sit in front matter, in fenced `yaml` blocks inside sections, or both, that all blocks merge into one token tree and that a top-level key defined twice is an error. It adds the 10-section order, `motion` tokens (`duration`, `delay` and `timingFunction`) with reduced-motion guidance, and the prose-only Voice & Content Strategy section. The upstream pin moves to `google-labs-code/design.md` 679d301 (Apache-2.0, unchanged), and the source-watch cursor moves there too. Toolkit still adds no upstream CLI or package tooling.
+
+## 3.146.1
+
+### Fixed
+
+- **One early import blocker now stops the import on Windows PowerShell 5.1:** the n8n import helper's early target check returned a single blocker as a lone object, which has no `Count` on Windows PowerShell 5.1, so the check let the run continue. A workflow whose saved local identity no longer existed could then fall back to a same-name workflow. Every counted or indexed result from a helper function is now wrapped as a list, which also fixes the live workflow count and the skipped-archived number in export with one live workflow. A test checks the helper scripts for the unwrapped pattern, and Windows CI runs every early-blocker case under Windows PowerShell 5.1.
+- **The n8n workflow validator sees more personal data:** a URL written as a quoted text value inside an expression (`{{ 'https://host/path' }}`) is now checked, while a host built at run time (`{{ ... }}` or a template literal's `${...}`) still is not. Email addresses with letters from any script are now matched, and an allowed email domain is compared in normalised form, so a look-alike domain never passes as an allowed one. Findings still name the place, never the value.
+- **Unused import switches fail loudly:** `-RequireConfirmation` and `-SkipCredentialBindingRefresh` on the import script were accepted and ignored; both now stop with `N8N_POLICY_VALIDATION_FAILED` before any Docker call. Confirmation before an import belongs to the sync menu's own `-RequireConfirmation`.
+- **AllLive export follows the folder's naming:** a new file uses `<name>.workflow.json` when every existing root workflow file does, and joins words with `_` when the folder does, instead of always writing `<name>.json`. Name clashes compare full file names.
+- **Dry-run staging is documented:** the import README says a dry run stages a credential-metadata helper in the container's `-ContainerDir` (default `/tmp`) and removes it before it reports.
+
+## 3.146.0 (Toolkit's own repository drops its rule copies)
+
+### Changed
+
+- **No governed block in Toolkit's root `AGENTS.md`:** the installed Toolkit delivers the governed rules at session start here too, so the root file now holds only Toolkit's own rules, starting with "## This Repository". The Antigravity bootstrap in `.agents/rules/` is gone; Antigravity reads `AGENTS.md` itself. `CLAUDE.md` stays the one line `@AGENTS.md`.
+- **Instruction sync:** `sync-agent-instruction-shims.cjs` no longer writes the governed block or the bootstrap into the root. Its check, and `--write`, now fail when root `AGENTS.md` carries any Toolkit block (even a broken marker) or the bootstrap comes back, so a stale branch cannot re-add them. The portable templates stay as they are.
+- **Session start in a Toolkit checkout:** the note no longer compares root `AGENTS.md` with the managed template, which would have said to regenerate the block back in. `CLAUDE.md` is still compared with its template, and a newer checkout still says to refresh Toolkit.
+- **Force-push guard:** a repository counts as governed by its working-tree `.github/toolkit-programme.json` saying `"governance": "enabled"` (even when the rest of it does not parse), alongside its governance state and the guard config. A leftover governed block alone no longer counts.
+- **Version floor:** Toolkit's own binding now sets `min_toolkit` to 3.137.0, the first release with the new turn-on, the cleanup route and the session-start truncation fix, and the cleanup writes that floor too. A test keeps the cleanup's floor no newer than the Toolkit version.
+- **Lists and docs:** the re-bump stamp list and the fallback audit drop the root block and the bootstrap, and the instructions playbook and bridge doc describe the hand-written root file.
+
+## 3.145.2
+
+### Fixed
+
+- **Owed UAT stays on its own PR:** the programme graph's Waiting on cell, CURRENT's In progress line and the task page's PR GRAPH now name the PR an owed owner test was recorded on, found by matching the test's head against the task's PRs, instead of whichever PR the task tracks now. A UAT owed on a merged PR no longer moves to a newer replacement PR. A head that no known PR has shows as `UAT at <short head>` with no PR number. The refresh keeps the heads it has seen on each task's PRs (newest 20, never dropping the owed test's head) in the task's private part, which older Toolkit copies already accept, and writes only that key there, so the controller's own private notes are never overwritten.
+
+## 3.145.1
+
+### Fixed
+
+- **A new repository's first sweeps say what to do:** a cloud sweep held only because the repository has no programme state yet (`PARENT_STATE_MISSING`) now warns "No programme state yet; setup on first sweep only." and names the step, `programme.cjs init-parent --apply --controller`, for the parent issue. Three such runs in a row turn the hourly gate red with the same words instead of pointing at a programme page that does not exist yet. Every other hold keeps its general text.
+- **The require-cycle guard sees more requires:** it now follows `require(path.join(__dirname, ...))` and same-file path constants built that way, ignores comments, strings and regular expressions when finding requires, the CLI check and the exports line, and also scans the helper-script templates repositories copy and run. The test also checks its own lexer on every file: it fails when a string, regular expression, template, comment or brace is left unclosed, or when the lexed view of a file no longer compiles, so a misread token that would hide a file's requires turns the test red instead. Requires of a function argument or a computed root stay out of reach and are named in the test as the accepted remainder.
+
+## 3.145.0
+
+### Fixed
+
+- **In-flight work shows NOW without a hand step:** an open pull request that claimed a programme task whose state recorded no pull request or branch only raised `PR_UNTRACKED`, so the task stayed `PLANNED` and the parent graph showed active work as LATER until a controller recorded it by hand. A refresh, the cloud sweep included, now records the one open pull request from a person's branch of the repository that claims the task (a GitHub closing link, `Refs`, `Completes`, `Closes`, `Fixes` or `Resolves` `#n` in its body, or, with no such line, its own PATH block): it writes the pull request, its branch and head, and moves a `PLANNED` task to `ACTIVE`, so the graph shows it NOW in the same pass. Two or more such pull requests, a pull request from a fork, a bot or a generated branch, a finished or retired task, and a pass whose discovery is incomplete write nothing and leave a `PR_UNTRACKED` finding that names the pull requests and the reason. The write goes through the guarded state write and is held when the task's record changed after planning; it never touches gate, review, UAT, close or assignment fields. While no gate return, review or UAT is bound to a recorded head, a later push moves the recorded head with it, so the push raises no `PR_HEAD_MOVED`. A tracked pull request that closed or merged still moves to the one newer open pull request that claims the task, now also through its PATH block.
+
+### Added
+
+- **Stale pins are loud:** in a governed repository whose cloud workflow copies (the sweep, its gate and the test shards copies) are pinned to an older Toolkit commit, the governance check only noted it, so the repository's cloud sweep kept running old Toolkit code unseen. Each session start on a computer, in Claude Code and Codex, now names every such copy in one stale-pins note with the refresh command, `node repo/scripts/toolkit-cloud-workflows.cjs --repo <repo>`, to run from a Toolkit checkout on the latest main and land through a pull request. It names the command only when this computer's Toolkit checkout is on main and already contains every pin; a newer pin or a checkout off main gets a note to update the checkout first, because a refresh from it would roll the copies back.
+
+## 3.144.0 (work in batches)
+
+### Changed
+
+- Work now moves from Later to Now in batches. Lanes finish the Now batch first (fixes, then reviews, then other steps), then the controller reads all of Later and picks the next batch: the highest priority tier first, then the quickest tasks, at most 6 PRs and one large task. A tail guard stops one slow task from holding the next batch. `CONTROLLER.md` "Work queue" and the delivery contract's new "Work in batches" part say the same rule; the delivery contract defines the priority tiers (P0 to P3), sizes (S, M, L), when a batch is done, lane order, parking and jumps.
+- The `order` field's description says how the controller sets it: Later reads priority tier, then size, with the picked batch first.
+
+### Added
+
+- The reconciler raises a new work-queue finding, `BATCH_NEXT`, on the programme parent when the graph has a Later task and no Now task needs a gate lane, after one quiet hour (only the first raise waits, so a routine task write never drops a dispose). A Now task needs none while it waits on the owner, its open PR passed review at its current head with no red required check, every PR on it has merged or closed, or it has been still for a day (the tail guard). Like the other work-queue findings it is answered by acting or a dispose, never acknowledged, and it clears by itself once a task takes a lane. It reaches the session-start attention line, `programme.cjs attention` and the Projects hourly nudge's `WORK QUEUE` prefix.
+- The Projects hourly nudge lists the graph's Later rows as queued work only once `BATCH_NEXT` says no task in progress needs a lane, and works project memory's queue the same way.
+
+## 3.143.0
+
+### Fixed
+
+- **The issue closure check proves a merge train is a train:** a merged train's `OWNER_TEST_NEEDED` line releases an issue its members answer for only when the train's own commits are merges of member heads (each row's pull request merged at that head, never the train itself), catch-up merges of main, eject reverts that exactly undo an earlier boarding, and a last version-only bump, read from GitHub. A pull request that pastes a train table over a merge of a sibling branch (even one that lists the sibling's head as a row), or adds a commit of its own, keeps the issue held.
+
+## 3.142.0 (store save recovers from a failed push)
+
+### Changed
+
+- `toolkit store` save, move and merge-branch no longer strand the store checkout after a failed push. A push is tried up to 4 times with waits of 2, 4 and 8 seconds; before each retry the store is read first, so a push that landed is never sent twice, and a store that moved is merged with a merge commit. After the last try the commit stays in the checkout, and running the same save again checks it and pushes it.
+- Commits the store lacks, whether kept by a failed push, made by hand or made by a race merge, are checked again right before every push: every blob and every commit message is secret-scanned, and each change may only add, change or exactly rename plain files inside the store folders. A commit that fails is named and never pushed.
+- A race merge that conflicts is cancelled and made again keeping both versions: the store's copy stays in place and ours is saved under `evidence/store-conflicts/`. No step leaves a half-done merge, and `sync` cancels one an older run left, keeping every commit.
+- The `--message` text is secret-scanned before anything is committed.
+- No store refusal points at a raw push, a reset or a hand merge any more.
+
+## 3.141.1
+
+### Changed
+
+- **Projects coordinator reads a thread's result in full before resolving it:** a wake preview can cut the end of a thread's final message, and a thread was once resolved from such a preview, losing the report paths and a follow-up item in its tail. Reading the final message in full (`full_bodies`, never a preview or summary) and acting on or recording every item in it is now a condition of resolving a thread, in the instructions block line, the skill's resolve conditions and read rule, the hourly nudge's thread read and resolve candidates, and the `RESOLVE DUE` step. Wording in the block and skill was tightened elsewhere to stay within their byte budgets, with no rule dropped from the skill; the block's "End finished Remote Control sessions" line now lives only in the skill, beside the resolve rule.
+
+### Fixed
+
+- **Superseded pull requests:** a programme task kept tracking the first pull request it found, even after that pull request closed unmerged and a replacement took its place, so the G1 acceptance check read the dead pull request's head (`EVIDENCE_STALE`) and the close list never offered the task. A refresh now moves a task's tracked pull request only to a newer pull request that claims the task, through a GitHub closing link or `Refs`, `Completes`, `Closes`, `Fixes` or `Resolves` with the task's number in its own body. When the tracked pull request closed unmerged, the task follows the one such open pull request, or else the newest such merged one; when it merged and the task is still open, the task follows the one such open pull request, so a later slice or rebuild is tracked too. A mention without a keyword, an older pull request, two or more such open pull requests and a retired task never move it, a finished task only moves from a closed pull request to a merged one, and a replacement that cannot be read back in the state it was chosen in leaves the task's PR discovery incomplete with the old pull request kept. Each move appears in the pass's planned effects and its JSON report.
+
+## 3.141.0 (design data refresh)
+
+### Fixed
+
+- **Task auto-merge in Claude Projects cloud threads:** every cloud Projects thread was forced Off for task auto-merge, so a train with the repository's switch at `after-gates` still needed the owner's card tap. The host writes a thread's session context as the opening record of its session transcript, marked meta, and never submits it as a prompt, so the hook that should have recorded the project line never saw it. The merge hold now reads the `- Task auto-merge` project line at merge time from that record: only the first main-thread user entry, only when it is marked meta, belongs to this session and starts with the session context. A typed first prompt, a later wake carrying a context, tool output, another session's transcript and a missing or unreadable transcript all still force Off. The prompt-based switch store, which was never written on the real host, is removed, and the gate route check and the merge hold now share one read-only transcript head reader. Tests use the host's real transcript shape.
+
+### Changed
+
+- **Design data:** The design-system generator's 28 CSV files now match upstream `nextlevelbuilder/ui-ux-pro-max-skill` at `0e8d408`, byte for byte, and every lock pin is the real upstream blob, so the old line-ending-only pins are gone.
+- **Status filter:** Only rows upstream marks `active` rank in style and stack searches, so deprecated and supplemental styles never lead a recommendation. A stack query naming a legacy or deprecated generation still finds that stack's deprecated rows.
+- **Right-to-left:** A recommended style now carries upstream's `rtl_level`, shown in the Markdown output too.
+
+### Added
+
+- **Source-lock refresh:** `repo/scripts/refresh-source-lock.cjs` turns a reviewed source-watch notice into a one-command refresh of an active source lock: it copies exact files, moves pins, lists new upstream files as excluded and refuses while an adapted file needs porting by hand.
+- **Escape list:** `repo/scripts/toolkit-escape-ledger.cjs` keeps one line per bug found after merge in the private evidence store (`state/<owner>/<repo>/escapes.jsonl`, beside the repository's programme state): what broke, why the tests missed it, the kind of test that should have caught it, who found it, and the fix and test once they exist. `add` writes a line, `fix` fills the fix and test once, `check` validates the file and `group` prints counts per kind and the escapes with no test yet, never the text. The reader refuses anything outside its exact format, and any text holding a local path, a secret-shaped value, personal data or an AI footer.
+- **Controller findings:** a bug found after merge now also gets its escape-list line the same turn.
+
 ## 3.140.0 (stuck threads get a fresh successor)
 
 ### Fixed

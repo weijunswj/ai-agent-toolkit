@@ -69,7 +69,7 @@ test('bump-version changes the version everywhere it appears and nothing else', 
   assert.match(result.stdout, /Toolkit version is now 9\.9\.9\./);
 
   const changed = files.filter((rel) => digest(path.join(copy, rel)) !== before.get(rel));
-  for (const rel of [VERSION_REL_PATH, ...MANIFEST_REL_PATHS, 'repo/docs/published-surface-audit-baseline.json', 'AGENTS.md', 'README.md']) {
+  for (const rel of [VERSION_REL_PATH, ...MANIFEST_REL_PATHS, 'repo/docs/published-surface-audit-baseline.json', 'README.md']) {
     assert.ok(changed.includes(rel), `${rel} should carry the new version`);
   }
   // Every changed file differs from the original only by the version number. The syncs write LF;
@@ -162,6 +162,7 @@ test('--next sets the base version plus one, folds the fragment and bumps a chan
   lane.write(SKILL, `${lane.read(SKILL)}\n- A lane rule.\n`);
   lane.commit('lane work');
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), [], 'a lane holding the base version passes CI');
+  const rootRules = lane.read('AGENTS.md');
 
   const result = lane.bump('--next', 'minor', '--base', 'base');
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -170,7 +171,9 @@ test('--next sets the base version plus one, folds the fragment and bumps a chan
   assert.ok(result.stdout.includes(`base at ${lane.run('rev-parse', 'base')} was ${TOOLKIT_VERSION}`), result.stdout);
   assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), expected);
   for (const rel of MANIFEST_REL_PATHS) assert.equal(JSON.parse(lane.read(rel)).version, expected, rel);
-  assert.ok(lane.read('AGENTS.md').includes(`toolkit=${expected} `), 'markers carry the new version');
+  assert.ok(lane.read('README.md').includes(`toolkit=${expected} `), 'markers carry the new version');
+  // Root AGENTS.md is all hand-written, so a bump (which runs both syncs with --write) leaves it as it was.
+  assert.equal(lane.read('AGENTS.md'), rootRules, 'the bump leaves root AGENTS.md unchanged');
   const changelog = lane.read(CHANGELOG_REL_PATH);
   assert.equal(topChangelogVersion(changelog), expected);
   assert.ok(changelog.includes(`## ${expected} (lane work)\n\n### Lane\n\n- **A change:** what it does.\n\n## ${TOOLKIT_VERSION}`), 'the notes sit under the new heading, above the base entry');

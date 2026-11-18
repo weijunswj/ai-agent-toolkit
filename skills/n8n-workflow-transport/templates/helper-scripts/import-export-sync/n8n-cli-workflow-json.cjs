@@ -12,7 +12,6 @@
 //   node n8n-cli-workflow-json.cjs list --input <n8n CLI output file> --store <workflows.json> --summary <summary.json>
 //   node n8n-cli-workflow-json.cjs file-summary --input <workflow.json> --summary <summary.json>
 //   node n8n-cli-workflow-json.cjs write --store <workflows.json> --id <workflow id> --output <file>
-//   node n8n-cli-workflow-json.cjs set-id --file <workflow.json> --id <workflow id>
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -187,16 +186,6 @@ function writeCommand(options) {
   writeJson(required(options, 'output'), matches[0]);
 }
 
-function setIdCommand(options) {
-  const file = required(options, 'file');
-  const workflow = readJsonFile(file, 'Prepared workflow');
-  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
-    throw new N8nCliOutputError('N8N_CLI_OUTPUT_UNREADABLE', 'Prepared workflow must contain one workflow object.');
-  }
-  workflow.id = required(options, 'id');
-  writeJson(file, workflow);
-}
-
 function required(options, key) {
   const value = options[key];
   if (typeof value !== 'string' || !value) throw new N8nCliOutputError('N8N_CLI_USAGE', `Missing --${key}.`);
@@ -223,14 +212,13 @@ const COMMANDS = {
   list: listCommand,
   'file-summary': fileSummaryCommand,
   write: writeCommand,
-  'set-id': setIdCommand,
 };
 
 function main(argv = process.argv.slice(2)) {
   try {
     const { command, options } = parseArgs(argv);
     const run = COMMANDS[command];
-    if (!run) throw new N8nCliOutputError('N8N_CLI_USAGE', `Unknown command: ${command || '(none)'}. Use list, file-summary, write or set-id.`);
+    if (!run) throw new N8nCliOutputError('N8N_CLI_USAGE', `Unknown command: ${command || '(none)'}. Use list, file-summary or write.`);
     run(options);
     return 0;
   } catch (error) {
