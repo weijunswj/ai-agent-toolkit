@@ -1932,12 +1932,13 @@ function orderTies(parent, children) {
     .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
 }
 
-// The Status cell (see above): NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED or RETIRED.
+// The Status cell (see above): NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED or RETIRED. A live
+// gate outranks a listed blocker; once it returns, the blocker queues the task again.
 function statusCell(outcome, child) {
   const cls = graphClass(outcome, child);
   if (cls === '-') return statusText(outcome, child);
   if (cls !== 'NOW') return 'LATER';
-  return child?.blockers?.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
+  return child?.blockers?.length && !gateLive(child) ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
 }
 
 // The task PR a UAT was recorded on: the one whose head is the UAT's head, from the tracked PR and
@@ -1959,10 +1960,15 @@ function owedUat(child) {
   return pr ? `UAT on PR #${pr}` : `UAT at ${shortSha(child.uat.at_head)}`;
 }
 
-// True while a gate is at work on the task: assigned or active, and not blocked. Its work is then
-// the current step, so a UAT still owed (often on an earlier PR) shows after it, not in its place.
+// True while a gate is assigned or active on the task, blocked or not.
+function gateLive(child) {
+  return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state));
+}
+
+// True while a gate is at work on the task: live and not blocked. Its work is then the current
+// step, so a UAT still owed (often on an earlier PR) shows after it, not in its place.
 function gateAtWork(child) {
-  return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state) && !child.blockers?.length);
+  return gateLive(child) && !child.blockers?.length;
 }
 
 // What a task waiting on the owner asks of them, or null when it does not wait on the owner. A gate
@@ -1975,16 +1981,34 @@ function ownerAsk(child) {
   return owedUat(child) || 'decision';
 }
 
-// The Waiting on cell of an active row: the owner's ask, a blocker, else the gate a task in
-// progress is in (then any UAT still owed); `-` for queued and finished rows.
+// The owner's next step on a task, or null: { ask, after }. The owner's ask (ownerAsk), else a UAT
+// still owed, now or `after` the gate at work. A blocker is never an owner step. The graph's Waiting
+// on cell, CURRENT and `attention`'s owner waits (ownerWaits) all read it, so they always agree.
+function ownerStep(outcome, child) {
+  if (!child || isFinished(outcome, child)) return null;
+  const ask = ownerAsk(child);
+  if (ask) return { ask, after: null };
+  const uat = owedUat(child);
+  if (!uat) return null;
+  return { ask: uat, after: gateAtWork(child) ? publicText(child.gate.role) : null };
+}
+
+// The tasks waiting on the owner, in Programme Graph order, each with its step, PR and head.
+function ownerWaits(parent, children) {
+  return graphOrder(parent, children, new Map()).flatMap(outcome => {
+    const child = children.get(outcome.issue);
+    const step = ownerStep(outcome, child);
+    return step ? [{ issue: outcome.issue, ...step, pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }] : [];
+  });
+}
+
+// The Waiting on cell of an active row: the owner's step, a blocker (after a live gate), else the
+// gate a task in progress is in; `-` for queued and finished rows.
 function waitingCell(outcome, child) {
   if (!child || isFinished(outcome, child)) return '-';
-  const ask = ownerAsk(child);
-  if (ask) return `Owner: ${ask}`;
-  const uat = owedUat(child);
-  if (uat && gateAtWork(child)) return `${publicText(child.gate.role)}, then Owner: ${uat}`;
-  if (uat) return `Owner: ${uat}`;
-  if (child.blockers?.length) return `Blocked: ${child.blockers.map(publicText).join('; ')}`;
+  const step = ownerStep(outcome, child);
+  if (step) return `${step.after ? `${step.after}, then ` : ''}Owner: ${step.ask}`;
+  if (child.blockers?.length) return `${gateLive(child) ? `${publicText(child.gate.role)}, then ` : ''}Blocked: ${child.blockers.map(publicText).join('; ')}`;
   return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role ? publicText(child.gate.role) : '-';
 }
 
@@ -2048,22 +2072,6 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
     `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
 }
 
-// What waits on the owner for one task, or null: the owner's ask (ownerAsk), a UAT, or a blocker. A
-// UAT owed while a gate is at work waits for that gate (ownerNext).
-function ownerWait(child) {
-  if (!child) return null;
-  const ask = ownerAsk(child);
-  if (ask) return `your ${ask}`;
-  if (owedUat(child) && !gateAtWork(child)) return `your ${owedUat(child)}`;
-  if (child.blockers.length) return `blocked: ${child.blockers.map(publicText).join('; ')}`;
-  return null;
-}
-
-// The owner's step after the gate at work, or null: a UAT still owed.
-function ownerNext(child) {
-  return !ownerWait(child) && gateAtWork(child) && owedUat(child) ? `your ${owedUat(child)}` : null;
-}
-
 // The generated CURRENT summary, kept slim: the board line, the tasks in progress in Programme Graph
 // order (each with its PR, gate and any wait on the owner), then one line with the attention counts
 // and the holds (tasks blocked or on hold), then any open PASS_STOPPED finding in full, since a
@@ -2071,11 +2079,13 @@ function ownerNext(child) {
 // other finding is in `programme.cjs attention`.
 function renderCurrentBlockBody(parent, children, issues = new Map(), now = new Date().toISOString(), board = null) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
+  // The owner's step (ownerStep) says "waiting on you"; a blocker is only "blocked".
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
-    const wait = ownerWait(row.child);
+    const step = ownerStep(row.outcome, row.child);
+    const blocked = !step && row.child.blockers.length ? `blocked: ${row.child.blockers.map(publicText).join('; ')}` : null;
     return `- ${[`#${row.outcome.issue} ${taskName(row.outcome, issues.get(row.outcome.issue))}`, row.child.pr.number ? `PR #${row.child.pr.number}` : null,
-      row.child.gate.role ? publicText(row.child.gate.role) : null, wait ? `waiting on you: ${wait}` : null,
-      ownerNext(row.child) ? `then ${ownerNext(row.child)}` : null].filter(Boolean).join(' · ')}`;
+      row.child.gate.role ? publicText(row.child.gate.role) : null, step && !step.after ? `waiting on you: your ${step.ask}` : blocked,
+      step?.after ? `then your ${step.ask}` : null].filter(Boolean).join(' · ')}`;
   });
   const holds = rows.filter(row => row.child && !isFinished(row.outcome, row.child) && (row.child.lifecycle === 'HOLD' || row.child.blockers.length)).length;
   return [
@@ -7802,7 +7812,7 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
-  evaluateChecks, frozenPage, titleCell, pageTitles, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,

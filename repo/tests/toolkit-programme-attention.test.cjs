@@ -892,3 +892,39 @@ test('E3: attention writes the longest-stalled work-queue task into this compute
   assert.deepEqual(written.queue, { count: 1, oldest: { issue: 423, code: 'TASK_MERGED_OPEN', since: at, next: state.FINDING_CODES.TASK_MERGED_OPEN.next_action } });
   assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge/);
 });
+
+// ---- Owner waits --------------------------------------------------------------------------------
+
+test('attention lists every task waiting on the owner, read from the children at read time, and says unknown when a child cannot be read', () => {
+  const catalogue = [423, 424, 425, 426].map((issue, order) => ({ issue, class: 'COMMITTED', parent: 421, order }));
+  const fx = fixture({ catalogue });
+  const write = (issue, change) => {
+    const doc = { ...state.newChild({ repository: 'acme/app', outcome: catalogue.find(outcome => outcome.issue === issue) }), lifecycle: 'ACTIVE' };
+    change(doc);
+    fx.store.write('child', issue, doc, { sha: null, previous: null });
+  };
+  write(423, doc => { doc.lifecycle = 'WAITING_OWNER'; Object.assign(doc.pr, { number: 900, state: 'MERGED', head: SHA_A }); Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_A }); });
+  write(424, doc => { doc.blockers = ['waits for #423']; });
+  write(425, doc => {
+    Object.assign(doc.pr, { number: 901, state: 'OPEN', head: SHA_B });
+    Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_B });
+    Object.assign(doc.gate, { role: 'G2', state: 'ACTIVE', assignment: { id: 'a-425-g2', role: 'G2' } });
+  });
+  const json = fx.run(['attention']);
+  assert.equal(json.error, null);
+  assert.deepEqual(json.result.owner_waits, [
+    { issue: 423, ask: 'UAT on PR #900', after: null, pr: 900, head: SHA_A },
+    { issue: 425, ask: 'UAT on PR #901', after: 'G2', pr: 901, head: SHA_B },
+  ], 'a blocked task and a task with no document are not owner waits');
+  const text = fx.run(['attention'], {}, { json: false }).result;
+  assert.match(text, /^Owner waits \(2\)\n- #423 UAT on PR #900 · PR #900 · aaaaaaa\n- #425 UAT on PR #901 after G2 · PR #901 · bbbbbbb$/m);
+  assert.match(text, /^Attention: /, 'the Attention line still leads');
+  const { blobSha } = require('./toolkit-programme-fake-github.cjs');
+  fx.github.files.set(fx.store.docPath('child', 424), { text: '{not json', sha: blobSha('{not json') });
+  fx.github.commit();
+  const broken = fx.run(['attention']);
+  assert.equal(broken.error, null, 'the findings still print');
+  assert.equal(broken.result.owner_waits, null);
+  assert.equal(broken.result.owner_waits_unknown, 'STATE_INVALID');
+  assert.match(fx.run(['attention'], {}, { json: false }).result, /^Owner waits: unknown \(STATE_INVALID\)$/m, 'never an empty list from a failed read');
+});
