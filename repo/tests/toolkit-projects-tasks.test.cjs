@@ -1258,3 +1258,43 @@ test('the hourly nudge flags a skipped scheduled workflow for a manual run', () 
     "is never started without the owner's approval naming it", 'with the file, ref and effect', 'A disabled workflow is not missed',
     'with a default-branch-only job guard']) assert.ok(missed.includes(phrase), phrase);
 });
+
+test('owner waits on the board reach the owner every run, missed runs are flagged from each cron, and gate starts record their assignment', () => {
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  for (const session of ['bound', 'fresh']) {
+    const nudge = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], parent_issue: '12', session })).split('\n');
+    const waits = nudge.find(line => line.startsWith('   Owner waits'));
+    assert.ok(waits && nudge.indexOf(waits) > nudge.findIndex(line => line.startsWith('2a. Owner asks')) && nudge.indexOf(waits) < nudge.findIndex(line => line.startsWith('2b. ')), `${session}: owner waits belong to step 2a`);
+    for (const phrase of ['`programme.cjs attention`', '`Owner waits`', 'under **Waiting on owner:** every run until done', '`UNRELAYED ASK:`',
+      "the parent page's PROGRAMME GRAPH rows whose Waiting on cell holds `Owner:`", '"Owner waits: unknown"']) assert.ok(waits.includes(phrase), `${session}: ${phrase}`);
+    const runs = nudge.find(line => line.startsWith('10. Task runs'));
+    for (const phrase of ['toolkit-projects-run-missed.cjs', '`cron_expression`', '`last_fired_at`', '"RUN MISSED: <n> | "', '"RUN CHECK FAILED: <why> | "', 'stopped by owner',
+      "on this task's own entry only, add `own_run` (this run's own time, never as a stamp"]) {
+      assert.ok(runs.includes(phrase), `${session}: ${phrase}`);
+    }
+    assert.ok(!/own time included/.test(runs), `${session}: this run's own time as a stamp would hide its own missed runs`);
+    const first = nudge.find(line => line.startsWith('- First line:'));
+    assert.ok(first.includes('"CHECK-IN NOT ARMED: <why> | ", "RUN MISSED: <n> | ", "RUN CHECK FAILED: <why> | "'), `${session}: first line`);
+    const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    assert.ok(!none.includes('   Owner waits'), `${session}: no programme parent, no owner-waits list`);
+  }
+  const daily = rendered('daily-check-in').split('\n');
+  const dailyWaits = daily.find(line => line.startsWith('   Owner waits'));
+  assert.ok(dailyWaits && daily.indexOf(dailyWaits) > daily.findIndex(line => line.startsWith('12. ')), 'the daily check-in lists owner waits in step 12');
+  assert.ok(dailyWaits.includes('`programme.cjs attention`') && dailyWaits.includes('**Waiting on owner:**'));
+  const asks = fs.readFileSync(path.join(dir, 'reference', 'owner-asks.md'), 'utf8');
+  assert.match(asks, /^- \*\*Owner waits on the programme board are asks\.\*\*[^\n]*Recording an owed UAT or decision is a new ask: ping it the same turn\./m);
+  const periodic = fs.readFileSync(path.join(dir, 'reference', 'periodic-runs.md'), 'utf8');
+  const missedRun = periodic.split('\n').find(line => line.startsWith('- `RUN MISSED`'));
+  assert.ok(missedRun && missedRun.includes('**Moving a task or catching up**') && missedRun.includes('`RUN CHECK FAILED`'), 'the coordinator catches up a missed run');
+  const skill = fs.readFileSync(SKILL, 'utf8');
+  assert.match(skill, /\*\*Programme attention before gates, finality and settling\.\*\*[^\n]*the turn a gate thread starts, queue its `assign` holder order, naming the assignment id in the brief, and its return the turn it reports \(\*\*Gate assignments\*\*, `reference\/periodic-runs\.md`\)\./);
+  // Every assignment a gate start opens is ended by the controller, and the next gate supersedes a live one; else the next
+  // `assign` is refused (ASSIGNMENT_LIVE) and a finished gate keeps its task in progress (the route itself: programme-parent-layout).
+  const gates = periodic.split('\n').find(line => line.startsWith('- **Gate assignments**'));
+  assert.ok(gates, 'the reference names the gate route');
+  for (const phrase of ['`assign --issue <n> --role <gate> --assignment <id>`', "while the task's previous gate is still live", '`--supersede --reason',
+    '`ASSIGNMENT_LIVE`', 'The turn the thread reports its result, queue in one order `return --issue <n> --record <id>.r<round> --assignment <id>`',
+    'for a G0 or G2 `return --issue <n> --consume <id>.r<round> --verdict ACCEPT`', "a G1's return stays submitted until its G2's `assign --supersede` ends it",
+    '`interrupt --issue <n> --reason <why>`']) assert.ok(gates.includes(phrase), phrase);
+});
