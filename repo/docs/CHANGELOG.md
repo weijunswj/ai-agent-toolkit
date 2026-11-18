@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.146.4
+
+### Fixed
+
+- **A quoted host inside a run-time part is checked:** the n8n validator read every `${ ... }` and `{{ ... }}` as run time, so a private host written as a quoted literal inside one (`https://${'private-host'}/x`, `https://{{ $env.HOST || 'private-host' }}/x`, also in Code nodes and expression template literals) passed. Each part is now read as the texts it can give: its alternatives (split at `||`, `??`, `&&`, `?`, `:` and `,`), each a `+` chain of quoted literals, template literals (with their own `${ ... }` read the same way) and grouping parentheses. Only names, member access, calls and index keys count as run time; `*`, `/`, `%` and a unary `!`, `~`, `+` or `-` make only their own piece of a chain run time (`'private-host/items?offset=' + page * 50` is still read), while a comparison, an assignment or a binary `-` makes the whole alternative run time, so a host in brackets, in a nested template or split across `+` (`{{ 'https://' + $json.tenant + '.private-host/x' }}`) is found. `https://${host}/api` still passes, and so does a literal that is an allowed host. A text with no letter or digit (`${host || ''}`) is not read as a host, a URL repeated by one of these texts is counted once, and only the stretch of text a URL can reach around each part is read again, so a large Code node stays fast.
+
 ## 3.146.3
 
 ### Fixed
