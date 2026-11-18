@@ -906,6 +906,20 @@ test('the blocker rule goes one level only: a task behind a still blocker that l
   assert.deepEqual(found.map(finding => finding.code), ['TASK_IDLE'], 'a queued blocker is not moving, so it hides nothing');
 });
 
+test('a task whose state lists a blocker is off the work queue for seven days, then raised saying so', () => {
+  assert.equal(state.BLOCKED_SKIP_DAYS, 7);
+  const blockers = ['waits for #807'];
+  const merged = { merged: true, pr: { number: 900, state: 'MERGED' }, hours: 7 * 24 };
+  assert.deepEqual(idle({ hours: 7 * 24 - 1, blockers }), [], 'under seven days the listed blocker still says why');
+  assert.deepEqual(idle({ ...merged, hours: 7 * 24 - 1, blockers }), []);
+  const why = /; its state lists a blocker, but it has not changed for over 7 days$/;
+  for (const [options, code] of [[{ hours: 7 * 24, blockers }, 'TASK_IDLE'], [{ ...merged, blockers }, 'TASK_MERGED_OPEN']]) {
+    const found = idle(options);
+    assert.deepEqual(found.map(finding => finding.code), [code], 'a blocker that cleared but is still listed cannot hide the task for ever');
+    assert.match(found[0].detail, why);
+  }
+});
+
 for (const [kind, blocker] of [['held by a lane', { lifecycle: 'ACTIVE', fence: { holder_prefix: 'INT-TK421-', holder_session: 'lane-1' } }], ['waiting on the owner', { lifecycle: 'WAITING_OWNER' }]]) test(`a task behind a blocker ${kind} is skipped for seven days, then raised naming the blocker`, () => {
   assert.equal(state.BLOCKED_SKIP_DAYS, 7);
   const f = setup({ clock: true, outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });

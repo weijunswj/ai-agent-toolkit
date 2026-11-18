@@ -484,7 +484,8 @@ const BATCH_TAIL_HOURS = 24;
 const BATCH_NEXT_HOURS = 1;
 // An open PR with no update (push, comment, review or edit) for this long no longer counts as moving its task.
 const PR_STALE_HOURS = 24;
-// A task behind a moving blocker is left off the work queue only while it changed in this many days.
+// A task behind a blocker (a moving native one, or one its state lists) is left off the work queue only
+// while it changed in this many days.
 const BLOCKED_SKIP_DAYS = 7;
 const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
 
@@ -5527,11 +5528,12 @@ class Reconciler {
 
   // Work queue: a task the graph shows IN PROGRESS that nothing is moving (see stillness). A task whose
   // PRs have all merged or closed is TASK_MERGED_OPEN after TASK_MERGED_OPEN_HOURS of quiet; any other
-  // idle task is TASK_IDLE after TASK_IDLE_HOURS. So is a task natively blocked by another open task on
-  // the graph that is itself moving or waiting on the owner: the blocker carries the work, but only for
-  // BLOCKED_SKIP_DAYS after the task last changed; then it is raised naming the blocker. A task whose
-  // state lists a blocker (shown NOW · QUEUED) raises neither: its blocker says why. The skip sits here,
-  // not in stillness, so the batch tail guard still counts it as still and a queued blocker still counts
+  // idle task is TASK_IDLE after TASK_IDLE_HOURS. A task natively blocked by another open task on the
+  // graph that is itself moving or waiting on the owner is skipped: the blocker carries the work. So is a
+  // task whose state lists a blocker (shown NOW · QUEUED): its blocker says why. Both skips hold only for
+  // BLOCKED_SKIP_DAYS after the task last changed, so a blocker that cleared but is still listed cannot
+  // hide it for ever; then it is raised and the detail says why it was skipped. The skips sit here, not
+  // in stillness, so the batch tail guard still counts the task as still and a queued blocker still counts
   // as stalled for the tasks behind it. A pass that could not read every open PR raises none, since an
   // unread open PR could be moving the task.
   diffIdle(parent, docs, observed, only, findings) {
@@ -5556,17 +5558,18 @@ class Reconciler {
     };
     for (const outcome of parent.outcomes) {
       if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
-      if (docs.get(outcome.issue)?.blockers?.length) continue;
       const found = stall(outcome);
       if (!found) continue;
       const { doc, open, merged, hours, latest } = found;
+      const listed = Boolean(doc.blockers?.length);
       const blocker = (observed.blockedBy.get(outcome.issue) || []).find(moving);
-      if (blocker && now - latest < BLOCKED_SKIP_DAYS * 24 * HOUR_MS) continue;
+      if ((listed || blocker) && now - latest < BLOCKED_SKIP_DAYS * 24 * HOUR_MS) continue;
       // Kept open on purpose by the controller: the mark on its page says why, so it is not queued.
       if (merged && keptOpen(doc)) continue;
       const since = new Date(latest).toISOString().slice(0, 16);
       const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
-      const blocked = blocker ? `; blocked by #${blocker} (moving), but unchanged for over ${BLOCKED_SKIP_DAYS} days` : '';
+      const blocked = blocker ? `; blocked by #${blocker} (moving), but unchanged for over ${BLOCKED_SKIP_DAYS} days`
+        : listed ? `; its state lists a blocker, but it has not changed for over ${BLOCKED_SKIP_DAYS} days` : '';
       findings.push(merged
         ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})${blocked}` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}${blocked}` });
