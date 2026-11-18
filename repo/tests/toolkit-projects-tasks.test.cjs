@@ -1296,5 +1296,6 @@ test('owner waits on the board reach the owner every run, missed runs are flagge
   for (const phrase of ['`assign --issue <n> --role <gate> --assignment <id>`', "while the task's previous gate is still live", '`--supersede --reason',
     '`ASSIGNMENT_LIVE`', 'The turn the thread reports its result, queue in one order `return --issue <n> --record <id>.r<round> --assignment <id>`',
     'for a G0 or G2 `return --issue <n> --consume <id>.r<round> --verdict ACCEPT`', "a G1's return stays submitted until its G2's `assign --supersede` ends it",
-    '`interrupt --issue <n> --reason <why>`']) assert.ok(gates.includes(phrase), phrase);
+    '`interrupt --issue <n> --reason <why>`', "When the task's last gate is an accepted one of the same role", 'both `assign` forms are refused (`GATE_STATE`)',
+    '`reopen --issue <n> --assignment <id> --reason "<gate> follows accepted <gate>"`']) assert.ok(gates.includes(phrase), phrase);
 });

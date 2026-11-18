@@ -258,3 +258,47 @@ test('an order that expires after its checks but before its first write writes n
   assert.equal(f.github.commits, before, 'nothing written, not even the log entry');
   assert.equal(f.parentDoc().private?.holder_orders, undefined);
 });
+
+test('a same-role gate after an accepted one is a reopen under a new assignment, as the gate route says', t => {
+  const f = setup(t);
+  let n = 0;
+  const ops = list => f.run(f.order({ order_id: `gate-${++n}`, ops: list })).report.results.map(entry => `${entry.command}:${entry.outcome}${entry.code ? `:${entry.code}` : ''}`);
+  const gate = () => f.store.read('child', 423).doc.gate;
+  const end = id => assert.deepEqual(ops([{ command: 'return', issue: 423, record: `${id}.r1`, assignment: id },
+    { command: 'return', issue: 423, consume: `${id}.r1`, verdict: 'ACCEPT' }]), ['return:WRITTEN', 'return:WRITTEN']);
+  const sameRole = (role, id, label) => {
+    assert.equal(gate().state, 'RETIRED', `${label}: the last gate is accepted`);
+    assert.equal(gate().role, role);
+    assert.deepEqual(ops([{ command: 'assign', issue: 423, role, assignment: id }]), ['assign:REFUSED:GATE_STATE'], `${label}: plain assign`);
+    assert.deepEqual(ops([{ command: 'assign', issue: 423, role, assignment: id, supersede: true, reason: `${role} follows ${role}` }]), ['assign:REFUSED:GATE_STATE'], `${label}: assign --supersede`);
+    assert.deepEqual(ops([{ command: 'reopen', issue: 423, assignment: id, reason: `${role} follows accepted ${role}` }]), ['reopen:WRITTEN'], `${label}: reopen`);
+    assert.equal(gate().state, 'ASSIGNED', `${label}: live again`);
+    assert.equal(gate().role, role, `${label}: reopen keeps the role`);
+    assert.equal(gate().assignment.id, id, `${label}: under the new assignment`);
+    assert.equal(state.completionAccepted(f.store.read('child', 423).doc), false, `${label}: completion waits for the new verdict`);
+    end(id);
+    assert.equal(gate().state, 'RETIRED', `${label}: its ACCEPT ends it`);
+    assert.equal(gate().assignment.id, id);
+  };
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G0', assignment: 'g0' }]), ['assign:WRITTEN']);
+  end('g0');
+  sameRole('G0', 'g0-second', 'second G0');
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G1', assignment: 'g1' }]), ['assign:WRITTEN'], 'another role after an accepted gate is a plain assign');
+  assert.deepEqual(ops([{ command: 'return', issue: 423, record: 'g1.r1', assignment: 'g1' }]), ['return:WRITTEN']);
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G2', assignment: 'g2', supersede: true, reason: 'G2 follows G1' }]), ['assign:WRITTEN']);
+  end('g2');
+  assert.equal(state.completionAccepted(f.store.read('child', 423).doc), true);
+  sameRole('G2', 'g2-delta', 'delta G2 after a PASS');
+  sameRole('G2', 'g2-recheck', 'G2 recheck with no G1 round between');
+  assert.equal(state.completionAccepted(f.store.read('child', 423).doc), true);
+  assert.deepEqual(state.validateParent(f.parentDoc()), []);
+  // The documented routes name this; if the state machine ever lets `assign` take an accepted gate's own role, change both.
+  const root = path.join(__dirname, '..', '..');
+  const route = fs.readFileSync(path.join(root, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference', 'periodic-runs.md'), 'utf8')
+    .split('\n').find(line => line.startsWith('- **Gate assignments**'));
+  assert.ok(route.includes("When the task's last gate is an accepted one of the same role") && route.includes('both `assign` forms are refused (`GATE_STATE`)')
+    && route.includes('queue `reopen --issue <n> --assignment <id> --reason'), 'the Projects gate route names the reopen');
+  const skill = fs.readFileSync(path.join(root, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8').split('\n').find(line => line.startsWith('**Gates.**'));
+  assert.ok(skill.includes("`assign` for an accepted gate's own role is refused with or without `--supersede` (`GATE_STATE`)")
+    && skill.includes('is a `reopen` under a new `--assignment`'), 'the reconciler Gates line names the reopen');
+});
