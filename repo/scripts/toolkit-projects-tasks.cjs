@@ -36,7 +36,7 @@ const FENCE_CLOSE = /^```[ \t]*$/;
 
 const KINDS = Object.freeze({
   'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in', tier: 'mid' },
-  'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge', tier: 'small' },
+  'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge', tier: 'mid' },
   custom: { checks: null, session: null, title: null, tier: 'small' }
 });
 const SHELL = Object.freeze({
@@ -340,6 +340,9 @@ function checkTask(kind, text, expectedFor) {
   const pointers = own.filter(block => block.name === POINTER.name);
   const legacy = own.filter(block => legacyNames.has(block.name));
   if (pointers.length + legacy.length !== own.length || pointers.length > 1) return { state: 'malformed', exitCode: 2 };
+  // A pointer that loads another kind's instructions is another task's prompt, never this one's to refresh.
+  const loads = pointers.length ? /toolkit-projects-tasks\.cjs --expand ([a-z-]+) /.exec(pointers[0].body) : null;
+  if (loads && loads[1] !== kind) return { state: 'malformed', exitCode: 2 };
   let state;
   if (own.some(tampered)) state = 'edited';
   else if (legacy.length || pointers[0].format !== FORMAT || normalizeBody(pointers[0].body) !== normalizeBody(expected.pointer.body)) state = 'outdated';

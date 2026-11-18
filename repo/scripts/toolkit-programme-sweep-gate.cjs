@@ -57,6 +57,10 @@ const STREAK = 3;
 const SWEEP_JOB = 'Refresh the programme';
 const GATE_JOB = 'Start the sweep if there is work';
 const GATE_WORKFLOW = 'toolkit-programme-sweep-gate.yml';
+// A new governed repository has no parent state until the controller runs init-parent, so its first
+// sweeps hold with PARENT_STATE_MISSING. The sweep's warning and the red streak line name the step.
+const NO_PARENT_STATE = 'No programme state yet; setup on first sweep only.';
+const INIT_PARENT = 'programme.cjs init-parent --apply --controller';
 const TITLES = Object.freeze({ held: 'Programme Sweep held', skipped: 'Programme Sweep skipped', gate: 'Programme Sweep gate skipped', noPass: 'Programme Sweep no pass' });
 const STREAK_EVENTS = Object.freeze(['schedule', 'workflow_dispatch']);
 // The code a titled warning carries: `<title> (<code>)` at the start of its message.
@@ -271,6 +275,9 @@ async function sweepStreak(call, runs, findingOf = run => runFinding(call, run, 
   if (count < STREAK) return null;
   const when = since ? ` since ${since}${broken ? '' : ' or earlier'}` : '';
   const named = first.title === TITLES.held ? [...codes].sort().join(', ') : first.code;
+  // A streak held only for missing parent state is a new repository's setup step, not a page to read.
+  const setup = first.title === TITLES.held && codes.size === 1 && codes.has('PARENT_STATE_MISSING');
+  if (setup) return `Programme Sweep held ${count} runs in a row (${named})${when}. ${NO_PARENT_STATE} Controller: create it with ${INIT_PARENT}; the first clean sweep clears this.`;
   return first.title === TITLES.held
     ? `Programme Sweep held ${count} runs in a row (${named})${when}. Controller: read the held items on the programme page and clear their cause, or ask the owner; the first clean sweep clears this.`
     : `Programme Sweep skipped ${count} runs in a row (${named})${when}. Owner: follow the fix in the sweep run's warning (toolkit governance check names it), or remove the Toolkit Programme Sweep workflows if this repository should not be governed.`;
@@ -328,4 +335,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = Object.freeze({ STREAK, TITLES, sweepStreak, runFinding, SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, governanceOf, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });
+module.exports = Object.freeze({ STREAK, TITLES, NO_PARENT_STATE, INIT_PARENT, sweepStreak, runFinding, SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, governanceOf, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });

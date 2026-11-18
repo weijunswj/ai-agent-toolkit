@@ -115,6 +115,24 @@ test('min_toolkit goes into the programme file in its own layout, so the pull re
   assert.equal(read(older.root, '.github/toolkit-programme.json'), BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`), 'an older value is raised in place');
 });
 
+test('setting min_toolkit also deletes the retired schedule_folder line in the file\'s own layout, and the preview says so', t => {
+  const crlf = BINDING.replace(/\n  /g, '\n    ').replace(/\n/g, '\r\n');
+  for (const [layout, base, indent, newline] of [['two spaces', BINDING, '  ', '\n'], ['four spaces and CRLF', crlf, '    ', '\r\n']]) {
+    const plain = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': base });
+    assert.match(cleanup.run({ root: plain.root, write: false, governance: plain.governance }).lines.join('\n'), /- \.github\/toolkit-programme\.json: set min_toolkit to \d+\.\d+\.\d+\.\n/, 'without the key, the line is as before');
+    assert.equal(cleanup.run({ root: plain.root, write: true, governance: plain.governance }).ok, true);
+    const expected = read(plain.root, '.github/toolkit-programme.json');
+    const key = `"schedule_folder": "TOOLKIT"`;
+    for (const carried of [base.replace('"enabled"', `"enabled",${newline}${indent}${key}`), base.replace('"governance"', `${key},${newline}${indent}"governance"`)]) {
+      const r = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': carried });
+      const preview = cleanup.run({ root: r.root, write: false, governance: r.governance });
+      assert.match(preview.lines.join('\n'), /- \.github\/toolkit-programme\.json: set min_toolkit to \d+\.\d+\.\d+, and delete the retired schedule_folder, which nothing reads any more\./);
+      assert.equal(cleanup.run({ root: r.root, write: true, governance: r.governance }).ok, true);
+      assert.equal(read(r.root, '.github/toolkit-programme.json'), expected, `${layout}: the key's line goes and nothing else changes`);
+    }
+  }
+});
+
 test('a sweep copy pinned to a Toolkit that does not know min_toolkit holds the cleanup, so the programme board keeps updating', t => {
   const offer = require('../scripts/toolkit-ci-shards-offer.cjs');
   // A copy pinned to a commit from before min_toolkit: its validator would read the cleaned binding as invalid.
@@ -209,4 +227,16 @@ test('refresh governance asks about the copies; Keep current is recommended and 
   assert.match(cleaned.out, /Changed in .*:\n- AGENTS\.md: remove the Toolkit block/);
   assert.match(cleaned.out, /one pull request for the owner to merge/);
   assert.doesNotMatch((await cli(['setup'])).out, /Toolkit instruction copies \|/, 'nothing left to ask about');
+});
+
+// The floor the cleanup writes is the first release with S2, S3 and the session-start truncation fix,
+// so it can never be newer than this Toolkit; Toolkit's own binding carries the same floor first.
+test('MIN_TOOLKIT is no newer than this Toolkit, and Toolkit\'s own binding carries it', () => {
+  const ROOT = path.join(__dirname, '..', '..');
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;
+  const parts = value => value.split('.').map(Number);
+  const [floor, current] = [parts(cleanup.MIN_TOOLKIT), parts(version)];
+  const order = floor.map((part, index) => Math.sign(part - current[index])).find(sign => sign !== 0) || 0;
+  assert.ok(order <= 0, `MIN_TOOLKIT ${cleanup.MIN_TOOLKIT} is newer than version.json ${version}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, '.github', 'toolkit-programme.json'), 'utf8')).min_toolkit, cleanup.MIN_TOOLKIT);
 });

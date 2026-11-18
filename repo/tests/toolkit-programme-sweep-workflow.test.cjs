@@ -667,6 +667,36 @@ test('L3: runs that made no pass neither count nor end a held streak; changed ho
   assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub([held('X'), note('Programme Sweep no pass', '(queued) x'), held('X'), held('X')]).fetchImpl, now: T, log: () => {} })).alert, undefined);
 });
 
+// A new governed repository has no parent state until the controller runs init-parent, so its first
+// sweeps hold with PARENT_STATE_MISSING. The warning and the red streak line say so in plain words and
+// name the step; every other hold keeps the general text.
+test('first sweep: a pass held only for missing parent state names init-parent and the parent', () => {
+  const missing = { code: 'PARENT_STATE_MISSING', target: '#7', detail: 'No parent state document for #7 yet.' };
+  const pass = holds => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=4, tasks read=0, queue left=0', holds, writes: { state: 0, github: 0 }, sweep: { read: 0, left: 0, noWrite: true } } });
+  const first = runAction('run', { env: minted, refresh: () => pass([missing]) });
+  assert.equal(first.code, 0, 'still a green held pass');
+  assert.deepEqual(first.tags, [{ title: action().HELD_TITLE, code: 'PARENT_STATE_MISSING' }], 'title and code unchanged');
+  assert.deepEqual(first.warnings, ['Programme Sweep held: No programme state yet; setup on first sweep only. The controller creates it for #7 with programme.cjs init-parent --apply --controller; the next run retries.']);
+  // Any other hold beside it keeps the general text, so no hold is hidden behind the setup step.
+  const mixed = runAction('run', { env: minted, refresh: () => pass([missing, { code: 'PASS_STOPPED', target: '#7', detail: 'x' }]) });
+  assert.deepEqual(mixed.warnings, ['Programme Sweep held: this pass held and the next run retries; three held runs in a row turn the hourly gate red.']);
+  // A target that is not a plain issue number is never echoed.
+  const odd = runAction('run', { env: minted, refresh: () => pass([{ ...missing, target: '#7 ::error::x' }]) });
+  assert.match(odd.warnings[0], /creates it for the parent issue with programme\.cjs init-parent/);
+});
+
+test('first sweep: a held streak that is all PARENT_STATE_MISSING names init-parent, not the programme page', async () => {
+  const { gate } = gateScript();
+  const held = code => note('Programme Sweep held', `(${code}) Programme Sweep held: x`);
+  const missing = held('PARENT_STATE_MISSING');
+  const red = await gate({ env: gateEnv, fetchImpl: streakGitHub([missing, missing, missing, []]).fetchImpl, now: T, log: () => {} });
+  assert.match(red.alert, /^Programme Sweep held 3 runs in a row \(PARENT_STATE_MISSING\) since [^ ]+\. No programme state yet; setup on first sweep only\. Controller: create it with programme\.cjs init-parent --apply --controller; the first clean sweep clears this\.$/);
+  assert.doesNotMatch(red.alert, /programme page/);
+  // A mixed-code streak keeps today's line.
+  const mixed = await gate({ env: gateEnv, fetchImpl: streakGitHub([missing, held('PASS_STOPPED'), missing, []]).fetchImpl, now: T, log: () => {} });
+  assert.match(mixed.alert, /^Programme Sweep held 3 runs in a row \(PARENT_STATE_MISSING, PASS_STOPPED\) since [^ ]+\. Controller: read the held items on the programme page/);
+});
+
 test('gate: a green run that made no pass (queued behind the lease, main moved, off the default branch, no sweep job) is not the last sweep; a paused one is', async () => {
   const { gate, decide } = gateScript();
   const noPass = code => [{ title: 'Programme Sweep no pass', annotation_level: 'notice', message: `(${code}) x` }];

@@ -7,7 +7,7 @@
 // that merely mentions Claude passes. Used by the Claude Code PreToolUse hook and the Codex helper hook.
 //
 // It also refuses force pushes (--force, -f, --force-with-lease, --mirror or a +refspec) in a
-// Toolkit-governed (GitHub governance ENABLED, or the governed block present) or personal-data-guarded
+// Toolkit-governed (GitHub governance ENABLED, or the working-tree binding says enabled) or personal-data-guarded
 // repository and to an evidence store (a TRANSPORT-* repository), since they rewrite history. Skipped
 // commit and push checks (--no-verify, core.hooksPath) are a written rule, not a hook: CI is the
 // backstop. This is best effort: CI and branch rules are the backstop. Not covered:
@@ -25,6 +25,10 @@
 // command run with one note for the user and the Codex hook refuses it (Codex shows no notes). Folders
 // are read as the shell reads them (toolkit-shell-call.cjs shellPath). For a Codex call that names no
 // folder, the push check finds the working tree itself or refuses. The same gaps apply.
+//
+// Where PowerShell may run the command (Claude Code's PowerShell tool, any Codex shell call), the
+// force-push, store-push and credential checks read a line with a backslash both as bash and as
+// PowerShell quotes it (quotings), and PowerShell's unquoted stop-parsing word `--%` is dropped first.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -54,8 +58,40 @@ function commitOrPr(text) {
     else if (word === 'commit') { if (git) return true; }
     else git = false;
   }
-  return /\bgh\s+pr\s+(?:create|edit|merge)\b/.test(text);
+  return /\bgh\s+(?:--%\s+)*pr\s+(?:create|edit|merge)\b/.test(text);
 }
+
+// PowerShell's stop-parsing word, `--%` unquoted, hands the rest of the line to the program as it is,
+// so `gh --% pr create` still runs `gh pr create`. The word is dropped before a command is read, the
+// way the closure reader drops it (toolkit-shell-call.cjs); a quoted '--%' stays an argument that gh refuses.
+function withoutStopParsing(current, text) {
+  const keep = current.words.map((word, index) => !(word === '--%' && text.startsWith('--%', current.offsets[index])));
+  if (keep.every(Boolean)) return current;
+  const kept = (list) => list.filter((_, index) => keep[index]);
+  return { ...current, words: kept(current.words), offsets: kept(current.offsets), expanding: kept(current.expanding) };
+}
+
+// The quotings a command line is read with: true for PowerShell's. Bash and PowerShell split words the
+// same way except at a backslash, which escapes the next character in bash and is plain text in
+// PowerShell, so `echo "a\" ; git push --force` hides the push from bash but runs it in PowerShell.
+// `quoting` 'posix' (Claude Code's Bash tool, or a script a POSIX shell runs) reads it as bash only;
+// 'powershell' as PowerShell only; null, where PowerShell may run it (Claude Code's PowerShell tool, a
+// Codex call), reads a line with a backslash both ways, and a check refuses when either reading does.
+function quotings(text, quoting) {
+  if (quoting === 'posix') return [false];
+  if (quoting === 'powershell') return [true];
+  return text.includes('\\') ? [false, true] : [false];
+}
+
+// The quoting of a script a shell word hands on (bash -c "..."): a POSIX shell reads it as bash, eval
+// the way the line around it was read, and any other shell (PowerShell, cmd) both ways.
+function nestedQuoting(program, powershell) {
+  if (/(?:^|[\\/])(?:bash|sh|zsh|dash|ksh)(?:\.exe)?$/i.test(program)) return 'posix';
+  if (/^eval$/i.test(program)) return powershell ? 'powershell' : 'posix';
+  return null;
+}
+// The quoting a check starts from for the shell the host names (shellOf, shellReadings).
+const startQuoting = (shell) => (shell === 'posix' ? 'posix' : null);
 
 function trailerStart(line, name) {
   let start = line.indexOf(name);
@@ -195,7 +231,7 @@ function attributionRefusal(command, cwd) {
   const rawCommand = commitOrPr(text);
   if (rawCommand && hasAttribution(text)) return MESSAGE;
   const root = cwd || process.cwd();
-  const commands = shellCommands(text).map((current) => messageCommand(current, root)).filter(Boolean);
+  const commands = shellCommands(text).map((current) => messageCommand(withoutStopParsing(current, text), root)).filter(Boolean);
   if (commands.some((current) => current.refusal)) return DIRECTORY_LIMIT;
   if (!rawCommand && !commands.length) return '';
   if (hasAttribution(text)) return MESSAGE;
@@ -308,14 +344,22 @@ function storeUrl(url) { return STORE_URL.test(String(url || '').trim()); }
 
 // Whether the repository's GitHub governance state is ENABLED (setup finished or not), or ERROR (a
 // merged binding that cannot be used never quietly drops protection). A state that cannot be read, or
-// a copy without the state module, counts as not enabled here; the block and guard-config checks
-// below still apply.
+// a copy without the state module, counts as not enabled here; the working-tree binding and
+// guard-config checks below still apply.
 function governanceEnabled(root, registryOptions) {
   try { return ['ENABLED', 'ERROR'].includes(require('./toolkit-governance-state.cjs').governanceState(root, registryOptions).state); } catch { return false; }
 }
 
+// Whether the working-tree programme binding says governance is enabled, even if the rest of it does
+// not parse: governed repositories no longer carry a rules block, so the binding is the file signal
+// that keeps one protected while its governance state cannot be read.
+const BINDING_ENABLED = /"governance"\s*:\s*"enabled"/;
+function bindingSaysEnabled(root) {
+  return BINDING_ENABLED.test(readSmallFile(path.join(root, '.github', 'toolkit-programme.json')));
+}
+
 // What protects the repository a folder is in: `checked` when the nearest folder with a .git entry
-// carries the governed rules block in AGENTS.md or the guard config, or its GitHub governance is
+// carries the guard config or a working-tree binding that says enabled, or its GitHub governance is
 // ENABLED, `store` when one of its remotes is an evidence store.
 function repositoryKind(folder, cache, registryOptions = {}) {
   if (cache.has(folder)) return cache.get(folder);
@@ -324,7 +368,7 @@ function repositoryKind(folder, cache, registryOptions = {}) {
   if (current) {
     answer = {
       checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
-        || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
+        || bindingSaysEnabled(current)
         || governanceEnabled(current, registryOptions),
       store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
     };
@@ -350,7 +394,7 @@ function repositoryRoot(folder) {
 // `shell` is the shell the command runs in when the host says (shellOf), else null.
 function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
   const cache = new Map();
-  return eachGitCommand(command, cwd, depth, shell, (git) => {
+  return eachGitCommand(command, cwd, depth, shell, startQuoting(shell), (git) => {
     if (!forcePush(git)) return '';
     const kind = repositoryKind(git.base, cache, registryOptions);
     const target = git.args.find((word) => !word.startsWith('-'));
@@ -360,12 +404,22 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = nul
 
 // Calls `judge(git)` for each git command in a shell command line, with the folder it runs in, and
 // returns the first refusal (a git -C limit refusal included), or ''. A cd earlier in the same line
-// moves the folder; a quoted command handed to a shell is read too, up to two levels deep.
-function eachGitCommand(command, cwd, depth, shell, judge) {
+// moves the folder; a quoted command handed to a shell is read too, up to two levels deep. The line is
+// read with each of its quotings (quotings).
+function eachGitCommand(command, cwd, depth, shell, quoting, judge) {
   const text = String(command || '');
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
+  const readings = quotings(text, quoting);
+  if (readings.length > 1) {
+    for (const powershell of readings) {
+      const refused = eachGitCommand(text, cwd, depth, shell, powershell ? 'powershell' : 'posix', judge);
+      if (refused) return refused;
+    }
+    return '';
+  }
+  const [powershell] = readings;
   let root = cwd || process.cwd();
-  for (const current of withVariables(shellCommands(text), shell)) {
+  for (const current of withVariables(shellCommands(text, { powershell }), shell)) {
     if (LOCATION_COMMAND.test(current.words[0])) {
       const target = locationTarget(current.words);
       if (target) root = shellPath(root, target);
@@ -378,7 +432,7 @@ function eachGitCommand(command, cwd, depth, shell, judge) {
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
-          const nested = eachGitCommand(word, root, depth + 1, null, judge);
+          const nested = eachGitCommand(word, root, depth + 1, null, nestedQuoting(current.words[0], powershell), judge);
           if (nested) return nested;
         }
       }
@@ -434,7 +488,7 @@ function boundStores(registryOptions = {}) {
 // computer or container with no cached binding behaves as before. Reads git config files only.
 function storePushRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
   let stores = null;
-  return eachGitCommand(command, cwd, depth, shell, (git) => {
+  return eachGitCommand(command, cwd, depth, shell, startQuoting(shell), (git) => {
     if (git.sub !== 'push' || dryRunPush(git.args)) return '';
     stores ||= boundStores(registryOptions);
     if (!stores.size) return '';
@@ -566,15 +620,34 @@ function branchCreated(sub, args) {
 // pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`.
 // An unconfirmed push also carries `plainGit`: only a single plain git command can check HEAD in
 // every reachable working tree; no other command may run alongside it.
-function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null) {
+//
+// `quoting` is the quotings to read the line with (quotings; bash only by default). With two, each
+// reading starts from its own copy of `preceding`, and the steps either adds go on for the rest of the
+// line around it.
+function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null, quoting = 'posix') {
   const text = String(command || '');
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
+  const readings = quotings(text, quoting);
+  if (readings.length > 1) {
+    const added = [];
+    for (const powershell of readings) {
+      const own = preceding.slice();
+      found.push(...outgoingChanges(text, cwd, depth, own, confirmed, shell, powershell ? 'powershell' : 'posix'));
+      for (const step of own.slice(preceding.length)) {
+        if (!added.some((seen) => JSON.stringify(seen) === JSON.stringify(step))) added.push(step);
+      }
+    }
+    preceding.push(...added);
+    return found;
+  }
+  const [powershell] = readings;
   const plainGit = depth === 0 && plainGitLine(text);
   let root = cwd || process.cwd();
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false });
-  for (const current of withVariables(shellCommands(text), shell)) {
+  for (const read of withVariables(shellCommands(text, { powershell }), shell)) {
+    const current = withoutStopParsing(read, text);
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = shellPath(root, current.words[1]);
       confirmed ||= absoluteShellPath(current.words[1]);
@@ -596,7 +669,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
-        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null));
+        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null, nestedQuoting(current.words[0], powershell)));
       }
     }
   }
@@ -617,7 +690,7 @@ function outgoingRefusal(command, cwd, { notes, budgetMs, folderConfirmed = true
   };
   let targets;
   // An unknown shell gives the targets of every reading (shellReadings); each is checked once.
-  try { targets = shellReadings(shell).flatMap((reading) => outgoingChanges(command, cwd, 0, [], folderConfirmed, reading)); } catch { return ''; }
+  try { targets = shellReadings(shell).flatMap((reading) => outgoingChanges(command, cwd, 0, [], folderConfirmed, reading, startQuoting(shell))); } catch { return ''; }
   const seen = new Set();
   for (const target of targets) {
     const key = JSON.stringify(target);

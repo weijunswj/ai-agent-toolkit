@@ -9,7 +9,7 @@ const test = require('node:test');
 const train = require('../scripts/toolkit-merge-train.cjs');
 const governance = require('../scripts/toolkit-governance-state.cjs');
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
-const { fixture, built } = require('./support/merge-train-fixture.cjs');
+const { fixture, built, MEMBER_BODY } = require('./support/merge-train-fixture.cjs');
 
 const v2 = (extra = {}) => ({
   schema: 'toolkit.programme-binding.v2', repository: 'example/repo', governance: 'enabled',
@@ -50,7 +50,7 @@ test('with trains off, build, catchup and land refuse; verify, body and eject st
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { result, out } = built(f, [f.member(1, one), f.member(2, two)]);
   const live = path.join(f.root, 'live.json');
-  fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head: result.head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } }));
+  fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head: result.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
   for (const binding of [[{ merge_train: 'off' }], [null, { governance: 'disabled' }]]) {
     f.governed(...binding);
     const off = /merge trains are off here \((repository-off|fresh-enabled-binding-required)\).*Merge each ready pull request alone/;
@@ -84,7 +84,7 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const land = (manifest, head) => {
     const live = path.join(f.root, 'live.json');
-    fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } }));
+    fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
     return train.run(['land', '--manifest', manifest, '--pr', '50', '--head', head, '--main', 'main', '--live', live], f.repo, f.opts);
   };
   const plain = built(f, [f.member(1, one), f.member(2, two)]);
@@ -111,7 +111,7 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   f.git('branch', '--quiet', '-D', 'toolkit-train/one');
   const scoped = built(f, [f.member(1, one), f.member(3, ci)]);
   const live = path.join(f.root, 'live-ci.json');
-  fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head: scoped.result.head }, 1: { state: 'OPEN', head: one }, 3: { state: 'OPEN', head: ci } }));
+  fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head: scoped.result.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 3: { state: 'OPEN', head: ci, body: MEMBER_BODY } }));
   landed = train.run(['land', '--manifest', scoped.out, '--pr', '50', '--head', scoped.result.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landed.merge.route, 'owner');
   assert.ok(landed.merge.route_reasons.some(reason => reason.startsWith('.github/workflows/ci.yml: ')), landed.merge.route_reasons.join('\n'));

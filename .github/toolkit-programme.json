@@ -2,6 +2,7 @@
   "schema": "toolkit.programme-binding.v2",
   "repository": "weijunswj/ai-agent-toolkit",
   "governance": "enabled",
+  "min_toolkit": "3.137.0",
   "parent_lifecycle": { "reopen_incomplete": true, "complete_when_children_closed": true },
   "detach_finished_children": true,
   "parents": [
@@ -18,7 +19,6 @@
     "auto_merge": "patch-minor",
     "github_actions": "owner"
   },
-  "schedule_folder": "TOOLKIT",
   "projection": {
     "after_section": "CURRENT",
     "replace_section": "Programme index"

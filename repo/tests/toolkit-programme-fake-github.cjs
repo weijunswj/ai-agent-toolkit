@@ -75,8 +75,9 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }) });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined, author = undefined, headRepository = undefined } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }),
+      ...(author === undefined ? {} : { author }), ...(headRepository === undefined ? {} : { headRepository }) });
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
@@ -304,7 +305,7 @@ class FakeGitHub {
       else if (closed) listed.sort((a, b) => b.number - a.number);
       return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, title: pr.title || '', body: pr.body, draft: pr.isDraft,
         state: pr.merged || pr.state === 'CLOSED' ? 'closed' : 'open', closed_at: pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z',
-        updated_at: updated(pr), head: {ref: pr.branch || '', sha: pr.head},
+        updated_at: updated(pr), head: {ref: pr.branch || '', sha: pr.head, repo: pr.headRepository === null ? null : { full_name: pr.headRepository || this.repository }},
         user: { login: pr.author || 'fixture-owner' }, merge_commit_sha: pr.merged ? pr.head : null,
         merged_at: pr.mergedAt, base: { repo: { full_name: this.repository } } })));
     }

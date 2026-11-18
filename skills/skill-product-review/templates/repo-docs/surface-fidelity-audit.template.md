@@ -34,4 +34,4 @@ Update the baseline only when count movement is intentional, reviewed, and docum
 
 ## Follow-Up
 
-- `<focused cleanup item>`
+- `<focused cleanup item>`: cleared by `<who>` by `<release or date>`

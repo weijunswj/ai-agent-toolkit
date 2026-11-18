@@ -99,20 +99,17 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup row is asked too.
-    assert.match(result.out, /^# Toolkit governance choices - 7 questions across 2 sections/);
-    assert.match(result.out, /\| 1\.6 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
-    assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
-    assert.match(result.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
-    assert.match(result.out, /^More on 1\.4: .*Minutes: unknown, because no green CI run could be read\./m);
+    assert.match(result.out, /^# Toolkit governance choices - 7 questions and 2 status rows across 2 sections/);
+    assert.match(result.out, /\| 1\.10 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
+    assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI time unknown\) \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
-    assert.match(result.out, /Status \(nothing to answer\): Evidence store: toolkit-test-fixture\/store\./);
-    assert.match(result.out, /Status \(nothing to answer\): Required checks: validate\./);
+    assert.match(result.out, /\| 1\.5 \| Evidence store \| toolkit-test-fixture\/store \| Nothing to answer: Bound in the merged programme file \| - \|/);
+    assert.match(result.out, /\| 1\.8 \| Required checks \| validate \| Nothing to answer: Bound in the merged programme file \| - \|/);
     assert.match(result.out, /\| 2\.1 \| Toolkit permissions \(Claude Code\) \| Outdated: 6 missing \| B\. Update: .* \| A\. Keep current<br>C\. Remove \|/);
-    assert.match(result.out, /The permissions row covers only this app\. Any other app you use needs toolkit governance run there too\./);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
-    assert.match(result.out, /- `all recommended`/);
+    assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.2=B\./m);
     assert.doesNotMatch(result.out, /could not note this bank/);
   }
   assert.equal(present().length, 2, 'no switch read back yet, so the old answers stay');
@@ -172,7 +169,7 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
   assert.equal(forged.code, 2, 'an agent cannot make up a ticket');
   assert.equal(calls.length, 1);
 
-  const kept = await answerBank(ctx, '1.5=A', { switchTransport });
+  const kept = await answerBank(ctx, '1.6=A', { switchTransport });
   assert.equal(kept.code, 0, kept.err);
   assert.match(kept.out, /Nothing changed: every answer keeps things as they are\./);
   assert.equal(calls.length, 1);
@@ -189,12 +186,13 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
   assert.equal(moved.code, 2);
   assert.match(moved.err, /changed since this computer read it/);
   const unread = await answerBank(ctx, 'maybe', { switchTransport });
-  assert.equal(unread.code, 0, 'an answer that cannot be read shows the bank again');
-  assert.match(unread.out, /answer was not read.*Nothing was written/);
+  assert.equal(unread.code, 0, 'an answer that cannot be read is not a failure');
+  assert.match(unread.out, /answer was not read.*Nothing was written\.\nReply again with all recommended or only your changes, such as 1\.2=B\./);
+  assert.doesNotMatch(unread.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
   for (const bad of [['refresh', '--set', 'on'], ['setup', '--answers', 'x'], ['setup', '--answers', 'x', '--ticket', 'nothex'], ['status', '--answers', 'x', '--ticket', 'f'.repeat(32)]]) assert.equal((await run(ctx, bad)).code, 2, bad.join(' '));
 });
 
-test('a ticket answers only the bank it was given for: a changed state shows the new bank and writes nothing', async t => {
+test('a ticket answers only the bank it was given for: a changed state names the changed row and writes nothing', async t => {
   const ctx = fixture(t);
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 12, url: `https://github.com/${SLUG}/pull/12`, head: 'a'.repeat(40) }; } };
@@ -207,6 +205,9 @@ test('a ticket answers only the bank it was given for: a changed state shows the
   const result = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport });
   assert.equal(result.code, 0);
   assert.match(result.out, /governance state changed since that bank was shown.*nothing was written/);
+  assert.match(result.out, /^1\.2 Task auto-merge changed: now On, recommended A\. Keep current\.$/m, 'only the changed row is named');
+  assert.doesNotMatch(result.out, /^1\.(1|3|4|5|6|8) /m);
+  assert.doesNotMatch(result.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
   assert.equal(calls.length, 0);
   const other = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport, environment: { TOOLKIT_HOST_SESSION: 'another-session' } });
   assert.equal(other.code, 2, 'another session cannot spend it either');
@@ -234,7 +235,8 @@ test('the permission row: Update and Remove give the owner one command to run th
   assert.equal(update.code, 0, update.err);
   assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
   assert.match(update.out, /^node fixture-apply\.cjs --apply$/m, 'the command is printed on its own line, not indented into a code block');
-  assert.match(update.out, /never in a code block of your own making; never run it yourself\./);
+  assert.match(update.out, /Never put a command above in a code block of your own making, and never run it yourself\./);
+  assert.equal(update.out.match(/^Agents: /gm).length, 1, 'one Agents line, the last');
   assert.doesNotMatch(update.out, /Paste into|Next step/);
   const remove = await answerBank(ctx, '2.1=B', { missing: 0 });
   assert.match(remove.out, /^node fixture-apply\.cjs --remove$/m);
@@ -402,4 +404,57 @@ test('the switch transport refuses a moved default branch and opens a pull reque
   assert.ok(!pr.input.body.includes(MARKER), 'never read as a governance decision');
   assert.match(pr.input.body, /changes only `task_prs\.auto_merge`.*It applies only after the owner merges it/s);
   assert.ok(pr.input.body.includes(VERSION_LINE), 'the switch pull request warns about older copies');
+});
+
+// schedule_folder is retired: the reader still accepts it, but a switch pull request drops it.
+const RETIRED = '  "schedule_folder": "TOOLKIT",\n';
+const withRetired = text => text.replace('  "required_checks"', `${RETIRED}  "required_checks"`);
+
+test('a switch pull request drops the retired schedule_folder line in the same diff and changes nothing else', async t => {
+  const ctx = fixture(t);
+  const calls = [];
+  const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 4, url: `https://github.com/${SLUG}/pull/4`, head: 'a'.repeat(40) }; } };
+  for (const [layout, extra] of [['pretty, switch added', {}], ['pretty, switch set in place', { task_prs: { auto_merge: 'after-gates' } }]]) {
+    const plain = bindingText(extra);
+    ctx.merge(plain);
+    assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0, layout);
+    const before = calls.at(-1)[2];
+    const carried = withRetired(plain);
+    assert.notEqual(carried, plain, 'the fixture carries the key');
+    ctx.merge(carried);
+    assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0, layout);
+    const [, mergedText, text] = calls.at(-1);
+    assert.equal(mergedText, carried, `${layout}: the pull request starts from the exact merged text`);
+    assert.equal(text, before, `${layout}: the only other change is the removed schedule_folder line`);
+  }
+  // A compact or CRLF binding keeps its layout too, and a key at the end takes the comma before it.
+  const compact = JSON.stringify({ ...JSON.parse(bindingText()), schedule_folder: 'TOOLKIT' });
+  ctx.merge(compact);
+  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
+  assert.equal(calls.at(-1)[2], `${JSON.stringify(JSON.parse(bindingText())).slice(0, -1)},"task_prs":{"auto_merge":"after-gates"}}`);
+  const crlf = withRetired(bindingText()).replace(/\n/g, '\r\n');
+  ctx.merge(crlf);
+  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
+  assert.equal(calls.at(-1)[2], bindingText().replace(/\n/g, '\r\n').replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates" }\r\n}\r\n'));
+});
+
+test('the switch pull request text names the retired line it deletes, and only when it deletes one', () => {
+  const routes = current => [
+    [/^GET user$/, { login: 'owner' }],
+    [/^GET repos\/toolkit-test-fixture\/switch$/, { default_branch: 'main' }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/git\/ref\/heads\/main$/, { object: { sha: 'b'.repeat(40) } }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/contents\/\.github\/toolkit-programme\.json\?ref=/, { type: 'file', encoding: 'base64', content: Buffer.from(current).toString('base64'), sha: 'c'.repeat(40) }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/pulls\?state=open&head=/, []],
+    [/^POST repos\/toolkit-test-fixture\/switch\/git\/refs$/, { ref: 'x' }],
+    [/^PUT repos\/toolkit-test-fixture\/switch\/contents\/\.github\/toolkit-programme\.json$/, { commit: { sha: 'd'.repeat(40) } }],
+    [/^POST repos\/toolkit-test-fixture\/switch\/pulls$/, input => ({ number: 8, html_url: `https://github.com/${SLUG}/pull/8`, body: input.body })],
+  ];
+  const proposal = bindingText({ task_prs: { auto_merge: 'after-gates' } });
+  const body = merged => {
+    const gh = fakeGh(routes(merged));
+    new GitHubProposalTransport({ run: gh.runner }).publishSwitch(SLUG, merged, proposal, { auto_merge: 'after-gates' });
+    return gh.calls.find(call => /pulls$/.test(call.args[1]) && call.input).input.body;
+  };
+  assert.match(body(withRetired(bindingText())), /^This changes only `task_prs\.auto_merge` in `\.github\/toolkit-programme\.json`, and deletes the retired `schedule_folder`, which nothing reads any more\. These are/);
+  assert.match(body(bindingText()), /^This changes only `task_prs\.auto_merge` in `\.github\/toolkit-programme\.json`\. These are/);
 });

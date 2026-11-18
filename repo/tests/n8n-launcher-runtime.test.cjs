@@ -34,19 +34,27 @@ const launcherCases = [
   }
 ];
 
+// Probed once per file. A cold PowerShell start on a busy CI runner has taken over 5 seconds, which
+// once turned a present PowerShell into a skipped test, so the probe allows a minute.
+let foundPowerShell;
 function findPowerShell() {
   if (process.platform === 'win32') return 'powershell.exe';
+  if (foundPowerShell !== undefined) return foundPowerShell;
 
+  foundPowerShell = null;
   const candidates = ['pwsh', 'powershell'];
   for (const candidate of candidates) {
     const result = spawnSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], {
       env: powerShellEnv(),
       encoding: 'utf8',
-      timeout: 5000
+      timeout: 60000
     });
-    if (!result.error && result.status === 0) return candidate;
+    if (!result.error && result.status === 0) {
+      foundPowerShell = candidate;
+      break;
+    }
   }
-  return null;
+  return foundPowerShell;
 }
 
 function powerShellSingleQuoted(value) {
