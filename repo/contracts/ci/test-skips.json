@@ -1036,6 +1036,14 @@
       "reason": "Windows-only behaviour (Windows-only cmd wrapper behavior); the test runs on the Windows leg"
     },
     {
+      "file": "repo/tests/plain-text-check.test.cjs",
+      "test": "findings in file names the baseline cannot store stay findings: install leaves them out and says so",
+      "systems": [
+        "windows"
+      ],
+      "reason": "Windows file names cannot hold the characters this test needs; the test runs on the Linux leg"
+    },
+    {
       "file": "repo/tests/repo-backup-ignore-hygiene.test.cjs",
       "test": "restore rejects a POSIX symlinked files directory before reading external payload bytes",
       "systems": [
@@ -1306,6 +1314,14 @@
         "windows"
       ],
       "reason": "Linux-only behaviour (the workflow runs on Linux only); the test runs on the Linux leg"
+    },
+    {
+      "file": "repo/tests/toolkit-remove.test.cjs",
+      "test": "the record is written with mode 600",
+      "systems": [
+        "windows"
+      ],
+      "reason": "Windows keeps no POSIX file mode, so mode 600 cannot be checked; the test runs on the Linux leg"
     },
     {
       "file": "repo/tests/toolkit-setup-orchestrator-4.test.cjs",
