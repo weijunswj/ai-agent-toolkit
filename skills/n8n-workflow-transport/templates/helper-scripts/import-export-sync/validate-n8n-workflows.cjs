@@ -162,7 +162,8 @@ const secretPatterns = [
   { label: 'JWT-looking token', regex: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
 ];
 
-const emailRegex = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+// Letters, digits and marks of any script, so a look-alike or internationalised domain is checked too.
+const emailRegex = /(?<![\p{L}\p{M}\p{N}._%+-])[\p{L}\p{M}\p{N}._%+-]+@[\p{L}\p{M}\p{N}.-]+\.[\p{L}\p{M}]{2,}(?![\p{L}\p{M}\p{N}])/giu;
 const urlRegex = /https?:\/\/[^\s"'<>)]+/gi;
 const googleIdRegex = /\b[0-9A-Za-z_-]{33,}\b/g;
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -185,6 +186,17 @@ function walk(value, visitor, trail = []) {
   }
 }
 
+// Quoted string literals ('...', "..." or `...`) inside every {{ ... }} expression body.
+function expressionLiterals(value) {
+  const literals = [];
+  for (const body of value.match(/\{\{[\s\S]*?\}\}/g) || []) {
+    for (const literal of body.match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g) || []) {
+      literals.push(literal.slice(1, -1));
+    }
+  }
+  return literals;
+}
+
 // Distinct unsafe values and the places they appear, without the values themselves.
 function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
   const values = new Set();
@@ -194,8 +206,12 @@ function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
       // For URLs, collapse each {{ ... }} expression to one token first, so a space inside an
       // expression does not end the match before a real host (https://{{ $env.U }}@host/...).
       // Emails are matched as written, so one quoted inside an expression is still found.
+      // A URL written as a quoted literal inside an expression ({{ 'https://host/x' }}) is checked on
+      // its own as well, because collapsing would hide it.
       const collapsed = options.collapseExpressions ? value.replace(/\{\{[\s\S]*?\}\}/g, '{{expr}}') : value;
-      const unsafe = (collapsed.match(regex) || []).filter((match) => !isAllowed(match));
+      const candidates = (collapsed.match(regex) || [])
+        .concat(options.collapseExpressions ? expressionLiterals(value).flatMap((literal) => literal.match(regex) || []) : []);
+      const unsafe = candidates.filter((match) => !isAllowed(match));
       if (unsafe.length > 0) {
         unsafe.forEach((match) => values.add(match));
         places.push(trail.join('.') || '(root)');
@@ -232,8 +248,10 @@ function createPolicyHelpers(policy) {
 
   const allowedEmail = (email) => {
     if (isAllowedPlaceholder(email) || isAllowedLiteral(email)) return true;
-    const domain = email.split('@').pop().toLowerCase();
-    return policy.allowedEmailDomains.some((allowedDomain) => domain === allowedDomain.toLowerCase());
+    // Compare normalised forms, so a look-alike letter from another script never equals an allowed domain.
+    const normalise = (domain) => String(domain).normalize('NFKC').toLowerCase();
+    const domain = normalise(email.split('@').pop());
+    return policy.allowedEmailDomains.some((allowedDomain) => domain === normalise(allowedDomain));
   };
 
   const allowedUrl = (url) => {
@@ -252,7 +270,8 @@ function createPolicyHelpers(policy) {
       .replace(/:[^:\]]*$/, '')
       .replace(/[\]`.,;]+$/, '')
       .toLowerCase();
-    if (host.includes('{{')) return true;
+    // A host built at run time, by an expression or a template literal's ${...}, holds no real host.
+    if (host.includes('{{') || host.includes('${')) return true;
     return policy.allowedUrlHosts.some((allowedHost) => hostMatches(host, allowedHost));
   };
 
