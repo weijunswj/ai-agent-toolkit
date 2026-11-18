@@ -2384,24 +2384,45 @@ const unwrappedCountExceptions = [
   },
 ];
 
+// Any assignment of a script function's result: bare, in ( ) or $( ), through &, to a scoped
+// variable, or after other code on the line. @( ... ) is the safe form and does not match.
+const scopedVariable = '\\$(?:(?:script|global|local|private):)?';
+
+// (Func ...) + x builds a new value from the result, so it is not the unrolled result itself.
+function isJoinedParenResult(line, assignment) {
+  const open = line.indexOf('(', assignment.index);
+  if (open === -1 || open > assignment.index + assignment[0].length) return false;
+  let depth = 0;
+  for (let at = open; at < line.length; at += 1) {
+    if (line[at] === '(') depth += 1;
+    if (line[at] === ')' && (depth -= 1) === 0) return /^\s*\+/.test(line.slice(at + 1));
+  }
+  return false;
+}
+
 function findUnwrappedCountedFunctionResults(filePath) {
   const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
   const functionNames = new Set(lines
     .map((line) => line.match(/^\s*function\s+([A-Za-z][\w-]*)/i))
     .filter(Boolean)
     .map((match) => match[1].toLowerCase()));
+  const assignmentPattern = new RegExp(`(?<![\\w:$\\]])${scopedVariable}([A-Za-z_]\\w*)\\s*=\\s*(?:\\$?\\(\\s*)?(?:&\\s*)?([A-Za-z][\\w-]*)(?=[\\s);]|$)`, 'gi');
   const findings = [];
   lines.forEach((line, index) => {
-    const assignment = line.match(/^\s*\$([A-Za-z_]\w*)\s*=\s*([A-Za-z][\w-]*)(?=\s|$)/);
-    if (!assignment || !functionNames.has(assignment[2].toLowerCase())) return;
-    const variable = assignment[1];
-    const reassigned = new RegExp(`^\\s*\\$${variable}\\s*=(?!=)`, 'i');
-    const counted = new RegExp(`\\$${variable}(?:\\.(?:Count|Length)\\b|\\[)`, 'i');
-    for (let next = index + 1; next < lines.length; next += 1) {
-      if (/^function\s/i.test(lines[next]) || reassigned.test(lines[next])) break;
-      if (counted.test(lines[next])) {
-        findings.push({ file: path.basename(filePath), line: index + 1, fn: assignment[2], variable });
-        break;
+    if (/^\s*#/.test(line)) return;
+    for (const assignment of line.matchAll(assignmentPattern)) {
+      if (!functionNames.has(assignment[2].toLowerCase())) continue;
+      if (isJoinedParenResult(line, assignment)) continue;
+      const variable = assignment[1];
+      const reassigned = new RegExp(`(?<![\\w:$])${scopedVariable}${variable}\\s*=(?!=)`, 'i');
+      const counted = new RegExp(`${scopedVariable}${variable}(?:\\.(?:Count|Length)\\b|\\[)`, 'i');
+      const rest = [line.slice(assignment.index + assignment[0].length)].concat(lines.slice(index + 1));
+      for (const [offset, next] of rest.entries()) {
+        if (offset > 0 && (/^function\s/i.test(next) || reassigned.test(next))) break;
+        if (counted.test(next)) {
+          findings.push({ file: path.basename(filePath), line: index + 1, fn: assignment[2], variable });
+          break;
+        }
       }
     }
   });
@@ -2421,9 +2442,34 @@ test('the PS 5.1 count guard finds an unwrapped counted function result and acce
       '$reused = Get-Items',
       '$reused = "text"',
       '$reused.Length',
+      '$paren = (Get-Items -All)',
+      'if ($paren.Count -gt 0) { }',
+      '$call = & Get-Items',
+      '$call[0]',
+      '$script:scoped = Get-Items',
+      'if ($script:scoped.Count -gt 0) { }',
+      'if ($true) { $mid = Get-Items }',
+      '$mid.Count',
+      '$sub = $(Get-Items)',
+      '$sub.Length',
+      '$sameLine = Get-Items; $sameLine.Count',
+      '$wrappedCall = @(& Get-Items)',
+      '$wrappedCall.Count',
+      '# $commented = Get-Items',
+      '$commented.Count',
+      '$joined = (Get-Items) + "/"',
+      '$joined.Length',
+      '[array]$cast = Get-Items',
+      '$cast.Count',
     ].join('\n'));
     assert.deepEqual(findUnwrappedCountedFunctionResults(probe), [
       { file: 'probe.ps1', line: 2, fn: 'Get-Items', variable: 'bad' },
+      { file: 'probe.ps1', line: 9, fn: 'Get-Items', variable: 'paren' },
+      { file: 'probe.ps1', line: 11, fn: 'Get-Items', variable: 'call' },
+      { file: 'probe.ps1', line: 13, fn: 'Get-Items', variable: 'scoped' },
+      { file: 'probe.ps1', line: 15, fn: 'Get-Items', variable: 'mid' },
+      { file: 'probe.ps1', line: 17, fn: 'Get-Items', variable: 'sub' },
+      { file: 'probe.ps1', line: 19, fn: 'Get-Items', variable: 'sameLine' },
     ]);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
@@ -2636,7 +2682,7 @@ foreach ($row in $rows) {
   }
 });
 
-test('import script refuses the unused -RequireConfirmation and -SkipCredentialBindingRefresh switches before any docker call', (t) => {
+test('import script refuses every unused switch before any docker call, and the docker marker can fire', (t) => {
   const shell = findTestPowerShell();
   if (!shell) {
     t.skip('PowerShell is unavailable');
@@ -2644,34 +2690,80 @@ test('import script refuses the unused -RequireConfirmation and -SkipCredentialB
   }
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-import-switches-'));
   try {
-    const scriptsDir = path.join(fixtureRoot, 'n8n-workflows', 'scripts');
+    const workflowDir = path.join(fixtureRoot, 'n8n-workflows');
+    const scriptsDir = path.join(workflowDir, 'scripts');
     const binDir = path.join(fixtureRoot, 'fake-bin');
     const marker = path.join(fixtureRoot, 'docker-called.txt');
     fs.mkdirSync(path.join(fixtureRoot, '.git'));
     fs.mkdirSync(scriptsDir, { recursive: true });
     fs.mkdirSync(binDir);
+    // The complete, stamped helper set and one valid workflow, so a run with no refused switch gets
+    // as far as its first docker call.
+    for (const name of Object.keys(JSON.parse(fs.readFileSync(path.join(helperRoot, 'n8n-helper-set.json'), 'utf8')).files)) {
+      fs.copyFileSync(path.join(helperRoot, name), path.join(scriptsDir, name));
+    }
+    fs.copyFileSync(path.join(helperRoot, 'n8n-helper-set.json'), path.join(scriptsDir, 'n8n-helper-set.json'));
+    writeFixture(path.join(workflowDir, 'probe.json'), {
+      name: 'Probe',
+      nodes: [{ id: 'start', name: 'Start', type: 'n8n-nodes-base.manualTrigger', typeVersion: 1, position: [0, 0], parameters: {} }],
+      connections: {},
+      settings: {},
+      active: false,
+    });
     const importCopy = path.join(scriptsDir, 'import-n8n-workflows-live.ps1');
-    fs.copyFileSync(path.join(helperRoot, 'import-n8n-workflows-live.ps1'), importCopy);
-    fs.writeFileSync(path.join(binDir, 'docker.cmd'), `@echo called>> "${marker}"\r\n`);
-    fs.writeFileSync(path.join(binDir, 'docker'), `#!/bin/sh\necho called >> '${marker}'\n`, { mode: 0o755 });
+    // The fake docker records the call and fails, so a run stops at the docker reachability check. The
+    // import starts docker as a process: on Windows that runs only a docker.exe (never a .cmd), and the
+    // search tries the current folder before the system folders, where a runner's own docker.exe may
+    // sit, so there the fake is compiled by Windows PowerShell into the current folder as well as PATH.
+    if (process.platform === 'win32') {
+      const buildPath = path.join(fixtureRoot, 'build-fake-docker.ps1');
+      const source = `public static class FakeDocker { public static int Main() { System.IO.File.AppendAllText(@"${marker}", "called"); return 1; } }`;
+      fs.writeFileSync(buildPath, `Add-Type -TypeDefinition ${psQuoted(source)} -OutputType ConsoleApplication -OutputAssembly ${psQuoted(path.join(binDir, 'docker.exe'))}\n`);
+      const build = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', buildPath], { encoding: 'utf8' });
+      assert.equal(build.status, 0, `fake docker.exe build: ${build.stdout}${build.stderr}`);
+      fs.copyFileSync(path.join(binDir, 'docker.exe'), path.join(fixtureRoot, 'docker.exe'));
+    } else {
+      fs.writeFileSync(path.join(binDir, 'docker'), `#!/bin/sh\necho called >> '${marker}'\nexit 1\n`, { mode: 0o755 });
+    }
     const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
     const env = { ...process.env, [pathKey]: `${binDir}${path.delimiter}${process.env[pathKey] || ''}` };
-    for (const [flag, pointer] of [
-      ['-RequireConfirmation', /n8n-workflow-sync-menu\.ps1 -RequireConfirmation/],
-      ['-SkipCredentialBindingRefresh', /never refreshes credential bindings/],
-    ]) {
-      const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', importCopy, flag], {
+    const runImport = (args) => {
+      const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', importCopy, ...args], {
         cwd: fixtureRoot,
         env,
         encoding: 'utf8',
       });
-      const output = result.stdout + result.stderr;
-      assert.equal(result.status, 1, `${flag}: ${output}`);
-      assert.match(output, new RegExp(`N8N_POLICY_VALIDATION_FAILED: ${flag} is not supported by the import script`), flag);
-      assert.match(output, pointer, flag);
-      assert.equal(fs.existsSync(marker), false, `${flag}: no docker call before the refusal`);
+      return { status: result.status, output: result.stdout + result.stderr };
+    };
+    for (const [args, pointer] of [
+      [['-RequireConfirmation'], /n8n-workflow-sync-menu\.ps1 -RequireConfirmation/],
+      [['-SkipCredentialBindingRefresh'], /never refreshes credential bindings/],
+      [['-AllowMissingCredentialBindings'], /Credential checks always run/],
+      [['-CredentialExportDir', '.tmp/credential-exports'], /never exports credential bindings/],
+    ]) {
+      const { status, output } = runImport(args);
+      assert.equal(status, 1, `${args[0]}: ${output}`);
+      assert.match(output, new RegExp(`N8N_POLICY_VALIDATION_FAILED: ${args[0]} is not supported by the import script`), args[0]);
+      assert.match(output, pointer, args[0]);
+      assert.equal(fs.existsSync(marker), false, `${args[0]}: no docker call before the refusal`);
     }
+    // Control: without a refused switch the same fixture reaches docker, so the marker checks above can fail.
+    const control = runImport(['-DryRun']);
+    assert.equal(control.status, 1, control.output);
+    assert.match(control.output, /Docker is not reachable/, control.output);
+    assert.equal(fs.existsSync(marker), true, `the control run calls docker: ${control.output}`);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
+});
+
+test('import script defines no function that nothing calls', () => {
+  const text = fs.readFileSync(path.join(helperRoot, 'import-n8n-workflows-live.ps1'), 'utf8');
+  const names = [...text.matchAll(/^\s*function\s+([A-Za-z][\w-]*)/gim)].map((match) => match[1]);
+  assert.ok(names.length > 20, 'the import script functions are found');
+  // PowerShell names are case-insensitive; a function that nothing calls appears once, where it is defined.
+  const uses = new Map();
+  for (const word of text.match(/[A-Za-z][\w-]*/g)) uses.set(word.toLowerCase(), (uses.get(word.toLowerCase()) || 0) + 1);
+  const uncalled = names.filter((name) => uses.get(name.toLowerCase()) < 2);
+  assert.deepEqual(uncalled, [], 'remove these unused functions');
 });
