@@ -492,20 +492,28 @@ test('attached blocks, comments and stop-parsing scans retain the hostile input 
 // EXEC and CXB are where PowerShell may run the command (Codex exec_command and Codex Bash), CB is
 // Claude Bash (POSIX only). The guard allows every write it is shown, so each refusal below comes from
 // the reader itself; `judged` means the guard was shown the write.
-test('779 closure matrix: piped data blocks, -c argument order, built iex text and two-reading write sets', () => {
+const MATRIX_READINGS = { PS: ['PowerShell', 'claude'], EXEC: ['exec_command', 'codex'], CXB: ['Bash', 'codex'], CB: ['Bash', 'claude'] };
+const AMB_ONLY = { PS: 'refuse', EXEC: 'refuse', CXB: 'refuse', CB: 'allow' };
+const ALL = { PS: 'refuse', EXEC: 'refuse', CXB: 'refuse', CB: 'refuse' };
+const NONE = { PS: 'allow', EXEC: 'allow', CXB: 'allow', CB: 'allow' };
+function matrixDecide(reading, command) {
   const closure = require('../scripts/toolkit-issue-closure.cjs');
+  const seen = [];
+  const guard = { assertClosable: n => { seen.push(`close ${n}`); return { status: 'allowed' }; }, checkTexts: () => { seen.push('texts'); return { status: 'allowed' }; }, checkEdit: () => { seen.push('edit'); return { status: 'allowed' }; } };
+  const [tool_name, host] = MATRIX_READINGS[reading];
+  const result = closure.issueClosureDecision({ tool_name, tool_input: { command } }, { host, guard });
+  return result?.deny ? 'refuse' : seen.length ? 'judged' : 'allow';
+}
+function matrixWrong(rows) {
+  const wrong = [];
+  for (const [name, command, expected] of rows) for (const [reading, want] of Object.entries(expected)) {
+    const got = matrixDecide(reading, command);
+    if (got !== want) wrong.push(`${name} on ${reading}: ${got}, expected ${want}`);
+  }
+  return wrong;
+}
+test('779 closure matrix: piped data blocks, -c argument order, built iex text and two-reading write sets', () => {
   const close = 'gh issue close 1 -R example.test/app';
-  const READINGS = { PS: ['PowerShell', 'claude'], EXEC: ['exec_command', 'codex'], CXB: ['Bash', 'codex'], CB: ['Bash', 'claude'] };
-  const decide = (reading, command) => {
-    const seen = [];
-    const guard = { assertClosable: n => { seen.push(`close ${n}`); return { status: 'allowed' }; }, checkTexts: () => { seen.push('texts'); return { status: 'allowed' }; }, checkEdit: () => { seen.push('edit'); return { status: 'allowed' }; } };
-    const [tool_name, host] = READINGS[reading];
-    const result = closure.issueClosureDecision({ tool_name, tool_input: { command } }, { host, guard });
-    return result?.deny ? 'refuse' : seen.length ? 'judged' : 'allow';
-  };
-  const AMB_ONLY = { PS: 'refuse', EXEC: 'refuse', CXB: 'refuse', CB: 'allow' };
-  const ALL = { PS: 'refuse', EXEC: 'refuse', CXB: 'refuse', CB: 'refuse' };
-  const NONE = { PS: 'allow', EXEC: 'allow', CXB: 'allow', CB: 'allow' };
   const rows = [
     // L4r: a data command's block piped on to any further stage may be invoked there.
     ['L4r |% Invoke', `Write-Output {${close}} |% Invoke`, AMB_ONLY],
@@ -580,12 +588,7 @@ test('779 closure matrix: piped data blocks, -c argument order, built iex text a
     ['785-L1 control: same API read in both readings', String.raw`echo \" ; gh api repos/example.test/app/issues/1 ; echo \" ; echo "a\" ; gh api repos/example.test/app/issues/1 ; echo \"b"`, { EXEC: 'allow', CXB: 'allow' }],
     ['785-L1 control: write only the judged reading sees', String.raw`echo "a\"b" ; ${close}`, { EXEC: 'judged', CXB: 'judged' }],
   );
-  const wrong = [];
-  for (const [name, command, expected] of rows) for (const [reading, want] of Object.entries(expected)) {
-    const got = decide(reading, command);
-    if (got !== want) wrong.push(`${name} on ${reading}: ${got}, expected ${want}`);
-  }
-  assert.deepEqual(wrong, []);
+  assert.deepEqual(matrixWrong(rows), []);
 });
 
 test('779 new refusals hold under hostile suffixes and stay bounded', () => {
@@ -603,4 +606,68 @@ test('779 new refusals hold under hostile suffixes and stay bounded', () => {
     const result = hostile.timing(text => { try { closureReader.closureWriteCandidate({ tool_name: 'Bash', tool_input: { command: text } }, { host: 'codex' }); } catch (error) { assert.match(error.message, /bound exceeded|two ways/); } }, size => head + unit.repeat(Math.floor((size - head.length - 1) / unit.length)) + "'", SCAN_TIMING);
     assert.ok(result.ok, `${head}${unit}: ${result.message}`);
   }
+});
+
+// Regression rows for the second G2 recheck of the 779 reader fixes (H1, M-b, M-c, M-d), each refused
+// or judged where the reader used to let the close through.
+test('779 recheck: gh among -c words, nested placements, piped block groups and moved targets', () => {
+  const close = 'gh issue close 1 -R example.test/app';
+  const rows = [
+    // H1: a guarded gh among the words after a -c script (here a plain read) used to stop the reader
+    // before it read the script, its placed reading and its reorders.
+    ['H1 script close, gh api read among the words', `sh -c '${close}' x gh api user`, { PS: 'judged', EXEC: 'judged', CXB: 'judged', CB: 'judged' }],
+    ['H1 $2 $1 plus gh api read', `sh -c '$2 $1' x 'issue close 1 -R example.test/app' gh api user`, ALL],
+    ['H1 $1$2 plus gh api read', `sh -c '$1$2' x g 'h issue close 1 -R example.test/app' gh api user`, ALL],
+    ['H1 $0 plus gh api read', `sh -c '$0 issue close 1 -R example.test/app' gh gh api user`, ALL],
+    ['H1 shift plus gh api read', `sh -c 'shift; $1$2 issue close 1 -R example.test/app' x y g h gh api user`, ALL],
+    ['H1 control: gh api read after a harmless script', `sh -c 'echo $1' x gh api user`, NONE],
+    // M-c: a block group run inline (., %, Invoke-Command) outputs the inner block, which a later
+    // stage of the statement around the group can invoke, even after a ; inside the group.
+    ['M-c . { } piped', `. { Write-Output {${close}} } | % Invoke`, AMB_ONLY],
+    ['M-c % { } piped', `1 | % { Write-Output {${close}} } | % Invoke`, AMB_ONLY],
+    ['M-c Invoke-Command { } piped', `Invoke-Command { Write-Output {${close}} } | ForEach-Object Invoke`, AMB_ONLY],
+    ['M-c later statement in the group', `. { Write-Output {${close}}; 1 } | % Invoke`, AMB_ONLY],
+    ['M-c two groups out', `. { & { Write-Output {${close}} } } | % Invoke`, AMB_ONLY],
+    ['M-c $( ) piped', `$(Write-Output {${close}}) | % Invoke`, AMB_ONLY],
+    ['M-c control: group not piped', `& { Write-Output {${close}} }`, NONE],
+    ['M-c control: pipe in a later statement after the group', `. { Write-Output {${close}} }; gh pr view 7 | Out-String`, NONE],
+    ['M-c control: pipe inside a later statement of the group', `. { Write-Output {${close}}; gh pr view 7 | Out-String }`, NONE],
+    ['M-c control: function body, next line pipes another command', `function f { Write-Output {${close}} }\ngh pr view 7 | Out-String`, NONE],
+  ];
+  assert.deepEqual(matrixWrong(rows), []);
+  // M-d: without -R, a folder change or GH_REPO decides the repository, so a move only the PowerShell
+  // reading runs makes the two readings name different writes.
+  const twoWays = (tool_name, command) => {
+    try { closureReader.closureCommands({ tool_name, tool_input: { command } }, { host: 'codex' }); return false; } catch (error) { return /two ways/.test(error.message); }
+  };
+  for (const tool of ['exec_command', 'Bash']) {
+    for (const move of [`$env:GH_REPO='other.test/app'`, String.raw`cd ..\other`, String.raw`Set-Location C:\other`]) {
+      assert.equal(twoWays(tool, String.raw`echo "a\" ; ` + move + String.raw` ; echo \"b" ; gh issue close 1`), true, `${tool}: ${move}`);
+      // With -R the move does not decide the repository, so both readings name the same write.
+      assert.equal(twoWays(tool, String.raw`echo "a\" ; ` + move + String.raw` ; echo \"b" ; gh issue close 1 -R example.test/app`), false, `${tool}: ${move} with -R`);
+    }
+    assert.equal(twoWays(tool, String.raw`echo "a\" ; echo \"b" ; gh issue close 1`), false, `${tool}: no move`);
+  }
+});
+
+test('779 recheck: repeated and nested -c placements stay inside one budget', () => {
+  // M-b: a script that repeats $1, nested inside another that repeats $1, multiplies the placed text.
+  // Every placed reading shares the command's budget, so these stay quick and the close is still judged.
+  const close = 'gh issue close 1 -R example.test/app';
+  const nested = (outer, k, r, len) => `${close} ; ` + Array.from({ length: outer }, () => `sh -c '${'$1 ; '.repeat(k)}' x "sh -c '${'\\$1 '.repeat(r)}' y ${'a'.repeat(len)}"`).join(' ; ');
+  const flat = (calls, reps, len) => `${close} ; ` + Array.from({ length: calls }, () => `sh -c '${'$1 '.repeat(reps)}' x ${'a'.repeat(len)}`).join(' ; ');
+  for (const [name, command] of [['nested', nested(7, 100, 200, 3000)], ['flat', flat(100, 200, 4500)], ['spaced flat', flat(120, 200, 4500).replace(/\$1 /g, '$1  ')]]) {
+    for (const reading of ['CXB', 'CB']) {
+      const started = process.hrtime.bigint();
+      const got = matrixDecide(reading, command);
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      assert.equal(got, 'judged', `${name} on ${reading}`);
+      assert.ok(ms < 5000, `${name} on ${reading} took ${Math.round(ms)} ms`);
+    }
+  }
+  // A placement past the budget that may make gh is refused, not skipped.
+  const glued = `sh -c '${'g$1 '.repeat(400)}' x ${'h'.repeat(6000)}`;
+  assert.equal(matrixDecide('CB', glued), 'refuse');
+  // A placement past the budget with no gh in reach is not read and not refused.
+  assert.equal(matrixDecide('CB', `sh -c '${'echo $1 ; '.repeat(400)}' x ${'a'.repeat(6000)}`), 'allow');
 });

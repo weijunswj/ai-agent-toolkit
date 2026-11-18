@@ -7069,6 +7069,359 @@
         "decision": "allow"
       },
       "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-script-then-gh-read-bash",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -c 'gh issue close 1 -R toolkit-test-fixture/fixture' x gh api user"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "A gh read among the words after the script must not stop the reader before it reads the script."
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-script-then-gh-read-exec",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "sh -c 'gh issue close 1 -R toolkit-test-fixture/fixture' x gh api user"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-script-then-gh-read-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "sh -c 'gh issue close 1 -R toolkit-test-fixture/fixture' x gh api user"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-reversed-then-gh-read-bash",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -c '$2 $1' x 'issue close 1 -R toolkit-test-fixture/fixture' gh api user"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-glued-then-gh-read-exec",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "sh -c '$1$2' x g 'h issue close 1 -R toolkit-test-fixture/fixture' gh api user"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-sh-c-nested-placements-bash",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh issue close 1 -R toolkit-test-fixture/fixture ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" ; sh -c '$1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; $1 ; ' x \"sh -c '\\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 \\$1 ' y aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Nested -c scripts that repeat $1 multiply the placed text; one budget keeps the read quick, so the close is judged before a host stops the hook."
+    },
+    {
+      "id": "CLOSURE.779a-group-dot-piped-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": ". { Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} } | % Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The group outputs the inner block, and the statement around the group pipes it on to an invoker."
+    },
+    {
+      "id": "CLOSURE.779a-group-foreach-piped-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "1 | % { Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} } | % Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-group-icm-piped-exec",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "Invoke-Command { Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} } | ForEach-Object Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-group-later-statement-piped-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": ". { Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture}; 1 } | % Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-subexpression-piped-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$(Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture}) | % Invoke"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-pass-sh-c-echo-then-gh-read-bash",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -c 'echo $1' x gh api user"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-pass-group-not-piped-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "& { Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} }"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.779a-pass-group-later-statement-pipe-ps",
+      "source": "issue 779 slice A, review round 2: gh among -c words, nested placements in one budget, piped block groups",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": ". { Write-Output {gh issue close 1 -R toolkit-test-fixture/fixture} }; gh pr view 7 -R toolkit-test-fixture/fixture | Out-String"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

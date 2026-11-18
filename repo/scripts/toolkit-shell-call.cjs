@@ -402,7 +402,7 @@ function documentOpening(line, state) {
 }
 
 // Read documents once by lines, preserving the command on both sides of the opener.
-function readScript(text, { powershell = false, interpolation = false, cmd = false, uncertainShell = false, codexBash = false } = {}) {
+function readScript(text, { powershell = false, interpolation = false, cmd = false, uncertainShell = false, codexBash = false, pipedOut = false } = {}) {
   const docs = new Map(); const nested = [];
   const lines = text.split(/\r?\n/); const lastExact = new Map(); const lastTabbed = new Map();
   lines.forEach((line, i) => { lastExact.set(line, i); lastTabbed.set(line.replace(/^\t+/, ''), i); });
@@ -442,26 +442,52 @@ function readScript(text, { powershell = false, interpolation = false, cmd = fal
   // Where PowerShell may run it, a script block followed by member access ({...}.Invoke(),
   // {...}?.Invoke()) or piped on to any further stage in the same statement runs too: a later stage
   // can invoke it however it likes (| % Invoke, | Where-Object { $_.Invoke() }, | Out-String | iex).
-  // The statement ends at a `;`, a line break, `&`, `&&`, `||` or the end of its group; quoted text,
-  // comments, nested groups and an escaped line break do not end it, and PowerShell 7 carries a
-  // pipeline on to a next line that starts with `|`.
+  // The statement ends at a `;`, a line break, `&`, `&&` or `||`; quoted text, comments, nested
+  // groups and an escaped line break do not end it, and PowerShell 7 carries a pipeline on to a next
+  // line that starts with `|`. Every statement in a group outputs to the group, so when the
+  // statement ends inside a group ((...), $(...), {...} run by ., &, % or Invoke-Command), the scan
+  // carries on after the group in the statement around it. A $(...) subexpression is read as its own
+  // text, so pipedOut says whether the statement around it pipes the subexpression's output on.
   const scriptBlocks = powershell || uncertainShell || codexBash;
   const escapes = c => !cmd && (c === '\\' && !powershell || c === '`');
-  const pipedFrom = new Map();
-  const pipedOn = from => {
-    const visited = []; let piped = false; let q = '';
+  // scanTo reads on from `from` to the first pipe, statement end or end of the enclosing group, as
+  // { kind: 'pipe' | 'end' | 'group', at }; with `statements` it reads past statement ends to the end
+  // of the enclosing group only. Each memo maps every position a scan passed to its result, so each
+  // position is read once per kind and the scans stay linear.
+  const statementScans = new Map(); const groupScans = new Map(); const pipedFrom = new Map();
+  const scanTo = (from, statements) => {
+    const memo = statements ? groupScans : statementScans; const visited = []; let q = ''; let found = { kind: 'end', at: source.length };
     for (let j = from; j < source.length; j++) {
-      if (!q) { if (pipedFrom.has(j)) { piped = pipedFrom.get(j); break; } visited.push(j); }
+      if (!q) { if (memo.has(j)) { found = memo.get(j); break; } visited.push(j); }
       const c = source[j];
       if (q !== "'" && escapes(c)) { j++; continue; }
       if (q) { if (c === q) q = ''; continue; }
       if (c === '"' || c === "'" && !cmd) { q = c; continue; }
       if (c === '<' && source[j + 1] === '#') { const close = source.indexOf('#>', j + 2); if (close < 0) break; j = close + 1; continue; }
       if (c === '#' && /[\s;&|{}()]/.test(source[j - 1] || ' ')) { while (j + 1 < source.length && source[j + 1] !== '\n') j++; continue; }
-      if (c === '(' || c === '{') { const end = balanced(j, c, c === '(' ? ')' : '}'); if (end < 0) break; j = end; continue; }
-      if (c === '|') { piped = source[j + 1] !== '|'; break; }
-      if (c === '\n') { piped = /^[ \t\r]*\|(?!\|)/.test(source.slice(j + 1, j + 256)); break; }
-      if (/[;&)}]/.test(c)) break;
+      if (c === '(' || c === '{') { const close = balanced(j, c, c === '(' ? ')' : '}'); if (close < 0) break; j = close; continue; }
+      if (c === ')' || c === '}') { found = { kind: 'group', at: j }; break; }
+      if (statements) continue;
+      if (c === '|') { found = { kind: source[j + 1] === '|' ? 'end' : 'pipe', at: j }; break; }
+      if (c === '\n') { found = { kind: /^[ \t\r]*\|(?!\|)/.test(source.slice(j + 1, j + 256)) ? 'pipe' : 'end', at: j }; break; }
+      if (c === ';' || c === '&') { found = { kind: 'end', at: j }; break; }
+    }
+    for (const j of visited) memo.set(j, found);
+    return found;
+  };
+  // A block is piped on when its own statement pipes, or when a group around it ends and the
+  // statement around that group pipes, however many groups out.
+  const pipedOn = from => {
+    const visited = []; let piped = false;
+    for (let j = from; ; ) {
+      if (j >= source.length) { piped = pipedOut; break; }
+      if (pipedFrom.has(j)) { piped = pipedFrom.get(j); break; }
+      visited.push(j);
+      const statement = scanTo(j, false);
+      if (statement.kind === 'pipe') { piped = true; break; }
+      const group = statement.kind === 'group' ? statement : scanTo(statement.at + 1, true);
+      if (group.kind !== 'group') { piped = pipedOut; break; }
+      j = group.at + 1;
     }
     for (const j of visited) pipedFrom.set(j, piped);
     return piped;
@@ -489,7 +515,7 @@ function readScript(text, { powershell = false, interpolation = false, cmd = fal
     if (quote !== "'" && c === '$' && source[i + 1] === '(') {
       const end = balanced(i + 1, '(', ')');
       if (end < 0) { emit(source.slice(i)); break; }
-      const inner = source.slice(i + 2, end); nested.push(inner);
+      const inner = source.slice(i + 2, end); nested.push(/\bgh\b/i.test(inner) && invoked(end) ? { text: inner, pipedOut: true } : inner);
       const cat = /^\s*cat\s+(__heredoc_\d+__)\s*$/.exec(inner);
       emit(cat ? `$(cat ${cat[1]})` : '$(__subst__)'); i = end; continue;
     }
@@ -637,15 +663,35 @@ const POSITIONALS = new RegExp(POSITIONAL.source, 'g');
 // Put a -c script's words in its positional slots. "$@" gives one quoted word per value, as the
 // shell does; every other slot is text in place, so the script's own quotes and spaces still decide
 // where words break. An escaped \$1 stays the text $1, for a -c script nested inside this one.
-function placePositional(script, values) {
+// A script that repeats a slot multiplies that word, so every placed text is sized first and charged
+// to the budget its whole command text shares (one step and its length); null means the budget ran
+// out and nothing was built.
+const PLACED_SLOTS = /\\\$|"\$(?:\{@\}|@)"|\$(?:\{([0-9@*])\}|([0-9@*]))/g;
+function placePositional(script, values, budget) {
   const list = values.slice(1);
   const posixQuote = word => `'${word.replace(/'/g, `'\\''`)}'`;
-  return script.replace(/\\\$|"\$(?:\{@\}|@)"|\$(?:\{([0-9@*])\}|([0-9@*]))/g, (whole, braced, bare) => {
-    if (whole === '\\$') return '$';
-    if (whole.startsWith('"')) return list.length ? list.map(posixQuote).join(' ') : '""';
+  const quotedList = () => list.length ? list.map(posixQuote).join(' ') : '""';
+  const slotText = (whole, braced, bare, size) => {
+    if (whole === '\\$') return size ? 1 : '$';
+    if (whole.startsWith('"')) return size ? quotedSize : quotedList();
     const slot = braced ?? bare;
-    return /\d/.test(slot) ? values[Number(slot)] ?? '' : list.join(' ');
-  });
+    if (/\d/.test(slot)) { const value = values[Number(slot)] ?? ''; return size ? value.length : value; }
+    return size ? joinedSize : list.join(' ');
+  };
+  let quotedSize = 0; let joinedSize = 0;
+  if (budget) {
+    quotedSize = list.length ? list.reduce((sum, word) => sum + word.length + 2 + (word.match(/'/g) || []).length * 3, list.length - 1) : 2;
+    joinedSize = list.reduce((sum, word) => sum + word.length, Math.max(list.length - 1, 0));
+    let size = script.length;
+    for (const match of script.matchAll(PLACED_SLOTS)) size += slotText(match[0], match[1], match[2], true) - match[0].length;
+    if (--budget.steps < 0 || (budget.chars -= size) < 0) return null;
+  }
+  return script.replace(PLACED_SLOTS, (whole, braced, bare) => slotText(whole, braced, bare, false));
+}
+// Whether a -c script and its words could make gh once the words are put in place: gh in the
+// script or a word, a word that is a gh piece, or script text glued to a slot with g or h.
+function placementMayRunGh(script, extra) {
+  return /gh|g\$|\$\{?[0-9@*]\}?h/i.test(script) || extra.some(word => /gh/i.test(word) || writePieces(word).gh);
 }
 // A word that can be a piece of a guarded gh write once glued into a command: one of its parts is
 // gh (or a path to it), g or h, or two or more letters of a guarded noun or verb.
@@ -660,7 +706,7 @@ function writePieces(word) {
 // words that can be pieces of a gh write in every slot order the script can see, keeping the other
 // words in their given order, and return each placed script once. The reads share one budget per
 // command text; null means the budget ran out, so the caller refuses.
-function reorderedPlacements(script, extra, budget) {
+function reorderedPlacements(script, extra, budget, given) {
   const slots = [...script.matchAll(POSITIONALS)].map(match => match[1] ?? match[2]);
   const list = slots.some(slot => !/\d/.test(slot));
   const pieces = extra.map(word => writePieces(word));
@@ -672,14 +718,14 @@ function reorderedPlacements(script, extra, budget) {
   // also leave the seen slots (shift), so each word takes a seen slot or none.
   const seen = list ? extra.length : Math.min(extra.length, Math.max(...slots.map(Number)) + 1);
   const others = extra.filter((_, i) => !moved.has(i));
-  const given = placePositional(script, extra); const placed = new Set(); const order = new Array(seen).fill(null);
+  const placed = new Set(); const order = new Array(seen).fill(null);
   const visit = n => {
     if (n === relevant.length) {
       const values = []; let other = 0;
       for (let at = 0; at < seen; at++) values.push(order[at] !== null ? extra[order[at]] : others[other++] ?? '');
       if (list) values.push(...others.slice(other));
-      const text = placePositional(script, values);
-      if (--budget.steps < 0 || (budget.chars -= text.length) < 0) return false;
+      const text = placePositional(script, values, budget);
+      if (text === null) return false;
       if (text !== given) placed.add(text);
       return true;
     }
@@ -735,6 +781,8 @@ function executableCommands(text, depth = 0, context = {}) {
   if (!context.placements) context = { ...context, placements: { steps: 2048, chars: 2 * 1024 * 1024 } };
   if (context.uncertainShell || context.cmd) text = text.replace(/\^\r?\n/g, ' ');
   const { clean, docs, nested } = readScript(text, context);
+  // pipedOut belongs to this text alone, not to the scripts read inside it.
+  if (context.pipedOut) context = { ...context, pipedOut: false };
   // Protect substitution sentinels from the generic tokenizer's parenthesis separators.
   const substitutions = [];
   const masked = clean.replace(/\$\((?:cat __heredoc_\d+__|__subst__)\)/g, value => { substitutions.push(value); return `__subword_${substitutions.length - 1}__`; });
@@ -794,10 +842,18 @@ function executableCommands(text, depth = 0, context = {}) {
       // Words after a POSIX -c script are its $0, $1 ...; "$0" "$@" runs them as a command.
       if (kind === 'posix' && index >= 0) {
         const extra = words.slice(scriptAt + 1); const at = extra.findIndex((_, n) => guardedGh(ghCommand(extra.slice(n, n + 8))));
-        if (at >= 0) { result.push({ words: extra.slice(at), expanding: expanding.slice(scriptAt + 1 + at), allWords: words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden: true, offsets: command.offsets }); continue; }
+        // A gh command among the words is read as one, and the script is still read below: a read
+        // such as gh api user among the words must not stand in for the script.
+        if (at >= 0) result.push({ words: extra.slice(at), expanding: expanding.slice(scriptAt + 1 + at), allWords: words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden: true, offsets: command.offsets });
         // A single word ('$1' x 'gh issue close 1', eval "$1") can hold the whole command.
-        // ... or several words ($@, $*, $1 $2) can together: read them joined as well.
-        if (extra.some(word => /\bgh\b/i.test(word))) for (const part of [...extra, extra.join(' ')]) result.push(...executableCommands(part, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
+        // ... or several words ($@, $*, $1 $2) can together: read them joined as well. These reads
+        // count against the placement budget too, since nested -c calls read their words again.
+        const refuseOverBudget = () => result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command\'s -c scripts put their words in place into more text than Toolkit reads, so it was refused. Run the gh command as its own command.', hidden: true });
+        if (extra.some(word => /\bgh\b/i.test(word))) {
+          const parts = [...extra, extra.join(' ')]; const placements = nextContext.placements;
+          if ((placements.chars -= parts.reduce((sum, part) => sum + part.length, 0)) < 0) { refuseOverBudget(); continue; }
+          for (const part of parts) result.push(...executableCommands(part, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
+        }
         // A script that expands its positional parameters ($0 to $9, ${n}, $@, $*) can glue them
         // together or to its own text: read the script with them put in place. It can also reorder
         // them first (set --, shift): refuse when another order of the words that can be pieces of a
@@ -806,8 +862,10 @@ function executableCommands(text, depth = 0, context = {}) {
         const body = words[scriptAt];
         if (extra.length && typeof body === 'string' && POSITIONAL.test(body)) {
           const posix = { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget };
-          result.push(...executableCommands(placePositional(body, extra), depth + 1, posix));
-          const reordered = reorderedPlacements(body, extra, posix.placements);
+          const given = placePositional(body, extra, posix.placements);
+          if (given === null) { if (placementMayRunGh(body, extra)) { refuseOverBudget(); continue; } }
+          else result.push(...executableCommands(given, depth + 1, posix));
+          const reordered = given === null ? [] : reorderedPlacements(body, extra, posix.placements, given);
           if (!reordered || reordered.some(text => runsWrite(executableCommands(text, depth + 1, posix)))) {
             result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command\'s -c script can reorder the words after it (set --, shift) into a gh command that changes GitHub, or gives Toolkit more orders than it reads, so it was refused. Run the gh command as its own command.', hidden: true });
             continue;
@@ -858,7 +916,7 @@ function executableCommands(text, depth = 0, context = {}) {
       }
     }
   }
-  return [...result, ...nested.flatMap(script => executableCommands(typeof script === 'string' ? script : script.text, depth + 1, { ...context, hidden: context.hidden || script.hidden, movesTarget }).map(command => ({ ...command, nested: true })))];
+  return [...result, ...nested.flatMap(script => executableCommands(typeof script === 'string' ? script : script.text, depth + 1, { ...context, hidden: context.hidden || script.hidden, pipedOut: Boolean(script.pipedOut), movesTarget }).map(command => ({ ...command, nested: true })))];
 }
 
 // closingReferences, when given, reads the closing references of PR text for the two-reading key
@@ -900,6 +958,9 @@ function writeFacts(command, closingReferences) {
     if (!closingReferences) return [];
     try { return [...new Set(closingReferences(text, 'x/x').map(ref => `${ref.repository}#${ref.number}`))].sort(); } catch { return ['unreadable']; }
   };
+  // Without -R, a folder change or GH_REPO before the write decides the repository, so a reading
+  // that moves the target names a different one than a reading that does not.
+  if (!repository && command.movesTarget) repository = '(moved)';
   const facts = { noun: gh.noun, verb: gh.verb, repository: repository.toLowerCase(), target: targets[0] ?? null };
   if (gh.noun === 'api') {
     facts.method = (method || (fields.length ? 'POST' : 'GET')).toUpperCase();
