@@ -2712,19 +2712,21 @@ test('import script refuses every unused switch before any docker call, and the 
     });
     const importCopy = path.join(scriptsDir, 'import-n8n-workflows-live.ps1');
     // The fake docker records the call and fails, so a run stops at the docker reachability check. The
-    // import starts docker as a process, which finds only a docker.exe on Windows (never a .cmd), so
-    // there the fake is compiled by Windows PowerShell; elsewhere a shell script does.
+    // import starts docker as a process: on Windows that runs only a docker.exe (never a .cmd), and the
+    // search tries the current folder before the system folders, where a runner's own docker.exe may
+    // sit, so there the fake is compiled by Windows PowerShell into the current folder as well as PATH.
     if (process.platform === 'win32') {
       const buildPath = path.join(fixtureRoot, 'build-fake-docker.ps1');
-      const source = 'public static class FakeDocker { public static int Main() { System.IO.File.AppendAllText(System.Environment.GetEnvironmentVariable("FAKE_DOCKER_MARKER"), "called"); return 1; } }';
+      const source = `public static class FakeDocker { public static int Main() { System.IO.File.AppendAllText(@"${marker}", "called"); return 1; } }`;
       fs.writeFileSync(buildPath, `Add-Type -TypeDefinition ${psQuoted(source)} -OutputType ConsoleApplication -OutputAssembly ${psQuoted(path.join(binDir, 'docker.exe'))}\n`);
       const build = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', buildPath], { encoding: 'utf8' });
       assert.equal(build.status, 0, `fake docker.exe build: ${build.stdout}${build.stderr}`);
+      fs.copyFileSync(path.join(binDir, 'docker.exe'), path.join(fixtureRoot, 'docker.exe'));
     } else {
-      fs.writeFileSync(path.join(binDir, 'docker'), '#!/bin/sh\necho called >> "$FAKE_DOCKER_MARKER"\nexit 1\n', { mode: 0o755 });
+      fs.writeFileSync(path.join(binDir, 'docker'), `#!/bin/sh\necho called >> '${marker}'\nexit 1\n`, { mode: 0o755 });
     }
     const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
-    const env = { ...process.env, FAKE_DOCKER_MARKER: marker, [pathKey]: `${binDir}${path.delimiter}${process.env[pathKey] || ''}` };
+    const env = { ...process.env, [pathKey]: `${binDir}${path.delimiter}${process.env[pathKey] || ''}` };
     const runImport = (args) => {
       const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', importCopy, ...args], {
         cwd: fixtureRoot,
@@ -2749,7 +2751,7 @@ test('import script refuses every unused switch before any docker call, and the 
     const control = runImport(['-DryRun']);
     assert.equal(control.status, 1, control.output);
     assert.match(control.output, /Docker is not reachable/, control.output);
-    assert.equal(fs.existsSync(marker), true, 'the control run calls docker');
+    assert.equal(fs.existsSync(marker), true, `the control run calls docker: ${control.output}`);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
