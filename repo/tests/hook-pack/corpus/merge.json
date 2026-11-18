@@ -2891,6 +2891,290 @@
       "payload": {"tool_name":"exec_command","tool_input":{"cmd":"cd env && ls","workdir":"{home}/.ai-agent-toolkit"}},
       "expect": {"decision":"allow"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-prefix-cd",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"X=1 cd; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-prefix-cd-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"X=1 cd; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-bang-cd",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"! cd; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-bang-cd-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"! cd; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-command-p-cd",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"command -p cd; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-command-p-cd-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"command -p cd; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-if-cd",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"if cd; then cd .ai-agent-toolkit; fi; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-if-cd-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"if cd; then cd .ai-agent-toolkit; fi; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-time-cd",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"time cd; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-time-cd-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"time cd; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cdpath-prefix",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"CDPATH=x:~ cd .ai-agent-toolkit && find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cdpath-prefix-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"CDPATH=x:~ cd .ai-agent-toolkit && find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cdpath-assign",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"CDPATH=:~; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cdpath-assign-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"CDPATH=:~; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cdpath-climb",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"CDPATH=x:../..; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-cdpath-climb-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"CDPATH=x:../..; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-wrapped-shell",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"nohup bash -c 'cd ..; find . -delete'"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-wrapped-shell-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"nohup bash -c 'cd ..; find . -delete'","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-dot-source",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"printf 'c%s ~' d > s; . ./s; cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-dot-source-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"printf 'c%s ~' d > s; . ./s; cd .ai-agent-toolkit; find . -delete","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-cd-from-home",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"X=1 cd .ai-agent-toolkit; find . -delete"},"cwd":"{home}"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-hidden-cd-from-home-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"X=1 cd .ai-agent-toolkit; find . -delete","workdir":"{home}"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-option-value-source",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git -C source status"},"cwd":"{home}/.ai-agent-toolkit"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-home-option-value-source-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"git -C source status","workdir":"{home}/.ai-agent-toolkit"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-source-activate",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"source .venv/bin/activate && ls"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-source-activate-workdir",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"source .venv/bin/activate && ls","workdir":"{work}"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-gitdir-wildcard",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git --git-dir .gi? push origin main"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-gitdir-variable",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"GIT_DIR=$PWD/.git git push origin main"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-gitdir-substitution",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git --git-dir $(pwd)/.git push origin main"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-gitdir-tilde-plus",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git --git-dir ~+/.git push origin main"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.push-gitdir-settings-cap",
+      "source": "working-folder guard, review round 4: a move the reader does not follow counts as Toolkit's own folder; a git folder it cannot read is the folder's own repository; GIT_DIR settings are capped",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"export GIT_DIR=/g0; export GIT_DIR=/g1; export GIT_DIR=/g2; export GIT_DIR=/g3; export GIT_DIR=/g4; export GIT_DIR=/g5; export GIT_DIR=/g6; export GIT_DIR=/g7; export GIT_DIR=/g8; export GIT_DIR=/g9; export GIT_DIR=/g10; export GIT_DIR=/g11; export GIT_DIR=/g12; export GIT_DIR=/g13; export GIT_DIR=/g14; export GIT_DIR=/g15; export GIT_DIR=/g16; git push origin work"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"main"},"files":{".git/refs/remotes/origin/HEAD":"ref: refs/remotes/origin/main\n"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
     }
   ]
 }

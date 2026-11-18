@@ -2100,3 +2100,115 @@ test('the folder reader takes time in step with the command, never more', (t) =>
   assert.match(decide(ctx, bash(f.outside, `${'cd a; '.repeat(17)}git push origin work`))?.deny || '', /more folder changes than Toolkit follows/);
   assert.equal(decide(ctx, bash(f.outside, `${'cd a; '.repeat(8)}git push origin work`)), null);
 });
+
+// Review round 4: a folder change the reader does not follow (a move word behind a prefix, a setting
+// cd reads, a nested shell behind a wrapper, code the shell runs in itself) counts as Toolkit's own
+// folder; the push reader keeps its cost in step with the command; a git folder it cannot read is
+// judged as the folder's own repository.
+test('round 5: a move this reader does not follow counts as Toolkit\'s own folder, whatever stands before it', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const current = path.join(f.home, 'current');
+  fs.mkdirSync(current, { recursive: true });
+  const userHome = path.dirname(f.home);
+  const refused = [
+    // A move word behind a prefix, a keyword or a wrapper builtin.
+    [f.env, 'X=1 cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, '! cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'command -p cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'if cd; then cd .ai-agent-toolkit; fi; find . -delete'],
+    [f.env, 'time cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'for i in 1; do cd; done; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, '{ cd; }; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'X=1 cd -; find . -delete'],
+    [f.checkout, 'X=1 cd; cd .ai-agent-toolkit; find . -delete'],
+    [current, 'X=1 cd; cd .ai-agent-toolkit; find . -delete'],
+    [userHome, 'X=1 cd .ai-agent-toolkit; find . -delete'],
+    // What cd reads besides its words: CDPATH, HOME, OLDPWD, autocd, cdable_vars, an alias.
+    [f.env, 'CDPATH=x:~ cd .ai-agent-toolkit && find . -delete'],
+    [f.env, 'CDPATH=:~; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'CDPATH=x:../..; cd .ai-agent-toolkit; find . -delete'],
+    [f.checkout, 'export CDPATH=:~; cd .ai-agent-toolkit; grep -r x .'],
+    [f.env, 'cd s; OLDPWD=x; cd -; find . -delete'],
+    [f.env, 'read HOME < f; cd; find . -delete'],
+    [f.env, 'shopt -s cdable_vars; d=x; cd d; find . -delete'],
+    [f.env, 'setopt AUTO_CD; x; find . -delete'],
+    [userHome, 'shopt -s expand_aliases\nalias c=x\nc .ai-agent-toolkit\nfind . -delete'],
+    // zsh's and ksh's two-word cd swaps text in the current folder's path.
+    [f.env, 'cd /env / && find . -delete'],
+    // A nested shell behind a wrapper or a prefix, trap's action and an alias's value are read too.
+    [f.env, "nohup bash -c 'cd ..; find . -delete'"],
+    [f.env, "timeout 9 sh -c 'cd ..; find . -delete'"],
+    [f.env, "exec bash -c 'cd ..; find . -delete'"],
+    [f.env, "X=1 bash -c 'cd ..; find . -delete'"],
+    [userHome, "nohup sh -c 'cd .ai-agent-toolkit; find . -delete'"],
+    [f.env, "trap 'c''d ..' DEBUG; find . -delete"],
+    // Code the shell runs in itself from a file is never read, so it is refused in Toolkit's folder.
+    [f.env, "printf 'c%s ~' d > s; . ./s; cd .ai-agent-toolkit; find . -delete"],
+    [f.env, 'X=1 source ./s; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, "BASH_ENV=./s bash -c 'find . -delete'"],
+  ];
+  const allowed = [
+    [f.home, 'cd source && ls'],
+    [f.home, 'git -C source status'],
+    [f.env, 'ls'],
+    [f.checkout, 'git status && git log -1'],
+    [f.outside, 'cd a 2>/dev/null && make'],
+    [f.outside, 'source .venv/bin/activate && make test'],
+    [f.outside, 'echo $HOME && ls'],
+    [f.outside, 'ls /home && make'],
+    [f.outside, "git commit -m 'Run cd before the build'"],
+    [f.outside, "nohup sh -c 'make' &"],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', FOLDER_REFUSAL, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  // PowerShell: a module-qualified Set-Location, a call operator before a built name, a script file.
+  const powershell = (cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  for (const command of [
+    'Microsoft.PowerShell.Management\\Set-Location ~; Set-Location .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item',
+    "&('s'+'l') ~; Set-Location .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item",
+    "Set-Alias c ('Set-'+'Location'); c ~; c .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item",
+    './x.ps1; Set-Location .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item',
+    '. ./x; Get-ChildItem -Recurse | Remove-Item',
+  ]) assert.match(powershell(f.env, command)?.deny || '', FOLDER_REFUSAL, command);
+  assert.equal(powershell(f.env, 'Get-ChildItem'), null);
+  assert.equal(powershell(f.outside, 'Get-ChildItem $env:HOME; npm test'), null);
+});
+
+test('round 5: many GIT_DIR settings before many pushes take time in step with the command', (t) => {
+  const ctx = context(t);
+  const settings = n => Array.from({ length: n }, (_, i) => `export GIT_DIR=/g${i}; `).join('');
+  const command = `${settings(2000)}${'git push origin work; '.repeat(2000)}`;
+  for (const input of [bash(ctx.repo, command), { cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: command, workdir: ctx.repo } }]) {
+    const started = process.hrtime.bigint();
+    const result = decide(ctx, input);
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.ok(ms < 2000, `took ${Math.round(ms)} ms for ${command.length} chars`);
+    assert.match(result?.deny || '', /more GIT_DIR settings than Toolkit follows/);
+  }
+  // Up to the cap each setting is still judged, and a feature-branch push passes.
+  assert.equal(decide(ctx, bash(ctx.repo, `${settings(16)}git push origin work`)), null);
+  assert.match(decide(ctx, bash(ctx.repo, `${settings(16)}git push origin main`))?.deny || '', /default branch `main`/);
+});
+
+test('round 5: a git folder the reader cannot read is judged as the folder\'s own repository', (t) => {
+  const ctx = context(t);
+  for (const command of [
+    'git --git-dir .gi? push origin main',
+    'git --git-dir .g[i]t push origin main',
+    'git --git-dir $(pwd)/.git push origin main',
+    'git --git-dir="$PWD/.git" push origin main',
+    'GIT_DIR=$PWD/.git git push origin main',
+    'GIT_DIR=$(pwd)/.git git push origin main',
+    'GIT_DIR=`pwd`/.git git push origin main',
+    'git --git-dir ~+/.git push origin main',
+  ]) {
+    assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /default branch `main`/, command);
+    assert.match(decide(ctx, { cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: command, workdir: ctx.repo } })?.deny || '', /default branch `main`/, `codex: ${command}`);
+  }
+  // A readable git folder still decides: a feature branch's passes from a folder on main.
+  const feature = repository(ctx.root, 'feature', { branch: 'work' });
+  assert.equal(decide(ctx, bash(ctx.repo, `git --git-dir=${path.join(feature, '.git')} push origin work`)), null);
+});
