@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.150.0
+
+### Changed
+
+- **Two review rounds per pull request:** the gate rules' round cap now gives each pull request two G2 rounds (every `Toolkit-G2:` verdict counts, deltas included) instead of holding the next round for an owner card after two FAIL verdicts. From round 2 only a proved High finding or a known material shipping-floor defect blocks: otherwise the verdict passes, open Mediums go to a follow-up child in Now and Lows to one in Later, and, with no blocker open, the controller sends the pull request to the merge train. A further round only rechecks the fix for a blocker that is still open, or a later RISKY change such as a source-conflict merge. Proof rules, the scope lock and the root-cause reassessment after two failed rechecks of one family are unchanged.
+- **Lows-only children wait in Later:** a follow-up child that holds only Low findings now sits in Later, and the three-day start applies to Now children only.
+
+### Fixed
+
+- **Merge hold reads a stdin script as unread:** a shell told to read its script from standard input, PowerShell's documented `-Command -` and `-c -` spelling (`echo '<script>' | pwsh -Command -`, `powershell -c -`), now counts as a shell whose script the reader cannot find, so from Toolkit's own folder it is refused on Claude Bash, Claude PowerShell and Codex, as `| bash` already was. A POSIX shell's `-c -` and `-c --` count the same way. Elsewhere it stays ordinary work.
+
 ## 3.149.0 (owner waits, missed runs and live gates)
 
 ### Added
