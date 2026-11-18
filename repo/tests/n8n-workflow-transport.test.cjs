@@ -1457,6 +1457,41 @@ test('validate-n8n-workflows.cjs still fails a real host hidden next to an expre
   }
 });
 
+test('validate-n8n-workflows.cjs checks URL literals quoted inside expressions and skips only run-time hosts', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    single: "={{ 'https://crm.private.test/x' }}",
+    template: '={{ `https://crm.private.test/${$json.id}` }}',
+    double: '={{ $json.flag ? "https://crm.private.test/a" : "" }}',
+    joined: "={{ 'https://' + $env.HOST }}",
+    templated: '={{ `https://${$env.HOST}/v1` }}',
+    allowed: "={{ $json.url || 'https://api.openai.com/v1/models' }}",
+    nodeRef: "={{ $('HTTP Request').item.json.id }}",
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 3 production-looking URL\(s\) at nodes\.0\.parameters\.single, nodes\.0\.parameters\.template, nodes\.0\.parameters\.double\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs matches non-ASCII email domains and never treats a look-alike as allowed', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    lookAlike: 'user@exаmple.com',
+    idn: 'ops@bücher.test',
+    allowed: 'user@example.com',
+    allowedUnicodeLocal: 'réception@example.com',
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 2 non-placeholder email\(s\) at nodes\.0\.parameters\.lookAlike, nodes\.0\.parameters\.idn\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /exаmple|bücher|ops@|user@/, 'the log never prints the address');
+});
+
 test('validate-n8n-workflows.cjs still fails a credential in the user info or query of an allowed public host', () => {
   const stripeKey = ['sk', 'live', 'Abc123Def456Ghi789Jkl012'].join('_');
   const hubspotKey = ['0f1e2d3c', '4b5a', '4978', '8695', 'a4b3c2d1e0f9'].join('-');
@@ -2668,6 +2703,53 @@ test('PowerShell export resolves dedicated local workflow identity before any na
     const allLiveIndex = text.indexOf('$existingFiles = @($workflowFiles)');
     const nameGroupingGuard = text.indexOf('if (-not $workflowInfo.HasDedicatedIdentity)', allLiveIndex);
     assert.ok(allLiveIndex >= 0 && nameGroupingGuard > allLiveIndex, `${label}: AllLive name fallback must exclude dedicated identities`);
+  }
+});
+
+test('AllLive export names new files after the folder convention and checks clashes on full file names', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  const fixtureRoot = tempDir();
+  const harnessPath = path.join(fixtureRoot, 'all-live-naming-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$functionNames = @("Get-SafeWorkflowFileBase", "Get-StableIdSuffix", "Get-WorkflowFileNameConvention", "Get-NewWorkflowFileName")
+$functions = @($ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true))
+if ($functions.Count -ne $functionNames.Count) { throw "AllLive naming functions not found" }
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+function Plan-Names($ExistingNames, $NewWorkflows) {
+  $existing = @($ExistingNames | ForEach-Object { [PSCustomObject]@{ Name = $_ } })
+  $convention = Get-WorkflowFileNameConvention $existing
+  $used = @{}
+  foreach ($file in $existing) { $used[$file.Name] = $true }
+  return @($NewWorkflows | ForEach-Object { Get-NewWorkflowFileName $_ $convention $used })
+}
+$cd = [PSCustomObject]@{ name = "C D"; id = "cd-id" }
+[PSCustomObject]@{
+  Snake = Plan-Names @("a_b.workflow.json", "intake.workflow.json") @($cd)
+  Mixed = Plan-Names @("a_b.workflow.json", "x-y.json") @($cd)
+  Empty = Plan-Names @() @($cd)
+  Clash = Plan-Names @("x.workflow.json", "a_b.workflow.json") @([PSCustomObject]@{ name = "X"; id = "Id-9876543210" })
+  SameRun = Plan-Names @("a_b.workflow.json") @([PSCustomObject]@{ name = "Same"; id = "one1" }, [PSCustomObject]@{ name = "Same"; id = "two2" })
+} | ConvertTo-Json -Compress
+`, 'utf8');
+  try {
+    const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], { cwd: fixtureRoot, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const parsed = JSON.parse(result.stdout.trim());
+    assert.deepEqual([].concat(parsed.Snake), ['c_d.workflow.json']);
+    assert.deepEqual([].concat(parsed.Mixed), ['c-d.json']);
+    assert.deepEqual([].concat(parsed.Empty), ['c-d.json']);
+    assert.deepEqual([].concat(parsed.Clash), ['x_id987654.workflow.json']);
+    assert.deepEqual([].concat(parsed.SameRun), ['same.workflow.json', 'same_two2.workflow.json']);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
