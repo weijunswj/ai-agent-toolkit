@@ -1578,6 +1578,155 @@ test('validate-n8n-workflows.cjs reads a run-time part with a space, call or quo
   assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
 });
 
+test('validate-n8n-workflows.cjs reads a quoted literal at the top of a run-time part as host text', () => {
+  const privateHost = ['crm', 'private', 'test'].join('.');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [
+      { id: 'code_1', name: 'Code', type: 'n8n-nodes-base.code', typeVersion: 2, position: [0, 0], parameters: { jsCode: 'const u = `https://${\'' + privateHost + '\'}/a`; return [{ json: { u } }];' } },
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [200, 0],
+        parameters: {
+          expression: '={{ `https://${\'' + privateHost + '\'}/b` }}',
+          plain: 'https://${\'' + privateHost + '\'}/c',
+          doubleQuotes: 'https://${"' + privateHost + '"}/d',
+          nestedTemplate: '`https://${`' + privateHost + '`}/e`',
+          defaultAfterOr: '`https://${$env.HOST || \'' + privateHost + '\'}/f`',
+          ternary: '`https://${prod ? \'' + privateHost + '\' : \'api.example.com\'}/g`',
+          prefixThenRunTime: '`https://${\'crm.private.\' + tld}/h`',
+          expressionLiteral: "=https://{{ '" + privateHost + "' }}/i",
+          expressionDefault: "=https://{{ $env.HOST || '" + privateHost + "' }}/j",
+          runTimeOnly: '`https://${host}/api`',
+          callArgument: "`https://${$('Cfg').item.json.host}/v1`",
+          indexKey: "`https://${cfg['host']}/v1`",
+          allowedTernary: "`https://${eu ? 'eu.api.openai.com' : 'api.openai.com'}/v1`",
+          expressionAllowedTernary: "=https://{{ $json.eu ? 'eu.api.openai.com' : 'api.openai.com' }}/v1",
+          prefixAllowedTail: "`https://${'tenant-' + id}.example.com/v1`",
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 10 production-looking URL\(s\) at nodes\.0\.parameters\.jsCode, nodes\.1\.parameters\.expression, nodes\.1\.parameters\.plain, nodes\.1\.parameters\.doubleQuotes, nodes\.1\.parameters\.nestedTemplate and 5 more\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs counts a URL once when a literal joined to code repeats it', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    joined: "={{ 'https://crm.private.test/k/' + encodeURIComponent($json.id) }}",
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.joined\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs reads grouped, nested and joined literals in a run-time part as host text', () => {
+  const privateHost = ['crm', 'private', 'test'].join('.');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [
+      { id: 'code_1', name: 'Code', type: 'n8n-nodes-base.code', typeVersion: 2, position: [0, 0], parameters: { jsCode: "const u = `https://${('" + privateHost + "')}/a`; return [{ json: { u } }];" } },
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [200, 0],
+        parameters: {
+          groupTernary: "`https://${(prod ? '" + privateHost + "' : 'api.example.com')}/b`",
+          groupDefault: "`https://${($env.HOST ?? '" + privateHost + "')}/c`",
+          plainGroup: "https://${('" + privateHost + "')}/d",
+          expressionGroup: "=https://{{ ($env.HOST || '" + privateHost + "') }}/e",
+          nestedTernary: "`https://${prod ? `${region}." + privateHost + "` : 'api.example.com'}/f`",
+          nestedOnly: "`https://${`${sub}." + privateHost + "`}/g`",
+          expressionNested: "=https://{{ $env.HOST || `${$json.sub}." + privateHost + "` }}/h",
+          splitJoined: "={{ 'https://' + $json.tenant + '." + privateHost + "/i' }}",
+          splitGroup: "={{ 'https://' + ($env.HOST || '" + privateHost + "') + '/j' }}",
+          splitLiterals: "${'https://' + '" + privateHost + "'}/k",
+          optionalChain: "`https://${cfg?.host ?? '" + privateHost + "'}/l`",
+          runTimeOnly: '`https://${host}/api`',
+          callArgument: "`https://${$('Cfg').item.json.host}/v1`",
+          indexKey: "`https://${cfg['host']}/v1`",
+          stringCall: "`https://${String('" + privateHost + "')}/v1`",
+          allowedGroupTernary: "`https://${(eu ? 'eu.api.openai.com' : 'api.openai.com')}/v1`",
+          comparison: "`https://${env === 'prod' ? 'api.example.com' : 'n8n.example.com'}/v1`",
+          tenantTail: "`https://${'tenant-' + id}.example.com/v1`",
+          emptyDefault: "https://${host || ''}/x",
+          expressionEmptyDefault: "=https://{{ $json.host || '' }}/x",
+          emptyTernary: "`https://${a ? host : ''}/x`",
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 12 production-looking URL\(s\) at nodes\.0\.parameters\.jsCode, nodes\.1\.parameters\.groupTernary, nodes\.1\.parameters\.groupDefault, nodes\.1\.parameters\.plainGroup, nodes\.1\.parameters\.expressionGroup and 7 more\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs reads a + chain past arithmetic and unary operators that bind tighter', () => {
+  const privateHost = ['crm', 'private', 'test'].join('.');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [
+      { id: 'code_1', name: 'Code', type: 'n8n-nodes-base.code', typeVersion: 2, position: [0, 0], parameters: { jsCode: "const u = `https://${'" + privateHost + "/items?offset=' + page * 50}`; return [{ json: { u } }];" } },
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [200, 0],
+        parameters: {
+          plainMultiply: "https://${'" + privateHost + "/items?offset=' + page * 50}",
+          expressionMultiply: "={{ 'https://' + $json.tenant + '." + privateHost + "/items?offset=' + $json.page * 50 }}",
+          expressionDivide: "={{ 'https://' + $json.tenant + '." + privateHost + "/t?s=' + Date.now() / 1000 }}",
+          expressionModulo: "={{ 'https://' + $json.tenant + '." + privateHost + "/m?n=' + $json.n % 7 }}",
+          expressionNot: "={{ 'https://' + $json.tenant + '." + privateHost + "/f?off=' + !$json.off }}",
+          expressionNegate: "={{ 'https://' + $json.tenant + '." + privateHost + "/d?v=' + -$json.v }}",
+          multiplyNegated: "`https://${'" + privateHost + "/p?x=' + a * -b}`",
+          allowedMultiply: "={{ 'https://api.example.com/items?offset=' + $json.page * 50 }}",
+          binaryMinus: "={{ 'https://' + '" + privateHost + "/x?n=' + $json.a - 1 }}",
+          comparison: "={{ 'https://' + '" + privateHost + "/x' === $json.u ? 'https://api.example.com/v1' : '' }}",
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 8 production-looking URL\(s\) at nodes\.0\.parameters\.jsCode, nodes\.1\.parameters\.plainMultiply, nodes\.1\.parameters\.expressionMultiply, nodes\.1\.parameters\.expressionDivide, nodes\.1\.parameters\.expressionModulo and 3 more\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs reads a large Code node with many run-time parts quickly', () => {
+  const cwd = tempDir();
+  const lines = Array.from({ length: 4000 }, (_, index) => 'const u' + index + " = `https://${a || 'api.example.com'}/${b || 'v1'}`;");
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [{ id: 'code_1', name: 'Code', type: 'n8n-nodes-base.code', typeVersion: 2, position: [0, 0], parameters: { jsCode: lines.join('\n') + '\nreturn [];' } }],
+  }));
+
+  const started = Date.now();
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /result PASS/);
+  assert.ok(Date.now() - started < 20000, 'a 270 KB Code node is read in seconds, not minutes');
+});
+
 test('validate-n8n-workflows.cjs still accepts an allowed literal URL that holds a ${...} part', () => {
   const allowedUrl = 'https://' + ['files', 'private', 'test'].join('.') + '/d/${body.id}/view';
   const cwd = tempDir();
