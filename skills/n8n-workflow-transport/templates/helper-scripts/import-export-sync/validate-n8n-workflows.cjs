@@ -285,6 +285,31 @@ function trailString(trail) {
   return trail.join('.');
 }
 
+// A host with every run-time part dropped: each {{ ... }} and each ${ ... } (braces inside counted).
+// One left open, because the URL pattern cut it short, runs to the end of the host.
+function literalHostPart(host) {
+  let literal = '';
+  let at = 0;
+  while (at < host.length) {
+    if (host.startsWith('{{', at)) {
+      const end = host.indexOf('}}', at + 2);
+      at = end === -1 ? host.length : end + 2;
+    } else if (host.startsWith('${', at)) {
+      let depth = 1;
+      at += 2;
+      while (at < host.length && depth > 0) {
+        if (host[at] === '{') depth += 1;
+        else if (host[at] === '}') depth -= 1;
+        at += 1;
+      }
+    } else {
+      literal += host[at];
+      at += 1;
+    }
+  }
+  return literal;
+}
+
 function hostMatches(host, allowedHost) {
   const lowerHost = host.toLowerCase();
   const lowerAllowed = allowedHost.toLowerCase();
@@ -316,8 +341,8 @@ function createPolicyHelpers(policy) {
   const allowedUrl = (url) => {
     if (isAllowedPlaceholder(url) || isAllowedLiteral(url)) return true;
     // Read the host the way a URL parser does: cut at / ? or #, drop user info and a port (literal
-    // or expression) and trailing prose punctuation. Only a host that is itself an expression
-    // ({{ ... }}) holds no real host and is skipped; anything else is checked, parseable or not.
+    // or expression) and trailing prose punctuation. Only a host built wholly at run time holds no
+    // real host and is skipped; anything else is checked, parseable or not.
     const authority = url.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
     // An allowed host clears only the host. Literal user info, or a literal value for a
     // credential-named query parameter, is a finding on any host: it is how keys get pasted.
@@ -329,16 +354,14 @@ function createPolicyHelpers(policy) {
       .replace(/:[^:\]]*$/, '')
       .replace(/[\]`.,;]+$/, '')
       .toLowerCase();
-    // A host built at run time by an expression ({{ ... }}) holds no real host. One built partly by a
-    // template literal's ${...} is checked on its fixed tail after the last ${...}, so a private
-    // domain around a run-time part (https://${tenant}.private-host/) is still found.
-    if (host.includes('{{')) return true;
-    if (host.includes('${')) {
-      const lastClose = host.lastIndexOf('}');
-      if (lastClose < host.lastIndexOf('${')) return true;
-      const tail = host.slice(lastClose + 1).replace(/^[.-]+/, '');
-      if (!tail) return true;
-      return policy.allowedUrlHosts.some((allowedHost) => hostMatches(tail, allowedHost));
+    // A host built partly at run time ({{ ... }} or a template literal's ${...}) is checked on what is
+    // left once every run-time part is dropped, so a private domain before or after a run-time part
+    // (https://${tenant}.private-host/, https://private-host{{ $json.path }}) is still found. A host
+    // with no letter or digit left is wholly run time and holds no real host.
+    if (host.includes('{{') || host.includes('${')) {
+      const literal = literalHostPart(host).replace(/^[.-]+|[.-]+$/g, '');
+      if (!/[\p{L}\p{N}]/u.test(literal)) return true;
+      return policy.allowedUrlHosts.some((allowedHost) => hostMatches(literal, allowedHost));
     }
     return policy.allowedUrlHosts.some((allowedHost) => hostMatches(host, allowedHost));
   };
