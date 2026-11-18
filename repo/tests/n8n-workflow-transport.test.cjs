@@ -2264,7 +2264,7 @@ test('portable import plan rejects every duplicate live target before mutation o
   assert.notEqual(functionEnd, -1);
   assert.match(importText, /\$resolvedTargetPlans = @\(\)/);
   assert.match(importText, /\$resolvedTargetPlans \+= \[PSCustomObject\]@\{[\s\S]*TargetId = \$targetWorkflowId/);
-  assert.match(importText, /\$targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers \$resolvedTargetPlans/);
+  assert.match(importText, /\$targetUniquenessBlockers = @\(Get-PlannedTargetUniquenessBlockers \$resolvedTargetPlans\)/);
   assert.match(importText, /\$plannedImports = @\(\)/);
   if (!powerShell) return;
 

@@ -923,7 +923,7 @@ try {
 Clear-StaleLiveWorkflowList
 Assert-HelperSetReady
 Assert-WorkflowIdentityStateReadable
-$workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly")
+$workflowFiles = @(Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly"))
 if ($Mode -eq "RepoTrackedOnly" -and -not $workflowFiles) {
   throw "No root-level workflow JSON files found in $(Get-DisplayPath $WorkflowDirPath)."
 }
@@ -932,7 +932,7 @@ foreach ($workflowFile in $workflowFiles) {
   $repoWorkflowInfos += Read-RepoWorkflowInfo $workflowFile
 }
 Invoke-LivePreflight
-$liveWorkflows = Get-LiveWorkflows
+$liveWorkflows = @(Get-LiveWorkflows)
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 if ($PublishedOnly) {
   Write-Step "NOTE" "PublishedOnly is set. n8n may omit workflows with no published version."

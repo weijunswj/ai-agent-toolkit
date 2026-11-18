@@ -1638,7 +1638,7 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
     }
   }
 
-  $targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans
+  $targetUniquenessBlockers = @(Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans)
   if ($targetUniquenessBlockers.Count -gt 0) {
     $blockedWorkflows += $targetUniquenessBlockers
     $plannedImports = @()
@@ -1792,7 +1792,7 @@ if ($DeploymentPolicyFileWasExplicit) {
   Assert-DeploymentPolicySnapshotCurrent $deploymentPolicySnapshot
 }
 
-$workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
+$workflowFiles = @(Get-RootWorkflowFiles $WorkflowDirPath)
 Assert-NoCaseFoldedWorkflowFileCollisions $workflowFiles
 
 Write-Section "Workflow JSON Validation"
@@ -1811,7 +1811,7 @@ if ($transportResult.ExitCode -ne 0) {
 Write-Step "TRANSPORT" "Selected supported Docker/server CLI transport; helper preparation and validation remain mandatory."
 
 Invoke-LivePreflight
-$liveWorkflows = Get-LiveWorkflows
+$liveWorkflows = @(Get-LiveWorkflows)
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 
 if ($DeploymentPolicyFileWasExplicit) {
@@ -1824,7 +1824,7 @@ if ($DeploymentPolicyFileWasExplicit) {
   $EffectiveDeploymentPolicyFilePath = Join-Path $PreparedDirPath "deployment-policy.snapshot.json"
   Write-Utf8NoBomText $EffectiveDeploymentPolicyFilePath ($deploymentPolicySnapshot.Content.TrimEnd() + "`n")
 }
-$targetResolutionBlockers = Test-PortableTargetResolution $workflowFiles $liveWorkflows
+$targetResolutionBlockers = @(Test-PortableTargetResolution $workflowFiles $liveWorkflows)
 if ($targetResolutionBlockers.Count -gt 0) {
   $targetGate = [PSCustomObject]@{
     PlannedImports = @()
