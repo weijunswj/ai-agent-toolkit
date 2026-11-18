@@ -2283,3 +2283,43 @@ test('round 6: a shell whose script the reader cannot find, and every folder rea
   assert.match(powershell(f.env, "powershell 'Set-Location ..; Remove-Item -Recurse -Force *'")?.deny || '', FOLDER_REFUSAL);
   assert.equal(powershell(f.outside, 'Get-ChildItem env:HOME; npm test'), null);
 });
+
+test('a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const script = "'Set-Location ..; Remove-Item -Recurse -Force *'";
+  const refused = [
+    // PowerShell documents `-` as the script word that reads the script from standard input.
+    [f.env, `echo ${script} | pwsh -Command -`],
+    [f.env, `echo ${script} | pwsh -c -`],
+    [f.env, `echo ${script} | pwsh -NoProfile -NonInteractive -Command -`],
+    [f.env, `echo ${script} | powershell -NoProfile -Command -`],
+    [f.env, `echo ${script} | powershell -c -`],
+    [f.env, `echo ${script} | powershell -co -`],
+    [f.env, `Write-Output ${script} | pwsh -c -`],
+    [f.env, `echo ${script} | pwsh.exe -Command "-"`],
+    [f.checkout, `echo ${script} | pwsh -Command -`],
+    [f.state, `echo ${script} | powershell -c -`],
+    // A POSIX shell takes `-` (and `--`) after `-c` as the end of its options, so the next word is the script.
+    [f.env, "bash -c - 'cd ..; rm -rf user-state'"],
+    [f.env, "sh -c -- 'cd ..; rm -rf user-state'"],
+  ];
+  const allowed = [
+    // Far from Toolkit's folder a stdin script is ordinary work, as `| bash` is.
+    [f.outside, "echo 'npm test' | pwsh -Command -"],
+    [f.outside, "echo 'npm test' | powershell -c -"],
+    // A script given in the command is still read.
+    [f.env, "pwsh -Command 'Get-ChildItem'"],
+  ];
+  const shells = [
+    ...FOLDER_SHELLS,
+    ['claude PowerShell', (ctx, cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })],
+  ];
+  // Every miss is listed, so a red run names each host shape and command.
+  const misses = [];
+  for (const [label, run] of shells) {
+    for (const [cwd, command] of refused) if (!FOLDER_REFUSAL.test(run(ctx, cwd, command)?.deny || '')) misses.push(`${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+    for (const [cwd, command] of allowed) if (run(ctx, cwd, command) !== null) misses.push(`${label} refuses in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  assert.deepEqual(misses, []);
+});

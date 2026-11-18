@@ -3355,6 +3355,78 @@
       "payload": {"tool_name":"exec_command","tool_input":{"cmd":"bash build.sh","workdir":"{work}"}},
       "expect": {"decision":"allow"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-pwsh-command-stdin",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo 'Set-Location ..; Remove-Item -Recurse -Force *' | pwsh -NoProfile -Command -"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-pwsh-command-stdin-workdir",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"echo 'Set-Location ..; Remove-Item -Recurse -Force *' | pwsh -NoProfile -Command -","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-pwsh-command-stdin-powershell",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"PowerShell","tool_input":{"command":"echo 'Set-Location ..; Remove-Item -Recurse -Force *' | pwsh -NoProfile -Command -"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-powershell-c-stdin",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo 'Set-Location ..; Remove-Item -Recurse -Force *' | powershell -c -"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-powershell-c-stdin-workdir",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"echo 'Set-Location ..; Remove-Item -Recurse -Force *' | powershell -c -","workdir":"{home}/.ai-agent-toolkit/env"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-powershell-c-stdin-powershell",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"PowerShell","tool_input":{"command":"echo 'Set-Location ..; Remove-Item -Recurse -Force *' | powershell -c -"},"cwd":"{home}/.ai-agent-toolkit/env"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-pwsh-command-stdin",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find (control)",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo 'npm test' | pwsh -Command -"},"cwd":"{work}"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.state-folder-outside-pwsh-command-stdin-workdir",
+      "source": "working-folder guard, #1024 follow-up: a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find (control)",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": {"tool_name":"exec_command","tool_input":{"cmd":"echo 'npm test' | pwsh -Command -","workdir":"{work}"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
     }
   ]
 }
