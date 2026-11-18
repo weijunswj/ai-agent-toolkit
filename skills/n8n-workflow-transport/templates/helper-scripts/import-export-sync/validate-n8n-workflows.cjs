@@ -407,16 +407,24 @@ function expressionTexts(source, token, depth = 0) {
   const runTime = () => {
     term = { runTime: true };
   };
+  let operandNext = false;
   let at = 0;
   while (at < source.length) {
     const char = source[at];
     const next = source[at + 1];
     if (/\s/.test(char)) {
       at += 1;
-    } else if (char === '/' && (next === '/' || next === '*')) {
+      continue;
+    }
+    if (char === '/' && (next === '/' || next === '*')) {
       const close = source.indexOf(next === '*' ? '*/' : '\n', at + 2);
       at = close === -1 ? source.length : close + (next === '*' ? 2 : 1);
-    } else if (char === "'" || char === '"') {
+      continue;
+    }
+    // An operand is due at the start of a piece, or after an operator that binds tighter than +.
+    const expectOperand = !term || operandNext;
+    operandNext = false;
+    if (char === "'" || char === '"') {
       const close = closingQuote(source, at);
       if (close === -1) {
         broken = true;
@@ -467,6 +475,16 @@ function expressionTexts(source, token, depth = 0) {
       runTime();
     } else if (/[\p{L}\p{N}_$.\\]/u.test(char)) {
       runTime();
+      at += 1;
+    } else if (/[*/%]/.test(char) && term && next !== '=') {
+      // *, / and % (and **) bind tighter than +, so they make only this piece a run-time number.
+      runTime();
+      operandNext = true;
+      at += char === '*' && next === '*' ? 2 : 1;
+    } else if (/[!~+-]/.test(char) && expectOperand && next !== '=' && !(/[+-]/.test(char) && next === char)) {
+      // A unary !, ~, + or - starts a run-time piece: a boolean or a number.
+      runTime();
+      operandNext = true;
       at += 1;
     } else {
       broken = true;
