@@ -1,5 +1,263 @@
 # Toolkit Changelog
 
+## 3.148.0
+
+### Added
+
+- External operation preflight keeps the recovery identity of a temporary outside resource that later sessions depend on. A new offline script claims the exact name before creating, records the provider's handle from its read-back, lets a fresh session resolve and check that one resource, and deletes the record only after a read-back shows the resource gone. It keeps one record per resource: a resource or handle another key already holds is refused, and two sessions claiming at once cannot both win. A missing, half-done, damaged or mismatched record holds the work.
+
+## 3.147.0 (no silent skips and release identity)
+
+### Added
+
+- **No silent skips:** every skipped or todo test in Toolkit's own suite is listed in `repo/contracts/ci/test-skips.json` with the systems it skips on and a reason. The shard summaries now name each skipped and todo test, and the Validate check fails on a skip the list does not hold, on a listed skip that no longer skips, and on a summary that counts skips without naming them. A governed repository's own shard runner judges each test file by its exit code only, so it has no per-test skips to hold.
+- **Release identity:** `node repo/scripts/toolkit-release-identity.cjs --commit <sha>` finds the first Toolkit version that holds a merged commit and reports, for the computer it runs on only, whether each Toolkit copy there has it: the managed checkout, the Claude Code plugin, the claude.ai account copy in the Claude app, a cloud session's synced plugin copy and the Projects guidebook. A copy is delivered, not delivered or unknown; anything it cannot read or prove is unknown, never delivered. `--min-version <x.y.z>` checks a version instead. It exits 0 only when every copy it found is delivered, and reads only.
+- The git-completion playbook asks for this check before an owner test of a merged fix, and for each UAT result to name the version tested.
+
+## 3.146.5 (programme graph status bands)
+
+### Fixed
+
+- **The programme graph sorts by status band:** rows now run `NOW · IN PROGRESS`, then `NOW · QUEUED`, then `LATER`, then the latest `COMPLETED`, then `RETIRED`, so moving work no longer mixes with work parked behind a blocker. Inside each band the order is as before: priority, then child number, optional tasks at the end of `LATER`, and tasks pinned with `last` at the end of their own band, so a pinned task in progress never drops below `LATER`. CURRENT's In progress list and the native sub-issue order follow the same bands, so the first refresh after this release reorders native sub-issues once.
+- **Queued tasks are off the work queue:** a task whose state lists a blocker (shown `NOW · QUEUED`) no longer raises `TASK_IDLE` or `TASK_MERGED_OPEN`; its blocker says why. The batch tail guard and the one-level native blocker rule are unchanged.
+- **An owed UAT reads as a UAT:** a task waiting on the owner with a UAT still owed shows `Owner: UAT on PR #<n>` in the graph and `your UAT on PR #<n>` in CURRENT, not `Owner: decision`. A gate waiting on the owner still shows `Owner: decision`.
+
+## 3.146.4
+
+### Fixed
+
+- **A quoted host inside a run-time part is checked:** the n8n validator read every `${ ... }` and `{{ ... }}` as run time, so a private host written as a quoted literal inside one (`https://${'private-host'}/x`, `https://{{ $env.HOST || 'private-host' }}/x`, also in Code nodes and expression template literals) passed. Each part is now read as the texts it can give: its alternatives (split at `||`, `??`, `&&`, `?`, `:` and `,`), each a `+` chain of quoted literals, template literals (with their own `${ ... }` read the same way) and grouping parentheses. Only names, member access, calls and index keys count as run time; `*`, `/`, `%` and a unary `!`, `~`, `+` or `-` make only their own piece of a chain run time (`'private-host/items?offset=' + page * 50` is still read), while a comparison, an assignment or a binary `-` makes the whole alternative run time, so a host in brackets, in a nested template or split across `+` (`{{ 'https://' + $json.tenant + '.private-host/x' }}`) is found. `https://${host}/api` still passes, and so does a literal that is an allowed host. A text with no letter or digit (`${host || ''}`) is not read as a host, a URL repeated by one of these texts is counted once, and only the stretch of text a URL can reach around each part is read again, so a large Code node stays fast.
+
+## 3.146.3
+
+### Fixed
+
+- **Two more ignored import switches fail loudly:** `-AllowMissingCredentialBindings` and `-CredentialExportDir` on the n8n import script were accepted and ignored, because only an old preflight that nothing called read them. Both now stop with `N8N_POLICY_VALIDATION_FAILED` before any Docker call, and the old preflight, its credential-binding export and the helpers only they used are removed. A test checks that every function in the import script is called.
+- **The PowerShell 5.1 count check sees more call shapes:** besides a bare call, it now finds a counted helper result assigned through `( ... )`, `$( ... )` or `&`, to a `$script:` variable, or after other code on the line. `[array]` casts and `(...) + text` stay accepted.
+- **Partly run-time URL hosts are checked again:** a host built partly at run time, by `{{ ... }}` or by a template literal's `${...}` (`https://${tenant}.private-host/api`, `https://private-host{{ $json.path }}`, also in Code nodes and in expression template literals), is checked on what is left once every run-time part is dropped, so a private domain before or after a run-time part is found. A `${ ... }` holding a space, a call or a quote (`${ sub }`, `${$('Config').item.json.sub}`) is read as one piece, and what it holds is checked on its own. A host with no letter or digit left still passes, and so does one whose literal part is an allowed host.
+- **Expressions are read past regex literals and comments:** an apostrophe inside a regex literal or a comment no longer hides a later URL in the same expression, and a URL written in a comment inside an expression is checked too.
+- **An email ends where the script changes:** an allowed address followed straight by letters of another script (an address at an allowed domain followed by Japanese text) is no longer flagged. The cut is not used when the text cut off, with what follows it, runs on through local-part characters into an `@` or a fullwidth `＠`, because then it starts another address. Any other address is checked as before.
+
+## 3.146.2
+
+### Changed
+
+- **DESIGN.md reference follows the current upstream spec:** the `frontend-art-direction` DESIGN.md contract reference now says tokens can sit in front matter, in fenced `yaml` blocks inside sections, or both, that all blocks merge into one token tree and that a top-level key defined twice is an error. It adds the 10-section order, `motion` tokens (`duration`, `delay` and `timingFunction`) with reduced-motion guidance, and the prose-only Voice & Content Strategy section. The upstream pin moves to `google-labs-code/design.md` 679d301 (Apache-2.0, unchanged), and the source-watch cursor moves there too. Toolkit still adds no upstream CLI or package tooling.
+
+## 3.146.1
+
+### Fixed
+
+- **One early import blocker now stops the import on Windows PowerShell 5.1:** the n8n import helper's early target check returned a single blocker as a lone object, which has no `Count` on Windows PowerShell 5.1, so the check let the run continue. A workflow whose saved local identity no longer existed could then fall back to a same-name workflow. Every counted or indexed result from a helper function is now wrapped as a list, which also fixes the live workflow count and the skipped-archived number in export with one live workflow. A test checks the helper scripts for the unwrapped pattern, and Windows CI runs every early-blocker case under Windows PowerShell 5.1.
+- **The n8n workflow validator sees more personal data:** a URL written as a quoted text value inside an expression (`{{ 'https://host/path' }}`) is now checked, while a host built at run time (`{{ ... }}` or a template literal's `${...}`) still is not. Email addresses with letters from any script are now matched, and an allowed email domain is compared in normalised form, so a look-alike domain never passes as an allowed one. Findings still name the place, never the value.
+- **Unused import switches fail loudly:** `-RequireConfirmation` and `-SkipCredentialBindingRefresh` on the import script were accepted and ignored; both now stop with `N8N_POLICY_VALIDATION_FAILED` before any Docker call. Confirmation before an import belongs to the sync menu's own `-RequireConfirmation`.
+- **AllLive export follows the folder's naming:** a new file uses `<name>.workflow.json` when every existing root workflow file does, and joins words with `_` when the folder does, instead of always writing `<name>.json`. Name clashes compare full file names.
+- **Dry-run staging is documented:** the import README says a dry run stages a credential-metadata helper in the container's `-ContainerDir` (default `/tmp`) and removes it before it reports.
+
+## 3.146.0 (Toolkit's own repository drops its rule copies)
+
+### Changed
+
+- **No governed block in Toolkit's root `AGENTS.md`:** the installed Toolkit delivers the governed rules at session start here too, so the root file now holds only Toolkit's own rules, starting with "## This Repository". The Antigravity bootstrap in `.agents/rules/` is gone; Antigravity reads `AGENTS.md` itself. `CLAUDE.md` stays the one line `@AGENTS.md`.
+- **Instruction sync:** `sync-agent-instruction-shims.cjs` no longer writes the governed block or the bootstrap into the root. Its check, and `--write`, now fail when root `AGENTS.md` carries any Toolkit block (even a broken marker) or the bootstrap comes back, so a stale branch cannot re-add them. The portable templates stay as they are.
+- **Session start in a Toolkit checkout:** the note no longer compares root `AGENTS.md` with the managed template, which would have said to regenerate the block back in. `CLAUDE.md` is still compared with its template, and a newer checkout still says to refresh Toolkit.
+- **Force-push guard:** a repository counts as governed by its working-tree `.github/toolkit-programme.json` saying `"governance": "enabled"` (even when the rest of it does not parse), alongside its governance state and the guard config. A leftover governed block alone no longer counts.
+- **Version floor:** Toolkit's own binding now sets `min_toolkit` to 3.137.0, the first release with the new turn-on, the cleanup route and the session-start truncation fix, and the cleanup writes that floor too. A test keeps the cleanup's floor no newer than the Toolkit version.
+- **Lists and docs:** the re-bump stamp list and the fallback audit drop the root block and the bootstrap, and the instructions playbook and bridge doc describe the hand-written root file.
+
+## 3.145.2
+
+### Fixed
+
+- **Owed UAT stays on its own PR:** the programme graph's Waiting on cell, CURRENT's In progress line and the task page's PR GRAPH now name the PR an owed owner test was recorded on, found by matching the test's head against the task's PRs, instead of whichever PR the task tracks now. A UAT owed on a merged PR no longer moves to a newer replacement PR. A head that no known PR has shows as `UAT at <short head>` with no PR number. The refresh keeps the heads it has seen on each task's PRs (newest 20, never dropping the owed test's head) in the task's private part, which older Toolkit copies already accept, and writes only that key there, so the controller's own private notes are never overwritten.
+
+## 3.145.1
+
+### Fixed
+
+- **A new repository's first sweeps say what to do:** a cloud sweep held only because the repository has no programme state yet (`PARENT_STATE_MISSING`) now warns "No programme state yet; setup on first sweep only." and names the step, `programme.cjs init-parent --apply --controller`, for the parent issue. Three such runs in a row turn the hourly gate red with the same words instead of pointing at a programme page that does not exist yet. Every other hold keeps its general text.
+- **The require-cycle guard sees more requires:** it now follows `require(path.join(__dirname, ...))` and same-file path constants built that way, ignores comments, strings and regular expressions when finding requires, the CLI check and the exports line, and also scans the helper-script templates repositories copy and run. The test also checks its own lexer on every file: it fails when a string, regular expression, template, comment or brace is left unclosed, or when the lexed view of a file no longer compiles, so a misread token that would hide a file's requires turns the test red instead. Requires of a function argument or a computed root stay out of reach and are named in the test as the accepted remainder.
+
+## 3.145.0
+
+### Fixed
+
+- **In-flight work shows NOW without a hand step:** an open pull request that claimed a programme task whose state recorded no pull request or branch only raised `PR_UNTRACKED`, so the task stayed `PLANNED` and the parent graph showed active work as LATER until a controller recorded it by hand. A refresh, the cloud sweep included, now records the one open pull request from a person's branch of the repository that claims the task (a GitHub closing link, `Refs`, `Completes`, `Closes`, `Fixes` or `Resolves` `#n` in its body, or, with no such line, its own PATH block): it writes the pull request, its branch and head, and moves a `PLANNED` task to `ACTIVE`, so the graph shows it NOW in the same pass. Two or more such pull requests, a pull request from a fork, a bot or a generated branch, a finished or retired task, and a pass whose discovery is incomplete write nothing and leave a `PR_UNTRACKED` finding that names the pull requests and the reason. The write goes through the guarded state write and is held when the task's record changed after planning; it never touches gate, review, UAT, close or assignment fields. While no gate return, review or UAT is bound to a recorded head, a later push moves the recorded head with it, so the push raises no `PR_HEAD_MOVED`. A tracked pull request that closed or merged still moves to the one newer open pull request that claims the task, now also through its PATH block.
+
+### Added
+
+- **Stale pins are loud:** in a governed repository whose cloud workflow copies (the sweep, its gate and the test shards copies) are pinned to an older Toolkit commit, the governance check only noted it, so the repository's cloud sweep kept running old Toolkit code unseen. Each session start on a computer, in Claude Code and Codex, now names every such copy in one stale-pins note with the refresh command, `node repo/scripts/toolkit-cloud-workflows.cjs --repo <repo>`, to run from a Toolkit checkout on the latest main and land through a pull request. It names the command only when this computer's Toolkit checkout is on main and already contains every pin; a newer pin or a checkout off main gets a note to update the checkout first, because a refresh from it would roll the copies back.
+
+## 3.144.0 (work in batches)
+
+### Changed
+
+- Work now moves from Later to Now in batches. Lanes finish the Now batch first (fixes, then reviews, then other steps), then the controller reads all of Later and picks the next batch: the highest priority tier first, then the quickest tasks, at most 6 PRs and one large task. A tail guard stops one slow task from holding the next batch. `CONTROLLER.md` "Work queue" and the delivery contract's new "Work in batches" part say the same rule; the delivery contract defines the priority tiers (P0 to P3), sizes (S, M, L), when a batch is done, lane order, parking and jumps.
+- The `order` field's description says how the controller sets it: Later reads priority tier, then size, with the picked batch first.
+
+### Added
+
+- The reconciler raises a new work-queue finding, `BATCH_NEXT`, on the programme parent when the graph has a Later task and no Now task needs a gate lane, after one quiet hour (only the first raise waits, so a routine task write never drops a dispose). A Now task needs none while it waits on the owner, its open PR passed review at its current head with no red required check, every PR on it has merged or closed, or it has been still for a day (the tail guard). Like the other work-queue findings it is answered by acting or a dispose, never acknowledged, and it clears by itself once a task takes a lane. It reaches the session-start attention line, `programme.cjs attention` and the Projects hourly nudge's `WORK QUEUE` prefix.
+- The Projects hourly nudge lists the graph's Later rows as queued work only once `BATCH_NEXT` says no task in progress needs a lane, and works project memory's queue the same way.
+
+## 3.143.0
+
+### Fixed
+
+- **The issue closure check proves a merge train is a train:** a merged train's `OWNER_TEST_NEEDED` line releases an issue its members answer for only when the train's own commits are merges of member heads (each row's pull request merged at that head, never the train itself), catch-up merges of main, eject reverts that exactly undo an earlier boarding, and a last version-only bump, read from GitHub. A pull request that pastes a train table over a merge of a sibling branch (even one that lists the sibling's head as a row), or adds a commit of its own, keeps the issue held.
+
+## 3.142.0 (store save recovers from a failed push)
+
+### Changed
+
+- `toolkit store` save, move and merge-branch no longer strand the store checkout after a failed push. A push is tried up to 4 times with waits of 2, 4 and 8 seconds; before each retry the store is read first, so a push that landed is never sent twice, and a store that moved is merged with a merge commit. After the last try the commit stays in the checkout, and running the same save again checks it and pushes it.
+- Commits the store lacks, whether kept by a failed push, made by hand or made by a race merge, are checked again right before every push: every blob and every commit message is secret-scanned, and each change may only add, change or exactly rename plain files inside the store folders. A commit that fails is named and never pushed.
+- A race merge that conflicts is cancelled and made again keeping both versions: the store's copy stays in place and ours is saved under `evidence/store-conflicts/`. No step leaves a half-done merge, and `sync` cancels one an older run left, keeping every commit.
+- The `--message` text is secret-scanned before anything is committed.
+- No store refusal points at a raw push, a reset or a hand merge any more.
+
+## 3.141.1
+
+### Changed
+
+- **Projects coordinator reads a thread's result in full before resolving it:** a wake preview can cut the end of a thread's final message, and a thread was once resolved from such a preview, losing the report paths and a follow-up item in its tail. Reading the final message in full (`full_bodies`, never a preview or summary) and acting on or recording every item in it is now a condition of resolving a thread, in the instructions block line, the skill's resolve conditions and read rule, the hourly nudge's thread read and resolve candidates, and the `RESOLVE DUE` step. Wording in the block and skill was tightened elsewhere to stay within their byte budgets, with no rule dropped from the skill; the block's "End finished Remote Control sessions" line now lives only in the skill, beside the resolve rule.
+
+### Fixed
+
+- **Superseded pull requests:** a programme task kept tracking the first pull request it found, even after that pull request closed unmerged and a replacement took its place, so the G1 acceptance check read the dead pull request's head (`EVIDENCE_STALE`) and the close list never offered the task. A refresh now moves a task's tracked pull request only to a newer pull request that claims the task, through a GitHub closing link or `Refs`, `Completes`, `Closes`, `Fixes` or `Resolves` with the task's number in its own body. When the tracked pull request closed unmerged, the task follows the one such open pull request, or else the newest such merged one; when it merged and the task is still open, the task follows the one such open pull request, so a later slice or rebuild is tracked too. A mention without a keyword, an older pull request, two or more such open pull requests and a retired task never move it, a finished task only moves from a closed pull request to a merged one, and a replacement that cannot be read back in the state it was chosen in leaves the task's PR discovery incomplete with the old pull request kept. Each move appears in the pass's planned effects and its JSON report.
+
+## 3.141.0 (design data refresh)
+
+### Fixed
+
+- **Task auto-merge in Claude Projects cloud threads:** every cloud Projects thread was forced Off for task auto-merge, so a train with the repository's switch at `after-gates` still needed the owner's card tap. The host writes a thread's session context as the opening record of its session transcript, marked meta, and never submits it as a prompt, so the hook that should have recorded the project line never saw it. The merge hold now reads the `- Task auto-merge` project line at merge time from that record: only the first main-thread user entry, only when it is marked meta, belongs to this session and starts with the session context. A typed first prompt, a later wake carrying a context, tool output, another session's transcript and a missing or unreadable transcript all still force Off. The prompt-based switch store, which was never written on the real host, is removed, and the gate route check and the merge hold now share one read-only transcript head reader. Tests use the host's real transcript shape.
+
+### Changed
+
+- **Design data:** The design-system generator's 28 CSV files now match upstream `nextlevelbuilder/ui-ux-pro-max-skill` at `0e8d408`, byte for byte, and every lock pin is the real upstream blob, so the old line-ending-only pins are gone.
+- **Status filter:** Only rows upstream marks `active` rank in style and stack searches, so deprecated and supplemental styles never lead a recommendation. A stack query naming a legacy or deprecated generation still finds that stack's deprecated rows.
+- **Right-to-left:** A recommended style now carries upstream's `rtl_level`, shown in the Markdown output too.
+
+### Added
+
+- **Source-lock refresh:** `repo/scripts/refresh-source-lock.cjs` turns a reviewed source-watch notice into a one-command refresh of an active source lock: it copies exact files, moves pins, lists new upstream files as excluded and refuses while an adapted file needs porting by hand.
+- **Escape list:** `repo/scripts/toolkit-escape-ledger.cjs` keeps one line per bug found after merge in the private evidence store (`state/<owner>/<repo>/escapes.jsonl`, beside the repository's programme state): what broke, why the tests missed it, the kind of test that should have caught it, who found it, and the fix and test once they exist. `add` writes a line, `fix` fills the fix and test once, `check` validates the file and `group` prints counts per kind and the escapes with no test yet, never the text. The reader refuses anything outside its exact format, and any text holding a local path, a secret-shaped value, personal data or an AI footer.
+- **Controller findings:** a bug found after merge now also gets its escape-list line the same turn.
+
+## 3.140.0 (stuck threads get a fresh successor)
+
+### Fixed
+
+- When Task Scheduler fails, `remove toolkit` now names the error inside its "could not be planned; nothing was removed" line, screened for anything secret-shaped, so a denial says what was denied. The message is PowerShell's first real error line, past the progress block Windows PowerShell can write first, which also makes a failed removal's reason readable.
+- Setup's line about old Toolkit tasks now says plainly that `remove toolkit` uninstalls Toolkit from the computer after your OK, and that the old tasks go with it only once no app keeps Toolkit. The setup skill says the same.
+- The 3.132.0 notes now say what an old Toolkit task really does when it fires: it finds its runner gone and exits with an error, then turns itself off after three such runs if Toolkit's record still matches it.
+- **The programme sweep reads the newest result of a required check.** For each app that set the check, the newest run decides: an older failure no longer turns a check red once a newer run passed, and a newer failure or cancelled run is no longer hidden by an older pass. Each run's completion time and app ride in the same GraphQL read, with no extra requests. When either cannot be read, the earlier cautious rule applies.
+- **The REST fallback for pull request checks can read green.** It now judges REST's lower-case states the way it judges GraphQL's, so a passing check read over REST no longer stays pending.
+- **A sweep stopped in planning whose save finds the state branch busy now says it saved nothing.** The lease keeps the stop and the changed-since bookmark for the next pass, which reports it.
+- **Stop-parsing word no longer hides a pull request from the attribution check:** PowerShell's `--%` word, unquoted, is dropped before the attribution, push and credential checks read a command, so `gh --% pr create` with an AI trailer is refused like `gh pr create`, and the Claude Code hook's fallback screen matches it too. A quoted `'--%'` stays an argument that gh refuses.
+- **Backslash quoting no longer hides a push where PowerShell may run it:** bash reads `\"` as an escaped quote and PowerShell as a backslash and a quote, so `echo "a\" ; git push --force ...` hides the push from bash but runs it in PowerShell. The force-push, evidence-store push and credential checks now also read a line with a backslash as PowerShell does, on Claude Code's PowerShell tool and every Codex shell call; Claude Code's Bash tool keeps the bash reading alone.
+- **Daily check-in plugin baseline uses the copy's sync time:** step 10 now measures plugin lag against main as it was when the host last synced the account's plugins, instead of the check-in session's start. A home thread can live for days while its container re-syncs the copy, so the old baseline could hide a real lag. The sync time is the modification time of the host's `manifest.json` beside the copy, which the host rewrites at every container start even when nothing changed; the copy folder's own birth time is only a lower bound, because an unchanged copy keeps its folder from an earlier start, and synced files carry a 1980 file time, so a file's own time is never used. Copies are found by name prefix, since the host can rename one (for example `ai-agent-toolkit~g2`). With several copies the newest sync time wins and each other copy is listed with its version and sync time; with no valid sync time the check compares with main today and says so. The lag age is measured up to the sync time, so a copy synced moments before the account caught up is not reported as more than a day behind. The pinned report now reads "pinned copy synced at <time>", and the state record keeps the sync time.
+
+### Changed
+
+- The old Windows task cleaner now has a fixed end: it goes in the first Toolkit release on or after 1 March 2027.
+- Tests now cover the task record's own guards (secret screening, the file's mode, path and stop-time checks, and the refusal to rewrite a record it could not read), and a hand edit made only in a task's exported XML, which is planned as changed and kept.
+- The contract is the one record of skill classes: the Skill Safety Matrix Packaging table and the Antigravity copier's Toolkit-only list follow it, and validation fails on any mismatch. `repository-agent-rules` and `toolkit-playbooks` are now Toolkit's own, so the Antigravity portable copy leaves them out; setup removes Toolkit's earlier global copies of them.
+- **Hourly nudge default tier:** the hourly nudge now defaults to the mid tier (Sonnet on Claude) instead of small, because the small tier missed threads in its lane sweep. A stored nudge prompt keeps its own tier until it is swapped.
+- **Task kind check:** `toolkit-projects-tasks.cjs --check` now reads a pointer that loads another task kind as malformed, instead of relying on a tier mismatch to catch it.
+
+### Added
+
+- Every skill now has one class in `repo/contracts/skill-publication.json`: portable (works anywhere) or Toolkit's own (runs Toolkit itself). The skill portability audit fails when a portable skill picks up a new Toolkit word, or names an agent app without a written reason; mentions already there sit in a baseline that only shrinks, checked against the change's base commit.
+- The README splits the skill table into portable skills and Toolkit's own skills, and the audit keeps each skill in its class's table.
+- **Stuck threads get a fresh successor:** the Projects hourly nudge now runs `repo/scripts/toolkit-projects-stuck.cjs` every run (step 4a) on what it read: every `list_threads` page, each unresolved work thread and each Remote Control lane's status. A thread is stuck when its Remote Control session ended, or is not connected or served with the session quiet 10 minutes or more while its device is reachable, or when it was failed, stopped or idle while owing work and did nothing of its own after the coordinator's message. A failed or stopped thread gets a continue message first, because a usage-limit or API-error cut-off leaves that state and such threads continue on one message. A working thread, one whose run left output in the last 45 minutes, and one waiting on something recorded (an open owner card, CI, a gate or review) are never stuck; a working thread quiet past twice its expected time goes to the owner instead. The report carries `STUCK THREADS`, `STUCK FOR OWNER` and `STUCK CHECK FAILED` prefixes, and a cut-off thread scan reads `THREAD SCAN INCOMPLETE`.
+- **The coordinator starts the successor itself:** `Successors for stuck threads` in the Projects skill's periodic-runs reference covers the re-check, the successor brief (the old brief with its gate route, the pushed state and a stop when the branch moved), a fresh Remote Control session for Remote Control lanes, the "superseded" message to the old thread and a ledger (`successors.json`) that holds each lane to one successor in 2 hours. A parked Remote Control lane now gets a successor before the owner is asked to type in it.
+
+## 3.139.1
+
+### Fixed
+
+- **Source-watch notices never merge on the standing answer:** a pull request that changes the source-watch notice report (`repo/source-watch/reviews/**`) now waits for the owner's typed merge in the task auto-merge check, and the whole `repo/source-watch/**` folder is in the RISKY tier. A notice closes unmerged once it is triaged, but the report was a LIGHT `.md` file outside the merge-authority list, so one UAT line could have made a notice eligible to merge.
+
+### Changed
+
+- The ui-ux-pro-max reviewed-through cursor moves to upstream `b6a7900`. The upstream commits in that range change the upstream CLI asset sync, its CI path filter, upstream tests, a gallery copy of an already tracked data file, the excluded README, and the adapted `design_system.py`, which gains a preview page writer and design token export. Toolkit's adapted generator is a smaller local-only subset with none of those writers, so nothing is adapted now; no exact-copy data file or licence changed, and the earlier recommendation of a separate data refresh stands.
+
+## 3.139.0
+
+### Changed
+
+- **Evidence store kinds are stated plainly:** a programme file whose store is missing, or names a kind other than `github` (a folder, a drive, `none`), is refused with one message that says governance keeps its state in a private GitHub repository, that a folder or drive can hold evidence copies only, and that without such a store governance stays off. It replaces the terse "not supported (supported: github)" line and the store-field errors that followed it. Only a plain kind word is echoed. Governance still reads such a file as an error, never as on.
+- **How To Use** has an Evidence Store part: when a store is needed (only while governance is on), a table of store kinds with and without governance, and three limits (same owner only, a shared store is shared trust, folders and drives hold copies only). The `toolkit-setup` skill points to it.
+- **Gate and global rules:** with governance off, progress and decisions go in the pull request and the evidence store, if any, and review rounds and long evidence go to the evidence store, if any, so a repository with no store is no longer told to use one.
+- Gate route check: the per-launch `Route override:` brief line is retired, so every gate runs on its stack-registry pin. A gate brief that still carries the line is refused with a plain reason, and an old route stamp carrying ` override=` reads off its pin, so the merge train finder never boards it. The controller roles page, the Projects skill launch rule and the merge train notes drop the override wording.
+
+### Fixed
+
+- Merge card on the first try: the merge hold's refusal now leads with Toolkit's merge card and tells the agent to ask no merge question of its own, with the typed line kept as the fallback. In a chat where the card counts and task auto-merge is off, an agent-written question card that asks to merge a named pull request is refused before the owner sees it; the refusal says to run the merge only if the user asked for it, so one tap merges. Questions about already-merged pull requests, merge trains and merges of issues, steps or branches are not refused. The tap receipt names the merge card. The review playbook says that running the merge is the ask.
+- **Logged acceptance clears the closed-without-acceptance finding:** refresh no longer raises `CLOSED_WITHOUT_ACCEPTANCE` for a completed close whose controller-logged review `PASSED` has passing verdicts at the tracked PR head (with no head tracked, the newest verdict) and whose UAT is `NOT_REQUIRED`, `PASSED` or `UAT_RETAINED` at that head. Before, only an accepted G1 or G2 gate counted, so a disposed finding came back as new whenever the attention list's size cap evicted the disposal.
+
+## 3.138.0 (usage reader)
+
+### Changed
+
+- **Retired `schedule_folder` leaves bindings:** every binding writer now drops this retired programme-file key, which nothing reads. That covers a governance turn-on or refresh proposal, a task auto-merge or merge-train switch pull request, a parallel CI shards answer and the instruction-copies cleanup. A switch, shards or cleanup change keeps the file's own layout, so its diff shows one extra removed line, and its pull request text or preview names it. A binding that still carries the key stays valid. This repository's own programme file no longer carries it.
+- **Report-only lines name who acts:** the CI check-up records each dropped item with its reason; the daily PASS/WARN/FAIL rollup in the secure CI/CD prompt, status template, self-hosted service and managed foundation skills names the owner as reader, the chosen alert channel and same-day action on a FAIL or a WARN three days running; skill product review baselines name who clears each finding and by when; agent cost control gaps are fixed the same turn or handed on with a due date; temporary resources are removed by their cleanup owner by the end date; the controller acts on a governed repository's startup note the same turn, refreshing Toolkit first when the note names a newer one.
+- **Owed Toolkit checks have an owner:** the yearly hook review and the Codex nested-cell re-measure are fixed rows of the controller's release-batch real-host smoke, residual hosts live in the release brief's host matrix, and the controller runs the host drift review when due and picks up source-watch notification pull requests on its periodic run.
+
+### Added
+
+- `repo/scripts/toolkit-usage-report.cjs`: reads Claude Code and Codex session transcripts and writes one JSON report of token and tool counts per session, so the runs that use up usage limits can be measured before anything is changed to save them. Per session it gives the models, first and last activity, model turns (helper turns among them), input, cache-write, cache-read and output tokens, the cache hit share, tool calls by name, repeat reads of one file, shell sleeps, wake-ups scheduled, helpers started and a run type (hourly, daily, weekly, coordinator, G0, G1, G2, merge train or other), plus totals per run type. A reply Claude Code writes as several lines counts once, and a repeated Codex token count is skipped. The report never holds prompt, reply, thinking, tool or file text: file paths become ids that match only within one report, and a report that would hold anything shaped like a secret is refused and not written.
+
+### Fixed
+
+- The reconciler skill again says how to run the standalone decision-trace audit, which flags it takes and what it fails on, and its script header no longer claims the reconcile pass runs it.
+- The reconciler skill now names where an initial nonblocking review finding is recorded: its area's open follow-up child issue.
+- The plain-text check's starting baseline leaves out findings in file names it cannot store (`:`, `\` or control characters) and says how many, so the next run fails on those findings instead of failing to read the baseline.
+- `--migrate-baseline` runs even while the check is switched off, says so, and reminds you that git history still holds the old text, so a real token stored there needs revoking. Running it on a baseline that already uses fingerprints says nothing changed.
+- The old baseline format notice says "old format" instead of "v1", and the installer prints it when it keeps such a baseline, not only on `--check`.
+- Success lines say "1 entry", not "1 entries", and the Toolkit's own plain-text check names a bad option or missing value instead of a vague error.
+- In a Toolkit checkout, the personal-data guard installer warns about a leftover plain-text check copy under `.github/scripts/` and `--check` reports it as drift, as it already did for a leftover guard copy.
+- **Merge trains re-read each member's UAT line:** `toolkit-merge-train.cjs land` now reads each member's live pull request body and refuses when the auto-merge check calls its `UAT:` line missing or invalid, or when the manifest records `NOT_REQUIRED` or `PASSED` while the body says `OWNER_TEST_NEEDED`. A stale or hand-built manifest can no longer drop an owner's test at merge; a stricter manifest line still lands and keeps the test owed. A `--live` member entry with no body is refused, never read as `NOT_REQUIRED`.
+- **The train finder says why a UAT line fails:** its skip reason now ends in `(missing)` or `(invalid: <why>)`.
+- **PR sweeps flag invalid UAT lines:** the Projects hourly and daily PR sweeps now flag `invalid UAT verdict` as well as `missing UAT verdict`, judged by the auto-merge check rather than by a line starting `UAT: `.
+- The n8n workflow validator helper's Pinecone pattern line ends in CRLF like the lines around it.
+
+## 3.137.1
+
+### Fixed
+
+- **Source-watch reports keep old trackers as history:** a test now pins that both report builders (third-party source updates and advisory targets) show a review cursor's tracker only under the "Tracker at last review (history; find the current owner at triage)" label, so a later edit cannot quietly present a closed task as the current owner.
+- The host-change review template now routes each finding to the smallest open task that owns that area now and cites closed or retired tasks only as history, and the source-watch README says a new or advanced cursor names the open task that owns the follow-up.
+
+## 3.137.0 (governance question bank shows once)
+
+### Fixed
+
+- **Governed rules could be cut off at session start:** Claude Code keeps a session-start text only up to 10,000 characters and shows a 2,000-character preview of a longer one, and the governed rules come last. A cloud session started above 12 or more enabled repositories, or a computer with many failed `Checkpoint:` lines, could pass that limit and lose the rules. The text now always stays within 10,000 bytes: failed `Checkpoint:` lines past what fits are counted instead of listed, and in a cloud session the last repositories' state lines shrink to their state word, then are counted, so the rules and the names of the repositories they bind stay whole. Tests pin the limit.
+- `programme.cjs mark-archive` keeps every repeated `--remove`, where it silently kept only the last one; any other option given twice is now refused instead of replaced.
+- The programme reconciler's README and skill no longer describe a Programme Graph PR column the graph dropped, and say that agents mark notes for archiving through a holder order's `mark-archive` write.
+- **Curly quotes in a bank answer:** the tool gate no longer counts a bank answer command that holds a curly quote as the exact answer command, because PowerShell reads curly quotes as quotes, so such a line could run a second command after the answer. The command is refused instead.
+- **Refused bank replies:** a bank reply that is not in the exact form now says what makes it exact (its own line, its live ticket, and no curly quote, straight double quote, `$`, backtick or `%` in the answer), instead of the general "only the user answers" refusal, so the agent sends it again rather than telling the owner it cannot be sent.
+- **Test time budget after a re-run:** the CI test duration check now counts only the newest run attempt of each shard, as the shard check does, so re-running a shard that ran slow once can clear it.
+
+### Added
+
+- **Governance question bank permission lines:** `toolkit permissions` now prints the governance question bank as two exact Claude Code lines in the computer block, so the owner clicks Allow once (for the Update in the bank's permissions row, or the `--apply` command) instead of on every `toolkit governance` run, auto mode included. One line is `toolkit-governance.cjs setup`, which shows the bank. The other is `toolkit-governance.cjs setup --answers *`, which sends the owner's reply and writes nothing without that reply's live one-use ticket. `refresh`, `--json` and every other governance subcommand still ask, and Codex gets a prompt rule for the bank. The lines name the managed checkout's path, like every computer line.
+
+### Changed
+
+- **Bank once:** `toolkit governance` shows its question bank once. A reply that cannot be used (unread, an unknown row, a status row, two choices for one row) now gets one line saying what was wrong and "Reply again", never the bank again, and the owner's next own message still answers the same bank with a new one-use ticket. In the owner's own terminal the same line is printed and the question asked again.
+- **Changed state:** when the governance state changed between showing the bank and the reply, only the rows that changed are named, with their new state and recommendation, and the next reply answers the bank as it is now. Only a bank whose rows were added or taken away needs `toolkit governance` again.
+- **Explain:** a reply of `explain 1.4` prints the full text of that row and keeps the bank open for the answer.
+- **One Agents line:** every output after an answer, results and errors alike, ends with one line for the agent: show the lines above exactly as printed, add nothing, post no card, run no command shown and never show the bank again unless the owner types `toolkit governance`. The agent sends anything that may answer the bank as it is, and Toolkit checks it, instead of asking its own question or showing the bank again.
+- **Shorter bank:** after the table come only the Turn on line where it applies and one reply line. The shards question and minutes moved into `explain 1.4`, with the minutes in short in the row's Current cell, and the permissions note is in that row's own text.
+- **Fixed row numbers:** each governance row keeps its number from run to run, and status rows sit in the table under theirs (1.5 Evidence store, 1.6 Governance App, 1.7 Parent issue, 1.8 Required checks, 1.9 Repository visibility). A row that does not apply leaves its number free, and answering a status row says it has nothing to answer. The heading counts questions and status rows apart. `setup toolkit`'s bank is unchanged.
+- **Stable command path:** governance commands shown to the owner or an agent name the managed Toolkit checkout when this computer records one, not the desktop app's plugin copy, whose path changes with each update. The tool gate accepts the bank answer command from either copy, exactly.
+- **No stray line:** a reply that leaves parallel CI shards out, or answers not now, no longer prints a "not now" line.
+- **Open pull requests read again:** the bank reads the open governance pull requests again before it runs, so a turn-on pull request closed outside Toolkit no longer holds the next turn-on with a misleading "not ready" line. When one is still open, the answer names it to merge or close and prepares no second one. A failed turn-on no longer prints a line telling the agent to show the bank again, and a reply the tool gate cannot count tells the owner they can type `toolkit governance`, instead of the agent showing the bank.
+- **Store reuse:** a test pins that a new repository with an evidence store already found recommends keeping it, with a new private store only the other choice.
+
 ## 3.136.1
 
 ### Fixed
@@ -100,7 +358,7 @@
 
 ### Removed
 
-- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now fails to start; say `remove toolkit` to list and remove it after your OK.
+- Toolkit's Windows scheduled-task code is gone: the task runner and its retired stub, the task launcher, task health, `toolkit update scheduled task`, and the task planner, apply, start and adopt commands. The cloud has run these jobs since 3.111.0. An old Toolkit task that still fires on a computer now finds its runner gone and exits with an error; after three such runs it turns itself off, if Toolkit's record still matches it. Say `remove toolkit` to uninstall Toolkit from this computer after your OK; the old tasks go with it once no app keeps Toolkit.
 - Setup's retired `--scheduled-task-update` and `--remove-toolkit-tasks` options are gone. Setup still prints one line when old Toolkit tasks are recorded on a Windows computer, pointing to `remove toolkit`.
 - The permission ask rows for the old task commands are gone, since those commands no longer exist.
 

@@ -96,5 +96,11 @@ test('portable Antigravity copy leaves out the Toolkit-only skills', (t) => {
   const result = copyPortableSkills({ projectRoot: project, sourceSkillsRoot: path.join(source, 'skills'), write: true });
   assert.equal(result.skills, 1);
   assert.deepEqual(fs.readdirSync(path.join(project, '.agents', 'skills')), ['release-readiness-audit']);
-  assert.deepEqual([...INTERNAL_SKILLS].sort(), ['controller-bootstrap', 'github-program-reconciler', 'toolkit-env', 'toolkit-setup']);
+  assert.deepEqual([...INTERNAL_SKILLS].sort(), [
+    'controller-bootstrap', 'github-program-reconciler', 'repository-agent-rules', 'toolkit-env', 'toolkit-playbooks', 'toolkit-setup'
+  ]);
+  // The list follows the toolkit class in the skill classes contract.
+  const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'skill-publication.json'), 'utf8'));
+  const toolkitClass = Object.keys(contract.skills).filter((name) => contract.skills[name].class === 'toolkit').sort();
+  assert.deepEqual([...INTERNAL_SKILLS].sort(), toolkitClass);
 });

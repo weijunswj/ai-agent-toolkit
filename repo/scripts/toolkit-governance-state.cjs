@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const repositoryIdentity = require('./toolkit-repository-identity.cjs');
-const { userStateDirectory } = require('./toolkit-user-state.cjs');
+const { userStateDirectory, managedScript } = require('./toolkit-user-state.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const managedBlock = require('./toolkit-managed-block.cjs');
 const { validateRemoteIdentity } = repositoryIdentity;
@@ -653,10 +653,10 @@ function findGitRootQuietly(cwd) {
 }
 
 // The single exported entry point other lanes consume (hooks, setup, conformance, catalogue, R6).
-// The command a person types to run the governance CLI from this Toolkit copy. There is no
-// `toolkit` executable, so messages show the real path.
+// The command a person types to run the governance CLI, from the managed Toolkit checkout when there
+// is one (managedScript). There is no `toolkit` executable, so messages show the real path.
 function governanceCommand(subcommand) {
-  return `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
+  return `node "${managedScript('toolkit-governance.cjs')}" ${subcommand}`;
 }
 
 function governanceState(cwd, options = {}) {

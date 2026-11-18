@@ -318,6 +318,27 @@ test('W2 correction loop: REOPEN keeps the session, the close list counts comple
   assert.equal(after.findings.some(entry => entry.code === 'CHILD_STATE_CONFLICT'), false);
 });
 
+test('a G1 whose tracked PR closed unmerged is accepted at its merged replacement after one refresh', () => {
+  const fx = fixture();
+  const dir = tmp();
+  const patch = (name, value) => { const file = path.join(dir, `${name}.json`); fs.writeFileSync(file, JSON.stringify(value)); return file; };
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.ctrl(['update', '--issue', '423', '--patch', patch('branch', { candidate: { branch: 'feature' } })]);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  fx.turnEnd('exec-a', returnBlock('g1-r1', { head: SHA_B }));
+  fx.reconcile();
+  assert.deepEqual([fx.child().gate.state, fx.child().pr.number], ['SUBMITTED', 540]);
+  // PR 540 is superseded: it closes unmerged and PR 541 merges in its place.
+  Object.assign(fx.github.prs.get(540), { state: 'CLOSED', body: 'Refs #423' });
+  fx.github.addPr(541, { head: SHA_B, merged: true, contexts: [green('validate')], body: 'Refs #423' });
+  fx.ctrl(['update', '--issue', '423', '--patch', patch('pass', { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_B, verdict: 'PASSED' }] } })]);
+  assert.equal(fx.run(['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'ACCEPT', '--session', controller.session, '--controller']).error?.code, 'EVIDENCE_STALE');
+  assert.equal(fx.run(['refresh']).error, null);
+  assert.deepEqual([fx.child().pr.number, fx.child().pr.state], [541, 'MERGED']);
+  fx.ctrl(['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
+  assert.deepEqual(fx.child().gate.returns.map(entry => [entry.return_id, entry.verdict]), [['g1-r1', 'ACCEPT']]);
+});
+
 test('W3 an accepted gate reopened for a correction loses its acceptance and the same builder binds the new assignment', () => {
   const fx = fixture();
   withGate(fx, 'RETIRED');

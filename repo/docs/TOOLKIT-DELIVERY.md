@@ -29,7 +29,42 @@ Every open outcome is committed or optional, with one stable child issue per coh
 | NOW | In progress: an open release PR or an active gate, including work merged but still waiting on its UAT or review. The complete usable release currently approved, with its necessary security, privacy, integrity and recovery floor. | The user agrees the outcome; routine means are delegated. |
 | LATER | Committed and not in progress, in the user's priority order; the top one starts next. A planned release has a name, not a version number; the version is taken when it merges, and it does not change the group. | The user agrees new material capabilities and the priority order. |
 
-Optional work the user keeps sorts after Later as OPTIONAL. Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. Ship the Now release with its safety floor, then work down Later from the top; real defects come first by impact. When a release closes, G0 proposes the next one from the top of Later and related work and the same open children are updated. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
+Optional work the user keeps sorts after Later as OPTIONAL. Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
+
+### Work in batches
+
+Work moves from Later to Now in batches. Lanes finish the Now batch first, then the controller reads all of Later and picks the next batch. Reading Later as a whole each time re-weighs priorities, lets related work be planned together and land as one merge train with one version bump, and keeps Now small enough that reviews never pile up.
+
+**Ranking Later.** Priority comes first, then size, so quick wins go first within a priority:
+
+| Tier | Meaning |
+|---|---|
+| P0 | The default branch is broken, a safety-floor or security gap, or data loss. |
+| P1 | The user asked for it now, or it blocks other committed work. |
+| P2 | Other committed work. |
+| P3 | Optional work (it already sorts after Later as OPTIONAL). |
+
+| Size | Meaning |
+|---|---|
+| S | One small PR, one gate round, no new mechanism. |
+| M | One PR with a new mechanism, or a RISKY tier. |
+| L | Several slices. |
+
+The controller estimates the size at intake and the task's G0 confirms it. The existing `order` field stays the single sort key: the controller sets it so Later reads tier, then size, then age, and renumbers with one `update-parent` at intake and whenever a priority changes. A task pinned `last` still sorts after every other one.
+
+**When a batch is done.** No Now task still needs a gate lane: each one is merged or closed, on a merge train or waiting for a merge OK after its review passed at its head with no red required check, or waiting only on the user (UAT, a decision, a merge OK).
+
+**Picking the next batch.** Read all of Later. Take the highest tier that has work and fill the batch with its quickest tasks first (S, then M), adding same-area tasks that fit, then the next tier if room is left. A batch holds at most 6 PRs, one merge train's worth, and at most one L task, so it stays reviewable and lands as one train. The controller picks; the batch's G0 confirms sizes and slices, and related tasks may share one G0 plan. Set the picked tasks' `order` so they lead Later, and record the pick and its reason as one decision record on the parent. Lanes then start the batch's tasks from the top of Later.
+
+**Inside a batch.**
+
+- Lane order: first fix a red CI result or a failed G2, then run a G2 or recheck of a built PR, then any other step, first started first.
+- Any known wait (CI, review, the user) parks the task and names the wait on its child; the lane switches to the next task in the batch and returns when the wait clears. Lanes never start work from outside the batch while it runs.
+- Tail guard: once the rest of the batch is done, a task that is size L, or that has waited on something other than the user for more than a day, stops holding the batch. It stays Now and keeps its lane priority, and the next batch is picked.
+- Jumps: a P0 task joins the current batch at once. A small fix joins the lane's next slice. Any other new user ask goes to the top of the next batch unless the user says it is for now.
+- Rechecks of failed PRs come before new builds. A PR that reaches the two-FAIL round cap goes to the user, and then counts as done for the batch. The merge train keeps its own lane and never waits.
+
+**What enforces it.** In a repository with an enabled programme, the reconciler raises the work-queue finding `BATCH_NEXT` on the parent when the graph has a Later task and no Now task needs a gate lane, after one quiet hour (only its first raise waits; once open or disposed it stays while its condition holds). A Now task needs none while it waits on the user, its open PR passed review at its current head with no red required check, every PR on it has merged or closed, or it has been still for a day (the tail guard). The finding is answered by starting the batch's next task or picking the next batch, or disposed with a reason, never acknowledged, and it clears by itself once a task takes a lane. Size and the L half of the tail guard stay the controller's judgement.
 
 ## 4. Where the plan and milestones live
 
@@ -113,7 +148,7 @@ A fail-open host requires an enforceable launcher or a disabled uncontrolled hel
 
 ## 15. Security and operational commitments
 
-Parent completion rechecks every native descendant with full planning and final walks before the fenced close. Hooks and CI may trust zero child summaries; stale summaries remain a known gap there. Local closure checks use a default-deny command reader: guarded writes hidden in assignments, unknown wrappers or unreadable Start-Process arguments refuse by name, including a brace or equals sign attached to gh and command words taken from variables, while quoted examples and listed data commands stay data. The reader skips PowerShell's stop-parsing word and block comments; it reads words, not all shell syntax. The Projects skill lists the accepted shell gaps. Unmatched merge commands refuse before approval consumption and keep their approval. Local closure checks refuse unreadable gh state; cloud unknowns are advisory and required CI remains the backstop. Update every computer together when a binding enables parent lifecycle: older readers reject that binding and pending lifecycle intents, holding governed work until updated. Codex code-mode nested shell calls reach the hook as Bash. In one earlier Codex test the outer JavaScript cell reached no hook; the capture planned to re-measure that on Codex 0.166 did not run, so it stays an accepted delivery gap. Codex gates hold until the installed hook-state check passes, including after plugin updates that revoke approval.
+Parent completion rechecks every native descendant with full planning and final walks before the fenced close. Hooks and CI may trust zero child summaries; stale summaries remain a known gap there. Local closure checks use a default-deny command reader: guarded writes hidden in assignments, unknown wrappers or unreadable Start-Process arguments refuse by name, including a brace or equals sign attached to gh and command words taken from variables, while quoted examples and listed data commands stay data. The reader skips PowerShell's stop-parsing word and block comments; it reads words, not all shell syntax. The Projects skill lists the accepted shell gaps. Unmatched merge commands refuse before approval consumption and keep their approval. Local closure checks refuse unreadable gh state; cloud unknowns are advisory and required CI remains the backstop. Update every computer together when a binding enables parent lifecycle: older readers reject that binding and pending lifecycle intents, holding governed work until updated. Codex code-mode nested shell calls reach the hook as Bash. In one earlier Codex test the outer JavaScript cell reached no hook; the capture planned to re-measure that on Codex 0.166 did not run, so it stays an accepted delivery gap and a fixed row of the controller's release-batch real-host smoke until it runs. Codex gates hold until the installed hook-state check passes, including after plugin updates that revoke approval.
 
 Every Core includes the security, privacy, integrity and recovery its effects need, checked locally with evidence-backed findings. Security scanning, secret references, external-operation authority, backup and restore, deployment and rollback, and host-service capabilities remain programme outcomes in the parent catalogue.
 
@@ -139,7 +174,7 @@ The release brief binds each row to exact sources, environments and evidence.
 | Standing authority and custody | Routine writes run without repeated approval; upload, read-back and cleanup protect the only copy, active and UAT resources, tested on disposable fixtures for drift, races, interrupted deletion and a producer crash. |
 | Source and installed authority | The isolated, reviewed candidate is promoted deliberately, and a fresh session shows matching instructions, hooks and version. |
 | Independent assurance | Every member of the selected set reviews the complete scope with exact candidate and route identity. Missing, duplicate, stale or wrong-route automated returns cannot complete the set; an owner's manually selected reviewer model and effort are recorded as actual and are not wrong-route solely for differing from the stack. |
-| Security review boundary | The release brief freezes the supported profile for each approved host before final review, and G2 is adversarial on every reachable path within it. Ship status keeps source-green, owner UAT, the native qualified host matrix, merge/install/activation authority and installed proof separate. A genuine host-unavailable HOLD is neither product-red nor success; only the owner may choose a reduced supported release, with residual hosts tracked. |
+| Security review boundary | The release brief freezes the supported profile for each approved host before final review, and G2 is adversarial on every reachable path within it. Ship status keeps source-green, owner UAT, the native qualified host matrix, merge/install/activation authority and installed proof separate. A genuine host-unavailable HOLD is neither product-red nor success; only the owner may choose a reduced supported release, with residual hosts tracked in the release brief's host matrix, which the controller carries to the next release. |
 
 Test the actual supported controller/launcher continuation path when section 7 requires renewal, with a harmless segment and consumer readback:
 

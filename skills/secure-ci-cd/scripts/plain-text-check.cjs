@@ -22,9 +22,11 @@
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline | --prune-baseline | --migrate-baseline] [--explain]
 //   --files          check only these files (paths relative to the repository; out-of-scope ones are skipped)
-//   --init-baseline  write the baseline from what is there now, only when no baseline exists yet
+//   --init-baseline  write the baseline from what is there now, only when no baseline exists yet; findings
+//                    in files whose names hold `:`, `\` or control characters are left out (they stay findings)
 //   --prune-baseline lower baseline counts to what still occurs; never adds or raises anything
-//   --migrate-baseline replace legacy matched text with fingerprints, keeping the same allowances
+//   --migrate-baseline replace legacy matched text with fingerprints, keeping the same allowances; it runs
+//                    even while the check is switched off, and git history still holds the old text
 // Baseline writes require a full run; they cannot be combined with --files or --explain.
 // Exit codes: 0 clean, 1 findings, 2 could not check (bad settings, unreadable file).
 
@@ -253,6 +255,18 @@ function scanFiles(root, files, config, used) {
 // moving a finding to another file, editing its link or exceeding its count is not an allowance.
 const fingerprintOf = (entry) => createHash('sha256').update(JSON.stringify([entry.file, entry.rule, entry.text]), 'utf8').digest('hex');
 const keyOf = (entry) => JSON.stringify([entry.file, entry.rule, entry.fingerprint || fingerprintOf(entry)]);
+// A baseline entry names its file by a plain relative path. The reader refuses anything else, so the
+// writer leaves findings in other file names out: they stay findings rather than break the baseline.
+const storableFile = (file) => typeof file === 'string' && Boolean(file) && !file.includes('\\')
+  && !file.split('/').some(part => !part || part === '.' || part === '..') && !/[:\x00-\x1f\x7f]/.test(file);
+const UNSTORABLE = 'file names with ":", "\\" or control characters cannot be stored in the baseline; rename the file or fix the text';
+const entriesText = (count) => `${count} entr${count === 1 ? 'y' : 'ies'}`;
+// Appended to a baseline-written line when findings were left out.
+const leftOutNote = (skipped) => (skipped ? ` ${skipped} finding(s) left out: ${UNSTORABLE}.` : '');
+// What a migration run says, after its own label ("Plain-text baseline").
+const migrationSummary = ({ entries, migrated }) => (migrated
+  ? `uses fingerprints (${entriesText(entries)}); allowances unchanged. Migration does not clean git history: revoke any real token that was stored there.`
+  : `already uses fingerprints (${entriesText(entries)}); nothing changed.`);
 
 function readBaseline(root, config) {
   const file = path.join(root, config.baseline);
@@ -269,8 +283,7 @@ function readBaseline(root, config) {
     const fields = ['file', 'rule', legacy ? 'text' : 'fingerprint', 'count'];
     const seen = new Set();
     for (const entry of baseline.allowed) {
-      if (!entry || typeof entry.file !== 'string' || !entry.file || typeof entry.rule !== 'string' || !entry.rule
-        || entry.file.includes('\\') || entry.file.split('/').some(part => !part || part === '.' || part === '..') || /[:\x00-\x1f\x7f]/.test(entry.file)
+      if (!entry || !storableFile(entry.file) || typeof entry.rule !== 'string' || !entry.rule
         || ![...REFERENCE_RULES.map(rule => rule.id), 'banned-term'].includes(entry.rule)
         || !Number.isSafeInteger(entry.count) || entry.count < 1
         || Object.keys(entry).length !== fields.length || fields.some(field => !Object.hasOwn(entry, field))
@@ -288,7 +301,7 @@ function readBaseline(root, config) {
 
 function baselineMigrationNotice(baseline, config) {
   return baseline.schema === LEGACY_BASELINE_SCHEMA && baseline.allowed.some(entry => REFERENCE_RULES.some(rule => rule.id === entry.rule))
-    ? `baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline`
+    ? `baseline ${config.baseline}: stores matched text (old format); run the check with --migrate-baseline`
     : null;
 }
 
@@ -353,7 +366,9 @@ function initBaseline(root, config, options = {}) {
   if (fs.existsSync(path.join(root, config.baseline))) throw new CheckError(`${config.baseline} already exists; it only shrinks, so it was not rewritten`);
   const { findings } = check(root, config, options);
   const counts = new Map();
+  let skipped = 0;
   for (const finding of findings) {
+    if (!storableFile(finding.file)) { skipped += 1; continue; }
     const key = keyOf(finding);
     if (!counts.has(key)) counts.set(key, { file: finding.file, rule: finding.rule, fingerprint: fingerprintOf(finding), count: 0 });
     counts.get(key).count += 1;
@@ -364,7 +379,7 @@ function initBaseline(root, config, options = {}) {
     description: BASELINE_DESCRIPTION,
     allowed
   });
-  return { entries: allowed.length };
+  return { entries: allowed.length, skipped };
 }
 
 function requireFullBaselineRun(options) {
@@ -377,10 +392,10 @@ function migrateBaseline(root, config, options = {}) {
   requireFullBaselineRun(options);
   const baseline = readBaseline(root, config);
   if (baseline.missing) throw new CheckError('No baseline exists to migrate.');
-  if (baseline.schema === BASELINE_SCHEMA) return { entries: baseline.allowed.length };
+  if (baseline.schema === BASELINE_SCHEMA) return { entries: baseline.allowed.length, migrated: false };
   const allowed = baseline.allowed.map(entry => ({ file: entry.file, rule: entry.rule, fingerprint: fingerprintOf(entry), count: entry.count }));
   writeBaseline(root, config, { schema: BASELINE_SCHEMA, description: BASELINE_DESCRIPTION, allowed });
-  return { entries: allowed.length };
+  return { entries: allowed.length, migrated: true };
 }
 
 function explain(config) {
@@ -440,20 +455,22 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
     const args = parseArgs(argv);
     const config = readConfigFile(args.config);
     if (args.explain) { out.write(`${explain(config)}\n`); return 0; }
-    if (config.off_reason) { out.write(`Plain-text check is switched off in this repository: ${config.off_reason.trim()}\n`); return 0; }
+    const off = config.off_reason ? config.off_reason.trim() : null;
+    // Migration only removes stored text and never raises an allowance, so it runs while the check is off.
+    if (args.migrate) {
+      const result = migrateBaseline(args.repo, config);
+      out.write(`Plain-text baseline ${migrationSummary(result)}${off ? ` The check itself is still switched off in this repository: ${off}` : ''}\n`);
+      return 0;
+    }
+    if (off) { out.write(`Plain-text check is switched off in this repository: ${off}\n`); return 0; }
     if (args.init) {
       const result = initBaseline(args.repo, config);
-      out.write(`Plain-text baseline written: ${config.baseline} (${result.entries} entr${result.entries === 1 ? 'y' : 'ies'}).\n`);
+      out.write(`Plain-text baseline written: ${config.baseline} (${entriesText(result.entries)}).${leftOutNote(result.skipped)}\n`);
       return 0;
     }
     if (args.prune) {
       const result = pruneBaseline(args.repo, config);
-      out.write(`Plain-text baseline pruned: ${result.removed} entr${result.removed === 1 ? 'y' : 'ies'} removed, ${result.kept} kept.\n`);
-      return 0;
-    }
-    if (args.migrate) {
-      const result = migrateBaseline(args.repo, config);
-      out.write(`Plain-text baseline uses fingerprints (${result.entries} entries); allowances unchanged.\n`);
+      out.write(`Plain-text baseline pruned: ${entriesText(result.removed)} removed, ${result.kept} kept.\n`);
       return 0;
     }
     return report(check(args.repo, config, { files: args.files }), config, out, err);
@@ -466,7 +483,7 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 module.exports = Object.freeze({
   CHECK_VERSION, CONFIG_SCHEMA, BASELINE_SCHEMA, LEGACY_BASELINE_SCHEMA, DEFAULT_CONFIG, DEFAULTS, REFERENCE_RULES, CheckError,
   termPattern, resolveConfig, readConfigFile, scopeOf, listFiles, listScopedFiles, findInText, scanFiles,
-  ALLOW_MARKER, readBaseline, baselineMigrationNotice, check, describeFailure, pruneBaseline, initBaseline, migrateBaseline, explain, report, main
+  ALLOW_MARKER, readBaseline, baselineMigrationNotice, leftOutNote, migrationSummary, check, describeFailure, pruneBaseline, initBaseline, migrateBaseline, explain, report, main
 });
 
 if (require.main === module) process.exitCode = main();

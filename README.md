@@ -33,15 +33,10 @@ Say `remove toolkit` in Claude Code or Codex. It asks whether to remove Toolkit 
 
 ## Skills
 
-Each skill is a folder under [skills/](skills/). Copy the whole folder, not just `SKILL.md`, if you install one by hand ([where each app looks](repo/docs/HOW-TO-USE.md#manual-skill-folder-locations)).
+Each skill is a folder under [skills/](skills/). Portable skills work in any project and agent app. Copy the whole folder, not just `SKILL.md`, if you install one by hand ([where each app looks](repo/docs/HOW-TO-USE.md#manual-skill-folder-locations)). Toolkit's own skills run Toolkit itself, so they ship in the plugin and are not for copying on their own.
 
-| Skill | Use |
+| Portable skill | Use |
 |---|---|
-| [Repository Agent Rules](skills/repository-agent-rules/) | Put a repository under Toolkit's rules, or check and repair them. |
-| [Toolkit Playbooks](skills/toolkit-playbooks/) | Pick the working playbook that applies (safety gates, git completion, decision traces, tests and more) before planning or editing. |
-| [Controller Bootstrap](skills/controller-bootstrap/) | Take over or recover an explicitly assigned Toolkit controller. |
-| [Toolkit Setup](skills/toolkit-setup/) | Set up, update, check or troubleshoot Toolkit itself. |
-| [Toolkit Env](skills/toolkit-env/) | Manage your API keys and tokens in Windows Credential Manager, kept out of chat. |
 | [n8n Safety Router](skills/n8n-safety-router/) | The safety rules to load before any n8n work. |
 | [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n locally or on a server, with backups and the official n8n skills. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Clean, check and compare n8n workflow files before an approved import or export. |
@@ -49,7 +44,6 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [Skill Product Review](skills/skill-product-review/) | Review third-party agent skills before using or adapting them. |
 | [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads and exposed endpoints. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare managed services before building auth, databases or other foundations yourself. |
-| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep programme pages, task and review state in step, with verified graph archives across logins, recovery for changed comments and visible redraw warnings. Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand. |
 | [Release Readiness Audit](skills/release-readiness-audit/) | Run a guarded release-readiness audit and fix batches. |
 | [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Set up and maintain a Hostinger VPS with Coolify, with owner approval gates. |
 | [Agent Cost Control](skills/agent-cost-control/) | Pick the cheapest model and effort for scheduled tasks, automations, non-gate helpers and spawned threads, and keep long-running threads short. |
@@ -58,6 +52,15 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review Docker, VPS, tunnel and public-port safety for self-hosted services. |
 | [Frontend Art Direction](skills/frontend-art-direction/) | Give a frontend a deliberate visual direction, or review one against an approved design. |
 | [Windows Local Dev Services](skills/windows-local-dev-services/) | Start, check and troubleshoot local dev servers on Windows. |
+
+| Toolkit's own skill | Use |
+|---|---|
+| [Repository Agent Rules](skills/repository-agent-rules/) | Put a repository under Toolkit's rules, or check and repair them. |
+| [Toolkit Playbooks](skills/toolkit-playbooks/) | Pick the working playbook that applies (safety gates, git completion, decision traces, tests and more) before planning or editing. |
+| [Controller Bootstrap](skills/controller-bootstrap/) | Take over or recover an explicitly assigned Toolkit controller. |
+| [Toolkit Setup](skills/toolkit-setup/) | Set up, update, check or troubleshoot Toolkit itself. |
+| [Toolkit Env](skills/toolkit-env/) | Manage your API keys and tokens in Windows Credential Manager, kept out of chat. |
+| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep programme pages, task and review state in step, with verified graph archives across logins, recovery for changed comments and visible redraw warnings. Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand. |
 
 How risky each skill is and what it may touch: [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md).
 
@@ -76,7 +79,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.136.1 sha256=a57c3a0c239c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.148.0 sha256=a57c3a0c239c -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

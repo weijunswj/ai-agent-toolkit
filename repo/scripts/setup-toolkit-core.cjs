@@ -3910,7 +3910,7 @@ function leftoverTaskLines({ home = os.homedir(), platform = process.platform, r
   if (read?.status !== 'ok' || !Array.isArray(read.tasks)) return [];
   const left = read.tasks.filter(entry => entry?.host === 'windows' && !entry.adopted);
   if (!left.length) return [];
-  return [`Scheduled tasks: ${left.length} old Toolkit task${left.length === 1 ? ' is' : 's are'} still recorded on this computer. The cloud runs these jobs now, and setup no longer changes them. Say "remove toolkit" to list and remove them after your OK.`];
+  return [`Scheduled tasks: ${left.length} old Toolkit task${left.length === 1 ? ' is' : 's are'} still recorded on this computer. The cloud runs these jobs now, and setup no longer changes them. Say "remove toolkit" to uninstall Toolkit from this computer after your OK; the old tasks go with it once no app keeps Toolkit.`];
 }
 
 // Record 808: with no computer sweep, setup names each governed repository this computer knows that
