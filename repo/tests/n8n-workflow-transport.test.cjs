@@ -1510,7 +1510,7 @@ test('validate-n8n-workflows.cjs checks the literal part of a host built partly 
           plain: 'https://${tenant}.' + privateHost + '/api',
           plainSuffix: 'https://' + privateHost + '${path}',
           template: '={{ `https://${$env.SUB}.' + privateHost + '/x` }}',
-          templateSuffix: '={{ `https://' + privateHost + '${$json.path}` }}',
+          templateSuffix: '={{ `https://' + privateHost + '${$json.path}/t` }}',
           expressionPrefix: '=https://{{ $json.sub }}.' + privateHost + '/api',
           expressionSuffix: '=https://' + privateHost + '{{ $json.path }}',
           runTimeOnly: 'https://${HOST}/x',
@@ -1534,7 +1534,7 @@ test('validate-n8n-workflows.cjs checks the literal part of a host built partly 
         type: 'n8n-nodes-base.code',
         typeVersion: 2,
         position: [400, 0],
-        parameters: { jsCode: 'const u = `https://' + privateHost + '${route}`; return [{ json: { u } }];' },
+        parameters: { jsCode: 'const u = `https://' + privateHost + '${route}/v2`; return [{ json: { u } }];' },
       },
     ],
   }));
@@ -1544,6 +1544,53 @@ test('validate-n8n-workflows.cjs checks the literal part of a host built partly 
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /contains 8 production-looking URL\(s\) at nodes\.0\.parameters\.plain, nodes\.0\.parameters\.plainSuffix, nodes\.0\.parameters\.template, nodes\.0\.parameters\.templateSuffix, nodes\.0\.parameters\.expressionPrefix and 3 more\./);
   assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs reads a run-time part with a space, call or quote as one piece of the host', () => {
+  const privateHost = ['crm', 'private', 'test'].join('.');
+  const codeNode = (id, x, jsCode) => ({ id, name: id, type: 'n8n-nodes-base.code', typeVersion: 2, position: [x, 0], parameters: { jsCode } });
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), safeWorkflow({
+    nodes: [
+      codeNode('spaced', 0, 'const u = `https://${ sub }.' + privateHost + '/a`; return [{ json: { u } }];'),
+      codeNode('nodeCall', 200, 'const u = `https://${$(\'Config\').item.json.sub}.' + privateHost + '/b`; return [{ json: { u } }];'),
+      codeNode('inputCall', 400, 'const u = `https://${$input.first().json.sub}.' + privateHost + '/c`; return [{ json: { u } }];'),
+      codeNode('runTimeOnly', 600, 'const u = `https://${ $env.HOST }/v1`; return [{ json: { u } }];'),
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [800, 0],
+        parameters: {
+          spaced: '={{ `https://${ $json.sub }.' + privateHost + '/d` }}',
+          nodeCall: '={{ `https://${$(\'Config\').item.json.sub}.' + privateHost + '/e` }}',
+          allowedTail: '={{ `https://${ $json.sub }.example.com/v1` }}',
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 5 production-looking URL\(s\) at nodes\.0\.parameters\.jsCode, nodes\.1\.parameters\.jsCode, nodes\.2\.parameters\.jsCode, nodes\.4\.parameters\.spaced, nodes\.4\.parameters\.nodeCall\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /crm\.private\.test/, 'the log never prints the host');
+});
+
+test('validate-n8n-workflows.cjs still accepts an allowed literal URL that holds a ${...} part', () => {
+  const allowedUrl = 'https://' + ['files', 'private', 'test'].join('.') + '/d/${body.id}/view';
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflow-policy.json'), { allowedLiteralValues: [allowedUrl] });
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    allowed: allowedUrl,
+    other: allowedUrl.replace('/view', '/edit'),
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.other\./);
 });
 
 test('validate-n8n-workflows.cjs keeps its place in an expression after a regex literal or a comment', () => {
@@ -1575,13 +1622,15 @@ test('validate-n8n-workflows.cjs ends an email at a change of script after the d
     privateThenJapanese: email('ops', 'crm.private.test') + 'まで',
     lookAlikeThenJapanese: email('user', 'exаmple.com') + 'まで',
     allowedThenLatin: email('user', 'example.comx'),
+    allowedThenJoinedPrivate: email('support', 'example.com') + 'または' + email('tanaka', 'crm.private.test'),
+    sentenceJoinedPrivate: '問い合わせは' + email('support', 'example.com') + 'または' + email('sato', 'crm.private.test') + 'へ',
   }));
 
   const result = runNode(validateScript, [], { cwd });
 
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /contains 3 non-placeholder email\(s\) at nodes\.0\.parameters\.privateThenJapanese, nodes\.0\.parameters\.lookAlikeThenJapanese, nodes\.0\.parameters\.allowedThenLatin\./);
-  assert.doesNotMatch(result.stdout + result.stderr, /ops@|user@|exаmple|crm\.private\.test/, 'the log never prints the address');
+  assert.match(result.stderr, /contains 5 non-placeholder email\(s\) at nodes\.0\.parameters\.privateThenJapanese, nodes\.0\.parameters\.lookAlikeThenJapanese, nodes\.0\.parameters\.allowedThenLatin, nodes\.0\.parameters\.allowedThenJoinedPrivate, nodes\.0\.parameters\.sentenceJoinedPrivate\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /ops@|user@|support@|tanaka|sato@|exаmple|crm\.private\.test/, 'the log never prints the address');
 });
 
 test('validate-n8n-workflows.cjs still fails a credential in the user info or query of an allowed public host', () => {
