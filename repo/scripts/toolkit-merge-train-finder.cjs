@@ -171,7 +171,10 @@ function judge(pull, facts, { required, branch, held, tiers, registry }) {
   if (bumps.length !== 1) return { skip: `needs exactly one Bump: line (has ${bumps.length})` };
   const uat = UAT.exec(body);
   const uatState = uatVerdict(body);
-  if (!uat || !uatState.mergeable) return { skip: 'no UAT: line the auto-merge check accepts' };
+  if (!uat || !uatState.mergeable) {
+    const why = uatState.state === 'absent' ? 'missing' : `invalid${uatState.problem ? `: ${uatState.problem}` : ''}`;
+    return { skip: `no UAT: line the auto-merge check accepts (${why})` };
+  }
   const files = facts.files(pull.number);
   if (files.includes(VERSION_FILE)) return { skip: 'carries its own version bump: it lands alone' };
   const byFiles = riskTier.classify(files.map(file => ({ path: file })), tiers).tier;

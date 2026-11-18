@@ -9,10 +9,11 @@
 //     this session for a gate, a pinned task profile or a pinned helper binding, which
 //     must hold wherever it is supplied);
 //   - the repository's governance state (toolkit-governance-state.cjs, the single authority)
-//     is ENABLED with the governed rules in force: the TOOLKIT-GOVERNED-RULES block and a
-//     valid programme binding, and the user has not disabled it. A DISABLED, UNDECIDED or
-//     incomplete repository is not governed here; an UNDECIDED one is held by the
-//     governance gate before any helper launch is reached.
+//     is ENABLED with its materials complete: a valid programme binding merged on the default
+//     branch (no governed rules block is needed; the installed Toolkit delivers the rules), and
+//     the user has not disabled it. A DISABLED, UNDECIDED or incomplete repository is not
+//     governed here; an UNDECIDED one is held by the governance gate before any helper launch
+//     is reached.
 // The walk stops at the first `.git` (a directory, or the file a worktree uses). Node built-ins
 // only, no subprocess. Without a launcher marker, an error is ungoverned.
 

@@ -172,6 +172,48 @@ test('ordinary commits, PRs and other commands pass, even when they mention Clau
   assert.deepEqual(attributionDecision({ tool_input: {} }), {});
 });
 
+// PowerShell's stop-parsing word `--%` hands the rest of the line to gh as it is, so gh still runs
+// `pr create`. Unquoted, it is dropped before the attribution, push and credential checks read the
+// command; quoted, it is an ordinary argument that gh refuses, so the command stays data.
+test('a stop-parsing --% word does not hide gh pr create, edit or merge from the attribution check', (t) => {
+  const dir = messageFiles(t);
+  const continued = '`\n';
+  for (const command of [
+    `gh --% pr create --title x --body "${trailer}"`,
+    `gh --% pr edit 12 --body "${trailer}"`,
+    `gh --% pr merge 12 --squash --body "${trailer}"`,
+    'gh --% pr create --title x --body-file body.md',
+    'gh --% pr edit 12 --body-file=body.md',
+    'gh --% --% pr create --title x --body-file body.md',
+    `gh ${continued}--% pr create --title x --body-file body.md`,
+    `gh.exe --% pr create --title x --body "${trailer}"`,
+    `git --% commit -m x -m "${trailer}"`,
+    `& gh --% pr create --title x --body "${trailer}"`,
+  ]) {
+    assert.equal(attributionRefusal(command, dir), MESSAGE, command);
+    for (const [tool_name, host] of [['Bash', 'claude'], ['PowerShell', 'claude'], ['Bash', 'codex'], ['exec_command', 'codex']]) {
+      const decision = attributionDecision({ tool_name, cwd: dir, tool_input: { command } }, { notes: [], host, check: () => ({}) });
+      assert.equal(decision.hookSpecificOutput?.permissionDecisionReason, MESSAGE, `${host} ${tool_name}: ${command}`);
+    }
+  }
+  for (const command of [
+    'gh --% pr create --title "Claude Code settings" --body "Adds the Claude Code settings question"',
+    'gh --% pr create --title x --body-file sub/body.md',
+    "gh '--%' pr create --title x --body-file body.md",
+    'gh "--%" pr create --title x --body-file body.md',
+    'echo gh --% pr create',
+  ]) {
+    assert.equal(attributionRefusal(command, dir), '', command);
+  }
+  // Every line-break shape in the shared hostile set still leaves the pull request refused.
+  for (const { id, text } of require('./support/hostile-inputs.cjs').variants(`git status\ngh --% pr create --title x --body "${trailer}"`)) {
+    assert.equal(attributionRefusal(text, dir), MESSAGE, id);
+  }
+  // The push and credential check reads the same pull request.
+  assert.deepEqual(outgoingChanges('gh --% pr create --base release --head owner:topic --title x', dir), [{ folder: dir, pullRequest: true, base: 'release', sources: ['topic'] }]);
+  assert.deepEqual(outgoingChanges("gh '--%' pr create --base release", dir), []);
+});
+
 test('trailers accept colon or equals separators with optional spaces', () => {
   for (const separator of [':', '=', ' : ', ' = ', '\t=\t']) {
     for (const trailer of [`Co-Authored-By${separator}Claude <noreply@anthropic.com>`, `Claude-Session${separator}session_123`]) {
@@ -265,7 +307,8 @@ test('both plugins route shell commands to the attribution check', () => {
   assert.equal(JSON.parse(helper.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecision, 'deny');
 });
 
-// Folders shaped like repositories (a .git folder is enough): Toolkit-governed, guarded, or neither.
+// Folders shaped like repositories (a .git folder is enough): Toolkit-governed (by its working-tree
+// binding), guarded, or neither.
 function guardRepos(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-guard-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -280,7 +323,7 @@ function guardRepos(t) {
     return root;
   };
   return {
-    governed: make('governed', { 'AGENTS.md': '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n' }),
+    governed: make('governed', { '.github/toolkit-programme.json': '{ "schema": "toolkit.programme-binding.v2", "governance": "enabled" }\n' }),
     guarded: make('guarded', { '.github/personal-data-guard.json': '{}\n' }),
     plain: make('plain', { 'AGENTS.md': '# Rules\n' }),
     store: make('store', { '.git/config': '[remote "origin"]\n\turl = https://github.com/owner/TRANSPORT-evidence.git\n' }),
@@ -387,25 +430,37 @@ test('absolute folder confirmation and host-confirmed calls keep their existing 
   ]);
 });
 
-test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
+test('N3: a governed repository is protected by its merged state or its working-tree binding, never by a governed block alone', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const registryOptions = { registryPath: path.join(dir, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
-  const gate = require('../scripts/toolkit-governance-gate.cjs');
-  const repo = (name, { block = false } = {}) => {
+  const repo = (name, { block = false, binding = null } = {}) => {
     const root = path.join(dir, name);
     fs.mkdirSync(root, { recursive: true });
     childProcess.execFileSync('git', ['init', '--quiet', root]);
     childProcess.execFileSync('git', ['-C', root, 'remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
     if (block) fs.writeFileSync(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n');
+    if (binding !== null) {
+      fs.mkdirSync(path.join(root, '.github'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.github', 'toolkit-programme.json'), binding);
+    }
     return root;
   };
+  const bindingText = (name, governance) => JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: `example-owner/${name}`, governance });
   const enabled = repo('enabled');
   require('./support/governance-observations.cjs').seedMerged(enabled, 'enable', { registryOptions });
+  // The working tree says enabled while this computer holds no merged state for the repository.
+  const boundUnread = repo('bound-unread', { binding: bindingText('bound-unread', 'enabled') });
+  const boundDisabled = repo('bound-disabled', { binding: bindingText('bound-disabled', 'disabled') });
+  // A binding that says enabled protects even when the rest of it does not parse.
+  const brokenBinding = repo('broken-binding', { binding: '{"governance": "enabled"' });
+  // A governed block an older setup left is not a governance signal: the binding is.
   const disabledWithBlock = repo('disabled-block', { block: true });
   require('./support/governance-observations.cjs').seedMerged(disabledWithBlock, 'disable', { registryOptions });
+  const undecidedWithBlock = repo('undecided-block', { block: true });
   const undecided = repo('undecided');
-  for (const [root, refused] of [[enabled, true], [disabledWithBlock, true], [undecided, false]]) {
+  for (const [root, refused] of [[enabled, true], [boundUnread, true], [boundDisabled, false], [brokenBinding, true],
+    [disabledWithBlock, false], [undecidedWithBlock, false], [undecided, false]]) {
     assert.equal(forceRefusal('git push --force origin main', root, 0, registryOptions), refused ? FORCE_MESSAGE : '', path.basename(root));
   }
 });
@@ -550,6 +605,18 @@ test('fetch repository URLs are reads, while local refspec writes are retained',
     'git fetch --update-head-ok https://example.com/repo.git main', 'git fetch --depth 1 https://example.com/repo.git main:feature']) {
     assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder)[0].preceding, [{ folder, sub: 'other' }], command);
   }
+});
+
+test('two quotings: each reading keeps its own earlier steps, and a nested script read both ways adds each step once', () => {
+  const folder = os.tmpdir();
+  // A merge after the push in both readings never counts as before it.
+  const targets = [];
+  outgoingRefusal('git push uat HEAD; echo "a\\b"; git merge main', folder, { check: (target) => { targets.push(target); return {}; } });
+  assert.deepEqual(targets, [{ folder, remote: 'uat', sources: ['HEAD'] }]);
+  // A commit in a PowerShell script read both ways is one earlier step for the push after it.
+  targets.length = 0;
+  outgoingRefusal('pwsh -Command "git commit -m x\\y"; git push uat HEAD', folder, { check: (target) => { targets.push(target); return {}; } });
+  assert.deepEqual(targets, [{ folder, remote: 'uat', sources: ['HEAD'], preceding: [{ folder, sub: 'commit' }] }]);
 });
 
 test('outgoing changes retain earlier git mutations and leave reads out', () => {

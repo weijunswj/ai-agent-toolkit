@@ -842,14 +842,14 @@ function Resolve-LiveMatch($RepoWorkflow, $LiveWorkflows) {
   return [PSCustomObject]@{ Status = "Archived"; Workflow = $null; Message = "Only archived live workflow(s) matched by name." }
 }
 
-function Get-SafeWorkflowFileBase($Name, $Id) {
-  $base = ([string]$Name).ToLowerInvariant() -replace '[^a-z0-9]+', '-'
-  $base = $base.Trim('-')
+function Get-SafeWorkflowFileBase($Name, $Id, [string]$Separator = "-") {
+  $base = ([string]$Name).ToLowerInvariant() -replace '[^a-z0-9]+', $Separator
+  $base = $base.Trim($Separator.ToCharArray())
   if ([string]::IsNullOrWhiteSpace($base)) {
     $base = "workflow"
   }
   if ($base.Length -gt 80) {
-    $base = $base.Substring(0, 80).Trim('-')
+    $base = $base.Substring(0, 80).Trim($Separator.ToCharArray())
   }
   if ([string]::IsNullOrWhiteSpace($base)) {
     $base = "workflow"
@@ -866,6 +866,35 @@ function Get-StableIdSuffix($Id) {
     return $clean.ToLowerInvariant()
   }
   return ([guid]::NewGuid().ToString("N")).Substring(0, 8)
+}
+
+# New AllLive files follow the folder's convention: the .workflow.json suffix when every existing
+# root file uses it, and "_" between words when some base name uses "_" and none uses "-".
+function Get-WorkflowFileNameConvention($ExistingFiles) {
+  $names = @($ExistingFiles | ForEach-Object { [string]$_.Name })
+  $suffix = ".json"
+  if ($names.Count -gt 0 -and @($names | Where-Object { $_ -notlike "*.workflow.json" }).Count -eq 0) {
+    $suffix = ".workflow.json"
+  }
+  $bases = @($names | ForEach-Object { $_.Substring(0, $_.Length - $suffix.Length) })
+  $separator = "-"
+  if (@($bases | Where-Object { $_.Contains("_") }).Count -gt 0 -and @($bases | Where-Object { $_.Contains("-") }).Count -eq 0) {
+    $separator = "_"
+  }
+  return [PSCustomObject]@{ Suffix = $suffix; Separator = $separator }
+}
+
+# Clashes compare full file names (case-insensitive), so x.workflow.json blocks a new x.workflow.json.
+function Get-NewWorkflowFileName($Workflow, $Convention, $UsedFileNames) {
+  $baseName = Get-SafeWorkflowFileBase $Workflow.name $Workflow.id $Convention.Separator
+  $idSuffix = Get-StableIdSuffix $Workflow.id
+  $fileName = "$baseName$($Convention.Suffix)"
+  while ($UsedFileNames.ContainsKey($fileName)) {
+    $baseName = "$baseName$($Convention.Separator)$idSuffix"
+    $fileName = "$baseName$($Convention.Suffix)"
+  }
+  $UsedFileNames[$fileName] = $true
+  return $fileName
 }
 
 function Write-LiveWorkflowExportFile($Workflow, $ExportFile) {
@@ -923,7 +952,7 @@ try {
 Clear-StaleLiveWorkflowList
 Assert-HelperSetReady
 Assert-WorkflowIdentityStateReadable
-$workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly")
+$workflowFiles = @(Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly"))
 if ($Mode -eq "RepoTrackedOnly" -and -not $workflowFiles) {
   throw "No root-level workflow JSON files found in $(Get-DisplayPath $WorkflowDirPath)."
 }
@@ -932,7 +961,7 @@ foreach ($workflowFile in $workflowFiles) {
   $repoWorkflowInfos += Read-RepoWorkflowInfo $workflowFile
 }
 Invoke-LivePreflight
-$liveWorkflows = Get-LiveWorkflows
+$liveWorkflows = @(Get-LiveWorkflows)
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 if ($PublishedOnly) {
   Write-Step "NOTE" "PublishedOnly is set. n8n may omit workflows with no published version."
@@ -1089,9 +1118,10 @@ foreach ($workflowInfo in $repoWorkflowInfos) {
 
 $liveForExport = @($liveWorkflows | Where-Object { $IncludeArchived -or $_.isArchived -ne $true })
 $skippedArchived = $liveWorkflows.Count - $liveForExport.Count
-$usedBaseNames = @{}
+$fileNameConvention = Get-WorkflowFileNameConvention $existingFiles
+$usedFileNames = @{}
 foreach ($workflowFile in $existingFiles) {
-  $usedBaseNames[$workflowFile.BaseName] = $true
+  $usedFileNames[$workflowFile.Name] = $true
 }
 
 $plannedAllLive = @()
@@ -1108,18 +1138,7 @@ foreach ($workflow in $liveForExport) {
   }
 
   if ($null -eq $targetFile) {
-    $baseName = Get-SafeWorkflowFileBase $workflow.name $workflow.id
-    if ($usedBaseNames.ContainsKey($baseName)) {
-      $baseName = "$baseName-$(Get-StableIdSuffix $workflow.id)"
-    }
-    while ($usedBaseNames.ContainsKey($baseName)) {
-      $baseName = "$baseName-$(Get-StableIdSuffix $workflow.id)"
-    }
-    $usedBaseNames[$baseName] = $true
-    $targetFile = Join-Path $WorkflowDirPath "$baseName.json"
-  } else {
-    $existingBaseName = [System.IO.Path]::GetFileNameWithoutExtension([System.IO.Path]::GetFileName([string]$targetFile))
-    $usedBaseNames[$existingBaseName] = $true
+    $targetFile = Join-Path $WorkflowDirPath (Get-NewWorkflowFileName $workflow $fileNameConvention $usedFileNames)
   }
 
   $targetBaseName = [System.IO.Path]::GetFileNameWithoutExtension([System.IO.Path]::GetFileName([string]$targetFile))

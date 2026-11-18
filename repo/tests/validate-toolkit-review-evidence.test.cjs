@@ -17,6 +17,7 @@ const {
   addSkillToCatalogs,
   updateBaseline,
   updateMigrationLedger,
+  validateEachCopy,
 } = require('./validate-toolkit-test-support.cjs');
 
 test('validator rejects a current skill without direct-canonical review evidence', () => {
@@ -285,4 +286,45 @@ test('validator detects stale plugin package versions', () => {
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /version does not match/);
+});
+
+// repo/contracts/skill-publication.json is the one record of skill classes: the Safety Matrix Packaging
+// table and the Antigravity copier's Toolkit-only list must follow it.
+function editFile(cwd, relPath, edit) {
+  const filePath = path.join(cwd, relPath);
+  fs.writeFileSync(filePath, edit(fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n')), 'utf8');
+}
+
+test('validator fails when the Packaging table or the Antigravity copier disagrees with the skill classes', async () => {
+  const matrixRel = 'repo/docs/SKILL-SAFETY-MATRIX.md';
+  const copierRel = 'repo/scripts/toolkit-antigravity-project-skills.cjs';
+  const cases = [
+    {
+      name: 'table row marks a Toolkit-own skill portable',
+      prepare: (cwd) => editFile(cwd, matrixRel, (text) => text.replace(
+        '| [toolkit-playbooks](../../skills/toolkit-playbooks/) | toolkit | Yes | Yes | No |',
+        '| [toolkit-playbooks](../../skills/toolkit-playbooks/) | portable | Yes | Yes | Yes |')),
+      error: /SKILL-SAFETY-MATRIX\.md Packaging row for toolkit-playbooks says portable but repo\/contracts\/skill-publication\.json says toolkit/
+    },
+    {
+      name: 'copier list misses a Toolkit-own skill',
+      prepare: (cwd) => editFile(cwd, copierRel, (text) => text.replace("'repository-agent-rules', ", '')),
+      error: /toolkit-antigravity-project-skills\.cjs Toolkit-only list must match the toolkit class in repo\/contracts\/skill-publication\.json/
+    },
+    {
+      name: 'contract moves a skill to toolkit while table and copier stay',
+      prepare: (cwd) => editFile(cwd, 'repo/contracts/skill-publication.json', (text) => {
+        const contract = JSON.parse(text);
+        contract.skills['host-observability'].class = 'toolkit';
+        contract.baseline = contract.baseline.filter((entry) => entry.skill !== 'host-observability');
+        return `${JSON.stringify(contract, null, 2)}\n`;
+      }),
+      error: /^(?=[\s\S]*Packaging row for host-observability says portable but repo\/contracts\/skill-publication\.json says toolkit)(?=[\s\S]*Toolkit-only list must match)/
+    }
+  ];
+  const results = await validateEachCopy(cases, (cwd, item) => item.prepare(cwd));
+  for (const { item, result } of results) {
+    assert.notEqual(result.status, 0, item.name);
+    assert.match(result.stderr, item.error, item.name);
+  }
 });

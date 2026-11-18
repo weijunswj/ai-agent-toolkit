@@ -79,13 +79,17 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // names its repository, number and full head SHA is refused for want of an approval, in a session
 // that could record a typed one, the refusal carries one exact AskUserQuestion input: "Merge
 // owner/name#N at <7 characters>?" with the options Merge (its description names the full SHA) and
-// Not now. cardAsked (PreToolUse) notes that exact call for the session's run; cardAnswered
+// Not now. That refusal leads with the card, so the agent shows it instead of asking its own
+// question. cardAsked (PreToolUse) notes that exact call for the session's run; cardAnswered
 // (PostToolUse) records an approval for that pull request at that full SHA when the answer the host
 // reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
-// Nothing is refused for the card's sake: a card with other wording, options or keys, a card asked
-// with an answer already filled in, a call that was not noted, a typed "Other" answer, an answer the
-// host marks as idle, follow-up, free text or noted, any field the reader does not know, and a card
-// in a launched, resumed or unmarked session all record nothing. Any exact card counts, whether or
+// These record nothing: a card with other wording, options or keys, a card asked with an answer
+// already filled in, a call that was not noted, a typed "Other" answer, an answer the host marks as
+// idle, follow-up, free text or noted, any field the reader does not know, and a card in a launched,
+// resumed or unmarked session. In a chat where the card could count and no standing task
+// auto-merge applies, cardRedirect (PreToolUse) also refuses, before it is shown, a question that
+// asks about merging a named pull request and is not the exact card (reworded and filled-in cards
+// included); see cardRedirect for what it reads. Any exact card counts, whether or
 // not a refusal came first: the user still taps and the SHA is pinned.
 // Shell feeds: the host starts its tool hooks with its own environment, and only a session's shell
 // commands carry TOOLKIT_HOST_SESSION, so a card event whose environment holds that variable at all
@@ -868,6 +872,64 @@ function cardAsked(input, { environment = process.env, registryOptions = {}, now
   } catch { return false; }
 }
 
+// An agent's own merge question: in a chat where Toolkit's card could count, an AskUserQuestion
+// that is not that exact card but asks about merging a named pull request. Shown, its tap would
+// record nothing and the user would need a second tap on the real card (the failure this stops),
+// so it is refused before the user sees it. The refusal never orders a merge: it says to run the
+// merge only if the user asked for it, and otherwise to ask again without a merge option.
+// This reads the wording of the question's fields to guess whether it asks for a merge approval,
+// an owner-approved exception to the hook-design rule of matching exact effects only. One question
+// of the input is enough: its text names a pull request (#N, owner/name#N, a pull request link, PR N
+// or pull request N), and its text or one of its option labels asks for a merge ("merge", or "be
+// merged" or "get merged"). Set aside first: branch upkeep wording (git merge, merge commit, merge
+// conflict, merge-base), the merge train or queue, merging a branch (main, a release branch and so
+// on), merging issues, steps, plans, lists or files, and any "merge ... into" phrase. A report such
+// as "#N merged" or "#N is merged" is not an ask, and when the question sets a phrase aside its
+// option labels are not read. Where the session's folder has standing task auto-merge, a merge with
+// no card can pass the hold, so the agent's question is the owner's only check and is never refused
+// there.
+// Accepted gap, in both directions: other wording gets through, and a question about something else
+// that still reads as a merge ask about a pull request is refused; the agent asks it again without
+// merge wording. Anything else, a reader failure included, shows the question.
+const PR_REFERENCE = /#[1-9]\d{0,5}\b|\/pull\/[1-9]\d{0,5}\b|\b(?:PR|pull[ \t]+request)[ \t]*#?[1-9]\d{0,5}\b/i;
+const MERGE_ASIDE = [
+  /\bmerge[- ](?:trains?|queues?)\b/gi,
+  /\bmerg\w*[ \t]+(?:in[ \t]+)?(?:origin\/\S+|main|master|mainline|trunk|develop|development|dev|staging|release|prod|production|stable|default|upstream)\b/gi,
+  /\bmerg\w*[ \t]+(?:(?:the|these|those|both|them|two|all|my|our)[ \t]+)?(?:issues?|steps?|plans?|sections?|lists?|branch(?:es)?|files?|tables?|rows?|duplicates?|notes?|docs?)\b/gi,
+  /\bmerg\w*\b[^.?!\n]{0,80}?\binto\b/gi,
+];
+const MERGE_ASK = /\bmerge\b|\b(?:be|get|gets|getting)[ \t]+merged\b/i;
+const CARD_REDIRECT = 'Toolkit: a tap on this question cannot approve a merge; only Toolkit\'s merge card can, and the hold shows it when a merge is run. If the user asked you to merge this pull request, do not ask again: after the merge summary, run that merge naming its full 40 character head SHA and show the card the hold returns, unchanged. If the user has not asked, do not merge: ask again without a merge option or merge wording, or in a plain message.';
+
+// The text with every set-aside merge phrase blanked, and whether any was found.
+function mergeAside(text) {
+  const rest = MERGE_ASIDE.reduce((left, aside) => left.replace(aside, ' '), withoutUpkeep(text));
+  return { rest, found: rest !== normalise(text) };
+}
+
+function mergeQuestion(toolInput) {
+  if (!plainObject(toolInput) || !Array.isArray(toolInput.questions)) return false;
+  return toolInput.questions.some(question => {
+    if (!plainObject(question) || typeof question.question !== 'string' || !PR_REFERENCE.test(question.question)) return false;
+    const asked = mergeAside(question.question);
+    if (MERGE_ASK.test(asked.rest)) return true;
+    // Option labels echo the question: when it talks about another kind of merge, so do they.
+    if (asked.found) return false;
+    const labels = Array.isArray(question.options) ? question.options.filter(option => plainObject(option) && typeof option.label === 'string').map(option => option.label) : [];
+    return labels.some(label => MERGE_ASK.test(mergeAside(label).rest));
+  });
+}
+
+// PreToolUse: { deny } for an agent's own merge question in a session that could record a card and
+// has no standing task auto-merge for its folder, else null. The exact card is never refused.
+function cardRedirect(input, { environment = process.env, registryOptions = {}, now } = {}) {
+  if (String(input && input.tool_name || '') !== CARD_TOOL || cardOf(input.tool_input) || !mergeQuestion(input.tool_input)) return null;
+  if (!cardSession(input, environment, registryOptions, now)) return null;
+  let standing;
+  try { standing = standingAnswer(input, input.cwd, { environment, registryOptions, now, host: 'claude' }); } catch { return null; }
+  return standing && standing.eligible === false ? { deny: CARD_REDIRECT } : null;
+}
+
 // The one label the host reports for the card, or null. Default-deny: every field must be one the
 // reader knows, the answers must hold this question alone, and annotations must be empty.
 function cardLabel(holder, card, keys) {
@@ -906,19 +968,28 @@ function cardAnswered(input, { environment = process.env, registryOptions = {}, 
   const approvals = new MergeApprovals({ registryOptions, now });
   if (label === CARD_LABELS[1]) {
     approvals.drop(card.repository, card.pr);
-    return { context: `Toolkit: the user tapped Not now for ${name}, so no merge approval is recorded and any unused one for it is removed. Do not merge it, and do not show the card again for this commit unless the user asks.` };
+    return { context: `Toolkit: the user tapped Not now on Toolkit's merge card for ${name}, so no merge approval is recorded and any unused one for it is removed. Do not merge it, and do not show the card again for this commit unless the user asks.` };
   }
   approvals.add([{ repository: card.repository, pr: card.pr, sha: card.sha, session: session.sessionId, card: true }]);
-  return { context: `Toolkit recorded the user's tap on Merge as one approval for ${name} at ${card.sha}. Run the same merge again, naming that head commit. A new head needs a new card.` };
+  return { context: `Toolkit recorded the user's tap on Merge as one approval for ${name} at ${card.sha}, from Toolkit's merge card. Run the same merge again, naming that head commit. A new head needs a new card.` };
 }
 
-// The merge card offer added to a refusal that asks for the user's approval, when this session
-// could record one and the merge names everything the card needs; '' otherwise.
+// The merge card offer for a refusal that asks for the user's approval, when this session could
+// record one and the merge names everything the card needs; '' otherwise.
 function cardOffer(merge, input, { environment, registryOptions, now, host }) {
   if (host !== 'claude' || !merge || merge.pr === null || typeof merge.repository !== 'string' || !new RegExp(`^${SLUG}$`).test(merge.repository)) return '';
   if (!cardSession(input, environment, registryOptions, now)) return '';
-  if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return ' To offer the user a tap card instead of typing, retry this merge naming its full 40 character head SHA.';
-  return ` In this chat the user may tap instead of typing: after the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
+  if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return 'To show the user Toolkit\'s merge card instead of asking them to type, retry this merge naming its full 40 character head SHA, and ask no merge question of your own.';
+  return `Toolkit's merge card is how the user approves this merge, so ask no merge question of your own. After the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
+}
+
+// A refusal that ends with the typed-line request, with the card offer put first: an agent that
+// acts on the first instruction it reads shows the card instead of asking its own question. The
+// typed line stays as the fallback; what counts as an approval is unchanged.
+function withCardFirst(refusal, offer) {
+  if (!offer) return refusal;
+  const reason = refusal.deny.slice(0, -ASK_TEXT.length).replace(/^Toolkit: /, '').trim();
+  return { deny: `Toolkit: ${offer} Why the merge was refused: ${reason} If the user would rather type: ${ASK_TEXT}` };
 }
 
 // The refusal for one requested merge, or the approval it uses. `standing` is the owner's standing
@@ -1231,7 +1302,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   // owner started (gate rules, Task auto-merge), so no origin check applies.
   const cloud = Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true';
   let forcedOff = false;
-  if (cloud) { try { forcedOff = new projectsCloud.ProjectsSwitch({ directory: governance.userStateDirectory(registryOptions), now }).forcedOff(sessionId); } catch { forcedOff = true; } }
+  if (cloud) { try { forcedOff = !['on', 'none'].includes(projectsCloud.transcriptSetting({ transcriptPath: input && input.transcript_path, sessionId })); } catch { forcedOff = true; } }
   const checks = {
     repositoryValid: Boolean(repository && root),
     knownHost: governance.normaliseHost(host) !== null,
@@ -1504,7 +1575,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
       // A Projects cloud thread gets its posted merge card; elsewhere Claude Code may offer the tap card.
       const cloud = cloudCard(refusal, merge, environment);
       if (cloud !== refusal) return cloud;
-      return refusal.deny.endsWith(ASK_TEXT) ? { deny: refusal.deny + cardOffer(merge, input, { environment: environment || {}, registryOptions, now, host }) } : refusal;
+      return refusal.deny.endsWith(ASK_TEXT) ? withCardFirst(refusal, cardOffer(merge, input, { environment: environment || {}, registryOptions, now, host })) : refusal;
     }
     if (!consume) continue;
     const call = ShellCall.from(input);
@@ -1610,5 +1681,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = Object.freeze({
   APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, cardAnswered, cardAsked, cardOf, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, mergeWording, recordPrompt, shellMerges, standingAnswer,
+  approvalsIn, cardAnswered, cardAsked, cardOf, cardRedirect, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, mergeWording, recordPrompt, shellMerges, standingAnswer,
 });

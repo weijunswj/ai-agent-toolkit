@@ -183,7 +183,7 @@ test('code fences close only on the same character and at least the same length'
   assert.equal(guard.hasFooter(`\`\`\`js\ncode\n\`\`\` not a close\n${tail}`), false, 'a closing fence has nothing after it');
 });
 
-test('guarded checkouts are found by guard config, governed block or evidence-store remote', () => {
+test('guarded checkouts are found by guard config, a working-tree binding saying enabled or evidence-store remote', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'footer-guard-'));
   try {
     const make = (name, file, content) => {
@@ -195,7 +195,9 @@ test('guarded checkouts are found by guard config, governed block or evidence-st
     };
     assert.equal(guard.guardedCheckout(make('store', '.git/config', '[remote "origin"]\n\turl = https://github.com/acme/TRANSPORT-app.git\n')), true);
     assert.equal(guard.guardedCheckout(make('pdg', '.github/personal-data-guard.json', '{}')), true);
-    assert.equal(guard.guardedCheckout(make('block', 'AGENTS.md', '<!-- BEGIN TOOLKIT-GOVERNED-RULES -->')), true);
+    assert.equal(guard.guardedCheckout(make('binding', '.github/toolkit-programme.json', '{ "governance": "enabled" }')), true);
+    // A governed block an older setup left is not a governance signal any more.
+    assert.equal(guard.guardedCheckout(make('block', 'AGENTS.md', '<!-- BEGIN TOOLKIT-GOVERNED-RULES -->')), false);
     assert.equal(guard.guardedCheckout(make('plain', 'AGENTS.md', '# rules')), false);
     assert.equal(guard.guardedCheckout(''), false);
   } finally { fs.rmSync(base, { recursive: true, force: true }); }

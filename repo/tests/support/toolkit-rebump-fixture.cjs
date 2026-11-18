@@ -42,7 +42,7 @@ function fixture(t, level = 'minor') {
   // The real bump command runs against a small fixture contract. Full repository
   // generation and validation are exercised by toolkit-version.test.cjs.
   for (const file of ['sync-agent-instruction-shims.cjs', 'sync-repo-doc-contract.cjs', 'audit-published-surfaces.cjs']) {
-    write(repo, `repo/scripts/${file}`, "const fs=require('fs');const v=JSON.parse(fs.readFileSync('repo/contracts/toolkit-local-bridge/version.json')).version;fs.writeFileSync('AGENTS.md', '<!-- toolkit='+v+' sha256=0123456789ab -->\\n');");
+    write(repo, `repo/scripts/${file}`, "const fs=require('fs');const v=JSON.parse(fs.readFileSync('repo/contracts/toolkit-local-bridge/version.json')).version;fs.writeFileSync('README.md', '<!-- toolkit='+v+' sha256=0123456789ab -->\\n');");
   }
   write(repo, 'repo/docs/changelog.d/README.md', '# Fragments\n');
   write(repo, '.gitignore', '.tmp/\n');
@@ -53,7 +53,7 @@ function fixture(t, level = 'minor') {
       const value = fs.existsSync(path.join(repo, rel)) ? JSON.parse(read(repo, rel)) : { version, name: 'fixture' };
       write(repo, rel, `${JSON.stringify({ ...value, version }, null, 2)}\n`);
     }
-    write(repo, 'AGENTS.md', `<!-- toolkit=${version} sha256=0123456789ab -->\n`);
+    write(repo, 'README.md', `<!-- toolkit=${version} sha256=0123456789ab -->\n`);
   };
   const commit = message => { git(repo, 'add', '--all'); git(repo, 'commit', '-q', '-m', message); return git(repo, 'rev-parse', 'HEAD'); };
   setVersion('3.1.0');

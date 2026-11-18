@@ -21,7 +21,7 @@ const READ_LIMIT = 512 * 1024;
 const TEXT_LIMIT = 300;
 
 class TasksError extends Error {
-  constructor(message, exitCode = 2) { super(message); this.exitCode = exitCode; }
+  constructor(message, exitCode = 2) { super(message); this.name = 'TasksError'; this.exitCode = exitCode; }
 }
 
 function userStateDir(home = os.homedir()) { return path.join(home, '.ai-agent-toolkit', 'user-state'); }
