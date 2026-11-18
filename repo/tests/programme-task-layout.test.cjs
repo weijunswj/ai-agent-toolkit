@@ -683,12 +683,12 @@ test('the status block of a block-holding page never lands inside the PATH block
   assert.equal(state.findStateBlock(body, state.NAV_BLOCK_NAME).block.tampered, false, 'the PATH block is whole');
 });
 
-const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null, keepOpen = null, review = null, outcomes = null, prContexts = [] } = {}) => {
+const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null, keepOpen = null, review = null, outcomes = null, prContexts = [], blockers = null } = {}) => {
   const f = setup({ clock: true, ...(outcomes ? { outcomes } : {}) });
   f.reconciler().run({ apply: true });
   const parentDoc = f.store.read('parent', 421).doc;
   f.store.mutate('child', 806, { writer, parentDoc, change: doc => {
-    const next = { ...doc, lifecycle, ...(pr ? { pr: { ...doc.pr, ...pr } } : {}), ...(prs ? { prs } : {}), ...(lifecycle === 'DONE' ? { completed_at: new Date(START).toISOString() } : {}) };
+    const next = { ...doc, lifecycle, ...(pr ? { pr: { ...doc.pr, ...pr } } : {}), ...(prs ? { prs } : {}), ...(blockers ? { blockers } : {}), ...(lifecycle === 'DONE' ? { completed_at: new Date(START).toISOString() } : {}) };
     if (gate) next.gate = { ...next.gate, ...gate };
     if (holder) next.fence = { ...next.fence, holder_prefix: 'INT-TK421-', holder_session: 'lane-1' };
     if (keepOpen) next.private = { ...next.private, keep_open: keepOpen };
@@ -872,7 +872,7 @@ test('a task blocked by another open task that is moving is not idle; behind a s
   f.github.issues.get(806).blockedBy = [807];
   f.reconciler().run({ apply: true });
   const parentDoc = f.store.read('parent', 421).doc;
-  const active = (number, holder) => f.store.mutate('child', number, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: number === 806 ? ['waiting on #807'] : [],
+  const active = (number, holder) => f.store.mutate('child', number, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE',
     ...(holder ? { fence: { ...doc.fence, holder_prefix: 'INT-TK421-', holder_session: 'lane-1' } } : {}) }) });
   active(806, false);
   active(807, true);
@@ -883,6 +883,27 @@ test('a task blocked by another open task that is moving is not idle; behind a s
   f.store.mutate('child', 807, { writer, parentDoc, change: doc => ({ ...doc, fence: { ...doc.fence, holder_prefix: null, holder_session: null } }) });
   f.time.now = START + 7 * HOUR;
   assert.deepEqual(queue(), [806, 807], 'a stalled blocker surfaces, and so does the task behind it');
+});
+
+test('a task whose state lists a blocker (NOW · QUEUED) is off the work queue: its blocker says why', () => {
+  const blockers = ['waits for #807'];
+  assert.deepEqual(idle({ hours: 14, blockers }), [], 'queued behind its blocker, not idle');
+  assert.deepEqual(idle({ hours: 14 }).map(finding => finding.code), ['TASK_IDLE'], 'the same task with no blocker is idle');
+  const merged = { merged: true, pr: { number: 900, state: 'MERGED' }, hours: 4 };
+  assert.deepEqual(idle({ ...merged, blockers }), [], 'every PR merged, but queued behind its blocker');
+  assert.deepEqual(idle(merged).map(finding => finding.code), ['TASK_MERGED_OPEN']);
+});
+
+test('the blocker rule goes one level only: a task behind a still blocker that lists its own blocker is idle', () => {
+  const f = setup({ clock: true, outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });
+  f.github.issues.get(806).blockedBy = [807];
+  f.reconciler().run({ apply: true });
+  const parentDoc = f.store.read('parent', 421).doc;
+  f.store.mutate('child', 806, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
+  f.store.mutate('child', 807, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: ['waits for the owner\'s host'] }) });
+  f.time.now = START + 7 * HOUR;
+  const found = f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code) && finding.issue === 806);
+  assert.deepEqual(found.map(finding => finding.code), ['TASK_IDLE'], 'a queued blocker is not moving, so it hides nothing');
 });
 
 test('the parent page counts the work queue and the graph row is the task, its number and NOW · IN PROGRESS', () => {
@@ -921,6 +942,7 @@ for (const [name, options] of [
   ['has an open PR that passed review at its head', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED(SHA_A) }],
   ['has every PR merged', { merged: true, pr: { number: 900, state: 'MERGED' } }],
   ['has been still for a day (the tail guard)', { hours: 25 }],
+  ['lists a blocker and has been still for a day (queued, off the work queue, and still under the tail guard)', { hours: 25, blockers: ['waits for #807'] }],
 ]) test(`a NOW task that ${name} does not hold the next batch`, () => {
   assert.equal(batch(options).length, 1);
 });

@@ -171,8 +171,10 @@ test('fix1 L2: skip children of a catalogued registered parent and still adopt u
   assert.deepEqual(f.parent().attention.filter(e=>e.code==='CHILD_ADDED').map(e=>e.issue),[12]);
 });
 
-test('a task the sweep adds later lands before the task pinned last, in the catalogue order and natively',()=>{
-  const f=fixture([2,3],[3]); f.run();
+test('a task the sweep adds later lands before the task pinned last in its band, in the catalogue order and natively',()=>{
+  const f=fixture([2,3],[3]);
+  const lifecycle=value=>f.store.mutate('child',3,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:value})});
+  lifecycle('PLANNED'); f.run();
   assert.deepEqual(f.github.issues.get(1).subs,[2,3]);
   f.github.addIssue(4,{parent:1}); f.github.addIssue(5,{parent:1});
   f.run(); f.run();
@@ -180,6 +182,8 @@ test('a task the sweep adds later lands before the task pinned last, in the cata
   assert.deepEqual(added.map(o=>[o.issue,o.order,o.last]),[[4,3,undefined],[5,4,undefined]],'additions take the next order and are never pinned');
   assert.equal(f.parent().outcomes.find(o=>o.issue===3).last,true,'the pin survives the sweep');
   assert.deepEqual(f.github.issues.get(1).subs,[2,4,5,3],'native sub-issues follow, with the pinned task last');
+  lifecycle('ACTIVE'); f.run();
+  assert.deepEqual(f.github.issues.get(1).subs,[2,3,4,5],'a pinned task in progress ends its NOW band, never below LATER');
 });
 
 test('fix1 L2: failed adoption never records CHILD_ADDED',()=>{
