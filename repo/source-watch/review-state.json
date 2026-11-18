@@ -13,9 +13,9 @@
       "repository": "google-labs-code/design.md",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json",
-      "reviewed_through_sha": "1ed38aa9dd4451b9039f9aeb9ed1d2579edafddf",
-      "reviewed_at": "2026-11-13",
-      "disposition": "SEPARATE_IMPLEMENTATION_PR_RECOMMENDED",
+      "reviewed_through_sha": "679d3018869335b8ef7906b69fccfd4d48991d1b",
+      "reviewed_at": "2026-11-18",
+      "disposition": "NO_ACTION",
       "owning_tracker": "#473"
     },
     {
