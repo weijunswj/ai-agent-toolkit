@@ -1633,6 +1633,31 @@ test('validate-n8n-workflows.cjs ends an email at a change of script after the d
   assert.doesNotMatch(result.stdout + result.stderr, /ops@|user@|support@|tanaka|sato@|exаmple|crm\.private\.test/, 'the log never prints the address');
 });
 
+test('validate-n8n-workflows.cjs does not cut an email when the cut-off text runs on into another address', () => {
+  const email = (local, domain) => [local, domain].join('@');
+  const allowed = email('support', 'example.com');
+  const privateDomain = ['crm', 'private', 'test'].join('.');
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({
+    underscore: allowed + 'または' + email('aoki_ops', privateDomain),
+    plus: allowed + 'または' + email('baba+x', privateDomain),
+    percent: allowed + 'または' + email('chiba%x', privateDomain),
+    oneLetterLabel: allowed + 'または' + email('doi.k', privateDomain),
+    dash: allowed + 'または' + email('endo-sato', privateDomain),
+    sentence: '問い合わせは' + allowed + 'または' + email('taro_yamada', privateDomain) + 'へ',
+    dottedOneLetters: allowed + 'または' + email('t.k_x', privateDomain),
+    cyrillicJoiner: allowed + 'или' + email('sato_k', privateDomain),
+    fullwidthAt: allowed + 'または' + 'fujii＠' + privateDomain,
+    allowedThenJapanese: allowed + 'まで',
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains 9 non-placeholder email\(s\) at nodes\.0\.parameters\.underscore, nodes\.0\.parameters\.plus, nodes\.0\.parameters\.percent, nodes\.0\.parameters\.oneLetterLabel, nodes\.0\.parameters\.dash and 4 more\./);
+  assert.doesNotMatch(result.stdout + result.stderr, /support@|crm\.private\.test/, 'the log never prints the address');
+});
+
 test('validate-n8n-workflows.cjs still fails a credential in the user info or query of an allowed public host', () => {
   const stripeKey = ['sk', 'live', 'Abc123Def456Ghi789Jkl012'].join('_');
   const hubspotKey = ['0f1e2d3c', '4b5a', '4978', '8695', 'a4b3c2d1e0f9'].join('-');
