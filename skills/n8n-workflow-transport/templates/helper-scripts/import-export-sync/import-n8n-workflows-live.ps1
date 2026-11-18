@@ -1769,6 +1769,12 @@ Write-Host ("Force import     : {0}" -f ($(if ($ForceImport) { "Yes" } else { "N
 if ($RestartContainerAfterImport) {
   throw "N8N_POLICY_VALIDATION_FAILED: -RestartContainerAfterImport is no longer supported. This helper never restarts n8n."
 }
+if ($RequireConfirmation) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -RequireConfirmation is not supported by the import script. To confirm before an import, run n8n-workflow-sync-menu.ps1 -RequireConfirmation."
+}
+if ($SkipCredentialBindingRefresh) {
+  throw "N8N_POLICY_VALIDATION_FAILED: -SkipCredentialBindingRefresh is not supported by the import script. It never refreshes credential bindings, so there is nothing to skip."
+}
 
 # A run that finishes or fails, including on an error, removes its stored live workflow list in the
 # finally block below; a killed run's leftovers are removed by the next run's first step.

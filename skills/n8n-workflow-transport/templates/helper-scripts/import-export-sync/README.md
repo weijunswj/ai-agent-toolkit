@@ -85,7 +85,9 @@ An explicitly supplied import deployment-policy path is validated as a safe read
 }
 ```
 
-The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-published (active) target is blocked because scheduled activity cannot be guaranteed to stop without a separate restart. n8n 2.x replaced activate/deactivate with publish/unpublish: a workflow counts as unpublished only when `active` is false and no published version (`activeVersionId`) is set; anything else, including a missing state, counts as live. The postcondition requires unpublished. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
+The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-published (active) target is blocked because scheduled activity cannot be guaranteed to stop without a separate restart. n8n 2.x replaced activate/deactivate with publish/unpublish: a workflow counts as unpublished only when `active` is false and no published version (`activeVersionId`) is set; anything else, including a missing state, counts as live. The postcondition requires unpublished. `-RequireConfirmation` belongs to the sync menu (`n8n-workflow-sync-menu.ps1 -RequireConfirmation`) and is not the default; the import script refuses it, and `-SkipCredentialBindingRefresh`, with `N8N_POLICY_VALIDATION_FAILED` before any Docker call.
+
+An import dry run (`-DryRun`) still reads the target: it lists live workflows and, once the early target checks pass, stages a credential-metadata helper and an encrypted credential export in the container's `-ContainerDir` (default `/tmp`). It removes both before it reports and imports nothing.
 
 Operation receipts are written to `.n8n-local/reports/latest-n8n-workflow-operation.{json,txt}` and bounded 90-day history. The menu's read-only Explain last n8n failure action validates the latest report and states one supported next action.
 
