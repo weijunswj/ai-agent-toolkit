@@ -2384,24 +2384,45 @@ const unwrappedCountExceptions = [
   },
 ];
 
+// Any assignment of a script function's result: bare, in ( ) or $( ), through &, to a scoped
+// variable, or after other code on the line. @( ... ) is the safe form and does not match.
+const scopedVariable = '\\$(?:(?:script|global|local|private):)?';
+
+// (Func ...) + x builds a new value from the result, so it is not the unrolled result itself.
+function isJoinedParenResult(line, assignment) {
+  const open = line.indexOf('(', assignment.index);
+  if (open === -1 || open > assignment.index + assignment[0].length) return false;
+  let depth = 0;
+  for (let at = open; at < line.length; at += 1) {
+    if (line[at] === '(') depth += 1;
+    if (line[at] === ')' && (depth -= 1) === 0) return /^\s*\+/.test(line.slice(at + 1));
+  }
+  return false;
+}
+
 function findUnwrappedCountedFunctionResults(filePath) {
   const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
   const functionNames = new Set(lines
     .map((line) => line.match(/^\s*function\s+([A-Za-z][\w-]*)/i))
     .filter(Boolean)
     .map((match) => match[1].toLowerCase()));
+  const assignmentPattern = new RegExp(`(?<![\\w:$\\]])${scopedVariable}([A-Za-z_]\\w*)\\s*=\\s*(?:\\$?\\(\\s*)?(?:&\\s*)?([A-Za-z][\\w-]*)(?=[\\s);]|$)`, 'gi');
   const findings = [];
   lines.forEach((line, index) => {
-    const assignment = line.match(/^\s*\$([A-Za-z_]\w*)\s*=\s*([A-Za-z][\w-]*)(?=\s|$)/);
-    if (!assignment || !functionNames.has(assignment[2].toLowerCase())) return;
-    const variable = assignment[1];
-    const reassigned = new RegExp(`^\\s*\\$${variable}\\s*=(?!=)`, 'i');
-    const counted = new RegExp(`\\$${variable}(?:\\.(?:Count|Length)\\b|\\[)`, 'i');
-    for (let next = index + 1; next < lines.length; next += 1) {
-      if (/^function\s/i.test(lines[next]) || reassigned.test(lines[next])) break;
-      if (counted.test(lines[next])) {
-        findings.push({ file: path.basename(filePath), line: index + 1, fn: assignment[2], variable });
-        break;
+    if (/^\s*#/.test(line)) return;
+    for (const assignment of line.matchAll(assignmentPattern)) {
+      if (!functionNames.has(assignment[2].toLowerCase())) continue;
+      if (isJoinedParenResult(line, assignment)) continue;
+      const variable = assignment[1];
+      const reassigned = new RegExp(`(?<![\\w:$])${scopedVariable}${variable}\\s*=(?!=)`, 'i');
+      const counted = new RegExp(`${scopedVariable}${variable}(?:\\.(?:Count|Length)\\b|\\[)`, 'i');
+      const rest = [line.slice(assignment.index + assignment[0].length)].concat(lines.slice(index + 1));
+      for (const [offset, next] of rest.entries()) {
+        if (offset > 0 && (/^function\s/i.test(next) || reassigned.test(next))) break;
+        if (counted.test(next)) {
+          findings.push({ file: path.basename(filePath), line: index + 1, fn: assignment[2], variable });
+          break;
+        }
       }
     }
   });
@@ -2436,6 +2457,10 @@ test('the PS 5.1 count guard finds an unwrapped counted function result and acce
       '$wrappedCall.Count',
       '# $commented = Get-Items',
       '$commented.Count',
+      '$joined = (Get-Items) + "/"',
+      '$joined.Length',
+      '[array]$cast = Get-Items',
+      '$cast.Count',
     ].join('\n'));
     assert.deepEqual(findUnwrappedCountedFunctionResults(probe), [
       { file: 'probe.ps1', line: 2, fn: 'Get-Items', variable: 'bad' },

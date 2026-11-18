@@ -186,15 +186,70 @@ function walk(value, visitor, trail = []) {
   }
 }
 
-// Quoted string literals ('...', "..." or `...`) inside every {{ ... }} expression body.
+// Text inside every {{ ... }} expression body that can hold a URL literal: quoted strings ('...',
+// "..." or `...`), plus comments and regex literals read in one pass, so an apostrophe inside a
+// regex literal or a comment does not hide a later string. The plain quote match is kept as well, so
+// this never checks less than it did before.
 function expressionLiterals(value) {
   const literals = [];
   for (const body of value.match(/\{\{[\s\S]*?\}\}/g) || []) {
     for (const literal of body.match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g) || []) {
       literals.push(literal.slice(1, -1));
     }
+    literals.push(...scriptTextParts(body.slice(2, -2)));
   }
   return literals;
+}
+
+// After one of these words a / starts a regex literal; after any other word or number it divides.
+const regexAfterWords = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
+
+// The strings, comments and regex literals of a JavaScript expression, in source order.
+function scriptTextParts(source) {
+  const parts = [];
+  let regexAllowed = true;
+  let at = 0;
+  while (at < source.length) {
+    const char = source[at];
+    if (char === "'" || char === '"' || char === '`') {
+      let end = at + 1;
+      while (end < source.length && source[end] !== char) end += source[end] === '\\' ? 2 : 1;
+      if (end >= source.length) {
+        at += 1;
+        continue;
+      }
+      parts.push(source.slice(at + 1, end));
+      at = end + 1;
+      regexAllowed = false;
+    } else if (source.startsWith('//', at) || source.startsWith('/*', at)) {
+      const block = source[at + 1] === '*';
+      const close = source.indexOf(block ? '*/' : '\n', at + 2);
+      const end = close === -1 ? source.length : close;
+      parts.push(source.slice(at + 2, end));
+      at = end + (block ? 2 : 0);
+    } else if (char === '/' && regexAllowed) {
+      let end = at + 1;
+      let inClass = false;
+      while (end < source.length && source[end] !== '\n' && (inClass || source[end] !== '/')) {
+        if (source[end] === '\\') end += 1;
+        else if (source[end] === '[') inClass = true;
+        else if (source[end] === ']') inClass = false;
+        end += 1;
+      }
+      parts.push(source.slice(at + 1, end));
+      at = end + 1;
+      regexAllowed = false;
+    } else if (/[\w$]/.test(char)) {
+      let end = at;
+      while (end < source.length && /[\w$]/.test(source[end])) end += 1;
+      regexAllowed = regexAfterWords.has(source.slice(at, end));
+      at = end;
+    } else {
+      if (!/\s/.test(char)) regexAllowed = !/[)\]}]/.test(char);
+      at += 1;
+    }
+  }
+  return parts;
 }
 
 // Distinct unsafe values and the places they appear, without the values themselves.
@@ -251,7 +306,11 @@ function createPolicyHelpers(policy) {
     // Compare normalised forms, so a look-alike letter from another script never equals an allowed domain.
     const normalise = (domain) => String(domain).normalize('NFKC').toLowerCase();
     const domain = normalise(email.split('@').pop());
-    return policy.allowedEmailDomains.some((allowedDomain) => domain === normalise(allowedDomain));
+    // An address followed straight by letters of another script (user@example.com then Japanese
+    // text) ends where the script changes, so the domain cut there is compared too.
+    const scriptCut = domain.match(/^(.*\.\p{sc=Latin}{2,})(?=(?!\p{sc=Latin})\p{L})/u);
+    const domains = scriptCut ? [domain, scriptCut[1]] : [domain];
+    return policy.allowedEmailDomains.some((allowedDomain) => domains.includes(normalise(allowedDomain)));
   };
 
   const allowedUrl = (url) => {
@@ -270,8 +329,17 @@ function createPolicyHelpers(policy) {
       .replace(/:[^:\]]*$/, '')
       .replace(/[\]`.,;]+$/, '')
       .toLowerCase();
-    // A host built at run time, by an expression or a template literal's ${...}, holds no real host.
-    if (host.includes('{{') || host.includes('${')) return true;
+    // A host built at run time by an expression ({{ ... }}) holds no real host. One built partly by a
+    // template literal's ${...} is checked on its fixed tail after the last ${...}, so a private
+    // domain around a run-time part (https://${tenant}.private-host/) is still found.
+    if (host.includes('{{')) return true;
+    if (host.includes('${')) {
+      const lastClose = host.lastIndexOf('}');
+      if (lastClose < host.lastIndexOf('${')) return true;
+      const tail = host.slice(lastClose + 1).replace(/^[.-]+/, '');
+      if (!tail) return true;
+      return policy.allowedUrlHosts.some((allowedHost) => hostMatches(tail, allowedHost));
+    }
     return policy.allowedUrlHosts.some((allowedHost) => hostMatches(host, allowedHost));
   };
 

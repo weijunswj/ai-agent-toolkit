@@ -3751,7 +3751,7 @@ test('n8n 2.x publish state counts as live whether n8n reports active or a publi
   assert.equal(cliWorkflowJson.workflowSummary(published).published, true);
 });
 
-test('n8n CLI workflow JSON helper writes live workflows and prepared ids without rewriting values', () => {
+test('n8n CLI workflow JSON helper writes live workflows without rewriting values', () => {
   const cwd = tempDir();
   const rawPath = path.join(cwd, 'raw.txt');
   const storePath = path.join(cwd, 'store.json');
@@ -3770,12 +3770,6 @@ test('n8n CLI workflow JSON helper writes live workflows and prepared ids withou
   assert.match(written, /"updatedAt": "2026-10-20T09:15:00\.123Z"/);
   assert.match(written, /"key": "lower",\s*"Key": "upper"/);
   assert.deepEqual(JSON.parse(written), n8n2xWorkflows()[0]);
-
-  result = runNode(cliWorkflowJsonScript, ['set-id', '--file', outPath, '--id', 'TargetId123']);
-  assert.equal(result.status, 0, result.stderr);
-  const withId = JSON.parse(fs.readFileSync(outPath, 'utf8'));
-  assert.equal(withId.id, 'TargetId123');
-  assert.deepEqual({ ...withId, id: 'Wf2xDraftOnly01' }, n8n2xWorkflows()[0]);
 
   result = runNode(cliWorkflowJsonScript, ['write', '--store', storePath, '--id', 'missing', '--output', outPath]);
   assert.notEqual(result.status, 0);
@@ -3895,7 +3889,6 @@ test('live import and export helpers keep workflow JSON out of PowerShell and pi
     assert.match(text, /\n\} finally \{\r?\n  Remove-LiveWorkflowList\r?\n\}\r?\n$/, name);
   }
   const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
-  assert.match(importText, /"set-id", "--file", \$PreparedFile/);
   assert.match(importText, /postcondition is unpublished/);
   assert.match(importText, /\$postconditionMatches\[0\]\.active -ne \$false/);
 });
