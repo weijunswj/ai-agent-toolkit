@@ -170,5 +170,35 @@ test('the design principles page binds above every skill, project line and brief
   assert.match(core, /The \[design principles\]\(controller\/principles\.md\) bind above every skill, project line and brief: they add, never relax\./);
   assert.match(core.split('\n## Pages\n')[1], /^These pages[^\n]*\n- \[Design principles\]\(controller\/principles\.md\) `[0-9a-f]{12}`: /);
   assert.match(page, /^- \*\*Binding:\*\* [^\n]*never relax them;[^\n]*A clash goes to the owner as a decision; a new principle needs an owner record/m);
-  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', 'Cloud first']) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
+  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', 'Work runs where the controller runs']) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
+});
+
+test('controllers close every thread or session they spawned once it is fully done, through the host contract', () => {
+  const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
+  const line = page.split('\n').find(text => text.startsWith('- **Close what you spawn:** ')) || '';
+  for (const phrase of [
+    'on relay, close each thread or session you started (gate, gatekeeper, lane) once it is fully done',
+    'its output is recorded', 'its PRs are merged or closed', 'its final message was read in full and every item acted on',
+    'its result was relayed and no owner test, card, question or decision is still owed',
+    "Use your host's close action ([host contract](../docs/HOST-CONTRACT.md)); with none, record it retired (gates page)",
+    'Appointment authorises it (roles page)', "Never a scheduled task's home thread; idleness alone never counts",
+    'With no timers, re-check open ones at session start and each owner turn',
+  ]) assert.ok(line.includes(phrase), phrase);
+  // The principles bind every harness, so they name none; each host's mechanics live in the host contract.
+  assert.doesNotMatch(page, /projects|claude|codex|remote control|opencode|antigravity/i);
+  const contract = fs.readFileSync(path.join(ROOT, 'repo', 'docs', 'HOST-CONTRACT.md'), 'utf8').replace(/\r\n/g, '\n');
+  const section = contract.split('\n## 10. Closing finished sessions\n')[1] || '';
+  for (const route of ['- **Claude Projects:** resolve the work thread', '- **Claude Code in the cloud:** archive the session (`archive_session`)',
+    '- **Claude Code on a computer:** end the session', '- **Codex:** archive the thread', '- **Remote Control:** end the remote session',
+    "never a scheduled task's home thread"]) assert.ok(section.includes(route), route);
+});
+
+test('work runs where the controller runs, and scheduled tasks prefer the cloud without a computer ban', () => {
+  const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
+  const line = page.split('\n').find(text => text.startsWith('- **Work runs where the controller runs:** ')) || '';
+  for (const phrase of [
+    'a cloud controller runs work in the cloud and a local one on its computer, unless a step needs the other side',
+    'Scheduled tasks prefer the cloud; new scheduled work joins an existing task first and stays a short prod',
+  ]) assert.ok(line.includes(phrase), phrase);
+  assert.doesNotMatch(page, /no computer scheduled tasks|\*\*Cloud first:\*\*/);
 });

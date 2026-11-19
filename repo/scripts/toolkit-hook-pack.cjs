@@ -155,7 +155,7 @@ function fixtureErrors(fixture) {
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
-  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
+  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title', 'train-members', 'train-sibling', 'train-sibling-row'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
@@ -174,7 +174,7 @@ function fixtureErrors(fixture) {
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main', 'min_toolkit'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
       if (repo.remote_main !== undefined && repo.remote_main !== true) errors.push('remote_main is true or left out');
       if (repo.can_write !== undefined && (repo.can_write !== false || repo.governance !== 'undecided')) errors.push('fixture.repo.can_write needs governance undecided and is false or left out');
       if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
@@ -182,6 +182,7 @@ function fixtureErrors(fixture) {
       if (repo.nested_worktrees !== undefined && (!Array.isArray(repo.nested_worktrees) || repo.nested_worktrees.some(tree => !tree || !/^[a-z0-9-]+$/.test(tree.branch || '')
         || (tree.commits !== undefined && (!Array.isArray(tree.commits) || tree.commits.some(commit => !commit || typeof commit.files !== 'object')))))) errors.push('fixture.repo.nested_worktrees lists { branch, commits } objects');
       if (repo.task_auto_merge !== undefined && (repo.governance !== 'enabled' || !TASK_AUTO_MERGE.includes(repo.task_auto_merge))) errors.push(`fixture.repo.task_auto_merge needs governance enabled and is one of ${TASK_AUTO_MERGE.join(', ')}`);
+      if (repo.min_toolkit !== undefined && (repo.governance !== 'enabled' || typeof repo.min_toolkit !== 'string' || !/^\d+\.\d+\.\d+$/.test(repo.min_toolkit))) errors.push('fixture.repo.min_toolkit needs governance enabled and is a MAJOR.MINOR.PATCH version');
       if (repo.legacy_answer !== undefined && !['yes', 'no', 'damaged'].includes(repo.legacy_answer)) errors.push('legacy_answer must be yes, no or damaged');
       if (repo.binding_status !== undefined && repo.binding_status !== 'unavailable') errors.push('binding_status must be unavailable');
       if (!GOVERNANCE.includes(repo.governance)) errors.push(`fixture.repo.governance must be one of ${GOVERNANCE.join(', ')}`);
@@ -454,7 +455,7 @@ class Fixture {
       if (spec.governance === 'disabled') support.recordMerged(this.work, { home: this.home, text: JSON.stringify({
         schema: 'toolkit.programme-binding.v2', repository: `toolkit-test-fixture/hook-pack-${name}`, governance: 'disabled',
       }), now: this.#now() });
-      if (spec.task_auto_merge) this.#taskAutoMerge(`toolkit-test-fixture/hook-pack-${name}`, spec.task_auto_merge, support);
+      if (spec.task_auto_merge || spec.min_toolkit) this.#enabledBinding(`toolkit-test-fixture/hook-pack-${name}`, spec, support);
     } else {
       this.#git(this.work, ['init', '--quiet']);
       if (spec.governance === 'undecided') {
@@ -547,7 +548,44 @@ class Fixture {
     if (spec.issue_closure === 'target-pr') result[`repos/${repository}/issues/9`] = { number: 9, state: 'open', pull_request: {} };
     if (spec.issue_closure === 'missing-gone') result[`repos/${repository}/issues/999`] = { fixtureStatus: 410 };
     if (spec.issue_closure === 'retained-title') result[`repos/${repository}/pulls/7`].title = 'Closes #1';
+    if (/^train-/.test(spec.issue_closure)) Object.assign(result, this.#mergedTrainFixture(repository, spec.issue_closure.replace(/^train-/, '')));
     return result;
+  }
+
+  // Issue 1 (its child closed) is referenced by merged train #20, whose UAT line waits on member #22,
+  // and by its member #21, which owes nothing. The train's commits board #21 and #22 and end in a
+  // version-only bump (`members`); with `sibling`, #22's boarding is instead a merge of a branch main
+  // never held, and with `sibling-row` the table also lists that branch's head as row #23, a pull
+  // request GitHub does not show merged.
+  #mergedTrainFixture(repository, kind) {
+    const sibling = kind !== 'members';
+    const sha = digit => digit.repeat(40);
+    const [main, head21, head22, other, board21, board22, bump, landed] = ['1', '2', '3', '4', '5', '6', '7', '8'].map(sha);
+    const second = sibling ? other : head22;
+    const body = ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
+      `| #21 | \`${head21}\` | NORMAL | patch | G2 PASS |`, `| #22 | \`${head22}\` | NORMAL | patch | G2 PASS |`,
+      ...(kind === 'sibling-row' ? [`| #23 | \`${other}\` | NORMAL | patch | G2 PASS |`] : []), '',
+      'Tier: NORMAL', 'Bump: patch', "UAT: OWNER_TEST_NEEDED (each member's own test after the merge: #22)", '', 'Refs #1 (member #21, UAT: NOT_REQUIRED)'].join('\n');
+    const reference = (number, text, merged_at) => ({ event: 'cross-referenced', source: { issue: { number, body: text, repository_url: `https://api.github.com/repos/${repository}`, pull_request: { merged_at } } } });
+    const commit = (id, parents, message) => ({ sha: id, parents: parents.map(parent => ({ sha: parent })), commit: { message } });
+    const added = name => [{ filename: `src/${name}.js`, status: 'added', patch: '@@ -0,0 +1 @@\n+module.exports = 1;' }];
+    return {
+      [`repos/${repository}/issues/1/timeline?per_page=100&page=1`]: [reference(20, body, '2026-11-12T10:00:00Z'), reference(21, 'Refs #1\n\nUAT: NOT_REQUIRED (internal)', '2026-11-12T10:00:02Z')],
+      [`repos/${repository}/pulls/20`]: { number: 20, title: 'Merge train', body, merged: true, head: { sha: bump }, merge_commit_sha: landed, commits: 5 },
+      [`repos/${repository}/pulls/21`]: { number: 21, title: 'Member', body: '', merged: true, head: { sha: head21 }, commits: 1 },
+      [`repos/${repository}/pulls/22`]: { number: 22, title: 'Member', body: '', merged: true, head: { sha: head22 }, commits: 1 },
+      [`repos/${repository}/pulls/23`]: { number: 23, title: 'Sibling', body: '', merged: false, head: { sha: other }, commits: 1 },
+      [`repos/${repository}/commits/${landed}`]: { sha: landed, parents: [{ sha: main }, { sha: bump }] },
+      [`repos/${repository}/pulls/20/commits?per_page=100&page=1`]: [commit(head21, [main], 'member 21'), commit(second, [main], 'member 22'),
+        commit(board21, [main, head21], 'Merge train: board #21'), commit(board22, [board21, second], 'Merge train: board #22'), commit(bump, [board22], 'Merge train: bump patch for #21, #22')],
+      [`repos/${repository}/commits/${board21}`]: { sha: board21, files: added('member-21') },
+      [`repos/${repository}/commits/${board22}`]: { sha: board22, files: added('member-22') },
+      [`repos/${repository}/commits/${bump}`]: { sha: bump, files: [{ filename: 'repo/contracts/toolkit-local-bridge/version.json', status: 'modified',
+        patch: '@@ -1,3 +1,3 @@\n {\n-  "version": "3.1.0",\n+  "version": "3.1.1",\n   "name": "x"' }] },
+      // As GitHub answers: the train's branch holds every head it merged, and main holds only itself.
+      [`repos/${repository}/compare/${head21}...${bump}?per_page=1`]: { status: 'ahead' },
+      [`repos/${repository}/compare/${other}...${main}?per_page=1`]: { status: 'diverged' },
+    };
   }
 
   #githubFixture(responses, slowProposal = false, spec = {}) {
@@ -588,9 +626,10 @@ cp.spawnSync = function(file, args, options) {
     this.env.NODE_OPTIONS = [this.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ');
   }
 
-  // A fresh enabled binding carrying the repository's switch (task_prs), in this fixture's home.
-  // legacy-on and v1 also plant the per-app On answers older Toolkit versions saved: they grant nothing.
-  #taskAutoMerge(slug, answer, support) {
+  // A fresh enabled binding carrying the repository's switch (task_prs) and min_toolkit as the fixture
+  // gives them, in this fixture's home. legacy-on and v1 also plant the per-app On answers older Toolkit
+  // versions saved: they grant nothing.
+  #enabledBinding(slug, { task_auto_merge: answer, min_toolkit: minToolkit }, support) {
     const v1 = answer === 'v1';
     const switchValue = answer === 'off' ? 'off' : ['after-gates', 'after-gates-stale'].includes(answer) ? 'after-gates' : null;
     const text = `${JSON.stringify(v1 ? {
@@ -603,6 +642,7 @@ cp.spawnSync = function(file, args, options) {
       store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
       ...(switchValue ? { task_prs: { auto_merge: switchValue } } : {}),
+      ...(minToolkit ? { min_toolkit: minToolkit } : {}),
     }, null, 2)}
 `;
     fs.writeFileSync(path.join(this.work, '.github', 'toolkit-programme.json'), text);

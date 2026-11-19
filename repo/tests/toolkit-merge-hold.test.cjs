@@ -1160,10 +1160,11 @@ test('a push to the default branch is refused; other branches and evidence store
     assert.match(decide(ctx, bash(feature, command))?.deny || '', unknown, `Bash: ${command}`);
   }
   assert.match(ps(feature, `cd ${store}; cd -; cd -; git push origin work`), unknown, 'PowerShell steps back past this command');
-  // In bash, `cd -` after one move is exact: back to the start, where a feature push is fine; and an
-  // absolute git -C names the folder whatever cd - did.
+  // In bash, `cd -` after one move is exact: back to the start, where a feature push is fine. A `cd -`
+  // with no move before it goes to a folder this command does not show, which counts as Toolkit's own
+  // folder, so even a push that names its folder with git -C is refused there.
   assert.equal(decide(ctx, bash(feature, `cd ${store}; cd -; git push origin work`)), null);
-  assert.equal(decide(ctx, bash(feature, `cd -; git -C ${feature} push origin work`)), null);
+  assert.match(decide(ctx, bash(feature, `cd -; git -C ${feature} push origin work`))?.deny || '', /runs in Toolkit's own folder/);
   assert.match(decide(ctx, bash(feature, `cd -; git -C ${ctx.repo} push`))?.deny || '', /default branch `main`/);
   // A switch is not the folder: -PassThru or -StackName after the path, cd -L, cmd's /d.
   for (const [cwd, command] of [[store, `Push-Location ${ctx.repo} -PassThru; git push`], [store, `Push-Location ${ctx.repo} -StackName s; git push`], [store, `Set-Location -Path ${ctx.repo} -PassThru; git push`], [store, `Set-Location -LiteralPath:${ctx.repo}; git push`], [store, `Push-Location -StackName s ${ctx.repo}; git push`], [store, `cd /d ${ctx.repo}; git push`]]) {
@@ -1701,4 +1702,624 @@ test('stop-parsing merge forms require approval and hidden merge recovery keeps 
   assert.equal(holdCore.decide(call('<# x #> '+merge),{...ctx.options,closureGuard}),null,'a block comment is data');
   assert.equal(reads,3);
   assert.equal(holdCore.decide(call('gh pr view 5 --%'),{...ctx.options,closureGuard}),null);
+});
+
+// The working-folder guard: a shell call that starts in Toolkit's own folder or its user-state
+// folder is judged by that folder, not only by its text. Table-driven from the G0 closure matrix
+// (folder x command text x host); every row runs as Claude Code (cwd) and as Codex (workdir).
+function toolkitFolders(ctx) {
+  const state = path.dirname(ctx.options.registryOptions.registryPath);
+  const home = path.dirname(state);
+  const outside = path.join(ctx.root, 'plain');
+  for (const folder of [state, path.join(state, 'tmp'), path.join(home, 'env'), path.join(home, 'source', 'ai-agent-toolkit'), outside]) fs.mkdirSync(folder, { recursive: true });
+  return { home, state, outside, env: path.join(home, 'env'), checkout: path.join(home, 'source', 'ai-agent-toolkit') };
+}
+const FOLDER_HOSTS = [
+  ['claude', (cwd, command) => ({ cwd, tool_name: 'Bash', tool_input: { command } })],
+  ['codex', (cwd, command) => ({ cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: command, workdir: cwd } })],
+];
+const FOLDER_REFUSAL = /runs in Toolkit's own folder or its user-state folder/;
+
+test('matrix: a shell call in Toolkit\'s own folder or its user-state folder cannot reach the user-state files', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const refused = [
+    [f.home, 'rm -rf user-state'],
+    [f.home, 'rm -rf ./user-state/'],
+    [f.home, 'cat user-state/session.json'],
+    [f.home, 'Remove-Item -Recurse .\\user-state'],
+    [f.home, 'rd /s /q user-state'],
+    [f.home, 'rm -rf user*'],
+    [f.home, 'rm -rf $X'],
+    [f.home, 'X=user-state; rm -rf $X'],
+    [f.home, 'cat */*.json'],
+    [f.home, 'rm -rf {user,x}-state'],
+    [f.home, 'rm -rf `printf u`*'],
+    [f.home, 'cd user-state; ls'],
+    [f.home, 'ls; rm -rf ..'],
+    [f.home, 'rm -rf .'],
+    [f.home, 'find . -delete'],
+    [f.home, 'git clean -xdf'],
+    [f.home, 'Get-ChildItem -Recurse | Remove-Item'],
+    [f.home, 'Get-ChildItem -Recurse | Get-Content'],
+    [f.home, 'gci -rec | gc'],
+    [f.home, 'ls -laR'],
+    [f.home, 'ls --recursive'],
+    [f.home, 'dir /s'],
+    [f.home, 'git diff --no-index . other'],
+    [f.home, 'node -e "process.exit(0)"'],
+    [f.home, 'echo x | node'],
+    [f.env, 'rm ../user-state/x'],
+    [f.env, 'rm -rf ../*'],
+    [f.env, 'find .. -delete'],
+    [f.checkout, 'rm -rf ../../*'],
+    [f.checkout, 'git clean -xdf --git-dir=../..'],
+    [f.state, 'ls'],
+    [f.state, 'rm -rf .'],
+    [path.join(f.state, 'tmp'), 'ls'],
+    [path.join(f.state, 'not-there-yet'), 'ls'],
+    [f.outside, `cd ${f.home}; rm -rf *`],
+    [f.outside, `cd ${f.home} && find . -delete`],
+    [f.outside, `pushd ${f.home}; find . -delete`],
+    // A wildcard or a variable is never read in Toolkit's folder, even one that looks harmless.
+    [f.checkout, 'ls *.md'],
+    [f.checkout, 'echo $HOME'],
+  ];
+  const allowed = [
+    [f.outside, 'rm -rf user-state'],
+    [f.outside, 'ls *'],
+    [f.home, 'ls'],
+    [f.home, 'ls -la'],
+    [f.home, 'dir'],
+    [f.home, 'Get-ChildItem'],
+    [f.home, 'Get-ChildItem -Hidden'],
+    [f.home, 'git status'],
+    [f.home, 'git diff'],
+    [f.home, 'cd source && ls'],
+    [f.home, 'node current/repo/scripts/toolkit-env.cjs status'],
+    [f.home, 'node --version'],
+    [f.env, 'ls'],
+    [f.env, 'cat ../current/state.json'],
+    [f.checkout, 'git -C .. status'],
+    [f.checkout, 'git status && git log -1'],
+  ];
+  for (const [host, shape] of FOLDER_HOSTS) {
+    for (const [cwd, command] of refused) assert.match(decide(ctx, shape(cwd, command))?.deny || '', FOLDER_REFUSAL, `${host} refuses in ${path.relative(ctx.root, cwd)}: ${command}`);
+    for (const [cwd, command] of allowed) assert.equal(decide(ctx, shape(cwd, command)), null, `${host} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  // The text-only rule still refuses naming both folders from anywhere.
+  assert.match(decide(ctx, bash(f.outside, 'cat ~/.ai-agent-toolkit/user-state/x'))?.deny || '', /must be read and changed only by Toolkit itself/);
+  // PowerShell's own tool in Toolkit's folder.
+  const powershell = (cwd, command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
+  assert.match(hold.decide(powershell(f.home, 'Remove-Item -Recurse -Force .\\user-state'), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '', FOLDER_REFUSAL);
+  assert.match(hold.decide(powershell(f.home, 'Get-ChildItem -Recurse | Remove-Item'), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '', FOLDER_REFUSAL);
+  assert.equal(hold.decide(powershell(f.home, 'Get-ChildItem'), { ...ctx.options, environment: {}, host: 'claude' }), null);
+  // A command too long to read refuses in Toolkit's folder, and still passes elsewhere.
+  const long = `ls ${'a'.repeat(hold.MAX_COMMAND_CHARS)}`;
+  assert.match(decide(ctx, bash(f.home, long))?.deny || '', /too long to check/);
+  assert.equal(decide(ctx, bash(f.outside, long)), null);
+  // The failure path guards the same calls: a broken check refuses a call in Toolkit's folder.
+  assert.equal(hold.mayMerge(bash(f.outside, 'ls')), false);
+});
+
+test('matrix: Toolkit\'s folder is matched by its real path, through links and in any letter case on Windows', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const links = path.join(ctx.root, 'links');
+  fs.mkdirSync(links);
+  const type = process.platform === 'win32' ? 'junction' : 'dir';
+  fs.symlinkSync(f.home, path.join(links, 'home'), type);
+  fs.symlinkSync(f.state, path.join(links, 'state'), type);
+  for (const [host, shape] of FOLDER_HOSTS) {
+    assert.match(decide(ctx, shape(path.join(links, 'home'), 'rm -rf user-state'))?.deny || '', FOLDER_REFUSAL, `${host}: linked Toolkit folder`);
+    assert.match(decide(ctx, shape(path.join(links, 'state'), 'ls'))?.deny || '', FOLDER_REFUSAL, `${host}: linked user-state folder`);
+    assert.match(decide(ctx, shape(path.join(f.env, '..'), 'rm -rf user-state'))?.deny || '', FOLDER_REFUSAL, `${host}: .. in the folder`);
+    assert.equal(decide(ctx, shape(path.join(links, 'home'), 'ls')), null, `${host}: linked Toolkit folder, plain listing`);
+  }
+  if (process.platform === 'win32') {
+    for (const [host, shape] of FOLDER_HOSTS) {
+      assert.match(decide(ctx, shape(f.home.toUpperCase(), 'rm -rf user-state'))?.deny || '', FOLDER_REFUSAL, `${host}: upper case`);
+      assert.match(decide(ctx, shape(f.state.toLowerCase(), 'dir'))?.deny || '', FOLDER_REFUSAL, `${host}: lower case`);
+    }
+  }
+});
+
+test('the folder reader in Toolkit\'s own folder is default-deny for hostile shell shapes', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  // Every line-break and invisible shape around a refused command stays refused; a read that names
+  // user-state in any shape is refused too.
+  for (const command of ['ls\nrm -rf user-state', 'ls\nrm -rf *', 'ls\nfind . -delete']) {
+    hostile.expectDefaultDeny(assert, text => decide(ctx, bash(f.home, text)) === null, hostile.variants(command).map(({ id, text }) => ({ id, text })));
+  }
+  const shapes = hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'invisible'], ['shell']);
+  hostile.expectDefaultDeny(assert, text => decide(ctx, bash(f.state, text)) === null, shapes);
+  // Quoting and continued-line shapes are refused in Toolkit's own folder too, not only inside user-state.
+  hostile.expectDefaultDeny(assert, text => decide(ctx, bash(f.home, text)) === null, hostile.cases(['quoting', 'continued-lines'], ['shell']));
+});
+
+test('a default-branch push names its repository through --git-dir or GIT_DIR, not only the folder', (t) => {
+  const ctx = context(t);
+  const feature = repository(ctx.root, 'feature', { branch: 'work' });
+  const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  const repoGit = path.join(ctx.repo, '.git');
+  const refused = [
+    [plain, `git --git-dir=${repoGit} push origin main`],
+    [plain, `git --git-dir ${repoGit} push origin main`],
+    [plain, `GIT_DIR=${repoGit} git push origin main`],
+    [plain, `git --git-dir=${repoGit} push`],
+    [feature, `git --git-dir=${repoGit} push`],
+    [plain, `git -C ${ctx.root} --git-dir=a/.git push origin main`],
+    [plain, `D=${repoGit}; git --git-dir=$D push origin main`],
+    [plain, `export GIT_DIR=${repoGit}; git push origin main`],
+    [plain, `GIT_DIR=${repoGit}; git push origin main`],
+    [feature, `GIT_DIR=${repoGit}; git push`],
+    [plain, `set GIT_DIR=${repoGit}& git push origin main`],
+    [plain, `cd -; git --git-dir=${repoGit} push origin main`],
+  ];
+  for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
+  const powershell = (cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })?.deny || '';
+  for (const command of [`$env:GIT_DIR = '${repoGit}'; git push origin main`, `$env:GIT_DIR='${repoGit}'; git push`]) {
+    assert.match(powershell(plain, command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  // The named repository, not the folder's, decides: a feature branch and a store pass, even from a
+  // folder whose own repository is on its default branch.
+  const allowed = [
+    [ctx.repo, `git --git-dir=${path.join(feature, '.git')} push`],
+    [ctx.repo, `git --git-dir=${path.join(feature, '.git')} push origin work`],
+    [ctx.repo, `git --git-dir=${path.join(store, '.git')} push origin main`],
+    [plain, `GIT_DIR=${path.join(feature, '.git')} git push origin work`],
+    [plain, `git --git-dir=${repoGit} push origin work`],
+  ];
+  for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
+  // A linked worktree's git folder reads refs and remotes through its common folder.
+  git(ctx.repo, ['-c', 'user.name=t', '-c', 'user.email=t@example.test', 'commit', '-q', '--allow-empty', '-m', 'one']);
+  git(ctx.repo, ['worktree', 'add', '-q', '-b', 'side', path.join(ctx.root, 'side')]);
+  const worktreeGit = path.join(repoGit, 'worktrees', 'side');
+  assert.match(decide(ctx, bash(plain, `git --git-dir=${worktreeGit} push origin HEAD:main`))?.deny || '', /default branch `main`/, 'worktree git folder');
+  assert.equal(decide(ctx, bash(plain, `git --git-dir=${worktreeGit} push`)), null, 'worktree on its own branch');
+  assert.match(decide(ctx, bash(plain, `git --git-dir=${path.join(ctx.root, 'side', '.git')} push origin HEAD:main`))?.deny || '', /default branch `main`/, 'worktree .git file');
+});
+
+// Review round 1: quotes, escapes and redirections cannot hide user-state from the folder reader, and
+// a GIT_DIR setting that may never reach git keeps the folder's own repository in the push check.
+test('matrix: quoted, escaped and redirected forms cannot reach user-state from Toolkit\'s folder', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const links = path.join(ctx.root, 'links');
+  fs.mkdirSync(links);
+  fs.symlinkSync(f.home, path.join(links, 'home'), process.platform === 'win32' ? 'junction' : 'dir');
+  const refused = [
+    [f.home, 'cd "user"-state; rm -rf .'],
+    [f.home, 'cd user""-state && rm -rf .'],
+    [f.home, 'cd user\\-state; rm -rf .'],
+    [f.home, "cd 'user'-state; ls"],
+    [f.home, "echo > 'user'-state/'merge'-approvals.json"],
+    [f.home, 'echo x > notes.txt'],
+    [f.home, 'cat < notes.txt'],
+    [f.home, 'ls "env"'],
+    [f.env, 'rm -rf ../user\\-state'],
+    [f.env, 'rm -rf .\\./*'],
+    [f.env, 'cd .\\.; rm -rf user\\-state'],
+    [f.env, 'rm -rf ../"user"-state'],
+    [f.checkout, "rm -rf ../../'user'-state"],
+    [f.checkout, 'rm -rf .\\./.\\./*'],
+    [f.outside, `cd ${f.home}; cd "user"-state; rm -rf .`],
+    [f.outside, `cd ${path.join(links, 'home')}; cd user\\-state; ls`],
+  ];
+  for (const [host, shape] of FOLDER_HOSTS) {
+    for (const [cwd, command] of refused) assert.match(decide(ctx, shape(cwd, command))?.deny || '', /^Toolkit: /, `${host} refuses in ${path.relative(ctx.root, cwd)}: ${command}`);
+    for (const [cwd, command] of [[f.checkout, 'git commit -m "a message"'], [f.checkout, "echo 'done'"], [f.env, 'ls -la']]) {
+      assert.equal(decide(ctx, shape(cwd, command)), null, `${host} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+    }
+  }
+  // A command too long to read that moves folder is refused even when it starts elsewhere.
+  const long = `cd ${path.join(links, 'home')}; rm -rf user\\-state; ls ${'a'.repeat(hold.MAX_COMMAND_CHARS)}`;
+  assert.match(decide(ctx, bash(f.outside, long))?.deny || '', /too long to check/);
+});
+
+test('a GIT_DIR setting that may never reach git keeps the folder\'s own repository in the push check', (t) => {
+  const ctx = context(t);
+  const store = path.join(repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' }), '.git');
+  // Each is refused on main from a repository on its default branch, and stays refused.
+  const refused = [
+    `set GIT_DIR=${store}; git push origin main`,
+    `declare GIT_DIR=${store}; git push origin main`,
+    `typeset GIT_DIR=${store}; git push origin main`,
+    `git_dir=${store} git push origin main`,
+    `export git_dir=${store}; git push origin main`,
+    `export GIT_DIR=${store}; unset GIT_DIR; git push origin main`,
+    `export GIT_DIR=${store}; unset -v GIT_DIR; git push`,
+    `GIT_DIR=${store}; git push origin main`,
+  ];
+  for (const [host, shape] of FOLDER_HOSTS) {
+    for (const command of refused) assert.match(decide(ctx, shape(ctx.repo, command))?.deny || '', /default branch `main`/, `${host}: ${command}`);
+  }
+  const powershell = command => hold.decide({ cwd: ctx.repo, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })?.deny || '';
+  for (const command of [`$env:GIT_DIR = '${store}'; Remove-Item Env:GIT_DIR; git push origin main`, `set GIT_DIR '${store}'; git push origin main`]) {
+    assert.match(powershell(command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  // A GIT_DIR named for this one command (prefix or option) is certain: the store push passes.
+  assert.equal(decide(ctx, bash(ctx.repo, `GIT_DIR=${store} git push origin main`)), null);
+  assert.equal(decide(ctx, bash(ctx.repo, `git --git-dir=${store} push origin main`)), null);
+});
+
+test('a push is judged in the folder the command names, not in its reading with backslashes undone', (t) => {
+  const ctx = context(t);
+  // A repository on a feature branch whose path holds a backslash (every Windows path; a folder name
+  // on Linux). With backslashes undone its path names a missing folder inside the repository on main.
+  const nested = repository(ctx.repo, process.platform === 'win32' ? 'nested' : 'sub\\dir', { branch: 'feature' });
+  for (const command of [`cd "${nested}"; git push`, `Push-Location "${nested}"; git push origin feature`]) {
+    assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
+  }
+  assert.match(decide(ctx, bash(ctx.repo, 'git push'))?.deny || '', /default branch `main`/);
+});
+
+// Review round 2: line continuations are joined as the shell joins them, ANSI-C strings, braces and
+// expansions are read in deeper folders, and a backslash stays a path separator in PowerShell.
+const FOLDER_SHELLS = [
+  ...FOLDER_HOSTS.map(([host, shape]) => [`${host} (shell unknown)`, (ctx, cwd, command) => decide(ctx, shape(cwd, command))]),
+  ['claude Bash (posix)', (ctx, cwd, command) => hold.decide({ cwd, tool_name: 'Bash', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })],
+];
+
+test('a line continuation, an ANSI-C string, braces or an expansion cannot spell a way to user-state', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const refused = [
+    [f.home, 'cd user\\\n-state && find . -delete'],
+    [f.home, 'cd user-\\\nstate && find . -delete'],
+    [f.home, 'cat user\\\n-state/session.json'],
+    [f.env, 'rm -rf .\\\n./user\\\n-state'],
+    [f.checkout, 'rm -rf ../.\\\n./user-st\\\nate'],
+    [f.env, "rm -rf $'\\x2e\\x2e'/$'user\\x2dstate'"],
+    [f.env, "cd $'\\x2e\\x2e'; cd $'user\\x2dstate' && find . -delete"],
+    [f.checkout, "rm -rf $'\\x2e\\x2e/\\x2e\\x2e/user\\x2dstate'"],
+    [f.env, "rm -rf $'\\056\\056'/user-stat$'\\145'"],
+    [f.env, 'rm -rf .{.,}/user-stat{e,}'],
+    [f.checkout, 'rm -rf .{.,}/.{.,}/user-stat{e,}'],
+    [f.env, 'rm -rf ${PWD%/*}/user?state'],
+    [f.checkout, 'rm -rf ${PWD%/*/*}/user-stat${x:-e}'],
+    [f.env, 'rm -rf ../user?state'],
+    [f.checkout, 'rm -rf ../../user-*'],
+    [f.checkout, `rm -rf ${f.home}/*`],
+    // Refused by default: a variable, braces or a wildcard the guard does not expand.
+    [f.checkout, 'echo $HOME'],
+    [f.checkout, 'ls src/{a,b}'],
+    [f.env, 'cat ./*.json'],
+  ];
+  const allowed = [
+    [f.checkout, "awk '{print $1}' notes.txt"],
+    [f.checkout, "find . -name '*.js'"],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', /^Toolkit: /, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+});
+
+test('a push split by a line continuation is judged as the shell joins it', (t) => {
+  const ctx = context(t);
+  const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });
+  for (const [label, run] of FOLDER_SHELLS) {
+    assert.match(run(ctx, ctx.repo, 'git pu\\\nsh origin main')?.deny || '', /default branch `main`/, label);
+    assert.match(run(ctx, store, `GIT_DIR=${ctx.repo}/.g\\\nit git push origin main`)?.deny || '', /default branch `main`/, label);
+  }
+});
+
+test('in PowerShell a backslash is a path separator, so Windows paths still run in Toolkit\'s folder', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const powershell = command => hold.decide({ cwd: f.home, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  for (const command of ['node current\\repo\\scripts\\toolkit-setup.cjs status', 'Get-Content env\\status.json', 'Get-ChildItem .\\env']) {
+    assert.equal(powershell(command), null, command);
+  }
+  for (const command of ['Get-Content user-state\\session.json', "Get-Content 'user'-state\\session.json", 'Remove-Item -Recurse .\\user-state', 'Get-ChildItem ..\\', 'Get-Content env\\x > out.txt', 'cd user`-state; Remove-Item *']) {
+    assert.match(powershell(command)?.deny || '', /^Toolkit: /, command);
+  }
+  // A shell the host does not name (Codex) is read by the computer's platform: PowerShell's on
+  // Windows, where a backslash is a separator, and bash's elsewhere, where it is an escape.
+  const codex = decide(ctx, { cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: 'node current\\repo\\scripts\\toolkit-setup.cjs status', workdir: f.home } });
+  if (process.platform === 'win32') assert.equal(codex, null);
+  else assert.match(codex?.deny || '', FOLDER_REFUSAL);
+});
+
+test('refuse by default: a folder change never leaves the starting folder, and an unseen folder is Toolkit\'s own', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const refused = [
+    // A comment hides the folder change, so the next line still runs in Toolkit's folder.
+    [f.home, 'ls #; cd env\nfind . -delete'],
+    [f.home, 'ls # && cd env\ncat user?state/sentinel.json'],
+    // A pipeline part or a background job changes folder in another shell.
+    [f.home, 'cd env & find . -delete'],
+    [f.home, 'ls | cd env; find . -delete'],
+    [f.home, 'cd env | ls\nfind . -delete'],
+    // Tilde forms name a folder the command does not spell out.
+    [f.home, 'cd env && rm -rf ~-'],
+    [f.home, 'cd env && cd ~- && find . -delete'],
+    [f.home, 'cd env; rm -rf ~-/user?state'],
+    [f.home, 'pushd env && rm -rf ~1/user?state'],
+    // A wildcard may stand for `..`.
+    [f.env, 'rm -rf .?/user?state'],
+    [f.env, 'rm -rf .[.]/user?state'],
+    [f.checkout, 'rm -rf .?/.?/user?state'],
+    // An expansion or a step back reaches Toolkit's folder in one move.
+    [f.home, 'cd env && rm -rf ${PWD%/*}'],
+    [f.home, 'cd env && cd $OLDPWD && find . -delete'],
+    [f.env, 'cd ..; cd -; cd -; find . -delete'],
+    [f.outside, 'cd -; find . -delete'],
+    // A move that fails leaves the next one to run from the folder before it.
+    [path.dirname(f.home), 'cd missing; cd .ai-agent-toolkit; find . -delete'],
+  ];
+  const allowed = [
+    [f.home, 'cd env && ls'],
+    // Many moves away from Toolkit's folder stay ordinary work.
+    [f.outside, 'cd a && cd b && cd c && cd d && cd e && make'],
+    [f.outside, 'cd a && make && cd .. && cd b && make && cd .. && cd c && make && cd .. && cd d && make && cd .. && cd e && make'],
+    [f.outside, 'ls | grep x & ls'],
+    [f.outside, `cd ${f.home}; cd -; ls`],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', FOLDER_REFUSAL, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  const powershell = command => hold.decide({ cwd: f.home, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  for (const command of ['Get-ChildItem #; Set-Location env\nRemove-Item -Recurse -Force *', 'Set-Location env & Remove-Item -Recurse -Force *', 'Set-Location env; Set-Location -; Set-Location -; Remove-Item -Recurse -Force *']) {
+    assert.match(powershell(command)?.deny || '', FOLDER_REFUSAL, command);
+  }
+});
+
+test('the folder reader takes time in step with the command, never more', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  // Each input once took minutes (a wildcard run, an unclosed brace run, a run of expansions).
+  const inputs = [
+    [f.env, `ls $x/${'*'.repeat(50000)}z`],
+    [f.env, `ls ${'?*'.repeat(25000)}/user-state`],
+    [f.outside, `echo ${'{'.repeat(60000)}`],
+    [f.outside, `echo ${'${'.repeat(30000)}`],
+    [f.home, `cd ${'a/'.repeat(30000)} && ls`],
+    [f.home, `${'cd a; '.repeat(10000)}ls`],
+    [f.outside, `${'cd a; '.repeat(10000)}git push origin work`],
+    [f.outside, `${'cd -; '.repeat(10000)}git push origin work`],
+    [f.outside, `${'eval '.repeat(10000)}ls`],
+    [f.outside, `${'bash -c '.repeat(10000)}ls`],
+    [f.home, `${"'".repeat(30000)}"${'\\'.repeat(30000)}`],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of inputs) {
+      const started = process.hrtime.bigint();
+      run(ctx, cwd, command);
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      assert.ok(ms < 2000, `${label} took ${Math.round(ms)} ms in ${path.relative(ctx.root, cwd)} for ${command.slice(0, 20)}... (${command.length} chars)`);
+    }
+  }
+  // Past the moves it follows, the push reader counts the folder as one it cannot see.
+  assert.match(decide(ctx, bash(f.outside, `${'cd a; '.repeat(17)}git push origin work`))?.deny || '', /more folder changes than Toolkit follows/);
+  assert.equal(decide(ctx, bash(f.outside, `${'cd a; '.repeat(8)}git push origin work`)), null);
+});
+
+// Review round 4: a folder change the reader does not follow (a move word behind a prefix, a setting
+// cd reads, a nested shell behind a wrapper, code the shell runs in itself) counts as Toolkit's own
+// folder; the push reader keeps its cost in step with the command; a git folder it cannot read is
+// judged as the folder's own repository.
+test('round 5: a move this reader does not follow counts as Toolkit\'s own folder, whatever stands before it', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const current = path.join(f.home, 'current');
+  fs.mkdirSync(current, { recursive: true });
+  const userHome = path.dirname(f.home);
+  const refused = [
+    // A move word behind a prefix, a keyword or a wrapper builtin.
+    [f.env, 'X=1 cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, '! cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'command -p cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'if cd; then cd .ai-agent-toolkit; fi; find . -delete'],
+    [f.env, 'time cd; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'for i in 1; do cd; done; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, '{ cd; }; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'X=1 cd -; find . -delete'],
+    [f.checkout, 'X=1 cd; cd .ai-agent-toolkit; find . -delete'],
+    [current, 'X=1 cd; cd .ai-agent-toolkit; find . -delete'],
+    [userHome, 'X=1 cd .ai-agent-toolkit; find . -delete'],
+    // What cd reads besides its words: CDPATH, HOME, OLDPWD, autocd, cdable_vars, an alias.
+    [f.env, 'CDPATH=x:~ cd .ai-agent-toolkit && find . -delete'],
+    [f.env, 'CDPATH=:~; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, 'CDPATH=x:../..; cd .ai-agent-toolkit; find . -delete'],
+    [f.checkout, 'export CDPATH=:~; cd .ai-agent-toolkit; grep -r x .'],
+    [f.env, 'cd s; OLDPWD=x; cd -; find . -delete'],
+    [f.env, 'read HOME < f; cd; find . -delete'],
+    [f.env, 'shopt -s cdable_vars; d=x; cd d; find . -delete'],
+    [f.env, 'setopt AUTO_CD; x; find . -delete'],
+    [userHome, 'shopt -s expand_aliases\nalias c=x\nc .ai-agent-toolkit\nfind . -delete'],
+    // zsh's and ksh's two-word cd swaps text in the current folder's path.
+    [f.env, 'cd /env / && find . -delete'],
+    // A nested shell behind a wrapper or a prefix, trap's action and an alias's value are read too.
+    [f.env, "nohup bash -c 'cd ..; find . -delete'"],
+    [f.env, "timeout 9 sh -c 'cd ..; find . -delete'"],
+    [f.env, "exec bash -c 'cd ..; find . -delete'"],
+    [f.env, "X=1 bash -c 'cd ..; find . -delete'"],
+    [userHome, "nohup sh -c 'cd .ai-agent-toolkit; find . -delete'"],
+    [f.env, "trap 'c''d ..' DEBUG; find . -delete"],
+    // Code the shell runs in itself from a file is never read, so it is refused in Toolkit's folder.
+    [f.env, "printf 'c%s ~' d > s; . ./s; cd .ai-agent-toolkit; find . -delete"],
+    [f.env, 'X=1 source ./s; cd .ai-agent-toolkit; find . -delete'],
+    [f.env, "BASH_ENV=./s bash -c 'find . -delete'"],
+  ];
+  const allowed = [
+    [f.home, 'cd source && ls'],
+    [f.home, 'git -C source status'],
+    [f.env, 'ls'],
+    [f.checkout, 'git status && git log -1'],
+    [f.outside, 'cd a 2>/dev/null && make'],
+    [f.outside, 'source .venv/bin/activate && make test'],
+    [f.outside, 'echo $HOME && ls'],
+    [f.outside, 'ls /home && make'],
+    [f.outside, "git commit -m 'Run cd before the build'"],
+    [f.outside, "nohup sh -c 'make' &"],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', FOLDER_REFUSAL, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  // PowerShell: a module-qualified Set-Location, a call operator before a built name, a script file.
+  const powershell = (cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  for (const command of [
+    'Microsoft.PowerShell.Management\\Set-Location ~; Set-Location .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item',
+    "&('s'+'l') ~; Set-Location .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item",
+    "Set-Alias c ('Set-'+'Location'); c ~; c .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item",
+    './x.ps1; Set-Location .ai-agent-toolkit; Get-ChildItem -Recurse | Remove-Item',
+    '. ./x; Get-ChildItem -Recurse | Remove-Item',
+  ]) assert.match(powershell(f.env, command)?.deny || '', FOLDER_REFUSAL, command);
+  assert.equal(powershell(f.env, 'Get-ChildItem'), null);
+  assert.equal(powershell(f.outside, 'Get-ChildItem $env:HOME; npm test'), null);
+});
+
+test('round 5: many GIT_DIR settings before many pushes take time in step with the command', (t) => {
+  const ctx = context(t);
+  const settings = n => Array.from({ length: n }, (_, i) => `export GIT_DIR=/g${i}; `).join('');
+  const command = `${settings(2000)}${'git push origin work; '.repeat(2000)}`;
+  for (const input of [bash(ctx.repo, command), { cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: command, workdir: ctx.repo } }]) {
+    const started = process.hrtime.bigint();
+    const result = decide(ctx, input);
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.ok(ms < 2000, `took ${Math.round(ms)} ms for ${command.length} chars`);
+    assert.match(result?.deny || '', /more GIT_DIR settings than Toolkit follows/);
+  }
+  // Up to the cap each setting is still judged, and a feature-branch push passes.
+  assert.equal(decide(ctx, bash(ctx.repo, `${settings(16)}git push origin work`)), null);
+  assert.match(decide(ctx, bash(ctx.repo, `${settings(16)}git push origin main`))?.deny || '', /default branch `main`/);
+});
+
+test('round 5: a git folder the reader cannot read is judged as the folder\'s own repository', (t) => {
+  const ctx = context(t);
+  for (const command of [
+    'git --git-dir .gi? push origin main',
+    'git --git-dir .g[i]t push origin main',
+    'git --git-dir $(pwd)/.git push origin main',
+    'git --git-dir="$PWD/.git" push origin main',
+    'GIT_DIR=$PWD/.git git push origin main',
+    'GIT_DIR=$(pwd)/.git git push origin main',
+    'GIT_DIR=`pwd`/.git git push origin main',
+    'git --git-dir ~+/.git push origin main',
+  ]) {
+    assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /default branch `main`/, command);
+    assert.match(decide(ctx, { cwd: os.tmpdir(), tool_name: 'exec_command', tool_input: { cmd: command, workdir: ctx.repo } })?.deny || '', /default branch `main`/, `codex: ${command}`);
+  }
+  // A readable git folder still decides: a feature branch's passes from a folder on main.
+  const feature = repository(ctx.root, 'feature', { branch: 'work' });
+  assert.equal(decide(ctx, bash(ctx.repo, `git --git-dir=${path.join(feature, '.git')} push origin work`)), null);
+});
+
+test('round 6: a shell whose script the reader cannot find, and every folder reached from Toolkit\'s folder, are judged; elsewhere hidden-move words are ordinary', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const current = path.join(f.home, 'current');
+  fs.mkdirSync(current, { recursive: true });
+  const userHome = path.dirname(f.home);
+  const refused = [
+    // A shell whose script option the reader does not know, or whose script comes from stdin or a file.
+    [f.env, "bash -ce 'cd ..; find . -delete'"],
+    [f.env, "bash -cl 'cd ..; find . -delete'"],
+    [f.env, "sh -ce 'cd ..; find . -delete'"],
+    [f.env, "env bash -ce 'cd ..; find . -delete'"],
+    [f.env, "bash -cex 'cd ..; grep -r MARK .'"],
+    [f.env, "bash -ce 'cd ..; find . -delete' -c"],
+    [f.env, "bash -o pipefail -c 'cd ..; find . -delete'"],
+    [f.env, "echo 'cd ..; find . -delete' | bash"],
+    [f.env, "bash <<< 'cd ..; find . -delete'"],
+    [f.env, 'bash ./s'],
+    [f.env, 'cmd /c"cd .. && rd /s /q ."'],
+    [f.env, "powershell 'Set-Location ..; Remove-Item -Recurse -Force *'"],
+    [f.env, "pwsh -CommandWithArgs 'Set-Location ..; Remove-Item -Recurse -Force *'"],
+    [f.env, "pwsh -cwa 'Set-Location ..; Remove-Item -Recurse -Force *'"],
+    [f.env, "pwsh -WorkingDirectory .. -Command 'Remove-Item -Recurse -Force *'"],
+    [f.checkout, "bash -ce 'cd ../..; find . -delete'"],
+    [current, "nohup bash -ce 'cd ..; find . -delete'"],
+    // From a start in Toolkit's folder, a folder outside it is judged too, with every path word read.
+    [f.env, 'cd ../..; find .ai-agent-toolkit -delete'],
+    [f.env, 'cd ../..; rm -rf .ai-agent-toolkit'],
+    [f.env, 'cd ../..; find . -delete'],
+    [f.env, 'cd ../..; find -delete'],
+    [f.env, 'cd ../..; rm -rf .ai-*'],
+    [f.env, 'cd ../../..; rm -rf home/.ai-agent-toolkit/env'],
+    [f.env, 'cd ../../..; rm -rf home'],
+    [f.checkout, 'cd ../../..; grep -r MARK .ai-agent-toolkit'],
+    [f.checkout, 'cd ../../../../plain; rm -rf ../home/.ai-agent-toolkit'],
+    // Near Toolkit's folder, a hidden move still counts: named, or reached by a folder spelled out.
+    [userHome, "bash -ce 'cd .ai-agent-toolkit; find . -delete'"],
+    [f.outside, "cd ../home/.ai-agent-toolkit/env && bash -ce 'cd ..; find . -delete'"],
+    // git diff given paths in Toolkit's own folder compares folders, as --no-index does.
+    [f.home, 'git diff env .'],
+    [f.home, 'git diff -R env .'],
+  ];
+  const allowed = [
+    [f.home, 'git diff'],
+    [f.env, "bash -c 'ls'"],
+    [f.env, "bash -e -c 'ls'"],
+    [f.checkout, 'cd ../../../../plain && make'],
+    // Far from Toolkit's folder, words that may steer or hide a move are ordinary work.
+    [f.outside, 'grep -rn HOME src'],
+    [f.outside, 'printenv HOME'],
+    [f.outside, 'env | grep PWD'],
+    [f.outside, 'which cd'],
+    [f.outside, 'man cd'],
+    [f.outside, 'git grep -n chdir'],
+    [f.outside, 'rg -w cd docs'],
+    [f.outside, 'alias'],
+    [f.outside, 'docker run --rm -e HOME=/root node:22 npm test'],
+    [f.outside, 'env HOME=/tmp/h npm test'],
+    [f.outside, 'bash build.sh'],
+    [f.outside, 'echo make | bash'],
+    [f.outside, "bash -ce 'make'"],
+  ];
+  for (const [label, run] of FOLDER_SHELLS) {
+    for (const [cwd, command] of refused) assert.match(run(ctx, cwd, command)?.deny || '', FOLDER_REFUSAL, `${label} refuses in ${path.relative(ctx.root, cwd)}: ${JSON.stringify(command)}`);
+    for (const [cwd, command] of allowed) assert.equal(run(ctx, cwd, command), null, `${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  const powershell = (cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' });
+  assert.match(powershell(f.env, "powershell 'Set-Location ..; Remove-Item -Recurse -Force *'")?.deny || '', FOLDER_REFUSAL);
+  assert.equal(powershell(f.outside, 'Get-ChildItem env:HOME; npm test'), null);
+});
+
+test('a shell told to read its script from stdin (`-Command -`, `-c -`) counts as a shell whose script the reader cannot find', (t) => {
+  const ctx = context(t);
+  const f = toolkitFolders(ctx);
+  const script = "'Set-Location ..; Remove-Item -Recurse -Force *'";
+  const refused = [
+    // PowerShell documents `-` as the script word that reads the script from standard input.
+    [f.env, `echo ${script} | pwsh -Command -`],
+    [f.env, `echo ${script} | pwsh -c -`],
+    [f.env, `echo ${script} | pwsh -NoProfile -NonInteractive -Command -`],
+    [f.env, `echo ${script} | powershell -NoProfile -Command -`],
+    [f.env, `echo ${script} | powershell -c -`],
+    [f.env, `echo ${script} | powershell -co -`],
+    [f.env, `Write-Output ${script} | pwsh -c -`],
+    [f.env, `echo ${script} | pwsh.exe -Command "-"`],
+    [f.checkout, `echo ${script} | pwsh -Command -`],
+    [f.state, `echo ${script} | powershell -c -`],
+    // A POSIX shell takes `-` (and `--`) after `-c` as the end of its options, so the next word is the script.
+    [f.env, "bash -c - 'cd ..; rm -rf user-state'"],
+    [f.env, "sh -c -- 'cd ..; rm -rf user-state'"],
+  ];
+  const allowed = [
+    // Far from Toolkit's folder a stdin script is ordinary work, as `| bash` is.
+    [f.outside, "echo 'npm test' | pwsh -Command -"],
+    [f.outside, "echo 'npm test' | powershell -c -"],
+    // A script given in the command is still read.
+    [f.env, "pwsh -Command 'Get-ChildItem'"],
+  ];
+  const shells = [
+    ...FOLDER_SHELLS,
+    ['claude PowerShell', (ctx, cwd, command) => hold.decide({ cwd, tool_name: 'PowerShell', tool_input: { command } }, { ...ctx.options, environment: {}, host: 'claude' })],
+  ];
+  // Every miss is listed, so a red run names each host shape and command.
+  const misses = [];
+  for (const [label, run] of shells) {
+    for (const [cwd, command] of refused) if (!FOLDER_REFUSAL.test(run(ctx, cwd, command)?.deny || '')) misses.push(`${label} allows in ${path.relative(ctx.root, cwd)}: ${command}`);
+    for (const [cwd, command] of allowed) if (run(ctx, cwd, command) !== null) misses.push(`${label} refuses in ${path.relative(ctx.root, cwd)}: ${command}`);
+  }
+  assert.deepEqual(misses, []);
 });

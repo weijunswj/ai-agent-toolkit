@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const { ShellCall, closureCommands, connectorTarget, GRAPHQL_OPERATION, shellPath, wordText, stdinText, fileIsGenerated, ghCommand } = require('./toolkit-shell-call.cjs');
-const { IssueClosureGuard, closingReferences } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+const { IssueClosureGuard, closingReferences, patchChanges } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const { resolveExecutable } = require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs');
 const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
@@ -35,6 +35,24 @@ function originRepository(cwd, options) {
   if (!repository) throw new Error('The origin remote is not on github.com. Name the repository explicitly.');
   return repository;
 }
+// A merge train's bump commit (bump-version.cjs --next), read from GitHub's commit files: it may
+// change only version stamps (a line pair that differs only in the version, as the risk tier reads
+// one: a JSON "version", a managed-block marker's toolkit= value, the Projects skill's Version line),
+// the changelog, and changelog fragments it folds (removed) or that eject's bump revert puts back
+// (added). Anything else, a rename or a file without a readable patch is not a bump. The readers
+// load only when a train must be proven, so the hook's start-up stays as it was.
+function trainBumpFiles(files) {
+  const { versionOnly } = require('./toolkit-risk-tier.cjs');
+  const { CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH } = require('./toolkit-version-at-merge.cjs');
+  const fragment = name => name.startsWith(`${FRAGMENT_DIR_REL_PATH}/`) && /^[^/]+\.md$/.test(name.slice(FRAGMENT_DIR_REL_PATH.length + 1)) && name !== `${FRAGMENT_DIR_REL_PATH}/README.md`;
+  return Array.isArray(files) && files.length > 0 && files.every(file => {
+    const name = file?.filename;
+    if (typeof name !== 'string') return false;
+    if (name === CHANGELOG_REL_PATH) return file.status === 'modified';
+    if (fragment(name)) return ['added', 'removed'].includes(file.status);
+    return file.status === 'modified' && typeof file.patch === 'string' && versionOnly(name, patchChanges(file.patch), { risky: true });
+  });
+}
 function guardFor(repository, cwd, options = {}) {
   if (!SLUG.test(repository || '')) throw new Error('Repository unavailable.');
   // Resolve gh only when a closing target actually needs a read.
@@ -45,7 +63,7 @@ function guardFor(repository, cwd, options = {}) {
     return new GitHubTransport({ ghPath, timeoutMs: options.timeoutMs ?? 5000 }).request(...args);
   } };
   return new IssueClosureGuard({ transport, repository, deadline: options.deadline, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500,
-    uatState: body => uatVerdict(body).state });
+    uatState: body => uatVerdict(body).state, trainBump: trainBumpFiles });
 }
 const TABLES = {
   create: { values: ['repo:R','assignee:a','base:B','body:b','body-file:F','head:H','label:l','milestone:m','project:p','recover','reviewer:r','template:T','title:t'], booleans: ['draft:d','dry-run','editor:e','fill:f','fill-first','fill-verbose','no-maintainer-edit','web:w'] },
@@ -197,7 +215,7 @@ function apiOperation(flags, positional, call, command, commands, index, expansi
   return { kind: target[3] ? 'edit' : 'create', repository, number, title: payload.title, body: payload.body };
 }
 function shellOperations(input, options = {}) {
-  const call = ShellCall.from(input); const operations = []; const commands = closureCommands(input, options);
+  const call = ShellCall.from(input); const operations = []; const commands = closureCommands(input, { ...options, closingReferences });
   for (const [index, command] of commands.entries()) {
     if (command.unreadableReason) throw Object.assign(new Error(command.unreadableReason), { complete: true });
     if (command.unreadableGh) throw new Error('Start-Process gh arguments cannot be inspected. Use one literal argument string and supported options, or run gh as its own command.');
@@ -320,4 +338,4 @@ function main() {
   process.stdout.write('Issue closure safety verified on the current PR head.\n');
 }
 if (require.main === module) { try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; } }
-module.exports = { issueClosureDecision, uatClosingDecision, guardFor, readFile, shellOperations, connectorOperations, flagValues, graphqlRelevant };
+module.exports = { issueClosureDecision, uatClosingDecision, guardFor, trainBumpFiles, readFile, shellOperations, connectorOperations, flagValues, graphqlRelevant };

@@ -3,9 +3,9 @@
 
 // Report-only scan for Toolkit files left in repositories.
 //
-// It looks at each GitHub checkout under the owner's GitHub folder (the same discovery the scheduled
-// task update uses). A repository whose governance could not be checked is not scanned. In the rest
-// it lists only what is provably Toolkit's:
+// It looks at each GitHub checkout in the owner's GitHub folder and one level below it. A repository
+// whose governance could not be checked is not scanned. In the rest it lists only what is provably
+// Toolkit's:
 //   - a Toolkit marker (a managed block inside an instruction file, a vendored check's first line, or
 //     the first line of a cloud sweep workflow copy);
 //   - a file that is byte for byte a copy Toolkit shipped, now or earlier (playbook-history.json),
@@ -39,6 +39,7 @@ const SCANNED_STATES = Object.freeze({ DISABLED: 'governance off', UNDECIDED: 'n
 const GOVERNED_COPY_BLOCKS = Object.freeze(['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE', 'ANTIGRAVITY.BOOTSTRAP']);
 const HISTORY = path.resolve(__dirname, '..', 'contracts', 'agent-rules', 'playbook-history.json');
 const IN_USE = 'governance is on, so it is in use';
+const BROKEN = "its Toolkit markers are broken, so Toolkit cannot tell its text from the rest; fixing them by hand is the owner's choice";
 const USAGE = 'Usage: node repo/scripts/toolkit-leftover-files.cjs scan [--github-folder <folder>] [--json]';
 
 const unix = text => text.replace(/\r\n/g, '\n');
@@ -93,15 +94,29 @@ function repositoryName(identity) {
 
 const shortHash = text => require('node:crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
 
-// The text left in an instruction file once the given blocks go, with the curated-source comment the
-// Toolkit template puts above them counted as Toolkit's: empty means nothing of the owner's is left.
-function ownText(text, names, templates) {
-  let rest = unix(text);
+// The curated-source comment Toolkit's retired managed template put at the top of AGENTS.md, above its
+// blocks, as it last shipped (playbook-history.json). Older wordings of it are not known here, so they
+// stay the owner's text. This is the one place that reads it, for the scan and the cleanup alike.
+function curatedHeader() {
+  return JSON.parse(fs.readFileSync(HISTORY, 'utf8')).agents_header;
+}
+
+// An instruction file's text, after its listed blocks were removed, without the curated header when
+// it is the first text there (blank lines before it aside), exactly as it shipped, on lines of its own.
+// The header goes with its line ending and one blank line after it; every other byte stays.
+function withoutCuratedHeader(text) {
+  const header = curatedHeader();
+  const lines = header.split('\n').map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const found = new RegExp(`^(\uFEFF?)(?:[ \\t]*\\r?\\n)*${lines.join('\\r?\\n')}(?:\\r?\\n|$)(?:[ \\t]*(?:\\r?\\n|$))?`).exec(text);
+  return found ? found[1] + text.slice(found[0].length) : text;
+}
+
+// The text left in an instruction file once the given blocks and the curated header go: empty means
+// nothing of the owner's is left.
+function ownText(text, names) {
+  let rest = text;
   for (const name of names) rest = blocks.removeBlock(rest, name);
-  rest = rest.trim();
-  let header = '';
-  try { header = /^<!--[\s\S]*?-->/.exec(unix(fs.readFileSync(path.join(templates, 'AGENTS.managed.template.md'), 'utf8')))?.[0] || ''; } catch { header = ''; }
-  return header && rest === header ? '' : rest;
+  return withoutCuratedHeader(rest).trim();
 }
 
 class LeftoverScan {
@@ -152,13 +167,15 @@ class LeftoverScan {
       if (!read) continue;
       if (read.skipped) { if (file !== 'GEMINI.md') result.unproven.push({ file, reason: read.skipped }); continue; }
       const parsed = blocks.findBlocks(read.text);
+      // With broken markers no block in the file is proven: where one ends cannot be told, so the
+      // whole file stays until the owner fixes the markers by hand.
+      if (parsed.errors.length) { result.unproven.push({ file, reason: BROKEN }); continue; }
       const listed = parsed.blocks.filter(block => !result.governed || GOVERNED_COPY_BLOCKS.includes(block.name));
-      const empties = !parsed.errors.length && listed.length > 0 && !ownText(read.text, listed.map(block => block.name), this.#templates);
+      const empties = listed.length > 0 && !ownText(read.text, listed.map(block => block.name));
       for (const block of listed) {
         const edited = block.format >= 2 && block.digest !== blocks.bodyDigest(block.body);
         result.files.push({ file, kind: 'block', block: block.name, proof: 'Toolkit marker', edited, empties });
       }
-      if (parsed.errors.length) result.unproven.push({ file, reason: 'its Toolkit markers are broken' });
     }
   }
 
@@ -286,6 +303,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return 0;
 }
 
-module.exports = Object.freeze({ LeftoverScan, discoverCheckouts, describe, parseArgs, main });
+module.exports = Object.freeze({ LeftoverScan, discoverCheckouts, describe, parseArgs, main, withoutCuratedHeader });
 
 if (require.main === module) process.exitCode = main();

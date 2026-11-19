@@ -71,14 +71,14 @@ function queueOf(value) {
   return { count: value.count, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.since, next: oldest.next } };
 }
 
-// `Longest stalled on the work queue: #<n> (<code> since <time>Z); next step: <step>`, or null.
+// `Longest stalled on the work queue: #<n> (<code> flagged <time>Z); next step: <step>`, or null. The time is when the finding was flagged.
 function queueText(value) {
   const queue = queueOf(value);
   if (!queue) return null;
   const { issue, code, since, next } = queue.oldest;
   const at = new Date(Date.parse(since)).toISOString().slice(0, 16).replace('T', ' ');
   const of = queue.count > 1 ? ` of ${queue.count}` : '';
-  return `Longest stalled on the work queue${of}: #${issue} (${code} since ${at}Z); next step: ${next.replace(/^Controller:\s*/, '')}`;
+  return `Longest stalled on the work queue${of}: #${issue} (${code} flagged ${at}Z); next step: ${next.replace(/^Controller:\s*/, '')}`;
 }
 
 function markShown(repository, digest, deps = {}) {

@@ -9,7 +9,7 @@
 //   the footer gets a block decision naming the clean edit for kinds the cloud can edit cleanly (issue
 //   and pull request comments, issue and pull request bodies), and a note for review comments and
 //   review bodies, which only the device sweep can clean. It reads the hook input, the checkout's own
-//   `.git`, `.github` and `AGENTS.md` files, and the user's governance decisions file under
+//   `.git` and `.github` files, and the user's governance decisions file under
 //   `~/.ai-agent-toolkit/user-state` (through `repositoryKind`): no git, gh or network call.
 // - `stripFooter` and `hasFooter` are shared with the device sweep (toolkit-github-footer-sweep.cjs).
 

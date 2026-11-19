@@ -3,8 +3,11 @@
 // Review-round rules: G0 slices with acceptance tests, the builder's same-session self-check,
 // finding severities (High and Medium block, Low becomes a follow-up record), rechecks scoped to the
 // fix, and small fixes batched into the next slice. Limits stop review looping: a blocker needs
-// proof, rechecks after a FAIL are scope-locked, and a third FAIL round needs the owner's card answer.
-// The negative checks stop a later edit from quietly letting proved High or Medium findings through.
+// proof, rechecks after a FAIL are scope-locked, and a PR gets two G2 rounds; from round 2 only a
+// proved High or a known material shipping-floor defect blocks, so other open Mediums go to a Now
+// follow-up child and Lows to a Later one.
+// The negative checks stop a later edit from quietly letting proved High findings or shipping-floor
+// defects through, or bringing back the owner card that let rounds run on.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -51,7 +54,10 @@ test('correction rechecks review the fix, and post-PASS deltas are unchanged', (
 });
 
 test('CONTROLLER maps severities, scopes rechecks and batches small fixes', () => {
-  assert.match(CONTROLLER, /ship blocker \(High or Medium, gate rules\), follow-up \(Low or `POST_SHIP`; one record per PR, on its area's open child, which joins the lane's next slice or starts within 3 days, unless the owner accepted it\)/);
+  assert.match(CONTROLLER, /ship blocker \(High or Medium, gate rules\), follow-up \(Low or `POST_SHIP`; one record per PR, on its area's open child, in Later when it holds only Lows, unless the owner accepted it\)/);
+  // A child holding only Lows sits in Later, so no rule may make it start within 3 days.
+  assert.match(CONTROLLER, /Now children start within 3 days/);
+  assert.doesNotMatch(CONTROLLER, /starts within 3 days|child work starts within/);
   assert.match(CONTROLLER, /fresh rechecks target fix commits/);
   assert.match(CONTROLLER, /\*\*Batch small fixes:\*\* a small fix joins the lane's next slice not yet in review/);
   assert.match(CONTROLLER, /the slice takes its highest tier/);
@@ -74,15 +80,28 @@ test('a blocking finding needs proof; unproven Medium is Low, unproven High goes
 
 test('rechecks after a FAIL are scope-locked; proved High on untouched code still blocks', () => {
   assert.match(GATE, /\*\*Scope lock:\*\* after a FAIL, rechecks review only the fix commits, earlier findings and what the fixes reach; a new finding on code no fix touched blocks only if High and proved, else joins the follow-up record/);
-  assert.match(SKILL, /every recheck brief names the fix commits, the findings they close, the scope lock and the PR's FAIL count/);
+  assert.match(SKILL, /every recheck brief names the fix commits, the findings they close, the scope lock and the PR's round count/);
   assert.match(DELIVERY, /Rechecks after a FAIL are scope-locked to the fix/);
 });
 
-test('round cap: two FAIL verdicts hold the next round for the owner card', () => {
-  assert.match(GATE, /\*\*Round cap:\*\* after two FAIL verdicts on one PR \(`Toolkit-G2: FAIL` comments, deltas included, since the owner last answered it\), no round starts until the owner answers a card/);
-  assert.match(GATE, /ship with open items as follow-ups \(if none breaks the shipping floor\), one more round, or split the PR\. One more round allows one; the card precedes any family reassessment/);
+test('round cap: two G2 rounds, then only a proved High or a shipping-floor defect blocks', () => {
+  assert.match(GATE, /\*\*Round cap:\*\* a PR gets two G2 rounds \(`Toolkit-G2:` verdicts, deltas included\)\. From round 2 only a proved High or a known material shipping-floor defect blocks; else the verdict passes, open Mediums go to a follow-up child in Now and Lows to one in Later\. Any further round rechecks only an open blocker's fix or a later RISKY delta\./);
   assert.match(GATE, /after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first/);
-  assert.match(CONTROLLER, /Before any recheck, count the PR's FAIL verdict comments; at two, hold and ask the owner with the host's question UI \(gate rules' round cap\)/);
-  assert.match(SKILL, /at two FAILs, post the round-cap card first \(gate rules\)/);
-  assert.match(DELIVERY, /after two FAIL verdicts on one PR no further round starts until the owner answers the gate rules' round-cap card/);
+  assert.match(CONTROLLER, /Count each PR's G2 rounds; from round 2 file open non-floor Mediums to a Now child and Lows to a Later one, and with no blocker open send the PR to the train \(gate rules' round cap\)/);
+  assert.match(SKILL, /the scope lock and the PR's round count \(gate rules' round cap\)/);
+  assert.match(DELIVERY, /From a PR's second G2 round only a proved High or a known material shipping-floor defect holds it; other open Mediums and Lows ship as follow-ups \(gate rules' round cap\)/);
+  assert.match(DELIVERY, /Rechecks after a FAIL are scope-locked to the fix, and from a PR's second round only a proved High or a known material shipping-floor defect blocks \(the gate rules' round cap\)/);
+  // The owner card that let rounds run on is gone everywhere the rule is stated.
+  for (const [name, text] of Object.entries({ GATE, CONTROLLER, SKILL, DELIVERY })) {
+    assert.doesNotMatch(text, /round-cap card|two FAIL verdicts|two-FAIL|at two FAILs|one more round|FAIL verdict comments; at two/, name);
+    // The shipping floor is not the safety floor, and High covers only the latter, so the cap never says High alone blocks.
+    assert.doesNotMatch(text, /only a proved High (blocks|holds)/, name);
+  }
+  // The shipping floor still blocks in every round: the cap must never send a floor defect to a follow-up.
+  assert.match(GATE, /Known material defects in the floor block\./);
+  // Capture the cap's own line only (unflattened text), so the hook-changes section that follows never leaks in.
+  const cap = read('repo/contracts/agent-rules/gate-rules.md').match(/\*\*Round cap:\*\*[^\n]*/)[0];
+  assert.doesNotMatch(cap, /High[^.;:]*(follow-up|never blocks|Later|Now)/);
+  assert.doesNotMatch(cap, /floor[^.;]*(follow-up|Later|Now)/);
+  assert.match(GATE, /An unproven Medium becomes Low; an unproven High goes to the owner's card and does not block alone/);
 });

@@ -18,6 +18,23 @@ function readToolkitVersion(file = VERSION_FILE) {
   return version;
 }
 
+// The one version order: -1, 0 or 1 for two MAJOR.MINOR.PATCH versions, each part compared as a
+// whole number of any size. Anything else throws, so no caller orders a version it cannot read.
+function compareVersions(left, right) {
+  for (const value of [left, right]) if (!SEMVER.test(String(value ?? ''))) throw new Error(`Not a MAJOR.MINOR.PATCH version: ${value}`);
+  const a = String(left).split('.').map(BigInt), b = String(right).split('.').map(BigInt);
+  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1;
+  return 0;
+}
+
+// A Toolkit source checkout is a folder holding the instruction sync script, this version file and
+// the Claude Code plugin manifest: files every Toolkit tree keeps. The bridge compares such a folder
+// with its own templates and the governance cleanup refuses it.
+const SOURCE_CHECKOUT_FILES = Object.freeze(['repo/scripts/sync-agent-instruction-shims.cjs', VERSION_REL_PATH, '.claude-plugin/plugin.json']);
+function isToolkitSourceCheckout(root) {
+  return SOURCE_CHECKOUT_FILES.every(file => fs.existsSync(path.join(root, ...file.split('/'))));
+}
+
 const TOOLKIT_VERSION = readToolkitVersion();
 
-module.exports = { SEMVER, TOOLKIT_VERSION, VERSION_FILE, VERSION_REL_PATH, readToolkitVersion };
+module.exports = { SEMVER, TOOLKIT_VERSION, VERSION_FILE, VERSION_REL_PATH, compareVersions, isToolkitSourceCheckout, readToolkitVersion };

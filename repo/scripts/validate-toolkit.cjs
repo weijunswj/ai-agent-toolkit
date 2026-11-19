@@ -616,10 +616,19 @@ function validateSkillSafetyMatrix(errors) {
   }
 }
 
-// The Packaging table says where each skill ships. Internal skills match the Antigravity copier's list,
-// which is what keeps them out of the portable copy; both native plugins carry every skill.
+// The Packaging table says where each skill ships. repo/contracts/skill-publication.json is the one
+// record of skill classes: each row's class and the Antigravity copier's Toolkit-only list (what keeps
+// those skills out of the portable copy) must follow it; both native plugins carry every skill.
 function validateSkillPackagingTable(errors, matrixPath, section) {
-  const { INTERNAL_SKILLS } = require('./toolkit-antigravity-project-skills.cjs');
+  // The checked workspace's own copier, so a copied workspace is judged on its own files.
+  const { INTERNAL_SKILLS } = require(path.join(root, 'repo', 'scripts', 'toolkit-antigravity-project-skills.cjs'));
+  const contractRel = 'repo/contracts/skill-publication.json';
+  let classes = {};
+  try {
+    classes = JSON.parse(fs.readFileSync(path.join(root, contractRel), 'utf8').replace(/^\uFEFF/, '')).skills || {};
+  } catch (error) {
+    fail(errors, `${contractRel} could not be read for the Packaging check: ${error.message}`);
+  }
   const header = section.split('\n').find((line) => line.startsWith('| Skill |'));
   const columns = ['Skill', 'Class', 'Claude Code plugin', 'Codex plugin', 'Antigravity copy'];
   if (!header || JSON.stringify(header.split('|').slice(1, -1).map((cell) => cell.trim())) !== JSON.stringify(columns)) {
@@ -631,11 +640,17 @@ function validateSkillPackagingTable(errors, matrixPath, section) {
   const names = rows.map((row) => row.name).sort();
   const current = skillDirs().map((rel) => path.basename(rel)).sort();
   if (JSON.stringify(names) !== JSON.stringify(current)) fail(errors, `${matrixPath} Packaging table must cover current skills exactly once`);
-  const internal = rows.filter((row) => row.cells[1] === 'internal').map((row) => row.name).sort();
-  if (JSON.stringify(internal) !== JSON.stringify([...INTERNAL_SKILLS].sort())) fail(errors, `${matrixPath} Packaging internal skills must match toolkit-antigravity-project-skills.cjs`);
+  const toolkitClass = Object.keys(classes).filter((name) => classes[name]?.class === 'toolkit').sort();
+  if (JSON.stringify(toolkitClass) !== JSON.stringify([...INTERNAL_SKILLS].sort())) {
+    fail(errors, `repo/scripts/toolkit-antigravity-project-skills.cjs Toolkit-only list must match the toolkit class in ${contractRel}`);
+  }
+  for (const row of rows) {
+    const expected = classes[row.name]?.class;
+    if (row.cells[1] !== expected) fail(errors, `${matrixPath} Packaging row for ${row.name} says ${row.cells[1]} but ${contractRel} says ${expected || 'nothing'}`);
+  }
   for (const row of rows) {
     const portable = row.cells[1] === 'portable';
-    if (!portable && row.cells[1] !== 'internal') fail(errors, `${matrixPath} Packaging row for ${row.name} has an invalid class`);
+    if (!portable && row.cells[1] !== 'toolkit') fail(errors, `${matrixPath} Packaging row for ${row.name} has an invalid class`);
     if (row.cells[2] !== 'Yes' || row.cells[3] !== 'Yes' || row.cells[4] !== (portable ? 'Yes' : 'No')) fail(errors, `${matrixPath} Packaging row for ${row.name} has the wrong hosts`);
   }
 }

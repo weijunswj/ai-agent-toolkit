@@ -265,7 +265,7 @@ test('Windows cwd shadow cannot satisfy an empty PATH', { skip: process.platform
   assert.throws(() => launch.assertExecutableAvailable('claude', { env: { PATH: '', Path: '', PATHEXT: '.CMD' }, cwd }), /not available/i);
 });
 
-test('direct PATH lookup searches past a refused Windows wrapper with simulated platform and env', t => {
+test('opted-in Codex PATH lookup searches past a refused Windows wrapper with simulated platform and env', t => {
   const wrapper = 'C:\\wrapper\\codex.cmd';
   const executable = 'C:\\native\\codex.exe';
   const files = new Set([wrapper, executable]);
@@ -283,7 +283,7 @@ test('direct PATH lookup searches past a refused Windows wrapper with simulated 
     'direct spawn must select the later executable');
 });
 
-test('direct PATH lookup runs the later Windows executable and never the logging wrapper', { skip: process.platform !== 'win32' }, () => {
+test('opted-in Codex PATH lookup runs the later Windows executable and never the logging wrapper', { skip: process.platform !== 'win32' }, () => {
   const root = tempFolder('direct-codex-path-');
   const wrapperBin = path.join(root, 'wrapper');
   const exeBin = path.join(root, 'native');
@@ -304,6 +304,21 @@ test('direct PATH lookup runs the later Windows executable and never the logging
   assert.equal(fs.existsSync(marker), false, 'a refused wrapper must never start');
 });
 
+test('opted-in lookup with only a refused wrapper on PATH keeps the wrapper refusal reason', t => {
+  const wrapper = 'C:\\wrapper\\other.cmd';
+  const realpath = fs.realpathSync;
+  const stat = fs.statSync;
+  const read = fs.readFileSync;
+  t.mock.method(fs, 'realpathSync', file => file === wrapper ? file : realpath(file));
+  t.mock.method(fs, 'statSync', file => file === wrapper ? { isFile: () => true } : stat(file));
+  t.mock.method(fs, 'readFileSync', (file, ...args) => file === wrapper ? '@echo off\r\necho refused\r\n' : read(file, ...args));
+  const options = { searchPastRefused: true, platform: 'win32', env: { PATH: 'C:\\wrapper', PATHEXT: '.cmd;.exe' } };
+  // The actionable reason (not a standard npm shim) must survive; "not available" would hide it.
+  for (const call of [() => launch.assertExecutableAvailable('other', options), () => launch.directSpawnParts('other', [], options)]) {
+    assert.throws(call, error => /not a standard npm shim/.test(error.message) && !/not available/.test(error.message));
+  }
+});
+
 test('direct lookup refuses the first wrapper by default and searches past only with explicit opt-in', t => {
   const wrapper = 'C:\\wrapper\\other.cmd';
   const executable = 'C:\\native\\other.exe';
@@ -313,12 +328,17 @@ test('direct lookup refuses the first wrapper by default and searches past only 
   const read = fs.readFileSync;
   t.mock.method(fs, 'realpathSync', file => files.has(file) ? file : realpath(file));
   t.mock.method(fs, 'statSync', file => files.has(file) ? { isFile: () => true } : stat(file));
-  t.mock.method(fs, 'readFileSync', (file, ...args) => file === wrapper ? '@echo off\\r\\necho refused\\r\\n' : read(file, ...args));
+  t.mock.method(fs, 'readFileSync', (file, ...args) => file === wrapper ? '@echo off\r\necho refused\r\n' : read(file, ...args));
   const options = { platform: 'win32', env: { PATH: 'C:\\wrapper;C:\\native', PATHEXT: '.cmd;.exe' } };
   assert.equal(launch.assertExecutableAvailable('other', options), wrapper);
   assert.throws(() => launch.directSpawnParts('other', [], options), /not a standard npm shim/,
     'default direct lookup must refuse the first wrapper');
   assert.throws(() => launch.directSpawnParts('other', [], { ...options, searchPastRefused: false }), /not a standard npm shim/);
+  // Only the boolean true opts in: truthy look-alikes keep the default refusal of the first wrapper.
+  for (const searchPastRefused of ['yes', 1]) {
+    assert.equal(launch.assertExecutableAvailable('other', { ...options, searchPastRefused }), wrapper, String(searchPastRefused));
+    assert.throws(() => launch.directSpawnParts('other', [], { ...options, searchPastRefused }), /not a standard npm shim/);
+  }
   assert.equal(launch.assertExecutableAvailable('other', { ...options, searchPastRefused: true }), executable);
   assert.equal(launch.directSpawnParts('other', [], { ...options, searchPastRefused: true }).command, executable);
   assert.throws(() => launch.directSpawnParts(wrapper, [], { ...options, searchPastRefused: true }), /not a standard npm shim/);

@@ -3,16 +3,16 @@
 
 // Projects the canonical agent-rule sources into every instruction surface this repository owns,
 // writing them (--write) or checking them (default), and reports every error in one run:
-//   - the governed rules (repo/contracts/agent-rules/toolkit-governed-rules.md) into the portable
-//     managed AGENTS template and this repository's root AGENTS.md;
 //   - the CLAUDE.md shim, which is exactly the import line `@AGENTS.md` with no markers, into its
 //     portable copy and this repository's root CLAUDE.md;
-//   - the Antigravity bootstrap template, whose source is the body between its own markers, into
-//     its portable copy and this repository's root bootstrap;
 //   - the n8n safety rules into the three portable n8n skill derivatives, and the n8n adapter into
 //     the n8n-safety-router adapter template.
-// Every block uses the versioned, hashed marker format of toolkit-managed-block.cjs. The global
-// rules are not projected here: setup installs them into each harness's user-level file.
+// The adapter block uses the versioned, hashed marker format of toolkit-managed-block.cjs. Neither the
+// global nor the governed rules are projected here: setup installs the global rules into each
+// harness's user-level file, and the installed Toolkit delivers the governed rules at session start,
+// this repository included, so root AGENTS.md is all hand-written. The check refuses a Toolkit block
+// in it, or any file under Antigravity's .agents/rules/ folder, so a stale branch cannot bring a copy
+// back.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -33,7 +33,6 @@ const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
-const governedPath = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 const globalPath = 'repo/contracts/agent-rules/global-rules.md';
 const versionPath = 'repo/contracts/toolkit-local-bridge/version.json';
 const n8nRulesPath = 'repo/contracts/agent-rules/n8n-safety-rules.md';
@@ -46,26 +45,14 @@ const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md'
 const n8nAdapterTemplatePath = 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md';
 const templateRoot = 'repo/contracts/agent-rules/repo-local';
 const publishedRoot = 'skills/repository-agent-rules/repo-local';
-const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
-// The block names the governed block replaces in root AGENTS.md.
-const ROOT_REPLACED_BLOCKS = Object.freeze([GOVERNED_BLOCK]);
-// Marked shim templates: file, block name and the root file each one is projected into.
-const SHIMS = Object.freeze([
-  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', target: '.agents/rules/00-agent-toolkit-bootstrap.md' }
-]);
+// Root files that must stay free of Toolkit copies. Antigravity reads AGENTS.md itself.
+const ROOT_AGENTS = 'AGENTS.md';
+// Antigravity's workspace rule folder: this repository keeps nothing there. Matched in any letter
+// case, since a case-insensitive checkout reads .Agents/Rules as the same folder.
+const RULES_FOLDER = Object.freeze(['.agents', 'rules']);
 // The CLAUDE.md shim is recognised by exact content, so it carries no markers. Claude Code reads
 // the import natively; Antigravity reads AGENTS.md itself, so no GEMINI.md shim exists.
 const CLAUDE_SHIM = Object.freeze({ file: 'CLAUDE.shim.template.md', target: 'CLAUDE.md', text: '@AGENTS.md\n' });
-const MANAGED_TEMPLATE = 'AGENTS.managed.template.md';
-const ROOT_HEADING = '# AI Agent Toolkit Repo Rules';
-
-const safetyComment = [
-  '<!--',
-  'Curated AI-facing source.',
-  'Source: repo/contracts/agent-rules/repo-local',
-  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-  '-->'
-].join('\n');
 
 function normalizeWorkspaceRel(value) {
   return path.posix.normalize(String(value).replace(/\\/g, '/'));
@@ -84,6 +71,22 @@ function isAbsolutePathLike(value) {
 function isInsideRoot(realPath) {
   const relative = path.relative(rootReal, realPath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+// Every file or link under the rule folder, in any letter case, as workspace-relative paths. Links
+// are reported, never followed.
+function ruleFolderEntries() {
+  const found = [];
+  const walk = (abs, rel, depth) => {
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (depth < RULES_FOLDER.length && entry.name.toLowerCase() !== RULES_FOLDER[depth]) continue;
+      if (entry.isDirectory()) walk(path.join(abs, entry.name), childRel, depth + 1);
+      else if (depth >= RULES_FOLDER.length || entry.isSymbolicLink()) found.push(childRel);
+    }
+  };
+  walk(root, '', 0);
+  return found.sort();
 }
 
 function safeWorkspacePath(relPath, label, options = {}) {
@@ -170,42 +173,7 @@ class InstructionProjectionOperation {
     if (readOptional(relPath) !== expected) this.#fail(`Stale ${label}: ${relPath}.`);
   }
 
-  #blocksOf(relPath, text) {
-    const { blocks, errors } = findBlocks(text);
-    if (errors.length) {
-      this.#fail(`Malformed managed agent instruction markers in ${relPath} (${errors[0]}).`);
-      return null;
-    }
-    return blocks;
-  }
-
-  // Removes the named blocks and returns what is left, trimmed.
-  #outside(relPath, text, names) {
-    const blocks = this.#blocksOf(relPath, text);
-    if (!blocks) return null;
-    let rest = text;
-    for (const block of [...blocks].reverse()) if (names.includes(block.name)) rest = rest.slice(0, block.start) + rest.slice(block.end);
-    return rest.trim();
-  }
-
   #block(source, name, body) { return renderBlock({ source, name, version: this.#version, body }); }
-
-  #templateText(block) { return `${safetyComment}\n\n${block}\n`; }
-
-  // A shim template's own body, read from between its markers.
-  #shimBody(shim) {
-    const relPath = `${templateRoot}/${shim.file}`;
-    const text = this.#readRequired(relPath);
-    if (text === null) return null;
-    const blocks = this.#blocksOf(relPath, text);
-    if (!blocks) return null;
-    const own = blocks.find(block => block.name === shim.name);
-    if (!own || blocks.length !== 1) {
-      this.#fail(`Shim template ${relPath} must hold exactly one ${shim.name} block.`);
-      return null;
-    }
-    return own.body;
-  }
 
   #projectN8n() {
     const rules = this.#readRequired(n8nRulesPath);
@@ -223,17 +191,15 @@ class InstructionProjectionOperation {
     this.#project(n8nAdapterTemplatePath, `${notice}\n\n${block}\n`, 'n8n adapter template');
   }
 
-  #projectTemplate(file, text) {
-    this.#project(`${templateRoot}/${file}`, text, 'repo-local instruction template');
-    this.#project(`${publishedRoot}/${file}`, text, 'portable instruction template');
-  }
-
-  #projectRootAgents(governedBlock) {
-    const current = readOptional('AGENTS.md');
-    let rest = this.#outside('AGENTS.md', current, ROOT_REPLACED_BLOCKS);
-    if (rest === null) return;
-    if (rest.startsWith(`${ROOT_HEADING}\n`) || rest === ROOT_HEADING) rest = rest.slice(ROOT_HEADING.length).trim();
-    this.#project('AGENTS.md', `${ROOT_HEADING}\n\n${governedBlock}\n${rest ? `\n${rest}\n` : ''}`);
+  // In both modes: these copies are removed by hand, never rewritten, so no fix command is named.
+  #refuseRootCopies() {
+    const { blocks, errors } = findBlocks(readOptional(ROOT_AGENTS));
+    if (blocks.length || errors.length) {
+      this.#errors.push(`Root ${ROOT_AGENTS} carries a Toolkit managed block; the installed Toolkit delivers the governed rules, so remove it by hand.`);
+    }
+    for (const rel of ruleFolderEntries()) {
+      this.#errors.push(`${rel} is not allowed: Antigravity reads ${ROOT_AGENTS} itself, so this repository keeps no rule files under ${RULES_FOLDER.join('/')}/; remove it.`);
+    }
   }
 
   #projectClaudeShim() {
@@ -248,32 +214,14 @@ class InstructionProjectionOperation {
     this.#project(CLAUDE_SHIM.target, CLAUDE_SHIM.text);
   }
 
-  #projectShim(shim, block) {
-    const rest = this.#outside(shim.target, readOptional(shim.target), [shim.name]);
-    if (rest === null) return;
-    this.#project(shim.target, `${block}\n${rest ? `\n${rest}\n` : ''}`);
-  }
-
   run() {
+    this.#refuseRootCopies();
     const versionText = this.#readRequired(versionPath);
     this.#version = versionText === null ? null : JSON.parse(versionText).version;
-    const governed = this.#readRequired(governedPath);
     this.#readRequired(globalPath);
     this.#projectN8n();
-    if (governed === null || !this.#version) return { errors: this.#errors };
-
-    this.#projectN8nAdapter();
-    const governedBlock = this.#block(governedPath, GOVERNED_BLOCK, governed);
-    this.#projectTemplate(MANAGED_TEMPLATE, this.#templateText(governedBlock));
-    this.#projectRootAgents(governedBlock);
     this.#projectClaudeShim();
-    for (const shim of SHIMS) {
-      const body = this.#shimBody(shim);
-      if (body === null) continue;
-      const block = this.#block(`${templateRoot}/${shim.file}`, shim.name, body);
-      this.#projectTemplate(shim.file, this.#templateText(block));
-      this.#projectShim(shim, block);
-    }
+    if (this.#version) this.#projectN8nAdapter();
     return { errors: this.#errors };
   }
 }
@@ -282,16 +230,12 @@ function validateAndSync(options = {}) { return new InstructionProjectionOperati
 
 // Every file this sync writes, for the merge train finder's generated-sync check: `blocks: null`
 // when the check above compares the whole file, else the block names it compares (the rest of the
-// file is hand-written). The repo-local shim templates are not here: their block body is a source.
+// file is hand-written).
 const PROJECTED_OUTPUTS = Object.freeze([
   ...n8nDerivativePaths.map(file => ({ path: file, blocks: null })),
   { path: n8nAdapterTemplatePath, blocks: null },
-  { path: `${templateRoot}/${MANAGED_TEMPLATE}`, blocks: null },
-  { path: `${publishedRoot}/${MANAGED_TEMPLATE}`, blocks: null },
-  { path: 'AGENTS.md', blocks: [...ROOT_REPLACED_BLOCKS] },
   { path: `${publishedRoot}/${CLAUDE_SHIM.file}`, blocks: null },
   { path: CLAUDE_SHIM.target, blocks: null },
-  ...SHIMS.flatMap(shim => [{ path: `${publishedRoot}/${shim.file}`, blocks: null }, { path: shim.target, blocks: [shim.name] }]),
 ].map(Object.freeze));
 
 if (require.main === module) {

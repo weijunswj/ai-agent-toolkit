@@ -152,8 +152,8 @@ test("a FAIL verdict on a shard refresh keeps it off, and a carried member never
 
 // ---- generated-sync ----
 
-const block = (body, version = '1.0.0') => `<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=${version} sha256=000000000000 -->\n${body}\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:END TOOLKIT-GOVERNED-RULES -->`;
-const agents = (inner, rest = 'Hand-written rules.') => `# AI Agent Toolkit Repo Rules\n\n${block(inner)}\n\n${rest}\n`;
+const block = (body, version = '1.0.0') => `<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=${version} sha256=000000000000 -->\n${body}\n<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->`;
+const readme = (inner, rest = 'Hand-written text.') => `# AI Agent Toolkit\n\n${block(inner)}\n\n${rest}\n`;
 // The Toolkit's own CI: the Validate workflow runs both syncs' --check, at the merge base and the head.
 const SYNC_CI = ref => ({
   [`${ref}:.github/workflows/validate.yml`]: 'jobs:\n  gate:\n    steps:\n      - run: |\n          node repo/scripts/sync-repo-doc-contract.cjs --check\n          node repo/scripts/sync-agent-instruction-shims.cjs --check\n',
@@ -167,37 +167,34 @@ const sync = (number, files, contents, { ci = true, pull: over = {} } = {}) => e
 
 test('a generated-sync change boards when only managed blocks and whole projected files change', t => {
   const { ready, skipped } = judge(t, [
-    sync(1, ['AGENTS.md', 'CLAUDE.md', 'skills/n8n-safety-router/n8n-safety-rules.md'], { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': agents('new') }),
+    sync(1, ['README.md', 'CLAUDE.md', 'skills/n8n-safety-router/n8n-safety-rules.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('new') }),
   ]);
   assert.deepEqual(ready, ['#1'], skipped);
 });
 
 test('a generated-sync change is refused for hand-written edits, a source file, broken markers or a missing block', t => {
   const { ready, skipped } = judge(t, [
-    sync(1, ['AGENTS.md'], { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': agents('new', 'Edited by hand.') }),
-    sync(2, ['AGENTS.md', 'repo/contracts/agent-rules/toolkit-governed-rules.md'], { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': agents('new') }),
-    sync(3, ['AGENTS.md'], { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': agents('new').replace(/<!-- AI-AGENT-TOOLKIT:[^\n]*:END[^\n]*-->/, '') }),
-    sync(4, ['AGENTS.md'], { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': '# AI Agent Toolkit Repo Rules\n\nHand-written rules.\n' }),
-    sync(5, ['repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md'], {}),
+    sync(1, ['README.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('new', 'Edited by hand.') }),
+    sync(2, ['README.md', 'repo/contracts/source-of-truth-contract.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('new') }),
+    sync(3, ['README.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('new').replace(/<!-- AI-AGENT-TOOLKIT:[^\n]*:END[^\n]*-->/, '') }),
+    sync(4, ['README.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': '# AI Agent Toolkit\n\nHand-written text.\n' }),
+    sync(5, ['repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md'], {}),
   ]);
   assert.deepEqual(ready, []);
-  assert.match(skipped, /#1: .*AGENTS\.md changes outside its managed blocks/);
+  assert.match(skipped, /#1: .*README\.md changes outside its managed blocks/);
   assert.match(skipped, /#2: no review verdict comment for its head 222222222222$/m, 'a source file in the change: an ordinary pull request');
-  assert.match(skipped, /#3: .*AGENTS\.md has broken or missing managed blocks/);
-  assert.match(skipped, /#4: .*AGENTS\.md has broken or missing managed blocks/);
-  assert.match(skipped, /#5: no review verdict comment for its head 555555555555$/m, 'a shim template whose block body is a source');
+  assert.match(skipped, /#3: .*README\.md has broken or missing managed blocks/);
+  assert.match(skipped, /#4: .*README\.md has broken or missing managed blocks/);
+  assert.match(skipped, /#5: no review verdict comment for its head 555555555555$/m, 'the CLAUDE.md shim template is a source');
 });
 
 test('the sync outputs the carry trusts are exactly the files the two syncs write', () => {
   assert.deepEqual([...carry.OUTPUTS.keys()].sort(), [
-    '.agents/rules/00-agent-toolkit-bootstrap.md', 'AGENTS.md', 'CLAUDE.md', 'README.md',
-    'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
+    'CLAUDE.md', 'README.md',
     'skills/n8n-environment-setup/references/n8n-safety-rules.md', 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md',
     'skills/n8n-safety-router/n8n-safety-rules.md', 'skills/n8n-workflow-transport/references/n8n-safety-rules.md',
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md', 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
   ]);
-  assert.deepEqual(carry.OUTPUTS.get('AGENTS.md'), ['TOOLKIT-GOVERNED-RULES']);
   assert.deepEqual(carry.OUTPUTS.get('README.md'), ['SOURCE-OF-TRUTH-CONTRACT']);
 });
 
@@ -218,19 +215,19 @@ test('a high-effort G2 stamp boards only a pull request of LIGHT .md files', t =
 });
 
 test("a generated-sync change in a repository whose CI does not run the syncs' --check needs a G2", t => {
-  const changes = { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': agents('anything at all') };
+  const changes = { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('anything at all') };
   // No entry here gives the shared merge base its CI files, so only the head's can be there.
   const headOnly = number => Object.fromEntries(Object.entries(SYNC_CI(sha(number))));
   const none = judge(t, [
     sync(1, ['CLAUDE.md'], {}, { ci: false }),
-    sync(2, ['AGENTS.md'], changes, { ci: false }),
-    sync(3, ['AGENTS.md'], { ...changes, ...headOnly(3) }, { ci: false }),
+    sync(2, ['README.md'], changes, { ci: false }),
+    sync(3, ['README.md'], { ...changes, ...headOnly(3) }, { ci: false }),
   ]);
   assert.deepEqual(none.ready, []);
   for (const number of [1, 2, 3]) assert.match(none.skipped, new RegExp(`#${number}: .*CI here does not run repo/scripts/sync-repo-doc-contract\\.cjs --check and repo/scripts/sync-agent-instruction-shims\\.cjs --check`), none.skipped);
   const head = judge(t, [
-    sync(4, ['AGENTS.md'], { ...changes, 'HEAD:.github/workflows/validate.yml': 'jobs: {}\n' }),
-    sync(5, ['AGENTS.md'], { ...changes, 'HEAD:repo/scripts/sync-agent-instruction-shims.cjs': null }),
+    sync(4, ['README.md'], { ...changes, 'HEAD:.github/workflows/validate.yml': 'jobs: {}\n' }),
+    sync(5, ['README.md'], { ...changes, 'HEAD:repo/scripts/sync-agent-instruction-shims.cjs': null }),
   ]);
   assert.deepEqual(head.ready, []);
   assert.match(head.skipped, /#4: .*CI here does not run repo\/scripts\/sync-repo-doc-contract\.cjs --check and /);

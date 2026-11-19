@@ -8,10 +8,11 @@ const { spawnSync } = require('node:child_process');
 const leftovers = require('../scripts/toolkit-leftover-files.cjs');
 
 const SCRIPT = require.resolve('../scripts/toolkit-leftover-files.cjs');
-const TEMPLATES = path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
 const PLAYBOOKS = require('../scripts/toolkit-playbooks.cjs').repositoryPlaybooks();
-const template = name => name.startsWith('docs/agent-playbooks/') ? PLAYBOOKS[name.slice('docs/agent-playbooks/'.length)] : fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
-const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(template('AGENTS.managed.template.md'))[0];
+const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
+const template = name => PLAYBOOKS[name.slice('docs/agent-playbooks/'.length)];
+const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(managedAgentsCopy())[0];
+const BROKEN = "its Toolkit markers are broken, so Toolkit cannot tell its text from the rest; fixing them by hand is the owner's choice";
 const CHECK = `#!/usr/bin/env node\n// AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED plain-text-check check=3 sha256=0123456789ab\n'use strict';\n`;
 
 // A GitHub folder of fixture checkouts. Each checkout's governance state is given by the test, the
@@ -174,8 +175,46 @@ test('broken markers, an old shim block, a programme file that is not "off", and
   } } });
   const widget = w.of(w.scan(), 'widget');
   assert.deepEqual(widget.files.map(item => [item.file, item.block || null]), [['GEMINI.md', 'GEMINI.SHIM']]);
-  assert.deepEqual(widget.unproven, [{ file: 'AGENTS.md', reason: 'its Toolkit markers are broken' }]);
+  assert.deepEqual(widget.unproven, [{ file: 'AGENTS.md', reason: BROKEN }]);
   assert.deepEqual(widget.kept, [{ file: '.github/toolkit-programme.json', reason: "it is the repository's programme file, which Toolkit reads for the on/off decision" }]);
+});
+
+// A complete governed block beside a broken marker is not proven either: where a block ends cannot be
+// told, so the file is named once, as not Toolkit's, and its one-line CLAUDE.md stays.
+test('broken markers beside a complete governed block: the file is only named as not listed', t => {
+  const w = world(t, { adopter: { state: 'ENABLED', files: {
+    'AGENTS.md': `${BLOCK}\n\n<!-- AI-AGENT-TOOLKIT:x:BEGIN EXTRA v1 -->\n# Own rules\n`,
+    'CLAUDE.md': '@AGENTS.md\n',
+    'docs/agent-playbooks/INDEX.md': template('docs/agent-playbooks/INDEX.md'),
+  } } });
+  const adopter = w.of(w.scan(), 'adopter');
+  assert.deepEqual(adopter.files.map(item => item.file), ['docs/agent-playbooks/INDEX.md']);
+  assert.deepEqual(adopter.unproven, [{ file: 'AGENTS.md', reason: BROKEN }]);
+  assert.deepEqual(adopter.kept.map(item => item.file), ['CLAUDE.md']);
+});
+
+// The curated-source comment is Toolkit's only as it last shipped and only as the first text left; an
+// older wording, or the comment further down, stays as the owner's text.
+test('the curated header goes only when it is the last shipped wording and the first text left', () => {
+  const header = require('../contracts/agent-rules/playbook-history.json').agents_header;
+  assert.equal(header, [
+    '<!--',
+    'Curated AI-facing source.',
+    'Source: repo/contracts/agent-rules/repo-local',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+    '-->',
+  ].join('\n'), 'the wording older setups wrote, kept as it shipped');
+  const drop = leftovers.withoutCuratedHeader;
+  assert.equal(drop(`${header}\n\n# Own rules\n`), '# Own rules\n');
+  assert.equal(drop(`${header}\n# Own rules\n`), '# Own rules\n');
+  assert.equal(drop(`${header}\n`), '');
+  assert.equal(drop(`\n${header}\n\n# Own rules\n`), '# Own rules\n', 'blank lines before it go with it');
+  assert.equal(drop(`${header.replace(/\n/g, '\r\n')}\r\n\r\n# Own rules\r\n`), '# Own rules\r\n', 'Windows line endings');
+  assert.equal(drop(`\uFEFF${header}\n\n# Own rules\n`), '\uFEFF# Own rules\n', 'a byte order mark stays');
+  for (const kept of [`# Own rules\n\n${header}\n`, `${header.replace('Curated', 'Older curated')}\n\n# Own rules\n`, `${header} trailing\n# Own rules\n`]) {
+    assert.equal(drop(kept), kept);
+  }
+  assert.equal(drop(`${header}\n\n\n# Own rules\n`), '\n# Own rules\n', 'only one blank line after it goes');
 });
 
 test('a symbolic link is never followed', { skip: process.platform === 'win32' }, t => {
@@ -265,7 +304,7 @@ test('a governed repository lists its instruction copies, including earlier and 
       '.github/toolkit-programme.json': '{ "governance": "enabled" }\n',
     } },
     // Nothing of its own is left once the block goes, so the one-line CLAUDE.md goes too.
-    template: { state: 'ENABLED', files: { 'AGENTS.md': template('AGENTS.managed.template.md'), 'CLAUDE.md': '@AGENTS.md\n', '.agents/rules/00-agent-toolkit-bootstrap.md': template('antigravity-bootstrap.template.md') } },
+    template: { state: 'ENABLED', files: { 'AGENTS.md': managedAgentsCopy(), 'CLAUDE.md': '@AGENTS.md\n', '.agents/rules/00-agent-toolkit-bootstrap.md': antigravityBootstrapCopy() } },
   });
   const scan = () => new leftovers.LeftoverScan({ githubFolder: w.folder, governance: w.governance, history }).scan();
   const report = scan();
@@ -281,6 +320,23 @@ test('a governed repository lists its instruction copies, including earlier and 
   const plain = w.of(report, 'template');
   assert.deepEqual(plain.files.map(item => [item.file, item.kind, item.empties ?? null]), [
     ['AGENTS.md', 'block', true], ['.agents/rules/00-agent-toolkit-bootstrap.md', 'block', true], ['CLAUDE.md', 'file', null]]);
+});
+
+// Two shipped texts whose hashes were recorded only under another name: project-completion-audit.md
+// (renamed to release-readiness-audit.md a day after it shipped) and a git-completion.md that was on
+// main for under an hour. The scan looks a copy up by its own name, so each hash is listed under the
+// name it shipped as. The texts are pinned by hash; reading them needs the full git history.
+test('the playbook history lists every shipped text under the name it shipped as', t => {
+  const history = require('../contracts/agent-rules/playbook-history.json').playbooks;
+  assert.ok(history['project-completion-audit.md'].includes('1981258f7b9c3a41'), 'project-completion-audit.md, blob c7a3567');
+  assert.ok(history['git-completion.md'].includes('59d87b96421ccca7'), 'git-completion.md, blob 9dbb943');
+  // The scan finds a copy by the hash listed under its own name.
+  const text = '# A text Toolkit shipped under one name\n';
+  const hash = require('node:crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
+  const w = world(t, { adopter: { state: 'ENABLED', files: { 'docs/agent-playbooks/project-completion-audit.md': text } } });
+  const scanWith = names => w.of(new leftovers.LeftoverScan({ githubFolder: w.folder, governance: w.governance, history: names }).scan(), 'adopter');
+  assert.deepEqual(scanWith({ 'project-completion-audit.md': [hash] }).files.map(item => [item.file, item.proof]), [['docs/agent-playbooks/project-completion-audit.md', 'same as an earlier Toolkit copy']]);
+  assert.deepEqual(scanWith({ 'project-completion-audit.md': [], 'release-readiness-audit.md': [hash] }).files, [], 'a hash under another name is not proof');
 });
 
 test('every playbook Toolkit ships now is in the playbook history, so a copy made from it is always recognised', () => {

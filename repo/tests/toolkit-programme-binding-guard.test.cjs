@@ -20,6 +20,21 @@ const recorded = require('./fixtures/programme-binding-guard/expected-4707537.js
 const now = evaluate(state);
 const before = recorded.results;
 
+// Main's answer with its store-kind refusal made plain: the line that said a kind "is not supported
+// (supported: github)" and the store lines after it become one line saying what a store must be and
+// what works without one. Every other error stays exactly as main recorded it.
+const STORE_NEEDED = 'Toolkit governance keeps its programme state in a private GitHub repository (store.kind "github"); a folder or drive can hold evidence copies but not this state. Without such a store, leave governance off.';
+function withPlainStoreRefusal(was) {
+  const errors = was.validate.errors || [];
+  const at = errors.findIndex(line => /^store\.kind (?:undefined|"[a-z]+") is not supported \(supported: github\)$/.test(line));
+  if (at < 0) return was;
+  const kind = /^store\.kind "([a-z]+)"/.exec(errors[at]);
+  const plain = `${kind ? `store.kind "${kind[1]}" is not supported` : 'the binding names no evidence store'}: ${STORE_NEEDED}`;
+  const kept = errors.filter(line => !line.startsWith('store.'));
+  kept.splice(at, 0, plain);
+  return { ...was, validate: { ...was.validate, message: `.github/toolkit-programme.json is invalid: ${kept[0]}`, errors: kept } };
+}
+
 test('the guard answers were recorded from the bound main', () => {
   assert.equal(recorded.recorded_from, '47075370b3b6c51662545a85757d43aaf0740d29');
   assert.equal(before.bindings.length, BINDINGS.length);
@@ -41,8 +56,9 @@ test('every binding keeps main\'s answer, except a v2 binding whose one new key 
     } else {
       assert.equal(is.validate.ok, false, `${entry.name} stays invalid`);
       assert.equal(is.validate.code, was.validate.code, `${entry.name} keeps its error code`);
-      // Bindings without a state key keep their exact errors too.
-      if (!Object.hasOwn(Object(entry.binding), 'state')) assert.deepEqual(is, was, `${entry.name} keeps its exact errors`);
+      // Bindings without a state key keep their exact errors too, except that a missing or unsupported
+      // store is now one plain refusal in place of main's store lines.
+      if (!Object.hasOwn(Object(entry.binding), 'state')) assert.deepEqual(is, withPlainStoreRefusal(was), `${entry.name} keeps its exact errors`);
     }
   }
 });

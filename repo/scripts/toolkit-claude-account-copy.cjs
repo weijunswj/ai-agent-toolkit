@@ -39,11 +39,9 @@ function accountCopyBehind(accountVersion, localVersion) {
 }
 
 function isOlder(left, right) {
-  const valid = (value) => /^\d+\.\d+\.\d+$/.test(value || '');
-  if (!valid(left) || !valid(right)) return false;
-  const a = left.split('.').map(Number), b = right.split('.').map(Number);
-  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] < b[i];
-  return false;
+  const { SEMVER, compareVersions } = require('./toolkit-version.cjs');
+  if (!SEMVER.test(left || '') || !SEMVER.test(right || '')) return false;
+  return compareVersions(left, right) < 0;
 }
 
 // Setup's line for the Claude app: setup cannot update the account copy, and when it is behind,

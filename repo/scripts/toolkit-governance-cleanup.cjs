@@ -19,23 +19,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const blocks = require('./toolkit-managed-block.cjs');
-const { LeftoverScan } = require('./toolkit-leftover-files.cjs');
+const { LeftoverScan, withoutCuratedHeader } = require('./toolkit-leftover-files.cjs');
 const { oldSweepCopies } = require('./toolkit-ci-shards-offer.cjs');
 
-// The first release whose installed Toolkit gives sessions the governed rules. A copy that knows the
-// key and is older says to update; a copy older than the key reads the binding as ERROR, which also
-// holds governance effects while ordinary work continues.
-const MIN_TOOLKIT = '3.127.0';
+// The floor a cleaned repository needs: the first release whose installed Toolkit gives sessions the
+// governed rules whole (with the session-start truncation fix), turns governance on without writing
+// rule copies and runs this cleanup. A copy that knows the key and is older says to update; a copy
+// older than the key reads the binding as ERROR, which also holds governance effects while ordinary
+// work continues. Toolkit's own binding carries the same floor.
+const MIN_TOOLKIT = '3.137.0';
 const BINDING_FILE = '.github/toolkit-programme.json';
 const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
 
-// A Toolkit source checkout builds its own instruction files from the templates, so its copies are
-// cleaned by hand there, never by this command.
-const SOURCE_MARKERS = Object.freeze(['skills/repository-agent-rules/repo-local/AGENTS.managed.template.md', 'repo/scripts/sync-agent-instruction-shims.cjs']);
-
 // A governed repository's sweep copies run the Toolkit commit they are pinned to, which reads the
 // programme file with its own validator: a commit whose validator does not know min_toolkit reads the
-// cleaned file as invalid and the sweep stops updating the programme board.
+// cleaned file as invalid and the sweep stops updating the programme board. A commit this Toolkit copy
+// cannot read is not checked, so it holds the cleanup too. Returns { tooOld, unchecked }.
 const STATE_SCRIPT = 'skills/github-program-reconciler/scripts/programme-state.cjs';
 function sweepCopiesWithoutMinToolkit(root) {
   const toolkitRoot = require('./toolkit-cloud-workflows.cjs').sourceRoot();
@@ -47,7 +46,16 @@ function sweepCopiesWithoutMinToolkit(root) {
 
 // The binding reader and its retired keys, loaded on first use.
 const programmeState = () => require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
-const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
+const { SEMVER, compareVersions, isToolkitSourceCheckout } = require('./toolkit-version.cjs');
+
+// Why the pinned sweep copies hold the cleanup, naming the too old and the unchecked ones apart.
+function heldBy({ tooOld = [], unchecked = [] }) {
+  if (!tooOld.length && !unchecked.length) return null;
+  const parts = [];
+  if (tooOld.length) parts.push(`the pinned Toolkit copies ${tooOld.join(', ')} run a Toolkit that does not know min_toolkit, so after the cleanup they would read the programme file as invalid and the programme board would stop updating`);
+  if (unchecked.length) parts.push(`the pinned Toolkit copies ${unchecked.join(', ')} could not be checked, because this Toolkit copy cannot read the commit they are pinned to (it is not a Toolkit git checkout, or does not have that commit yet), so they might read the cleaned programme file as invalid`);
+  return { held: parts.join('; '), step: tooOld.length ? 'Refresh them first' : 'Run this from a Toolkit git checkout that has their commit, or refresh them first' };
+}
 
 // The programme file with min_toolkit set, in its own layout (indent, line endings, byte order mark),
 // so the pull request shows one added or changed line; a layout it cannot follow is written out whole.
@@ -70,11 +78,14 @@ function withMinToolkit(original, binding) {
   return same(edited) ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
 }
 
-// { ok, changes: [{ file, action }], lines }, plus { held, files } when the pinned sweep copies hold it.
-// `governance` and `sweepReaders` (root => the sweep copies that cannot read min_toolkit) are for tests.
+// { ok, changes: [{ file, action }], lines }, plus { held, step, files } when the pinned sweep copies hold it
+// and { refused, files } when the programme file stops it after the scan, so the bank can say why.
+// `governance` and `sweepReaders` (root => { tooOld, unchecked } sweep copies) are for tests.
 function run({ root, write = false, governance = null, sweepReaders = sweepCopiesWithoutMinToolkit }) {
   if (!fs.existsSync(path.join(root, '.git'))) return { ok: false, changes: [], lines: [`Nothing was changed: ${root} is not the top folder of a git checkout.`] };
-  if (SOURCE_MARKERS.every(file => fs.existsSync(path.join(root, ...file.split('/'))))) {
+  // A Toolkit source checkout builds its own instruction files from the templates, so its copies are
+  // cleaned by hand there, never by this command.
+  if (isToolkitSourceCheckout(root)) {
     return { ok: false, changes: [], lines: ['Nothing was changed: this is a Toolkit source checkout, which builds its own instruction files from the templates, so its copies are removed by hand in a source pull request.'] };
   }
   const scan = new LeftoverScan({ discover: () => [], ...(governance ? { governance } : {}) }).inspect(root);
@@ -88,23 +99,25 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
     if (items[0].kind !== 'block' || items[0].empties) { changes.push({ file, action: 'delete' }); continue; }
     let text = fs.readFileSync(path.join(root, file), 'utf8');
     for (const item of items) text = blocks.removeBlock(text, item.block);
+    text = withoutCuratedHeader(text);
     changes.push({ file, action: 'remove-block', text, edited: items.some(item => item.edited) });
   }
 
   let binding, bindingText = '';
   try { bindingText = fs.readFileSync(path.join(root, BINDING_FILE), 'utf8'); binding = JSON.parse(bindingText.replace(/^\uFEFF/, '')); } catch { binding = null; }
+  const refuse = refused => ({ ok: false, refused, files: changes.length, changes: [], lines: [`Nothing was changed: ${refused}.`] });
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
-    return { ok: false, changes: [], lines: [`Nothing was changed: ${BINDING_FILE} could not be read, so min_toolkit cannot be set. Fix it first.`] };
+    return refuse(`${BINDING_FILE} could not be read, so min_toolkit cannot be set. Fix it first`);
   }
   // min_toolkit is a version 2 key: a version 1 binding holding it would read as invalid once merged.
   if (binding.schema !== 'toolkit.programme-binding.v2') {
-    return { ok: false, changes: [], lines: [`Nothing was changed: ${BINDING_FILE} is not a version 2 programme file, and only version 2 can carry min_toolkit. Move it to version 2 first.`] };
+    return refuse(`${BINDING_FILE} is not a version 2 programme file, and only version 2 can carry min_toolkit. Move it to version 2 first`);
   }
-  if (typeof binding.min_toolkit !== 'string' || newer(MIN_TOOLKIT, binding.min_toolkit)) {
-    const old = sweepReaders(root);
-    if (old.length) {
-      const held = `the pinned Toolkit copies ${old.join(', ')} run a Toolkit that does not know min_toolkit, so after the cleanup they would read the programme file as invalid and the programme board would stop updating`;
-      return { ok: false, held, files: changes.length, changes: [], lines: [`Nothing was changed: ${held}. Refresh them first (toolkit-cloud-workflows.cjs --repo <repository>, one pull request the owner merges), then clean up.`] };
+  // A value that is not a version is replaced, as an older one is raised.
+  if (typeof binding.min_toolkit !== 'string' || !SEMVER.test(binding.min_toolkit) || compareVersions(MIN_TOOLKIT, binding.min_toolkit) > 0) {
+    const hold = heldBy(sweepReaders(root));
+    if (hold) {
+      return { ok: false, held: hold.held, step: hold.step, files: changes.length, changes: [], lines: [`Nothing was changed: ${hold.held}. ${hold.step} (toolkit-cloud-workflows.cjs --repo <repository>, one pull request the owner merges), then clean up.`] };
     }
     const retired = programmeState().RETIRED_BINDING_KEYS.filter(key => Object.hasOwn(binding, key));
     changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: withMinToolkit(bindingText, binding), retired });
@@ -124,6 +137,10 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
   if (changes.length) lines.push(write
     ? 'Next: commit these on a new branch and open one pull request for the owner to merge. It deletes files, so it never goes through task auto-merge.'
     : 'Run again with --write to make these changes in the working tree.');
+  // Every app that works here reads min_toolkit once this merges, and an older copy holds governance.
+  if (write && changes.some(change => change.action === 'set-min-toolkit')) {
+    lines.push(`Before merging, update Toolkit on every app that works in this repository (setup toolkit), so each copy is ${MIN_TOOLKIT} or later. A copy that then reads the programme file as unusable needs updating; never remove min_toolkit to quiet it.`);
+  }
   return { ok: true, changes: changes.map(({ file, action }) => ({ file, action })), lines };
 }
 

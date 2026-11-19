@@ -519,6 +519,19 @@ test('AT16b: an answer that never comes or cannot be read holds within the time 
   });
 });
 
+test('AT16c: a named Codex the system cannot start holds as cannot be started, not as unreadable', { skip: process.platform === 'win32' }, async t => {
+  const f = fixture(t);
+  // An executable script whose interpreter does not exist: the file is there, but the start fails
+  // only after spawn is called (async ENOENT), so it must still read as a start failure.
+  const codex = path.join(f.root, 'bin', 'codex');
+  write(codex, '#!/nonexistent-toolkit-interpreter/node\n');
+  fs.chmodSync(codex, 0o755);
+  const r = await launchCheck({ codexHome: f.codexHome, codex, timeoutMs: 5000 });
+  assert.equal(r.code, 1);
+  assert.match(r.line, /\(cannot be started directly\)/);
+  assert.doesNotMatch(r.line, /readable answer/);
+});
+
 test('AT18: a trusted_hash that is not sha256 plus 64 hex characters is unverified everywhere', t => {
   for (const hash of ['not-a-hash', `sha256:${'B'.repeat(64)}`, `sha256:${'b'.repeat(63)}`]) {
     const f = fixture(t); const config = path.join(f.codexHome, 'config.toml');

@@ -258,3 +258,83 @@ test('an order that expires after its checks but before its first write writes n
   assert.equal(f.github.commits, before, 'nothing written, not even the log entry');
   assert.equal(f.parentDoc().private?.holder_orders, undefined);
 });
+
+test('a same-role gate after an accepted one is a reopen under a new assignment, as the gate route says', t => {
+  const f = setup(t);
+  let n = 0;
+  const ops = list => f.run(f.order({ order_id: `gate-${++n}`, ops: list })).report.results.map(entry => `${entry.command}:${entry.outcome}${entry.code ? `:${entry.code}` : ''}`);
+  const gate = () => f.store.read('child', 423).doc.gate;
+  const end = id => assert.deepEqual(ops([{ command: 'return', issue: 423, record: `${id}.r1`, assignment: id },
+    { command: 'return', issue: 423, consume: `${id}.r1`, verdict: 'ACCEPT' }]), ['return:WRITTEN', 'return:WRITTEN']);
+  const sameRole = (role, id, label) => {
+    assert.equal(gate().state, 'RETIRED', `${label}: the last gate is accepted`);
+    assert.equal(gate().role, role);
+    assert.deepEqual(ops([{ command: 'assign', issue: 423, role, assignment: id }]), ['assign:REFUSED:GATE_STATE'], `${label}: plain assign`);
+    assert.deepEqual(ops([{ command: 'assign', issue: 423, role, assignment: id, supersede: true, reason: `${role} follows ${role}` }]), ['assign:REFUSED:GATE_STATE'], `${label}: assign --supersede`);
+    assert.deepEqual(ops([{ command: 'reopen', issue: 423, assignment: id, reason: `${role} follows accepted ${role}` }]), ['reopen:WRITTEN'], `${label}: reopen`);
+    assert.equal(gate().state, 'ASSIGNED', `${label}: live again`);
+    assert.equal(gate().role, role, `${label}: reopen keeps the role`);
+    assert.equal(gate().assignment.id, id, `${label}: under the new assignment`);
+    assert.equal(state.completionAccepted(f.store.read('child', 423).doc), false, `${label}: completion waits for the new verdict`);
+    end(id);
+    assert.equal(gate().state, 'RETIRED', `${label}: its ACCEPT ends it`);
+    assert.equal(gate().assignment.id, id);
+  };
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G0', assignment: 'g0' }]), ['assign:WRITTEN']);
+  end('g0');
+  sameRole('G0', 'g0-second', 'second G0');
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G1', assignment: 'g1' }]), ['assign:WRITTEN'], 'another role after an accepted gate is a plain assign');
+  assert.deepEqual(ops([{ command: 'return', issue: 423, record: 'g1.r1', assignment: 'g1' }]), ['return:WRITTEN']);
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G2', assignment: 'g2', supersede: true, reason: 'G2 follows G1' }]), ['assign:WRITTEN']);
+  end('g2');
+  assert.equal(state.completionAccepted(f.store.read('child', 423).doc), true);
+  sameRole('G2', 'g2-delta', 'delta G2 after a PASS');
+  sameRole('G2', 'g2-recheck', 'G2 recheck with no G1 round between');
+  assert.equal(state.completionAccepted(f.store.read('child', 423).doc), true);
+  assert.deepEqual(state.validateParent(f.parentDoc()), []);
+  // The documented routes name this; if the state machine ever lets `assign` take an accepted gate's own role, change both.
+  const root = path.join(__dirname, '..', '..');
+  const route = fs.readFileSync(path.join(root, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference', 'periodic-runs.md'), 'utf8')
+    .split('\n').find(line => line.startsWith('- **Gate assignments**'));
+  assert.ok(route.includes("When the task's last gate is an accepted one of the same role") && route.includes('both `assign` forms are refused (`GATE_STATE`)')
+    && route.includes('queue `reopen --issue <n> --assignment <id> --reason'), 'the Projects gate route names the reopen');
+  const skill = fs.readFileSync(path.join(root, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8').split('\n').find(line => line.startsWith('**Gates.**'));
+  assert.ok(skill.includes("`assign` for an accepted gate's own role is refused with or without `--supersede` (`GATE_STATE`)")
+    && skill.includes('is a `reopen` under a new `--assignment`'), 'the reconciler Gates line names the reopen');
+});
+
+test('a holder order that starts a gate drops the task\'s lane wait in that one write and keeps every other blocker', t => {
+  const f = setup(t);
+  const wait = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  let n = 0;
+  const ops = list => f.run(f.order({ order_id: `wait-${++n}`, ops: list })).report.results.map(entry => `${entry.command}:${entry.outcome}`);
+  assert.deepEqual(ops([{ command: 'update', issue: 423, patch: { lifecycle: 'ACTIVE', blockers: [wait, 'waits for PR 1098'] } }]), ['update:WRITTEN']);
+  const started = f.run(f.order({ order_id: `wait-${++n}`, ops: [{ command: 'assign', issue: 423, role: 'G1', assignment: 'g1-wait' }] })).report.results;
+  assert.deepEqual(started, [{ at: 1, command: 'assign', outcome: 'WRITTEN', dropped_lane_waits: [wait] }], 'the result names each lane wait it dropped, so a wrong drop shows the same turn');
+  const child = f.store.read('child', 423).doc;
+  assert.deepEqual(child.blockers, ['waits for PR 1098'], 'no separate blocker write is needed');
+  assert.equal(child.gate.state, 'ASSIGNED');
+  assert.equal(child.private.lane_wait, undefined, 'the stamp goes with the last lane wait');
+  assert.deepEqual(f.parentDoc().private.holder_orders.find(entry => entry.order_id === `wait-${n}`).results.at(-1).dropped_lane_waits, [wait], 'and so does the order log');
+  const restarted = f.run(f.order({ order_id: `wait-${++n}`, ops: [{ command: 'interrupt', issue: 423, reason: 'the thread stopped' },
+    { command: 'assign', issue: 423, role: 'G1', assignment: 'g1-wait2' }] })).report.results;
+  assert.deepEqual(restarted.map(entry => Object.keys(entry).join()), ['at,command,outcome', 'at,command,outcome'], 'nothing dropped, nothing listed');
+  const sentBack = f.run(f.order({ order_id: `wait-${++n}`, ops: [{ command: 'return', issue: 423, record: 'g1-wait2.r1', assignment: 'g1-wait2' },
+    { command: 'update', issue: 423, patch: { blockers: [wait, 'waits for PR 1098'] } }, { command: 'return', issue: 423, consume: 'g1-wait2.r1', verdict: 'REOPEN' },
+    { command: 'return', issue: 423, record: 'g1-wait2.r2', assignment: 'g1-wait2' }, { command: 'update', issue: 423, patch: { blockers: [wait] } },
+    { command: 'reopen', issue: 423, reason: 'the owner asked for one more fix' }] })).report.results;
+  assert.deepEqual(sentBack.map(entry => entry.outcome), Array(6).fill('WRITTEN'));
+  assert.deepEqual(sentBack.map(entry => entry.dropped_lane_waits || null), [null, null, [wait], null, null, [wait]], 'consume REOPEN and reopen name their drops too');
+  assert.deepEqual(f.store.read('child', 423).doc.blockers, [], 'fixture: the last reopen dropped the wait');
+  // The documented routes name the lane wait and its drop; change them with the state machine.
+  const root = path.join(__dirname, '..', '..');
+  const route = fs.readFileSync(path.join(root, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference', 'periodic-runs.md'), 'utf8')
+    .split('\n').find(line => line.startsWith('- **Gate assignments**'));
+  for (const phrase of ['one blocker starting with the word `Queued`', '`assign` and `reopen` drop it and keep every other blocker', 'Answer `QUEUED_BUT_MOVING`', 'a commit after the wait and outside every recorded gate', 'with the missed `assign`', "check each result's `dropped_lane_waits`"]) assert.ok(route.includes(phrase), phrase);
+  const skill = fs.readFileSync(path.join(root, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^  - Status is worked out: [^\n]*one blocker starting with the word `Queued` [^\n]*`assign` and `reopen` \(and a consume `REOPEN`\) drop lane waits in the same write and keep every other blocker/m);
+  assert.match(skill, /^- `QUEUED_BUT_MOVING`: [^\n]*committed after the wait was written and after its last recorded gate ended/m);
+  assert.match(skill, /`assign`, `reopen` and a consume `REOPEN` list each one they dropped \(`dropped_lane_waits`/);
+  assert.match(skill, /^- `QUEUED_BUT_MOVING`: A task shown `NOW · QUEUED` by lane waits alone/m);
+  assert.match(skill, /`TASK_IDLE`, `TASK_MERGED_OPEN`, `QUEUED_BUT_MOVING` and `BATCH_NEXT` are its alarms/);
+});

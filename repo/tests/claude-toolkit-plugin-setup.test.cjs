@@ -11,6 +11,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const setup = require('../scripts/setup-claude-toolkit-plugin.cjs');
+const { controllerFiles } = require('./support/controller-text.cjs');
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'claude-toolkit-plugin-'));
@@ -1001,15 +1002,39 @@ test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {
   assert.match(result.stderr, /no usable claude code cli/i);
 });
 
-test('installed enforcement byte verification rejects missing and stale cache files', () => {
+// A package fixture with the actual canonical runtime, contracts and every controller page the
+// core lists, so a page added later is in the fixture without editing it.
+function enforcementCache() {
   const cache = tmpRoot();
-  // A package fixture contains the actual canonical runtime and contracts.
-  // Negative checks below independently remove/drift protected cache files.
   for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts','skills/secure-ci-cd/scripts']) {
     fs.cpSync(path.join(repoRoot,directory),path.join(cache,directory),{recursive:true});
   }
   fs.mkdirSync(path.join(cache,'repo','controller'),{recursive:true});
-  for(const file of ['repo/CONTROLLER.md','repo/controller/roles-and-routes.md','repo/controller/gates.md','repo/controller/evidence-and-finish.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
+  for(const file of [...controllerFiles(repoRoot),'repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
+  return cache;
+}
+
+test('installed enforcement byte verification covers every controller page the core lists', () => {
+  const cache = enforcementCache();
+  const evaluate = () => setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(evaluate().ok, true);
+  for (const rel of controllerFiles(repoRoot)) {
+    const file = path.join(cache, ...rel.split('/'));
+    fs.appendFileSync(file, ' ');
+    let state = evaluate();
+    assert.equal(state.ok, false, rel);
+    assert.ok(state.errors.includes(`installed plugin cache is stale for ${rel}`), `${rel}: ${state.errors.join('; ')}`);
+    fs.rmSync(file);
+    state = evaluate();
+    assert.ok(state.errors.includes(`installed plugin cache is missing ${rel}`), `${rel}: ${state.errors.join('; ')}`);
+    fs.copyFileSync(path.join(repoRoot, ...rel.split('/')), file);
+  }
+  assert.equal(evaluate().ok, true);
+});
+
+test('installed enforcement byte verification rejects missing and stale cache files', () => {
+  // Negative checks below independently remove/drift protected cache files.
+  const cache = enforcementCache();
   assert.equal(setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot }).ok, true);
   fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' ');
   let state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });

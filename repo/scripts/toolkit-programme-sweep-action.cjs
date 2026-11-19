@@ -52,7 +52,7 @@ const PRIVATE_KEY_SECRET = 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY';
 const BINDING_PATH = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_LIMIT = 64 * 1024;
 // The scheduled pass's own kill; the workflow stops the job three minutes after it.
-const { RESET_WAIT_MS } = require('./toolkit-programme-sweep-gate.cjs');
+const { RESET_WAIT_MS, NO_PARENT_STATE, INIT_PARENT } = require('./toolkit-programme-sweep-gate.cjs');
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const RUN_TIMEOUT_MS = programmeState.PASS_BUDGETS.scheduled.killMs;
 // A version 1 binding has no governance key and reads as enabled, as everywhere else.
@@ -95,6 +95,16 @@ const NO_PASS_TITLE = 'Programme Sweep no pass';
 function holdCodes(report) {
   const codes = [...new Set((Array.isArray(report?.holds) ? report.holds : []).map(hold => hold?.code).filter(code => /^[A-Z][A-Z0-9_]{0,63}$/.test(code || '')))];
   return codes.length ? codes.sort().join(', ') : 'unnamed';
+}
+// A pass held only for missing parent state (a new repository's first sweeps) names the setup step
+// and the parent; any other hold keeps the general text, so no hold hides behind the setup step.
+const HELD_WARNING = 'Programme Sweep held: this pass held and the next run retries; three held runs in a row turn the hourly gate red.';
+function heldWarning(report) {
+  const holds = Array.isArray(report?.holds) ? report.holds : [];
+  if (!holds.length || !holds.every(hold => hold?.code === 'PARENT_STATE_MISSING')) return HELD_WARNING;
+  // Only a plain issue number is echoed into the annotation.
+  const parents = [...new Set(holds.map(hold => hold.target).filter(target => /^#[1-9][0-9]{0,9}$/.test(target || '')))];
+  return `Programme Sweep held: ${NO_PARENT_STATE} The controller creates it for ${parents.length ? parents.join(', ') : 'the parent issue'} with ${INIT_PARENT}; the next run retries.`;
 }
 const NOTICES = Object.freeze({
   main_moved: 'Programme Sweep skipped: the default branch moved while this run was starting; the next run picks it up.',
@@ -358,7 +368,7 @@ class ProgrammeSweepAction {
     // A pass that saved nothing (PAUSED stays calm: it read nothing and the follow-up resumes it) is
     // held too, so the gate counts it toward its streak.
     const unsaved = result.report?.outcome !== 'PAUSED' && result.report?.outcome !== 'QUEUED' && wroteNothing(result.report);
-    if (held || unsaved) this.warning(held ? 'Programme Sweep held: this pass held and the next run retries; three held runs in a row turn the hourly gate red.' : NOTICES.unsaved, { title: HELD_TITLE, code: held ? holdCodes(result.report) : 'NO_WRITE' });
+    if (held || unsaved) this.warning(held ? heldWarning(result.report) : NOTICES.unsaved, { title: HELD_TITLE, code: held ? holdCodes(result.report) : 'NO_WRITE' });
     // A run queued behind another sweep did not run a pass and holds no lease: footer cleaning skips
     // it, and the sweep that is running needs no follow-up from it.
     if (result.report?.outcome === 'QUEUED') return 0;

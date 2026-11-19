@@ -1,14 +1,18 @@
 'use strict';
 
 // Contract checks for the two instruction layers and their projections: the global rules source,
-// the Toolkit-governed block (root AGENTS.md and the portable template), the host shims and the
-// portable playbooks. These are instruction checks, not native permission or live-operation tests.
+// the Toolkit-governed rules (delivered at session start; root AGENTS.md carries no copy), the host
+// shims and the portable playbooks. These are instruction checks, not native permission or live-operation
+// tests.
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { controllerText } = require('./support/controller-text.cjs');
 const { findBlocks, bodyDigest, blockState } = require('../scripts/toolkit-managed-block.cjs');
+const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const globalPath = 'repo/contracts/agent-rules/global-rules.md';
@@ -17,16 +21,6 @@ const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md'
 const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
-const SHIMS = [
-  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', active: '.agents/rules/00-agent-toolkit-bootstrap.md', heading: '# Agent Toolkit Antigravity Bootstrap' }
-];
-const safetyComment = [
-  '<!--',
-  'Curated AI-facing source.',
-  'Source: repo/contracts/agent-rules/repo-local',
-  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-  '-->'
-].join('\n');
 const forbiddenDefaultPromptPhrases = ['GitHub PR Completion Rules', 'GITHUB APPROVAL NEEDED', 'VERSION CONTROL APPROVAL NEEDED',
   'REMOTE APPROVAL NEEDED', 'LOCAL CHANGE APPROVAL NEEDED', 'PR: none yet', 'PR lane', 'remote source-of-truth', 'GitHub PR URL',
   'Should I push this branch'];
@@ -64,35 +58,82 @@ test('the rule sources exist and the superseded sources and templates are gone',
   }
 });
 
-test('the governed block reaches root AGENTS.md and both templates unchanged, inside current v2 markers', () => {
-  const governed = readText(governedPath).trimEnd();
-  for (const relPath of ['AGENTS.md', `${repoLocalSourceRoot}/AGENTS.managed.template.md`, `${repoLocalPublishedRoot}/AGENTS.managed.template.md`]) {
-    assertCurrentBlock(relPath, 'TOOLKIT-GOVERNED-RULES', governedPath, governed);
+// The governed-block and Antigravity bootstrap templates are retired: nothing installed them, and a
+// Toolkit source checkout is known by files every Toolkit tree keeps. No script, test, hook fixture,
+// manifest or workflow may read them again.
+const RETIRED_TEMPLATES = ['AGENTS.managed.template.md', 'antigravity-bootstrap.template.md'];
+test('the retired instruction templates are gone from both trees and no code or fixture names them', () => {
+  for (const root of [repoLocalSourceRoot, repoLocalPublishedRoot]) {
+    for (const file of RETIRED_TEMPLATES) assert.equal(exists(`${root}/${file}`), false, `${root}/${file}`);
   }
-  const template = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`);
-  assert.equal(readText(`${repoLocalPublishedRoot}/AGENTS.managed.template.md`), template);
-  assert.ok(template.startsWith(`${safetyComment}\n\n`));
-  assert.equal(findBlocks(template).blocks.length, 1, 'the template carries only the governed block');
-  const root = readText('AGENTS.md');
-  assert.ok(root.startsWith('# AI Agent Toolkit Repo Rules\n\n<!-- AI-AGENT-TOOLKIT:'));
-  assert.doesNotMatch(root, /GLOBAL-AGENTS\.MD-TEMPLATE|N8N-AGENT-RULES-ADAPTER|SOURCE-OF-TRUTH-CONTRACT/);
+  // This test, and the test support that builds the old copies, whose markers name their retired source.
+  const skipped = [path.relative(repoRoot, __filename), path.relative(repoRoot, require.resolve('./support/retired-instruction-copies.cjs'))]
+    .map(file => file.split(path.sep).join('/'));
+  // The n8n router test lists this older top-level path as one that must stay absent.
+  const olderAbsent = 'skills/repository-agent-rules/antigravity-bootstrap.template.md';
+  const code = childProcess.execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' }).split('\0')
+    .filter(file => /\.(?:c?js|mjs|json|ps1|sh|ya?ml)$/.test(file) && !skipped.includes(file) && exists(file));
+  assert.ok(code.includes('repo/scripts/toolkit-local-bridge.cjs'), 'the scan sees the scripts');
+  const naming = code.filter(file => {
+    const text = fs.readFileSync(path.join(repoRoot, file), 'utf8').split(olderAbsent).join('');
+    return RETIRED_TEMPLATES.some(name => text.includes(name));
+  });
+  assert.deepEqual(naming, []);
 });
 
-test('host shims stay tiny, carry current markers and match their templates', () => {
-  for (const shim of SHIMS) {
-    const source = `${repoLocalSourceRoot}/${shim.file}`;
-    const template = readText(source);
-    assert.equal(readText(`${repoLocalPublishedRoot}/${shim.file}`), template);
-    assert.ok(template.startsWith(`${safetyComment}\n\n`));
-    const block = onlyBlock(source, shim.name);
-    assertCurrentBlock(shim.active, shim.name, source, block.body);
-    const active = readText(shim.active);
-    assert.ok(active.includes(shim.heading), shim.active);
-    if (shim.importLine) assert.equal(active.split('\n').filter(line => line.trim() === shim.importLine).length, 1, shim.active);
-    assert.match(active, /Root `AGENTS\.md` is (?:canonical|the canonical repo instruction file)\./);
-    assert.ok(Buffer.byteLength(active) < 1024, `${shim.active} under 1 KB`);
+test('root AGENTS.md carries no Toolkit marker and no Antigravity rule file exists', () => {
+  // The installed Toolkit delivers the governed rules here too, so the root file is all hand-written.
+  const root = readText('AGENTS.md');
+  assert.ok(root.startsWith('# AI Agent Toolkit Repo Rules\n\n## This Repository\n'));
+  assert.doesNotMatch(root, /^<!-- AI-AGENT-TOOLKIT:/m);
+  assert.equal(exists('.agents/rules/00-agent-toolkit-bootstrap.md'), false, 'Antigravity reads AGENTS.md itself');
+});
+
+// A copy of the files the sync reads and writes, so its check can be run on a changed root.
+function syncWorkspace(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-instruction-sync-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { PROJECTED_OUTPUTS } = require('../scripts/sync-agent-instruction-shims.cjs');
+  for (const relPath of ['repo/contracts/agent-rules', 'repo/contracts/toolkit-local-bridge/version.json', 'AGENTS.md',
+    ...PROJECTED_OUTPUTS.map(output => output.path)]) {
+    fs.cpSync(path.join(repoRoot, relPath), path.join(dir, relPath), { recursive: true });
   }
-  assert.doesNotMatch(readText('.agents/rules/00-agent-toolkit-bootstrap.md'), /@\.\.\/\.\.\/AGENTS\.md/);
+  const sync = (...args) => childProcess.spawnSync(process.execPath, [path.join(repoRoot, 'repo/scripts/sync-agent-instruction-shims.cjs'), ...args, '--workspace', dir], { encoding: 'utf8' });
+  return { dir, sync };
+}
+
+test('the sync check refuses a Toolkit block or the Antigravity bootstrap brought back into the root, and --write never re-adds them', t => {
+  const { dir, sync } = syncWorkspace(t);
+  const check = sync();
+  assert.equal(check.status, 0, check.stderr);
+  const original = fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8');
+  // A stale branch that still carries the governed block (or a broken half of one) must not land.
+  const copy = managedAgentsCopy(), [found] = findBlocks(copy).blocks;
+  const block = copy.slice(found.start, found.end);
+  // A Windows checkout may give the file CRLF line endings, so match either.
+  const withBlock = original.replace(/(\r?\n)\1## This Repository/, (_match, eol) => `${eol}${eol}${block}${eol}${eol}## This Repository`);
+  assert.notEqual(withBlock, original);
+  for (const [label, text] of [['governed block', withBlock],
+    ['broken marker', `${original}\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=1.0.0 sha256=000000000000 -->\n`]]) {
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), text);
+    for (const args of [[], ['--write']]) {
+      const result = sync(...args);
+      assert.equal(result.status, 1, `${label} ${args}`);
+      assert.match(result.stderr, /FAIL: Root AGENTS\.md carries a Toolkit managed block; the installed Toolkit delivers the governed rules, so remove it by hand\./, `${label} ${args}`);
+      assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), text, `${label} ${args}: never rewritten`);
+    }
+  }
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'), original);
+  fs.mkdirSync(path.join(dir, '.agents/rules'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.agents/rules/00-agent-toolkit-bootstrap.md'), antigravityBootstrapCopy());
+  const bootstrap = sync();
+  assert.equal(bootstrap.status, 1);
+  assert.match(bootstrap.stderr, /FAIL: \.agents\/rules\/00-agent-toolkit-bootstrap\.md is not allowed: Antigravity reads AGENTS\.md itself/);
+  fs.rmSync(path.join(dir, '.agents'), { recursive: true });
+  // --write leaves the hand-written root as it is.
+  assert.equal(sync('--write').status, 0);
+  assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), original);
+  assert.equal(fs.existsSync(path.join(dir, '.agents')), false);
 });
 
 test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists', () => {
@@ -374,4 +415,48 @@ test('every approval surface carries the evidence-store exception and none still
   }
   for (const text of [governed, playbook]) assert.doesNotMatch(text, /within owner authority that names the repository|exact owner authority/);
   assert.doesNotMatch(skill, /Transport-store uploads[^\n]*when the user grants standing approval/);
+});
+
+// Toolkit's own checkout keeps no rule file under .agents/rules/, not only the retired
+// bootstrap name, and a case variant (which a case-insensitive checkout reads as the same folder)
+// is refused too. A file elsewhere under .agents/ is left alone.
+test('the sync check refuses any file under .agents/rules/, in any letter case, and --write never adds or removes one', t => {
+  const { dir, sync } = syncWorkspace(t);
+  for (const rel of ['.agents/rules/team-rules.md', '.agents/rules/nested/deep.md', '.agents/rules/notes.txt', '.Agents/Rules/x.md']) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), '# Rules\n');
+    for (const args of [[], ['--write']]) {
+      const result = sync(...args);
+      assert.equal(result.status, 1, `${rel} ${args}`);
+      assert.match(result.stderr, new RegExp(`FAIL: ${rel.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')} `), `${rel} ${args}`);
+      assert.equal(fs.readFileSync(path.join(dir, rel), 'utf8'), '# Rules\n', `${rel} ${args}: never rewritten`);
+    }
+    fs.rmSync(path.join(dir, rel.split('/')[0]), { recursive: true });
+  }
+  fs.mkdirSync(path.join(dir, '.agents/plugins'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.agents/plugins/marketplace.json'), '{}\n');
+  const other = sync();
+  assert.equal(other.status, 0, other.stderr);
+});
+
+// A linked rule folder or rule file is reported by its own path and never followed, so a link that
+// points outside the workspace cannot hide a rule copy or leak the target's file names.
+test('the sync check refuses a linked rule folder or rule file without following it', { skip: process.platform === 'win32' && 'symlinks need extra rights on Windows' }, t => {
+  const { dir, sync } = syncWorkspace(t);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-rules-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, 'hidden.md'), '# Rules\n');
+  fs.mkdirSync(path.join(dir, '.agents'));
+  fs.symlinkSync(outside, path.join(dir, '.agents/rules'), 'dir');
+  const folder = sync();
+  assert.equal(folder.status, 1, folder.stderr);
+  assert.match(folder.stderr, /FAIL: \.agents\/rules is not allowed/);
+  assert.doesNotMatch(folder.stderr, /hidden\.md/);
+  fs.rmSync(path.join(dir, '.agents/rules'));
+  fs.mkdirSync(path.join(dir, '.agents/rules'));
+  fs.symlinkSync(path.join(outside, 'hidden.md'), path.join(dir, '.agents/rules/linked.md'));
+  const file = sync('--write');
+  assert.equal(file.status, 1, file.stderr);
+  assert.match(file.stderr, /FAIL: \.agents\/rules\/linked\.md is not allowed/);
+  assert.equal(fs.readFileSync(path.join(outside, 'hidden.md'), 'utf8'), '# Rules\n');
 });

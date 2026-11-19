@@ -88,6 +88,16 @@ test('other pushes, dry runs and the store command itself are not judged here', 
   ]) assert.equal(refuse(f, command, cwd), '', command);
 });
 
+// bash reads `\"` as an escaped quote and PowerShell as a backslash and a quote, so this push runs
+// only where PowerShell may read the line: refused there, left alone where bash runs it.
+test('a store push hidden from bash by backslash quoting is refused where PowerShell may run it', (t) => {
+  const f = fixture(t);
+  f.bind();
+  const hidden = 'echo "a\\" ; git push origin main ; echo \\"b"';
+  for (const shell of [null, 'unset', 'powershell']) assert.equal(refuse(f, hidden, f.store, shell), guard.STORE_PUSH_MESSAGE, String(shell));
+  assert.equal(refuse(f, hidden, f.store, 'posix'), '', 'bash cannot run the hidden push');
+});
+
 test('a computer with no cached binding keeps today\'s behaviour', (t) => {
   const f = fixture(t);
   assert.equal(refuse(f, 'git push origin main', f.store), '');

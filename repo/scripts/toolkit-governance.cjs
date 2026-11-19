@@ -472,7 +472,7 @@ class ToolkitGovernanceCli {
     // The App row reads its variable and secret only where governance is on or can be turned on here.
     const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copies && copies.ok ? { files: copies.changes.filter(change => change.action !== 'set-min-toolkit').length } : copies && copies.held ? { files: copies.files, held: copies.held } : null });
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -535,12 +535,15 @@ class ToolkitGovernanceCli {
   #turnOnUrl = null;
 
   // The cleanup route (toolkit-governance-cleanup.cjs), reading governance the way this command does.
-  // A preview writes nothing; it never runs git.
+  // A preview writes nothing; it never runs git. The catch is the last resort for a failure the route
+  // does not report itself, such as a file it could not write.
   #cleanup(root, write) {
     try {
       return cleanupRoute.run({ root, write, governance: { readIdentity: governance.readIdentity, governanceState: dir => governance.governanceState(dir, this.#registryOptions) } });
     } catch (error) {
-      return { ok: false, changes: [], lines: [`The instruction copies could not be checked (${error.code || error.message}).`] };
+      return { ok: false, changes: [], lines: [write
+        ? `The instruction copies could not be cleaned up (${error.code || error.message}). Check the working tree with git status before committing anything.`
+        : `The instruction copies could not be checked (${error.code || error.message}).`] };
     }
   }
 
@@ -873,6 +876,16 @@ function switchText(mergedText, parsed, changes) {
       : `${body},${newline}${indent}"task_prs": { ${members(': ')} }${text.slice(body.length)}`;
   }
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
+}
+
+// The bank's view of a cleanup preview: the files it would remove, why the pinned sweep copies hold
+// it, or why the programme file stops it; null when there is nothing to say.
+function copiesRow(copies) {
+  if (!copies) return null;
+  if (copies.ok) return { files: copies.changes.filter(change => change.action !== 'set-min-toolkit').length };
+  if (copies.held) return { files: copies.files, held: copies.held, step: copies.step };
+  if (copies.refused) return { files: copies.files, refused: copies.refused };
+  return null;
 }
 
 // The owner's governance App setup command (it refuses under an agent).

@@ -268,9 +268,7 @@ test('n8n-safety-router README tells agents to dry-run then ask before write', (
 });
 test('generic AI coding agent templates stay slim and obsolete heavy templates are absent', () => {
   for (const relPath of [
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md'
+    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'
   ]) {
     const text = readText(relPath);
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);

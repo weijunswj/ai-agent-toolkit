@@ -1,6 +1,7 @@
 {
   "schema": "toolkit.playbook-history.v1",
-  "note": "SHA-256 (first 16 hex) of every playbook text Toolkit ever shipped for copying into a repository docs/agent-playbooks/ folder, LF line endings, INDEX.md from the toolkit-playbooks SKILL.md without its frontmatter. Nothing copies playbooks any more, so the list only grows if a current playbook changes; the leftover scan uses it to prove a repository copy is Toolkit's.",
+  "note": "SHA-256 (first 16 hex) of every playbook text Toolkit ever shipped for copying into a repository docs/agent-playbooks/ folder, LF line endings, INDEX.md from the toolkit-playbooks SKILL.md without its frontmatter. Nothing copies playbooks any more, so the list only grows if a current playbook changes; the leftover scan uses it to prove a repository copy is Toolkit's. agents_header is the curated-source comment the retired managed AGENTS.md template put above its blocks, exactly as it last shipped; the leftover scan and the cleanup drop it only when it is the first text left.",
+  "agents_header": "<!--\nCurated AI-facing source.\nSource: repo/contracts/agent-rules/repo-local\nReview rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.\n-->",
   "playbooks": {
     "INDEX.md": [
       "1619d57d87cba8ae",
@@ -70,6 +71,8 @@
       "1572e1ef867b6aa1",
       "18b046448db857fb",
       "1e743cc29b5bd3a3",
+      "43473a1b948edc44",
+      "59d87b96421ccca7",
       "70fa1134c7fb1ff6",
       "98a052e12845c78d",
       "b77a4c6f4f7b0a8e",
@@ -105,6 +108,7 @@
       "a71d13f0ee50b0de"
     ],
     "project-completion-audit.md": [
+      "1981258f7b9c3a41",
       "9d323a8e47cb0349"
     ],
     "release-readiness-audit.md": [

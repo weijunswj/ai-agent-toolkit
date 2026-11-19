@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerFiles } = require('./support/controller-text.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const MAP = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'lanes', 'lane-map.json'), 'utf8'));
@@ -48,4 +49,9 @@ test('every script named for a host belongs to that host lane', () => {
     if (!owner || owner[0] !== lane) wrong.push(`repo/scripts/${name} (${owner ? owner.join(', ') : 'unlisted'}, expected ${lane})`);
   }
   assert.deepEqual(wrong, []);
+});
+
+test('the controller file and every page its Pages section lists have an owner', () => {
+  const map = owners();
+  assert.deepEqual(controllerFiles(ROOT).filter((rel) => !map.has(rel)), []);
 });

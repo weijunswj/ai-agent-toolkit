@@ -6,11 +6,47 @@ This Toolkit reference is adapted from Google Labs `design.md`, tracked in `repo
 
 ## What DESIGN.md Is
 
-`DESIGN.md` is a plain-text design contract for coding agents. It can combine optional YAML front matter for machine-readable design tokens with Markdown sections that explain design rationale, visual identity, component intent, and practical do/don't guidance.
+`DESIGN.md` is a plain-text design contract for coding agents. It combines machine-readable YAML design tokens with Markdown sections that explain design rationale, visual identity, component intent, and practical do/don't guidance.
 
 Treat it as a portable design-system contract that helps agents preserve visual direction across sessions and tools. The upstream format is alpha, so prefer conservative interpretation and manual review over strict automation.
 
-The optional YAML front matter may also declare sections that are intentionally omitted from a design system. An `omitted` declaration describes the contract's scope; it does not replace missing token values or ask an agent to invent them.
+The tokens may also declare sections that are intentionally omitted from a design system. An `omitted` declaration describes the contract's scope; it does not replace missing token values or ask an agent to invent them.
+
+## Where Tokens Live
+
+Tokens can sit in YAML front matter at the top of the file (between two `---` lines), in interleaved fenced `yaml` code blocks inside the relevant sections, or both. Read every block: they merge into one design token tree, so a file with no front matter can still define tokens. Defining the same top-level key in more than one block is an error; report it rather than picking one.
+
+## Section Order
+
+All sections use `##` headings. Sections may be left out, but those present follow this order:
+
+1. **Overview** (also "Brand & Style")
+2. **Colors**
+3. **Typography**
+4. **Layout** (also "Layout & Spacing")
+5. **Elevation & Depth** (also "Elevation")
+6. **Shapes**
+7. **Motion & Micro-interaction** (also "Motion & Micro-interactions", "Motion")
+8. **Voice & Content Strategy**
+9. **Components**
+10. **Do's and Don'ts**
+
+Preserve unknown section headings. Two sections with the same heading make the file invalid.
+
+## Motion Tokens
+
+`motion` maps purpose-named tokens, such as `state-change`, `surface-enter` and `surface-exit`, to timing values:
+
+```yaml
+motion:
+  <token-name>: <Motion>
+```
+
+Each Motion token has `duration` and `delay` (a Duration: a string ending in `ms`, such as `150ms`) and `timingFunction` (a CSS easing such as `ease-out` or `cubic-bezier(...)`). Unknown motion token names are valid motion. The section's prose should say what moves and what does not, keep small changes faster than large transitions, honour `prefers-reduced-motion`, and prefer animating `transform` and `opacity`.
+
+## Voice & Content Strategy
+
+This section is prose only. It sets tone of voice, capitalisation, canonical terminology, button and action label grammar, empty, loading and error state copy, and number, date and unit formats. Follow it when writing interface copy.
 
 ## Optional Omitted Sections
 
@@ -22,7 +58,7 @@ omitted: <string[]|OmittedSection[]> # optional
 
 Each entry can be either:
 
-- A string naming the omitted section, such as `spacing`.
+- A string naming the omitted section, such as `spacing` or `motion`.
 - An object of the form `{ section: string, reason?: string }`, where `section` names the omitted section and the optional `reason` documents why it does not apply.
 
 For example:

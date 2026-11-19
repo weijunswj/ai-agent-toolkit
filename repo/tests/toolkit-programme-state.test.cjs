@@ -57,8 +57,8 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const normalized = state.validateBinding(binding);
   assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [binding.parents[0].issue, binding.parents[0].record_prefix, binding.parents[0].writer_prefix]);
   // Version 1 is still read, as enabled with one parent.
-  // schedule_folder, parent_lifecycle, detach_finished_children and task_prs are version 2 fields.
-  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, detach_finished_children: _detach, task_prs: _taskPrs, ...rest } = binding;
+  // schedule_folder, parent_lifecycle, detach_finished_children, task_prs and min_toolkit are version 2 fields.
+  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, detach_finished_children: _detach, task_prs: _taskPrs, min_toolkit: _minToolkit, ...rest } = binding;
   const v1 = { ...rest, schema: state.SCHEMA.binding, parent_issue: 421, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-' };
   assert.equal(validateBindingV1(v1), true, JSON.stringify(validateBindingV1.errors));
   assert.equal(state.validateBinding(v1), v1);
@@ -237,7 +237,7 @@ test('checks are GREEN only when every required check passed at the exact head',
   assert.deepEqual([green.required_total, green.required_passed, green.at_head], [1, 1, SHA_A]);
 });
 
-test('a cancelled check run counts only when it is the check\'s only result at the head', () => {
+test('with no readable time or app, a cancelled check run counts only when it is the check\'s only result at the head', () => {
   const run = (name, conclusion, extra = {}) => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion, required: false, ...extra });
   const evaluate = (contexts) => state.evaluateChecks({ head: SHA_A, rollupOid: SHA_A, contexts, configured: ['validate'] });
   const cancelled = run('validate', 'CANCELLED');
@@ -246,7 +246,7 @@ test('a cancelled check run counts only when it is the check\'s only result at t
   const replaced = evaluate([cancelled, run('validate', 'SUCCESS')]);
   assert.equal(replaced.state, 'GREEN', 'a newer run that passed replaces a cancelled one');
   assert.deepEqual([replaced.required_total, replaced.required_passed, replaced.failing], [1, 1, []]);
-  assert.equal(evaluate([run('validate', 'SUCCESS'), cancelled]).state, 'GREEN', 'order does not matter');
+  assert.equal(evaluate([run('validate', 'SUCCESS'), cancelled]).state, 'GREEN', 'with no readable time, list order does not matter');
   assert.equal(evaluate([cancelled, run('validate', null, { status: 'IN_PROGRESS' })]).state, 'PENDING', 'a newer run still going is pending, not red');
   assert.equal(evaluate([cancelled, run('validate', 'FAILURE')]).state, 'RED', 'a newer run that failed still fails');
   assert.equal(evaluate([cancelled, run('validate', 'SUCCESS'), run('validate', 'FAILURE')]).state, 'RED', 'any real failure still fails');
@@ -255,6 +255,86 @@ test('a cancelled check run counts only when it is the check\'s only result at t
   assert.equal(evaluate([run('validate', 'CANCELLED', { status: 'IN_PROGRESS' }), run('validate', 'SUCCESS')]).state, 'PENDING', 'only a completed cancelled run is set aside');
   const status = { kind: 'StatusContext', context: 'validate', state: 'ERROR', required: true };
   assert.equal(evaluate([status, run('validate', 'SUCCESS')]).state, 'RED', 'a status error is never set aside');
+});
+
+// A required check's runs from one app, oldest first in each row: the newest result decides. GitHub
+// names a required check by its name and, optionally, the app that must set it (never a workflow),
+// so runs are grouped by app (two workflows of one app are the same input as one workflow's reruns:
+// the reader carries no workflow). A run with no readable time or app keeps the rule above.
+test('the newest result of a required check decides, per app, when every run has a readable time', () => {
+  const at = minute => `2026-11-15T10:${String(minute).padStart(2, '0')}:00Z`;
+  const run = (conclusion, minute, extra = {}) => ({ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion, required: false, app: 15368, completed_at: at(minute), ...extra });
+  const going = (minute = null) => run(null, minute, { status: 'IN_PROGRESS', completed_at: null });
+  const evaluate = contexts => state.evaluateChecks({ head: SHA_A, rollupOid: SHA_A, contexts, configured: ['validate'] }).state;
+  const rows = [
+    ['failure, then success', [run('FAILURE', 1), run('SUCCESS', 2)], 'GREEN'],
+    ['success, then failure', [run('SUCCESS', 1), run('FAILURE', 2)], 'RED'],
+    ['success, then in progress', [run('SUCCESS', 1), going()], 'PENDING'],
+    ['failure, then in progress', [run('FAILURE', 1), going()], 'PENDING'],
+    ['success, then cancelled', [run('SUCCESS', 1), run('CANCELLED', 2)], 'RED'],
+    ['cancelled, then success', [run('CANCELLED', 1), run('SUCCESS', 2)], 'GREEN'],
+    ['cancelled only', [run('CANCELLED', 1)], 'RED'],
+    ['cancelled, then failure', [run('CANCELLED', 1), run('FAILURE', 2)], 'RED'],
+    ['failure, then skipped', [run('FAILURE', 1), run('SKIPPED', 2)], 'UNKNOWN'],
+    ['listed newest first', [run('SUCCESS', 2), run('FAILURE', 1)], 'GREEN'],
+    ['failure, then success, one run with no time', [run('FAILURE', 1), run('SUCCESS', 2, { completed_at: null })], 'RED'],
+    ['failure, then success, one run with no app', [run('FAILURE', 1), run('SUCCESS', 2, { app: null })], 'RED'],
+    ['failure, then success, every run with no app', [run('FAILURE', 1, { app: null }), run('SUCCESS', 2, { app: null })], 'RED'],
+    ['success and failure completed at the same time', [run('SUCCESS', 1), run('FAILURE', 1)], 'RED'],
+    ['two apps: older failure from one, newer success from another', [run('FAILURE', 1, { app: 1 }), run('SUCCESS', 2, { app: 2 })], 'RED'],
+    ['two apps: each newest passed', [run('FAILURE', 1, { app: 1 }), run('SUCCESS', 2, { app: 1 }), run('SUCCESS', 1, { app: 2 })], 'GREEN'],
+    ['a status context failure beside a newer passing run', [{ kind: 'StatusContext', context: 'validate', state: 'FAILURE', required: true }, run('SUCCESS', 2)], 'RED'],
+    ['a status context success beside a newer failing run', [{ kind: 'StatusContext', context: 'validate', state: 'SUCCESS', required: true }, run('SUCCESS', 1), run('FAILURE', 2)], 'RED'],
+  ];
+  for (const [name, contexts, expected] of rows) assert.equal(evaluate(contexts), expected, name);
+  const two = state.evaluateChecks({ head: SHA_A, rollupOid: SHA_A, configured: ['validate', 'lint'],
+    contexts: [run('FAILURE', 1), run('SUCCESS', 2), run('SUCCESS', 1, { name: 'lint' }), run('FAILURE', 2, { name: 'lint' })] });
+  assert.deepEqual([two.state, two.failing, two.required_passed], ['RED', ['lint'], 1], 'two checks: one passed by its newest run, one failed by its newest run');
+});
+
+// Every way the sweep reads a pull request's checks carries what the newest-result rule needs, so a
+// later edit cannot drop it silently: the time a run completed and the app that set it.
+test('both GraphQL check reads and the REST fallback carry each run\'s completion time and app', () => {
+  const node = { __typename: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', isRequired: true, completedAt: '2026-11-15T10:02:00Z', checkSuite: { app: { databaseId: 15368 } } };
+  const expected = { kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', state: null, required: true, app: 15368, completed_at: '2026-11-15T10:02:00Z' };
+  const pr = { number: 7, title: 't', body: '', state: 'OPEN', isDraft: false, merged: false, mergedAt: null, mergeCommit: null, headRefOid: SHA_A, baseRefName: 'main', mergeable: 'MERGEABLE',
+    commits: { nodes: [{ commit: { oid: SHA_A, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [node] } } } }] } };
+  const queries = [];
+  const fields = /\.\.\. on CheckRun \{[^}]*\bcompletedAt\b[^}]*\bcheckSuite\s*\{\s*app\s*\{\s*databaseId\s*\}\s*\}/;
+  const single = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { graphql: query => { queries.push(query); return { repository: { defaultBranchRef: { name: 'main' }, pullRequest: pr } }; } } });
+  assert.deepEqual(single.pullRequest(7).contexts, [expected]);
+  const batched = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath, body) => { queries.push(body.query); return { status: 200, json: { data: { repository: { defaultBranchRef: { name: 'main' }, p7: pr } } } }; } } });
+  assert.deepEqual(batched.pullRequests([7]).get(7).contexts, [expected]);
+  assert.equal(queries.length, 2);
+  for (const query of queries) assert.match(query, fields);
+  const rest = { 'pulls/7': { number: 7, title: 't', body: '', state: 'open', draft: false, merged: false, head: { sha: SHA_A }, base: { ref: 'main', repo: { default_branch: 'main' } }, mergeable: true },
+    [`commits/${SHA_A}/check-runs?per_page=100`]: { total_count: 1, check_runs: [{ name: 'validate', status: 'completed', conclusion: 'success', completed_at: '2026-11-15T10:02:00Z', app: { id: 15368, slug: 'github-actions' } }] },
+    [`commits/${SHA_A}/status`]: { total_count: 0, statuses: [] } };
+  const fallback = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath) => ({ status: 200, json: rest[apiPath.replace('repos/example.test/app/', '')] }) } });
+  const facts = fallback.restPullRequest(7);
+  assert.deepEqual(facts.contexts, [{ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'SUCCESS', required: false, app: 15368, completed_at: '2026-11-15T10:02:00Z' }],
+    'REST\'s lower-case states read as GraphQL spells them');
+  assert.equal(state.evaluateChecks({ head: facts.head, rollupOid: facts.rollupOid, contexts: facts.contexts, configured: ['validate'] }).state, 'GREEN', 'so a passing run read over REST can read GREEN');
+});
+
+// QUEUED_BUT_MOVING counts only a head committed after its lane-wait stamp, so both GraphQL reads carry
+// the head commit's time; a last commit that is not the head, or the REST fallback, gives none.
+test('both GraphQL PR reads carry the head commit time, and only for the head; the REST fallback gives none', () => {
+  const at = '2026-11-19T04:00:00Z';
+  const pr = oid => ({ number: 7, title: 't', body: '', state: 'OPEN', isDraft: false, merged: false, mergedAt: null, mergeCommit: null, headRefOid: SHA_A, baseRefName: 'main', mergeable: 'MERGEABLE',
+    commits: { nodes: [{ commit: { oid, committedDate: at, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [] } } } }] } });
+  const queries = [];
+  const single = oid => new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { graphql: query => { queries.push(query); return { repository: { defaultBranchRef: { name: 'main' }, pullRequest: pr(oid) } }; } } });
+  const batched = oid => new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath, body) => { queries.push(body.query); return { status: 200, json: { data: { repository: { defaultBranchRef: { name: 'main' }, p7: pr(oid) } } } }; } } });
+  assert.equal(single(SHA_A).pullRequest(7).head_committed_at, at);
+  assert.equal(batched(SHA_A).pullRequests([7]).get(7).head_committed_at, at);
+  assert.equal(single(SHA_B).pullRequest(7).head_committed_at, null, 'the last commit read is not the head');
+  assert.equal(batched(SHA_B).pullRequests([7]).get(7).head_committed_at, null, 'the last commit read is not the head');
+  for (const query of queries) assert.match(query, /commits\(last: ?1\) \{ nodes \{ commit \{ oid committedDate /);
+  const rest = { 'pulls/7': { number: 7, title: 't', body: '', state: 'open', draft: false, merged: false, head: { sha: SHA_A }, base: { ref: 'main', repo: { default_branch: 'main' } }, mergeable: true },
+    [`commits/${SHA_A}/check-runs?per_page=100`]: { total_count: 0, check_runs: [] }, [`commits/${SHA_A}/status`]: { total_count: 0, statuses: [] } };
+  const fallback = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath) => ({ status: 200, json: rest[apiPath.replace('repos/example.test/app/', '')] }) } });
+  assert.equal(fallback.restPullRequest(7).head_committed_at, null);
 });
 
 test('a closed task page is frozen by the hidden task status line its block carries, and drawn again once reopened', () => {
@@ -348,7 +428,7 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
   // Cells: Task (the name), Child # (`#n`), Status (NOW, LATER, OPTIONAL, COMPLETED or RETIRED), Waiting on, Last Updated.
   const rows = lines.filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
   const issueOf = row => /^#(\d+)$/.exec(row[1])[1];
-  assert.deepEqual(rows.map(row => Number(issueOf(row))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
+  assert.deepEqual(rows.map(row => Number(issueOf(row))), [8, 17, 11, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW · IN PROGRESS, NOW · QUEUED, then LATER with optional tasks last, each by priority order and child number; finished oldest first');
   assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
   assert.equal(/OPTIONAL|LATER · /.test(body), false, 'LATER needs no second word, and optional tasks show as LATER');
   const statusOf = Object.fromEntries(rows.map(row => [`#${issueOf(row)}`, row[2]]));
@@ -364,7 +444,7 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
     ['#12', 'COMPLETED', 'a finished row says so'],
     ['#9', 'RETIRED', 'a retired row says so'],
   ]) assert.equal(statusOf[issue], expected, `${issue}: ${why}`);
-  assert.deepEqual(rows[1], ['Shared host contract', '#8', 'NOW · IN PROGRESS', 'G1', '-'], 'the name, then the child number and the gate a task in progress waits on; PRs and description are on the task page');
+  assert.deepEqual(rows[0], ['Shared host contract', '#8', 'NOW · IN PROGRESS', 'G1', '-'], 'the name, then the child number and the gate a task in progress waits on; PRs and description are on the task page');
   assert.equal(body.includes('One contract for both hosts'), false);
   assert.equal(/#549|#552|#553/.test(body), false, 'the parent names no PRs; each task page lists them');
   assert.equal(rows[5][0], 'per-repository governance states', 'a release prefix is not part of the name');
@@ -372,10 +452,50 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
   assert.deepEqual(rows[12], ['#9', '#9', 'RETIRED', '-', '2026-10-01 08:00'], 'retired is its own group below COMPLETED');
   assert.equal(children.get(9).pr.number, 553, 'rendering preserves historical state');
   assert.deepEqual(rows[11].slice(1), ['#16', 'COMPLETED', '-', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
-  assert.deepEqual(rows[2].slice(1), ['#17', 'NOW · IN PROGRESS', 'Owner: decision', '-']);
-  assert.deepEqual(rows[0].slice(1), ['#11', 'NOW · QUEUED', 'Blocked: waits for #8', '-'], 'a NOW task with a blocker is queued behind it');
+  assert.deepEqual(rows[1].slice(1), ['#17', 'NOW · IN PROGRESS', 'Owner: decision', '-']);
+  assert.deepEqual(rows[2].slice(1), ['#11', 'NOW · QUEUED', 'Blocked: waits for #8', '-'], 'a NOW task with a blocker is queued behind it, after every task in progress');
   assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
+});
+
+test('the Programme Graph sorts by status band (NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED, RETIRED); inside a band pinned tasks go last and optional tasks close LATER', () => {
+  const outcomes = [
+    { issue: 2, class: 'COMMITTED', parent: 7, order: 0 },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 0, last: true },
+    { issue: 5, class: 'COMMITTED', parent: 7, order: 0, last: true },
+    { issue: 6, class: 'COMMITTED', parent: 7, order: 2 },
+    { issue: 8, class: 'OPTIONAL', parent: 7, order: 0 },
+    { issue: 9, class: 'COMMITTED', parent: 7, order: 0, last: true },
+    { issue: 10, class: 'OPTIONAL', parent: 7, order: 0, last: true },
+    { issue: 11, class: 'COMPLETED', parent: 7, order: 0 },
+    { issue: 12, class: 'RETIRED', parent: 7, order: 0 },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const doc = (issue, changes) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), lifecycle: 'ACTIVE', ...changes });
+  const children = new Map([
+    [2, doc(2, { blockers: ['waits for #3'] })],
+    [3, doc(3)],
+    [4, doc(4)],
+    [5, doc(5, { blockers: ['waits for #4'] })],
+  ]);
+  const rows = state.renderParentBlockBody(parent, children, new Map()).split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
+  const table = rows.map(row => `${row[1]} ${row[2]}`);
+  assert.deepEqual(table, [
+    '#3 NOW · IN PROGRESS',
+    '#4 NOW · IN PROGRESS',
+    '#2 NOW · QUEUED',
+    '#5 NOW · QUEUED',
+    '#6 LATER',
+    '#8 LATER',
+    '#9 LATER',
+    '#10 LATER',
+    '#11 COMPLETED',
+    '#12 RETIRED',
+  ], 'a task in progress leads a queued one of higher priority; a pinned NOW task stays in its band, never below LATER; LATER keeps today\'s order');
+  const bands = ['NOW · IN PROGRESS', 'NOW · QUEUED', 'LATER', 'COMPLETED', 'RETIRED'];
+  const ranks = rows.map(row => bands.indexOf(row[2]));
+  assert.ok(ranks.every((rank, at) => rank >= 0 && (at === 0 || rank >= ranks[at - 1])), `the Status column never steps back a band: ${table.join(', ')}`);
 });
 
 test('the Programme Graph renders deterministic Singapore update times from task state and comments', () => {
@@ -438,7 +558,7 @@ test('a priority tie is named only among queued rows of one group', () => {
   assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
 });
 
-test('an outcome pinned last sorts after every unpinned open outcome, even ones added after it', () => {
+test('an outcome pinned last sorts after every unpinned open outcome in its status band, even ones added after it', () => {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
   const outcomes = [
@@ -456,7 +576,7 @@ test('an outcome pinned last sorts after every unpinned open outcome, even ones 
   const current = body => state.renderCurrentBlockBody(body, new Map(), new Map());
   const body = state.renderParentBlockBody(parent, new Map(), new Map());
   assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
-  assert.match(body, /Order: NOW, LATER by priority \(optional tasks after the rest\), tasks pinned last, then the latest 10 COMPLETED/);
+  assert.match(body, /Order: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER; pinned tasks end their band\), then the latest 10 COMPLETED/);
   assert.equal(rows(body)[0], 2, 'the top unpinned task leads, so it starts next');
   assert.doesNotMatch(current(parent), /Start next/, 'CURRENT leaves what starts next to the graph');
   // A task added later takes the next order and still lands before the pinned one.
@@ -468,8 +588,9 @@ test('an outcome pinned last sorts after every unpinned open outcome, even ones 
   const done = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 3, class: 'COMPLETED', parent: 7, order: 2, last: true }, { issue: 2, class: 'COMMITTED', parent: 7, order: 9 }] });
   const doneBody = state.renderParentBlockBody(done, new Map(), new Map());
   assert.deepEqual(rows(doneBody), [2, 3]);
-  assert.doesNotMatch(doneBody, /tasks pinned last/, 'the order line names pinned tasks only while one is open');
-  assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /tasks pinned last/);
+  assert.match(doneBody, /Order: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER\), then the latest 10 COMPLETED/);
+  assert.doesNotMatch(doneBody, /pinned tasks/, 'the order line names pinned tasks only while one is open');
+  assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /pinned tasks/);
   // Pinned rows tie only with each other.
   const ties = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
     { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },
@@ -521,7 +642,7 @@ test('the generated CURRENT summary is slim: work in progress with its PR, gate 
     '- #1 Task 1 · PR #541 · G1',
     '- #2 Task 2 · PR #543 · G1 · then your UAT on PR #543', // the active G1 is the current step; the owed UAT comes after it
     '- #3 Task 3 · waiting on you: your decision',
-    '- #4 Task 4 · waiting on you: blocked: needs the key',
+    '- #4 Task 4 · blocked: needs the key', // a blocker is not an owner step
     '',
     '**Attention: clear** · Holds: 1 · Full list: `programme.cjs attention`',
   ].join('\n'), 'queued work and next actions show in the graph and on the task pages; a finished task is never a hold');
@@ -805,4 +926,39 @@ test('a replaced last section ends at the next managed block, keeping the trace 
   const page = `# Title\n\n## Programme index\nold list\n\n${trace}\n\n[i1]: https://example.com/\n`;
   const { body } = state.upsertStateBlock(page, state.renderBlock('graph', '3.9.1'), { replace_section: 'Programme index' });
   assert.equal(body, `# Title\n\n${state.renderBlock('graph', '3.9.1')}\n\n${trace}\n\n[i1]: https://example.com/\n`);
+});
+
+// The lane-wait stamp (private.lane_wait): from when a queued task's PR moves count (the wait written, or
+// a recorded gate ended) and the tracked PR head then, so the sweep sees a move with no gate recorded.
+test('every child write stamps a lane wait with its write time and the PR head then, a recorded gate ending restamps it, and a patch cannot set it', () => {
+  const WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  const at = '2026-11-19T03:00:00.000Z';
+  const later = '2026-11-19T04:00:00.000Z';
+  const base = state.claimDocument(child(), writer, {});
+  const doc = (blockers, head = null, previous = null) => ({ ...base, blockers, pr: { ...base.pr, ...(head ? { number: 900, state: 'OPEN', head } : {}) },
+    private: { ...(previous?.private || {}) } });
+  assert.deepEqual(state.stampChild(doc([]), doc([WAIT]), at).private.lane_wait, { at, head: null }, 'added with no PR');
+  const stamped = state.stampChild(doc([]), doc([WAIT], SHA_A), at);
+  assert.deepEqual(stamped.private.lane_wait, { at, head: SHA_A }, 'added with a PR');
+  assert.deepEqual(state.stampChild(stamped, doc([WAIT, 'waits for PR 1098'], SHA_B, stamped), later).private.lane_wait, { at, head: SHA_A },
+    'a later write that keeps the wait keeps its stamp, whatever else moves');
+  assert.deepEqual(state.stampChild(stamped, doc([`${WAIT}; behind #1322`], SHA_B, stamped), later).private.lane_wait, { at: later, head: SHA_B }, 'a changed wait is a new wait');
+  assert.deepEqual(state.stampChild(doc([WAIT], SHA_A), doc([WAIT], SHA_B), later).private.lane_wait, { at: later, head: SHA_B },
+    'a wait written before stamps existed is stamped like a new one: moves count from this write');
+  const gated = (gateState, base2) => ({ ...base2, gate: { ...base2.gate, role: 'G1', state: gateState, assignment: { id: 'g1-x', role: 'G1' } } });
+  for (const ended of ['SUBMITTED', 'INTERRUPTED', 'WAITING_OWNER', 'RETIRED']) {
+    assert.deepEqual(state.stampChild(gated('ACTIVE', stamped), gated(ended, doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at: later, head: SHA_B },
+      `the write that ends a recorded gate (ACTIVE to ${ended}) restamps the wait: the gate covers every commit before it`);
+  }
+  assert.deepEqual(state.stampChild(gated('ASSIGNED', stamped), gated('ACTIVE', doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at, head: SHA_A }, 'a gate still live keeps it');
+  assert.deepEqual(state.stampChild(gated('SUBMITTED', stamped), gated('SUBMITTED', doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at, head: SHA_A }, 'a gate already ended keeps it');
+  assert.equal('lane_wait' in state.stampChild(stamped, doc(['waits for PR 1098'], SHA_A, stamped), later).private, false, 'removed with the last wait');
+  const parentDoc = heldParent();
+  const forged = { private: { lane_wait: { at: later, head: SHA_B } } };
+  assert.deepEqual(state.stampChild(stamped, state.applyPatch('child', stamped, forged, { writer, parentDoc }), later).private.lane_wait, { at, head: SHA_A }, 'a patch cannot move it');
+  assert.equal('lane_wait' in state.stampChild(doc([]), state.applyPatch('child', doc([]), forged, { writer, parentDoc }), later).private, false, 'nor set it with no wait');
+  for (const valid of [stamped, doc([WAIT]), state.stampChild(doc([]), doc([WAIT]), at)]) assert.deepEqual(state.validateChild(valid), [], 'valid with and without the stamp');
+  for (const bad of [{ at, head: 'abc' }, { at: '', head: null }, { at, head: null, extra: 1 }, 'x']) {
+    assert.ok(state.validateChild({ ...stamped, private: { lane_wait: bad } }).some(error => error.includes('private.lane_wait')), JSON.stringify(bad));
+  }
 });

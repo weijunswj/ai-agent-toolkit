@@ -2444,12 +2444,8 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const nested = path.join(root, 'nested');
   fs.mkdirSync(nested, { recursive: true });
-  const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
   writeFile(path.join(root, 'AGENTS.md'), [
-    agentsTemplate,
+    managedAgentsTemplate(),
     '',
     'Marker examples:',
     '`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`',
@@ -2472,8 +2468,16 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
 
 const NEVER_HALTING = /STOP|stop before repository work|ask the user/i;
 
+// The files a Toolkit source checkout is known by: none of them is an instruction template.
+function writeSourceCheckoutKeys(checkout, version) {
+  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
+  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version }));
+  writeFile(path.join(checkout, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version }));
+}
+
+// The AGENTS.md an older setup wrote: the governed rules block under the curated header.
 function managedAgentsTemplate() {
-  return fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
+  return require('./support/retired-instruction-copies.cjs').managedAgentsCopy();
 }
 
 // Runs the SessionStart hook in `cwd` with a hub outside the repository, so the
@@ -2612,14 +2616,9 @@ test('SessionStart notice: a governed-rules copy is a leftover whatever Toolkit 
   // A Toolkit source checkout newer than the running copy is the same direction, even when current.
   const checkout = tmpRoot();
   fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
-  writeFile(path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), managedAgentsTemplate());
-  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
-  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '99.0.0' }));
+  writeSourceCheckoutKeys(checkout, '99.0.0');
   writeFile(path.join(checkout, 'AGENTS.md'), managedAgentsTemplate());
-  const pluginRoot = tmpRoot();
-  writeFile(path.join(pluginRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    managedAgentsTemplate().replace('Finish fast', 'Finish in an older wording'));
-  const source = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: checkout, pluginRoot });
+  const source = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: checkout, pluginRoot: tmpRoot() });
   assert.equal(source.reference, 'source-checkout');
   assert.deepEqual(source.findings, []);
   assert.equal(source.direction, 'newer');
@@ -2643,6 +2642,43 @@ test('SessionStart notice: a governed-rules copy is a leftover whatever Toolkit 
   assert.equal(second.status, 0, second.stderr);
   assert.match(second.stdout, /^Toolkit note: .+ \(Seen at 2 session starts since \d{4}-\d{2}-\d{2}\.\)$/m);
   assert.deepEqual(snapshotTree(root), before);
+});
+
+test('SessionStart notice: a Toolkit source checkout whose root AGENTS.md has no Toolkit block gets no note; its CLAUDE.md is still compared', () => {
+  // The installed Toolkit delivers the governed rules to the Toolkit checkout too, so its root
+  // AGENTS.md is all hand-written. Comparing it with the managed template said to regenerate it,
+  // which would put the block back.
+  const checkout = tmpRoot();
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  writeFile(path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local', 'CLAUDE.shim.template.md'), '@AGENTS.md\n');
+  writeSourceCheckoutKeys(checkout, '3.0.0');
+  writeFile(path.join(checkout, 'AGENTS.md'), '# AI Agent Toolkit Repo Rules\n\n## This Repository\n\nOwn rules.\n');
+  writeFile(path.join(checkout, 'CLAUDE.md'), '@AGENTS.md\n');
+  const before = snapshotTree(checkout);
+  const managedBy = [['hub state', { state: { repo_path: checkout }, governanceEnabled: () => false }], ['governance', { state: {}, governanceEnabled: () => true }]];
+  for (const syncSource of ['codex-plugin', 'claude-plugin']) {
+    for (const [label, managed] of managedBy) {
+      const result = runAgentRulesPreflight({ hook: true, syncSource }, { targetRoot: checkout, pluginRoot: repoRoot, runningVersion: '3.0.0', ...managed });
+      assert.equal(result.reference, 'source-checkout', `${syncSource}, ${label}`);
+      assert.deepEqual(result.findings, [], `${syncSource}, ${label}`);
+      assert.equal(result.status, 'ok', `${syncSource}, ${label}`);
+      assert.equal(formatAgentRulesPreflight(result), '', `${syncSource}, ${label}`);
+    }
+  }
+  // The one-line CLAUDE.md shim is still compared with its own template.
+  writeFile(path.join(checkout, 'CLAUDE.md'), '# Own notes\n');
+  const drift = runAgentRulesPreflight({ hook: true, syncSource: 'claude-plugin' }, { targetRoot: checkout, pluginRoot: repoRoot, runningVersion: '3.0.0', ...managedBy[0][1] });
+  assert.equal(drift.direction, 'drift');
+  assert.deepEqual([...new Set(drift.findings.map((finding) => finding.file))], ['CLAUDE.md']);
+  assert.match(formatAgentRulesPreflight(drift), /^Toolkit note: this Toolkit checkout's managed instruction blocks \(CLAUDE\.md\) differ from its own templates; next step: regenerate them/);
+  // Broken markers in it are regenerated too: the sync writes the whole file, so fixing it is no
+  // owner's choice there.
+  writeFile(path.join(checkout, 'CLAUDE.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v2 toolkit=3.0.0 sha256=000000000000 -->\n@AGENTS.md\n');
+  const broken = runAgentRulesPreflight({ hook: true, syncSource: 'claude-plugin' }, { targetRoot: checkout, pluginRoot: repoRoot, runningVersion: '3.0.0', ...managedBy[0][1] });
+  assert.deepEqual([broken.direction, [...new Set(broken.findings.map((finding) => finding.kind))]], ['drift', ['broken-marker']]);
+  assert.match(formatAgentRulesPreflight(broken), /^Toolkit note: this Toolkit checkout's managed instruction blocks \(CLAUDE\.md\) differ from its own templates; next step: regenerate them with node repo\/scripts\/sync-agent-instruction-shims\.cjs --write before this task ends\. No files were changed\.$/);
+  writeFile(path.join(checkout, 'CLAUDE.md'), '@AGENTS.md\n');
+  assert.deepEqual(snapshotTree(checkout), before, 'read-only');
 });
 
 test('SessionStart notice offers a refresh for differing or broken repository blocks at every session start, counted per finding, without writing', async (t) => {
@@ -2681,7 +2717,7 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
         const newer = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true, state: { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } } }));
         assert.match(newer, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\)/);
         assert.match(newer, /next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/);
-      } else assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
+      } else assert.equal(message, "Toolkit note: Toolkit markers in AGENTS.md are broken, so Toolkit cannot tell its text from the rest and leaves the file alone; fixing them by hand is the owner's choice, and nothing is due in this task. No files were changed.");
       assert.doesNotMatch(message, /are older|refresh them with repository-agent-rules/);
       assert.match(message, /No files were changed/);
 
@@ -2704,6 +2740,31 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
       assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
     });
   }
+});
+
+// Broken markers beside checks keep both parts, and a governed repository whose programme file
+// cannot be used (ERROR) is told what comes before the bank can ask about its copies.
+test('SessionStart notice: broken markers keep the checks part, and ERROR names the step before the bank', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  const preflight = (extra) => formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, runningVersion: '3.0.0', governanceEnabled: () => true, ...extra }));
+  const broken = "Toolkit markers in AGENTS.md are broken, so Toolkit cannot tell its text from the rest and leaves the file alone; fixing them by hand is the owner's choice, and nothing is due in this task.";
+  writeFile(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=000000000000 -->\n# broken\n');
+  const withChecks = preflight({ governanceStateAt: () => ({ state: 'ENABLED', reason: null, minToolkit: null }) });
+  assert.equal(withChecks, `Toolkit note: ${broken} Also, this repository's Toolkit checks (.github/scripts/plain-text-check.cjs) are missing or differ from the running Toolkit 3.0.0; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`);
+
+  writeFile(path.join(root, 'AGENTS.md'), `${managedAgentsTemplate()}\n# Own rules\n`);
+  const tooOld = preflight({ governanceStateAt: () => ({ state: 'ERROR', reason: 'toolkit-too-old', minToolkit: '99.0.0' }) });
+  assert.match(tooOld, /^Toolkit note: this repository still carries Toolkit instruction copies \(AGENTS\.md\) from an older setup\. Removing them is the owner's choice: its programme file needs a newer Toolkit than the running copy, so update Toolkit \(setup toolkit\) first; then `refresh governance` asks about them\. Nothing is due in this task\./);
+  // Its checks may come from that newer Toolkit, so the step is to refresh Toolkit, never to rewrite them.
+  assert.match(tooOld, /Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\) than the running copy \(3\.0\.0\); next step: refresh Toolkit \(setup toolkit\) before this task ends\./);
+  assert.doesNotMatch(tooOld, /repository-agent-rules|\(Toolkit instruction copies\)/);
+  const unusable = preflight({ governanceStateAt: () => ({ state: 'ERROR', reason: 'merged-binding-invalid', minToolkit: null }) });
+  assert.match(unusable, /Removing them is the owner's choice: `refresh governance` asks about them once the programme file can be used\. Nothing is due in this task\./);
+  assert.match(unusable, /refresh them with repository-agent-rules before this task ends/);
+  const enabled = preflight({ governanceStateAt: () => ({ state: 'ENABLED', reason: null, minToolkit: null }) });
+  assert.match(enabled, /`refresh governance` asks about them \(Toolkit instruction copies\), and only a Clean up answer opens the one cleanup pull request/);
+  for (const message of [withChecks, tooOld, unusable, enabled]) assert.doesNotMatch(message, NEVER_HALTING);
 });
 
 test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is on', () => {
