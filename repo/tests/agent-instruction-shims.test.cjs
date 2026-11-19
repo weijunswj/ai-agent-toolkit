@@ -67,6 +67,27 @@ test('the rule sources exist and the superseded sources and templates are gone',
   }
 });
 
+// The governed-block and Antigravity bootstrap templates are retired: nothing installed them, and a
+// Toolkit source checkout is known by files every Toolkit tree keeps. No script, test, hook fixture,
+// manifest or workflow may read them again.
+const RETIRED_TEMPLATES = ['AGENTS.managed.template.md', 'antigravity-bootstrap.template.md'];
+test('the retired instruction templates are gone from both trees and no code or fixture names them', () => {
+  for (const root of [repoLocalSourceRoot, repoLocalPublishedRoot]) {
+    for (const file of RETIRED_TEMPLATES) assert.equal(exists(`${root}/${file}`), false, `${root}/${file}`);
+  }
+  const self = path.relative(repoRoot, __filename).split(path.sep).join('/');
+  // The n8n router test lists this older top-level path as one that must stay absent.
+  const olderAbsent = 'skills/repository-agent-rules/antigravity-bootstrap.template.md';
+  const code = childProcess.execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' }).split('\0')
+    .filter(file => /\.(?:c?js|mjs|json|ps1|sh|ya?ml)$/.test(file) && file !== self && exists(file));
+  assert.ok(code.includes('repo/scripts/toolkit-local-bridge.cjs'), 'the scan sees the scripts');
+  const naming = code.filter(file => {
+    const text = fs.readFileSync(path.join(repoRoot, file), 'utf8').split(olderAbsent).join('');
+    return RETIRED_TEMPLATES.some(name => text.includes(name));
+  });
+  assert.deepEqual(naming, []);
+});
+
 test('the governed block reaches both templates unchanged, inside current v2 markers; root AGENTS.md carries no Toolkit marker', () => {
   const governed = readText(governedPath).trimEnd();
   for (const relPath of [`${repoLocalSourceRoot}/AGENTS.managed.template.md`, `${repoLocalPublishedRoot}/AGENTS.managed.template.md`]) {

@@ -97,10 +97,12 @@ test('a version 1 programme file and a Toolkit source checkout are refused, so a
   assert.deepEqual([refused.files, refused.refused], [1, '.github/toolkit-programme.json is not a version 2 programme file, and only version 2 can carry min_toolkit. Move it to version 2 first'], 'the bank names the refusal');
   assert.equal(read(old.root, 'AGENTS.md'), BLOCK);
   assert.equal(read(old.root, '.github/toolkit-programme.json'), v1);
+  // A source checkout is known by files every Toolkit tree keeps, not by an instruction template.
   const source = repo(t, {
     'AGENTS.md': BLOCK, '.github/toolkit-programme.json': BINDING,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md': BLOCK,
     'repo/scripts/sync-agent-instruction-shims.cjs': '// sync\n',
+    'repo/contracts/toolkit-local-bridge/version.json': '{"version":"1.0.0"}\n',
+    '.claude-plugin/plugin.json': '{"name":"ai-agent-toolkit"}\n',
   });
   const held = cleanup.run({ root: source.root, write: true, governance: source.governance });
   assert.equal(held.ok, false);
