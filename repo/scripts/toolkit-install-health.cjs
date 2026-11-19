@@ -31,7 +31,7 @@ const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
-const { AntigravitySessionRefresh, sessionRefreshCheck } = require('./toolkit-antigravity-project-skills.cjs');
+const { AntigravitySessionRefresh, refreshLock, sessionRefreshCheck } = require('./toolkit-antigravity-project-skills.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
 const RECORDED_SOURCES = Object.freeze(['claude-plugin', 'repo']);
@@ -123,7 +123,8 @@ class ToolkitInstallHealthCheck {
       syncedSkillsDir: path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
       accountPluginFolders: claudeAccountPluginFolders(environment),
       antigravitySkills: new AntigravitySessionRefresh({ checkout: state.repo_path,
-        homeDir: (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir() }),
+        homeDir: (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(),
+        lock: refreshLock(() => require('./toolkit-local-bridge.cjs')) }),
     });
   }
 

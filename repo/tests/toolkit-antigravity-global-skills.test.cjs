@@ -144,7 +144,7 @@ test('a copy setup cannot read never hides the copies', (t) => {
 const { spawnSync } = require('node:child_process');
 const { ManagedSkillCopies } = require('../scripts/toolkit-skill-copies.cjs');
 const { OfficialN8nSkills } = require('../scripts/toolkit-n8n-official-skills.cjs');
-const { AntigravitySessionRefresh, sessionRefreshCheck } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+const { AntigravitySessionRefresh, refreshLock, sessionRefreshCheck } = require('../scripts/toolkit-antigravity-project-skills.cjs');
 
 const N8N_REL = ['repo', 'contracts', 'third-party', 'n8n-io-skills', 'skills'];
 
@@ -174,7 +174,7 @@ function opted(t, { copy = true } = {}) {
   if (copy) { portable.install(); n8n.install(); }
   const target = path.join(homeDir, '.gemini', 'config', 'skills');
   const stampPath = path.join(homeDir, '.ai-agent-toolkit', 'antigravity-refresh', 'source.json');
-  const refresh = (options = {}) => new AntigravitySessionRefresh({ checkout, homeDir, ...options }).run();
+  const refresh = (options = {}) => new AntigravitySessionRefresh({ checkout, homeDir, lock: refreshLock(() => require('../scripts/toolkit-local-bridge.cjs')), ...options }).run();
   const read = (...parts) => fs.readFileSync(path.join(target, ...parts), 'utf8');
   return { dir, checkout, homeDir, target, stampPath, portable, n8n, commit, refresh, read };
 }

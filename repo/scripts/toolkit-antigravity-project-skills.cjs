@@ -251,11 +251,12 @@ function checkoutCommit(root) {
 
 // The refresh lock: the bridge's update lock (its acquireLock and releaseLock), in a folder of its own. Two
 // session starts after one update never interleave their copies, and the bridge's own lock (held around
-// the install check) never blocks the refresh. A hook never waits: a held lock skips this run. The bridge
-// passes its own functions; elsewhere they are loaded on first use.
-function refreshLock({ acquireLock, releaseLock } = {}) {
+// the install check) never blocks the refresh. A hook never waits: a held lock skips this run. The caller
+// hands in a loader for the bridge's two functions (this module never requires the bridge, which requires
+// it), so a start on an unchanged checkout never loads the bridge.
+function refreshLock(loadBridge) {
   return (folder) => {
-    const bridge = acquireLock ? { acquireLock, releaseLock } : require('./toolkit-local-bridge.cjs');
+    const bridge = loadBridge();
     const lock = bridge.acquireLock(folder, { hook: true, syncSource: 'antigravity-refresh' });
     return { acquired: lock.acquired, release: () => bridge.releaseLock(lock) };
   };
@@ -272,7 +273,7 @@ function refreshLock({ acquireLock, releaseLock } = {}) {
 // current, not-installed, busy, updated, failed.
 class AntigravitySessionRefresh {
   #checkout; #folder; #lock; #portable; #n8n;
-  constructor({ checkout, homeDir = os.homedir(), lock = refreshLock() } = {}) {
+  constructor({ checkout, homeDir = os.homedir(), lock } = {}) {
     const controlRoot = path.join(homeDir, '.ai-agent-toolkit');
     this.#checkout = typeof checkout === 'string' && path.isAbsolute(checkout) ? checkout : '';
     this.#folder = path.join(controlRoot, 'antigravity-refresh');

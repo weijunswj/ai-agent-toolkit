@@ -1540,7 +1540,7 @@ function codexGlobalRulesReportEntry(result) {
 function codexSessionStartEntry(globalRules, hubPath) {
   const rules = codexGlobalRulesReportEntry(globalRules);
   const checkout = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))).repo_path;
-  const antigravity = sessionRefreshCheck(new AntigravitySessionRefresh({ checkout, lock: refreshLock({ acquireLock, releaseLock }) }).run());
+  const antigravity = sessionRefreshCheck(new AntigravitySessionRefresh({ checkout, lock: refreshLock(() => ({ acquireLock, releaseLock })) }).run());
   if (!antigravity) return rules;
   const checks = [...(rules?.checks || []), antigravity];
   return { status: checks.some((entry) => entry.status === 'action-required') ? 'action-required' : 'passed', checks,

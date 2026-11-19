@@ -243,13 +243,16 @@ function createGitBackedSetupRepo(root, options = {}) {
 }
 
 // The real setup scripts plus every local script they require, followed through require('./x.cjs').
-// The Codex plugin helper stays the fake one, which hands a require on to the real helpers.
+// The Codex plugin helper stays the fake one, which hands a require on to the real helpers, and the
+// bridge stays the fake one setup runs as a command (session start's Antigravity refresh requires the real
+// bridge only when it takes its lock, which setup never does).
+const FAKE_SCRIPTS = new Set(['repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/toolkit-local-bridge.cjs']);
 function realSetupScriptClosure() {
   const names = new Set();
   const pending = ['repo/scripts/setup-toolkit.cjs', 'repo/scripts/setup-toolkit-core.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs'];
   while (pending.length) {
     const name = pending.pop();
-    if (names.has(name) || name === 'repo/scripts/setup-codex-toolkit-plugin.cjs') continue;
+    if (names.has(name) || FAKE_SCRIPTS.has(name)) continue;
     names.add(name);
     const text = fs.readFileSync(path.join(repoRoot, name), 'utf8');
     for (const match of text.matchAll(/require\(['"](\.\.?\/[\w./-]+\.cjs)['"]\)/g)) pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(name), match[1])));
