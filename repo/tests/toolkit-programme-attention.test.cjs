@@ -912,12 +912,13 @@ test('attention lists every task waiting on the owner, read from the children at
   });
   const json = fx.run(['attention']);
   assert.equal(json.error, null);
+  // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the MERGED · awaiting proof band after it.
   assert.deepEqual(json.result.owner_waits, [
-    { issue: 423, ask: 'UAT on PR #900', after: null, pr: 900, head: SHA_A },
     { issue: 425, ask: 'UAT on PR #901', after: 'G2', pr: 901, head: SHA_B },
+    { issue: 423, ask: 'UAT on PR #900', after: null, pr: 900, head: SHA_A },
   ], 'a blocked task and a task with no document are not owner waits');
   const text = fx.run(['attention'], {}, { json: false }).result;
-  assert.match(text, /^Owner waits \(2\)\n- #423 UAT on PR #900 · PR #900 · aaaaaaa\n- #425 UAT on PR #901 after G2 · PR #901 · bbbbbbb$/m);
+  assert.match(text, /^Owner waits \(2\)\n- #425 UAT on PR #901 after G2 · PR #901 · bbbbbbb\n- #423 UAT on PR #900 · PR #900 · aaaaaaa$/m);
   assert.match(text, /^Attention: /, 'the Attention line still leads');
   const { blobSha } = require('./toolkit-programme-fake-github.cjs');
   fx.github.files.set(fx.store.docPath('child', 424), { text: '{not json', sha: blobSha('{not json') });

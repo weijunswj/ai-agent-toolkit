@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.152.3
+
+### Fixed
+
+- **Merged tasks no longer look unfinished on the programme graph:** a task whose tracked task PR merged while its issue stays open now shows `MERGED · awaiting proof`, not `NOW · IN PROGRESS` with the gate that already returned. It needs no open or draft task PR, no listed blocker and no gate still at the task (none, or its gate retired). Waiting on shows the owner's step, such as `Owner: UAT on PR #<n>`, else `-`. The band sorts after `NOW · IN PROGRESS` and before `NOW · QUEUED`, the order line names it, and CURRENT's In progress line shows `merged, awaiting proof` in place of the gate. A listed blocker still queues a merged task, so lane waits on multi-slice tasks stay `NOW · QUEUED`. The task page's hidden status, issue closure and the work-queue findings are unchanged.
+
 ## 3.152.2
 
 ### Fixed
