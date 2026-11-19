@@ -427,7 +427,7 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "G2 tests scope, execution, security and evidence",
-      "instruction_only": "Rating findings is the reviewer's judgement."
+      "instruction_only": "Rating findings is the reviewer's judgement; counting rounds and filing follow-ups is the controller's."
     },
     {
       "file": "repo/controller/gates.md",

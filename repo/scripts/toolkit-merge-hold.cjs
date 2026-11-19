@@ -617,6 +617,9 @@ function commandParts(text, kind, depth = 0) {
       const option = program === 'cmd' ? /^\// : inner === 'posix' ? /^[-+]/ : /^-/;
       if (at < 0 || texts.slice(start + 1, at).some(item => !option.test(item))) part.opaque = true;
       if (at < 0) continue;
+      // A script word of `-` is not the script: PowerShell then reads its script from stdin
+      // (`-Command -`), and a POSIX shell takes `-` or `--` as the end of its options.
+      if (texts[at + 1] === '-' || (inner === 'posix' && texts[at + 1] === '--')) part.opaque = true;
       part.nests = at + 1;
       if (inner === 'powershell' && RUNNER_ENCODED.test(texts[at])) { part.words.push({ text: '', open: true, vars: false }); break; }
       nested.push(...inside(texts.slice(at + 1).join(' '), inner));
