@@ -643,9 +643,9 @@ test('every skill description keeps its trigger phrases where Codex shows them',
   for (const name of fs.readdirSync(skillsRoot)) {
     const file = path.join(skillsRoot, name, 'SKILL.md');
     if (!fs.existsSync(file)) continue;
-    const line = fs.readFileSync(file, 'utf8').split(/\r?\n/).find(text => text.startsWith('description: '));
-    assert.ok(line, `${name} has a description`);
-    const description = line.slice('description: '.length);
+    // The description as hosts show it, without the YAML quotes some descriptions need.
+    const description = validator.parseFrontMatter(fs.readFileSync(file, 'utf8'))?.description;
+    assert.ok(description, `${name} has a description`);
     assert.ok(description.length <= 1024, `${name} description ${description.length} characters`);
     for (const match of description.matchAll(/"[^"]*"|`[^`]*`/g)) {
       assert.ok(match.index + match[0].length <= SHOWN, `${name}: ${match[0]} ends at ${match.index + match[0].length}, past ${SHOWN}`);
