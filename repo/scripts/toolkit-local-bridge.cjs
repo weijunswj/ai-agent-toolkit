@@ -1205,11 +1205,9 @@ function agentRulesPluginRoot(args, options = {}) {
   return runtimeCodexPluginRoot();
 }
 
-// The CLAUDE.md shim has no markers: it is exactly the import line. A file that
-// imports AGENTS.md on a line of its own is current; one still holding the old
-// marked CLAUDE.SHIM block is stale; anything else is the repository's own file.
-// A Toolkit source checkout's file built from a one-line template (the CLAUDE.md shim): that line,
-// outside a fenced code block, with no Toolkit markers.
+// A Toolkit source checkout's file built from its template. The CLAUDE.md shim has no markers: it is
+// exactly the import line. A file that imports AGENTS.md on a line of its own is current; one still
+// holding the old marked CLAUDE.SHIM block is stale; anything else is the repository's own file.
 function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
   const targetPath = path.join(targetRoot, spec.target);
   const templatePath = path.join(templateRoot, spec.template);

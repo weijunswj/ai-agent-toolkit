@@ -31,7 +31,6 @@ const MIN_TOOLKIT = '3.137.0';
 const BINDING_FILE = '.github/toolkit-programme.json';
 const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
 
-
 // A governed repository's sweep copies run the Toolkit commit they are pinned to, which reads the
 // programme file with its own validator: a commit whose validator does not know min_toolkit reads the
 // cleaned file as invalid and the sweep stops updating the programme board. A commit this Toolkit copy
