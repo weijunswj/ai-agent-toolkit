@@ -611,6 +611,15 @@ function redact(doc) {
   return copy;
 }
 
+// The lane waits a gate-start write dropped (blockers starting `Queued`), listed in its result so a
+// blocker dropped by mistake shows the same turn.
+function laneWaitDrops(before, next) {
+  if (!before || !next) return [];
+  const kept = new Set(next.blockers || []);
+  return (before.blockers || []).filter(text => state.isLaneWait(text) && !kept.has(text));
+}
+const dropsResult = dropped => (dropped.length ? { dropped_lane_waits: dropped } : {});
+
 function writeResult(kind, number, result, writer) {
   return { document: `${kind === 'parent' ? 'parent' : 'issue'}-${number}.json`, outcome: result.outcome, revision: result.doc?.revision ?? null,
     epoch: result.doc?.fence?.epoch ?? null, acting: { prefix: writer.prefix, session: writer.session } };
@@ -847,7 +856,7 @@ const commands = {
         log({ ...entry, results: [...entry.results, failed].slice(-holderOrder.MAX_OPS), stopped_at: nowText(deps) });
         return { mode: 'apply', ...summary, outcome: 'STOPPED', results, next_action: `Stopped at write ${at + 1} (${op.command}): ${failed.code}. Report this to the controller; a run of the same order continues from this write.` };
       }
-      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE' };
+      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE', ...(result?.dropped_lane_waits ? { dropped_lane_waits: result.dropped_lane_waits } : {}) };
       results.push(ran);
       done.add(at);
       log({ ...entry, done: [...done].sort((a, b) => a - b), results: [...entry.results, ran].slice(-holderOrder.MAX_OPS), by });
@@ -965,23 +974,29 @@ const commands = {
     const attention = showAttention(parentDoc, args, deps);
     const writer = requireGateWriter(context, parentDoc, context.store.read('child', args.issue).doc, outcome);
     const files = context.store.listJournals(args.issue);
+    let dropped = [];
     const result = context.store.mutate('child', args.issue, {
       writer, parentDoc, create: () => state.newChild({ repository: context.repository, outcome }),
       change: doc => {
         const next = state.assignGate(doc, { assignment: args.assignment, role: args.role, supersede: Boolean(args.supersede), reason: args.reason || null });
+        dropped = laneWaitDrops(doc, next);
         return next && markJournalsSeen(next, files);
       },
     });
-    return { ...writeResult('child', args.issue, result, writer), attention };
+    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), attention };
   },
 
   reopen(args, context) {
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
     const files = context.store.listJournals(args.issue);
-    const result = context.store.mutate('child', args.issue, { writer, parentDoc,
-      change: doc => markJournalsSeen(state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null }), files) });
-    return writeResult('child', args.issue, result, writer);
+    let dropped = [];
+    const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => {
+      const next = state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null });
+      dropped = laneWaitDrops(doc, next);
+      return markJournalsSeen(next, files);
+    } });
+    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped) };
   },
 
   interrupt(args, context) {
@@ -1009,15 +1024,20 @@ const commands = {
     const writer = requireParentHolder(context, parentDoc);
     const attention = args.consume ? showAttention(parentDoc, args, deps) : null;
     let change;
+    let dropped = [];
     if (args.record) {
       change = doc => state.recordReturn(doc, { returnId: args.record, assignment: args.assignment, atHead: args['at-head'] || null });
     } else {
       const child = context.store.read('child', args.issue).doc;
       const head = child && args.verdict === 'ACCEPT' && child.gate.role === 'G1' ? liveHead(context, child) : undefined;
-      change = doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head });
+      change = doc => {
+        const next = state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head });
+        dropped = laneWaitDrops(doc, next);
+        return next;
+      };
     }
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
-    return { ...writeResult('child', args.issue, result, writer), ...(attention ? { attention } : {}) };
+    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...(attention ? { attention } : {}) };
   },
 
   // An executor binds its own session to the controller's current assignment and opens its journal.

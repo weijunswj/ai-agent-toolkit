@@ -317,6 +317,26 @@ test('both GraphQL check reads and the REST fallback carry each run\'s completio
   assert.equal(state.evaluateChecks({ head: facts.head, rollupOid: facts.rollupOid, contexts: facts.contexts, configured: ['validate'] }).state, 'GREEN', 'so a passing run read over REST can read GREEN');
 });
 
+// QUEUED_BUT_MOVING counts only a head committed after its lane-wait stamp, so both GraphQL reads carry
+// the head commit's time; a last commit that is not the head, or the REST fallback, gives none.
+test('both GraphQL PR reads carry the head commit time, and only for the head; the REST fallback gives none', () => {
+  const at = '2026-11-19T04:00:00Z';
+  const pr = oid => ({ number: 7, title: 't', body: '', state: 'OPEN', isDraft: false, merged: false, mergedAt: null, mergeCommit: null, headRefOid: SHA_A, baseRefName: 'main', mergeable: 'MERGEABLE',
+    commits: { nodes: [{ commit: { oid, committedDate: at, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [] } } } }] } });
+  const queries = [];
+  const single = oid => new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { graphql: query => { queries.push(query); return { repository: { defaultBranchRef: { name: 'main' }, pullRequest: pr(oid) } }; } } });
+  const batched = oid => new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath, body) => { queries.push(body.query); return { status: 200, json: { data: { repository: { defaultBranchRef: { name: 'main' }, p7: pr(oid) } } } }; } } });
+  assert.equal(single(SHA_A).pullRequest(7).head_committed_at, at);
+  assert.equal(batched(SHA_A).pullRequests([7]).get(7).head_committed_at, at);
+  assert.equal(single(SHA_B).pullRequest(7).head_committed_at, null, 'the last commit read is not the head');
+  assert.equal(batched(SHA_B).pullRequests([7]).get(7).head_committed_at, null, 'the last commit read is not the head');
+  for (const query of queries) assert.match(query, /commits\(last: ?1\) \{ nodes \{ commit \{ oid committedDate /);
+  const rest = { 'pulls/7': { number: 7, title: 't', body: '', state: 'open', draft: false, merged: false, head: { sha: SHA_A }, base: { ref: 'main', repo: { default_branch: 'main' } }, mergeable: true },
+    [`commits/${SHA_A}/check-runs?per_page=100`]: { total_count: 0, check_runs: [] }, [`commits/${SHA_A}/status`]: { total_count: 0, statuses: [] } };
+  const fallback = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath) => ({ status: 200, json: rest[apiPath.replace('repos/example.test/app/', '')] }) } });
+  assert.equal(fallback.restPullRequest(7).head_committed_at, null);
+});
+
 test('a closed task page is frozen by the hidden task status line its block carries, and drawn again once reopened', () => {
   const block = status => state.findStateBlock(state.renderBlock(state.renderChildBlockBody(child({ lifecycle: status === 'COMPLETED' ? 'DONE' : 'ACTIVE' }), { ...outcome, class: status === 'COMPLETED' ? 'COMPLETED' : 'COMMITTED' }), '3.9.1')).block;
   const done = block('COMPLETED');
@@ -906,4 +926,39 @@ test('a replaced last section ends at the next managed block, keeping the trace 
   const page = `# Title\n\n## Programme index\nold list\n\n${trace}\n\n[i1]: https://example.com/\n`;
   const { body } = state.upsertStateBlock(page, state.renderBlock('graph', '3.9.1'), { replace_section: 'Programme index' });
   assert.equal(body, `# Title\n\n${state.renderBlock('graph', '3.9.1')}\n\n${trace}\n\n[i1]: https://example.com/\n`);
+});
+
+// The lane-wait stamp (private.lane_wait): from when a queued task's PR moves count (the wait written, or
+// a recorded gate ended) and the tracked PR head then, so the sweep sees a move with no gate recorded.
+test('every child write stamps a lane wait with its write time and the PR head then, a recorded gate ending restamps it, and a patch cannot set it', () => {
+  const WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  const at = '2026-11-19T03:00:00.000Z';
+  const later = '2026-11-19T04:00:00.000Z';
+  const base = state.claimDocument(child(), writer, {});
+  const doc = (blockers, head = null, previous = null) => ({ ...base, blockers, pr: { ...base.pr, ...(head ? { number: 900, state: 'OPEN', head } : {}) },
+    private: { ...(previous?.private || {}) } });
+  assert.deepEqual(state.stampChild(doc([]), doc([WAIT]), at).private.lane_wait, { at, head: null }, 'added with no PR');
+  const stamped = state.stampChild(doc([]), doc([WAIT], SHA_A), at);
+  assert.deepEqual(stamped.private.lane_wait, { at, head: SHA_A }, 'added with a PR');
+  assert.deepEqual(state.stampChild(stamped, doc([WAIT, 'waits for PR 1098'], SHA_B, stamped), later).private.lane_wait, { at, head: SHA_A },
+    'a later write that keeps the wait keeps its stamp, whatever else moves');
+  assert.deepEqual(state.stampChild(stamped, doc([`${WAIT}; behind #1322`], SHA_B, stamped), later).private.lane_wait, { at: later, head: SHA_B }, 'a changed wait is a new wait');
+  assert.deepEqual(state.stampChild(doc([WAIT], SHA_A), doc([WAIT], SHA_B), later).private.lane_wait, { at: later, head: SHA_B },
+    'a wait written before stamps existed is stamped like a new one: moves count from this write');
+  const gated = (gateState, base2) => ({ ...base2, gate: { ...base2.gate, role: 'G1', state: gateState, assignment: { id: 'g1-x', role: 'G1' } } });
+  for (const ended of ['SUBMITTED', 'INTERRUPTED', 'WAITING_OWNER', 'RETIRED']) {
+    assert.deepEqual(state.stampChild(gated('ACTIVE', stamped), gated(ended, doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at: later, head: SHA_B },
+      `the write that ends a recorded gate (ACTIVE to ${ended}) restamps the wait: the gate covers every commit before it`);
+  }
+  assert.deepEqual(state.stampChild(gated('ASSIGNED', stamped), gated('ACTIVE', doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at, head: SHA_A }, 'a gate still live keeps it');
+  assert.deepEqual(state.stampChild(gated('SUBMITTED', stamped), gated('SUBMITTED', doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at, head: SHA_A }, 'a gate already ended keeps it');
+  assert.equal('lane_wait' in state.stampChild(stamped, doc(['waits for PR 1098'], SHA_A, stamped), later).private, false, 'removed with the last wait');
+  const parentDoc = heldParent();
+  const forged = { private: { lane_wait: { at: later, head: SHA_B } } };
+  assert.deepEqual(state.stampChild(stamped, state.applyPatch('child', stamped, forged, { writer, parentDoc }), later).private.lane_wait, { at, head: SHA_A }, 'a patch cannot move it');
+  assert.equal('lane_wait' in state.stampChild(doc([]), state.applyPatch('child', doc([]), forged, { writer, parentDoc }), later).private, false, 'nor set it with no wait');
+  for (const valid of [stamped, doc([WAIT]), state.stampChild(doc([]), doc([WAIT]), at)]) assert.deepEqual(state.validateChild(valid), [], 'valid with and without the stamp');
+  for (const bad of [{ at, head: 'abc' }, { at: '', head: null }, { at, head: null, extra: 1 }, 'x']) {
+    assert.ok(state.validateChild({ ...stamped, private: { lane_wait: bad } }).some(error => error.includes('private.lane_wait')), JSON.stringify(bad));
+  }
 });
