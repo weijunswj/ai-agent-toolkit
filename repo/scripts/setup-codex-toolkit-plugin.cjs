@@ -46,6 +46,7 @@ const CACHE_FINGERPRINT_PATHS = [
   "repo/scripts/toolkit-user-state.cjs",
   "repo/scripts/toolkit-governance-proposal.cjs",
   "repo/CONTROLLER.md",
+  "repo/controller/principles.md",
   "repo/controller/roles-and-routes.md",
   "repo/controller/gates.md",
   "repo/controller/evidence-and-finish.md",

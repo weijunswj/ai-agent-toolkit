@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { Guidebook, parseArgs, main, VERSION_LINE, BASE_PATHS, blobSha } = require('../scripts/toolkit-projects-guidebook.cjs');
 const { ProjectsInstructions } = require('../scripts/toolkit-projects-instructions.cjs');
+const { controllerFiles } = require('./support/controller-text.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SKILL_DIR = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects');
@@ -253,6 +254,14 @@ test('the command line prints one result per line and exits 0 only when done or 
   ]);
   assert.throws(() => parseArgs(['--out', '--check']), { code: 'GUIDEBOOK_ARGUMENTS' });
   assert.throws(() => parseArgs(['--check', out, 'extra']), { code: 'GUIDEBOOK_ARGUMENTS' });
+});
+
+test('BASE carries the controller file and every page its Pages section lists', t => {
+  const out = path.join(tmp(t), 'copy');
+  guidebook().refresh(out);
+  const based = fs.readFileSync(path.join(out, 'BASE'), 'utf8').trimEnd().split('\n').map(line => line.split(' ')[1]);
+  const missing = controllerFiles(ROOT).filter(rel => !BASE_PATHS.includes(rel) || !based.includes(rel));
+  assert.deepEqual(missing, []);
 });
 
 test('BASE names the git blob of every base file the Projects controller inherits, CRLF read as LF', t => {

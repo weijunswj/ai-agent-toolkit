@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const setup = require('../scripts/setup-codex-toolkit-plugin.cjs');
+const { controllerFiles } = require('./support/controller-text.cjs');
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-toolkit-plugin-'));
@@ -527,6 +528,22 @@ test('Codex SessionStart verifier rejects the old direct bridge command and inco
   assert.match(errors, /startup, resume, clear, and compact/);
   assert.match(errors, /exact portable Toolkit launcher shape/);
   assert.match(errors, /must not call toolkit-local-bridge\.cjs directly/);
+});
+
+test('installed cache freshness covers every controller page the core lists', () => {
+  const cache = path.join(tmpRoot(), 'codex-cache');
+  copyPackageFingerprint(repoRoot, cache);
+  if (process.platform === 'win32') setup.prepareInstalledSessionStart(cache);
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(cache, repoRoot), []);
+  for (const rel of controllerFiles(repoRoot)) {
+    const file = path.join(cache, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${fs.readFileSync(path.join(repoRoot, ...rel.split('/')), 'utf8')} `);
+    const errors = setup.verifyInstalledCacheFreshness(cache, repoRoot);
+    assert.ok(errors.some((error) => error.endsWith(`installed plugin cache is stale for repo file: ${rel}`)), `${rel}: ${errors.join('; ')}`);
+    fs.copyFileSync(path.join(repoRoot, ...rel.split('/')), file);
+  }
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(cache, repoRoot), []);
 });
 
 test('Windows SessionStart preparation installs strict launcher metadata without touching Claude cache', { skip: process.platform !== 'win32' }, () => {
