@@ -402,6 +402,27 @@ function activeTopologyFinding(text, rel = '') {
   return activeTopologyFindings(text, rel)[0] || null;
 }
 
+// The text of a one-line YAML value: a double-quoted value loses its quotes and has its escapes read,
+// a single-quoted one loses its quotes and turns '' into ', and any other value stays as written. The
+// strict skill-YAML check in validate-toolkit.cjs refuses anything this does not read the same way as
+// a real YAML parser.
+const YAML_ESCAPES = Object.freeze({ 0: '\0', a: '\x07', b: '\b', t: '\t', '\t': '\t', n: '\n', v: '\v', f: '\f', r: '\r', e: '\x1b', ' ': ' ', '"': '"', '\\': '\\', N: '\x85', _: '\xa0', L: '\u2028', P: '\u2029' });
+
+function yamlScalarText(value) {
+  const text = String(value);
+  if (text.length >= 2 && text.startsWith("'") && text.endsWith("'")) return text.slice(1, -1).replace(/''/g, "'");
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    return text.slice(1, -1).replace(/\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[\s\S])/g, (escape, code) => {
+      if (code.length > 1) {
+        const point = parseInt(code.slice(1), 16);
+        return point <= 0x10ffff ? String.fromCodePoint(point) : escape;
+      }
+      return Object.hasOwn(YAML_ESCAPES, code) ? YAML_ESCAPES[code] : escape;
+    });
+  }
+  return text;
+}
+
 function parseFrontMatter(text) {
   if (!text.startsWith('---\n')) return null;
   const end = text.indexOf('\n---', 4);
@@ -409,7 +430,7 @@ function parseFrontMatter(text) {
   const result = {};
   for (const line of text.slice(4, end).trim().split('\n')) {
     const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (match) result[match[1]] = match[2].trim();
+    if (match) result[match[1]] = yamlScalarText(match[2].trim());
   }
   return result;
 }
@@ -566,5 +587,6 @@ module.exports = {
   snapshot,
   validateTopologyScopePolicy,
   validTopologyScopePolicy,
-  validate
+  validate,
+  yamlScalarText
 };

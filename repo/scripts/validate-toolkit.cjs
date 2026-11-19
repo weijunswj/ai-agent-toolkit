@@ -156,7 +156,7 @@ function parseFrontMatter(text) {
   const result = {};
   for (const line of normalized.slice(4, end).trim().split('\n')) {
     const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (match) result[match[1]] = match[2].trim();
+    if (match) result[match[1]] = surfaceAudit.yamlScalarText(match[2].trim());
   }
   return result;
 }
@@ -232,6 +232,105 @@ function validateSkills(errors) {
     if (!frontMatter?.name || !frontMatter.description) fail(errors, `${skillPath} missing frontmatter name or description`);
     if (frontMatter?.name !== path.posix.basename(skillDir)) fail(errors, `${skillPath} frontmatter name does not match its folder`);
     if (/[<>]/.test(String(frontMatter?.description || '').replace(/^[>|][+-]?\d*$/, ''))) fail(errors, `${skillPath} description contains angle brackets; claude.ai rejects XML tags in skill descriptions and strips them`);
+  }
+  validateStrictSkillYaml(errors);
+}
+
+// Skill frontmatter and skill metadata must load in every host, and some (Antigravity among them) use a
+// strict YAML parser that refuses a file other hosts accept, such as a plain description holding ": ".
+// Toolkit carries no YAML library, so these files are held to a small subset that every strict YAML 1.1
+// or 1.2 parser accepts: `key: value` lines nested by spaces, `- value` list items, blank lines and
+// whole-line comments. A value is a double-quoted string with valid escapes, a single-quoted string
+// with '' for a quote, or a plain value that cannot be read as YAML syntax.
+const STRICT_YAML_DOUBLE = /^"(?:[^"\\]|\\(?:[0abtnvfre "\\\t N_LP]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U(?:00(?:0[0-9A-Fa-f]|10)[0-9A-Fa-f]{4})))*"$/;
+const STRICT_YAML_SINGLE = /^'(?:[^']|'')*'$/;
+const STRICT_YAML_INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
+const STRICT_YAML_QUOTE_HINT = 'quote the value with double quotes';
+
+function strictYamlValueProblem(value) {
+  if (value.startsWith('"')) return STRICT_YAML_DOUBLE.test(value) ? null : 'is not one double-quoted string with valid escapes and nothing after it';
+  if (value.startsWith("'")) return STRICT_YAML_SINGLE.test(value) ? null : "is not one single-quoted string with '' for each quote and nothing after it";
+  if (STRICT_YAML_INDICATOR.test(value)) return `starts with the YAML character ${value[0]}; ${STRICT_YAML_QUOTE_HINT}`;
+  if (value.includes(': ')) return `holds ": ", which strict YAML reads as a nested key; ${STRICT_YAML_QUOTE_HINT}`;
+  if (value.endsWith(':')) return `ends with ":", which strict YAML reads as a nested key; ${STRICT_YAML_QUOTE_HINT}`;
+  if (/[ \t]#/.test(value)) return `holds " #", which YAML reads as the start of a comment; ${STRICT_YAML_QUOTE_HINT}`;
+  return null;
+}
+
+// Findings for one YAML document, each `line <n>: <reason>`; firstLine is the file line of text's first line.
+function strictYamlFindings(text, firstLine = 1) {
+  const findings = [];
+  const levels = [];
+  let open = { line: 0 };
+  text.split('\n').forEach((raw, index) => {
+    const line = firstLine + index;
+    const finding = (reason) => findings.push(`line ${line}: ${reason}`);
+    if (/^[ \t]*(?:#.*)?$/.test(raw)) return;
+    // A line that cannot be placed ends any open block, so one mistake gives one finding.
+    const unplaced = (reason) => { open = null; return finding(reason); };
+    if (/^ *\t/.test(raw)) return unplaced('indents with a tab; YAML indents with spaces only');
+    const indent = raw.length - raw.trimStart().length;
+    const body = raw.slice(indent).replace(/[ \t]+$/, '');
+    const item = /^-(?:[ ]+(.*))?$/.exec(body);
+    const entry = item ? null : /^([A-Za-z0-9_][A-Za-z0-9_-]*):(?:[ ]+(.*))?$/.exec(body);
+    if (!item && !entry) return unplaced('is not a `key: value` line or a `- value` list item');
+    const parent = levels.at(-1);
+    if (open && (!parent || indent > parent.indent)) {
+      if (!parent && indent > 0) return unplaced('is indented, but nothing above it opens a block');
+      levels.push({ indent, list: Boolean(item), keys: new Set() });
+    } else {
+      if (open) findings.push(`line ${open.line}: has no value and no indented block under it; give it a value`);
+      open = null;
+      while (levels.length && indent < levels.at(-1).indent) levels.pop();
+      if (!levels.length || levels.at(-1).indent !== indent) return finding('is indented to a depth no earlier line uses');
+    }
+    open = null;
+    const level = levels.at(-1);
+    if (level.list !== Boolean(item)) return finding('mixes list items and keys at one depth');
+    const value = (item ? item[1] : entry[2]) || '';
+    if (entry) {
+      if (level.keys.has(entry[1])) finding(`repeats the key ${entry[1]}`);
+      level.keys.add(entry[1]);
+      if (!value) {
+        open = { line };
+        return undefined;
+      }
+    } else if (!value) return finding('is an empty list item; give it a value');
+    const problem = strictYamlValueProblem(value);
+    if (problem) finding(`value ${problem}`);
+    return undefined;
+  });
+  if (open && open.line) findings.push(`line ${open.line}: has no value and no indented block under it; give it a value`);
+  return findings;
+}
+
+// The frontmatter of a Markdown file as { text, firstLine }, or null when it has none: the lines
+// between an opening `---` first line and the next line that is exactly `---`.
+function frontMatterBlock(text) {
+  const lines = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n');
+  if (lines[0] !== '---') return null;
+  const end = lines.indexOf('---', 1);
+  return end === -1 ? null : { text: lines.slice(1, end).join('\n'), firstLine: 2 };
+}
+
+function strictSkillYamlFiles() {
+  const skills = skillDirs().flatMap((dir) => [`${dir}/SKILL.md`, `${dir}/agents/openai.yaml`]).filter(existsRel);
+  const contracts = ['repo/contracts/third-party', 'repo/contracts/claude-projects']
+    .flatMap((dir) => walk(resolveRel(dir)))
+    .filter((entry) => entry.dirent.isFile() && entry.dirent.name === 'SKILL.md')
+    .map((entry) => entry.relPath);
+  return [...skills, ...contracts.sort()];
+}
+
+function validateStrictSkillYaml(errors) {
+  for (const relPath of strictSkillYamlFiles()) {
+    const text = readText(relPath);
+    const block = relPath.endsWith('.md') ? frontMatterBlock(text) : { text, firstLine: 1 };
+    if (!block) {
+      fail(errors, `${relPath} has no frontmatter block between --- lines`);
+      continue;
+    }
+    for (const finding of strictYamlFindings(block.text, block.firstLine)) fail(errors, `${relPath} ${finding}; strict YAML hosts such as Antigravity refuse this file`);
   }
 }
 
@@ -900,6 +999,8 @@ module.exports = {
   parseFrontMatter,
   parseSkillRouting,
   skillDirs,
+  strictYamlFindings,
+  validateStrictSkillYaml,
   validationCommandTargetFinding,
   validationCommandTargets,
   validate
