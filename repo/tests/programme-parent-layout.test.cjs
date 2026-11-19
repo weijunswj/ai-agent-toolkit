@@ -85,7 +85,7 @@ test('a task waiting on the owner with a UAT still owed waits on that UAT, in th
   Object.assign(child.pr, { number: 2017, state: 'MERGED', head: 'c'.repeat(40) });
   Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) });
   assert.equal(row(504), 'Owner: UAT on PR #2017');
-  assert.match(current(), /^- #504 [^\n]* · PR #2017 · waiting on you: your UAT on PR #2017$/m);
+  assert.match(current(), /^- #504 [^\n]* · PR #2017 · merged, awaiting proof · waiting on you: your UAT on PR #2017$/m);
   Object.assign(child.gate, { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'a-504-g2', role: 'G2' } });
   assert.equal(row(504), 'Owner: decision', 'the gate asked the owner something');
   assert.match(current(), /^- #504 [^\n]* · PR #2017 · G2 · waiting on you: your decision$/m);
@@ -293,6 +293,124 @@ test('CURRENT lists tasks in progress before queued ones, whatever their priorit
   const listed = state.renderCurrentBlockBody(parent, children, new Map(), '2026-11-18T00:00:00Z').split('\n')
     .filter(line => /^- #\d+ /.test(line)).map(line => Number(/^- #(\d+) /.exec(line)[1]));
   assert.deepEqual(listed, [3, 2]);
+});
+
+// A task whose tracked task PR merged while its issue stays open reads `MERGED · awaiting proof`,
+// never the gate that already returned. The fixture copies the shape the sweep recorded after two
+// real merges: PR MERGED, lifecycle ACTIVE and an accepted G2 left RETIRED with its role still set.
+const MERGED = 'MERGED · awaiting proof';
+const MERGED_HEAD = 'c'.repeat(40);
+function mergedFixture() {
+  const f = renderScaleFixture(state);
+  const graph = () => state.renderParentBlockBody(f.parent, f.children, f.issues);
+  const row = issue => cellsOf(rowsOf(graph()).find(line => cellsOf(line)[1] === `#${issue}`));
+  const board = issue => `${row(issue)[2]} | ${row(issue)[3]}`;
+  const order = () => rowsOf(graph()).map(line => Number(cellsOf(line)[1].slice(1)));
+  const current = () => state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now);
+  const merge = (issue, extra = {}) => {
+    const child = f.children.get(issue);
+    Object.assign(child.pr, { number: 3000 + issue, state: 'MERGED', head: MERGED_HEAD, merge_sha: MERGED_HEAD });
+    child.prs = child.prs.map(pr => (pr.state === 'OPEN' ? { ...pr, state: 'CLOSED' } : pr));
+    Object.assign(child.gate, { role: 'G2', state: 'RETIRED' });
+    return Object.assign(child, extra);
+  };
+  return { f, graph, row, board, order, current, merge };
+}
+
+test('merged task, issue open, gate returned: MERGED · awaiting proof with no stale gate, active or held', () => {
+  for (const lifecycle of ['ACTIVE', 'HOLD']) {
+    const t = mergedFixture();
+    t.merge(500, { lifecycle });
+    assert.equal(t.board(500), `${MERGED} | -`, lifecycle);
+  }
+  const t = mergedFixture();
+  t.merge(500, { gate: { role: null, state: null, session_id: null, route: null, returns: [] } });
+  assert.equal(t.board(500), `${MERGED} | -`, 'no gate recorded at all');
+});
+
+test('merged and waiting on the owner with a UAT owed: the status says merged and Waiting on names the UAT', () => {
+  const t = mergedFixture();
+  const child = t.merge(501, { lifecycle: 'WAITING_OWNER' });
+  Object.assign(child.uat, { state: 'PENDING', at_head: MERGED_HEAD });
+  assert.equal(t.board(501), `${MERGED} | Owner: UAT on PR #3501`);
+});
+
+test('merged rows sort after NOW · IN PROGRESS and before NOW · QUEUED, and the order line names the band', () => {
+  const t = mergedFixture();
+  t.merge(500);
+  t.f.children.get(503).blockers = ['waits for PR 1098'];
+  const order = t.order();
+  const statusOf = issue => t.row(issue)[2];
+  const firstMerged = order.findIndex(issue => statusOf(issue) === MERGED);
+  assert.ok(firstMerged > 0, 'a merged row is drawn after the rows in progress');
+  assert.ok(order.slice(0, firstMerged).every(issue => statusOf(issue) === 'NOW · IN PROGRESS'), 'rows in progress lead');
+  assert.equal(statusOf(order[firstMerged + 1]), 'NOW · QUEUED', 'queued rows follow the merged band');
+  assert.match(t.graph(), /Order: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER/);
+});
+
+test('CURRENT agrees with the graph: a merged task reads merged, awaiting proof, not its returned gate', () => {
+  const t = mergedFixture();
+  t.merge(500);
+  const line = t.current().split('\n').find(text => text.startsWith('- #500 '));
+  assert.ok(line, 'the merged task is still listed in progress');
+  assert.match(line, /PR #3500 · merged, awaiting proof$/);
+  assert.doesNotMatch(line, /· G2/);
+});
+
+test('a listed blocker still queues a merged task, so lane waits on multi-slice tasks stay NOW · QUEUED', () => {
+  const t = mergedFixture();
+  const wait = 'Queued in NOW: one child at a time; starts when the gate lane frees';
+  t.merge(502, { blockers: [wait] });
+  assert.equal(t.board(502), `NOW · QUEUED | Blocked: ${wait}`);
+  assert.doesNotMatch(t.current().split('\n').find(text => text.startsWith('- #502 ')), /merged, awaiting proof/);
+});
+
+test('a closed issue is COMPLETED and a task set back to planned is LATER, merged or not', () => {
+  const t = mergedFixture();
+  t.merge(500, { lifecycle: 'DONE', completed_at: '2026-11-07T00:00:00Z' });
+  t.merge(501, { lifecycle: 'PLANNED' });
+  assert.equal(t.board(500), 'COMPLETED | -');
+  assert.equal(t.board(501), 'LATER | -');
+});
+
+test('a task PR opened after the merge puts the task back in progress, tracked or as another claimant', () => {
+  const t = mergedFixture();
+  const tracked = t.merge(500);
+  tracked.prs.push({ number: 3500, state: 'MERGED', merge_sha: MERGED_HEAD });
+  Object.assign(tracked.pr, { number: 3900, state: 'OPEN', head: 'd'.repeat(40), merge_sha: null });
+  Object.assign(tracked.gate, { role: 'G2', state: 'ASSIGNED' });
+  assert.equal(t.board(500), 'NOW · IN PROGRESS | G2');
+  for (const state of ['OPEN', 'DRAFT']) {
+    t.merge(501).prs.push({ number: 3901, state, head: 'e'.repeat(40) });
+    assert.equal(t.row(501)[2], 'NOW · IN PROGRESS', `another task PR is ${state}`);
+    t.f.children.get(501).prs.pop();
+  }
+});
+
+test('a gate still at the task keeps it in progress with its gate named, whatever the merged PR', () => {
+  for (const [gateState, waiting] of [['ASSIGNED', 'G1'], ['ACTIVE', 'G1'], ['SUBMITTED', 'G1'], ['INTERRUPTED', 'G1'], ['WAITING_OWNER', 'Owner: decision']]) {
+    const t = mergedFixture();
+    Object.assign(t.merge(500).gate, { role: 'G1', state: gateState });
+    assert.equal(t.board(500), `NOW · IN PROGRESS | ${waiting}`, gateState);
+  }
+});
+
+test('a task whose tracked PR closed unmerged or that has no PR stays NOW · IN PROGRESS with its gate', () => {
+  const t = mergedFixture();
+  Object.assign(t.merge(500).pr, { state: 'CLOSED', merge_sha: null });
+  Object.assign(t.f.children.get(501).gate, { role: 'G2', state: 'RETIRED' });
+  t.f.children.get(501).pr = { ...t.f.children.get(501).pr, number: null, state: null };
+  t.f.children.get(501).prs = [];
+  assert.equal(t.board(500), 'NOW · IN PROGRESS | G2');
+  assert.equal(t.board(501), 'NOW · IN PROGRESS | G2');
+});
+
+test('rows with no merged task PR are unchanged', () => {
+  const t = mergedFixture();
+  assert.equal(t.board(500), 'NOW · IN PROGRESS | -');
+  assert.equal(t.board(510), 'LATER | -');
+  assert.equal(t.board(520), 'COMPLETED | -');
+  assert.ok(!rowsOf(t.graph()).some(line => cellsOf(line)[2] === MERGED), 'the fixture draws no merged row until a PR merges');
 });
 
 test('CURRENT is slim: in progress, one attention line with holds, no Start next or finding lists', () => {
