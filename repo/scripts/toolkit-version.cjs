@@ -18,6 +18,15 @@ function readToolkitVersion(file = VERSION_FILE) {
   return version;
 }
 
+// The one version order: -1, 0 or 1 for two MAJOR.MINOR.PATCH versions, each part compared as a
+// whole number of any size. Anything else throws, so no caller orders a version it cannot read.
+function compareVersions(left, right) {
+  for (const value of [left, right]) if (!SEMVER.test(String(value ?? ''))) throw new Error(`Not a MAJOR.MINOR.PATCH version: ${value}`);
+  const a = String(left).split('.').map(BigInt), b = String(right).split('.').map(BigInt);
+  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1;
+  return 0;
+}
+
 const TOOLKIT_VERSION = readToolkitVersion();
 
-module.exports = { SEMVER, TOOLKIT_VERSION, VERSION_FILE, VERSION_REL_PATH, readToolkitVersion };
+module.exports = { SEMVER, TOOLKIT_VERSION, VERSION_FILE, VERSION_REL_PATH, compareVersions, readToolkitVersion };

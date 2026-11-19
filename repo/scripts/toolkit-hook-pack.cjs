@@ -174,7 +174,7 @@ function fixtureErrors(fixture) {
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main', 'min_toolkit'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
       if (repo.remote_main !== undefined && repo.remote_main !== true) errors.push('remote_main is true or left out');
       if (repo.can_write !== undefined && (repo.can_write !== false || repo.governance !== 'undecided')) errors.push('fixture.repo.can_write needs governance undecided and is false or left out');
       if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
@@ -182,6 +182,7 @@ function fixtureErrors(fixture) {
       if (repo.nested_worktrees !== undefined && (!Array.isArray(repo.nested_worktrees) || repo.nested_worktrees.some(tree => !tree || !/^[a-z0-9-]+$/.test(tree.branch || '')
         || (tree.commits !== undefined && (!Array.isArray(tree.commits) || tree.commits.some(commit => !commit || typeof commit.files !== 'object')))))) errors.push('fixture.repo.nested_worktrees lists { branch, commits } objects');
       if (repo.task_auto_merge !== undefined && (repo.governance !== 'enabled' || !TASK_AUTO_MERGE.includes(repo.task_auto_merge))) errors.push(`fixture.repo.task_auto_merge needs governance enabled and is one of ${TASK_AUTO_MERGE.join(', ')}`);
+      if (repo.min_toolkit !== undefined && (repo.governance !== 'enabled' || typeof repo.min_toolkit !== 'string' || !/^\d+\.\d+\.\d+$/.test(repo.min_toolkit))) errors.push('fixture.repo.min_toolkit needs governance enabled and is a MAJOR.MINOR.PATCH version');
       if (repo.legacy_answer !== undefined && !['yes', 'no', 'damaged'].includes(repo.legacy_answer)) errors.push('legacy_answer must be yes, no or damaged');
       if (repo.binding_status !== undefined && repo.binding_status !== 'unavailable') errors.push('binding_status must be unavailable');
       if (!GOVERNANCE.includes(repo.governance)) errors.push(`fixture.repo.governance must be one of ${GOVERNANCE.join(', ')}`);
@@ -454,7 +455,7 @@ class Fixture {
       if (spec.governance === 'disabled') support.recordMerged(this.work, { home: this.home, text: JSON.stringify({
         schema: 'toolkit.programme-binding.v2', repository: `toolkit-test-fixture/hook-pack-${name}`, governance: 'disabled',
       }), now: this.#now() });
-      if (spec.task_auto_merge) this.#taskAutoMerge(`toolkit-test-fixture/hook-pack-${name}`, spec.task_auto_merge, support);
+      if (spec.task_auto_merge || spec.min_toolkit) this.#enabledBinding(`toolkit-test-fixture/hook-pack-${name}`, spec, support);
     } else {
       this.#git(this.work, ['init', '--quiet']);
       if (spec.governance === 'undecided') {
@@ -625,9 +626,10 @@ cp.spawnSync = function(file, args, options) {
     this.env.NODE_OPTIONS = [this.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ');
   }
 
-  // A fresh enabled binding carrying the repository's switch (task_prs), in this fixture's home.
-  // legacy-on and v1 also plant the per-app On answers older Toolkit versions saved: they grant nothing.
-  #taskAutoMerge(slug, answer, support) {
+  // A fresh enabled binding carrying the repository's switch (task_prs) and min_toolkit as the fixture
+  // gives them, in this fixture's home. legacy-on and v1 also plant the per-app On answers older Toolkit
+  // versions saved: they grant nothing.
+  #enabledBinding(slug, { task_auto_merge: answer, min_toolkit: minToolkit }, support) {
     const v1 = answer === 'v1';
     const switchValue = answer === 'off' ? 'off' : ['after-gates', 'after-gates-stale'].includes(answer) ? 'after-gates' : null;
     const text = `${JSON.stringify(v1 ? {
@@ -640,6 +642,7 @@ cp.spawnSync = function(file, args, options) {
       store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
       ...(switchValue ? { task_prs: { auto_merge: switchValue } } : {}),
+      ...(minToolkit ? { min_toolkit: minToolkit } : {}),
     }, null, 2)}
 `;
     fs.writeFileSync(path.join(this.work, '.github', 'toolkit-programme.json'), text);

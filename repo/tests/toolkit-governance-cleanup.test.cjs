@@ -29,6 +29,8 @@ function repo(t, files, state = 'ENABLED') {
   return { root, governance };
 }
 const read = (root, file) => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } };
+const NONE_OLD = () => ({ tooOld: [], unchecked: [] });
+const BROKEN_AGENTS = `${BLOCK}\n\n<!-- AI-AGENT-TOOLKIT:x:BEGIN EXTRA v1 -->\n# Own rules\n`;
 
 test('a preview lists the changes and writes nothing; the cleanup removes only the copies and sets min_toolkit', t => {
   const own = '# Adopter rules\r\n\r\nKeep these exactly.\r\n';
@@ -92,6 +94,7 @@ test('a version 1 programme file and a Toolkit source checkout are refused, so a
   const refused = cleanup.run({ root: old.root, write: true, governance: old.governance });
   assert.equal(refused.ok, false);
   assert.match(refused.lines.join('\n'), /version 2/);
+  assert.deepEqual([refused.files, refused.refused], [1, '.github/toolkit-programme.json is not a version 2 programme file, and only version 2 can carry min_toolkit. Move it to version 2 first'], 'the bank names the refusal');
   assert.equal(read(old.root, 'AGENTS.md'), BLOCK);
   assert.equal(read(old.root, '.github/toolkit-programme.json'), v1);
   const source = repo(t, {
@@ -147,33 +150,110 @@ test('a sweep copy pinned to a Toolkit that does not know min_toolkit holds the 
   assert.equal(read(pinned.root, '.github/toolkit-programme.json'), BINDING);
   // Copies that read min_toolkit let it run; the check is skipped when min_toolkit is already current.
   const ready = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
-  assert.equal(cleanup.run({ root: ready.root, write: true, governance: ready.governance, sweepReaders: () => [] }).ok, true);
+  assert.equal(cleanup.run({ root: ready.root, write: true, governance: ready.governance, sweepReaders: NONE_OLD }).ok, true);
   const current = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`) });
   assert.equal(cleanup.run({ root: current.root, write: false, governance: current.governance, sweepReaders: () => { throw new Error('not asked'); } }).ok, true);
 
   // The bank shows the held cleanup as a status line, never a question to answer.
   const bank = require('../scripts/toolkit-governance-bank.cjs');
   const state = { state: 'ENABLED', repository: 'owner/app', root: '/x' };
-  const specs = bank.governanceBankSpecs({ state, task: 'off', merged: { store: { repository: 'owner/store' }, required_checks: [] }, permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, copies: { files: 1, held: held.held } });
+  const specs = bank.governanceBankSpecs({ state, task: 'off', merged: { store: { repository: 'owner/store' }, required_checks: [] }, permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, copies: { files: 1, held: held.held, step: held.step } });
   const row = specs.find(spec => spec.id === 'instruction-copies');
   assert.equal(row.report_only, true);
   assert.equal(row.current, '1 file left, cleanup held');
+  assert.match(row.recommended_text, /Not offered yet: .+ does not know min_toolkit.+\. Refresh them first$/);
   assert.equal(bank.parseBankAnswer(`${bank.bankReference(specs)}: all recommended`, specs).instructionCopies, undefined);
+});
+
+// A sweep copy pinned to a commit this Toolkit copy cannot read is not called too old: it is named as
+// not checked, with the step that settles it, and it still holds the cleanup.
+test('a sweep copy whose commit cannot be checked holds the cleanup and says so, apart from a too old one', t => {
+  const unknown = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'e'.repeat(40)} sha256=000000000000\nname: Toolkit Programme Sweep\n`;
+  const r = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING, '.github/workflows/toolkit-programme-sweep.yml': unknown });
+  const held = cleanup.run({ root: r.root, write: true, governance: r.governance });
+  assert.equal(held.ok, false);
+  assert.match(held.held, /^the pinned Toolkit copies \.github\/workflows\/toolkit-programme-sweep\.yml could not be checked, because this Toolkit copy cannot read the commit they are pinned to/);
+  assert.doesNotMatch(held.held, /does not know min_toolkit/);
+  assert.match(held.lines.join('\n'), /Run this from a Toolkit git checkout that has their commit, or refresh them first \(toolkit-cloud-workflows\.cjs/);
+  assert.equal(read(r.root, 'AGENTS.md'), `${BLOCK}\n\n# Own\n`, 'it still holds');
+  const both = cleanup.run({ root: r.root, governance: r.governance, sweepReaders: () => ({ tooOld: ['a.yml'], unchecked: ['b.yml'] }) });
+  assert.match(both.held, /copies a\.yml run a Toolkit that does not know min_toolkit.+; the pinned Toolkit copies b\.yml could not be checked/);
+  assert.equal(both.step, 'Refresh them first');
+});
+
+// Broken markers beside a governed block: the file is left alone and named once, everything else that
+// is proven Toolkit's is still cleaned, and nothing throws.
+test('a file with broken Toolkit markers is left in place and the other copies are still cleaned', t => {
+  const r = repo(t, {
+    'AGENTS.md': BROKEN_AGENTS, 'CLAUDE.md': '@AGENTS.md\n',
+    'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'],
+    '.github/toolkit-programme.json': BINDING,
+  });
+  for (const write of [false, true]) {
+    const done = cleanup.run({ root: r.root, write, governance: r.governance, sweepReaders: NONE_OLD });
+    assert.equal(done.ok, true, done.lines.join('\n'));
+    assert.deepEqual(done.changes.map(change => change.file), ['docs/agent-playbooks/INDEX.md', '.github/toolkit-programme.json']);
+    assert.equal(done.lines.filter(line => line.includes('AGENTS.md')).length, 1, 'named once');
+    assert.match(done.lines.join('\n'), /- Left in place: AGENTS\.md, because its Toolkit markers are broken, so Toolkit cannot tell its text from the rest; fixing them by hand is the owner's choice\./);
+  }
+  assert.equal(read(r.root, 'AGENTS.md'), BROKEN_AGENTS, 'byte for byte unchanged');
+  assert.equal(read(r.root, 'CLAUDE.md'), '@AGENTS.md\n', 'AGENTS.md still has its own text, so its shim stays');
+  assert.equal(read(r.root, 'docs/agent-playbooks/INDEX.md'), null);
+  const cli = require('node:child_process').spawnSync(process.execPath, [require.resolve('../scripts/toolkit-governance-cleanup.cjs'), '--repo', r.root], { encoding: 'utf8' });
+  assert.doesNotMatch(cli.stderr, /MANAGED_BLOCK_BROKEN|at .+\.cjs:\d+/, 'no stack trace');
+});
+
+// The template's curated-source comment sits above the governed block. Once the block goes it is
+// Toolkit's text too, so it goes with it, whether or not the owner's text follows.
+test('the template header above a removed block goes with it', t => {
+  const templateText = fs.readFileSync(path.join(TEMPLATES, 'AGENTS.managed.template.md'), 'utf8');
+  for (const [label, text, expected] of [
+    ['LF', `${templateText}\n# Own rules\n`, '# Own rules\n'],
+    ['CRLF', `${templateText.replace(/\n/g, '\r\n')}\r\n# Own rules\r\n`, '# Own rules\r\n'],
+    ['own text first', `# Own rules\n\n${templateText}`, `# Own rules\n\n${/^<!--[\s\S]*?-->\n/.exec(templateText)[0]}`],
+  ]) {
+    const r = repo(t, { 'AGENTS.md': text, '.github/toolkit-programme.json': BINDING });
+    const done = cleanup.run({ root: r.root, write: true, governance: r.governance, sweepReaders: NONE_OLD });
+    assert.equal(done.ok, true, done.lines.join('\n'));
+    assert.equal(read(r.root, 'AGENTS.md'), expected, label);
+  }
+});
+
+// After the cleanup, a Toolkit copy older than min_toolkit reads the programme file as unusable, so
+// the step before merging is to update every app, never to take min_toolkit out.
+test('the cleanup\'s next step names updating Toolkit on every app first', t => {
+  const r = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
+  const preview = cleanup.run({ root: r.root, governance: r.governance, sweepReaders: NONE_OLD });
+  assert.doesNotMatch(preview.lines.join('\n'), /update Toolkit on every app/);
+  const done = cleanup.run({ root: r.root, write: true, governance: r.governance, sweepReaders: NONE_OLD });
+  assert.match(done.lines.join('\n'), /Before merging, update Toolkit on every app that works in this repository \(setup toolkit\), so each copy is \d+\.\d+\.\d+ or later\. A copy that then reads the programme file as unusable needs updating; never remove min_toolkit to quiet it\./);
+  const current = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`) });
+  assert.doesNotMatch(cleanup.run({ root: current.root, write: true, governance: current.governance }).lines.join('\n'), /Before merging/, 'min_toolkit was already set');
+  const odd = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING.replace('"enabled"', '"enabled",\n  "min_toolkit": "soon"') });
+  assert.equal(cleanup.run({ root: odd.root, write: true, governance: odd.governance, sweepReaders: NONE_OLD }).ok, true);
+  assert.equal(JSON.parse(read(odd.root, '.github/toolkit-programme.json')).min_toolkit, cleanup.MIN_TOOLKIT, 'a value that is not a version is replaced');
 });
 
 test('a governed block edited by hand is named in the preview, because those edits go with it', t => {
   const edited = BLOCK.replace(/(BEGIN TOOLKIT-GOVERNED-RULES[^\n]*-->\n)/, '$1Our own extra line.\n');
   const r = repo(t, { 'AGENTS.md': `${edited}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
-  const preview = cleanup.run({ root: r.root, governance: r.governance, sweepReaders: () => [] });
+  const preview = cleanup.run({ root: r.root, governance: r.governance, sweepReaders: NONE_OLD });
   assert.equal(preview.ok, true);
   assert.match(preview.lines.join('\n'), /- AGENTS\.md: remove the Toolkit block, keeping the rest of the file \(the block was edited by hand since Toolkit wrote it, and those edits go with it\)\./);
   const plain = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING });
-  assert.doesNotMatch(cleanup.run({ root: plain.root, governance: plain.governance, sweepReaders: () => [] }).lines.join('\n'), /edited by hand/);
+  assert.doesNotMatch(cleanup.run({ root: plain.root, governance: plain.governance, sweepReaders: NONE_OLD }).lines.join('\n'), /edited by hand/);
 });
 
 // The cleanup is wired into refresh governance: the bank of a governed repository with copies asks
 // about them, and only the owner's ticketed Clean up writes the cleanup in the working tree.
-test('refresh governance asks about the copies; Keep current is recommended and Clean up writes the cleanup', async t => {
+const V2_BINDING = `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/adopter', governance: 'enabled',
+  parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }], store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
+  required_checks: ['validate'], ci_shards: { answer: 'never' } }, null, 2)}\n`;
+const COPIES_ROW = /\| (1\.\d+) \| Toolkit instruction copies \| (\d+) files? to clean up \| A\. Keep current \| B\. Clean up \|/;
+
+// A governed fixture repository with `files` and a working-tree programme file `binding` (the merged
+// one stays version 2, so governance is on), and the owner's bank: cli(argv) and answer(reply).
+function governedBank(t, files, binding = V2_BINDING) {
   const { makeGoverned, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
   const gate = require('../scripts/toolkit-governance-gate.cjs');
   const governance = require('../scripts/toolkit-governance-state.cjs');
@@ -185,15 +265,9 @@ test('refresh governance asks about the copies; Keep current is recommended and 
   const repoDir = makeGoverned(path.join(base, 'adopter'), 'adopter', { home });
   const registryPath = path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   const registryOptions = { registryPath, testOnly: true };
-  const own = '# Adopter rules\n';
-  fs.writeFileSync(path.join(repoDir, 'AGENTS.md'), `${BLOCK}\n\n${own}`);
-  fs.mkdirSync(path.join(repoDir, 'docs', 'agent-playbooks'), { recursive: true });
-  fs.writeFileSync(path.join(repoDir, 'docs', 'agent-playbooks', 'INDEX.md'), PLAYBOOKS['INDEX.md']);
-  const binding = `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/adopter', governance: 'enabled',
-    parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }], store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
-    required_checks: ['validate'], ci_shards: { answer: 'never' } }, null, 2)}\n`;
+  for (const [file, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(repoDir, file)), { recursive: true }); fs.writeFileSync(path.join(repoDir, file), text); }
   fs.writeFileSync(path.join(repoDir, '.github', 'toolkit-programme.json'), binding);
-  recordMerged(repoDir, { registryPath, text: binding });
+  recordMerged(repoDir, { registryPath, text: V2_BINDING });
   const SESSION = 'session-owner-cleanup';
   const cli = async argv => {
     let out = '', err = '';
@@ -212,10 +286,17 @@ test('refresh governance asks about the copies; Keep current is recommended and 
     const ticket = new BankTickets({ registryOptions }).issue(SESSION, new gate.SessionEpochs({ registryOptions }).get(SESSION));
     return { shown, ...(await cli(['setup', '--answers', `${reference}: ${reply}`, '--ticket', ticket])) };
   };
+  return { repoDir, cli, answer };
+}
+
+test('refresh governance asks about the copies; Keep current is recommended and Clean up writes the cleanup', async t => {
+  const own = '# Adopter rules\n';
+  const { repoDir, cli, answer } = governedBank(t, { 'AGENTS.md': `${BLOCK}\n\n${own}`, 'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'] });
 
   const kept = await answer('all recommended');
-  const row = /\| (1\.\d+) \| Toolkit instruction copies \| 2 files to clean up \| A\. Keep current \| B\. Clean up \|/.exec(kept.shown.out);
+  const row = COPIES_ROW.exec(kept.shown.out);
   assert.ok(row, kept.shown.out);
+  assert.equal(row[2], '2');
   assert.equal(kept.code, 0, kept.err);
   assert.equal(read(repoDir, 'docs/agent-playbooks/INDEX.md'), PLAYBOOKS['INDEX.md'], 'all recommended removes nothing');
 
@@ -227,6 +308,45 @@ test('refresh governance asks about the copies; Keep current is recommended and 
   assert.match(cleaned.out, /Changed in .*:\n- AGENTS\.md: remove the Toolkit block/);
   assert.match(cleaned.out, /one pull request for the owner to merge/);
   assert.doesNotMatch((await cli(['setup'])).out, /Toolkit instruction copies \|/, 'nothing left to ask about');
+});
+
+// Broken markers never take the row away: the other copies are still offered. A programme file that
+// stops the cleanup after the scan shows as a status row naming why, never as nothing.
+test('the bank keeps the copies row beside broken markers, and names a programme file that stops the cleanup', async t => {
+  const broken = governedBank(t, { 'AGENTS.md': BROKEN_AGENTS, 'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'] });
+  const shown = await broken.cli(['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(COPIES_ROW.exec(shown.out)?.[2], '1', shown.out);
+
+  const v1 = '{\n  "schema": "toolkit.programme-binding.v1",\n  "repository": "toolkit-test-fixture/adopter",\n  "parent_issue": 1\n}\n';
+  const old = governedBank(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n` }, v1);
+  const status = await old.cli(['setup']);
+  assert.equal(status.code, 0, status.err);
+  assert.doesNotMatch(status.out, COPIES_ROW);
+  assert.match(status.out, /Toolkit instruction copies \| 1 file left, cleanup cannot run/);
+  const bank = require('../scripts/toolkit-governance-bank.cjs');
+  const specs = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', merged: { store: { repository: 'owner/store' }, required_checks: [] },
+    permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, copies: { files: 1, refused: 'the reason' } });
+  const row = specs.find(spec => spec.id === 'instruction-copies');
+  assert.deepEqual([row.report_only, row.current, row.recommended_text], [true, '1 file left, cleanup cannot run', 'Not offered yet: the reason']);
+});
+
+// A Clean up answer whose write fails is not a success: the command exits 1 and says to check the
+// working tree.
+test('a Clean up answer whose write fails exits 1', async t => {
+  const { repoDir, answer } = governedBank(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, 'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'] });
+  const shown = await answer('all recommended');
+  const row = COPIES_ROW.exec(shown.shown.out);
+  assert.ok(row, shown.shown.out);
+  const rmSync = fs.rmSync;
+  const target = path.resolve(repoDir, 'docs', 'agent-playbooks', 'INDEX.md');
+  t.mock.method(fs, 'rmSync', (file, ...rest) => {
+    if (path.resolve(String(file)) === target) throw Object.assign(new Error('refused by the test'), { code: 'EPERM' });
+    return rmSync(file, ...rest);
+  });
+  const failed = await answer(`${row[1]}=B`);
+  assert.equal(failed.code, 1, failed.out);
+  assert.match(failed.out, /The instruction copies could not be cleaned up \(EPERM\)\. Check the working tree with git status before committing anything\./);
 });
 
 // The floor the cleanup writes is the first release with S2, S3 and the session-start truncation fix,
