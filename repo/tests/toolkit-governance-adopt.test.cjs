@@ -109,13 +109,15 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['evidence-store', true], ['governance-app', false], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
-  assert.deepEqual(questions.map(spec => spec.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '2.1'], 'every row has its fixed number, status rows included');
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['governance-app', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => spec.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '', '', '', '2.1'], 'questions are numbered without gaps; status rows have none');
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
-  assert.match(table, /\| 1\.5 \| Evidence store \| None yet \| Nothing to answer: Toolkit creates a private TRANSPORT-fresh when governance turns on \| - \|/);
-  assert.match(table, /\| 1\.7 \| Parent issue \| None yet \| Nothing to answer: Toolkit opens one when governance turns on \| - \|/);
-  assert.match(table, /\| 1\.8 \| Required checks \| None yet \| Nothing to answer: Default-branch protection waits for them \| - \|/);
+  // What turning on makes is listed under the table, not asked: governance is not on yet, so it is
+  // not "already set".
+  assert.match(table, /^Nothing to answer here:\n- Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on\.\n- Parent issue: None yet\. Toolkit opens one when governance turns on\.\n- Required checks: None yet\. Default-branch protection waits for them\.$/m);
+  assert.doesNotMatch(table, /Already set|\| 1\.[6-9] \|/, 'five questions in section 1, with no gap');
+  assert.match(table, /^\| 1\.5 \| Governance App \|/m);
   assert.equal(github.calls.length, 0, 'showing the bank makes nothing');
 
   const before = fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8');
@@ -149,11 +151,11 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
 
 test('the governance App row: Not now says so once, and Set up gives no command while governance stays off', async t => {
   const ctx = fixture(t);
-  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.6=A'] });
+  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=B, 1.5=A'] });
   assert.equal(notNow.code, 0, notNow.err + notNow.out);
   assert.match(notNow.out, /Governance GitHub App: not now\. Governance works without it/);
   assert.doesNotMatch(notNow.out, /toolkit-governance-app-setup|pre-filled page/);
-  const off = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A'] });
+  const off = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A, 1.5=B'] });
   assert.match(off.out, /Governance App: not set up, because governance is not on after this answer\./);
   assert.doesNotMatch(off.out, /toolkit-governance-app-setup/);
   assert.equal(off.published.length, 0);
@@ -172,7 +174,7 @@ test('a failed step stops with what was made, and answering again reuses it inst
 
   const retry = fakeGitHub({ repos: github.world.repos });
   const shown = await run(ctx, ['setup'], retry, { interactive: true, answers: [''] });
-  assert.match(shown.out, /\| 1\.5 \| Evidence store \| TRANSPORT-fresh \| Nothing to answer: Reused when governance turns on \|/, 'the store made last time is found, not offered again');
+  assert.match(shown.out, /^- Evidence store: TRANSPORT-fresh\. Reused when governance turns on\.$/m, 'the store made last time is found, not offered again');
   const done = await run(ctx, ['setup'], retry, { interactive: true, answers: ['all recommended'] });
   assert.equal(done.code, 0, done.err + done.out);
   assert.deepEqual(retry.calls, [['issue', SLUG, 'Programme: fresh']], 'no second store');
@@ -195,7 +197,7 @@ test('a found store is a question: keep it, or create a new private one', async 
   const keep = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], keep, { interactive: true, answers: [''] });
   assert.match(shown.out, /\| 1\.5 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
-  assert.match(shown.out, /\| 1\.7 \| Parent issue \| #3 \| Nothing to answer: Reused when governance turns on \|/);
+  assert.match(shown.out, /^- Parent issue: #3\. Reused when governance turns on\.$/m);
   const kept = await run(ctx, ['setup'], keep, { interactive: true, answers: ['all recommended'] });
   assert.equal(kept.code, 0, kept.err + kept.out);
   assert.deepEqual(keep.calls, [], 'everything is reused');
@@ -204,7 +206,7 @@ test('a found store is a question: keep it, or create a new private one', async 
 
   const ctx2 = fixture(t);
   const fresh = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
-  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.5=B'] });
+  const made = await run(ctx2, ['setup'], fresh, { interactive: true, answers: ['1.1=B, 1.5=B'] });
   assert.equal(made.code, 0, made.err + made.out);
   assert.deepEqual(fresh.calls, [['create', STORE], ['put', STORE, 'archives/README.md']]);
   assert.equal(made.published[0].binding.store.repository, STORE);
@@ -215,7 +217,7 @@ test('when GitHub cannot be searched, turning on makes nothing and says why', as
   const github = fakeGitHub();
   const offline = { ...github, discoveryGh: () => ({ ok: false, reason: 'gh-unavailable' }) };
   const shown = await run(ctx, ['setup'], offline, { interactive: true, answers: [''] });
-  assert.match(shown.out, /\| 1\.5 \| Store and parent issue \| Could not be checked \| Nothing to answer: GitHub could not be read/);
+  assert.match(shown.out, /^- Store and parent issue: Could not be checked\. GitHub could not be read/m);
   const answered = await run(ctx, ['setup'], offline, { interactive: true, answers: ['all recommended'] });
   assert.notEqual(answered.code, 0);
   assert.match(answered.out, /GitHub could not be read \(.+\), so the evidence store and parent issue could not be found or made\./, 'the answer says why');

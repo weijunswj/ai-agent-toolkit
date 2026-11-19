@@ -18,6 +18,8 @@ const PROMPT_INTERVAL_MS = 60000;
 const SHA = /^[a-f0-9]{40}$/;
 const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
+// The branch a parallel CI shards answer is prepared on (publishCiShards).
+const SHARDS_BRANCH = /^toolkit\/(?:switches-[a-z0-9-]+-)?ci-shards-(?:yes|never)-/;
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file);
 // The dependency security files the turn-on adds where missing (toolkit-governance-adopt.cjs).
 const securityFiles = () => { const security = require('./toolkit-governance-security.cjs'); return [security.DEPENDABOT_REL, '.github/dependabot.yaml', security.WORKFLOW_REL]; };
@@ -416,6 +418,15 @@ class GitHubProposalTransport {
     }
     return { repository, number: pr.number, head: pr.head.sha, url: pr.html_url, answer: binding.governance === 'disabled' ? 'no' : 'yes', state: pr.state };
   }
+  // The open pull requests that hold a parallel CI shards answer: this repository's own
+  // toolkit/...ci-shards-yes|never-... branches (publishCiShards), newest first.
+  openCiShards(repository) {
+    this.#auth();
+    const prs = this.#api(`repos/${repository}/pulls?state=open&per_page=100`, undefined, null, 'map({number, url: .html_url, ref: .head.ref, repo: .head.repo.full_name})');
+    if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');
+    return prs.filter(pr => String(pr.repo).toLowerCase() === repository.toLowerCase() && SHARDS_BRANCH.test(String(pr.ref)))
+      .map(pr => ({ number: pr.number, url: pr.url }));
+  }
   list(repository) {
     const prs = this.#api(`repos/${repository}/pulls?state=open&per_page=100`, undefined, null, `map({number, marked: ((.body // "") | contains("${MARKER}"))})`);
     if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');
@@ -468,6 +479,9 @@ class GitHubProposalTransport {
     const owner = repository.split('/')[0];
     const open = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`);
     if (Array.isArray(open) && open[0]?.number) return { number: open[0].number, url: open[0].html_url, head: open[0].head?.sha || null };
+    // Another shards answer still open is the one to merge or close, never a second beside it.
+    const waiting = this.openCiShards(repository);
+    if (waiting.length) throw Object.assign(new Error('SHARDS_PR_OPEN'), { code: 'SHARDS_PR_OPEN', url: waiting[0].url });
     if (this.#optional(`repos/${repository}/git/ref/heads/${head}`)) fail('SWITCH_BRANCH_EXISTS');
     this.#api(`repos/${repository}/git/refs`, { ref: `refs/heads/${head}`, sha: base.object.sha });
     const title = words ? `Set ${words} and parallel CI shards ${answer === 'yes' ? 'yes' : 'never ask'} for this repository`
