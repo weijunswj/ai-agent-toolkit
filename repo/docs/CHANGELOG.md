@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.155.1
+
+### Fixed
+
+- **Every Toolkit skill loads in strict YAML hosts:** Antigravity 2 refused `external-operation-preflight` and `n8n-workflow-transport` with "mapping values are not allowed in this context", because a plain description holding ": " is invalid YAML. Their descriptions, and those of `github-program-reconciler` and `toolkit-setup`, are now double-quoted with the same wording, as is the Codex `default_prompt` of `github-program-reconciler`.
+- **Validation catches skill YAML that strict hosts refuse:** `validate-toolkit.cjs` now holds every skill's frontmatter (Toolkit's own, the bundled n8n skills and the Claude Projects skill) and every `agents/openai.yaml` to a small YAML subset that every strict parser accepts (spaces for indentation, no tab, control character or NEL, and whole-character `\u` escapes), and names the file, line and fix for anything outside it. Toolkit's own frontmatter readers now read a quoted value without its quotes.
+
 ## 3.155.0 (governance bank reply fixes)
 
 ### Changed
