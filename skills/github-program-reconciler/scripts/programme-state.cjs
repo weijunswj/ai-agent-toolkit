@@ -400,6 +400,7 @@ const FINDING_CODES = Object.freeze({
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
   BATCH_NEXT: { source: 'reconcile', queue: true, next_action: "Controller: no NOW task needs a gate lane. Start the batch's next task (picked tasks lead LATER); if none is left, read all of LATER and pick the next batch: top priority, then quickest, at most 6 PRs and one large task; set their order to lead LATER and record the pick" },
+  QUEUED_BUT_MOVING: { source: 'reconcile', queue: true, next_action: 'Controller: queue the gate\'s missed `assign` (it drops the lane wait), or dispose with a reason if no gate is working it' },
   TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: the sweep records a single open PR from this repository itself; for several PRs, a fork or bot PR, or a finished task, pick the PR and record it with update --patch, or dispose of the finding' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
@@ -938,6 +939,7 @@ function validateChild(doc) {
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
     if (isObject(doc.private) && doc.private.keep_open !== undefined) validateKeepOpen(errors, doc.private.keep_open);
     if (isObject(doc.private) && doc.private.pr_heads !== undefined) validatePrHeads(errors, doc.private.pr_heads);
+    if (isObject(doc.private) && doc.private.lane_wait !== undefined) validateLaneWaitStamp(errors, doc.private.lane_wait);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
       && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
@@ -1006,9 +1008,53 @@ function stampKeepOpen(previous, next, now) {
   return next;
 }
 
+// A lane wait: a blocker that says a NOW task waits only for a free gate lane, written as one blocker
+// whose text starts with the word `Queued` (the reserved form; any other blocker is a real block).
+// A gate going live (assign, reopen) drops every lane wait in the same write and keeps the rest.
+const LANE_WAIT = /^Queued\b/;
+const isLaneWait = text => typeof text === 'string' && LANE_WAIT.test(text);
+const laneWaits = doc => (Array.isArray(doc?.blockers) ? doc.blockers : []).filter(isLaneWait);
+function dropLaneWaits(doc) {
+  if (Array.isArray(doc.blockers)) doc.blockers = doc.blockers.filter(text => !isLaneWait(text));
+}
+
+// private.lane_wait = { at, head }: from when a queued task's PR moves count, and the tracked PR head
+// then (null with none), so the sweep sees a PR move with no gate recorded (QUEUED_BUT_MOVING). Every
+// write stamps it: a wait that is added or changed, or one stored before stamps existed, gets the write
+// time and the head it is written at; the write that ends a recorded gate (it stops being assigned or
+// active) restamps it the same way, since that gate covers every commit made before it ended; any other
+// write keeps the stamp. It goes with the last wait, and a patch can neither set nor move it. It lives in
+// the child's private part, which every Toolkit reader accepts.
+function validateLaneWaitStamp(errors, stamp) {
+  check(errors, isObject(stamp) && Object.keys(stamp).length === 2 && isText(stamp.at) && (stamp.head === null || isSha(stamp.head)),
+    'private.lane_wait must hold only at (the write time) and head (a full head SHA or null)');
+}
+
+function stampLaneWait(previous, next, now) {
+  const waits = laneWaits(next);
+  if (!waits.length) {
+    if (isObject(next.private) && 'lane_wait' in next.private) {
+      const { lane_wait: _dropped, ...rest } = next.private;
+      next.private = rest;
+    }
+    return next;
+  }
+  const before = laneWaits(previous);
+  const same = before.length > 0 && before.join('\n') === waits.join('\n');
+  const stored = previous?.private?.lane_wait;
+  const errors = [];
+  if (same && stored !== undefined) validateLaneWaitStamp(errors, stored);
+  const gateEnded = gateLive(previous) && !gateLive(next);
+  const stamp = same && stored !== undefined && !errors.length && !gateEnded ? { at: stored.at, head: stored.head }
+    : { at: now, head: isSha(next.pr?.head) ? next.pr.head : null };
+  next.private = { ...next.private, lane_wait: stamp };
+  return next;
+}
+
 // The write-time stamps of a child document's private part.
 function stampChild(previous, next, now) {
   drift().stampNextAction(previous, next, now);
+  stampLaneWait(previous, next, now);
   return stampKeepOpen(previous, next, now);
 }
 
@@ -1443,6 +1489,7 @@ function assignGate(doc, { assignment, role, supersede = false, reason = null })
   gate.session_id = null;
   gate.route = null;
   if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
+  dropLaneWaits(next);
   next.next_action = `Executor: bind to assignment ${assignment} and start ${role}`;
   return next;
 }
@@ -1463,6 +1510,7 @@ function reopenGate(doc, { reason, assignment = null }) {
     gate.session_id = null;
     gate.route = null;
     if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
+    dropLaneWaits(next);
     next.next_action = `Executor: bind to assignment ${assignment} and correct ${gate.role}`;
     return next;
   }
@@ -1471,11 +1519,13 @@ function reopenGate(doc, { reason, assignment = null }) {
     const pending = gate.returns.filter(entry => !entry.consumed).at(-1);
     if (pending) { pending.consumed = true; pending.verdict = 'REOPEN'; }
     gate.state = 'ACTIVE';
+    dropLaneWaits(next);
     next.next_action = `Executor: continue ${gate.role}; the next return needs a new return ID`;
     return next;
   }
   if (gate.state === 'WAITING_OWNER') {
     gate.state = 'ACTIVE';
+    dropLaneWaits(next);
     next.next_action = `Executor: continue ${gate.role} with the owner's answer`;
     return next;
   }
@@ -1553,6 +1603,8 @@ function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null
   entry.consumed = true;
   entry.verdict = verdict;
   next.gate.state = verdict === 'REOPEN' ? 'ACTIVE' : verdict === 'WAITING_OWNER' ? 'WAITING_OWNER' : 'RETIRED';
+  // REOPEN makes the gate live again, as `reopen` does, so it drops lane waits too.
+  if (verdict === 'REOPEN') dropLaneWaits(next);
   next.next_action = verdict === 'ACCEPT' ? `Controller: ${next.gate.role} accepted; assign the next gate or record completion`
     : verdict === 'REOPEN' ? `Executor: continue ${next.gate.role}; the next return needs a new return ID`
       : 'Owner: answer the question, then Controller: reopen the gate';
@@ -4087,12 +4139,16 @@ function rollupContext(node) {
 
 const upper = value => (typeof value === 'string' ? value.toUpperCase() : null);
 
+// The commit time of the PR head (null unless the last commit read is the head), so QUEUED_BUT_MOVING
+// counts only a move committed after its lane wait was stamped.
+const headCommittedAt = (head, commit) => (isSha(head) && commit?.oid === head && typeof commit.committedDate === 'string' ? commit.committedDate : null);
+
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
       number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
-      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
+      commits(last: 1) { nodes { commit { oid committedDate statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
           __typename
@@ -4120,7 +4176,7 @@ class ProgrammeGraphReader {
     for (let start = 0; start < unique.length; start += 20) {
       const batch = unique.slice(start, start + 20);
       if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
-      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid committedDate statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
       const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
@@ -4136,7 +4192,7 @@ class ProgrammeGraphReader {
         result.set(number, { number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
           train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
           default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
-          complete: !rollup?.contexts?.pageInfo?.hasNextPage,
+          head_committed_at: headCommittedAt(pr.headRefOid, commit), complete: !rollup?.contexts?.pageInfo?.hasNextPage,
           contexts: (rollup?.contexts?.nodes || []).map(rollupContext) });
       }
     }
@@ -4156,6 +4212,8 @@ class ProgrammeGraphReader {
     return { number: pr.number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'closed' ? 'CLOSED' : pr.draft ? 'DRAFT' : 'OPEN',
       head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
       train: trainRows(pr.body), merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
+      // These REST reads carry no commit time, so QUEUED_BUT_MOVING raises nothing for this PR this pass.
+      head_committed_at: null,
       complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
       // REST spells states in lower case; the GraphQL spelling is the one checks are judged by.
       contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: upper(check.status), conclusion: upper(check.conclusion), required: false,
@@ -4280,7 +4338,7 @@ class ProgrammeGraphReader {
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
       train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
-      rollupOid: commit?.oid || null,
+      rollupOid: commit?.oid || null, head_committed_at: headCommittedAt(pr.headRefOid, commit),
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
       contexts: (rollup?.contexts?.nodes || []).map(rollupContext),
     };
@@ -5586,6 +5644,33 @@ class Reconciler {
     }
   }
 
+  // Work queue: QUEUED_BUT_MOVING, a task shown NOW · QUEUED by its lane waits alone (no other blocker)
+  // whose tracked PR is open or draft at a head other than the one its lane-wait stamp names, committed
+  // after the stamp's time, with no gate assigned or active and nothing waiting on the owner: a gate is
+  // working it but its `assign` was missed. The stamp's time is when the wait was written or a recorded
+  // gate last ended, so a head pushed before the wait (and only read now) or under a recorded gate does
+  // not count. `docs` are the documents as this pass will write them. A G0, or a G2 with no new push,
+  // moves no head, so only the gate start's `assign` covers those. A pass that could not read every open
+  // PR, or the head's commit time, raises none for it.
+  diffQueuedMoving(parent, docs, observed, only, findings) {
+    if (observed.prGraph?.openComplete === false) return;
+    for (const outcome of parent.outcomes) {
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
+      const doc = docs.get(outcome.issue);
+      if (!doc || statusCell(outcome, doc) !== 'NOW · QUEUED' || !doc.blockers.every(isLaneWait)) continue;
+      if (doc.lifecycle === 'WAITING_OWNER' || doc.gate?.state === 'WAITING_OWNER') continue;
+      const stamp = doc.private?.lane_wait;
+      if (!isObject(stamp) || !['OPEN', 'DRAFT'].includes(doc.pr?.state) || !isSha(doc.pr.head) || doc.pr.head === stamp.head) continue;
+      const live = observed.prs.get(outcome.issue);
+      const since = Date.parse(stamp.at);
+      const committed = Date.parse(live?.head === doc.pr.head ? live.head_committed_at : null);
+      if (!Number.isFinite(since) || !Number.isFinite(committed) || committed <= since) continue;
+      const minute = time => `${new Date(time).toISOString().slice(0, 16)}Z`;
+      findings.push({ code: 'QUEUED_BUT_MOVING', issue: outcome.issue,
+        detail: `shown NOW · QUEUED by its lane wait alone, but PR #${doc.pr.number} moved from ${stamp.head ? shortSha(stamp.head) : 'no head'} to ${shortSha(doc.pr.head)}, committed at ${minute(committed)}, after the wait was written or its last recorded gate ended (${minute(since)}), and no gate is assigned or active` });
+    }
+  }
+
   // Work queue, batch rule (delivery contract section 3): lanes finish the NOW batch before LATER work
   // starts. BATCH_NEXT, on the parent, says a lane is free for LATER work: the graph has an open LATER
   // task and no open NOW task still needs a gate lane. A NOW task needs none when it waits on the owner
@@ -6564,6 +6649,7 @@ class Reconciler {
     const blockHolds = new Set(holds.slice(blockHoldStart));
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
+    this.diffQueuedMoving(parent, projected, observed, only, findings);
     this.diffBatch(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
@@ -7819,7 +7905,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });

@@ -156,6 +156,101 @@ test('a live gate outranks a listed blocker on the board, and its return puts th
   assert.equal(status(), 'LATER', 'set back to planned with no PR');
 });
 
+// A lane wait is one blocker starting with the word `Queued`: the task waits only for a free gate lane.
+// A gate going live (assign, reopen) drops it in the same write and keeps every other blocker, so a
+// gate start is one write and the board shows the worked task in progress after its gate returns.
+const LANE_WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+
+test('a lane wait is a blocker starting with the word Queued; any other blocker is a real block', () => {
+  for (const text of [LANE_WAIT, 'Queued', 'Queued behind #1322 for the gate lane']) assert.equal(state.isLaneWait(text), true, text);
+  for (const text of ['waits for PR 1098', 'queued behind #12', 'Queuedness', ' Queued in NOW', 'Blocked: Queued in NOW', '', null]) assert.equal(state.isLaneWait(text), false, String(text));
+});
+
+test('assign drops the lane wait in the same write, keeps every other blocker, and the task stays in progress after its gate returns', () => {
+  const f = ownerFixture({ 641: child => { child.blockers = [LANE_WAIT]; }, 642: child => { child.blockers = [LANE_WAIT, 'waits for PR 1098']; } });
+  const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
+  Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
+  const step = (issue, change) => f.children.set(issue, change(f.children.get(issue)));
+  const board = issue => `${f.cell(issue)[2]} | ${f.cell(issue)[3]}`;
+  assert.equal(board(641), `NOW · QUEUED | Blocked: ${LANE_WAIT}`, 'control: the lane wait queues the task');
+  step(641, child => state.assignGate(child, { assignment: 'g2-641', role: 'G2' }));
+  assert.deepEqual(f.children.get(641).blockers, [], 'assign dropped the lane wait');
+  assert.equal(board(641), 'NOW · IN PROGRESS | G2');
+  step(641, child => state.recordReturn(child, { returnId: 'g2-641.r1', assignment: 'g2-641' }));
+  step(641, child => state.consumeReturn(child, { returnId: 'g2-641.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }));
+  assert.equal(f.cell(641)[2], 'NOW · IN PROGRESS', 'an accepted gate waiting for its train is not queued for a lane again');
+  step(642, child => state.assignGate(child, { assignment: 'g1-642', role: 'G1' }));
+  assert.deepEqual(f.children.get(642).blockers, ['waits for PR 1098'], 'every other blocker stays');
+  assert.equal(board(642), 'NOW · IN PROGRESS | G1, then Blocked: waits for PR 1098');
+  f.children.get(642).blockers.unshift(LANE_WAIT);
+  step(642, child => state.assignGate(child, { assignment: 'g2-642', role: 'G2', supersede: true, reason: 'G2 follows G1' }));
+  assert.deepEqual(f.children.get(642).blockers, ['waits for PR 1098'], 'assign --supersede drops it too');
+  assert.throws(() => state.assignGate({ ...f.children.get(642), blockers: [LANE_WAIT] }, { assignment: 'g2-642b', role: 'G2' }), { code: 'ASSIGNMENT_LIVE' }, 'a refused assign writes nothing');
+});
+
+test('reopen drops the lane wait in each of its three branches and keeps every other blocker', () => {
+  const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
+  const f = ownerFixture({ 651: () => {}, 652: () => {}, 653: () => {} });
+  Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
+  const step = (issue, change) => f.children.set(issue, change(f.children.get(issue)));
+  const wait = (issue, ...others) => { f.children.get(issue).blockers = [LANE_WAIT, ...others]; };
+  // An accepted gate reopened under a new assignment.
+  step(651, child => state.assignGate(child, { assignment: 'g0-651', role: 'G0' }));
+  step(651, child => state.recordReturn(child, { returnId: 'g0-651.r1', assignment: 'g0-651' }));
+  step(651, child => state.consumeReturn(child, { returnId: 'g0-651.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }));
+  wait(651);
+  step(651, child => state.reopenGate(child, { reason: 'second G0', assignment: 'g0-651b' }));
+  assert.deepEqual(f.children.get(651).blockers, [], 'reopen --assignment');
+  assert.equal(f.cell(651)[2], 'NOW · IN PROGRESS');
+  // A submitted return sent back.
+  step(652, child => state.assignGate(child, { assignment: 'g1-652', role: 'G1' }));
+  step(652, child => state.recordReturn(child, { returnId: 'g1-652.r1', assignment: 'g1-652' }));
+  wait(652, 'waits for PR 1098');
+  step(652, child => state.reopenGate(child, { reason: 'fix the review notes' }));
+  assert.deepEqual(f.children.get(652).blockers, ['waits for PR 1098'], 'reopen of a submitted return');
+  // A gate waiting on the owner continues with the answer.
+  step(653, child => state.assignGate(child, { assignment: 'g2-653', role: 'G2' }));
+  step(653, child => state.recordReturn(child, { returnId: 'g2-653.r1', assignment: 'g2-653' }));
+  step(653, child => state.consumeReturn(child, { returnId: 'g2-653.r1', verdict: 'WAITING_OWNER', writer, parentDoc: f.parent }));
+  wait(653);
+  step(653, child => state.reopenGate(child, { reason: 'the owner answered' }));
+  assert.deepEqual(f.children.get(653).blockers, [], 'reopen of a gate waiting on the owner');
+});
+
+test('a return consumed as REOPEN drops the lane wait like reopen, and WAITING_OWNER keeps it', () => {
+  const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
+  const f = ownerFixture({ 671: () => {} });
+  Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
+  const submitted = state.recordReturn(state.assignGate(f.children.get(671), { assignment: 'g1-671', role: 'G1' }), { returnId: 'g1-671.r1', assignment: 'g1-671' });
+  submitted.blockers = [LANE_WAIT, 'waits for PR 1098'];
+  const consume = verdict => state.consumeReturn(submitted, { returnId: 'g1-671.r1', verdict, writer, parentDoc: f.parent, liveHead: null });
+  const reopened = consume('REOPEN');
+  assert.deepEqual([reopened.gate.state, reopened.blockers], ['ACTIVE', ['waits for PR 1098']], 'the same result as reopen of a submitted return');
+  assert.deepEqual(state.reopenGate(submitted, { reason: 'fix the review notes' }).blockers, reopened.blockers);
+  f.children.set(671, { ...reopened, blockers: [] });
+  assert.equal(f.cell(671)[2], 'NOW · IN PROGRESS');
+  const waiting = consume('WAITING_OWNER');
+  assert.deepEqual([waiting.gate.state, waiting.blockers], ['WAITING_OWNER', [LANE_WAIT, 'waits for PR 1098']], 'a gate waiting on the owner is not live, so nothing is dropped');
+});
+
+test('a lane wait written after the gate ends, or around an interrupted gate, queues the task again', () => {
+  const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
+  const f = ownerFixture({ 661: child => { child.blockers = [LANE_WAIT]; } });
+  Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
+  const step = change => f.children.set(661, change(f.children.get(661)));
+  step(child => state.assignGate(child, { assignment: 'g0-661', role: 'G0' }));
+  step(child => state.recordReturn(child, { returnId: 'g0-661.r1', assignment: 'g0-661' }));
+  step(child => state.consumeReturn(child, { returnId: 'g0-661.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }));
+  f.children.get(661).blockers = [LANE_WAIT];
+  assert.equal(f.cell(661)[2], 'NOW · QUEUED', 'the controller re-queued it after the gate');
+  step(child => state.assignGate(child, { assignment: 'g1-661', role: 'G1' }));
+  f.children.get(661).blockers = [LANE_WAIT];
+  assert.equal(f.cell(661)[2], 'NOW · IN PROGRESS', 'a live gate outranks a wait written meanwhile');
+  step(child => state.interruptGate(child, { reason: 'the thread stopped with no result' }));
+  assert.deepEqual(f.children.get(661).blockers, [LANE_WAIT], 'interrupt never drops a blocker');
+  assert.equal(f.cell(661)[2], 'NOW · QUEUED', 'an interrupted gate is not live, so the task queues again');
+});
+
 // The Projects route has no executor journals: the controller's holder orders open and end every
 // gate (reference/periodic-runs.md, Gate assignments). This walks that route for one task: each gate
 // ends, the board drops it, and the next gate supersedes a G1 return that waits for its G2.
