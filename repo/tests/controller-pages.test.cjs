@@ -179,13 +179,13 @@ test('controllers close every thread or session they spawned once it is fully do
   for (const phrase of [
     'on relay, close each thread or session you started (gate, gatekeeper, lane) once it is fully done',
     'its output is recorded', 'its PRs are merged or closed', 'its final message was read in full and every item acted on',
-    'its result was relayed and nothing is owed to the owner',
+    'its result was relayed and no owner test, card, question or decision is still owed',
     "Use your host's close action ([host contract](../docs/HOST-CONTRACT.md)); with none, record it retired (gates page)",
     'Appointment authorises it (roles page)', "Never a scheduled task's home thread; idleness alone never counts",
     'With no timers, re-check open ones at session start and each owner turn',
   ]) assert.ok(line.includes(phrase), phrase);
   // The principles bind every harness, so they name none; each host's mechanics live in the host contract.
-  assert.doesNotMatch(page, /Projects|Claude Code|Codex|Remote Control/);
+  assert.doesNotMatch(page, /projects|claude|codex|remote control|opencode|antigravity/i);
   const contract = fs.readFileSync(path.join(ROOT, 'repo', 'docs', 'HOST-CONTRACT.md'), 'utf8').replace(/\r\n/g, '\n');
   const section = contract.split('\n## 10. Closing finished sessions\n')[1] || '';
   for (const route of ['- **Claude Projects:** resolve the work thread', '- **Claude Code in the cloud:** archive the session (`archive_session`)',

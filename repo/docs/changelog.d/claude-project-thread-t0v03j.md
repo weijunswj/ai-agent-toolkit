@@ -1,6 +1,6 @@
 ### Added
 
-- **Close what you spawn:** the controller design principles now tell every controller to close each thread or session it started (gate, gatekeeper, lane) once it is fully done: its output is recorded, its PRs are merged or closed, its final message was read in full and every item acted on, its result was relayed and nothing is owed to the owner. A host with no close action records the session retired. Never a scheduled task's home thread, and idleness alone never counts. Without timers, the controller re-checks open ones at session start and each owner turn. A new section 10 of the host contract gives each host's close action.
+- **Close what you spawn:** the controller design principles now tell every controller to close each thread or session it started (gate, gatekeeper, lane) once it is fully done: its output is recorded, its PRs are merged or closed, its final message was read in full and every item acted on, its result was relayed and no owner test, card, question or decision is still owed. A host with no close action records the session retired. Never a scheduled task's home thread, and idleness alone never counts. Without timers, the controller re-checks open ones at session start and each owner turn. A new section 10 of the host contract gives each host's close action.
 
 ### Changed
 
