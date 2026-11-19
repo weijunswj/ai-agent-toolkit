@@ -17,9 +17,13 @@
 //   3. The agent sends the reply it read with that ticket: `toolkit-governance.cjs setup --answers
 //      "<reference>: all recommended" --ticket <ticket>`. The command spends the ticket (BankTickets.take)
 //      and writes or prepares nothing without it. The tool gate lets only that exact command through.
-//   4. The bank is shown once. A reply that cannot be used (unread, an unknown row, a changed row, or
-//      "explain 1.4") gets a short line, and the command notes the same bank again for the run
-//      (BankTickets.rearm), so the owner's next own message gets a new one-use ticket the same way.
+//   4. The bank is shown once. A reply that cannot be used (unread, an unknown row or a changed row)
+//      gets a short line, and an answer that was used gets what it did; either way the command notes
+//      the same bank again for the run (BankTickets.rearm), so the owner's next own message gets a new
+//      one-use ticket the same way.
+//   5. "explain 1.4" is read-only: it needs no ticket, spends none and writes nothing, before or after
+//      an answer (`setup --answers "<reference>: explain 1.4"`, bankExplainCommand). The hook leaves
+//      the shown bank open for the owner's next own message.
 // A pull request it prepares still decides nothing until the owner merges it.
 
 const crypto = require('node:crypto');
@@ -286,7 +290,7 @@ function bankReference(specs) { return specs[0]?.presentation.bank_reference || 
 // as printed and nothing else, so the bank is never shown again in reply to an answer.
 // A command above is the owner's to run (permissions, the governance App), in Toolkit's own code block
 // so the app shows it as typed; it is shown, never run.
-const AGENTS_AFTER_ANSWER = 'Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Add no code block of your own, and never run a command above yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says.';
+const agentsAfterAnswer = () => `Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Add no code block of your own, and never run a command above yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says. If they only ask to explain a row, such as explain 1.4, run node "${script()}" setup --answers "explain 1.4" with that row: it needs no ticket and writes nothing.`;
 
 // The bank as the owner reads it, with the one reply line. Every app takes a typed reply, the same way
 // as `setup toolkit`: the whole list at once, answered in one line. The table holds only questions;
@@ -324,9 +328,18 @@ function explainText(specs, ref) {
 }
 
 // The row number a reply asks to explain ("explain 1.4", with or without the bank reference), or null.
+const EXPLAIN = /^\s*(?:([0-9A-Za-z-]{16,19})\s*:\s*)?explain\s+(\d+\.\d+)\s*\.?\s*$/i;
 function explainRequest(text) {
-  const match = /^\s*(?:[0-9A-Za-z-]{16,19}\s*:\s*)?explain\s+(\d+\.\d+)\s*\.?\s*$/i.exec(String(text || ''));
-  return match ? match[1] : null;
+  const match = EXPLAIN.exec(String(text || ''));
+  return match ? match[2] : null;
+}
+
+// The same, with the bank reference it names (normalised, or as typed when malformed, so it matches
+// no bank), or null: { reference, row }.
+function explainParts(text) {
+  const match = EXPLAIN.exec(String(text || ''));
+  if (!match) return null;
+  return { reference: match[1] ? (bank.normalizeBankReference(match[1]) || match[1]) : null, row: match[2] };
 }
 
 // A short digest of each row as shown, keyed by its id and number (id@1.4, or id@ for a status row),
@@ -552,7 +565,28 @@ function bankTicketCommand(text, sessionId, tickets) {
   try { return tickets.peek(match[5], sessionId) !== null; } catch { return false; }
 }
 
+// What the agent is told when the owner's own message after a bank only asks to explain a row: the
+// read-only explain command, which spends no ticket, so the bank stays open for their answer.
+function bankExplainContext(entry, row) {
+  return [
+    `Toolkit governance: the user's message above asks for the full text of row ${row} of governance bank ${entry.bank_reference}. Run exactly this once; it needs no ticket and writes nothing:`,
+    `  node "${script()}" setup --answers "${entry.bank_reference}: explain ${row}"`,
+    'Then do what its Agents line says. The bank stays open: their next own message comes back with a one-use ticket for their answer. Never show the bank again yourself, and never answer it for them.',
+  ].join('\n');
+}
+
+// Whether a shell command is exactly the read-only explain command: Toolkit's own script, `setup
+// --answers` with only "explain <row>" (the bank reference optional) and no ticket. It writes nothing,
+// so it needs no session or ticket; anything else after `--answers` still needs the live ticket.
+const EXPLAIN_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,60})"[ \t]*$/;
+function bankExplainCommand(text) {
+  const command = String(text || '');
+  if (/[$`%\u2018-\u201f]/.test(command)) return false;
+  const match = EXPLAIN_COMMAND.exec(command);
+  return Boolean(match) && sameScript(match[1] ?? match[2] ?? match[3]) && explainRequest(match[4]) !== null;
+}
+
 module.exports = Object.freeze({
-  APP_NAMES, BANK_HOST, TICKETS_BASENAME, AGENTS_AFTER_ANSWER, REPLY_AGAIN, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  explainText, explainRequest, rowDigests, changedRows, bankTicketContext, bankTicketCommand,
+  APP_NAMES, BANK_HOST, TICKETS_BASENAME, REPLY_AGAIN, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
+  agentsAfterAnswer, explainText, explainRequest, explainParts, rowDigests, changedRows, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand,
 });

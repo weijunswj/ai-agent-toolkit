@@ -45,7 +45,7 @@ async function run(ctx, argv, { interactive = false, answers = [] } = {}) {
     cwd: ctx.repo, interactive, registryOptions: ctx.registryOptions, ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 2, stale: 1, update: 'node fixture-apply.cjs --apply', remove: 'node fixture-apply.cjs --remove' }),
-    environment: { TOOLKIT_HOST_SESSION: SESSION },
+    environment: { TOOLKIT_HOST_SESSION: SESSION }, ...(ctx.cli || {}),
   });
   const code = await cli.main(argv);
   return { code, out, err };
@@ -169,7 +169,9 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
   assert.doesNotMatch(done.out, /Parallel CI shards/, 'a row left out says nothing');
   noBank(done.out);
   agentsLast(done.out);
-  assert.equal(tickets(ctx).issue(SESSION, epochOf(ctx)), null, 'a used answer leaves nothing open');
+  // A used answer keeps the bank open for the owner's next own message (owner test of 19 Nov), with a
+  // new one-use ticket; the spent one stays spent.
+  assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx))?.bank_reference, reference, 'a used answer leaves the same bank open for the next own message');
   const forged = await run(ctx, ['setup', '--answers', `${reference}: all recommended`, '--ticket', 'f'.repeat(32)]);
   assert.equal(forged.code, 2);
   assert.match(forged.err, /^No live reply ticket from the owner.*The owner can type toolkit governance to see the bank again\./m);
@@ -309,4 +311,95 @@ test('commands name the managed Toolkit checkout when this computer records one,
   const command = scriptPath => `node "${scriptPath}" setup --answers "ABCD-EFGH-JKMN-PQRS: all recommended" --ticket ${'a'.repeat(32)}`;
   for (const scriptPath of [own, managed]) assert.equal(bankTicketCommand(command(scriptPath), SESSION, live), true, scriptPath);
   assert.equal(bankTicketCommand(command(path.join(home, 'elsewhere', 'toolkit-governance.cjs')), SESSION, live), false, 'any other copy is refused');
+});
+
+// Owner test of 19 Nov: after 1.4=A, "explain 1.4" was refused for want of a ticket, and 1.9=A
+// named a spent ticket next to the missing row. Explain is read-only and needs no ticket, before or
+// after an answer; the bank stays open for the owner's next own message after an answer, so an
+// unknown row then gets only its own line; an answer still needs the one-use ticket.
+test('explain needs no ticket before or after an answer, and an unknown row after an answer says only that', async t => {
+  const ctx = fixture(t);
+  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
+  const shown = tickets(ctx).pendingFor(SESSION, epochOf(ctx));
+  const owed = out => out.trim().split(/\n\s*\n/).slice(0, -1).join('\n\n');
+  const explain = async (answer, line) => {
+    const result = await run(ctx, ['setup', '--answers', answer]);
+    assert.equal(result.code, 0, `${answer}: ${result.err}`);
+    assert.match(result.out, line, answer);
+    assert.doesNotMatch(owed(result.out), /ticket|used|spent|Reply again/i, `${answer}: no ticket line`);
+    noBank(result.out);
+    agentsLast(result.out);
+  };
+  await explain(`${reference}: explain 1.4`, /^### 1\.4 Parallel CI shards$/m);
+  assert.deepEqual(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), shown, 'an explain leaves the shown bank as it was');
+  const done = await reply(ctx, reference, KEEP);
+  assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m);
+  await explain(`${reference}: explain 1.4`, /^### 1\.4 Parallel CI shards$/m);
+  await explain('explain 1.2', /^### 1\.2 /m);
+  await explain(`${reference}: explain 1.9`, /^This bank has no row 1\.9\.$/m);
+  const unknown = await reply(ctx, reference, '1.9=A');
+  assert.equal(unknown.code, 0, unknown.err);
+  assert.match(unknown.out, /^This bank has no row 1\.9\. Nothing was written\.$/m);
+  assert.doesNotMatch(owed(unknown.out), /ticket|used|spent/i, 'an unknown row names no ticket');
+  noBank(unknown.out);
+  // Anything but an explain still needs the owner's live ticket, and writes nothing without it.
+  const bare = await run(ctx, ['setup', '--answers', `${reference}: 1.4=A`]);
+  assert.equal(bare.code, 2);
+  assert.doesNotMatch(bare.out, /Nothing changed|### /);
+});
+
+// G2 of 19 Nov: an answer that opens the shards pull request turns that row into a status row, so
+// every later question moves up one number. The ticketless explain then printed another row under
+// the number the owner saw (explain 1.4 gave the next row, and a row still on screen did not exist).
+// It reads the bank the owner was shown: a bank numbered differently is named as changed, never
+// explained by its new numbers; the ticket path refuses the next answer the same way.
+test('explain after an answer that renumbers the bank names the change, never another row', async t => {
+  const ctx = fixture(t);
+  const open = [];
+  ctx.cli = {
+    ciEstimator: () => ({ minutes: 25, workflow: 'CI' }), ciReaders: () => ({ ok: true }),
+    switchTransport: {
+      openCiShards: () => open,
+      publishCiShards() { const pr = { number: 5, url: `https://github.com/${SLUG}/pull/5`, head: 'a'.repeat(40) }; open.push(pr); return pr; },
+      publishSwitch: () => ({ number: 6, url: `https://github.com/${SLUG}/pull/6`, head: 'b'.repeat(40) }),
+    },
+  };
+  const shown = await run(ctx, ['setup']);
+  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
+  const seen = row => (new RegExp(`^\\| ${row.replace('.', '\\.')} \\| ([^|]+?) \\|`, 'm').exec(shown.out) || [])[1];
+  assert.equal(seen('1.4'), 'Parallel CI shards');
+  const later = ['1.5', '1.6'].filter(seen);
+  assert.ok(later.length, 'a row follows the shards row');
+  const answered = await reply(ctx, reference, '1.4=B');
+  assert.equal(answered.code, 0, answered.err);
+  assert.equal(open.length, 1, 'the answer opened the shards pull request');
+  const moved = JSON.parse((await run(ctx, ['setup', '--json'])).out);
+  assert.notEqual(moved.bank_reference, reference, 'the bank is numbered differently now');
+  for (const row of ['1.4', ...later]) {
+    const result = await run(ctx, ['setup', '--answers', `${reference}: explain ${row}`]);
+    assert.equal(result.code, 0, result.err);
+    assert.match(result.out, /^The governance bank changed since it was shown \(rows were added, taken away or numbered differently\), so row \d\.\d as shown is not explained here and nothing was written\. Type toolkit governance to see the new bank\.$/m, `explain ${row}`);
+    assert.doesNotMatch(result.out, /^### |This bank has no row/m, `explain ${row} prints no row by the new numbers`);
+    agentsLast(result.out);
+    // Without the reference in the command, the session's noted bank is the one the owner saw.
+    const bare = await run(ctx, ['setup', '--answers', `explain ${row}`]);
+    assert.doesNotMatch(bare.out, /^### |This bank has no row/m, `bare explain ${row}`);
+    assert.match(bare.out, /^The governance bank changed since it was shown/m);
+  }
+  assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx))?.bank_reference, reference, 'explain spends nothing: the shown bank stays noted');
+});
+
+// When rows changed but every number still means the same row, explain names the changed rows first,
+// as the ticket path does, then the row.
+test('explain after a row changed in place names the change, then the row', async t => {
+  const ctx = fixture(t);
+  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
+  ctx.cli = { permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) };
+  const result = await run(ctx, ['setup', '--answers', `${reference}: explain 1.4`]);
+  assert.equal(result.code, 0, result.err);
+  const [first, changed] = result.out.trim().split('\n');
+  assert.equal(first, 'The governance state changed since that bank was shown; the numbers still mean the same rows.');
+  assert.match(changed, /^2\.1 Toolkit permissions \(Claude Code\) changed: now Up to date, recommended A\. Keep current\.$/);
+  assert.match(result.out, /^### 1\.4 Parallel CI shards$/m);
+  agentsLast(result.out);
 });

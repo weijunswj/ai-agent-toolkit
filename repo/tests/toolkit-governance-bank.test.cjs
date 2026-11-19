@@ -124,3 +124,27 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep', ciShards: 'not-now' }, 'a governed bank also asks about parallel CI shards; every row left out stays as it is');
   assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B, 1.4=B`, enabled), /answered only while governance is on/);
 });
+
+// Explain is read-only: the owner's "explain 1.4" spends no ticket and keeps the bank open, and the
+// tool gate lets through exactly the ticketless explain command; any other reply without the live
+// ticket is still refused.
+test('an explain message gets the ticketless explain command, keeps the bank open, and only that command passes without a ticket', (t) => {
+  const { ctx, repo, sessionId, tickets, prompts, epochs } = shownFixture(t);
+  const explain = prompts.decide({ cwd: repo, prompt: 'explain 1.4', sessionId });
+  assert.equal(explain.action, 'pass');
+  const command = `node "${SCRIPT}" setup --answers "${REFERENCE}: explain 1.4"`;
+  assert.ok(explain.context.includes(command), explain.context);
+  assert.equal(ticketIn(explain.context), undefined, 'an explain gets no ticket');
+  assert.ok(tickets.pendingFor(sessionId, epochs.get(sessionId)), 'the bank still waits for the owner\'s answer');
+  assert.equal(tools(ctx).decide(bash(sessionId, command)), null, 'the ticketless explain command passes');
+  assert.equal(tools(ctx).decide(bash('another-session', `node "${SCRIPT}" setup --answers "explain 2.1"`)), null, 'an explain writes nothing, in any session');
+  for (const refused of [
+    `${command}; echo done`,
+    `node "${SCRIPT}" setup --answers "${REFERENCE}: 1.4=A"`,
+    `node "${SCRIPT}" setup --answers "${REFERENCE}: explain 1.4, 1.4=A"`,
+    `node "${SCRIPT}" setup --answers "$X explain 1.4"`,
+    `node "/elsewhere/toolkit-governance.cjs" setup --answers "${REFERENCE}: explain 1.4"`,
+  ]) assert.ok(tools(ctx).decide(bash(sessionId, refused))?.deny, refused);
+  const answer = prompts.decide({ cwd: repo, prompt: 'all recommended', sessionId });
+  assert.ok(ticketIn(answer.context), 'the next own message still answers the bank with a ticket');
+});
