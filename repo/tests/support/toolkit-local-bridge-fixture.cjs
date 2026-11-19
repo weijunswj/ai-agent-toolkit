@@ -117,13 +117,12 @@ const CORE_CACHE_FIXTURE_PATHS = Object.freeze([
   'repo/contracts/agent-rules/global-rules.md',
   'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
   'repo/CONTROLLER.md',
-  'repo/controller/roles-and-routes.md',
-  'repo/controller/gates.md',
-  'repo/controller/evidence-and-finish.md',
   'repo/ARCHITECTURE.md',
 ]);
+// The whole controller folder, so every page the core lists is in the fixture, now and later.
 const CORE_CACHE_FIXTURE_DIRS = Object.freeze([
   'repo/contracts/controller-kernel',
+  'repo/controller',
 ]);
 
 function completeCoreCacheFixture(repoPath, includeFiles = true) {

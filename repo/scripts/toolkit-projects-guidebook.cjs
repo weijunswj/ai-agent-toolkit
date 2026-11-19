@@ -36,6 +36,7 @@ const BASE_PATHS = Object.freeze([
   'repo/contracts/agent-rules/gate-rules.md',
   'repo/contracts/agent-rules/toolkit-governed-rules.md',
   'repo/CONTROLLER.md',
+  'repo/controller/principles.md',
   'repo/controller/roles-and-routes.md',
   'repo/controller/gates.md',
   'repo/controller/evidence-and-finish.md',

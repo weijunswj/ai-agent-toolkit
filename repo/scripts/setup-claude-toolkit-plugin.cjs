@@ -303,6 +303,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/contracts/agent-rules/global-rules.md",false],
     ["repo/contracts/agent-rules/n8n-safety-router-adapter.md",false],
     ["repo/CONTROLLER.md",false],
+    ["repo/controller/principles.md",false],
     ["repo/controller/roles-and-routes.md",false],
     ["repo/controller/gates.md",false],
     ["repo/controller/evidence-and-finish.md",false],
