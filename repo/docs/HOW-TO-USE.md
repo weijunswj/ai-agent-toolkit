@@ -176,7 +176,7 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target.
 
-When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills and the official n8n skills into Antigravity's global skills folder (`~/.gemini/config/skills`). After that, each Claude Code or Codex session start refreshes Toolkit's copies from the managed checkout once Toolkit has updated (an unchanged Toolkit costs it two small file reads), and setup shows the answer as Keep current; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed. Start a new Antigravity session after a refresh to load the changed skills.
+When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills and the official n8n skills into Antigravity's global skills folder (`~/.gemini/config/skills`). After that, each Claude Code or Codex session start (with auto-sync or repo auto-update on) refreshes Toolkit's copies from the managed checkout once Toolkit has updated (an unchanged Toolkit costs it two small file reads), and setup shows the answer as Keep current; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed. Start a new Antigravity session after a refresh to load the changed skills.
 
 For one workspace only, use the copy below instead.
 

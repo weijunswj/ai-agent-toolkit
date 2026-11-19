@@ -425,7 +425,7 @@ test('session start refreshes Toolkit\'s Antigravity copies only when the owner 
   result = hook(root, hub, repoRoot);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(repoRoot, 'skills', first.skill, 'SKILL.md'), 'utf8'));
-  const report = reports().find((text) => /- Antigravity skills: refreshed/.test(text));
+  const report = reports().find((text) => /- Antigravity skills: Toolkit's skill copies in Antigravity: refreshed \d+\./.test(text));
   assert.ok(report, 'the update report records the refresh');
   assert.match(report, /Start a new Antigravity session to load the changed skills\./);
 });

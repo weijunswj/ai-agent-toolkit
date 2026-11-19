@@ -346,7 +346,7 @@ test('Codex session start refreshes Toolkit\'s Antigravity copies from the manag
   assert.equal(fs.readFileSync(path.join(target, 'n8n-one-official', 'SKILL.md'), 'utf8'), 'n8n v1\n');
   assert.deepEqual(fs.readdirSync(target).sort(), ['alpha', 'n8n-one-official'], 'nothing from the copy Codex runs');
   const report = readLatestReport(hub);
-  assert.match(report.text, /- Antigravity skills: refreshed 2 of Toolkit's skill copies in Antigravity/);
+  assert.match(report.text, /- Antigravity skills: Toolkit's skill copies in Antigravity: refreshed 2\./);
 });
 
 test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {

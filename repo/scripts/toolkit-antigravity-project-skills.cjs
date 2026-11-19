@@ -324,8 +324,9 @@ class AntigravitySessionRefresh {
 function sessionRefreshCheck(result) {
   const label = 'Antigravity skills';
   if (result?.status === 'updated') {
-    const done = [result.copied ? `refreshed ${result.copied}` : '', result.pruned ? `removed ${result.pruned} retired` : ''].filter(Boolean).join(' and ');
-    return { id: 'antigravity-skills', label, status: 'passed', summary: `${done} of Toolkit's skill copies in Antigravity. Start a new Antigravity session to load the changed skills.`,
+    const done = [result.copied ? `refreshed ${result.copied}` : '',
+      result.pruned ? `removed ${result.pruned} retired skill${result.pruned === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
+    return { id: 'antigravity-skills', label, status: 'passed', summary: `Toolkit's skill copies in Antigravity: ${done}. Start a new Antigravity session to load the changed skills.`,
       updated: true, run: result.source || '' };
   }
   if (result?.status !== 'failed') return null;

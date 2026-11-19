@@ -354,7 +354,10 @@ test('the session-start check reports only a change or a failure', () => {
   assert.equal(updated.status, 'passed');
   assert.equal(updated.updated, true);
   assert.equal(updated.run, 'abc1234def567', 'a later refresh on another commit gets its own update report');
-  assert.match(updated.summary, /refreshed 2 and removed 1 retired.*Start a new Antigravity session to load the changed skills\./);
+  assert.equal(updated.summary, "Toolkit's skill copies in Antigravity: refreshed 2 and removed 1 retired skill. Start a new Antigravity session to load the changed skills.");
+  const summary = (copied, pruned) => sessionRefreshCheck({ status: 'updated', copied, pruned }).summary.split('. ')[0];
+  assert.equal(summary(1, 0), "Toolkit's skill copies in Antigravity: refreshed 1");
+  assert.equal(summary(0, 2), "Toolkit's skill copies in Antigravity: removed 2 retired skills");
 });
 
 test('the checkout commit is read from git files alone: loose or packed branch, detached, linked worktree', (t) => {
