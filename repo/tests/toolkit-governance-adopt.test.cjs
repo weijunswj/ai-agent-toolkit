@@ -110,13 +110,14 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
   assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['governance-app', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
-  assert.deepEqual(questions.map(spec => spec.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.6', '', '', '', '2.1'], 'every question keeps its fixed number; status rows have none');
+  assert.deepEqual(questions.map(spec => spec.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '', '', '', '2.1'], 'questions are numbered without gaps; status rows have none');
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
   // What turning on makes is listed under the table, not asked: governance is not on yet, so it is
   // not "already set".
   assert.match(table, /^Nothing to answer here:\n- Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on\.\n- Parent issue: None yet\. Toolkit opens one when governance turns on\.\n- Required checks: None yet\. Default-branch protection waits for them\.$/m);
-  assert.doesNotMatch(table, /Already set|\| 1\.[578] \|/);
+  assert.doesNotMatch(table, /Already set|\| 1\.[6-9] \|/, 'five questions in section 1, with no gap');
+  assert.match(table, /^\| 1\.5 \| Governance App \|/m);
   assert.equal(github.calls.length, 0, 'showing the bank makes nothing');
 
   const before = fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8');
@@ -150,11 +151,11 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
 
 test('the governance App row: Not now says so once, and Set up gives no command while governance stays off', async t => {
   const ctx = fixture(t);
-  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=B, 1.6=A'] });
+  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=B, 1.5=A'] });
   assert.equal(notNow.code, 0, notNow.err + notNow.out);
   assert.match(notNow.out, /Governance GitHub App: not now\. Governance works without it/);
   assert.doesNotMatch(notNow.out, /toolkit-governance-app-setup|pre-filled page/);
-  const off = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A, 1.6=B'] });
+  const off = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A, 1.5=B'] });
   assert.match(off.out, /Governance App: not set up, because governance is not on after this answer\./);
   assert.doesNotMatch(off.out, /toolkit-governance-app-setup/);
   assert.equal(off.published.length, 0);

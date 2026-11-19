@@ -169,6 +169,24 @@ test('the command cannot write: no write call in its source, and none attempted 
   assert.equal(permissions.main(['--store', '/work/store'], { ...computer(t), stdout: () => {}, stderr: () => {} }), 2, 'the old store option is gone');
 });
 
+// The owner's one command is the first thing after the opening line and the last line again, and
+// each guard text is said once for all the lines it covers, not once per line.
+test('the one --apply command comes first and last, and each guard is said once', t => {
+  const deps = { ...computer(t), fs: governedFs(), run: fakeGit() };
+  const out = [];
+  assert.equal(permissions.main([], { ...deps, stdout: text => out.push(text) }), 0);
+  const lines = out.join('').trimEnd().split('\n');
+  const command = `node "${TK}/repo/scripts/toolkit-permissions.cjs" --apply --repo-root "/work/repo"`;
+  assert.equal(lines.indexOf(`    ${command}`), 2, 'the command opens the print');
+  assert.equal(lines.at(-1), `    ${command}`, 'and closes it');
+  assert.equal(lines.filter(line => line === `    ${command}`).length, 2);
+  const built = new permissions.PermissionBlocks(deps).build();
+  const programme = permissions.ROWS.find(row => row.id.startsWith('programme')).guard;
+  assert.equal(out.join('').split(programme).length, 2, 'the programme guard is printed once');
+  assert.ok(lines.includes(`- programme.cjs ${permissions.ROWS.filter(row => row.guard === programme).map(row => `${row.sub} *`).join(', ')}: ${programme}`));
+  for (const guard of new Set(built.coverage.map(row => row.guard))) assert.equal(lines.filter(line => line.startsWith('- ') && line.endsWith(`: ${guard}`)).length, 1, guard);
+});
+
 test('--check reads a settings file and reports missing and stale lines without changing it', t => {
   const deps = { ...computer(t), fs: governedFs(), run: fakeGit() };
   const built = new permissions.PermissionBlocks(deps).build({ scope: 'computer' });

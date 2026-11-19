@@ -325,7 +325,7 @@ test('the bank keeps the copies row beside broken markers, and names a programme
   const status = await old.cli(['setup']);
   assert.equal(status.code, 0, status.err);
   assert.doesNotMatch(status.out, COPIES_ROW);
-  assert.match(status.out, /Toolkit instruction copies \| 1 file left, cleanup cannot run/);
+  assert.match(status.out, /^- Toolkit instruction copies: 1 file left, cleanup cannot run\. Not offered yet: /m);
   const bank = require('../scripts/toolkit-governance-bank.cjs');
   const specs = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', merged: { store: { repository: 'owner/store' }, required_checks: [] },
     permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, copies: { files: 1, refused: 'the reason' } });

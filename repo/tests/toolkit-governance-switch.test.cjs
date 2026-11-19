@@ -100,13 +100,13 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     assert.equal(result.code, 0, result.err);
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup row is asked too.
     assert.match(result.out, /^# Toolkit governance choices - 7 questions across 2 sections$/m);
-    assert.match(result.out, /\| 1\.7 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
+    assert.match(result.out, /\| 1\.6 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
     assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI time unknown\) \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
     assert.match(result.out, /^Already set, nothing to answer here:\n- Evidence store: toolkit-test-fixture\/store\. Bound in the merged programme file\.\n- Parent issue: #1\. Bound in the merged programme file\.\n- Required checks: validate\. Bound in the merged programme file\.\nTo change anything bound in the merged programme file, edit \.github\/toolkit-programme\.json in a pull request and merge it\.$/m);
-    assert.doesNotMatch(result.out, /\| 1\.[58] \|/, 'status rows sit below the table and carry no number');
+    assert.doesNotMatch(result.out, /\| 1\.[7-9] \|/, 'status rows sit below the table and carry no number, so the six questions end at 1.6');
     assert.match(result.out, /\| 2\.1 \| Toolkit permissions \(Claude Code\) \| Outdated: 6 missing \| B\. Update: .* \| A\. Keep current<br>C\. Remove \|/);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
     assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.2=B\./m);
@@ -169,7 +169,7 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
   assert.equal(forged.code, 2, 'an agent cannot make up a ticket');
   assert.equal(calls.length, 1);
 
-  const kept = await answerBank(ctx, '1.6=A', { switchTransport });
+  const kept = await answerBank(ctx, '1.5=A', { switchTransport });
   assert.equal(kept.code, 0, kept.err);
   assert.match(kept.out, /Nothing changed: every answer keeps things as they are\./);
   assert.equal(calls.length, 1);

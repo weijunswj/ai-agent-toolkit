@@ -44,13 +44,10 @@ const EPOCH = /^[0-9a-f]{32}$/;
 const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // The script the agent is told to run: the managed checkout's when there is one, else this copy's.
 const script = () => managedScript('toolkit-governance.cjs');
-// Each question keeps its number from run to run, whichever questions are asked (one that is not asked
-// leaves a gap), so an answer such as 1.6=A means the same row after the evidence store stops being a
-// question. Status rows take no answer and have no number. Every question needs a number here.
-const FIXED_REFS = Object.freeze({
-  governance: '1.1', 'task-auto-merge': '1.2', 'merge-train': '1.3', 'ci-shards': '1.4', 'evidence-store': '1.5',
-  'governance-app': '1.6', 'instruction-copies': '1.7', 'permission-blocks': '2.1',
-});
+// Questions are numbered in the order they are built, without gaps; status rows take no answer and
+// have no number. A question's number can move between runs (the evidence store becoming a status row
+// moves the App row up), so a reply to an older bank where any number moved is never applied: the row
+// digests are keyed by number too (rowDigests), and the owner gets the new bank instead.
 // Every row the merged programme file binds changes the same way, said once under the list.
 const BOUND = 'Bound in the merged programme file';
 const BOUND_CHANGE = 'To change anything bound in the merged programme file, edit .github/toolkit-programme.json in a pull request and merge it.';
@@ -270,7 +267,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       bank.wizardChoice('remove', 'Remove', 'You get one command to run yourself that takes every Toolkit permission line out, the same way.'),
     ],
   }));
-  return bank.withPresentationMetadata(specs.map(spec => ({ ...spec, fixed_ref: FIXED_REFS[spec.id] })), BANK_HOST);
+  return bank.withPresentationMetadata(specs, BANK_HOST);
 }
 
 // The minutes in a few words for the shards row's Current cell; the full line is in explain.
@@ -332,20 +329,23 @@ function explainRequest(text) {
   return match ? match[1] : null;
 }
 
-// A short digest of each row as shown, keyed by its number, so a reply to a bank that changed since
-// can name only the rows that changed (changedRows).
+// A short digest of each row as shown, keyed by its id and number (id@1.4, or id@ for a status row),
+// so a reply to a bank that changed since can name only the rows that changed (changedRows).
+const rowKey = spec => `${spec.id}@${spec.presentation.question_ref}`;
 function rowDigests(specs) {
   const payload = bank.questionBankApprovalPayload(specs);
-  return Object.fromEntries(payload.questions.map(question => [question.id, crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)]));
+  const digest = new Map(payload.questions.map(question => [question.id, crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)]));
+  return Object.fromEntries(specs.map(spec => [rowKey(spec), digest.get(spec.id)]));
 }
 
 // The lines that name what changed between the bank the owner was shown (its row digests) and this
-// one, or null when rows were added or taken away (then only a new bank can be answered).
+// one, or null when rows were added or taken away or any number moved (then only a new bank can be
+// answered, since a reply such as 1.4=A could mean another row now).
 function changedRows(before, specs) {
   const now = rowDigests(specs);
-  const ids = Object.keys(now);
-  if (!before || typeof before !== 'object' || Object.keys(before).length !== ids.length || ids.some(id => !Object.hasOwn(before, id))) return null;
-  return specs.filter(spec => before[spec.id] !== now[spec.id]).map(spec => (spec.report_only
+  const keys = Object.keys(now);
+  if (!before || typeof before !== 'object' || Object.keys(before).length !== keys.length || keys.some(key => !Object.hasOwn(before, key))) return null;
+  return specs.filter(spec => before[rowKey(spec)] !== now[rowKey(spec)]).map(spec => (spec.report_only
     ? `${spec.title} changed: now ${spec.current_short || spec.current}, with nothing to answer.`
     : `${spec.presentation.question_ref} ${spec.title} changed: now ${spec.current_short || spec.current}, recommended ${spec.presentation.recommended_choice_ref}. ${bank.choiceLabel(spec, spec.recommended)}.`));
 }

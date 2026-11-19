@@ -108,10 +108,10 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);
-  assert.match(table, /\| 1\.6 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
-  assert.doesNotMatch(table, /\| 1\.4 \||\| 1\.5 \|/, 'rows that do not apply leave their numbers free');
+  assert.match(table, /\| 1\.4 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
+  assert.doesNotMatch(table, /\| 1\.5 \|/, 'rows that do not apply leave no gap: the App row takes 1.4');
   assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.6=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.4=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
   assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=B, 1.2=B`, undecided).taskAutoMerge, 'on', 'on together with turning governance on');
   // A row left out stays as it is, so on its own 1.2=B leaves governance undecided and is refused.
   for (const answer of ['1.2=B', '1.1=A, 1.2=B']) assert.throws(() => bank.parseBankAnswer(`${reference}: ${answer}`, undecided), /only while governance is on/, answer);

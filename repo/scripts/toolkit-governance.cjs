@@ -508,7 +508,7 @@ class ToolkitGovernanceCli {
     if (entry.bank_reference !== reference) {
       const changed = governanceBank.changedRows(entry.rows, specs);
       if (!changed) {
-        this.#print(false, {}, ['The governance bank changed since it was shown (rows were added or taken away), so the answer was not used and nothing was written. Type toolkit governance to see the new bank.']);
+        this.#print(false, {}, ['The governance bank changed since it was shown (rows were added, taken away or numbered differently), so the answer was not used and nothing was written. Type toolkit governance to see the new bank.']);
         return 0;
       }
       return again(['The governance state changed since that bank was shown, so the answer was not used and nothing was written.', ...changed]);

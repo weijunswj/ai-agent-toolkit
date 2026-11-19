@@ -245,18 +245,15 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
     }
     if (!spec.report_only) sectionByName.get(spec.section).question_count += 1;
   }
-  // A bank whose questions carry fixed numbers (fixed_ref, such as '1.5') keeps each question's number
-  // from run to run, and a question that is not asked leaves a gap. A report-only row is always an
+  // Questions are numbered without gaps in the order given; a report-only row is always an
   // unnumbered status line at the end of its section, so every number has letters.
-  const fixed = fixedIndexes(specs, sectionByName);
-  const rank = (spec) => (fixed ? fixed.get(spec) ?? Number.MAX_SAFE_INTEGER : Number(Boolean(spec.report_only)));
   specs = [...specs].sort((left, right) => sectionByName.get(left.section).index - sectionByName.get(right.section).index
-    || rank(left) - rank(right));
+    || Number(Boolean(left.report_only)) - Number(Boolean(right.report_only)));
   const questionCount = answerable(specs).length;
   const seenBySection = new Map();
   const presented = specs.map((spec) => {
     const section = sectionByName.get(spec.section);
-    const questionIndex = spec.report_only ? null : fixed ? fixed.get(spec) : (seenBySection.get(spec.section) || 0) + 1;
+    const questionIndex = spec.report_only ? null : (seenBySection.get(spec.section) || 0) + 1;
     if (questionIndex) seenBySection.set(spec.section, questionIndex);
     const choices = spec.choices.map((choice, index) => ({
       ...choice,
@@ -285,27 +282,6 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
     ...spec,
     presentation: { ...spec.presentation, bank_identity: bankIdentity, bank_reference: bankReference },
   }));
-}
-
-// Each question's fixed number, or null when the bank does not fix them. Fixed numbers are all or
-// nothing across the questions, unique, and must name the row's own section; a report-only row's
-// fixed_ref is unused, since it takes no answer.
-function fixedIndexes(specs, sectionByName) {
-  const questions = answerable(specs);
-  const count = questions.filter((spec) => spec.fixed_ref !== undefined).length;
-  if (!count) return null;
-  if (count !== questions.length) throw new Error('Question bank questions must all carry a fixed number or none.');
-  const indexes = new Map();
-  const seen = new Set();
-  for (const spec of questions) {
-    const match = /^(\d+)\.(\d+)$/.exec(String(spec.fixed_ref));
-    if (!match || Number(match[1]) !== sectionByName.get(spec.section).index || Number(match[2]) < 1 || seen.has(spec.fixed_ref)) {
-      throw new Error(`Question bank row ${spec.id} has an invalid fixed number.`);
-    }
-    seen.add(spec.fixed_ref);
-    indexes.set(spec, Number(match[2]));
-  }
-  return indexes;
 }
 
 function ensurePresentationMetadata(specs) {

@@ -355,7 +355,7 @@ test('bank: an answer waiting in its pull request shows as that pull request, a 
   const waiting = recorder([{ number: 7, url }]);
   const shown = await answer(ctx, 'all recommended', { transport: waiting });
   assert.match(shown.shown.out, new RegExp(`^- Parallel CI shards: Pull request #7 open\\. Your answer waits in ${pattern(url)}: merge it, or close it to answer again\\. Toolkit prepares no second one\\.$`, 'm'));
-  assert.doesNotMatch(shown.shown.out, /\| 1\.4 \|/, 'it is not asked again');
+  assert.doesNotMatch(shown.shown.out, /\| Parallel CI shards \|/, 'it is not asked again');
   assert.equal(waiting.calls.length, 0, 'all recommended prepares no second pull request');
   // Slow CI recommends Yes, but a reply that leaves 1.4 out keeps it as it is: Not now, nothing written.
   const quiet = recorder();
