@@ -367,3 +367,21 @@ test('min_toolkit: a binding asking for a newer Toolkit is an update ERROR; an o
   assert.match(line, /setup toolkit/);
   assert.equal(governance.judgeMerged(entry({ min_toolkit: '3.127' }), identity, new Date()).status, 'invalid', 'a version that is not x.y.z is invalid');
 });
+
+// The running version is read only for a binding that asks for one, so a copy whose version file
+// cannot be read still reads a binding without min_toolkit; with min_toolkit it compares as before.
+test('min_toolkit: the running version is read only when the binding asks for one', t => {
+  const version = require('../scripts/toolkit-version.cjs');
+  const identity = { root: '/r', repository_id: 'a'.repeat(64), valid: true, remote: { host: 'github.com', path: '/example-owner/example-repo.git' } };
+  const binding = { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-EX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: [] };
+  const entry = extra => ({ text: JSON.stringify({ ...binding, ...extra }), commit: 'c'.repeat(40), fetched_at: new Date().toISOString() });
+  const read = t.mock.method(version, 'readToolkitVersion', () => { throw new Error('version file not readable'); });
+  assert.equal(governance.judgeMerged(entry({}), identity, new Date()).status, 'enabled');
+  assert.equal(read.mock.callCount(), 0);
+  assert.throws(() => governance.judgeMerged(entry({ min_toolkit: '3.10.0' }), identity, new Date()), /version file not readable/);
+  read.mock.mockImplementation(() => '3.9.0');
+  const merged = governance.judgeMerged(entry({ min_toolkit: '3.10.0' }), identity, new Date());
+  assert.deepEqual([merged.status, merged.min_toolkit], ['invalid', '3.10.0'], '3.10.0 is newer than 3.9.0: parts compare as numbers, not text');
+  assert.equal(governance.judgeMerged(entry({ min_toolkit: '3.9.0' }), identity, new Date()).status, 'enabled');
+});

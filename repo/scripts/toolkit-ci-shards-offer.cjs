@@ -120,28 +120,34 @@ function firstList(root, estimate = null) {
   return { ok: true, manifest, text: `${JSON.stringify(manifest, null, 2)}\n`, shards: shards.length };
 }
 
-// The pinned Toolkit copies of the sweep in `root` whose commit cannot read a binding key: `reads(commit,
-// git)` says whether the Toolkit at that commit does. A copy whose commit this Toolkit checkout does not
-// have cannot be checked, so it counts as old too.
+// The pinned Toolkit copies of the sweep in `root` that may not read a binding key: { tooOld, unchecked }.
+// `reads(commit, git)` says whether the Toolkit at that commit does (tooOld when not). A copy whose commit
+// this Toolkit copy cannot read (not a git checkout, or the commit is not in it) is unchecked; callers
+// hold for both, and say which is which.
 function oldSweepCopies(root, toolkitRoot, reads) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   const git = args => spawnSync('git', args, { cwd: toolkitRoot, windowsHide: true, shell: false, encoding: 'utf8' });
-  const old = [];
+  const tooOld = [], unchecked = [];
   for (const copy of workflows.markedCopies(root).filter(entry => SWEEP_IDS.includes(entry.id))) {
     const text = readText(path.join(root, ...copy.file.split('/'))) || '';
     const commit = workflows.MARKER.exec(text.replace(/\r\n/g, '\n'))?.[2];
     const known = commit && git(['cat-file', '-e', `${commit}^{commit}`]).status === 0;
-    if (!known || !reads(commit, git)) old.push(copy.file);
+    if (!known) unchecked.push(copy.file);
+    else if (!reads(commit, git)) tooOld.push(copy.file);
   }
-  return old;
+  return { tooOld, unchecked };
 }
 
 // Whether every pinned Toolkit copy of the sweep in `root` reads ci_shards: { ok } or { ok: false,
 // reason } naming the step.
 function readersReady(root, toolkitRoot, { reader = CI_SHARDS_READER } = {}) {
-  const old = oldSweepCopies(root, toolkitRoot, (commit, git) => git(['merge-base', '--is-ancestor', reader, commit]).status === 0);
-  if (!old.length) return { ok: true };
-  return { ok: false, reason: `the pinned Toolkit copies ${old.join(', ')} run a Toolkit older than the one that reads ci_shards (3.113.0), and would read the binding as invalid. Refresh the repository rules first (merge their pull request), then answer again` };
+  const { tooOld, unchecked } = oldSweepCopies(root, toolkitRoot, (commit, git) => git(['merge-base', '--is-ancestor', reader, commit]).status === 0);
+  if (!tooOld.length && !unchecked.length) return { ok: true };
+  const parts = [];
+  if (tooOld.length) parts.push(`the pinned Toolkit copies ${tooOld.join(', ')} run a Toolkit older than the one that reads ci_shards (3.113.0), and would read the binding as invalid`);
+  if (unchecked.length) parts.push(`the pinned Toolkit copies ${unchecked.join(', ')} could not be checked, because this Toolkit copy cannot read the commit they are pinned to (it is not a Toolkit git checkout, or does not have that commit yet), so they might read the binding as invalid`);
+  const step = tooOld.length ? 'Refresh the repository rules first (merge their pull request)' : 'Run this from a Toolkit git checkout that has their commit, or refresh the repository rules first (merge their pull request)';
+  return { ok: false, reason: `${parts.join('; ')}. ${step}, then answer again` };
 }
 
 // The merged binding text with only ci_shards set, so the owner's diff shows only that: an existing

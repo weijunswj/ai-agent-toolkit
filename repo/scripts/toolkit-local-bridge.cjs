@@ -22,7 +22,7 @@ const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs')
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
-const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
+const { TOOLKIT_VERSION, compareVersions } = require('./toolkit-version.cjs');
 
 const ARCHITECTURE_VERSION = 2;
 const BRIDGE_VERSION = TOOLKIT_VERSION;
@@ -688,16 +688,6 @@ function isValidBridgeVersion(value) {
   return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(String(value || ''));
 }
 
-function compareBridgeVersions(left, right) {
-  const leftParts = String(left).split('.').map((part) => BigInt(part));
-  const rightParts = String(right).split('.').map((part) => BigInt(part));
-  for (let index = 0; index < 3; index += 1) {
-    if (leftParts[index] > rightParts[index]) return 1;
-    if (leftParts[index] < rightParts[index]) return -1;
-  }
-  return 0;
-}
-
 function assertRecognizedSyncSource(syncSource) {
   if (!SYNC_SOURCES.includes(syncSource)) {
     throw new Error(`Unsupported bridge sync source: ${syncSource || '<missing>'}`);
@@ -732,7 +722,7 @@ function maximumBridgeVersion(existingHubVersion, versionsBySource) {
   let maximum = isValidBridgeVersion(existingHubVersion) ? existingHubVersion : '';
   for (const source of SYNC_SOURCES) {
     const version = versionsBySource?.[source];
-    if (isValidBridgeVersion(version) && (!maximum || compareBridgeVersions(version, maximum) > 0)) maximum = version;
+    if (isValidBridgeVersion(version) && (!maximum || compareVersions(version, maximum) > 0)) maximum = version;
   }
   return maximum;
 }
@@ -1337,12 +1327,18 @@ const VENDORED_REPO_CHECKS = Object.freeze(['plain-text-check', 'personal-data-g
 const REQUIRED_REPO_CHECKS = Object.freeze(['plain-text-check']);
 const VENDORED_CHECK_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=([0-9a-f]{12})$/m;
 
-// Reads this computer's cached state only (the session-start hook refreshes it). ERROR (an unusable
-// merged binding) keeps the governed checks: it never quietly drops to off. `registryOptions` is for
-// tests.
+// Reads this computer's cached state only (the session-start hook refreshes it): { state, reason,
+// minToolkit }, or null when it cannot be read. `registryOptions` is for tests.
+function governanceStateAt(targetRoot, registryOptions = {}) {
+  try {
+    const found = require('./toolkit-governance-state.cjs').governanceState(targetRoot, registryOptions);
+    return { state: found.state, reason: found.reason || null, minToolkit: found.merged?.min_toolkit || null };
+  } catch { return null; }
+}
+
+// ERROR (an unusable merged binding) keeps the governed checks: it never quietly drops to off.
 function governanceEnabledAt(targetRoot, registryOptions = {}) {
-  try { return ['ENABLED', 'ERROR'].includes(require('./toolkit-governance-state.cjs').governanceState(targetRoot, registryOptions).state); }
-  catch { return false; }
+  return ['ENABLED', 'ERROR'].includes(governanceStateAt(targetRoot, registryOptions)?.state);
 }
 
 // A repository that switched the plain-text check off with a recorded reason is not reported.
@@ -1414,7 +1410,7 @@ function newestKnownToolkitVersion(state) {
       if (isValidBridgeVersion(version)) versions.push(version);
     } catch { /* an unreadable checkout adds no version */ }
   }
-  return versions.reduce((newest, version) => (!newest || compareBridgeVersions(version, newest) > 0 ? version : newest), '');
+  return versions.reduce((newest, version) => (!newest || compareVersions(version, newest) > 0 ? version : newest), '');
 }
 
 // Direction is 'newer' when the repository rules or checks may come from a newer Toolkit
@@ -1450,11 +1446,20 @@ function runAgentRulesPreflight(args, options = {}) {
   // Anywhere else a copy is a leftover to remove, and a missing one is the goal.
   if (sourceVersion) for (const spec of specs) { if (spec.target !== 'AGENTS.md') findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec })); }
   else findings.push(...leftoverRuleCopies(targetRoot), ...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
-  const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
-  const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
   // A leftover note depends on governance: where it is on, removal is the owner's Clean up answer.
   const leftovers = findings.some((finding) => finding.kind === 'leftover');
-  const result = { ...base, reference, templateRoot, authorVersion, findings, ...(leftovers ? { governed: !rulesManaged || governed() } : {}) };
+  const governedLeftovers = leftovers && (!rulesManaged || governed());
+  // Where governance is on but its programme file cannot be used here (ERROR), the bank does not ask
+  // about the copies yet, so the note names what comes first. A programme file that needs a newer
+  // Toolkit also means its checks may come from that newer Toolkit.
+  const reported = !sourceVersion && (governedLeftovers || findings.some((finding) => finding.kind === 'repo-check'));
+  const held = reported ? (options.governanceStateAt || governanceStateAt)(gitRoot) : null;
+  const governanceError = held?.state === 'ERROR' ? (held.reason === 'toolkit-too-old' ? 'toolkit-too-old' : 'unusable') : null;
+  const known = sourceVersion || newestKnownToolkitVersion(options.state);
+  const needed = governanceError === 'toolkit-too-old' && isValidBridgeVersion(held.minToolkit) ? held.minToolkit : '';
+  const authorVersion = needed && (!known || compareVersions(needed, known) > 0) ? needed : known;
+  const newer = Boolean(authorVersion) && compareVersions(runningVersion, authorVersion) < 0;
+  const result = { ...base, reference, templateRoot, authorVersion, findings, ...(leftovers ? { governed: governedLeftovers } : {}), ...(governanceError ? { governanceError } : {}) };
   // A source checkout newer than the running copy is reported even when it matches
   // its own templates: the installed copy is the stale side.
   if (sourceVersion && newer) return { ...result, status: 'needs-attention', direction: 'newer' };
@@ -1470,15 +1475,26 @@ function formatAgentRulesPreflight(result) {
   const named = (kinds) => [...new Set(findings.filter((finding) => kinds.includes(finding.kind)).map((finding) => finding.file))].join(', ');
   const files = named(findings.map((finding) => finding.kind));
   const missingCheck = findings.some((finding) => finding.detail === 'missing');
-  // Checks, with or without leftover copies beside them.
-  const checksAndLeftovers = findings.some((finding) => finding.kind === 'repo-check') && findings.every((finding) => ['repo-check', 'leftover'].includes(finding.kind));
+  // Owner's-choice parts (leftover copies, broken markers) and checks, each with or without the others.
+  const OWNER_KINDS = ['leftover', 'broken-marker'];
+  const checksAndLeftovers = findings.some((finding) => finding.kind === 'repo-check') && findings.every((finding) => ['repo-check', ...OWNER_KINDS].includes(finding.kind));
   // Removing instruction copies is always the owner's choice, so this part names where that choice is
   // made and asks nothing of this task.
-  const leftover = !findings.some((finding) => finding.kind === 'leftover') ? '' : result.governed
-    ? `this repository still carries Toolkit instruction copies (${named(['leftover'])}) that the installed Toolkit now delivers itself. Removing them is the owner's choice: \`refresh governance\` asks about them (Toolkit instruction copies), and only a Clean up answer opens the one cleanup pull request; nothing is due in this task.`
-    : `this repository still carries Toolkit instruction copies (${named(['leftover'])}) from an older setup. Governance is not on here, so the installed Toolkit does not replace them; the leftover scan (toolkit-leftover-files.cjs scan) lists them, and removing them is the owner's choice; nothing is due in this task.`;
-  const note = (checks) => (leftover ? `Toolkit note: ${leftover} Also, ${checks} No files were changed.` : `Toolkit note: ${checks} No files were changed.`);
-  if (findings.length && findings.every((finding) => finding.kind === 'leftover')) return `Toolkit note: ${leftover} No files were changed.`;
+  const copies = named(['leftover']);
+  const leftover = !copies ? '' : !result.governed
+    ? `this repository still carries Toolkit instruction copies (${copies}) from an older setup. Governance is not on here, so the installed Toolkit does not replace them; the leftover scan (toolkit-leftover-files.cjs scan) lists them, and removing them is the owner's choice; nothing is due in this task.`
+    : result.governanceError === 'toolkit-too-old'
+      ? `this repository still carries Toolkit instruction copies (${copies}) from an older setup. Removing them is the owner's choice: its programme file needs a newer Toolkit than the running copy, so update Toolkit (setup toolkit) first; then \`refresh governance\` asks about them. Nothing is due in this task.`
+      : result.governanceError
+        ? `this repository still carries Toolkit instruction copies (${copies}) from an older setup. Removing them is the owner's choice: \`refresh governance\` asks about them once the programme file can be used. Nothing is due in this task.`
+        : `this repository still carries Toolkit instruction copies (${copies}) that the installed Toolkit now delivers itself. Removing them is the owner's choice: \`refresh governance\` asks about them (Toolkit instruction copies), and only a Clean up answer opens the one cleanup pull request; nothing is due in this task.`;
+  // Broken markers hide where a Toolkit block ends, so nothing in that file is touched; fixing them is
+  // the owner's choice, never a step due in this task.
+  const brokenFiles = named(['broken-marker']);
+  const broken = brokenFiles ? `Toolkit markers in ${brokenFiles} are broken, so Toolkit cannot tell its text from the rest and leaves the file alone; fixing them by hand is the owner's choice, and nothing is due in this task.` : '';
+  const owners = [leftover, broken].filter(Boolean);
+  const note = (checks) => `Toolkit note: ${[...owners, ...(checks ? [checks] : [])].join(' Also, ')} No files were changed.`;
+  if (findings.length && findings.every((finding) => OWNER_KINDS.includes(finding.kind))) return note('');
   // The check installer cannot tell a newer copy from an older one, so with a newer Toolkit on
   // record the step is to refresh Toolkit, never to rewrite the checks from the running copy.
   if (result.direction === 'newer' && checksAndLeftovers) {
@@ -1490,10 +1506,7 @@ function formatAgentRulesPreflight(result) {
   if (result.direction === 'drift') {
     return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; next step: regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs --write before this task ends. No files were changed.`;
   }
-  if (checksAndLeftovers) {
-    return note(`this repository's Toolkit checks (${named(['repo-check'])}) ${missingCheck ? 'are missing or differ from' : 'differ from'} the running Toolkit ${result.runningVersion}; next step: refresh them with repository-agent-rules before this task ends.`);
-  }
-  return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates (broken Toolkit markers); next step: repair the markers, or remove the copies in one pull request, before this task ends. No files were changed.`;
+  return note(`this repository's Toolkit checks (${named(['repo-check'])}) ${missingCheck ? 'are missing or differ from' : 'differ from'} the running Toolkit ${result.runningVersion}; next step: refresh them with repository-agent-rules before this task ends.`);
 }
 
 function agentRulesNoticeKey(result, message) {
@@ -2961,7 +2974,7 @@ function recordedBridgeVersionForSource(state, syncSource) {
 function assertSourceDowngradeAllowed(state, args) {
   assertRecognizedSyncSource(args.syncSource);
   const recordedVersion = recordedBridgeVersionForSource(state, args.syncSource);
-  if (!recordedVersion || compareBridgeVersions(BRIDGE_VERSION, recordedVersion) >= 0 || args.forceDowngrade) return;
+  if (!recordedVersion || compareVersions(BRIDGE_VERSION, recordedVersion) >= 0 || args.forceDowngrade) return;
   const forceGuidance = args.hook ? '' : '; use `--force-downgrade` only for explicit manual same-source recovery';
   throw new Error(
     `Refusing downgrade for sync source ${args.syncSource}: running bridge ${BRIDGE_VERSION} is older than recorded ${args.syncSource} bridge ${recordedVersion}; ${downgradeRemediation(args.syncSource)}${forceGuidance}`
@@ -3011,7 +3024,7 @@ function newerWorkspaceToolkit(runningRoot, start = process.env.CLAUDE_PROJECT_D
   for (const dir of candidates) {
     if (samePath(dir, runningRoot)) continue;
     const version = versionOf(dir);
-    if (version && compareBridgeVersions(BRIDGE_VERSION, version) < 0) return { root: dir, version };
+    if (version && compareVersions(BRIDGE_VERSION, version) < 0) return { root: dir, version };
   }
   return null;
 }
@@ -3036,7 +3049,7 @@ function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process
     const missing = !account ? 'this copy has no readable version' : (managedCheckout ? `the Toolkit folder ${slash(managedCheckout)} has no readable version` : 'no Toolkit folder is recorded on this PC');
     return { app: true, context: `Toolkit: could not compare this claude.ai copy with this PC's Toolkit (${missing}), so no update reminder is shown.` };
   }
-  if (compareBridgeVersions(account, local) >= 0) return { app: true };
+  if (compareVersions(account, local) >= 0) return { app: true };
   return { app: true, reminder: accountCopyBehind(account, local) };
 }
 
@@ -3674,6 +3687,7 @@ module.exports = {
   BRIDGE_VERSION,
   compareVendoredRepoChecks,
   governanceEnabledAt,
+  governanceStateAt,
   acquireLock,
   lockOwnerLiveness,
   parseArgs,

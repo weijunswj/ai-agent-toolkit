@@ -506,12 +506,6 @@ function result(fields) {
 
 // What the cached default-branch binding says: { status: 'none' | 'unknown' | 'invalid' | 'foreign'
 // | 'enabled' | 'disabled', version, problems, foreign_repository, commit, fetched_at, fresh }.
-function newerVersion(a, b) {
-  const x = a.split('.').map(Number), y = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
-  return false;
-}
-
 function judgeMerged(entry, identity, now) {
   if (!entry) return { status: 'unknown', fresh: false };
   const base = { commit: entry.commit, fetched_at: entry.fetched_at, fresh: !entry.refresh_error && bindingCache.isFresh(entry, now), unavailable: Boolean(entry.refresh_error) };
@@ -527,10 +521,13 @@ function judgeMerged(entry, identity, now) {
   const slug = remoteSlug(identity.remote);
   if (!slug || slug.toLowerCase() !== valid.repository.toLowerCase()) return { ...base, status: 'foreign', foreign_repository: valid.repository };
   // A binding that asks for a newer Toolkit cannot be used by this copy: it may rely on rules only the
-  // newer copy delivers.
-  const running = require('./toolkit-version.cjs').readToolkitVersion();
-  if (valid.min_toolkit && newerVersion(valid.min_toolkit, running)) {
-    return { ...base, status: 'invalid', min_toolkit: valid.min_toolkit, problems: [`this repository needs Toolkit ${valid.min_toolkit} or later; this copy is ${running}`] };
+  // newer copy delivers. The running version is read only when the binding asks.
+  if (valid.min_toolkit) {
+    const version = require('./toolkit-version.cjs');
+    const running = version.readToolkitVersion();
+    if (version.compareVersions(valid.min_toolkit, running) > 0) {
+      return { ...base, status: 'invalid', min_toolkit: valid.min_toolkit, problems: [`this repository needs Toolkit ${valid.min_toolkit} or later; this copy is ${running}`] };
+    }
   }
   return { ...base, status: programmeState.bindingEnabled(valid) ? 'enabled' : 'disabled', version: valid.schema === BINDING_SCHEMA ? 1 : 2, binding: valid };
 }

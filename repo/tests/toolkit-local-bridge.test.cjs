@@ -2715,7 +2715,7 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
         const newer = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true, state: { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } } }));
         assert.match(newer, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\)/);
         assert.match(newer, /next step: refresh Toolkit \(setup toolkit\) before this task ends\. No files were changed\.$/);
-      } else assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
+      } else assert.equal(message, "Toolkit note: Toolkit markers in AGENTS.md are broken, so Toolkit cannot tell its text from the rest and leaves the file alone; fixing them by hand is the owner's choice, and nothing is due in this task. No files were changed.");
       assert.doesNotMatch(message, /are older|refresh them with repository-agent-rules/);
       assert.match(message, /No files were changed/);
 
@@ -2738,6 +2738,31 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
       assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
     });
   }
+});
+
+// Broken markers beside checks keep both parts, and a governed repository whose programme file
+// cannot be used (ERROR) is told what comes before the bank can ask about its copies.
+test('SessionStart notice: broken markers keep the checks part, and ERROR names the step before the bank', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  const preflight = (extra) => formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, runningVersion: '3.0.0', governanceEnabled: () => true, ...extra }));
+  const broken = "Toolkit markers in AGENTS.md are broken, so Toolkit cannot tell its text from the rest and leaves the file alone; fixing them by hand is the owner's choice, and nothing is due in this task.";
+  writeFile(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=000000000000 -->\n# broken\n');
+  const withChecks = preflight({ governanceStateAt: () => ({ state: 'ENABLED', reason: null, minToolkit: null }) });
+  assert.equal(withChecks, `Toolkit note: ${broken} Also, this repository's Toolkit checks (.github/scripts/plain-text-check.cjs) are missing or differ from the running Toolkit 3.0.0; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`);
+
+  writeFile(path.join(root, 'AGENTS.md'), `${managedAgentsTemplate()}\n# Own rules\n`);
+  const tooOld = preflight({ governanceStateAt: () => ({ state: 'ERROR', reason: 'toolkit-too-old', minToolkit: '99.0.0' }) });
+  assert.match(tooOld, /^Toolkit note: this repository still carries Toolkit instruction copies \(AGENTS\.md\) from an older setup\. Removing them is the owner's choice: its programme file needs a newer Toolkit than the running copy, so update Toolkit \(setup toolkit\) first; then `refresh governance` asks about them\. Nothing is due in this task\./);
+  // Its checks may come from that newer Toolkit, so the step is to refresh Toolkit, never to rewrite them.
+  assert.match(tooOld, /Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\) than the running copy \(3\.0\.0\); next step: refresh Toolkit \(setup toolkit\) before this task ends\./);
+  assert.doesNotMatch(tooOld, /repository-agent-rules|\(Toolkit instruction copies\)/);
+  const unusable = preflight({ governanceStateAt: () => ({ state: 'ERROR', reason: 'merged-binding-invalid', minToolkit: null }) });
+  assert.match(unusable, /Removing them is the owner's choice: `refresh governance` asks about them once the programme file can be used\. Nothing is due in this task\./);
+  assert.match(unusable, /refresh them with repository-agent-rules before this task ends/);
+  const enabled = preflight({ governanceStateAt: () => ({ state: 'ENABLED', reason: null, minToolkit: null }) });
+  assert.match(enabled, /`refresh governance` asks about them \(Toolkit instruction copies\), and only a Clean up answer opens the one cleanup pull request/);
+  for (const message of [withChecks, tooOld, unusable, enabled]) assert.doesNotMatch(message, NEVER_HALTING);
 });
 
 test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is on', () => {
