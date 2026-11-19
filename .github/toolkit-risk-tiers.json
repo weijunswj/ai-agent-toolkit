@@ -41,6 +41,7 @@
     "repo/tests/toolkit-local-bridge*.test.cjs",
     "repo/tests/support/toolkit-local-bridge-fixture.cjs",
     "repo/tests/support/toolkit-fetch-race-fixture.cjs",
+    "repo/tests/support/retired-instruction-copies.cjs",
     "repo/tests/toolkit-test-temp-guard.cjs",
     "repo/tests/toolkit-test-editor-preload.cjs",
     "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/*.env.example",

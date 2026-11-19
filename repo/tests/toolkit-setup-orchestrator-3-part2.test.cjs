@@ -64,7 +64,7 @@ test('setup docs claim no retired automatic admission and keep honest enforcemen
 });
 
 test('generated Codex and Claude instruction surfaces preserve the compact host-neutral topology policy', () => {
-  const agents = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
+  const agents = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/toolkit-governed-rules.md'), 'utf8');
   const global = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/global-rules.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   const gate = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/gate-rules.md'), 'utf8');

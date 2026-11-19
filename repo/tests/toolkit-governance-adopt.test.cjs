@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { makeGoverned, recordAbsent } = require('./toolkit-governed-fixture-support.cjs');
+const { managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 const scripts = path.join(__dirname, '..', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
@@ -226,7 +227,7 @@ test('a working tree with a programme file that turns governance on is a prepare
   const ctx = fixture(t);
   const file = path.join(ctx.repo, '.github', 'toolkit-programme.json');
   assert.equal(adopt.adoptionPrepared(ctx.repo), false);
-  fs.copyFileSync(path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), path.join(ctx.repo, 'AGENTS.md'));
+  fs.writeFileSync(path.join(ctx.repo, 'AGENTS.md'), managedAgentsCopy());
   assert.equal(adopt.adoptionPrepared(ctx.repo), false, 'a governed block alone is not a prepared adoption');
   fs.rmSync(path.join(ctx.repo, 'AGENTS.md'));
   fs.writeFileSync(file, `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled' })}\n`);
