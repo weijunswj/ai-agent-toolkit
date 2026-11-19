@@ -1,6 +1,6 @@
 ---
 name: external-operation-preflight
-description: Use before any live change on an outside system, such as a hosting provider, deployment platform, database, bucket, DNS or SaaS service: creating, binding, renaming, migrating, promoting, deploying, pausing a trigger, restoring or merging into a branch that auto-deploys. Binds exact targets to one environment, checks resource identity, authority and downstream effects with an offline checker, and holds on any mismatch. Also owns the backup and restore evidence contract.
+description: "Use before any live change on an outside system, such as a hosting provider, deployment platform, database, bucket, DNS or SaaS service: creating, binding, renaming, migrating, promoting, deploying, pausing a trigger, restoring or merging into a branch that auto-deploys. Binds exact targets to one environment, checks resource identity, authority and downstream effects with an offline checker, and holds on any mismatch. Also owns the backup and restore evidence contract."
 ---
 
 # External Operation Preflight
