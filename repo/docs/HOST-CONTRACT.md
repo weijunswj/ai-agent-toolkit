@@ -179,3 +179,13 @@ The integration controller alone writes the parent, the version files and the in
 - The fence orders cooperating Toolkit writers under one GitHub account; it authenticates nobody.
 - The tool cannot see whether another host session has stopped. A takeover record must carry that evidence (session archived, remote control ended).
 - A journal is evidence, not state, until the controller's reconcile reads it.
+
+## 10. Closing finished sessions
+
+The controller principle **Close what you spawn** says when a thread or session is done; this section says how each host closes it. Close only what you started, never a scheduled task's home thread.
+
+- **Claude Projects:** resolve the work thread (the Projects skill's resolve rule adds its own checks) and end any Remote Control session it started.
+- **Claude Code in the cloud:** archive the session (`archive_session`); `list_sessions` finds the ones still open for the owner-turn re-check.
+- **Claude Code on a computer:** end the session; archive it where the app offers that, else record it retired.
+- **Codex:** archive the thread in the Codex app.
+- **Remote Control:** end the remote session once its result is relayed.

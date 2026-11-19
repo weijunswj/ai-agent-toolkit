@@ -282,8 +282,8 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Cloud first:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether work needs the owner's computer is a routing call."
+      "rule": "**Work runs where the controller runs:**",
+      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether a step needs the other side of the controller's own type is a routing call."
     },
     {
       "file": "repo/controller/principles.md",
@@ -304,6 +304,11 @@
       "file": "repo/controller/principles.md",
       "rule": "**Host-local talk:**",
       "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; what counts as an unasked mention is a wording call."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Close what you spawn:**",
+      "instruction_only": "Whether a thread or session is fully done is a judgement per session, and no host gives Toolkit a list of the sessions a controller started; the Projects hourly pass (RESOLVE DUE) is itself instruction text."
     },
     {
       "file": "repo/controller/roles-and-routes.md",
