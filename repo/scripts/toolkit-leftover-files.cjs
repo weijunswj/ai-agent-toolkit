@@ -94,19 +94,18 @@ function repositoryName(identity) {
 
 const shortHash = text => require('node:crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
 
-// The curated-source comment the current Toolkit template puts at the top of AGENTS.md, above its
-// blocks. Older wordings of it are not known here, so they stay the owner's text. This is the one
-// place that reads it, for the scan and the cleanup alike.
-function curatedHeader(templates = TEMPLATES) {
-  try { return /^<!--[\s\S]*?-->/.exec(unix(fs.readFileSync(path.join(templates, 'AGENTS.managed.template.md'), 'utf8')))?.[0] || ''; } catch { return ''; }
+// The curated-source comment Toolkit's retired managed template put at the top of AGENTS.md, above its
+// blocks, as it last shipped (playbook-history.json). Older wordings of it are not known here, so they
+// stay the owner's text. This is the one place that reads it, for the scan and the cleanup alike.
+function curatedHeader() {
+  return JSON.parse(fs.readFileSync(HISTORY, 'utf8')).agents_header;
 }
 
 // An instruction file's text, after its listed blocks were removed, without the curated header when
-// it is the first text there (blank lines before it aside), exactly as the template has it, on lines
-// of its own. The header goes with its line ending and one blank line after it; every other byte stays.
-function withoutCuratedHeader(text, templates = TEMPLATES) {
-  const header = curatedHeader(templates);
-  if (!header) return text;
+// it is the first text there (blank lines before it aside), exactly as it shipped, on lines of its own.
+// The header goes with its line ending and one blank line after it; every other byte stays.
+function withoutCuratedHeader(text) {
+  const header = curatedHeader();
   const lines = header.split('\n').map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const found = new RegExp(`^(\uFEFF?)(?:[ \\t]*\\r?\\n)*${lines.join('\\r?\\n')}(?:\\r?\\n|$)(?:[ \\t]*(?:\\r?\\n|$))?`).exec(text);
   return found ? found[1] + text.slice(found[0].length) : text;
@@ -114,10 +113,10 @@ function withoutCuratedHeader(text, templates = TEMPLATES) {
 
 // The text left in an instruction file once the given blocks and the curated header go: empty means
 // nothing of the owner's is left.
-function ownText(text, names, templates) {
+function ownText(text, names) {
   let rest = text;
   for (const name of names) rest = blocks.removeBlock(rest, name);
-  return withoutCuratedHeader(rest, templates).trim();
+  return withoutCuratedHeader(rest).trim();
 }
 
 class LeftoverScan {
@@ -172,7 +171,7 @@ class LeftoverScan {
       // whole file stays until the owner fixes the markers by hand.
       if (parsed.errors.length) { result.unproven.push({ file, reason: BROKEN }); continue; }
       const listed = parsed.blocks.filter(block => !result.governed || GOVERNED_COPY_BLOCKS.includes(block.name));
-      const empties = listed.length > 0 && !ownText(read.text, listed.map(block => block.name), this.#templates);
+      const empties = listed.length > 0 && !ownText(read.text, listed.map(block => block.name));
       for (const block of listed) {
         const edited = block.format >= 2 && block.digest !== blocks.bodyDigest(block.body);
         result.files.push({ file, kind: 'block', block: block.name, proof: 'Toolkit marker', edited, empties });

@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const TEMPLATE = path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md');
+const { managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 let scratchHome = null;
 
@@ -33,7 +33,7 @@ function makeGoverned(repo, name, { home, enable = true } = {}) {
   if (enable) require('node:child_process').execFileSync('git', ['init', '--quiet', repo], { stdio: 'ignore', windowsHide: true });
   fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
   fs.writeFileSync(path.join(repo, '.git', 'config'), `[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://github.com/${slug}.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`);
-  fs.copyFileSync(TEMPLATE, path.join(repo, 'AGENTS.md'));
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), managedAgentsCopy());
   fs.mkdirSync(path.join(repo, '.github'), { recursive: true });
   fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), `${JSON.stringify({
     schema: 'toolkit.programme-binding.v1', repository: slug, parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX',

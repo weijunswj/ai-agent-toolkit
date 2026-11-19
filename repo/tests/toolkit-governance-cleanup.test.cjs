@@ -11,9 +11,9 @@ const os = require('node:os');
 const path = require('node:path');
 const cleanup = require('../scripts/toolkit-governance-cleanup.cjs');
 
-const TEMPLATES = path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
+const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 const PLAYBOOKS = require('../scripts/toolkit-playbooks.cjs').repositoryPlaybooks();
-const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(fs.readFileSync(path.join(TEMPLATES, 'AGENTS.managed.template.md'), 'utf8'))[0];
+const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(managedAgentsCopy())[0];
 const CHECK = `#!/usr/bin/env node\n// AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED plain-text-check check=3 sha256=0123456789ab\n'use strict';\n`;
 const BINDING = '{\n  "schema": "toolkit.programme-binding.v2",\n  "repository": "example/adopter",\n  "governance": "enabled"\n}\n';
 
@@ -66,9 +66,9 @@ test('a preview lists the changes and writes nothing; the cleanup removes only t
 
 test('an AGENTS.md left with nothing of its own goes, with its one-line CLAUDE.md and the bootstrap', t => {
   const r = repo(t, {
-    'AGENTS.md': fs.readFileSync(path.join(TEMPLATES, 'AGENTS.managed.template.md'), 'utf8'),
+    'AGENTS.md': managedAgentsCopy(),
     'CLAUDE.md': '@AGENTS.md\n',
-    '.agents/rules/00-agent-toolkit-bootstrap.md': fs.readFileSync(path.join(TEMPLATES, 'antigravity-bootstrap.template.md'), 'utf8'),
+    '.agents/rules/00-agent-toolkit-bootstrap.md': antigravityBootstrapCopy(),
     '.github/toolkit-programme.json': BINDING,
   });
   const done = cleanup.run({ root: r.root, write: true, governance: r.governance });
@@ -97,10 +97,12 @@ test('a version 1 programme file and a Toolkit source checkout are refused, so a
   assert.deepEqual([refused.files, refused.refused], [1, '.github/toolkit-programme.json is not a version 2 programme file, and only version 2 can carry min_toolkit. Move it to version 2 first'], 'the bank names the refusal');
   assert.equal(read(old.root, 'AGENTS.md'), BLOCK);
   assert.equal(read(old.root, '.github/toolkit-programme.json'), v1);
+  // A source checkout is known by files every Toolkit tree keeps, not by an instruction template.
   const source = repo(t, {
     'AGENTS.md': BLOCK, '.github/toolkit-programme.json': BINDING,
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md': BLOCK,
     'repo/scripts/sync-agent-instruction-shims.cjs': '// sync\n',
+    'repo/contracts/toolkit-local-bridge/version.json': '{"version":"1.0.0"}\n',
+    '.claude-plugin/plugin.json': '{"name":"ai-agent-toolkit"}\n',
   });
   const held = cleanup.run({ root: source.root, write: true, governance: source.governance });
   assert.equal(held.ok, false);
@@ -203,10 +205,10 @@ test('a file with broken Toolkit markers is left in place and the other copies a
   assert.doesNotMatch(cli.stderr, /MANAGED_BLOCK_BROKEN|at .+\.cjs:\d+/, 'no stack trace');
 });
 
-// The template's curated-source comment sits above the governed block. Once the block goes it is
-// Toolkit's text too, so it goes with it, whether or not the owner's text follows.
+// The curated-source comment older setups wrote sits above the governed block. Once the block goes it
+// is Toolkit's text too, so it goes with it, whether or not the owner's text follows.
 test('the template header above a removed block goes with it', t => {
-  const templateText = fs.readFileSync(path.join(TEMPLATES, 'AGENTS.managed.template.md'), 'utf8');
+  const templateText = managedAgentsCopy();
   for (const [label, text, expected] of [
     ['LF', `${templateText}\n# Own rules\n`, '# Own rules\n'],
     ['CRLF', `${templateText.replace(/\n/g, '\r\n')}\r\n# Own rules\r\n`, '# Own rules\r\n'],

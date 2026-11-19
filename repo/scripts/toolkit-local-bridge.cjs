@@ -22,7 +22,7 @@ const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs')
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
-const { TOOLKIT_VERSION, compareVersions } = require('./toolkit-version.cjs');
+const { TOOLKIT_VERSION, compareVersions, isToolkitSourceCheckout } = require('./toolkit-version.cjs');
 
 const ARCHITECTURE_VERSION = 2;
 const BRIDGE_VERSION = TOOLKIT_VERSION;
@@ -44,13 +44,15 @@ const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'repository-agent-rules', 'repo-local');
+// Per host, the instruction files whose Toolkit markers make a repository Toolkit-managed. A file with
+// a template is also compared with it in a Toolkit source checkout, which builds that file from it.
 const AGENT_RULES_PREFLIGHT_FILES = {
   'codex-plugin': [
-    { target: 'AGENTS.md', template: 'AGENTS.managed.template.md' }
+    { target: 'AGENTS.md' }
   ],
   'claude-plugin': [
-    { target: 'AGENTS.md', template: 'AGENTS.managed.template.md' },
-    { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md', exact: true }
+    { target: 'AGENTS.md' },
+    { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md' }
   ]
 };
 const RECONCILIATION_ALLOWED_FLAGS = new Set([
@@ -1203,10 +1205,15 @@ function agentRulesPluginRoot(args, options = {}) {
   return runtimeCodexPluginRoot();
 }
 
-// The CLAUDE.md shim has no markers: it is exactly the import line. A file that
-// imports AGENTS.md on a line of its own is current; one still holding the old
-// marked CLAUDE.SHIM block is stale; anything else is the repository's own file.
-function compareExactAgentRuleFile(targetPath, templatePath, spec) {
+// A Toolkit source checkout's file built from its template. The CLAUDE.md shim has no markers: it is
+// exactly the import line. A file that imports AGENTS.md on a line of its own is current; one still
+// holding the old marked CLAUDE.SHIM block is stale; anything else is the repository's own file.
+function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
+  const targetPath = path.join(targetRoot, spec.target);
+  const templatePath = path.join(templateRoot, spec.template);
+  if (!fs.existsSync(templatePath)) {
+    return [{ file: spec.target, kind: 'template-missing', detail: `bundled template missing: ${slash(templatePath)}` }];
+  }
   const expected = normalizeManagedBlockText(fs.readFileSync(templatePath, 'utf8')).trim();
   if (!fs.existsSync(targetPath)) {
     return [{ file: spec.target, kind: 'missing', detail: 'required instruction file is missing' }];
@@ -1229,79 +1236,6 @@ function compareExactAgentRuleFile(targetPath, templatePath, spec) {
     if (!fenced && line.trim() === expected) return [];
   }
   return [{ file: spec.target, kind: 'unmanaged', detail: `no ${expected} import line found` }];
-}
-
-function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
-  const targetPath = path.join(targetRoot, spec.target);
-  const templatePath = path.join(templateRoot, spec.template);
-  if (!fs.existsSync(templatePath)) {
-    return [{
-      file: spec.target,
-      kind: 'template-missing',
-      detail: `bundled template missing: ${slash(templatePath)}`
-    }];
-  }
-  if (spec.exact) return compareExactAgentRuleFile(targetPath, templatePath, spec);
-  const template = parseManagedMarkerBlocks(fs.readFileSync(templatePath, 'utf8'));
-  if (template.errors.length) {
-    return template.errors.map((error) => ({
-      file: spec.target,
-      kind: 'template-broken',
-      detail: error
-    }));
-  }
-  if (!fs.existsSync(targetPath)) {
-    return [{
-      file: spec.target,
-      kind: 'missing',
-      detail: 'required instruction file is missing'
-    }];
-  }
-  if (!fs.statSync(targetPath).isFile()) {
-    return [{
-      file: spec.target,
-      kind: 'not-file',
-      detail: 'required instruction path is not a file'
-    }];
-  }
-  const target = parseManagedMarkerBlocks(fs.readFileSync(targetPath, 'utf8'));
-  if (target.errors.length) {
-    return target.errors.map((error) => ({
-      file: spec.target,
-      kind: 'broken-marker',
-      detail: error
-    }));
-  }
-  if (target.blocks.size === 0) {
-    return [{
-      file: spec.target,
-      kind: 'unmanaged',
-      detail: 'no complete AI-AGENT-TOOLKIT managed marker pair found'
-    }];
-  }
-
-  const findings = [];
-  for (const [key, templateBlock] of template.blocks) {
-    const targetBlock = target.blocks.get(key);
-    if (!targetBlock) {
-      findings.push({
-        file: spec.target,
-        kind: 'missing-block',
-        block: templateBlock.label,
-        detail: `missing managed block ${templateBlock.label}`
-      });
-      continue;
-    }
-    if (targetBlock.text !== templateBlock.text) {
-      findings.push({
-        file: spec.target,
-        kind: 'stale-block',
-        block: templateBlock.label,
-        detail: `managed block ${templateBlock.label} differs from the bundled template`
-      });
-    }
-  }
-  return findings;
 }
 
 // The governed-rules copies older setups wrote into a repository (the governed block, its older
@@ -1372,14 +1306,11 @@ function compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled =
   return findings;
 }
 
-// A Toolkit source checkout owns the canonical templates its managed blocks are
-// generated from; an installed plugin copy of them may be older.
+// A Toolkit source checkout owns the canonical templates its instruction files are built from; an
+// installed plugin copy of them may be older.
 function toolkitSourceCheckoutVersion(targetRoot) {
-  const versionFile = path.join(targetRoot, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
-  if (!fs.existsSync(path.join(targetRoot, AGENT_RULES_TEMPLATE_DIR, 'AGENTS.managed.template.md'))
-    || !fs.existsSync(path.join(targetRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'))
-    || !fs.existsSync(versionFile)) return '';
-  const version = readJsonIfExists(versionFile)?.version || '';
+  if (!isToolkitSourceCheckout(targetRoot)) return '';
+  const version = readJsonIfExists(path.join(targetRoot, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'))?.version || '';
   return isValidBridgeVersion(version) ? version : '';
 }
 
@@ -1441,10 +1372,9 @@ function runAgentRulesPreflight(args, options = {}) {
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
   // A Toolkit source checkout still builds its root CLAUDE.md from its template, so that is compared.
-  // Its root AGENTS.md is all hand-written: the installed Toolkit delivers the governed rules there
-  // too, and comparing it with the managed template would say to regenerate the block back in.
-  // Anywhere else a copy is a leftover to remove, and a missing one is the goal.
-  if (sourceVersion) for (const spec of specs) { if (spec.target !== 'AGENTS.md') findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec })); }
+  // Its root AGENTS.md is all hand-written and has no template: the installed Toolkit delivers the
+  // governed rules there too. Anywhere else a copy is a leftover to remove, and a missing one is the goal.
+  if (sourceVersion) for (const spec of specs) { if (spec.template) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec })); }
   else findings.push(...leftoverRuleCopies(targetRoot), ...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
   // A leftover note depends on governance: where it is on, removal is the owner's Clean up answer.
   const leftovers = findings.some((finding) => finding.kind === 'leftover');
@@ -1494,7 +1424,9 @@ function formatAgentRulesPreflight(result) {
   const broken = brokenFiles ? `Toolkit markers in ${brokenFiles} are broken, so Toolkit cannot tell its text from the rest and leaves the file alone; fixing them by hand is the owner's choice, and nothing is due in this task.` : '';
   const owners = [leftover, broken].filter(Boolean);
   const note = (checks) => `Toolkit note: ${[...owners, ...(checks ? [checks] : [])].join(' Also, ')} No files were changed.`;
-  if (findings.length && findings.every((finding) => OWNER_KINDS.includes(finding.kind))) return note('');
+  // A source checkout's sync rewrites its whole CLAUDE.md, broken markers included, so there they get
+  // the regenerate step below, never the owner's choice.
+  if (result.reference !== 'source-checkout' && findings.length && findings.every((finding) => OWNER_KINDS.includes(finding.kind))) return note('');
   // The check installer cannot tell a newer copy from an older one, so with a newer Toolkit on
   // record the step is to refresh Toolkit, never to rewrite the checks from the running copy.
   if (result.direction === 'newer' && checksAndLeftovers) {

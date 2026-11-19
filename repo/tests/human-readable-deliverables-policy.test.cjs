@@ -15,12 +15,10 @@ const lfRead = (relative) => rawRead(relative).replace(/^\uFEFF/, '').replace(/\
 const windowsRead = (relative) => `\uFEFF${lfRead(relative).replace(/\n/g, '\r\n')}`;
 const readers = { checkout: rawRead, lf: lfRead, windows: windowsRead };
 
-// The governed block (and its projections) carries the gate-specific half of the rule.
+// The governed rules carry the gate-specific half of the rule.
 const GOVERNED_COPIES = Object.freeze([
   'repo/contracts/agent-rules/toolkit-governed-rules.md',
-  'AGENTS.md',
-  'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
-  'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
+  'AGENTS.md'
 ]);
 const N8N_PREFIXED_DERIVATIVES = Object.freeze([
   'skills/n8n-environment-setup/references/n8n-safety-rules.md',

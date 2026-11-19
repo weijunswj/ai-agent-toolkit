@@ -15,10 +15,6 @@ const { LEVELS, CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, PROJECTS_SKILL_REL_PA
 const VERSION_FILES = [VERSION_REL_PATH, ...MANIFEST_REL_PATHS];
 const STAMP_FILES = new Set([
   'README.md',
-  'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
-  'repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md',
-  'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-  'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
   'skills/n8n-safety-router/n8n-safety-rules.md',
   'skills/n8n-environment-setup/references/n8n-safety-rules.md',
   'skills/n8n-workflow-transport/references/n8n-safety-rules.md',

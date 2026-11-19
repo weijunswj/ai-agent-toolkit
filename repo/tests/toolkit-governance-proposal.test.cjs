@@ -8,6 +8,7 @@ const { GovernanceProposals, GitHubProposalTransport, validProposal } = require(
 const governance = require('../scripts/toolkit-governance-state.cjs');
 const { recordAbsent, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
 const { seedMerged } = require('./support/governance-observations.cjs');
+const { managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 function fixture(t, transport = null) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'governance-proposal-'));
@@ -38,7 +39,7 @@ function prepareAdoption(f, { full = true, rules = false } = {}) {
   fs.mkdirSync(path.join(f.cwd, '.github'), { recursive: true });
   fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify(binding));
   if (rules) {
-    fs.copyFileSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), path.join(f.cwd, 'AGENTS.md'));
+    fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), managedAgentsCopy());
     fs.writeFileSync(path.join(f.cwd, 'CLAUDE.md'), '@AGENTS.md\n');
     fs.mkdirSync(path.join(f.cwd, 'docs/agent-playbooks'), { recursive: true });
     fs.writeFileSync(path.join(f.cwd, 'docs/agent-playbooks/INDEX.md'), '# Project playbooks\n');

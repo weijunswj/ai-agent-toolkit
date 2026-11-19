@@ -2444,12 +2444,8 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const nested = path.join(root, 'nested');
   fs.mkdirSync(nested, { recursive: true });
-  const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
   writeFile(path.join(root, 'AGENTS.md'), [
-    agentsTemplate,
+    managedAgentsTemplate(),
     '',
     'Marker examples:',
     '`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`',
@@ -2472,8 +2468,16 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
 
 const NEVER_HALTING = /STOP|stop before repository work|ask the user/i;
 
+// The files a Toolkit source checkout is known by: none of them is an instruction template.
+function writeSourceCheckoutKeys(checkout, version) {
+  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
+  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version }));
+  writeFile(path.join(checkout, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version }));
+}
+
+// The AGENTS.md an older setup wrote: the governed rules block under the curated header.
 function managedAgentsTemplate() {
-  return fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
+  return require('./support/retired-instruction-copies.cjs').managedAgentsCopy();
 }
 
 // Runs the SessionStart hook in `cwd` with a hub outside the repository, so the
@@ -2612,14 +2616,9 @@ test('SessionStart notice: a governed-rules copy is a leftover whatever Toolkit 
   // A Toolkit source checkout newer than the running copy is the same direction, even when current.
   const checkout = tmpRoot();
   fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
-  writeFile(path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), managedAgentsTemplate());
-  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
-  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '99.0.0' }));
+  writeSourceCheckoutKeys(checkout, '99.0.0');
   writeFile(path.join(checkout, 'AGENTS.md'), managedAgentsTemplate());
-  const pluginRoot = tmpRoot();
-  writeFile(path.join(pluginRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    managedAgentsTemplate().replace('Finish fast', 'Finish in an older wording'));
-  const source = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: checkout, pluginRoot });
+  const source = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: checkout, pluginRoot: tmpRoot() });
   assert.equal(source.reference, 'source-checkout');
   assert.deepEqual(source.findings, []);
   assert.equal(source.direction, 'newer');
@@ -2651,11 +2650,8 @@ test('SessionStart notice: a Toolkit source checkout whose root AGENTS.md has no
   // which would put the block back.
   const checkout = tmpRoot();
   fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
-  const templates = path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local');
-  writeFile(path.join(templates, 'AGENTS.managed.template.md'), managedAgentsTemplate());
-  writeFile(path.join(templates, 'CLAUDE.shim.template.md'), '@AGENTS.md\n');
-  writeFile(path.join(checkout, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs'), '// marker\n');
-  writeFile(path.join(checkout, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), JSON.stringify({ version: '3.0.0' }));
+  writeFile(path.join(checkout, 'skills', 'repository-agent-rules', 'repo-local', 'CLAUDE.shim.template.md'), '@AGENTS.md\n');
+  writeSourceCheckoutKeys(checkout, '3.0.0');
   writeFile(path.join(checkout, 'AGENTS.md'), '# AI Agent Toolkit Repo Rules\n\n## This Repository\n\nOwn rules.\n');
   writeFile(path.join(checkout, 'CLAUDE.md'), '@AGENTS.md\n');
   const before = snapshotTree(checkout);
@@ -2675,6 +2671,12 @@ test('SessionStart notice: a Toolkit source checkout whose root AGENTS.md has no
   assert.equal(drift.direction, 'drift');
   assert.deepEqual([...new Set(drift.findings.map((finding) => finding.file))], ['CLAUDE.md']);
   assert.match(formatAgentRulesPreflight(drift), /^Toolkit note: this Toolkit checkout's managed instruction blocks \(CLAUDE\.md\) differ from its own templates; next step: regenerate them/);
+  // Broken markers in it are regenerated too: the sync writes the whole file, so fixing it is no
+  // owner's choice there.
+  writeFile(path.join(checkout, 'CLAUDE.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v2 toolkit=3.0.0 sha256=000000000000 -->\n@AGENTS.md\n');
+  const broken = runAgentRulesPreflight({ hook: true, syncSource: 'claude-plugin' }, { targetRoot: checkout, pluginRoot: repoRoot, runningVersion: '3.0.0', ...managedBy[0][1] });
+  assert.deepEqual([broken.direction, [...new Set(broken.findings.map((finding) => finding.kind))]], ['drift', ['broken-marker']]);
+  assert.match(formatAgentRulesPreflight(broken), /^Toolkit note: this Toolkit checkout's managed instruction blocks \(CLAUDE\.md\) differ from its own templates; next step: regenerate them with node repo\/scripts\/sync-agent-instruction-shims\.cjs --write before this task ends\. No files were changed\.$/);
   writeFile(path.join(checkout, 'CLAUDE.md'), '@AGENTS.md\n');
   assert.deepEqual(snapshotTree(checkout), before, 'read-only');
 });
