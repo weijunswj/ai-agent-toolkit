@@ -3,6 +3,14 @@
   "description": "Every test in repo/tests that skips or stays todo on a CI system, with the systems it skips on and why. The Validate check fails on a skip this list does not hold and on a listed skip that no longer skips. A test name must match the name the test runner reports exactly.",
   "skips": [
     {
+      "file": "repo/tests/agent-instruction-shims.test.cjs",
+      "test": "the sync check refuses a linked rule folder or rule file without following it",
+      "systems": [
+        "windows"
+      ],
+      "reason": "POSIX-only behaviour (symlinks, executable bits or a Linux-only step); the test runs on the Linux leg"
+    },
+    {
       "file": "repo/tests/bare-name-spawn.test.cjs",
       "test": "a git.exe planted in the working folder does not run; the PATH copy does",
       "systems": [

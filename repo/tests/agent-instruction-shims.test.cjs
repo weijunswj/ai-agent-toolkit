@@ -121,7 +121,7 @@ test('the sync check refuses a Toolkit block or the Antigravity bootstrap brough
   fs.writeFileSync(path.join(dir, '.agents/rules/00-agent-toolkit-bootstrap.md'), readText(`${repoLocalSourceRoot}/antigravity-bootstrap.template.md`));
   const bootstrap = sync();
   assert.equal(bootstrap.status, 1);
-  assert.match(bootstrap.stderr, /FAIL: \.agents\/rules\/00-agent-toolkit-bootstrap\.md is retired: Antigravity reads AGENTS\.md itself, so remove it\./);
+  assert.match(bootstrap.stderr, /FAIL: \.agents\/rules\/00-agent-toolkit-bootstrap\.md is not allowed: Antigravity reads AGENTS\.md itself/);
   fs.rmSync(path.join(dir, '.agents'), { recursive: true });
   // --write leaves the hand-written root as it is.
   assert.equal(sync('--write').status, 0);
@@ -422,4 +422,48 @@ test('every approval surface carries the evidence-store exception and none still
   }
   for (const text of [governed, playbook]) assert.doesNotMatch(text, /within owner authority that names the repository|exact owner authority/);
   assert.doesNotMatch(skill, /Transport-store uploads[^\n]*when the user grants standing approval/);
+});
+
+// Toolkit's own checkout keeps no rule file under .agents/rules/, not only the retired
+// bootstrap name, and a case variant (which a case-insensitive checkout reads as the same folder)
+// is refused too. A file elsewhere under .agents/ is left alone.
+test('the sync check refuses any file under .agents/rules/, in any letter case, and --write never adds or removes one', t => {
+  const { dir, sync } = syncWorkspace(t);
+  for (const rel of ['.agents/rules/team-rules.md', '.agents/rules/nested/deep.md', '.agents/rules/notes.txt', '.Agents/Rules/x.md']) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), '# Rules\n');
+    for (const args of [[], ['--write']]) {
+      const result = sync(...args);
+      assert.equal(result.status, 1, `${rel} ${args}`);
+      assert.match(result.stderr, new RegExp(`FAIL: ${rel.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')} `), `${rel} ${args}`);
+      assert.equal(fs.readFileSync(path.join(dir, rel), 'utf8'), '# Rules\n', `${rel} ${args}: never rewritten`);
+    }
+    fs.rmSync(path.join(dir, rel.split('/')[0]), { recursive: true });
+  }
+  fs.mkdirSync(path.join(dir, '.agents/plugins'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.agents/plugins/marketplace.json'), '{}\n');
+  const other = sync();
+  assert.equal(other.status, 0, other.stderr);
+});
+
+// A linked rule folder or rule file is reported by its own path and never followed, so a link that
+// points outside the workspace cannot hide a rule copy or leak the target's file names.
+test('the sync check refuses a linked rule folder or rule file without following it', { skip: process.platform === 'win32' && 'symlinks need extra rights on Windows' }, t => {
+  const { dir, sync } = syncWorkspace(t);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-rules-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, 'hidden.md'), '# Rules\n');
+  fs.mkdirSync(path.join(dir, '.agents'));
+  fs.symlinkSync(outside, path.join(dir, '.agents/rules'), 'dir');
+  const folder = sync();
+  assert.equal(folder.status, 1, folder.stderr);
+  assert.match(folder.stderr, /FAIL: \.agents\/rules is not allowed/);
+  assert.doesNotMatch(folder.stderr, /hidden\.md/);
+  fs.rmSync(path.join(dir, '.agents/rules'));
+  fs.mkdirSync(path.join(dir, '.agents/rules'));
+  fs.symlinkSync(path.join(outside, 'hidden.md'), path.join(dir, '.agents/rules/linked.md'));
+  const file = sync('--write');
+  assert.equal(file.status, 1, file.stderr);
+  assert.match(file.stderr, /FAIL: \.agents\/rules\/linked\.md is not allowed/);
+  assert.equal(fs.readFileSync(path.join(outside, 'hidden.md'), 'utf8'), '# Rules\n');
 });

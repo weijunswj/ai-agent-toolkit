@@ -15,7 +15,7 @@
 // rules are not projected here: setup installs them into each harness's user-level file. Neither are
 // the governed rules into this repository's root: the installed Toolkit delivers them at session
 // start here too, so root AGENTS.md is all hand-written. The check refuses a Toolkit block in it, or
-// the retired Antigravity bootstrap, so a stale branch cannot bring either back.
+// any file under Antigravity's .agents/rules/ folder, so a stale branch cannot bring a copy back.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -56,7 +56,9 @@ const SHIMS = Object.freeze([
 ]);
 // Root files that must stay free of Toolkit copies. Antigravity reads AGENTS.md itself.
 const ROOT_AGENTS = 'AGENTS.md';
-const RETIRED_BOOTSTRAP = '.agents/rules/00-agent-toolkit-bootstrap.md';
+// Antigravity's workspace rule folder: this repository keeps nothing there. Matched in any letter
+// case, since a case-insensitive checkout reads .Agents/Rules as the same folder.
+const RULES_FOLDER = Object.freeze(['.agents', 'rules']);
 // The CLAUDE.md shim is recognised by exact content, so it carries no markers. Claude Code reads
 // the import natively; Antigravity reads AGENTS.md itself, so no GEMINI.md shim exists.
 const CLAUDE_SHIM = Object.freeze({ file: 'CLAUDE.shim.template.md', target: 'CLAUDE.md', text: '@AGENTS.md\n' });
@@ -87,6 +89,22 @@ function isAbsolutePathLike(value) {
 function isInsideRoot(realPath) {
   const relative = path.relative(rootReal, realPath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+// Every file or link under the rule folder, in any letter case, as workspace-relative paths. Links
+// are reported, never followed.
+function ruleFolderEntries() {
+  const found = [];
+  const walk = (abs, rel, depth) => {
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (depth < RULES_FOLDER.length && entry.name.toLowerCase() !== RULES_FOLDER[depth]) continue;
+      if (entry.isDirectory()) walk(path.join(abs, entry.name), childRel, depth + 1);
+      else if (depth >= RULES_FOLDER.length || entry.isSymbolicLink()) found.push(childRel);
+    }
+  };
+  walk(root, '', 0);
+  return found.sort();
 }
 
 function safeWorkspacePath(relPath, label, options = {}) {
@@ -228,8 +246,8 @@ class InstructionProjectionOperation {
     if (blocks.length || errors.length) {
       this.#errors.push(`Root ${ROOT_AGENTS} carries a Toolkit managed block; the installed Toolkit delivers the governed rules, so remove it by hand.`);
     }
-    if (fs.existsSync(safeWorkspacePath(RETIRED_BOOTSTRAP, 'retired Antigravity bootstrap', { allowMissing: true }))) {
-      this.#errors.push(`${RETIRED_BOOTSTRAP} is retired: Antigravity reads ${ROOT_AGENTS} itself, so remove it.`);
+    for (const rel of ruleFolderEntries()) {
+      this.#errors.push(`${rel} is not allowed: Antigravity reads ${ROOT_AGENTS} itself, so this repository keeps no rule files under ${RULES_FOLDER.join('/')}/; remove it.`);
     }
   }
 
