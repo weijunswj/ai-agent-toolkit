@@ -399,6 +399,37 @@ test('session start refreshes a stale Toolkit helper definition and reports it',
   assert.match(report, /- Result: `passed`/);
 });
 
+// Session start keeps Toolkit's copies in Antigravity current once the owner chose them in setup, even
+// while the bridge holds its own update lock; with no copies chosen it writes nothing there.
+test('session start refreshes Toolkit\'s Antigravity copies only when the owner chose them', (t) => {
+  const { AntigravityGlobalSkills } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  const setUp = () => {
+    const root = tmpRoot(t);
+    installToolkit(root, repoRoot);
+    const hub = path.join(root, '.ai-agent-toolkit', 'current');
+    writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
+    return { root, hub };
+  };
+  const unchosen = setUp();
+  let result = hook(unchosen.root, unchosen.hub, repoRoot);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(path.join(unchosen.root, '.gemini')), false, 'not chosen: nothing created');
+
+  const { root, hub } = setUp();
+  fs.mkdirSync(path.join(root, '.gemini'));
+  const owner = new AntigravityGlobalSkills({ toolkitRoot: repoRoot, homeDir: root });
+  owner.install();
+  const [first] = owner.recorded();
+  const copy = path.join(first.target, first.skill, 'SKILL.md');
+  fs.appendFileSync(copy, '\nolder copy\n');
+  result = hook(root, hub, repoRoot);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(repoRoot, 'skills', first.skill, 'SKILL.md'), 'utf8'));
+  const report = reports().find((text) => /- Antigravity skills: refreshed/.test(text));
+  assert.ok(report, 'the update report records the refresh');
+  assert.match(report, /Start a new Antigravity session to load the changed skills\./);
+});
+
 test('session start reports a newer recorded repo version as action required', (t) => {
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);

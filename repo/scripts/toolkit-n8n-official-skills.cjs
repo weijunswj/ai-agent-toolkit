@@ -22,20 +22,28 @@ const HOST_TARGETS = Object.freeze({
 const ANTIGRAVITY_TARGET = ['.gemini', 'config', 'skills'];
 // Antigravity's IDE also reads this older global folder; Toolkit never writes there.
 const ANTIGRAVITY_OLDER = ['.gemini', 'antigravity', 'skills'];
+const ANTIGRAVITY_ONLY = Symbol('antigravity-only');
 
 class OfficialN8nSkills extends ManagedSkillCopies {
   #homeDir;
 
   constructor({ toolkitRoot, host, homeDir = os.homedir(), controlRoot, antigravity = false } = {}) {
-    if (!Object.hasOwn(HOST_TARGETS, host)) throw new Error(`Unsupported host for the n8n skills copy: ${host}`);
+    if (host !== ANTIGRAVITY_ONLY && !Object.hasOwn(HOST_TARGETS, host)) throw new Error(`Unsupported host for the n8n skills copy: ${host}`);
     super({
       sourceRoot: path.join(toolkitRoot, SOURCE_REL),
       ledgerPath: path.join(controlRoot || path.join(homeDir, '.ai-agent-toolkit'), 'n8n-official-skills.json'),
       ledgerSchema: LEDGER_SCHEMA,
       // This app's skills folder, plus Antigravity's when the user keeps Toolkit's skills there.
-      targets: () => [path.join(homeDir, ...HOST_TARGETS[host]), ...(antigravity ? [path.join(homeDir, ...ANTIGRAVITY_TARGET)] : [])],
+      targets: () => [...(host === ANTIGRAVITY_ONLY ? [] : [path.join(homeDir, ...HOST_TARGETS[host])]), ...(antigravity ? [path.join(homeDir, ...ANTIGRAVITY_TARGET)] : [])],
     });
     this.#homeDir = homeDir;
+  }
+
+  // Toolkit's n8n copies in Antigravity's skills folder alone, which session start keeps current once the
+  // user keeps Toolkit's skills there. The copies in the apps' own folders stay setup's; their ledger
+  // entries are read and saved back unchanged.
+  static antigravityOnly({ toolkitRoot, homeDir = os.homedir(), controlRoot } = {}) {
+    return new OfficialN8nSkills({ toolkitRoot, host: ANTIGRAVITY_ONLY, homeDir, controlRoot, antigravity: true });
   }
 
   // Antigravity's skills folder, for removing Toolkit's n8n copies there when the user turns it off.
