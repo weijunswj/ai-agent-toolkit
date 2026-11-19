@@ -169,7 +169,9 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
   assert.doesNotMatch(done.out, /Parallel CI shards/, 'a row left out says nothing');
   noBank(done.out);
   agentsLast(done.out);
-  assert.equal(tickets(ctx).issue(SESSION, epochOf(ctx)), null, 'a used answer leaves nothing open');
+  // A used answer keeps the bank open for the owner's next own message (owner test of 19 Nov), with a
+  // new one-use ticket; the spent one stays spent.
+  assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx))?.bank_reference, reference, 'a used answer leaves the same bank open for the next own message');
   const forged = await run(ctx, ['setup', '--answers', `${reference}: all recommended`, '--ticket', 'f'.repeat(32)]);
   assert.equal(forged.code, 2);
   assert.match(forged.err, /^No live reply ticket from the owner.*The owner can type toolkit governance to see the bank again\./m);
@@ -309,4 +311,39 @@ test('commands name the managed Toolkit checkout when this computer records one,
   const command = scriptPath => `node "${scriptPath}" setup --answers "ABCD-EFGH-JKMN-PQRS: all recommended" --ticket ${'a'.repeat(32)}`;
   for (const scriptPath of [own, managed]) assert.equal(bankTicketCommand(command(scriptPath), SESSION, live), true, scriptPath);
   assert.equal(bankTicketCommand(command(path.join(home, 'elsewhere', 'toolkit-governance.cjs')), SESSION, live), false, 'any other copy is refused');
+});
+
+// Owner test of 19 Nov: after 1.4=A, "explain 1.4" was refused for want of a ticket, and 1.9=A
+// named a spent ticket next to the missing row. Explain is read-only and needs no ticket, before or
+// after an answer; the bank stays open for the owner's next own message after an answer, so an
+// unknown row then gets only its own line; an answer still needs the one-use ticket.
+test('explain needs no ticket before or after an answer, and an unknown row after an answer says only that', async t => {
+  const ctx = fixture(t);
+  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
+  const shown = tickets(ctx).pendingFor(SESSION, epochOf(ctx));
+  const owed = out => out.trim().split(/\n\s*\n/).slice(0, -1).join('\n\n');
+  const explain = async (answer, line) => {
+    const result = await run(ctx, ['setup', '--answers', answer]);
+    assert.equal(result.code, 0, `${answer}: ${result.err}`);
+    assert.match(result.out, line, answer);
+    assert.doesNotMatch(owed(result.out), /ticket|used|spent|Reply again/i, `${answer}: no ticket line`);
+    noBank(result.out);
+    agentsLast(result.out);
+  };
+  await explain(`${reference}: explain 1.4`, /^### 1\.4 Parallel CI shards$/m);
+  assert.deepEqual(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), shown, 'an explain leaves the shown bank as it was');
+  const done = await reply(ctx, reference, KEEP);
+  assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m);
+  await explain(`${reference}: explain 1.4`, /^### 1\.4 Parallel CI shards$/m);
+  await explain('explain 1.2', /^### 1\.2 /m);
+  await explain(`${reference}: explain 1.9`, /^This bank has no row 1\.9\.$/m);
+  const unknown = await reply(ctx, reference, '1.9=A');
+  assert.equal(unknown.code, 0, unknown.err);
+  assert.match(unknown.out, /^This bank has no row 1\.9\. Nothing was written\.$/m);
+  assert.doesNotMatch(owed(unknown.out), /ticket|used|spent/i, 'an unknown row names no ticket');
+  noBank(unknown.out);
+  // Anything but an explain still needs the owner's live ticket, and writes nothing without it.
+  const bare = await run(ctx, ['setup', '--answers', `${reference}: 1.4=A`]);
+  assert.equal(bare.code, 2);
+  assert.doesNotMatch(bare.out, /Nothing changed|### /);
 });

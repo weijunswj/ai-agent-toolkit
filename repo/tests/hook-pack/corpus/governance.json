@@ -1618,6 +1618,26 @@
       "expect": {"decision":"deny"},
       "status": "pass",
       "note": "The ticket is live, so only the curly quote refuses it. Codex runs the same tool gate inside its helper hook, so the refusing hook differs by host. The other forged forms are covered by the bank's unit tests."
+    },
+    {
+      "id": "BANK.explain-no-ticket-bash",
+      "source": "owner test of 19 Nov: after an answer, explain 1.4 was refused for want of a ticket; explain only reads",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{plugin}/repo/scripts/toolkit-governance.cjs\" setup --answers \"ABCD-EFGH-JKMN-PQRS: explain 1.4\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "No bank ticket exists here, so only the exact explain form lets it through."
+    },
+    {
+      "id": "BANK.answer-no-ticket-bash",
+      "source": "owner test of 19 Nov: explain needs no ticket, but every other bank reply still does",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{plugin}/repo/scripts/toolkit-governance.cjs\" setup --answers \"ABCD-EFGH-JKMN-PQRS: 1.4=A\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass",
+      "note": "The explain row's command with an answer in place of the explain. Codex runs the same tool gate inside its helper hook, so the refusing hook differs by host."
     }
   ]
 }
