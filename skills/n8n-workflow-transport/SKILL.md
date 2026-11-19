@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-transport
-description: Prepare n8n workflow files safely offline: remove secrets and IDs, validate, compare, and get them ready for manual import or export. Apply n8n-safety-router first. It never changes a live n8n instance.
+description: "Prepare n8n workflow files safely offline: remove secrets and IDs, validate, compare, and get them ready for manual import or export. Apply n8n-safety-router first. It never changes a live n8n instance."
 ---
 
 # n8n Workflow Transport
