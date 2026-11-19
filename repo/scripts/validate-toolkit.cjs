@@ -240,9 +240,12 @@ function validateSkills(errors) {
 // strict YAML parser that refuses a file other hosts accept, such as a plain description holding ": ".
 // Toolkit carries no YAML library, so these files are held to a small subset that every strict YAML 1.1
 // or 1.2 parser accepts: `key: value` lines nested by spaces, `- value` list items, blank lines and
-// whole-line comments. A value is a double-quoted string with valid escapes, a single-quoted string
-// with '' for a quote, or a plain value that cannot be read as YAML syntax.
-const STRICT_YAML_DOUBLE = /^"(?:[^"\\]|\\(?:[0abtnvfre "\\\t N_LP]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U(?:00(?:0[0-9A-Fa-f]|10)[0-9A-Fa-f]{4})))*"$/;
+// whole-line comments, holding only characters YAML prints (no tab, control character or YAML 1.1
+// line break such as NEL). A value is a double-quoted string with valid escapes (a \u escape names a
+// whole character, never half of a surrogate pair), a single-quoted string with '' for a quote, or a
+// plain value that cannot be read as YAML syntax.
+const STRICT_YAML_CHARACTER = /[^\x20-\x7e\xa0-\u2027\u202a-\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/u;
+const STRICT_YAML_DOUBLE = /^"(?:[^"\\]|\\(?:[0abtnvfre "\\\t N_LP]|x[0-9A-Fa-f]{2}|u(?![Dd][89A-Fa-f])[0-9A-Fa-f]{4}|U(?:0000(?![Dd][89A-Fa-f])[0-9A-Fa-f]{4}|000[1-9A-Fa-f][0-9A-Fa-f]{4}|0010[0-9A-Fa-f]{4})))*"$/;
 const STRICT_YAML_SINGLE = /^'(?:[^']|'')*'$/;
 const STRICT_YAML_INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
 const STRICT_YAML_QUOTE_HINT = 'quote the value with double quotes';
@@ -251,9 +254,10 @@ function strictYamlValueProblem(value) {
   if (value.startsWith('"')) return STRICT_YAML_DOUBLE.test(value) ? null : 'is not one double-quoted string with valid escapes and nothing after it';
   if (value.startsWith("'")) return STRICT_YAML_SINGLE.test(value) ? null : "is not one single-quoted string with '' for each quote and nothing after it";
   if (STRICT_YAML_INDICATOR.test(value)) return `starts with the YAML character ${value[0]}; ${STRICT_YAML_QUOTE_HINT}`;
+  if (value === '=' || value === '<<') return `is "${value}", which YAML 1.1 reads as a special tag; ${STRICT_YAML_QUOTE_HINT}`;
   if (value.includes(': ')) return `holds ": ", which strict YAML reads as a nested key; ${STRICT_YAML_QUOTE_HINT}`;
   if (value.endsWith(':')) return `ends with ":", which strict YAML reads as a nested key; ${STRICT_YAML_QUOTE_HINT}`;
-  if (/[ \t]#/.test(value)) return `holds " #", which YAML reads as the start of a comment; ${STRICT_YAML_QUOTE_HINT}`;
+  if (value.includes(' #')) return `holds " #", which YAML reads as the start of a comment; ${STRICT_YAML_QUOTE_HINT}`;
   return null;
 }
 
@@ -265,12 +269,18 @@ function strictYamlFindings(text, firstLine = 1) {
   text.split('\n').forEach((raw, index) => {
     const line = firstLine + index;
     const finding = (reason) => findings.push(`line ${line}: ${reason}`);
-    if (/^[ \t]*(?:#.*)?$/.test(raw)) return;
     // A line that cannot be placed ends any open block, so one mistake gives one finding.
     const unplaced = (reason) => { open = null; return finding(reason); };
-    if (/^ *\t/.test(raw)) return unplaced('indents with a tab; YAML indents with spaces only');
+    const character = STRICT_YAML_CHARACTER.exec(raw)?.[0];
+    if (character) {
+      const code = `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+      return unplaced(character === '\t'
+        ? `holds a tab (${code}), which strict YAML refuses in indentation and reads as a separator after ":" or "-"; use spaces, or write \\t inside double quotes`
+        : `holds the character ${code}, which strict YAML refuses or reads as a line break; delete it, or write it as an escape inside double quotes`);
+    }
+    if (/^ *(?:#.*)?$/.test(raw)) return;
     const indent = raw.length - raw.trimStart().length;
-    const body = raw.slice(indent).replace(/[ \t]+$/, '');
+    const body = raw.slice(indent).replace(/ +$/, '');
     const item = /^-(?:[ ]+(.*))?$/.exec(body);
     const entry = item ? null : /^([A-Za-z0-9_][A-Za-z0-9_-]*):(?:[ ]+(.*))?$/.exec(body);
     if (!item && !entry) return unplaced('is not a `key: value` line or a `- value` list item');
@@ -304,10 +314,10 @@ function strictYamlFindings(text, firstLine = 1) {
   return findings;
 }
 
-// The frontmatter of a Markdown file as { text, firstLine }, or null when it has none: the lines
-// between an opening `---` first line and the next line that is exactly `---`.
+// The frontmatter of a Markdown file read by readText (no BOM, LF line ends) as { text, firstLine }, or
+// null when it has none: the lines between an opening `---` first line and the next line that is exactly `---`.
 function frontMatterBlock(text) {
-  const lines = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n');
+  const lines = text.split('\n');
   if (lines[0] !== '---') return null;
   const end = lines.indexOf('---', 1);
   return end === -1 ? null : { text: lines.slice(1, end).join('\n'), firstLine: 2 };
