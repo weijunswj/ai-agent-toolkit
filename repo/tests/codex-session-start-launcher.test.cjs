@@ -66,6 +66,7 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/toolkit-staging-generations.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
     'repo/scripts/toolkit-skill-copies.cjs',
+    'repo/scripts/toolkit-n8n-official-skills.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
     'repo/scripts/toolkit-claude-account-copy.cjs',

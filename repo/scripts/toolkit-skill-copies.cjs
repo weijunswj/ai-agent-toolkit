@@ -104,6 +104,16 @@ class ManagedSkillCopies {
     return rows;
   }
 
+  // How many folders a copy run would change in this owner's folders: Toolkit's copies that are out of
+  // date, skills Toolkit added since, and Toolkit's copies of skills the source no longer has (a copy run
+  // removes those). Hand copies never count.
+  outOfDate() {
+    const targets = new Set(this.targets());
+    const names = new Set(this.skillNames());
+    const retired = this.recorded().filter((row) => targets.has(row.target) && !names.has(row.skill)).length;
+    return retired + this.inspect().filter((row) => row.state === 'stale' || row.state === 'missing').length;
+  }
+
   // Copies missing and stale Toolkit-owned folders and removes Toolkit's copies of skills that are no
   // longer in the source; hand copies stay as they are.
   install() {

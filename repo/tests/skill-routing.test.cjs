@@ -546,7 +546,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\| Codex \| `<repo>\\\.agents\\skills\\<skill-name>\\`<br>`%USERPROFILE%\\\.agents\\skills\\<skill-name>\\` \| `AGENTS\.md` \|/);
   assert.match(howToUse, /\| Claude Code \| `<repo>\\\.claude\\skills\\<skill-name>\\`<br>`%USERPROFILE%\\\.claude\\skills\\<skill-name>\\` \| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
   assert.match(howToUse, /\| OpenCode \| `<repo>\\\.opencode\\skills\\<skill-name>\\`[^\n]*\| `AGENTS\.md` \|/);
-  assert.match(howToUse, /\| Antigravity 2 \| `<workspace>\\\.agents\\skills\\<skill-name>\\` \(portable copy only; no native plugin\) \| `AGENTS\.md`, Antigravity 2 bootstrap \|/);
+  assert.match(howToUse, /\| Antigravity 2 \| `<workspace>\\\.agents\\skills\\<skill-name>\\` \(portable copy only; no native plugin\) \| `AGENTS\.md` \|/);
+  assert.doesNotMatch(howToUse, /bootstrap file into|Antigravity 2 bootstrap|00-agent-toolkit-bootstrap/, 'no install route puts an Antigravity bootstrap into a repository');
   assert.match(howToUse, /\*\*Choose any one supported Codex skill-folder location:\*\*/);
   assert.match(howToUse, /\*\*Choose any one supported Claude Code skill-folder location:\*\*/);
   assert.match(howToUse, /\*\*Choose any one supported OpenCode skill-folder location:\*\*/);

@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: 8GYE-0NG5-HMTD-7FT6
+Bank reference: Y81E-SJE1-QBEJ-YJX5
 
 Quick index
 
@@ -235,7 +235,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ### 3.2 Copy Toolkit's skills into Antigravity?
 
-**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills), where each session start and each setup keep them current. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 
 **Current:** Toolkit's skills are not in Antigravity's global skills folder.
 
@@ -285,7 +285,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: 2G6A-JP8H-080J-7J8N
+Bank reference: 3XHN-RKB0-S16G-38YD
 
 Quick index
 
@@ -565,7 +565,7 @@ Quick index
 
 ### 3.6 Copy Toolkit's skills into Antigravity?
 
-**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills), where each session start and each setup keep them current. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 
 **Current:** Toolkit's skills are not in Antigravity's global skills folder.
 

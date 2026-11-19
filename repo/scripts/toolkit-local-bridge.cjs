@@ -17,7 +17,7 @@ const {
   markOwnedStaging,
   reconcileOwnedStaging
 } = require('./toolkit-staging-generations.cjs');
-const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
+const { AntigravitySessionRefresh, copyPortableSkills, refreshLock, sessionRefreshCheck } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
@@ -1534,6 +1534,19 @@ function codexGlobalRulesReportEntry(result) {
   return { status: 'passed', checks: [{ id: 'global-rules', label: 'Global rules', status: 'passed', summary, updated: true, run: result.run_id || '' }], actions: [] };
 }
 
+// The Codex session-start report entry: the global rules entry plus, once the user keeps Toolkit's skills
+// in Antigravity, their refresh from the managed checkout (Claude Code runs it in its install check).
+// Null when neither has anything to report.
+function codexSessionStartEntry(globalRules, hubPath) {
+  const rules = codexGlobalRulesReportEntry(globalRules);
+  const checkout = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))).repo_path;
+  const antigravity = sessionRefreshCheck(new AntigravitySessionRefresh({ checkout, lock: refreshLock(() => ({ acquireLock, releaseLock })) }).run());
+  if (!antigravity) return rules;
+  const checks = [...(rules?.checks || []), antigravity];
+  return { status: checks.some((entry) => entry.status === 'action-required') ? 'action-required' : 'passed', checks,
+    actions: [...(rules?.actions || []), ...(antigravity.action ? [antigravity.action] : [])] };
+}
+
 function isLegacyDelegatedRepoSync(args) {
   return Boolean(
     args.skipRepoAutoUpdate &&
@@ -3009,7 +3022,7 @@ function nativePluginCacheStatus(args, state) {
 // Claude Code runs Toolkit in place from the managed checkout, so the check runs in a fresh
 // process: after an update it uses the updated code and stack registry on disk.
 function sessionStartInstallCheck(args, hubPath, codexGlobalRules = null) {
-  if (args.hook && args.syncSource === 'codex-plugin') return codexGlobalRulesReportEntry(codexGlobalRules);
+  if (args.hook && args.syncSource === 'codex-plugin') return codexSessionStartEntry(codexGlobalRules, hubPath);
   if (!args.hook || args.syncSource !== 'claude-plugin') return null;
   const root = runtimeClaudePluginRoot();
   const result = runCommand(process.execPath, [path.join(root, 'repo', 'scripts', 'toolkit-install-health.cjs'), '--session-start', '--hub', hubPath], {
