@@ -7,6 +7,7 @@ const tasks = require('../scripts/toolkit-tasks.cjs');
 const windows = require('../scripts/toolkit-windows-tasks.cjs');
 const removal = require('../scripts/toolkit-remove.cjs');
 const s = require('./support/legacy-task-world.cjs');
+const { parseFrontMatter } = require('../scripts/validate-toolkit.cjs');
 
 // One repository's old footer cleaner, as an earlier release's task apply left it on the fake scheduler.
 function enrol(t, world, name) {
@@ -569,7 +570,8 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   // A Codex session whose plugin cache moved on could not read this skill, saw only its listing, and
   // answered `remove toolkit` with Codex's own plugin uninstall tool, leaving everything else behind.
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
-  const description = skill.split('\n').find(line => line.startsWith('description: ')).slice('description: '.length);
+  // The description as hosts show it, without its YAML quotes.
+  const description = parseFrontMatter(skill).description;
   assert.ok(description.length <= 1024, `description ${description.length} characters`);
   // Codex desktop lists each skill with only about the first 200 characters of its description, so the
   // remove route has to sit inside them (a 13 November Codex session showed this skill cut at 203).
