@@ -907,3 +907,31 @@ test('a replaced last section ends at the next managed block, keeping the trace 
   const { body } = state.upsertStateBlock(page, state.renderBlock('graph', '3.9.1'), { replace_section: 'Programme index' });
   assert.equal(body, `# Title\n\n${state.renderBlock('graph', '3.9.1')}\n\n${trace}\n\n[i1]: https://example.com/\n`);
 });
+
+// The lane-wait stamp (private.lane_wait): when the task's lane wait was written and the tracked PR
+// head then, so the sweep can see a queued task's PR move with no gate recorded (QUEUED_BUT_MOVING).
+test('every child write stamps a lane wait with its write time and the PR head then; a patch cannot set it', () => {
+  const WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  const at = '2026-11-19T03:00:00.000Z';
+  const later = '2026-11-19T04:00:00.000Z';
+  const base = state.claimDocument(child(), writer, {});
+  const doc = (blockers, head = null, previous = null) => ({ ...base, blockers, pr: { ...base.pr, ...(head ? { number: 900, state: 'OPEN', head } : {}) },
+    private: { ...(previous?.private || {}) } });
+  assert.deepEqual(state.stampChild(doc([]), doc([WAIT]), at).private.lane_wait, { at, head: null }, 'added with no PR');
+  const stamped = state.stampChild(doc([]), doc([WAIT], SHA_A), at);
+  assert.deepEqual(stamped.private.lane_wait, { at, head: SHA_A }, 'added with a PR');
+  assert.deepEqual(state.stampChild(stamped, doc([WAIT, 'waits for PR 1098'], SHA_B, stamped), later).private.lane_wait, { at, head: SHA_A },
+    'a later write that keeps the wait keeps its stamp, whatever else moves');
+  assert.deepEqual(state.stampChild(stamped, doc([`${WAIT}; behind #1322`], SHA_B, stamped), later).private.lane_wait, { at: later, head: SHA_B }, 'a changed wait is a new wait');
+  assert.deepEqual(state.stampChild(doc([WAIT], SHA_A), doc([WAIT], SHA_B), later).private.lane_wait, { at: later, head: SHA_A },
+    'a wait written before stamps existed takes the stored head, so a move made by the same write still counts');
+  assert.equal('lane_wait' in state.stampChild(stamped, doc(['waits for PR 1098'], SHA_A, stamped), later).private, false, 'removed with the last wait');
+  const parentDoc = heldParent();
+  const forged = { private: { lane_wait: { at: later, head: SHA_B } } };
+  assert.deepEqual(state.stampChild(stamped, state.applyPatch('child', stamped, forged, { writer, parentDoc }), later).private.lane_wait, { at, head: SHA_A }, 'a patch cannot move it');
+  assert.equal('lane_wait' in state.stampChild(doc([]), state.applyPatch('child', doc([]), forged, { writer, parentDoc }), later).private, false, 'nor set it with no wait');
+  for (const valid of [stamped, doc([WAIT]), state.stampChild(doc([]), doc([WAIT]), at)]) assert.deepEqual(state.validateChild(valid), [], 'valid with and without the stamp');
+  for (const bad of [{ at, head: 'abc' }, { at: '', head: null }, { at, head: null, extra: 1 }, 'x']) {
+    assert.ok(state.validateChild({ ...stamped, private: { lane_wait: bad } }).some(error => error.includes('private.lane_wait')), JSON.stringify(bad));
+  }
+});

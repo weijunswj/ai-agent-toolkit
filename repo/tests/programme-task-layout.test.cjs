@@ -952,6 +952,85 @@ for (const code of ['TASK_IDLE', 'TASK_MERGED_OPEN']) test(`an open ${code} find
   assert.deepEqual(finding(), before, 'an unread open PR list neither raises nor settles a work-queue finding');
 });
 
+// QUEUED_BUT_MOVING: a task shown NOW · QUEUED only by its lane wait whose open PR moved since the
+// wait was written, with no gate recorded: the gate start's `assign` was missed.
+const LANE_WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+const SHA_B = 'b'.repeat(40);
+const movingRun = ({ move = true, blockers = [LANE_WAIT], pr = { number: 900, state: 'OPEN', head: SHA_A }, ...options } = {}) => {
+  const f = idleRun({ hours: 1, openPr: true, blockers, pr, ...options });
+  if (move) Object.assign(f.github.prs.get(900), { head: SHA_B, rollupOid: SHA_B, updated_at: new Date(f.time.now).toISOString() });
+  return f;
+};
+const moving = options => movingRun(options).reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code) && finding.code !== 'BATCH_NEXT');
+
+test('a task queued only by its lane wait whose open PR moved with no gate recorded is on the work queue', () => {
+  assert.equal(state.WORK_QUEUE_CODES.has('QUEUED_BUT_MOVING'), true, 'answered by acting or dispose, never ack');
+  assert.match(state.FINDING_CODES.QUEUED_BUT_MOVING.next_action, /missed `assign` \(it drops the lane wait\)/);
+  const found = moving();
+  assert.deepEqual(found.map(finding => [finding.code, finding.issue]), [['QUEUED_BUT_MOVING', 806]]);
+  assert.match(found[0].detail, /^shown NOW · QUEUED by its lane wait alone, but PR #900 moved from aaaaaaa to bbbbbbb since the wait was written at 2026-11-01T00:00Z, and no gate is assigned or active$/);
+  assert.deepEqual(moving({ pr: { number: 900, state: 'OPEN', head: null } }).map(finding => finding.code), ['QUEUED_BUT_MOVING'], 'a PR opened since the wait counts');
+});
+
+for (const [name, options] of [
+  ['its head has not moved (a built PR waiting for a lane)', { move: false }],
+  ['it lists a real blocker too', { blockers: [LANE_WAIT, 'waits for PR 1098'] }],
+  ['it lists only a real blocker', { blockers: ['waits for PR 1098'] }],
+  ['a gate is live on it', { gate: { role: 'G2', state: 'ACTIVE', assignment: { id: 'g2-806', role: 'G2' } } }],
+  ['it waits on the owner', { lifecycle: 'WAITING_OWNER' }],
+  ['its gate waits on the owner', { gate: { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'g2-806', role: 'G2' } } }],
+]) test(`a queued task is not QUEUED_BUT_MOVING when ${name}`, () => {
+  assert.deepEqual(moving(options).filter(finding => finding.code === 'QUEUED_BUT_MOVING'), []);
+});
+
+test('a queued task whose PR merged or closed is not QUEUED_BUT_MOVING (a G0 or a push-less G2 moves no head either)', () => {
+  for (const merged of [true, false]) {
+    const f = movingRun({ move: false });
+    Object.assign(f.github.prs.get(900), { head: SHA_B, rollupOid: SHA_B, state: merged ? 'MERGED' : 'CLOSED', merged, mergedAt: merged ? new Date(f.time.now).toISOString() : null });
+    assert.deepEqual(f.reconciler().run().findings.filter(finding => finding.code === 'QUEUED_BUT_MOVING'), [], merged ? 'merged' : 'closed');
+  }
+});
+
+test('a pass that could not read every open PR raises no QUEUED_BUT_MOVING', () => {
+  const f = movingRun();
+  const request = f.github.request.bind(f.github);
+  f.github.request = (method, path, ...rest) => method === 'GET' && /\/pulls\?state=open&per_page=100&sort=updated/.test(path) ? { status: 502, json: null, headers: {} } : request(method, path, ...rest);
+  const refresh = () => f.reconciler(VERSION, { refreshFacts: true, writer: state.refreshWriter(f.store.read('parent', 421).doc) }).run();
+  assert.deepEqual(refresh().findings.filter(finding => finding.code === 'QUEUED_BUT_MOVING'), []);
+});
+
+test('a lane wait written before stamps existed counts the head the sweep moves it from', () => {
+  const f = movingRun({ move: false });
+  // An older Toolkit wrote the wait: no stamp in the stored document.
+  const file = [...f.github.files.keys()].find(name => name.endsWith('/issue-806.json'));
+  const legacy = JSON.parse(f.github.files.get(file).text);
+  delete legacy.private.lane_wait;
+  f.github.putFile(file, legacy);
+  assert.equal(f.store.read('child', 806).doc.private.lane_wait, undefined, 'fixture: no stamp stored');
+  Object.assign(f.github.prs.get(900), { head: SHA_B, rollupOid: SHA_B });
+  assert.deepEqual(f.reconciler().run().findings.filter(finding => finding.code === 'QUEUED_BUT_MOVING').map(finding => finding.issue), [806]);
+  f.reconciler().run({ apply: true });
+  assert.equal(f.store.read('child', 806).doc.private.lane_wait.head, SHA_A, 'the write stamps the head it moved from');
+});
+
+test('QUEUED_BUT_MOVING refuses ack, holds a dispose while it stands, and clears once the missed assign runs', () => {
+  const f = movingRun();
+  f.reconciler().run({ apply: true });
+  const entry = () => f.store.read('parent', 421).doc.attention.find(item => item.code === 'QUEUED_BUT_MOVING' && item.issue === 806);
+  assert.equal(entry()?.state, 'new');
+  const parentDoc = f.store.read('parent', 421).doc;
+  assert.throws(() => state.answerFinding(parentDoc, { id: entry().id, state: 'acknowledged', next: 'later', now: new Date(f.time.now).toISOString() }), { code: 'QUEUE_FINDING_NEEDS_ACTION' });
+  f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, { id: entry().id, state: 'disposed', reason: 'the re-bump workflow pushed it', now: new Date(f.time.now).toISOString() }) });
+  f.time.now += HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(entry().state, 'disposed', 'a dispose holds while the condition holds');
+  f.store.mutate('child', 806, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => state.assignGate(doc, { assignment: 'g2-806', role: 'G2' }) });
+  f.time.now += HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(entry().state, 'resolved', 'the assign drops the lane wait, so the condition clears');
+  assert.deepEqual(f.store.read('child', 806).doc.blockers, []);
+});
+
 test('the parent page counts the work queue and the graph row is the task, its number and NOW · IN PROGRESS', () => {
   const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   f.reconciler().run({ apply: true });

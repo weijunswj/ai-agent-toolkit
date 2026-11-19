@@ -302,3 +302,25 @@ test('a same-role gate after an accepted one is a reopen under a new assignment,
   assert.ok(skill.includes("`assign` for an accepted gate's own role is refused with or without `--supersede` (`GATE_STATE`)")
     && skill.includes('is a `reopen` under a new `--assignment`'), 'the reconciler Gates line names the reopen');
 });
+
+test('a holder order that starts a gate drops the task\'s lane wait in that one write and keeps every other blocker', t => {
+  const f = setup(t);
+  const wait = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  let n = 0;
+  const ops = list => f.run(f.order({ order_id: `wait-${++n}`, ops: list })).report.results.map(entry => `${entry.command}:${entry.outcome}`);
+  assert.deepEqual(ops([{ command: 'update', issue: 423, patch: { lifecycle: 'ACTIVE', blockers: [wait, 'waits for PR 1098'] } }]), ['update:WRITTEN']);
+  assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G1', assignment: 'g1-wait' }]), ['assign:WRITTEN']);
+  const child = f.store.read('child', 423).doc;
+  assert.deepEqual(child.blockers, ['waits for PR 1098'], 'no separate blocker write is needed');
+  assert.equal(child.gate.state, 'ASSIGNED');
+  assert.equal(child.private.lane_wait, undefined, 'the stamp goes with the last lane wait');
+  // The documented routes name the lane wait and its drop; change them with the state machine.
+  const root = path.join(__dirname, '..', '..');
+  const route = fs.readFileSync(path.join(root, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference', 'periodic-runs.md'), 'utf8')
+    .split('\n').find(line => line.startsWith('- **Gate assignments**'));
+  for (const phrase of ['one blocker starting with the word `Queued`', '`assign` and `reopen` drop it and keep every other blocker', 'Answer `QUEUED_BUT_MOVING`', 'with the missed `assign`']) assert.ok(route.includes(phrase), phrase);
+  const skill = fs.readFileSync(path.join(root, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^  - Status is worked out: [^\n]*one blocker starting with the word `Queued` [^\n]*`assign` and `reopen` drop lane waits in the same write and keep every other blocker/m);
+  assert.match(skill, /^- `QUEUED_BUT_MOVING`: A task shown `NOW · QUEUED` by lane waits alone/m);
+  assert.match(skill, /`TASK_IDLE`, `TASK_MERGED_OPEN`, `QUEUED_BUT_MOVING` and `BATCH_NEXT` are its alarms/);
+});
