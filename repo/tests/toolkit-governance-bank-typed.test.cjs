@@ -45,7 +45,7 @@ async function run(ctx, argv, { interactive = false, answers = [] } = {}) {
     cwd: ctx.repo, interactive, registryOptions: ctx.registryOptions, ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 2, stale: 1, update: 'node fixture-apply.cjs --apply', remove: 'node fixture-apply.cjs --remove' }),
-    environment: { TOOLKIT_HOST_SESSION: SESSION },
+    environment: { TOOLKIT_HOST_SESSION: SESSION }, ...(ctx.cli || {}),
   });
   const code = await cli.main(argv);
   return { code, out, err };
@@ -346,4 +346,60 @@ test('explain needs no ticket before or after an answer, and an unknown row afte
   const bare = await run(ctx, ['setup', '--answers', `${reference}: 1.4=A`]);
   assert.equal(bare.code, 2);
   assert.doesNotMatch(bare.out, /Nothing changed|### /);
+});
+
+// G2 of 19 Nov: an answer that opens the shards pull request turns that row into a status row, so
+// every later question moves up one number. The ticketless explain then printed another row under
+// the number the owner saw (explain 1.4 gave the next row, and a row still on screen did not exist).
+// It reads the bank the owner was shown: a bank numbered differently is named as changed, never
+// explained by its new numbers; the ticket path refuses the next answer the same way.
+test('explain after an answer that renumbers the bank names the change, never another row', async t => {
+  const ctx = fixture(t);
+  const open = [];
+  ctx.cli = {
+    ciEstimator: () => ({ minutes: 25, workflow: 'CI' }), ciReaders: () => ({ ok: true }),
+    switchTransport: {
+      openCiShards: () => open,
+      publishCiShards() { const pr = { number: 5, url: `https://github.com/${SLUG}/pull/5`, head: 'a'.repeat(40) }; open.push(pr); return pr; },
+      publishSwitch: () => ({ number: 6, url: `https://github.com/${SLUG}/pull/6`, head: 'b'.repeat(40) }),
+    },
+  };
+  const shown = await run(ctx, ['setup']);
+  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
+  const seen = row => (new RegExp(`^\\| ${row.replace('.', '\\.')} \\| ([^|]+?) \\|`, 'm').exec(shown.out) || [])[1];
+  assert.equal(seen('1.4'), 'Parallel CI shards');
+  const later = ['1.5', '1.6'].filter(seen);
+  assert.ok(later.length, 'a row follows the shards row');
+  const answered = await reply(ctx, reference, '1.4=B');
+  assert.equal(answered.code, 0, answered.err);
+  assert.equal(open.length, 1, 'the answer opened the shards pull request');
+  const moved = JSON.parse((await run(ctx, ['setup', '--json'])).out);
+  assert.notEqual(moved.bank_reference, reference, 'the bank is numbered differently now');
+  for (const row of ['1.4', ...later]) {
+    const result = await run(ctx, ['setup', '--answers', `${reference}: explain ${row}`]);
+    assert.equal(result.code, 0, result.err);
+    assert.match(result.out, /^The governance bank changed since it was shown \(rows were added, taken away or numbered differently\), so row \d\.\d as shown is not explained here and nothing was written\. Type toolkit governance to see the new bank\.$/m, `explain ${row}`);
+    assert.doesNotMatch(result.out, /^### |This bank has no row/m, `explain ${row} prints no row by the new numbers`);
+    agentsLast(result.out);
+    // Without the reference in the command, the session's noted bank is the one the owner saw.
+    const bare = await run(ctx, ['setup', '--answers', `explain ${row}`]);
+    assert.doesNotMatch(bare.out, /^### |This bank has no row/m, `bare explain ${row}`);
+    assert.match(bare.out, /^The governance bank changed since it was shown/m);
+  }
+  assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx))?.bank_reference, reference, 'explain spends nothing: the shown bank stays noted');
+});
+
+// When rows changed but every number still means the same row, explain names the changed rows first,
+// as the ticket path does, then the row.
+test('explain after a row changed in place names the change, then the row', async t => {
+  const ctx = fixture(t);
+  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
+  ctx.cli = { permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) };
+  const result = await run(ctx, ['setup', '--answers', `${reference}: explain 1.4`]);
+  assert.equal(result.code, 0, result.err);
+  const [first, changed] = result.out.trim().split('\n');
+  assert.equal(first, 'The governance state changed since that bank was shown; the numbers still mean the same rows.');
+  assert.match(changed, /^2\.1 Toolkit permissions \(Claude Code\) changed: now Up to date, recommended A\. Keep current\.$/);
+  assert.match(result.out, /^### 1\.4 Parallel CI shards$/m);
+  agentsLast(result.out);
 });

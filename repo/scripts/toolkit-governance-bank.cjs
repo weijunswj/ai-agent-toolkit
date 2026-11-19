@@ -334,6 +334,14 @@ function explainRequest(text) {
   return match ? match[2] : null;
 }
 
+// The same, with the bank reference it names (normalised, or as typed when malformed, so it matches
+// no bank), or null: { reference, row }.
+function explainParts(text) {
+  const match = EXPLAIN.exec(String(text || ''));
+  if (!match) return null;
+  return { reference: match[1] ? (bank.normalizeBankReference(match[1]) || match[1]) : null, row: match[2] };
+}
+
 // A short digest of each row as shown, keyed by its id and number (id@1.4, or id@ for a status row),
 // so a reply to a bank that changed since can name only the rows that changed (changedRows).
 const rowKey = spec => `${spec.id}@${spec.presentation.question_ref}`;
@@ -580,5 +588,5 @@ function bankExplainCommand(text) {
 
 module.exports = Object.freeze({
   APP_NAMES, BANK_HOST, TICKETS_BASENAME, REPLY_AGAIN, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  agentsAfterAnswer, explainText, explainRequest, rowDigests, changedRows, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand,
+  agentsAfterAnswer, explainText, explainRequest, explainParts, rowDigests, changedRows, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand,
 });

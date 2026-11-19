@@ -149,7 +149,7 @@ class ToolkitGovernanceCli {
     let explain = null;
     // `setup --answers "explain 1.4"` with no ticket: the full text of one row, read-only.
     if (['setup', 'refresh'].includes(rest[0]) && rest.length === 3 && rest[1] === '--answers') {
-      explain = governanceBank.explainRequest(rest[2]);
+      explain = governanceBank.explainParts(rest[2]);
       if (!explain || json) { this.#stderr.write(USAGE); return 2; }
       rest = [rest[0]];
     }
@@ -440,7 +440,8 @@ class ToolkitGovernanceCli {
   // gets a one-use ticket (toolkit-governance-bank.cjs), and exits BANK_SHOWN. With --answers and that
   // ticket it applies the owner's answer: at most one governance pull request, and the permission
   // blocks. In the owner's own terminal it shows the bank and reads the reply there. `explain` (a row
-  // number) prints that row's full text and nothing else: no ticket, no note, no write.
+  // number and the bank reference it names, explainParts) prints that row's full text of the bank the
+  // owner was shown and nothing else: no ticket, no note, no write (#explainShown).
   async #bank(json, answers, ticket, explain = null) {
     this.#refresh(this.#cwd);
     const state = this.#state();
@@ -484,7 +485,7 @@ class ToolkitGovernanceCli {
     const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
     const reference = governanceBank.bankReference(specs);
     if (explain) {
-      this.#print(false, {}, [governanceBank.explainText(specs, explain) || `This bank has no row ${explain}.`]);
+      this.#print(false, {}, this.#explainShown(state, specs, reference, explain));
       return 0;
     }
     if (answers === null) {
@@ -537,6 +538,27 @@ class ToolkitGovernanceCli {
     finally {
       try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, rows: governanceBank.rowDigests(specs) }); } catch { /* the owner can type toolkit governance */ }
     }
+  }
+
+  // The ticketless "explain 1.4" reads row 1.4 of the bank the owner was shown: the one its command
+  // names, else this session's noted bank (read only, never spent). When that bank is not this one, it
+  // says what the ticket path says: the rows that changed, then the row, while every number still
+  // means the same row; otherwise that the bank changed, so it never prints another row under a
+  // number the owner saw (an answer that opens a shards pull request moves later numbers).
+  #explainShown(state, specs, reference, { reference: named, row }) {
+    const text = governanceBank.explainText(specs, row) || `This bank has no row ${row}.`;
+    const sessionId = this.#hostSession();
+    let noted = null;
+    try {
+      const epoch = sessionId ? new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(sessionId) : null;
+      noted = sessionId ? new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).pendingFor(sessionId, epoch) : null;
+    } catch { noted = null; }
+    if (noted && noted.repository_id !== state.repository_id) noted = null;
+    const shown = named || noted?.bank_reference || null;
+    if (!shown || shown === reference) return [text];
+    const changed = noted?.bank_reference === shown ? governanceBank.changedRows(noted.rows, specs) : null;
+    if (!changed) return [`The governance bank changed since it was shown (rows were added, taken away or numbered differently), so row ${row} as shown is not explained here and nothing was written. Type toolkit governance to see the new bank.`];
+    return ['The governance state changed since that bank was shown; the numbers still mean the same rows.', ...changed, '', text];
   }
 
   // A reply that could not be used: its lines and the one reply line, and the bank noted again for
