@@ -239,9 +239,11 @@ test('a version-only edit is LIGHT even on a RISKY path; any other line keeps th
   assert.equal(tierOf('AGENTS.md', ['Version: 2026-10-26.3', 'Version: 2026-10-26.4']), 'RISKY', 'not in other instruction files');
 });
 
-test('every real managed-block marker in this repository counts as a version bump, and only the toolkit= version may differ', () => {
+test('every real managed-block marker in this repository or an older setup\'s copy counts as a version bump, and only the toolkit= version may differ', () => {
   const grep = spawnSync('git', ['-C', ROOT, 'grep', '-h', '-E', '<!-- AI-AGENT-TOOLKIT:[^ ]+:BEGIN '], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
-  const markers = [...new Set(grep.map(line => line.trim()).filter(line => / toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->$/.test(line)))];
+  // Repositories still carry the Antigravity bootstrap copy older setups wrote, with its dotted name.
+  const bootstrap = require('./support/retired-instruction-copies.cjs').antigravityBootstrapCopy().split('\n').filter(line => line.includes(':BEGIN '));
+  const markers = [...new Set([...grep, ...bootstrap].map(line => line.trim()).filter(line => / toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->$/.test(line)))];
   assert.ok(markers.some(line => line.includes('ANTIGRAVITY.BOOTSTRAP')), 'a marker name with a dot is among them');
   for (const marker of markers) {
     const bumped = marker.replace(/toolkit=\d+\.\d+\.\d+/, 'toolkit=99.0.0');

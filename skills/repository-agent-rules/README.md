@@ -12,7 +12,7 @@ Checks and repairs a repository's Toolkit files: the CI checks a governed reposi
 | [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) | `CLAUDE.md` | Claude Code; exactly the line `@AGENTS.md`, no markers |
 | [repo-local/toolkit-programme.template.json](repo-local/toolkit-programme.template.json) | `.github/toolkit-programme.json` | A merged enabled repository, or its accepted pending yes |
 
-The governed block and Antigravity bootstrap templates stay only so the session-start preflight can compare leftover copies and this Toolkit repository can build its own root files; they are never installed into another repository. Install a shim only beside the repository's own `AGENTS.md`, never a shim without `AGENTS.md`: shims only point to it. A target repository or explicit path is required.
+No governed block or Antigravity bootstrap template exists: neither is installed into a repository. Install a shim only beside the repository's own `AGENTS.md`, never a shim without `AGENTS.md`: shims only point to it. A target repository or explicit path is required.
 
 A governed block, Antigravity bootstrap or `docs/agent-playbooks/` copy an older setup left is reported as a leftover and left as it is. Explicit repairs back up anything they replace under `_agent-toolkit-backups/` with the shared restore contract, keep every byte outside the markers, and preview any `.gitignore` or `.git/info/exclude` change for exact approval. Legacy `.agent-toolkit-backups/` content is recognised and left untouched.
 

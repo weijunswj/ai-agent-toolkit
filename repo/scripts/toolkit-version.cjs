@@ -27,6 +27,14 @@ function compareVersions(left, right) {
   return 0;
 }
 
+// A Toolkit source checkout is a folder holding the instruction sync script, this version file and
+// the Claude Code plugin manifest: files every Toolkit tree keeps. The bridge compares such a folder
+// with its own templates and the governance cleanup refuses it.
+const SOURCE_CHECKOUT_FILES = Object.freeze(['repo/scripts/sync-agent-instruction-shims.cjs', VERSION_REL_PATH, '.claude-plugin/plugin.json']);
+function isToolkitSourceCheckout(root) {
+  return SOURCE_CHECKOUT_FILES.every(file => fs.existsSync(path.join(root, ...file.split('/'))));
+}
+
 const TOOLKIT_VERSION = readToolkitVersion();
 
-module.exports = { SEMVER, TOOLKIT_VERSION, VERSION_FILE, VERSION_REL_PATH, compareVersions, readToolkitVersion };
+module.exports = { SEMVER, TOOLKIT_VERSION, VERSION_FILE, VERSION_REL_PATH, compareVersions, isToolkitSourceCheckout, readToolkitVersion };
