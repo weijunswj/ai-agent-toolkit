@@ -113,8 +113,14 @@ test('offer: the answer waits while a pinned sweep copy runs a Toolkit older tha
   const held = offer.readersReady(repo, ROOT);
   assert.equal(held.ok, false);
   assert.match(held.reason, /toolkit-programme-sweep\.yml run a Toolkit older than the one that reads ci_shards \(3\.113\.0\).*Refresh the repository rules first/);
+  assert.doesNotMatch(held.reason, /could not be checked/);
   put(repo, '.github/workflows/toolkit-programme-sweep.yml', marker('e'.repeat(40)));
-  assert.equal(offer.readersReady(repo, ROOT).ok, false, 'a commit this checkout cannot check holds too');
+  const unchecked = offer.readersReady(repo, ROOT);
+  assert.equal(unchecked.ok, false, 'a commit this checkout cannot check holds too');
+  // It is named as not checked, never as too old, with the step that settles it.
+  assert.match(unchecked.reason, /^the pinned Toolkit copies \.github\/workflows\/toolkit-programme-sweep\.yml could not be checked, because this Toolkit copy cannot read the commit they are pinned to .+\. Run this from a Toolkit git checkout that has their commit, or refresh the repository rules first \(merge their pull request\), then answer again$/);
+  assert.doesNotMatch(unchecked.reason, /older than the one that reads ci_shards/);
+  assert.deepEqual(offer.oldSweepCopies(repo, ROOT, () => true), { tooOld: [], unchecked: ['.github/workflows/toolkit-programme-sweep.yml'] });
 });
 
 // ---- the bank ----------------------------------------------------------------------------------

@@ -82,8 +82,9 @@ function statusRow({ id, section, title, current, text }) {
 // merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
 // minutes line, measured: the estimate or null }) where it is offered, or null, and `app` the governance
 // App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read), and
-// `copies` the instruction copies the cleanup route would remove ({ files, held? }: `held` is why the
-// cleanup cannot run yet; null when not read).
+// `copies` the instruction copies the cleanup route would remove ({ files, held?, step?, refused? }:
+// `held` is why the pinned sweep copies hold the cleanup and `step` what clears it, `refused` why the
+// programme file stops it; null when not read).
 function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
@@ -220,8 +221,11 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   // The cleanup route (toolkit-governance-cleanup.cjs): asked only in a governed repository that still
   // has instruction copies. Removing files is the owner's own choice, so Keep current is recommended
   // and all recommended removes nothing.
+  const left = copies ? `${copies.files} ${copies.files === 1 ? 'file' : 'files'} left` : '';
   if (governed && copies && copies.files > 0 && copies.held) {
-    specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${copies.files} ${copies.files === 1 ? 'file' : 'files'} left, cleanup held`, text: `Not offered yet: ${copies.held}. Refresh the cloud workflow copies first` }));
+    specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${left}, cleanup held`, text: `Not offered yet: ${copies.held}. ${copies.step}` }));
+  } else if (governed && copies && copies.files > 0 && copies.refused) {
+    specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${left}, cleanup cannot run`, text: `Not offered yet: ${copies.refused}` }));
   } else if (governed && copies && copies.files > 0) {
     specs.push(bank.resolvedQuestion({
       id: 'instruction-copies', key: 'instructionCopies', section, title: 'Toolkit instruction copies',

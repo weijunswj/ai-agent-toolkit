@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
-const { TOOLKIT_VERSION, VERSION_REL_PATH, readToolkitVersion } = require('../scripts/toolkit-version.cjs');
+const { TOOLKIT_VERSION, VERSION_REL_PATH, compareVersions, readToolkitVersion } = require('../scripts/toolkit-version.cjs');
 const { MANIFEST_REL_PATHS, parseArgs } = require('../scripts/bump-version.cjs');
 const {
   CHANGELOG_REL_PATH, changelogHeadings, headingOf, heldHeadingsProblem, mergeSections, nextSkillVersion, nextVersion, topChangelogVersion,
@@ -443,4 +443,17 @@ test('the validator runs the CI guard against DIFF_BASE and fails closed', (t) =
   const unknown = validate('no-such-commit');
   assert.equal(unknown.status, 1);
   assert.match(`${unknown.stdout}${unknown.stderr}`, /DIFF_BASE no-such-commit is not a commit in this checkout/);
+});
+
+// The one version order every caller shares: parts compare as whole numbers of any size, and a value
+// that is not MAJOR.MINOR.PATCH is refused rather than ordered.
+test('compareVersions orders versions by number and refuses anything else', () => {
+  for (const [left, right, expected] of [
+    ['3.10.0', '3.9.0', 1], ['3.9.0', '3.10.0', -1], ['3.9.0', '3.9.0', 0], ['10.0.0', '9.99.99', 1], ['3.0.1', '3.0.0', 1],
+    ['99999999999999999999.0.0', '99999999999999999998.0.0', 1],
+  ]) assert.equal(compareVersions(left, right), expected, `${left} vs ${right}`);
+  for (const bad of ['3.9', '3.9.0.1', 'v3.9.0', '', null, undefined, '3.x.0']) {
+    assert.throws(() => compareVersions(bad, '3.9.0'), /Not a MAJOR\.MINOR\.PATCH version/, String(bad));
+    assert.throws(() => compareVersions('3.9.0', bad), /Not a MAJOR\.MINOR\.PATCH version/, String(bad));
+  }
 });
