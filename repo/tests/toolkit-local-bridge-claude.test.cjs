@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { runAgentRulesPreflight } = require('../scripts/toolkit-local-bridge.cjs');
+const { managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const {
   repoRoot,
@@ -43,7 +44,7 @@ test('agent-rules preflight leaves CLAUDE.md alone outside a Toolkit source chec
   for (const [claudeText, expected] of cases) {
     const root = tmpRoot();
     fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-    writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
+    writeFile(path.join(root, 'AGENTS.md'), managedAgentsCopy());
     writeFile(path.join(root, 'CLAUDE.md'), claudeText);
     const result = runAgentRulesPreflight(
       { hook: true, syncSource: 'claude-plugin' },

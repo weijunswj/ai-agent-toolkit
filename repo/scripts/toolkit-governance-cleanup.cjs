@@ -31,9 +31,6 @@ const MIN_TOOLKIT = '3.137.0';
 const BINDING_FILE = '.github/toolkit-programme.json';
 const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
 
-// A Toolkit source checkout builds its own instruction files from the templates, so its copies are
-// cleaned by hand there, never by this command.
-const SOURCE_MARKERS = Object.freeze(['skills/repository-agent-rules/repo-local/AGENTS.managed.template.md', 'repo/scripts/sync-agent-instruction-shims.cjs']);
 
 // A governed repository's sweep copies run the Toolkit commit they are pinned to, which reads the
 // programme file with its own validator: a commit whose validator does not know min_toolkit reads the
@@ -50,7 +47,7 @@ function sweepCopiesWithoutMinToolkit(root) {
 
 // The binding reader and its retired keys, loaded on first use.
 const programmeState = () => require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
-const { SEMVER, compareVersions } = require('./toolkit-version.cjs');
+const { SEMVER, compareVersions, isToolkitSourceCheckout } = require('./toolkit-version.cjs');
 
 // Why the pinned sweep copies hold the cleanup, naming the too old and the unchecked ones apart.
 function heldBy({ tooOld = [], unchecked = [] }) {
@@ -87,7 +84,9 @@ function withMinToolkit(original, binding) {
 // `governance` and `sweepReaders` (root => { tooOld, unchecked } sweep copies) are for tests.
 function run({ root, write = false, governance = null, sweepReaders = sweepCopiesWithoutMinToolkit }) {
   if (!fs.existsSync(path.join(root, '.git'))) return { ok: false, changes: [], lines: [`Nothing was changed: ${root} is not the top folder of a git checkout.`] };
-  if (SOURCE_MARKERS.every(file => fs.existsSync(path.join(root, ...file.split('/'))))) {
+  // A Toolkit source checkout builds its own instruction files from the templates, so its copies are
+  // cleaned by hand there, never by this command.
+  if (isToolkitSourceCheckout(root)) {
     return { ok: false, changes: [], lines: ['Nothing was changed: this is a Toolkit source checkout, which builds its own instruction files from the templates, so its copies are removed by hand in a source pull request.'] };
   }
   const scan = new LeftoverScan({ discover: () => [], ...(governance ? { governance } : {}) }).inspect(root);

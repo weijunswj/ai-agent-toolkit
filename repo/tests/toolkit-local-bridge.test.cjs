@@ -2444,12 +2444,8 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const nested = path.join(root, 'nested');
   fs.mkdirSync(nested, { recursive: true });
-  const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
-    'utf8'
-  );
   writeFile(path.join(root, 'AGENTS.md'), [
-    agentsTemplate,
+    managedAgentsTemplate(),
     '',
     'Marker examples:',
     '`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`',
@@ -2479,8 +2475,9 @@ function writeSourceCheckoutKeys(checkout, version) {
   writeFile(path.join(checkout, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version }));
 }
 
+// The AGENTS.md an older setup wrote: the governed rules block under the curated header.
 function managedAgentsTemplate() {
-  return fs.readFileSync(path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
+  return require('./support/retired-instruction-copies.cjs').managedAgentsCopy();
 }
 
 // Runs the SessionStart hook in `cwd` with a hub outside the repository, so the

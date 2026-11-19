@@ -1,8 +1,8 @@
 'use strict';
 
 // Contract checks for the two instruction layers and their projections: the global rules source,
-// the Toolkit-governed block (the portable templates; root AGENTS.md carries none), the host shims
-// and the portable playbooks. These are instruction checks, not native permission or live-operation
+// the Toolkit-governed rules (delivered at session start; root AGENTS.md carries no copy), the host
+// shims and the portable playbooks. These are instruction checks, not native permission or live-operation
 // tests.
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
@@ -12,6 +12,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { controllerText } = require('./support/controller-text.cjs');
 const { findBlocks, bodyDigest, blockState } = require('../scripts/toolkit-managed-block.cjs');
+const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const globalPath = 'repo/contracts/agent-rules/global-rules.md';
@@ -20,16 +21,6 @@ const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md'
 const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
-const SHIMS = [
-  { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', heading: '# Agent Toolkit Antigravity Bootstrap' }
-];
-const safetyComment = [
-  '<!--',
-  'Curated AI-facing source.',
-  'Source: repo/contracts/agent-rules/repo-local',
-  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-  '-->'
-].join('\n');
 const forbiddenDefaultPromptPhrases = ['GitHub PR Completion Rules', 'GITHUB APPROVAL NEEDED', 'VERSION CONTROL APPROVAL NEEDED',
   'REMOTE APPROVAL NEEDED', 'LOCAL CHANGE APPROVAL NEEDED', 'PR: none yet', 'PR lane', 'remote source-of-truth', 'GitHub PR URL',
   'Should I push this branch'];
@@ -75,11 +66,13 @@ test('the retired instruction templates are gone from both trees and no code or 
   for (const root of [repoLocalSourceRoot, repoLocalPublishedRoot]) {
     for (const file of RETIRED_TEMPLATES) assert.equal(exists(`${root}/${file}`), false, `${root}/${file}`);
   }
-  const self = path.relative(repoRoot, __filename).split(path.sep).join('/');
+  // This test, and the test support that builds the old copies, whose markers name their retired source.
+  const skipped = [path.relative(repoRoot, __filename), path.relative(repoRoot, require.resolve('./support/retired-instruction-copies.cjs'))]
+    .map(file => file.split(path.sep).join('/'));
   // The n8n router test lists this older top-level path as one that must stay absent.
   const olderAbsent = 'skills/repository-agent-rules/antigravity-bootstrap.template.md';
   const code = childProcess.execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8' }).split('\0')
-    .filter(file => /\.(?:c?js|mjs|json|ps1|sh|ya?ml)$/.test(file) && file !== self && exists(file));
+    .filter(file => /\.(?:c?js|mjs|json|ps1|sh|ya?ml)$/.test(file) && !skipped.includes(file) && exists(file));
   assert.ok(code.includes('repo/scripts/toolkit-local-bridge.cjs'), 'the scan sees the scripts');
   const naming = code.filter(file => {
     const text = fs.readFileSync(path.join(repoRoot, file), 'utf8').split(olderAbsent).join('');
@@ -88,15 +81,7 @@ test('the retired instruction templates are gone from both trees and no code or 
   assert.deepEqual(naming, []);
 });
 
-test('the governed block reaches both templates unchanged, inside current v2 markers; root AGENTS.md carries no Toolkit marker', () => {
-  const governed = readText(governedPath).trimEnd();
-  for (const relPath of [`${repoLocalSourceRoot}/AGENTS.managed.template.md`, `${repoLocalPublishedRoot}/AGENTS.managed.template.md`]) {
-    assertCurrentBlock(relPath, 'TOOLKIT-GOVERNED-RULES', governedPath, governed);
-  }
-  const template = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`);
-  assert.equal(readText(`${repoLocalPublishedRoot}/AGENTS.managed.template.md`), template);
-  assert.ok(template.startsWith(`${safetyComment}\n\n`));
-  assert.equal(findBlocks(template).blocks.length, 1, 'the template carries only the governed block');
+test('root AGENTS.md carries no Toolkit marker and no Antigravity rule file exists', () => {
   // The installed Toolkit delivers the governed rules here too, so the root file is all hand-written.
   const root = readText('AGENTS.md');
   assert.ok(root.startsWith('# AI Agent Toolkit Repo Rules\n\n## This Repository\n'));
@@ -123,7 +108,8 @@ test('the sync check refuses a Toolkit block or the Antigravity bootstrap brough
   assert.equal(check.status, 0, check.stderr);
   const original = fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8');
   // A stale branch that still carries the governed block (or a broken half of one) must not land.
-  const block = readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`).slice(safetyComment.length).trim();
+  const copy = managedAgentsCopy(), [found] = findBlocks(copy).blocks;
+  const block = copy.slice(found.start, found.end);
   // A Windows checkout may give the file CRLF line endings, so match either.
   const withBlock = original.replace(/(\r?\n)\1## This Repository/, (_match, eol) => `${eol}${eol}${block}${eol}${eol}## This Repository`);
   assert.notEqual(withBlock, original);
@@ -139,7 +125,7 @@ test('the sync check refuses a Toolkit block or the Antigravity bootstrap brough
   }
   fs.writeFileSync(path.join(dir, 'AGENTS.md'), original);
   fs.mkdirSync(path.join(dir, '.agents/rules'), { recursive: true });
-  fs.writeFileSync(path.join(dir, '.agents/rules/00-agent-toolkit-bootstrap.md'), readText(`${repoLocalSourceRoot}/antigravity-bootstrap.template.md`));
+  fs.writeFileSync(path.join(dir, '.agents/rules/00-agent-toolkit-bootstrap.md'), antigravityBootstrapCopy());
   const bootstrap = sync();
   assert.equal(bootstrap.status, 1);
   assert.match(bootstrap.stderr, /FAIL: \.agents\/rules\/00-agent-toolkit-bootstrap\.md is not allowed: Antigravity reads AGENTS\.md itself/);
@@ -148,20 +134,6 @@ test('the sync check refuses a Toolkit block or the Antigravity bootstrap brough
   assert.equal(sync('--write').status, 0);
   assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), original);
   assert.equal(fs.existsSync(path.join(dir, '.agents')), false);
-});
-
-test('host shims stay tiny, carry current markers and match their templates', () => {
-  for (const shim of SHIMS) {
-    const source = `${repoLocalSourceRoot}/${shim.file}`;
-    const template = readText(source);
-    assert.equal(readText(`${repoLocalPublishedRoot}/${shim.file}`), template);
-    assert.ok(template.startsWith(`${safetyComment}\n\n`));
-    const block = assertCurrentBlock(source, shim.name, source, onlyBlock(source, shim.name).body);
-    assert.ok(block.body.includes(shim.heading), source);
-    assert.match(block.body, /Root `AGENTS\.md` is (?:canonical|the canonical repo instruction file)\./);
-    assert.doesNotMatch(block.body, /@\.\.\/\.\.\/AGENTS\.md/);
-    assert.ok(Buffer.byteLength(block.body) < 1024, `${source} under 1 KB`);
-  }
 });
 
 test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists', () => {

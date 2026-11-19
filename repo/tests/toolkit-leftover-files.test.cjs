@@ -8,10 +8,10 @@ const { spawnSync } = require('node:child_process');
 const leftovers = require('../scripts/toolkit-leftover-files.cjs');
 
 const SCRIPT = require.resolve('../scripts/toolkit-leftover-files.cjs');
-const TEMPLATES = path.join(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
 const PLAYBOOKS = require('../scripts/toolkit-playbooks.cjs').repositoryPlaybooks();
-const template = name => name.startsWith('docs/agent-playbooks/') ? PLAYBOOKS[name.slice('docs/agent-playbooks/'.length)] : fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
-const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(template('AGENTS.managed.template.md'))[0];
+const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
+const template = name => PLAYBOOKS[name.slice('docs/agent-playbooks/'.length)];
+const BLOCK = /<!-- AI-AGENT-TOOLKIT:\S+:BEGIN TOOLKIT-GOVERNED-RULES[\s\S]*?END TOOLKIT-GOVERNED-RULES -->/.exec(managedAgentsCopy())[0];
 const BROKEN = "its Toolkit markers are broken, so Toolkit cannot tell its text from the rest; fixing them by hand is the owner's choice";
 const CHECK = `#!/usr/bin/env node\n// AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED plain-text-check check=3 sha256=0123456789ab\n'use strict';\n`;
 
@@ -193,10 +193,17 @@ test('broken markers beside a complete governed block: the file is only named as
   assert.deepEqual(adopter.kept.map(item => item.file), ['CLAUDE.md']);
 });
 
-// The curated-source comment is Toolkit's only as the current template has it and only as the first
-// text left; an older wording, or the comment further down, stays as the owner's text.
-test('the curated header goes only when it is the current wording and the first text left', () => {
-  const header = /^<!--[\s\S]*?-->/.exec(template('AGENTS.managed.template.md'))[0];
+// The curated-source comment is Toolkit's only as it last shipped and only as the first text left; an
+// older wording, or the comment further down, stays as the owner's text.
+test('the curated header goes only when it is the last shipped wording and the first text left', () => {
+  const header = require('../contracts/agent-rules/playbook-history.json').agents_header;
+  assert.equal(header, [
+    '<!--',
+    'Curated AI-facing source.',
+    'Source: repo/contracts/agent-rules/repo-local',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+    '-->',
+  ].join('\n'), 'the wording older setups wrote, kept as it shipped');
   const drop = leftovers.withoutCuratedHeader;
   assert.equal(drop(`${header}\n\n# Own rules\n`), '# Own rules\n');
   assert.equal(drop(`${header}\n# Own rules\n`), '# Own rules\n');
@@ -297,7 +304,7 @@ test('a governed repository lists its instruction copies, including earlier and 
       '.github/toolkit-programme.json': '{ "governance": "enabled" }\n',
     } },
     // Nothing of its own is left once the block goes, so the one-line CLAUDE.md goes too.
-    template: { state: 'ENABLED', files: { 'AGENTS.md': template('AGENTS.managed.template.md'), 'CLAUDE.md': '@AGENTS.md\n', '.agents/rules/00-agent-toolkit-bootstrap.md': template('antigravity-bootstrap.template.md') } },
+    template: { state: 'ENABLED', files: { 'AGENTS.md': managedAgentsCopy(), 'CLAUDE.md': '@AGENTS.md\n', '.agents/rules/00-agent-toolkit-bootstrap.md': antigravityBootstrapCopy() } },
   });
   const scan = () => new leftovers.LeftoverScan({ githubFolder: w.folder, governance: w.governance, history }).scan();
   const report = scan();

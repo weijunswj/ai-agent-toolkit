@@ -178,24 +178,22 @@ test('a generated-sync change is refused for hand-written edits, a source file, 
     sync(2, ['README.md', 'repo/contracts/source-of-truth-contract.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('new') }),
     sync(3, ['README.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': readme('new').replace(/<!-- AI-AGENT-TOOLKIT:[^\n]*:END[^\n]*-->/, '') }),
     sync(4, ['README.md'], { [`${BASE}:README.md`]: readme('old'), 'HEAD:README.md': '# AI Agent Toolkit\n\nHand-written text.\n' }),
-    sync(5, ['repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md'], {}),
+    sync(5, ['repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md'], {}),
   ]);
   assert.deepEqual(ready, []);
   assert.match(skipped, /#1: .*README\.md changes outside its managed blocks/);
   assert.match(skipped, /#2: no review verdict comment for its head 222222222222$/m, 'a source file in the change: an ordinary pull request');
   assert.match(skipped, /#3: .*README\.md has broken or missing managed blocks/);
   assert.match(skipped, /#4: .*README\.md has broken or missing managed blocks/);
-  assert.match(skipped, /#5: no review verdict comment for its head 555555555555$/m, 'a shim template whose block body is a source');
+  assert.match(skipped, /#5: no review verdict comment for its head 555555555555$/m, 'the CLAUDE.md shim template is a source');
 });
 
 test('the sync outputs the carry trusts are exactly the files the two syncs write', () => {
   assert.deepEqual([...carry.OUTPUTS.keys()].sort(), [
     'CLAUDE.md', 'README.md',
-    'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/n8n-environment-setup/references/n8n-safety-rules.md', 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md',
     'skills/n8n-safety-router/n8n-safety-rules.md', 'skills/n8n-workflow-transport/references/n8n-safety-rules.md',
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md', 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
   ]);
   assert.deepEqual(carry.OUTPUTS.get('README.md'), ['SOURCE-OF-TRUTH-CONTRACT']);
 });
