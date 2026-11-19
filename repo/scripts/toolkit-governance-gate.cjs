@@ -40,7 +40,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
-const { BankTickets, bankTicketContext, bankTicketCommand } = require('./toolkit-governance-bank.cjs');
+const { BankTickets, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand, explainRequest } = require('./toolkit-governance-bank.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
 // removes the file, which is Toolkit's own, because its text is never delivered again.
@@ -1170,6 +1170,9 @@ class PromptHold {
       return { action: 'pass', context: `${BANK_MOVED}
 ${NEVER_OWNER}` };
     }
+    // "explain 1.4" only reads: it spends no ticket and no delivery, and the bank stays open.
+    const row = explainRequest(message.text);
+    if (row) return { action: 'pass', context: bankExplainContext(shown, row) };
     if (message.wrapped) {
       let accepted = false;
       try { accepted = this.#tickets.acceptDelivery(message, Date.parse(shown.at)); } catch { accepted = false; }
@@ -1423,6 +1426,8 @@ class ToolGate {
       // Sending the user's reply to a governance bank, with this session's live bank ticket; the
       // command spends the ticket again as it runs. Any other bank answer is refused below.
       if (tool !== 'Monitor' && bankTicketCommand(text, sessionId, this.#bank)) return null;
+      // The read-only explain of one bank row ("explain 1.4"), exactly, needs no ticket.
+      if (tool !== 'Monitor' && bankExplainCommand(text)) return null;
       // Any other run of the answer script with an answer and a ticket (joined to another command,
       // from another session, through another script path) is refused, so a ticket is spent only
       // by the session it was given to, on its own.

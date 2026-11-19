@@ -51,6 +51,7 @@ const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|di
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
   + `       ${governance.governanceCommand('publish --run <pending receipt>')}\n`
   + `       ${governance.governanceCommand('<setup|refresh> [--json]')} (the governance question bank; refresh is the same)\n`
+  + `       ${governance.governanceCommand('setup --answers "[<bank reference>: ]explain <row>"')} (one row's full text; no ticket, writes nothing)\n`
   + `       ${governance.governanceCommand('setup --answers "<bank reference>: <answer>" --ticket <owner reply ticket>')}\n`
   + `       ${governance.governanceCommand('migrate [--root <folder>]...')} (protection/security maintenance only; no local decisions)\n`
   + `       ${governance.governanceCommand('finish')} (the session start runs it once after a bank turn-on merges)\n`;
@@ -145,6 +146,13 @@ class ToolkitGovernanceCli {
     let requestedRun = null;
     let answers = null;
     let ticket = null;
+    let explain = null;
+    // `setup --answers "explain 1.4"` with no ticket: the full text of one row, read-only.
+    if (['setup', 'refresh'].includes(rest[0]) && rest.length === 3 && rest[1] === '--answers') {
+      explain = governanceBank.explainParts(rest[2]);
+      if (!explain || json) { this.#stderr.write(USAGE); return 2; }
+      rest = [rest[0]];
+    }
     if (['setup', 'refresh'].includes(rest[0]) && rest.length === 5 && rest[1] === '--answers' && rest[3] === '--ticket') {
       answers = String(rest[2]);
       ticket = String(rest[4]);
@@ -180,9 +188,9 @@ class ToolkitGovernanceCli {
       if (command === 'finish') return await this.#finish(json);
       if (command === 'publish') return this.#publish(json, requestedRun);
       if (command === 'setup' || command === 'refresh') {
-        const code = await this.#bank(json, answers, ticket);
-        // Every output that follows an answer ends with the one Agents line (the bank's own has its own).
-        if (answers !== null) this.#stdout.write(`\n${governanceBank.AGENTS_AFTER_ANSWER}\n`);
+        const code = await this.#bank(json, answers, ticket, explain);
+        // Every output that follows an answer or an explain ends with the one Agents line (the bank's own has its own).
+        if (answers !== null || explain) this.#stdout.write(`\n${governanceBank.agentsAfterAnswer()}\n`);
         return code;
       }
       return await this.#decide(command, json);
@@ -191,7 +199,7 @@ class ToolkitGovernanceCli {
         : error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? [ADOPTION_NOT_READY, 2]
           : error instanceof GovernanceCliError ? [error.message, error.exitCode]
             : [`Toolkit governance stopped because of an unexpected problem (${error?.name || 'Error'}${error?.code ? ` ${error.code}` : ''}). The operation did not finish or could not be verified. Read back its result before retrying.`, 2];
-      this.#stderr.write(`${text}\n${answers !== null ? `\n${governanceBank.AGENTS_AFTER_ANSWER}\n` : ''}`);
+      this.#stderr.write(`${text}\n${answers !== null || explain ? `\n${governanceBank.agentsAfterAnswer()}\n` : ''}`);
       return code;
     }
   }
@@ -431,8 +439,10 @@ class ToolkitGovernanceCli {
   // format as setup toolkit. Shown, it notes the bank for this run so the owner's next own message
   // gets a one-use ticket (toolkit-governance-bank.cjs), and exits BANK_SHOWN. With --answers and that
   // ticket it applies the owner's answer: at most one governance pull request, and the permission
-  // blocks. In the owner's own terminal it shows the bank and reads the reply there.
-  async #bank(json, answers, ticket) {
+  // blocks. In the owner's own terminal it shows the bank and reads the reply there. `explain` (a row
+  // number and the bank reference it names, explainParts) prints that row's full text of the bank the
+  // owner was shown and nothing else: no ticket, no note, no write (#explainShown).
+  async #bank(json, answers, ticket, explain = null) {
     this.#refresh(this.#cwd);
     const state = this.#state();
     if (state.rule === 'ERROR' || state.state === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code || 'ERROR'}). Nothing was written.`);
@@ -474,6 +484,10 @@ class ToolkitGovernanceCli {
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
     const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
     const reference = governanceBank.bankReference(specs);
+    if (explain) {
+      this.#print(false, {}, this.#explainShown(state, specs, reference, explain));
+      return 0;
+    }
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
       if (this.#interactive) {
@@ -513,12 +527,38 @@ class ToolkitGovernanceCli {
       }
       return again(['The governance state changed since that bank was shown, so the answer was not used and nothing was written.', ...changed]);
     }
-    const explain = governanceBank.explainRequest(answers);
-    if (explain) return again([governanceBank.explainText(specs, explain) || `This bank has no row ${explain}.`, '']);
+    const row = governanceBank.explainRequest(answers);
+    if (row) return again([governanceBank.explainText(specs, row) || `This bank has no row ${row}.`, '']);
     let chosen;
     try { chosen = governanceBank.parseBankAnswer(answers, specs); }
     catch (error) { return again([`${error.message} Nothing was written.`]); }
-    return this.#applyBank(state, task, chosen, found, permissions, train);
+    // The bank stays open after an answer too, so the owner's next own message (another change, or a
+    // row that does not exist) gets a new one-use ticket and its own line, never a spent ticket.
+    try { return this.#applyBank(state, task, chosen, found, permissions, train); }
+    finally {
+      try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, rows: governanceBank.rowDigests(specs) }); } catch { /* the owner can type toolkit governance */ }
+    }
+  }
+
+  // The ticketless "explain 1.4" reads row 1.4 of the bank the owner was shown: the one its command
+  // names, else this session's noted bank (read only, never spent). When that bank is not this one, it
+  // says what the ticket path says: the rows that changed, then the row, while every number still
+  // means the same row; otherwise that the bank changed, so it never prints another row under a
+  // number the owner saw (an answer that opens a shards pull request moves later numbers).
+  #explainShown(state, specs, reference, { reference: named, row }) {
+    const text = governanceBank.explainText(specs, row) || `This bank has no row ${row}.`;
+    const sessionId = this.#hostSession();
+    let noted = null;
+    try {
+      const epoch = sessionId ? new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(sessionId) : null;
+      noted = sessionId ? new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).pendingFor(sessionId, epoch) : null;
+    } catch { noted = null; }
+    if (noted && noted.repository_id !== state.repository_id) noted = null;
+    const shown = named || noted?.bank_reference || null;
+    if (!shown || shown === reference) return [text];
+    const changed = noted?.bank_reference === shown ? governanceBank.changedRows(noted.rows, specs) : null;
+    if (!changed) return [`The governance bank changed since it was shown (rows were added, taken away or numbered differently), so row ${row} as shown is not explained here and nothing was written. Type toolkit governance to see the new bank.`];
+    return ['The governance state changed since that bank was shown; the numbers still mean the same rows.', ...changed, '', text];
   }
 
   // A reply that could not be used: its lines and the one reply line, and the bank noted again for
