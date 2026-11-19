@@ -100,26 +100,27 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.equal(shown.split(after).length, 2, 'named once where Turn on is recommended');
   assert.ok(!bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' } })).includes(after));
   // A repository with no required checks yet: the status row says protection waits, and the step.
-  const fresh = adoption => questionBank.renderCompactQuestionTable(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' },
-    adoption: { repository: 'owner/app', store: { repository: 'owner/TRANSPORT-app', create: true }, found_store: null, store_name: 'TRANSPORT-app', store_choice: false, parent: { issue: null, create: true }, visibility: 'private', unknown: [], ...adoption } }), true).join('\n');
+  const fresh = adoption => bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' },
+    adoption: { repository: 'owner/app', store: { repository: 'owner/TRANSPORT-app', create: true }, found_store: null, store_name: 'TRANSPORT-app', store_choice: false, parent: { issue: null, create: true }, visibility: 'private', unknown: [], ...adoption } }));
   // The migrate step is in the turn-on result (turnOnSummary), not the bank.
-  assert.match(fresh({ checks: [] }), /\| 1\.8 \| Required checks \| None yet \| Nothing to answer: Default-branch protection waits for them \| - \|/);
-  assert.match(fresh({ checks: ['validate'] }), /\| 1\.8 \| Required checks \| validate \| Nothing to answer: Taken from what the default branch already enforces \| - \|/);
+  assert.match(fresh({ checks: [] }), /^- Required checks: None yet\. Default-branch protection waits for them\.$/m);
+  assert.match(fresh({ checks: ['validate'] }), /^- Required checks: validate\. Taken from what the default branch already enforces\.$/m);
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);
-  assert.match(table, /\| 1\.6 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
-  assert.doesNotMatch(table, /\| 1\.4 \||\| 1\.5 \|/, 'rows that do not apply leave their numbers free');
+  assert.match(table, /\| 1\.4 \| Governance App \| Not checked \| B\. Set up: .* \| A\. Keep current \|/);
+  assert.doesNotMatch(table, /\| 1\.5 \|/, 'rows that do not apply leave no gap: the App row takes 1.4');
   assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.6=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.2=B`, undecided).taskAutoMerge, 'on', 'on together with turning governance on');
-  assert.throws(() => bank.parseBankAnswer(`${reference}: 1.1=A, 1.2=B`, undecided), /only while governance is on/);
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 1.4=A, 2.1=B`, undecided), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'remove', evidenceStore: 'keep' });
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=B, 1.2=B`, undecided).taskAutoMerge, 'on', 'on together with turning governance on');
+  // A row left out stays as it is, so on its own 1.2=B leaves governance undecided and is refused.
+  for (const answer of ['1.2=B', '1.1=A, 1.2=B']) assert.throws(() => bank.parseBankAnswer(`${reference}: ${answer}`, undecided), /only while governance is on/, answer);
   const outdated = bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', missing: 2, stale: 4 } });
   assert.match(questionBank.renderCompactQuestionTable(outdated, true).join('\n'), /\| 2\.1 \| Toolkit permissions \(Claude Code\) \| Outdated: 2 missing, 4 old \| B\. Update: .* \| A\. Keep current<br>C\. Remove \|/);
   assert.throws(() => bank.parseBankAnswer('AAAA-AAAA-AAAA-AAAA: all recommended', undecided), /Governance question bank reference is stale/);
-  assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /unavailable question 1\.9/);
+  assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /^Error: This bank has no row 1\.9\.$/);
   const enabled = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'after-gates', merged: { store: { repository: 'owner/store' }, required_checks: [] }, ciShards: { estimate: '', measured: null } });
   assert.notEqual(bank.bankReference(enabled), reference, 'a different state is a different bank');
-  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'setup', permissionBlocks: 'keep', evidenceStore: 'keep', ciShards: 'not-now' }, 'a governed bank also asks about parallel CI shards; Set up stays recommended and gives no command once governance is off');
+  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep', ciShards: 'not-now' }, 'a governed bank also asks about parallel CI shards; every row left out stays as it is');
   assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B, 1.4=B`, enabled), /answered only while governance is on/);
 });

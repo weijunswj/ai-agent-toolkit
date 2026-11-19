@@ -225,7 +225,8 @@ class PermissionBlocks {
         if (host === 'codex' && row.codex === false) { prompts.push({ command, tokens, why: CODEX_OPEN }); continue; }
         entries.push({ id: row.id, command, tokens, guard: row.guard });
         tableIds.add(row.id);
-        for (const form of forms) coverage.push({ line: `${command}${form}`, guard: row.guard });
+        const name = row.kind === 'script' ? path.posix.basename(row.script) : command;
+        for (const form of forms) coverage.push({ line: `${command}${form}`, name, rest: `${row.sub ? ` ${row.sub}` : ''}${form}`, guard: row.guard });
         for (const tool of tools) {
           if (tool === 'codex') continue;
           for (const form of forms) allow.push(`${tool}(${command}${form})`);
@@ -321,7 +322,9 @@ function parseArgs(argv) {
 }
 
 function describe(built, options) {
-  const lines = ['Toolkit permission blocks. Toolkit only prints these: you add them once, with the one command at the end or by pasting, and an agent writes them only when you ask it to.', ''];
+  const shortcut = applyLine(built);
+  // The owner's one command opens the print and closes it, so it is not lost below the blocks.
+  const lines = [`Toolkit permission blocks. To add them, paste this one command into your own PowerShell or terminal, then press Enter. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it. Or paste the blocks below by hand; an agent writes them only when you ask it to.`, '', `    ${shortcut.command}`, ''];
   lines.push(...permissionsTable(built), '');
   for (const block of built.blocks) {
     const app = block.host === 'claude' ? 'Claude Code' : 'Codex';
@@ -335,13 +338,24 @@ function describe(built, options) {
   }
   for (const stop of built.stops) lines.push(`Stopped: ${stop.stopped} Next: ${stop.next}`);
   if (built.stops.length) lines.push('');
-  lines.push('What still checks each line, in full:', ...built.coverage.map(row => `- ${row.line}: ${row.guard}`), '');
+  lines.push('What still checks each line:', ...guardLines(built.coverage), '');
   lines.push('Never in a block: merges, closes, deletes outside the cleanup and store commands, raw git pushes, history rewrites, settings edits, secrets and real keys. Those keep asking. Evidence store work goes through the store command, which pushes only the bound store branch and never forces; the shell hook refuses a raw push to a store bound on this computer.');
   lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push(`To take every Toolkit line out again, run ${applyLine(built, '--remove').command} in your own terminal. Run toolkit permissions again after the Toolkit folder moves.`);
-  const shortcut = applyLine(built);
   lines.push(`Owner shortcut: paste this one command into your own PowerShell or terminal, then press Enter. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it.`, '', `    ${shortcut.command}`);
   return lines;
+}
+
+// One line per guard, naming every line it covers in short (the script's file name, then each
+// subcommand), so a guard shared by many lines is said once.
+function guardLines(coverage) {
+  const groups = new Map();
+  for (const row of coverage) {
+    if (!groups.has(row.guard)) groups.set(row.guard, []);
+    const items = groups.get(row.guard);
+    items.push(items.length && coverage.find(other => other.guard === row.guard && other.name === row.name) !== row ? row.rest.trim() : `${row.name}${row.rest}`);
+  }
+  return [...groups].map(([guard, items]) => `- ${items.join(', ')}: ${guard}`);
 }
 
 // The plain-English table of what the blocks allow. Only Toolkit's own commands and this
