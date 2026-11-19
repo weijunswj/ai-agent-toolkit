@@ -1428,16 +1428,9 @@ function antigravityState(args, owner = new AntigravityGlobalSkills({ toolkitRoo
   try { installed = owner.installed(); copies = owner.hasCopies(); }
   catch { return { installed: false, copies: false, outOfDate: 0 }; }
   if (!copies) return { installed, copies, outOfDate: 0 };
-  // Toolkit's copies that a copy run would change: out of date, missing since a newer Toolkit added a
-  // skill, or retired from the source (a copy run removes those). Hand copies never count. Reading the
-  // copies can fail (a link or an unreadable file); that never hides the copies: it shows as null,
-  // "could not check".
-  try {
-    const names = new Set(owner.skillNames());
-    const retired = owner.recorded().filter((row) => !names.has(row.skill)).length;
-    const behind = owner.inspect().filter((row) => row.state === 'stale' || row.state === 'missing').length;
-    return { installed, copies, outOfDate: behind + retired };
-  } catch { return { installed, copies, outOfDate: null }; }
+  // Toolkit's copies that a copy run would change (ManagedSkillCopies.outOfDate). Reading the copies can
+  // fail (a link or an unreadable file); that never hides the copies: it shows as null, "could not check".
+  try { return { installed, copies, outOfDate: owner.outOfDate() }; } catch { return { installed, copies, outOfDate: null }; }
 }
 
 function antigravitySkillsOutcome(state) {
@@ -1447,32 +1440,39 @@ function antigravitySkillsOutcome(state) {
   return "Toolkit's skills are not in Antigravity's global skills folder.";
 }
 
+// With Toolkit's copies there, the owner already chose "Copy and keep updated": that is the saved answer,
+// shown as Keep current, and it refreshes whatever is out of date. Session start does the same after each
+// Toolkit update.
+function antigravitySkillsRecommendation(state) {
+  if (!state?.copies) return { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' };
+  const reason = state.outOfDate === null ? 'You chose to copy them before; setup could not check whether they match this Toolkit version, so it refreshes them.'
+    : state.outOfDate ? `You chose to copy them before, and ${state.outOfDate} need refreshing; Keep current refreshes them.`
+      : 'You chose to copy them before, and they match this Toolkit version.';
+  return { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason };
+}
+
 function antigravitySkillsQuestion(args, current) {
   const outcome = antigravitySkillsOutcome(current.antigravity);
+  const copies = current.antigravity?.copies;
   return resolvedQuestion({
     id: 'antigravity-skills',
     key: 'antigravitySkills',
     section: 'Toolkit in your coding apps',
     title: "Copy Toolkit's skills into Antigravity?",
     prompt: 'Antigravity skills choice',
-    whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
+    whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills), where each session start and each setup keep them current. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
     choices: [
       wizardChoice('copy', 'Copy and keep updated', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
-      ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
+      ...(copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
       wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
     ],
-    recommendation: current.antigravity?.copies && current.antigravity.outOfDate === null
-      ? { value: 'copy', outcome: "Refresh Toolkit's skills in Antigravity.", reason: 'You chose to copy them before, and setup could not check whether they match this Toolkit version.' }
-      : current.antigravity?.copies && current.antigravity.outOfDate
-      ? { value: 'copy', outcome: "Bring Toolkit's skills in Antigravity up to date.", reason: 'You chose to copy them before, and some of the copies are older than this Toolkit version.' }
-      : current.antigravity?.copies
-        ? { value: 'keep', outcome: "Leave Toolkit's skills in Antigravity as they are.", reason: 'Your copies already match this Toolkit version; setup offers to refresh them when they fall behind.' }
-        : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
+    ...(copies ? { currentChoice: 'copy', keepAs: 'Keep copying them and keeping them current: setup refreshes any out-of-date copies after you answer, and session start does the same after each Toolkit update.' } : {}),
+    recommendation: antigravitySkillsRecommendation(current.antigravity),
     selected: args.setupChoices.antigravitySkills,
     current: outcome,
-    currentShort: !current.antigravity?.copies ? 'Not copied'
-      : current.antigravity.outOfDate === null ? 'Copied, could not check'
-        : current.antigravity.outOfDate ? `Copied, ${current.antigravity.outOfDate} out of date` : 'Copied, up to date',
+    currentShort: !copies ? 'Not copied'
+      : current.antigravity.outOfDate === null ? 'Copied, kept updated, could not check'
+        : current.antigravity.outOfDate ? `Copied, kept updated, ${current.antigravity.outOfDate} to refresh` : 'Copied, kept updated',
     currentVerification: 'state-derived',
     afterApplying: 'Start a new Antigravity session to load changed skills.',
   });

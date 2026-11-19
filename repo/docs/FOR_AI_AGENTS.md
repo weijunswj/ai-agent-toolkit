@@ -39,7 +39,7 @@ Use installed skills only when they clearly match the task and improve correctne
 
 | Skill | Use when the task involves |
 | --- | --- |
-| `repository-agent-rules` | The Toolkit-governed `AGENTS.md` block, the one-line `CLAUDE.md` and the Antigravity bootstrap for an opted-in repository. |
+| `repository-agent-rules` | A repository's Toolkit files (the CI checks a governed repository carries and the one-line `CLAUDE.md` shim), and Toolkit instruction copies an older setup left. |
 | `controller-bootstrap` | Explicitly take over or recover an assigned Toolkit controller through the shared takeover playbook, using trusted CURRENT and exact Controller/registry source evidence; ordinary coding, setup, and GitHub programme reconciliation remain separate. |
 | `toolkit-setup` | AI Agent Toolkit plugin setup or refresh, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, Antigravity portable skills copying, bridge audit, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. |
 | `toolkit-env` | Seeing, adding, changing, rotating, removing, or connecting the user's own local API keys and tokens for Claude Code or Codex, including `toolkit env` commands and MCP entries that read those keys. Server-side secrets and Toolkit installation are excluded. |

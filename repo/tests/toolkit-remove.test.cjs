@@ -397,7 +397,7 @@ function fullHome(t) {
   assert.ok(n8n.install().copied.length > 0);
   fs.mkdirSync(path.join(home, '.claude', 'skills', 'my-skill'), { recursive: true });
   const folder = path.join(home, '.ai-agent-toolkit');
-  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'notes/mine.txt']) {
+  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'antigravity-refresh/source.json', 'antigravity-refresh/update.lock', 'notes/mine.txt']) {
     fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x');
   }
   const installed = { 'claude-code': true, codex: false };
@@ -428,6 +428,7 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.match(text, /Toolkit folder \(goes last, once no Toolkit plugin is installed\):/);
   assert.match(text, /~\/\.ai-agent-toolkit\/agent-control: removed \(its backups folder stays\)/);
   assert.match(text, /~\/\.ai-agent-toolkit\/env: kept, the list of your keys/);
+  assert.match(text, /~\/\.ai-agent-toolkit\/antigravity-refresh: removed/, 'the Antigravity refresh stamp and lock are Toolkit files');
   assert.match(text, /~\/\.ai-agent-toolkit\/notes: kept, not a Toolkit file/);
   assert.match(text, /Plugins to uninstall[^\n]*\n- Claude Code: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`\n- Claude Code: `claude plugin marketplace remove ai-agent-toolkit-local`/);
   assert.doesNotMatch(text, /codex plugin remove/);

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { ManagedSkillCopies, copySummary } = require('./toolkit-skill-copies.cjs');
+const { OfficialN8nSkills } = require('./toolkit-n8n-official-skills.cjs');
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PORTABLE_SKILLS_RELATIVE_PATH = path.join('.agents', 'skills');
@@ -221,6 +223,118 @@ class AntigravityGlobalSkills extends ManagedSkillCopies {
 
 function globalCopySummary(result) { return copySummary(result).join('; ') || 'nothing to copy'; }
 
+const REFRESH_SCHEMA = 'ai-agent-toolkit.antigravity-refresh.v1';
+const COMMIT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+// A managed checkout has both; anything else is not a source to copy from.
+const CHECKOUT_FILES = Object.freeze([['skills'], ['repo', 'contracts', 'toolkit-local-bridge', 'version.json']]);
+
+// The commit a checkout has checked out, read from its git files without running git, so an unchanged
+// checkout costs a session start two small reads. '' when it cannot be read, which counts as changed.
+function checkoutCommit(root) {
+  const read = (file) => fs.readFileSync(file, 'utf8').trim();
+  try {
+    let gitDir = path.join(root, '.git');
+    if (fs.statSync(gitDir).isFile()) gitDir = path.resolve(root, /^gitdir:\s*(.+)$/m.exec(read(gitDir))[1].trim());
+    const head = read(path.join(gitDir, 'HEAD'));
+    if (COMMIT.test(head)) return head;
+    const ref = /^ref:\s*(refs\/\S+)$/.exec(head)?.[1];
+    if (!ref) return '';
+    let common = gitDir;
+    try { common = path.resolve(gitDir, read(path.join(gitDir, 'commondir'))); } catch { /* not a linked worktree */ }
+    for (const dir of new Set([gitDir, common])) {
+      try { const value = read(path.join(dir, ...ref.split('/'))); if (COMMIT.test(value)) return value; } catch { /* packed */ }
+    }
+    const value = read(path.join(common, 'packed-refs')).split(/\r?\n/).find((line) => line.endsWith(` ${ref}`))?.split(' ')[0] || '';
+    return COMMIT.test(value) ? value : '';
+  } catch { return ''; }
+}
+
+// The refresh lock: the bridge's update lock (its acquireLock and releaseLock), in a folder of its own. Two
+// session starts after one update never interleave their copies, and the bridge's own lock (held around
+// the install check) never blocks the refresh. A hook never waits: a held lock skips this run. The caller
+// hands in a loader for the bridge's two functions (this module never requires the bridge, which requires
+// it), so a start on an unchanged checkout never loads the bridge.
+function refreshLock(loadBridge) {
+  return (folder) => {
+    const bridge = loadBridge();
+    const lock = bridge.acquireLock(folder, { hook: true, syncSource: 'antigravity-refresh' });
+    return { acquired: lock.acquired, release: () => bridge.releaseLock(lock) };
+  };
+}
+
+// Session start keeps Toolkit's copies in Antigravity's global skills folder current once the user chose
+// them in setup (the Antigravity ledger exists): the portable skills and the official n8n skills there,
+// copied from the managed checkout, never from the copy that runs. The checkout's commit is stamped after
+// each complete refresh, so a session start on an unchanged checkout stops before taking a lock or reading
+// Antigravity's folder; a skipped or failed run leaves the stamp, so the next start tries again. Only
+// Toolkit's recorded folders are written: hand copies and the apps' own folders stay as they are, and a
+// copy edited by hand between Toolkit updates waits for the next update or setup.
+// run() never throws: { status, copied, pruned, source, error }, status one of not-opted-in, no-source,
+// current, not-installed, busy, updated, failed.
+class AntigravitySessionRefresh {
+  #checkout; #folder; #lock; #portable; #n8n;
+  constructor({ checkout, homeDir = os.homedir(), lock } = {}) {
+    const controlRoot = path.join(homeDir, '.ai-agent-toolkit');
+    this.#checkout = typeof checkout === 'string' && path.isAbsolute(checkout) ? checkout : '';
+    this.#folder = path.join(controlRoot, 'antigravity-refresh');
+    this.#lock = lock;
+    this.#portable = new AntigravityGlobalSkills({ toolkitRoot: this.#checkout, homeDir, controlRoot });
+    this.#n8n = OfficialN8nSkills.antigravityOnly({ toolkitRoot: this.#checkout, homeDir, controlRoot });
+  }
+
+  #stamped() {
+    try {
+      const stamp = JSON.parse(fs.readFileSync(path.join(this.#folder, 'source.json'), 'utf8'));
+      return stamp?.schema === REFRESH_SCHEMA && typeof stamp.source_commit === 'string' ? stamp.source_commit : '';
+    } catch { return ''; }
+  }
+
+  #stamp(commit) {
+    const file = path.join(this.#folder, 'source.json');
+    const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    fs.writeFileSync(temp, `${JSON.stringify({ schema: REFRESH_SCHEMA, source_commit: commit }, null, 2)}\n`, { flag: 'wx' });
+    fs.renameSync(temp, file);
+  }
+
+  #refresh() {
+    const result = (status, extra = {}) => ({ status, copied: 0, pruned: 0, ...extra });
+    if (!this.#portable.hasCopies()) return result('not-opted-in');
+    if (!this.#checkout || !CHECKOUT_FILES.every((parts) => fs.existsSync(path.join(this.#checkout, ...parts)))) return result('no-source');
+    const commit = checkoutCommit(this.#checkout);
+    if (commit && this.#stamped() === commit) return result('current');
+    if (!this.#portable.installed()) return result('not-installed');
+    const lock = this.#lock(this.#folder);
+    if (!lock.acquired) return result('busy');
+    try {
+      const runs = [this.#portable, this.#n8n].filter((owner) => owner.outOfDate() > 0).map((owner) => owner.install());
+      if (commit) this.#stamp(commit);
+      const copied = runs.reduce((sum, run) => sum + run.copied.length, 0);
+      const pruned = runs.reduce((sum, run) => sum + run.pruned.length, 0);
+      return result(copied || pruned ? 'updated' : 'current', { copied, pruned, source: commit });
+    } finally { lock.release(); }
+  }
+
+  run() {
+    // A file-system error is named by its code only, so no private path reaches the report.
+    try { return this.#refresh(); } catch (error) { return { status: 'failed', copied: 0, pruned: 0, error: error?.code || error?.message || String(error) }; }
+  }
+}
+
+// The session-start install check for a refresh: only a change or a failure reports.
+function sessionRefreshCheck(result) {
+  const label = 'Antigravity skills';
+  if (result?.status === 'updated') {
+    const done = [result.copied ? `refreshed ${result.copied}` : '',
+      result.pruned ? `removed ${result.pruned} retired skill${result.pruned === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
+    return { id: 'antigravity-skills', label, status: 'passed', summary: `Toolkit's skill copies in Antigravity: ${done}. Start a new Antigravity session to load the changed skills.`,
+      updated: true, run: result.source || '' };
+  }
+  if (result?.status !== 'failed') return null;
+  const reason = /^E[A-Z]+$/.test(result.error) ? `file error ${result.error}` : result.error;
+  return { id: 'antigravity-skills', label, status: 'action-required', summary: `could not refresh Toolkit's skill copies in Antigravity (${reason}); the next session start tries again.`,
+    action: "Close Antigravity, then start a new session. If this keeps happening, run `setup toolkit` and keep Toolkit's skills in Antigravity." };
+}
+
 function copyPortableSkills({ projectRoot, sourceSkillsRoot, write = false }) {return new PortableSkillCopyOperation({projectRoot,sourceSkillsRoot,write}).run();}
 
 function printHelp() {
@@ -255,4 +369,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { AntigravityGlobalSkills, INTERNAL_SKILLS, copyPortableSkills, globalCopySummary, parseArgs, run };
+module.exports = { AntigravityGlobalSkills, AntigravitySessionRefresh, INTERNAL_SKILLS, checkoutCommit, copyPortableSkills, globalCopySummary, parseArgs, refreshLock, run, sessionRefreshCheck };

@@ -123,7 +123,7 @@ Repo-local agent instruction installs need a selected or open target repo, or an
 | Codex | `<repo>\.agents\skills\<skill-name>\`<br>`%USERPROFILE%\.agents\skills\<skill-name>\` | `AGENTS.md` |
 | Claude Code | `<repo>\.claude\skills\<skill-name>\`<br>`%USERPROFILE%\.claude\skills\<skill-name>\` | `AGENTS.md`, `CLAUDE.md` shim |
 | OpenCode | `<repo>\.opencode\skills\<skill-name>\`<br>`%USERPROFILE%\.config\opencode\skills\<skill-name>\`<br>`<repo>\.claude\skills\<skill-name>\`<br>`%USERPROFILE%\.claude\skills\<skill-name>\`<br>`<repo>\.agents\skills\<skill-name>\`<br>`%USERPROFILE%\.agents\skills\<skill-name>\` | `AGENTS.md` |
-| Antigravity 2 | `<workspace>\.agents\skills\<skill-name>\` (portable copy only; no native plugin) | `AGENTS.md`, Antigravity 2 bootstrap |
+| Antigravity 2 | `<workspace>\.agents\skills\<skill-name>\` (portable copy only; no native plugin) | `AGENTS.md` |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
@@ -176,7 +176,7 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target.
 
-When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills into Antigravity's global skills folder (`~/.gemini/config/skills`) and keeps Toolkit's copies current on each setup; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed.
+When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills and the official n8n skills into Antigravity's global skills folder (`~/.gemini/config/skills`). After that, each Claude Code or Codex session start (with auto-sync or repo auto-update on) refreshes Toolkit's copies from the managed checkout once Toolkit has updated (an unchanged Toolkit costs it two small file reads), and setup shows the answer as Keep current; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed. Start a new Antigravity session after a refresh to load the changed skills.
 
 For one workspace only, use the copy below instead.
 
@@ -200,12 +200,7 @@ The copy writes only skill files under `<workspace>\.agents\skills\` and leaves 
 |---|---|
 | Workspace portable copy | `<workspace>\.agents\skills\<skill-name>\SKILL.md` |
 
-**Put repo-local bootstrap outputs in the target repo:**
-
-1. `AGENTS.md`.
-2. `.agents/rules/00-agent-toolkit-bootstrap.md`.
-
-Antigravity 2 reads `AGENTS.md` itself, so Toolkit installs no `GEMINI.md` shim.
+Antigravity 2 reads `AGENTS.md` itself, so Toolkit installs no `GEMINI.md` shim. Toolkit writes no other repo-local rule file for it either: no bootstrap file and no copy of the governed rules.
 
 `skills/**/SKILL.md` files are complete canonical toolkit surfaces. Edit the relevant skill folder directly and run the targeted skill portability and surface audits.
 

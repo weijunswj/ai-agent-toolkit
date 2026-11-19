@@ -313,6 +313,42 @@ test('Codex auto-refresh runs before a delegated hub sync failure', () => {
   assert.match(report.text, /warning\/error: `delegated repo sync failed:/);
 });
 
+// The Codex session start keeps Toolkit's copies in Antigravity current from the managed checkout (never
+// the copy Codex runs), once the owner chose them; with no copies chosen it writes nothing there.
+test('Codex session start refreshes Toolkit\'s Antigravity copies from the managed checkout only when chosen', () => {
+  const { AntigravityGlobalSkills } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n' });
+  writeFile(path.join(sourceRepo, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), '{"version":"1.0.0"}\n');
+  writeFile(path.join(sourceRepo, 'repo', 'contracts', 'third-party', 'n8n-io-skills', 'skills', 'n8n-one-official', 'SKILL.md'), 'n8n v1\n');
+  commitAll(sourceRepo, 'checkout files');
+  const hub = path.join(root, 'hub', 'current');
+  const env = isolatedHomeEnv(root, { PATH: process.env.PATH });
+  let result = run(['--hub', hub, '--repo-path', sourceRepo, '--write', '--enable-auto-sync', '--sync-source', 'codex-plugin'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  const hook = () => run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], { env });
+  const gemini = path.join(root, '.gemini');
+
+  // Not chosen: nothing is created under Antigravity's folder.
+  result = hook();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(gemini), false);
+
+  // Chosen in setup, then the managed checkout moves on.
+  fs.mkdirSync(gemini);
+  new AntigravityGlobalSkills({ toolkitRoot: sourceRepo, homeDir: root }).install();
+  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'SKILL.md'), 'alpha v2\n');
+  commitAll(sourceRepo, 'alpha v2');
+  result = hook();
+  assert.equal(result.status, 0, result.stderr);
+  const target = path.join(gemini, 'config', 'skills');
+  assert.equal(fs.readFileSync(path.join(target, 'alpha', 'SKILL.md'), 'utf8'), 'alpha v2\n', 'copied from the managed checkout');
+  assert.equal(fs.readFileSync(path.join(target, 'n8n-one-official', 'SKILL.md'), 'utf8'), 'n8n v1\n');
+  assert.deepEqual(fs.readdirSync(target).sort(), ['alpha', 'n8n-one-official'], 'nothing from the copy Codex runs');
+  const report = readLatestReport(hub);
+  assert.match(report.text, /- Antigravity skills: Toolkit's skill copies in Antigravity: refreshed 2\./);
+});
+
 test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {
   const marketplace = readJson(path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'));
   assert.equal(marketplace.name, 'ai-agent-toolkit-local');

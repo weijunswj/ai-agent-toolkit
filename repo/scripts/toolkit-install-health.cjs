@@ -14,6 +14,8 @@
 // once toolkit env is in use, its store and connected MCP entries (by key name only).
 // Notices that block nothing: an older saved Projects controller skill, and an older Toolkit copy
 // from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it).
+// At session start only: Toolkit's skill copies in Antigravity, refreshed from the managed checkout
+// once the user chose them in setup (reported only when changed or failed).
 // It never reports Codex's Toolkit state: Codex reports that in its own setup and checks.
 //
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
@@ -29,6 +31,7 @@ const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
+const { AntigravitySessionRefresh, refreshLock, sessionRefreshCheck } = require('./toolkit-antigravity-project-skills.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
 const RECORDED_SOURCES = Object.freeze(['claude-plugin', 'repo']);
@@ -82,12 +85,13 @@ function claudeAccountToolkitVersion(folders) {
 }
 
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders; #platform;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders; #antigravity; #platform;
 
   // envHealth: an object with health() (see toolkit-env.cjs), or null to skip that check.
   // syncedSkillsDir: where Claude Code keeps skills synced from claude.ai, or null to skip the Projects skill check.
   // accountPluginFolders: the Claude desktop app's account-plugin folders, or null to skip that check.
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null, platform = process.platform }) {
+  // antigravitySkills: an AntigravitySessionRefresh (session start only), or null to skip it.
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null, antigravitySkills = null, platform = process.platform }) {
     this.#platform = platform;
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
@@ -98,6 +102,7 @@ class ToolkitInstallHealthCheck {
     this.#env = envHealth;
     this.#syncedSkillsDir = syncedSkillsDir;
     this.#accountPluginFolders = accountPluginFolders;
+    this.#antigravity = antigravitySkills;
   }
 
   // The checks the installed session-start hook runs, wired to the real files.
@@ -117,6 +122,9 @@ class ToolkitInstallHealthCheck {
       envHealth: ToolkitEnv.forUser({ environment }),
       syncedSkillsDir: path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
       accountPluginFolders: claudeAccountPluginFolders(environment),
+      antigravitySkills: new AntigravitySessionRefresh({ checkout: state.repo_path,
+        homeDir: (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(),
+        lock: refreshLock(() => require('./toolkit-local-bridge.cjs')) }),
     });
   }
 
@@ -331,6 +339,8 @@ class ToolkitInstallHealthCheck {
     if (projectsSkill) checks.push(projectsSkill);
     const accountPlugin = this.#accountPluginCheck();
     if (accountPlugin) checks.push(accountPlugin);
+    const antigravity = this.#antigravity ? sessionRefreshCheck(this.#antigravity.run()) : null;
+    if (antigravity) checks.push(antigravity);
     const status = checks.some((entry) => entry.status === STATUS.ACTION) ? STATUS.ACTION
       : checks.some((entry) => entry.status === STATUS.RESTART) ? STATUS.RESTART : STATUS.PASSED;
     const actions = checks.filter((entry) => entry.status !== STATUS.PASSED && entry.action).map((entry) => entry.action);
