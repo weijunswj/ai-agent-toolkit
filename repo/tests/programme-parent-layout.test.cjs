@@ -217,6 +217,22 @@ test('reopen drops the lane wait in each of its three branches and keeps every o
   assert.deepEqual(f.children.get(653).blockers, [], 'reopen of a gate waiting on the owner');
 });
 
+test('a return consumed as REOPEN drops the lane wait like reopen, and WAITING_OWNER keeps it', () => {
+  const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
+  const f = ownerFixture({ 671: () => {} });
+  Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
+  const submitted = state.recordReturn(state.assignGate(f.children.get(671), { assignment: 'g1-671', role: 'G1' }), { returnId: 'g1-671.r1', assignment: 'g1-671' });
+  submitted.blockers = [LANE_WAIT, 'waits for PR 1098'];
+  const consume = verdict => state.consumeReturn(submitted, { returnId: 'g1-671.r1', verdict, writer, parentDoc: f.parent, liveHead: null });
+  const reopened = consume('REOPEN');
+  assert.deepEqual([reopened.gate.state, reopened.blockers], ['ACTIVE', ['waits for PR 1098']], 'the same result as reopen of a submitted return');
+  assert.deepEqual(state.reopenGate(submitted, { reason: 'fix the review notes' }).blockers, reopened.blockers);
+  f.children.set(671, { ...reopened, blockers: [] });
+  assert.equal(f.cell(671)[2], 'NOW · IN PROGRESS');
+  const waiting = consume('WAITING_OWNER');
+  assert.deepEqual([waiting.gate.state, waiting.blockers], ['WAITING_OWNER', [LANE_WAIT, 'waits for PR 1098']], 'a gate waiting on the owner is not live, so nothing is dropped');
+});
+
 test('a lane wait written after the gate ends, or around an interrupted gate, queues the task again', () => {
   const writer = { session: 'toolkit-controller', prefix: 'INT-TK-' };
   const f = ownerFixture({ 661: child => { child.blockers = [LANE_WAIT]; } });
