@@ -37,6 +37,8 @@ const CACHE_READ_LIMIT = 256 * 1024;
 const CACHE_SCAN_LIMIT = 256;
 const CACHE_FILE = /^[0-9a-f]{32}\.json$/;
 const GIT_TIMEOUT_MS = 5000;
+// A call stopped at its time limit returns a moment after it; one that failed to start returns at once.
+const TIMEOUT_SLACK_MS = 25;
 // Gate admission, finality and governed writes need a read no older than this.
 const FRESH_MS = 24 * 60 * 60 * 1000;
 const BRANCH = /^[A-Za-z0-9._\/-]{1,200}$/;
@@ -132,29 +134,36 @@ function parseSymref(text) {
 // at `hooksDir`, an empty folder the refresh owns, so no repository hook can move the tracking ref,
 // and the ref must then be the commit the remote itself reported.
 function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, deadline = null, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
+  // Each call also says whether its time ran out: the budget was already spent, or the call was
+  // stopped at its limit. A failure that follows such a call is 'read-timed-out', so the session line
+  // can tell a slow read from a refused one.
   const git = (args, commandDeadline = deadline) => {
+    let remaining = 0;
+    const began = Date.now();
     try {
       // Whole milliseconds: spawnSync throws on a fractional timeout, which would read as offline.
-      const remaining = Math.floor(commandDeadline === null ? timeout : Math.min(timeout, commandDeadline - Date.now()));
-      if (!(remaining > 0)) throw new Error('read budget exhausted');
-      return runGit(args, { cwd: root, timeout: remaining });
-    } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
+      remaining = Math.floor(commandDeadline === null ? timeout : Math.min(timeout, commandDeadline - Date.now()));
+      if (!(remaining > 0)) return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), timedOut: true };
+      const run = runGit(args, { cwd: root, timeout: remaining });
+      return { ...run, timedOut: run.status === null && Date.now() - began >= remaining - TIMEOUT_SLACK_MS };
+    } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), timedOut: false }; }
   };
+  const held = (run, error) => ({ status: 'unknown', error: run.timedOut ? 'read-timed-out' : error });
   const set = name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0');
   if (HELD_CONFIG_ENVIRONMENT.some(set) && !cloudContainerConfig(environment)) return { status: 'unknown', error: 'remote-redirected' };
   if (!emptyFolder(hooksDir)) return { status: 'unknown', error: 'hooks-unguarded' };
   const effective = git(['ls-remote', '--get-url', 'origin']);
-  if (effective.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
+  if (effective.status !== 0) return held(effective, 'remote-unreachable');
   const resolved = validateRemoteIdentity(effective.stdout.toString('utf8').trim());
   // The same repository spelt another way (https, ssh, with or without .git) is the same origin.
   if (!expectedRemote || !resolved.valid || repositoryIdForCanonicalRemote(resolved.canonical) !== repositoryIdForCanonicalRemote(expectedRemote)) return { status: 'unknown', error: 'remote-redirected' };
   if (/^(?:ssh|scp):\/\//.test(resolved.canonical) && HELD_SSH_ENVIRONMENT.some(set)) return { status: 'unknown', error: 'remote-redirected' };
   // Exit 1 is "no such setting"; anything else that is not a clean 0 cannot be shown safe.
   const overrides = git(['config', '--show-scope', '--get-regexp', TRANSPORT_OVERRIDES]);
-  if (overrides.status !== 0 && overrides.status !== 1) return { status: 'unknown', error: 'remote-redirected' };
+  if (overrides.status !== 0 && overrides.status !== 1) return held(overrides, 'remote-redirected');
   if (overrides.status === 0 && overrides.stdout.toString('utf8').split(/\r?\n/).some(line => HELD_SCOPES.includes(line.split('\t')[0]))) return { status: 'unknown', error: 'remote-redirected' };
   const symref = git(['ls-remote', '--symref', 'origin', 'HEAD']);
-  if (symref.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
+  if (symref.status !== 0) return held(symref, 'remote-unreachable');
   const branch = parseSymref(symref.stdout.toString('utf8'));
   if (!branch) return { status: 'unknown', error: 'default-branch-unknown' };
   const advertised = /^([0-9a-f]{40}(?:[0-9a-f]{24})?)\tHEAD$/m.exec(symref.stdout.toString('utf8'));
@@ -163,21 +172,21 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const started = Date.now();
   const fetched = git(['-c', `core.hooksPath=${hooksDir}`, 'fetch', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${tracking}`]);
   if (fetched.status === null) removeKilledFetchLock(args => git(args, null), root, tracking, started);
-  if (fetched.status !== 0) return { status: 'unknown', error: 'fetch-failed' };
+  if (fetched.status !== 0) return held(fetched, 'fetch-failed');
   const head = git(['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`]);
   const commit = head.status === 0 ? head.stdout.toString('utf8').trim() : '';
-  if (!SHA.test(commit)) return { status: 'unknown', error: 'commit-unreadable' };
+  if (!SHA.test(commit)) return held(head, 'commit-unreadable');
   // The remote's HEAD moved between the two reads, or something rewrote the ref: read again later.
   if (commit !== advertised[1]) return { status: 'unknown', error: 'ref-moved' };
   const tree = git(['ls-tree', '-l', commit, '--', BINDING_PATH]);
-  if (tree.status !== 0) return { status: 'unknown', error: 'tree-unreadable' };
+  if (tree.status !== 0) return held(tree, 'tree-unreadable');
   const line = tree.stdout.toString('utf8').trim();
   if (!line) return { status: 'absent', default_branch: branch, commit };
   const entry = /^100(?:644|755) blob ([0-9a-f]{40,64})\s+(\d+)\t/.exec(line);
   if (!entry) return { status: 'present', default_branch: branch, commit, text: null, problem: 'not a regular file' };
   if (Number(entry[2]) > BINDING_READ_LIMIT) return { status: 'present', default_branch: branch, commit, text: null, problem: 'too large' };
   const blob = git(['cat-file', 'blob', entry[1]]);
-  if (blob.status !== 0) return { status: 'unknown', error: 'blob-unreadable' };
+  if (blob.status !== 0) return held(blob, 'blob-unreadable');
   return { status: 'present', default_branch: branch, commit, text: blob.stdout.toString('utf8') };
 }
 
@@ -204,6 +213,8 @@ const REFRESH_REASONS = Object.freeze({
   'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c, GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, or GIT_SSH or GIT_SSH_COMMAND for an ssh origin), so the merged binding was not read. A GIT_SSH or GIT_SSH_COMMAND set for good (Plink or TortoiseGit) keeps every refresh of an ssh origin held, and turns queued offline are then dropped unwritten after seven days; an https origin is read normally',
   'remote-unreachable': 'GitHub could not be reached (offline?)',
   'fetch-failed': 'the default branch could not be fetched',
+  'read-timed-out': 'a read of GitHub ran out of time (a slow network or a busy computer); it is read again next time',
+  'refresh-failed': 'the read stopped with an unexpected error',
   'default-branch-unknown': 'the remote did not say which branch is its default',
   'ref-moved': 'the default branch moved while it was read; it is read again next time',
   'hooks-unguarded': 'Toolkit could not prepare its empty hooks folder, so it did not fetch',
@@ -218,6 +229,32 @@ const REFRESH_REASONS = Object.freeze({
 function refreshReason(error) {
   if (Object.hasOwn(REFRESH_REASONS, error)) return REFRESH_REASONS[error];
   return /^[A-Z][A-Z0-9_]{0,63}$/.test(String(error || '')) ? `the identity read failed (${error})` : null;
+}
+
+// Why a refresh kept the last read, as a few fixed words for the session-start line that says
+// governance could not be checked. Only these phrases are shown, never git's output or any setting.
+const REFRESH_CAUSES = Object.freeze({
+  'remote-redirected': 'git settings here would send the read somewhere other than origin',
+  'remote-unreachable': 'GitHub could not be reached',
+  'fetch-failed': 'the default branch could not be fetched',
+  'read-timed-out': 'a read of GitHub ran out of time',
+  'default-branch-unknown': 'GitHub did not say which branch is the default',
+  'ref-moved': 'the default branch moved while it was read',
+  'hooks-unguarded': 'Toolkit could not prepare its empty hooks folder',
+  'commit-unreadable': 'the fetched commit could not be read',
+  'tree-unreadable': 'the fetched commit could not be read',
+  'blob-unreadable': 'the binding file could not be read',
+  'cache-unwritable': "this computer's cache of the read could not be written",
+  'identity-invalid': "this repository's origin could not be read",
+  'refresh-failed': 'the read stopped with an unexpected error',
+  offline: 'governance reads are switched off here',
+});
+// The cause for any code: an identity read failure (an uppercase code) names the origin, a code this
+// copy does not know gets a generic phrase, and no code at all says so.
+function refreshCause(error) {
+  if (typeof error !== 'string' || error === '') return 'the cause was not recorded';
+  if (Object.hasOwn(REFRESH_CAUSES, error)) return REFRESH_CAUSES[error];
+  return /^[A-Z][A-Z0-9_]{0,63}$/.test(error) ? "this repository's origin could not be read" : 'an unrecognised read failure';
 }
 
 // Atomic write of one cache entry; returns the entry. Throws on a write failure.
@@ -336,5 +373,7 @@ module.exports = Object.freeze({
   writeCache,
   isFresh,
   refreshReason,
+  refreshCause,
+  REFRESH_CAUSES,
   defaultRunGit,
 });
