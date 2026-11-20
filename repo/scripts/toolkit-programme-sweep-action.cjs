@@ -394,7 +394,10 @@ class ProgrammeSweepAction {
 
 if (require.main === module) {
   const action = new ProgrammeSweepAction();
-  try { process.exitCode = process.argv[2] === 'store' ? action.store() : process.argv[2] === 'footers' ? action.cleanFooters() : action.run(); }
+  // Each command by name: an unknown one is refused, never run as a refresh.
+  const run = process.argv[2] === 'store' ? () => action.store() : process.argv[2] === 'refresh' ? () => action.run() : process.argv[2] === 'footers' ? () => action.cleanFooters() : null;
+  if (!run) { process.stderr.write('Programme Sweep: unknown command; use store, refresh or footers.\n'); process.exitCode = 1; }
+  else try { process.exitCode = run(); }
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 

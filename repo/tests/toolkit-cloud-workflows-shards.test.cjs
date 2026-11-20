@@ -17,6 +17,7 @@ const conformance = require(path.join(ROOT, 'repo/scripts/toolkit-governance-con
 const governed = require(path.join(ROOT, 'repo/scripts/governed-test-shards.cjs'));
 const COMMIT = workflows.toolkitHead(ROOT);
 const OTHER = 'a'.repeat(40);
+const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
 const source = file => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
 const SHARDS = workflows.SHARD_WORKFLOWS.find(row => row.id === 'test-shards');
 const TIMINGS = workflows.SHARD_WORKFLOWS.find(row => row.id === 'shard-timings');
@@ -62,7 +63,7 @@ function forge(text, edit) {
 
 const rowState = (repo, id, commit = COMMIT, root = ROOT) => workflows.plan({ ciShards: 'yes', repo, root, commit }).rows.find(row => row.id === id)?.state;
 
-test('test shards copy: a job per system with the list\'s shard ids, the pinned Toolkit runner and the gate', () => {
+test('test shards copy: a job per system with the list\'s shard ids, the Toolkit runner from main and the gate', () => {
   const text = workflows.render('test-shards', source(SHARDS.source), COMMIT, BOTH);
   assert.match(text, /^  linux:\n[^]*?^        shard: \["linux-1","linux-2"\]$/m);
   assert.match(text, /^  windows:\n[^]*?^        shard: \["windows-1","windows-2","windows-3"\]$/m);
@@ -76,8 +77,8 @@ test('test shards copy: a job per system with the list\'s shard ids, the pinned 
   assert.ok(source('.github/workflows/validate.yml').includes('name: test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}-${{ github.sha }}'));
   assert.match(text, /pattern: test-summary-\*-\$\{\{ github\.sha \}\}\n/, 'the gate reads only this commit\'s summaries');
   assert.match(text, /run: node \.toolkit\/repo\/scripts\/run-tests\.cjs --repo-root \. --verify "\$RUNNER_TEMP\/test-summaries"\n/);
-  assert.equal((text.match(new RegExp(`repository: weijunswj/ai-agent-toolkit\\n {10}ref: ${COMMIT}\\n {10}path: \\.toolkit\\n`, 'g')) || []).length, 3, 'every job checks the Toolkit out at the pinned commit');
-  assert.doesNotMatch(text, /TOOLKIT_[A-Z]/, 'no placeholder is left');
+  assert.equal((text.match(/repository: weijunswj\/ai-agent-toolkit\n {10}ref: \$\{\{ vars\.TOOLKIT_REF \|\| 'main' \}\}\n {10}path: \.toolkit\n/g) || []).length, 3, 'every job checks out Toolkit main, or the TOOLKIT_REF pin');
+  assert.doesNotMatch(text, /TOOLKIT_(?:CHECKOUT_REF|SHARDS_)/, 'no placeholder is left');
 });
 
 test('test shards copy: least privilege, no secrets, no kept credentials, every action pinned to a Toolkit pin', () => {
@@ -102,7 +103,7 @@ test('test shards copy: a system the list does not name has no job, and bad shar
   const windows = workflows.render('test-shards', source(SHARDS.source), COMMIT, { systems: { windows: ['windows-1', 'windows-2'] } });
   assert.doesNotMatch(windows, /^  linux:|--os linux/m);
   assert.match(windows, /    needs: \[windows\]\n/);
-  assert.equal((windows.match(/ref: [0-9a-f]{40}\n/g) || []).length, 2);
+  assert.equal((windows.match(/ref: \$\{\{ vars\.TOOLKIT_REF \|\| 'main' \}\}\n/g) || []).length, 2);
   for (const bad of [null, { systems: {} }, { systems: { linux: [] } }, { systems: { linux: ['windows-1'] } }, { systems: { linux: ['linux-1', 'linux-1'] } }, { systems: { mac: ['mac-1'] } }, { systems: { linux: ['linux-1"]'] } }]) {
     assert.throws(() => workflows.render('test-shards', source(SHARDS.source), COMMIT, bad), /shard ids/);
   }
@@ -112,7 +113,7 @@ test('test shards copy: a system the list does not name has no job, and bad shar
 test('shard timings copy: the Toolkit\'s own workflow, checking the Toolkit out and refreshing the repository\'s own list', () => {
   const original = source(TIMINGS.source);
   const text = workflows.render('shard-timings', original, COMMIT);
-  assert.match(text, /- name: Check out this run's commit\n[^\n]+\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n\n      - name: Check out the Toolkit\n[^\n]+\n        with:\n          repository: weijunswj\/ai-agent-toolkit\n          ref: [0-9a-f]{40}\n          path: \.toolkit\n          persist-credentials: false\n/);
+  assert.match(text, /- name: Check out this run's commit\n[^\n]+\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n\n      - name: Check out the Toolkit\n[^\n]+\n        with:\n          repository: weijunswj\/ai-agent-toolkit\n          ref: \$\{\{ vars\.TOOLKIT_REF \|\| 'main' \}\}\n          path: \.toolkit\n          persist-credentials: false\n/);
   assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --warn-if-due\n/);
   assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --open-pr\n/);
   assert.doesNotMatch(text, /node repo\/scripts\/|Validate run on main|^# shard manifest\./m, 'nothing that only holds in the Toolkit');
@@ -198,8 +199,10 @@ test('cloud workflows: a change to the list\'s shards makes the test shards copy
   workflows.apply(workflows.plan({ ciShards: 'yes', repo, root: ROOT, commit: COMMIT }));
   assert.match(fs.readFileSync(copy, 'utf8'), /shard: \["linux-1","linux-2","linux-3"\]/);
   assert.equal(rowState(repo, 'test-shards'), 'current');
-  // An older Toolkit commit this checkout does not have: outdated.
+  // A Toolkit commit this checkout does not have, same layout: current; pinned to it: outdated.
   fs.writeFileSync(copy, workflows.render('test-shards', source(SHARDS.source), OTHER, { systems: { linux: ['linux-1', 'linux-2', 'linux-3'] } }));
+  assert.equal(rowState(repo, 'test-shards'), 'current');
+  fs.writeFileSync(copy, pinnedCopy(workflows.render('test-shards', source(SHARDS.source), OTHER, { systems: { linux: ['linux-1', 'linux-2', 'linux-3'] } }), OTHER));
   assert.equal(rowState(repo, 'test-shards'), 'outdated');
 });
 

@@ -6,14 +6,20 @@
 //
 // The copies are rendered from the Toolkit's own workflow files at the commit this checkout is on,
 // read from git, never from the working tree (from an app plugin copy, which has no git, the managed
-// Toolkit checkout the bridge keeps current). Each copy checks the Toolkit out at that same commit
-// into `.toolkit/` (public, no token) and runs the scripts from there, while the binding and the
-// working folder stay the governed repository's own. The render itself is
-// toolkit-cloud-workflows-render.cjs; its header says what it changes. Each copy carries a managed
-// header line naming the Toolkit commit and the copy's hash, so --check can tell a current copy from
-// a stale or hand-edited one. A copy from an older commit is also re-rendered at that commit, when
-// this checkout has it and the render file is unchanged since, so an edit whose hash was recomputed
-// still shows.
+// Toolkit checkout the bridge keeps current). Each copy checks out Toolkit main into `.toolkit/`
+// (public, no token), or the commit the repository's TOOLKIT_REF variable pins (the owner's kill
+// switch: `gh variable set TOOLKIT_REF --repo <owner/name> --body <commit>`), and runs the scripts
+// from there, while the binding and the working folder stay the governed repository's own. The render
+// itself is toolkit-cloud-workflows-render.cjs; its header says what it changes. Each copy carries a
+// managed header line naming the Toolkit commit it was rendered from, the copy's hash and its layout,
+// so --check can tell a current copy from a stale or hand-edited one. Stale means the layout only: a
+// copy is current while its body is what a refresh writes now, whichever commit rendered it. A copy
+// from before layouts pins every Toolkit checkout to one commit and is always outdated. A copy from
+// an older commit is also re-rendered at that commit, when this checkout has it and the render file is
+// unchanged since, so an edit whose hash was recomputed still shows.
+//
+// --refresh-pr brings a governed repository's stale copies up to date through one pull request for
+// the owner to merge (toolkit-cloud-workflows-refresh.cjs); nothing is written to the checkout.
 //
 // Programme Sweep and its gate go to every governed repository. The test shards workflow and Shard
 // Timings go only to a repository whose merged binding answers yes to parallel CI shards (ci_shards,
@@ -22,13 +28,14 @@
 // shards copy carries the list's shard ids in its matrix, so a change to the list's shards makes the
 // copy outdated (a rules refresh rewrites it), never edited.
 //
-// Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]
-// Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed (the reason is printed).
+// Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check | --refresh-pr] [--json]
+// Exit codes: 0 done (or no drift, or nothing for --refresh-pr to do), 1 drift found by --check,
+// 2 not installed or no pull request made (the reason is printed).
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
+const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, TOOLKIT_REF, LAYOUT, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
 const governedShards = require('./governed-test-shards.cjs');
 
 const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
@@ -53,7 +60,7 @@ const CONSEQUENCE = Object.freeze({
 });
 const RESERVED = new Set([...WORKFLOWS, ...SHARD_WORKFLOWS].map(row => row.file.slice('.github/workflows/'.length)).filter(name => name !== governedShards.DEFAULT_WORKFLOW));
 const CI_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
-const USAGE = 'Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]';
+const USAGE = 'Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check | --refresh-pr] [--json]';
 
 const TOOLKIT_REMOTE = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)weijunswj\/ai-agent-toolkit(?:\.git)?\/?$/i;
 // A Toolkit source checkout runs its own workflow files. This file has been there far longer than
@@ -65,7 +72,10 @@ function git(cwd, args) {
   return { ok: !result.error && result.status === 0, stdout: String(result.stdout || '') };
 }
 
-// The Toolkit git checkout the copies are rendered from and pinned to: this copy when it is one,
+// Whether `dir` is a git checkout whose origin is the Toolkit repository (a fork never counts).
+const isToolkitClone = dir => fs.existsSync(path.join(dir, '.git')) && TOOLKIT_REMOTE.test(git(dir, ['remote', 'get-url', 'origin']).stdout.trim());
+
+// The Toolkit git checkout the copies are rendered from: this copy when it is one,
 // otherwise the managed checkout the bridge keeps current (its recorded path, then the default
 // place), because an app's plugin copy has no git. The first whose origin is the Toolkit repository
 // wins; with none, this copy, which then fails with the reason.
@@ -76,10 +86,7 @@ function sourceRoot({ home = os.homedir(), self = TOOLKIT_ROOT } = {}) {
     if (typeof saved === 'string' && saved) candidates.push(saved);
   } catch { /* no bridge state */ }
   candidates.push(path.join(home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit'));
-  for (const candidate of candidates) {
-    if (!fs.existsSync(path.join(candidate, '.git'))) continue;
-    if (TOOLKIT_REMOTE.test(git(candidate, ['remote', 'get-url', 'origin']).stdout.trim())) return path.resolve(candidate);
-  }
+  for (const candidate of candidates) if (isToolkitClone(candidate)) return path.resolve(candidate);
   return self;
 }
 
@@ -200,20 +207,25 @@ function copyState(text, expected, reference = () => null) {
   const marker = MARKER.exec(normalised);
   if (!marker || normalised.indexOf(marker[0]) !== 0) return { state: 'unmanaged' };
   const body = normalised.slice(marker[0].length + 1);
-  if (bodyHash(body) !== marker[3]) return { state: 'edited', toolkit: marker[2] };
+  const pinned = !marker[4];
+  if (bodyHash(body) !== marker[3]) return { state: 'edited', toolkit: marker[2], pinned };
   // The hash leaves pins out, so each pin must still be a full commit SHA: a move to a branch or tag
   // is a hand edit.
-  if ([...body.matchAll(/^\s+(?:- )?uses: ([^\n]*)$/gm)].some(([, value]) => !/^[^@\s]+@[0-9a-f]{40}(?: # [^\n]*)?$/.test(value))) return { state: 'edited', toolkit: marker[2] };
-  // Every Toolkit checkout must name the Toolkit and the commit in the header; a hash recomputed after
-  // changing either is still a hand edit.
-  const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: (\S+)$/gm)];
-  if (!named.length || named.some(([, repository, ref]) => repository !== TOOLKIT_REPOSITORY || ref !== marker[2])) return { state: 'edited', toolkit: marker[2] };
-  if (normalised === expected) return { state: 'current', toolkit: marker[2] };
+  if ([...body.matchAll(/^\s+(?:- )?uses: ([^\n]*)$/gm)].some(([, value]) => !/^[^@\s]+@[0-9a-f]{40}(?: # [^\n]*)?$/.test(value))) return { state: 'edited', toolkit: marker[2], pinned };
+  // Every Toolkit checkout must name the Toolkit and its ref: TOOLKIT_REF for a copy with a layout,
+  // the header's commit for an older pinned copy. A hash recomputed after changing either is still a
+  // hand edit.
+  const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: ([^\n]+)$/gm)];
+  if (!named.length || named.some(([, repository, ref]) => repository !== TOOLKIT_REPOSITORY || ref !== (pinned ? marker[2] : TOOLKIT_REF))) return { state: 'edited', toolkit: marker[2], pinned };
+  // Stale means the layout only: a copy whose body is what a refresh writes now is current, whichever
+  // Toolkit commit rendered it, because it runs Toolkit main either way.
+  if (Number(marker[4]) === LAYOUT && body === expected.slice(expected.indexOf('\n') + 1)) return { state: 'current', toolkit: marker[2], pinned };
   const input = copyInput(marker[1], body);
-  if (input === undefined) return { state: 'edited', toolkit: marker[2] };
-  const own = reference(marker[2], input);
-  if (own !== null && withoutPins(normalised) !== withoutPins(normalise(own))) return { state: 'edited', toolkit: marker[2] };
-  return { state: 'outdated', toolkit: marker[2] };
+  if (input === undefined) return { state: 'edited', toolkit: marker[2], pinned };
+  // A copy from before layouts was made by an older render, so only its hash can be checked.
+  const own = pinned ? null : reference(marker[2], input);
+  if (own !== null && withoutPins(normalised) !== withoutPins(normalise(own))) return { state: 'edited', toolkit: marker[2], pinned };
+  return { state: 'outdated', toolkit: marker[2], pinned };
 }
 
 function readOrNull(file) {
@@ -221,7 +233,7 @@ function readOrNull(file) {
 }
 
 function parseArgs(argv) {
-  const options = { repo: null, ci: null, check: false, json: false };
+  const options = { repo: null, ci: null, check: false, refreshPr: false, json: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--repo' || arg === '--ci-workflow') {
@@ -229,11 +241,13 @@ function parseArgs(argv) {
       if (!value) throw new InstallError(`${arg} needs a value.`);
       if (arg === '--repo') options.repo = value; else options.ci = value;
     } else if (arg === '--check') options.check = true;
+    else if (arg === '--refresh-pr') options.refreshPr = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new InstallError(`unknown argument ${arg}.`);
   }
   if (!options.help && !options.repo) throw new InstallError('--repo is required.');
+  if (options.check && options.refreshPr) throw new InstallError('choose --check or --refresh-pr, not both.');
   if (options.ci && !CI_FILE.test(options.ci)) throw new InstallError('--ci-workflow takes a workflow file name such as ci.yml.');
   return options;
 }
@@ -378,11 +392,17 @@ function report(result, check) {
 
 // `refresh` reads the merged binding again before its ci_shards answer is used, so a copy step run
 // after the answer merged does not act on this computer's older read.
-function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = sourceRoot(), commit, ciShards, refresh = target => require('./toolkit-governance-state.cjs').refreshMergedBinding(target) } = {}) {
+// `github` and `governance` are for tests of --refresh-pr (toolkit-cloud-workflows-refresh.cjs).
+function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = sourceRoot(), commit, ciShards, refresh = target => require('./toolkit-governance-state.cjs').refreshMergedBinding(target), github, governance } = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { err.write(`Not installed: ${error.message}\n${USAGE}\n`); return 2; }
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
-  if (ciShards === undefined) { try { refresh(path.resolve(options.repo)); } catch { /* the last read stays */ } }
+  if (ciShards === undefined || options.refreshPr) { try { refresh(path.resolve(options.repo)); } catch { /* the last read stays */ } }
+  if (options.refreshPr) {
+    const result = require('./toolkit-cloud-workflows-refresh.cjs').refreshPr({ repo: options.repo, ci: options.ci, root, commit, ciShards, workflows: module.exports, ...(github ? { github } : {}), ...(governance ? { governance } : {}) });
+    (result.code ? err : out).write(`${result.line}\n`);
+    return result.code;
+  }
   try {
     const result = plan({ repo: options.repo, ci: options.ci, root, ...(commit ? { commit } : {}), ...(ciShards !== undefined ? { ciShards } : {}) });
     if (!options.check) apply(result);
@@ -397,6 +417,6 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
   }
 }
 
-if (require.main === module) process.exitCode = main();
+module.exports = Object.freeze({ installerAt, isToolkitClone, sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
 
-module.exports = Object.freeze({ installerAt, sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+if (require.main === module) process.exitCode = main();

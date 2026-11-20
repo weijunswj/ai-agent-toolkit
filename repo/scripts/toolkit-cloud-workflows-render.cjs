@@ -8,8 +8,11 @@
 // their hash alone until the next rules refresh.
 //
 // The render changes only:
-//   - a managed header line naming the Toolkit commit and the copy's hash,
-//   - each Toolkit-script checkout, which names the Toolkit repository, the pinned commit and `.toolkit/`,
+//   - a managed header line naming the Toolkit commit it was rendered from, the copy's hash and the
+//     layout (LAYOUT below),
+//   - each Toolkit-script checkout, which names the Toolkit repository, `.toolkit/` and the ref
+//     TOOLKIT_REF: Toolkit main, or the commit the repository's TOOLKIT_REF variable pins (the owner's
+//     per-repository kill switch),
 //   - `node repo/scripts/` paths, which become `node .toolkit/repo/scripts/`,
 //   - the gate's CI trigger, which follows the repository's own CI workflow or is left out,
 //   - for the test shards copy (rendered from repo/contracts/ci/governed-test-shards.yml, which runs
@@ -26,7 +29,15 @@ const crypto = require('node:crypto');
 const TOOLKIT_REPOSITORY = 'weijunswj/ai-agent-toolkit';
 const TOOLKIT_PATH = '.toolkit';
 const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1';
-const MARKER = /^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ([a-z-]+) toolkit=([0-9a-f]{40}) sha256=([0-9a-f]{12})$/m;
+// A copy from before LAYOUT 1 has no layout field and pins every Toolkit checkout to the marker's
+// commit; it still parses, so it reads as outdated, never as unmanaged.
+const MARKER = /^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ([a-z-]+) toolkit=([0-9a-f]{40}) sha256=([0-9a-f]{12})(?: layout=([1-9][0-9]{0,3}))?$/m;
+// The copies' call surface: which Toolkit scripts, subcommands and environment names they use
+// (repo/contracts/cloud-workflows-layout.json). Copies run Toolkit main, so main must keep serving
+// this layout and the previous one; a change that stops it bumps this number (the contract test says
+// so).
+const LAYOUT = 1;
+const TOOLKIT_REF = "${{ vars.TOOLKIT_REF || 'main' }}";
 const SHA = /^[0-9a-f]{40}$/;
 const SHARD_ID = /^[a-z]+-[1-9][0-9]*$/;
 const SYSTEMS = Object.freeze(['linux', 'windows']);
@@ -39,7 +50,7 @@ function shardBranch(input) {
   if (typeof branch !== 'string' || !BRANCH.test(branch) || branch.includes('..')) throw new InstallError('the shard copies need a plain default branch name.');
   return branch;
 }
-const NOTE = '# A copy of the Toolkit\'s own workflow, pinned to the Toolkit commit above. Do not edit it here: refresh the repository rules to update it.';
+const NOTE = '# A copy of the Toolkit\'s own workflow, rendered at the Toolkit commit above. It runs Toolkit main, or the commit this repository\'s TOOLKIT_REF variable pins. Do not edit it here: refresh the repository rules to update it.';
 
 class InstallError extends Error {
   constructor(message) { super(message); this.name = 'InstallError'; }
@@ -69,7 +80,7 @@ function shardSystems(input) {
   return systems;
 }
 
-function renderTestShards(source, commit, input) {
+function renderTestShards(source, input) {
   const systems = shardSystems(input);
   let text = replaceOnce(source, PUSH_MAIN, `  push:\n    branches: [${shardBranch(input)}]\n`, 'test shards push branch');
   for (const system of SYSTEMS) {
@@ -82,18 +93,18 @@ function renderTestShards(source, commit, input) {
   }
   const present = SYSTEMS.filter(system => systems[system]);
   text = replaceOnce(text, '    needs: [linux, windows]\n', `    needs: [${present.join(', ')}]\n`, 'gate needs');
-  const pins = (text.match(/^ {10}ref: TOOLKIT_COMMIT$/gm) || []).length;
-  if (pins !== present.length + 1 || pins !== (text.match(/TOOLKIT_COMMIT/g) || []).length) throw new InstallError('the Toolkit\'s workflow changed shape (Toolkit checkouts); the render needs an update.');
-  text = text.replace(/^( {10}ref: )TOOLKIT_COMMIT$/gm, `$1${commit}`);
-  if (/TOOLKIT_[A-Z_]+/.test(text) || !text.includes(`node ${TOOLKIT_PATH}/repo/scripts/run-tests.cjs --repo-root . --verify `)) throw new InstallError('the Toolkit\'s workflow changed shape (test shards placeholders); the render needs an update.');
+  const pins = (text.match(/^ {10}ref: TOOLKIT_CHECKOUT_REF$/gm) || []).length;
+  if (pins !== present.length + 1 || pins !== (text.match(/TOOLKIT_CHECKOUT_REF/g) || []).length) throw new InstallError('the Toolkit\'s workflow changed shape (Toolkit checkouts); the render needs an update.');
+  text = text.replace(/^( {10}ref: )TOOLKIT_CHECKOUT_REF$/gm, `$1${TOOLKIT_REF}`);
+  if (/\bTOOLKIT_(?:CHECKOUT_REF|SHARDS_[A-Z]+)\b/.test(text) || !text.includes(`node ${TOOLKIT_PATH}/repo/scripts/run-tests.cjs --repo-root . --verify `)) throw new InstallError('the Toolkit\'s workflow changed shape (test shards placeholders); the render needs an update.');
   return text;
 }
 
 const RUN_COMMIT_CHECKOUT = '      - name: Check out this run\'s commit\n        uses: ' + CHECKOUT + '\n        with:\n          ref: ${{ github.sha }}\n          persist-credentials: false\n';
 
-function renderBody(id, source, commit, ci) {
-  if (id === 'test-shards') return renderTestShards(source, commit, ci);
-  const toolkitScript = `        with:\n          repository: ${TOOLKIT_REPOSITORY}\n          ref: ${commit}\n          path: ${TOOLKIT_PATH}\n`;
+function renderBody(id, source, ci) {
+  if (id === 'test-shards') return renderTestShards(source, ci);
+  const toolkitScript = `        with:\n          repository: ${TOOLKIT_REPOSITORY}\n          ref: ${TOOLKIT_REF}\n          path: ${TOOLKIT_PATH}\n`;
   const toolkitCheckout = '      - name: Check out the Toolkit\n        uses: ' + CHECKOUT + '\n' + toolkitScript + '          persist-credentials: false\n';
   let text = source;
   if (id === 'shard-timings') {
@@ -132,8 +143,8 @@ function renderBody(id, source, commit, ci) {
 // ({ systems, branch }), or the Shard Timings copy's default branch ({ branch }).
 function render(id, source, commit, input = null) {
   if (!SHA.test(commit)) throw new InstallError('the Toolkit commit must be a full 40-character SHA.');
-  const body = `${NOTE}\n${renderBody(id, normalise(source), commit, input)}`;
-  return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${bodyHash(body)}\n${body}`;
+  const body = `${NOTE}\n${renderBody(id, normalise(source), input)}`;
+  return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${bodyHash(body)} layout=${LAYOUT}\n${body}`;
 }
 
-module.exports = Object.freeze({ TOOLKIT_REPOSITORY, TOOLKIT_PATH, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render });
+module.exports = Object.freeze({ TOOLKIT_REPOSITORY, TOOLKIT_PATH, TOOLKIT_REF, LAYOUT, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render });
