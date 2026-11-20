@@ -766,7 +766,8 @@ for (const expired of [false, true]) test(`F8: a killed fetch cleans only its ow
   // The lock's time is set from Node's clock, as a real fetch's lock matches it, so this also holds
   // when the clock-ahead run moves Node's clock but not file times.
   const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); clock += 51; return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
-  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, deadline, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
+  // Stopped at the prompt deadline it ran out of time; with time left it simply failed.
+  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, deadline, runGit: fakeGit({ ...base, fetch: killed }) }).error, expired ? 'read-timed-out' : 'fetch-failed');
   assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
   fs.writeFileSync(lock, '');
   const old = new Date(Date.now() - HOUR);
