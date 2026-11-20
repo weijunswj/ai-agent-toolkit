@@ -563,3 +563,42 @@ test('batch: STATE_BRANCH_BUSY after three', t => {
   assert.equal(f.stop().diagnostics.phase, 'state', 'the last busy stop is reported once the state can hold it');
   assert.equal(f.record().streaks.busy, 0);
 });
+
+// The cloud sweep raises CLOUD_LAYOUT_STALE on the parent when the repository's Toolkit workflow
+// copies are behind the Toolkit's layout, and the finding resolves once a refresh lands. A computer's
+// pass never checks.
+test('cloud sweep: CLOUD_LAYOUT_STALE is raised while the copies are stale and resolves after the refresh', t => {
+  const f = fixture(t);
+  let stale = true;
+  const checked = [];
+  const cloudLayoutFindings = context => { checked.push(context.repoRoot); return stale ? ['CLOUD_LAYOUT_STALE'] : []; };
+  assert.equal(f.run({ cloud: true, cloudLayoutFindings }).code, 0);
+  const finding = () => (f.store.read('parent', 421).doc.attention || []).find(entry => entry.code === 'CLOUD_LAYOUT_STALE');
+  assert.deepEqual([finding()?.state, finding()?.issue], ['new', 421]);
+  assert.match(state.FINDING_CODES.CLOUD_LAYOUT_STALE.next_action, /toolkit-cloud-workflows\.cjs --repo <this repository's checkout> --refresh-pr/);
+  stale = false;
+  f.advance(HOUR);
+  assert.equal(f.run({ cloud: true, cloudLayoutFindings }).code, 0);
+  assert.equal(finding()?.state, 'resolved');
+  const before = checked.length;
+  f.advance(HOUR);
+  assert.equal(f.run({ cloudLayoutFindings }).code, 0);
+  assert.equal(checked.length, before, 'a computer pass does not check');
+});
+
+// The real check: pinned or stale copies raise it, current copies and the Toolkit itself do not.
+test('cloud sweep: the layout check compares the copies with a render from the Toolkit the sweep runs', t => {
+  const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'));
+  const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
+  const commit = workflows.toolkitHead(ROOT);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-layout-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(repo, '.git'));
+  fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
+  const write = pinned => { for (const row of workflows.WORKFLOWS) { const text = workflows.render(row.id, require('node:child_process').execFileSync('git', ['show', `${commit}:${row.file}`], { cwd: ROOT, encoding: 'utf8' }), commit); fs.writeFileSync(path.join(repo, row.file), pinned ? pinnedCopy(text, commit) : text); } };
+  write(true);
+  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE']);
+  write(false);
+  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), []);
+  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: ROOT }), [], 'the Toolkit runs its own workflow files');
+});

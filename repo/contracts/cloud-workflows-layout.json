@@ -1,0 +1,159 @@
+{
+  "schema": "toolkit.cloud-workflows-layout.v1",
+  "description": "What the Toolkit cloud workflow copies in governed repositories run: each step that runs or checks out Toolkit code, its Toolkit script calls, the environment names it passes and its sparse checkout. Copies run Toolkit main, so main serves this layout and the previous one. A change here needs a new layout number (LAYOUT in repo/scripts/toolkit-cloud-workflows-render.cjs), with the old calls kept under previous while main still serves them.",
+  "layout": 1,
+  "calls": [
+    {
+      "copy": "programme-sweep",
+      "step": "Check out the Toolkit",
+      "run": [],
+      "env": [],
+      "sparse": null
+    },
+    {
+      "copy": "programme-sweep",
+      "step": "Read the evidence store from the binding",
+      "run": [
+        ".toolkit/repo/scripts/toolkit-programme-sweep-action.cjs store"
+      ],
+      "env": [
+        "DEFAULT_BRANCH"
+      ]
+    },
+    {
+      "copy": "programme-sweep",
+      "step": "Refresh the programme",
+      "run": [
+        ".toolkit/repo/scripts/toolkit-programme-sweep-action.cjs refresh"
+      ],
+      "env": [
+        "APP_CLIENT_ID_SET",
+        "GOVERNED_TOKEN",
+        "MINT_OUTCOME",
+        "REPOSITORY_PRIVATE",
+        "STORE_REPOSITORY",
+        "STORE_TOKEN",
+        "SWEEP_LOGIN"
+      ]
+    },
+    {
+      "copy": "programme-sweep",
+      "step": "Clean the cloud footer from the owner's posts",
+      "run": [
+        ".toolkit/repo/scripts/toolkit-programme-sweep-action.cjs footers"
+      ],
+      "env": [
+        "FOOTER_SINCE",
+        "GOVERNED_TOKEN",
+        "REFRESHED",
+        "STORE_REPOSITORY",
+        "STORE_TOKEN"
+      ]
+    },
+    {
+      "copy": "programme-sweep",
+      "step": "Check out the follow-up script",
+      "run": [],
+      "env": [],
+      "sparse": "repo/scripts/toolkit-programme-sweep-gate.cjs"
+    },
+    {
+      "copy": "programme-sweep",
+      "step": "Wait for the limit to reset, then start the next run",
+      "run": [
+        ".toolkit/repo/scripts/toolkit-programme-sweep-gate.cjs follow-up"
+      ],
+      "env": [
+        "FOLLOW_UP_AT",
+        "GH_TOKEN"
+      ]
+    },
+    {
+      "copy": "programme-sweep-gate",
+      "step": "Check out the gate from the Toolkit",
+      "run": [],
+      "env": [],
+      "sparse": "repo/scripts/toolkit-programme-sweep-gate.cjs"
+    },
+    {
+      "copy": "programme-sweep-gate",
+      "step": "Start the sweep if there is work",
+      "run": [
+        ".toolkit/repo/scripts/toolkit-programme-sweep-gate.cjs"
+      ],
+      "env": [
+        "CI_WORKFLOW",
+        "EVENT_ACTION",
+        "EVENT_NAME",
+        "GH_TOKEN"
+      ]
+    },
+    {
+      "copy": "test-shards",
+      "step": "Check out the Toolkit",
+      "run": [],
+      "env": [],
+      "sparse": "repo/scripts"
+    },
+    {
+      "copy": "test-shards",
+      "step": "Run test shard",
+      "run": [
+        ".toolkit/repo/scripts/run-tests.cjs --repo-root . --shard <expr> --os linux --summary \"<expr>/summary/test-summary-<expr>-attempt-<expr>.json\""
+      ],
+      "env": []
+    },
+    {
+      "copy": "test-shards",
+      "step": "Check out the Toolkit",
+      "run": [],
+      "env": [],
+      "sparse": "repo/scripts"
+    },
+    {
+      "copy": "test-shards",
+      "step": "Run test shard",
+      "run": [
+        ".toolkit/repo/scripts/run-tests.cjs --repo-root . --shard <expr> --os windows --summary \"<expr>/summary/test-summary-<expr>-attempt-<expr>.json\""
+      ],
+      "env": []
+    },
+    {
+      "copy": "test-shards",
+      "step": "Check out the Toolkit",
+      "run": [],
+      "env": [],
+      "sparse": "repo/scripts"
+    },
+    {
+      "copy": "test-shards",
+      "step": "Check every test file ran once and passed",
+      "run": [
+        ".toolkit/repo/scripts/run-tests.cjs --repo-root . --verify \"$RUNNER_TEMP/test-summaries\""
+      ],
+      "env": []
+    },
+    {
+      "copy": "shard-timings",
+      "step": "Check out the Toolkit",
+      "run": [],
+      "env": [],
+      "sparse": null
+    },
+    {
+      "copy": "shard-timings",
+      "step": "Refresh the shard timings",
+      "run": [
+        ".toolkit/repo/scripts/refresh-shard-timings.cjs --repo-root \"$GITHUB_WORKSPACE\" --branch main --warn-if-due",
+        ".toolkit/repo/scripts/refresh-shard-timings.cjs --repo-root \"$GITHUB_WORKSPACE\" --branch main --open-pr"
+      ],
+      "env": [
+        "APP_SLUG",
+        "GH_TOKEN",
+        "MINT_OUTCOME",
+        "TOOLKIT_SHARD_PUBLISH_TOKEN"
+      ]
+    }
+  ],
+  "previous": null
+}

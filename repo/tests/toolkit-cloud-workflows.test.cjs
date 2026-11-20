@@ -13,7 +13,9 @@ const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'));
 const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
 const conformance = require(path.join(ROOT, 'repo/scripts/toolkit-governance-conformance.cjs'));
+const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
 const COMMIT = workflows.toolkitHead(ROOT);
+const REF = "\\$\\{\\{ vars\\.TOOLKIT_REF \\|\\| 'main' \\}\\}";
 const OTHER = 'a'.repeat(40);
 const source = file => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
 const SWEEP = workflows.WORKFLOWS.find(row => row.id === 'programme-sweep');
@@ -40,25 +42,25 @@ function capture() {
 // Undoes the render, so a copy can be compared with its source line for line.
 function unrender(text, { ci = null } = {}) {
   const lines = text.split('\n');
-  assert.match(lines[0], new RegExp(`^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED [a-z-]+ toolkit=${COMMIT} sha256=[0-9a-f]{12}$`));
-  assert.match(lines[1], /^# A copy of the Toolkit's own workflow, pinned to the Toolkit commit above\./);
+  assert.match(lines[0], new RegExp(`^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED [a-z-]+ toolkit=${COMMIT} sha256=[0-9a-f]{12} layout=1$`));
+  assert.match(lines[1], /^# A copy of the Toolkit's own workflow, rendered at the Toolkit commit above\. It runs Toolkit main, or the commit this repository's TOOLKIT_REF variable pins\./);
   let body = lines.slice(2).join('\n');
-  body = body.replace(/\n      - name: Check out the Toolkit\n        uses: [^\n]+\n        with:\n          repository: [^\n]+\n          ref: [0-9a-f]{40}\n          path: \.toolkit\n          persist-credentials: false\n\n/, '\n');
-  body = body.replace(/          repository: weijunswj\/ai-agent-toolkit\n          ref: [0-9a-f]{40}\n          path: \.toolkit\n/g, '          ref: TOOLKIT\n');
+  body = body.replace(/\n      - name: Check out the Toolkit\n        uses: [^\n]+\n        with:\n          repository: [^\n]+\n          ref: \$\{\{ vars\.TOOLKIT_REF \|\| 'main' \}\}\n          path: \.toolkit\n          persist-credentials: false\n\n/, '\n');
+  body = body.replace(/          repository: weijunswj\/ai-agent-toolkit\n          ref: \$\{\{ vars\.TOOLKIT_REF \|\| 'main' \}\}\n          path: \.toolkit\n/g, '          ref: TOOLKIT\n');
   body = body.replace(/node \.toolkit\/repo\/scripts\//g, 'node repo/scripts/');
   body = body.replace('- name: Check out the gate from the Toolkit', '- name: Check out the gate from main');
   if (ci) body = body.replace(`workflows: [${JSON.stringify(ci.name)}]`, 'workflows: [Validate]').replace(`CI_WORKFLOW: ${ci.file}`, 'CI_WORKFLOW: validate.yml');
   return body;
 }
 
-test('cloud workflows: the sweep copy is the Toolkit file plus a pinned Toolkit checkout and .toolkit paths', () => {
+test('cloud workflows: the sweep copy is the Toolkit file plus a Toolkit checkout that follows main and .toolkit paths', () => {
   const text = workflows.render('programme-sweep', source(SWEEP.file), COMMIT);
   const original = source(SWEEP.file).replace(/          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n          sparse-checkout/, '          ref: TOOLKIT\n          persist-credentials: false\n          sparse-checkout');
   assert.equal(unrender(text), original, 'nothing else changes');
   assert.match(text, /- name: Check out this run's commit\n[^\n]+\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n\n      - name: Check out the Toolkit\n/, 'the governed checkout stays and the Toolkit comes next');
   assert.doesNotMatch(text, /node repo\/scripts\//, 'every script runs from the Toolkit checkout');
-  assert.equal((text.match(/repository: weijunswj\/ai-agent-toolkit\n {10}ref: ([0-9a-f]{40})/g) || []).length, 2, 'the sweep and the follow-up check the Toolkit out');
-  assert.equal((text.match(new RegExp(`ref: ${COMMIT}`, 'g')) || []).length, 2, 'both at the pinned commit');
+  assert.equal((text.match(new RegExp(`repository: weijunswj\\/ai-agent-toolkit\\n {10}ref: ${REF}\\n`, 'g')) || []).length, 2, 'the sweep and the follow-up check out Toolkit main, or the TOOLKIT_REF pin');
+  assert.doesNotMatch(text, new RegExp(`ref: ${COMMIT}`), 'no Toolkit checkout is pinned to the render commit');
   for (const uses of text.match(/^\s+uses: \S+/gm)) assert.match(uses, /@[0-9a-f]{40}$/, `${uses.trim()} is pinned by commit`);
   assert.equal((text.match(/secrets\./g) || []).length, (source(SWEEP.file).match(/secrets\./g) || []).length, 'no new secret use');
   const toolkitStep = text.slice(text.indexOf('- name: Check out the Toolkit'), text.indexOf('- name: Set up Node'));
@@ -69,7 +71,7 @@ test('cloud workflows: the sweep copy is the Toolkit file plus a pinned Toolkit 
 test('cloud workflows: the gate copy checks the Toolkit out and follows the repository CI or drops the trigger', () => {
   const plain = workflows.render('programme-sweep-gate', source(GATE.file), COMMIT);
   assert.doesNotMatch(plain, /workflow_run:|CI_WORKFLOW/, 'without a CI workflow the trigger and its input go');
-  assert.match(plain, /- name: Check out the gate from the Toolkit\n[^\n]+\n        with:\n          repository: weijunswj\/ai-agent-toolkit\n          ref: [0-9a-f]{40}\n          path: \.toolkit\n          persist-credentials: false\n          sparse-checkout: repo\/scripts\/toolkit-programme-sweep-gate\.cjs/);
+  assert.match(plain, /- name: Check out the gate from the Toolkit\n[^\n]+\n        with:\n          repository: weijunswj\/ai-agent-toolkit\n          ref: \$\{\{ vars\.TOOLKIT_REF \|\| 'main' \}\}\n          path: \.toolkit\n          persist-credentials: false\n          sparse-checkout: repo\/scripts\/toolkit-programme-sweep-gate\.cjs/);
   assert.match(plain, /run: node \.toolkit\/repo\/scripts\/toolkit-programme-sweep-gate\.cjs\n/);
   assert.doesNotMatch(plain, /ref: main/);
   const ci = { file: 'ci.yml', name: 'Build and test' };
@@ -90,7 +92,7 @@ test('cloud workflows: the copies carry no header line that only holds in the To
   const wrong = [/a Validate run finishes/, /only its own script from main/, /`programme\.cjs refresh` from the commit it checked out/, /when an issue or pull request changed or a CI run finished/];
   for (const text of copies) for (const phrase of wrong) assert.doesNotMatch(text, phrase);
   assert.match(copies[1], /where the gate follows one/);
-  assert.match(copies[0], /a governed\n# repository's copy checks the Toolkit out at a pinned commit/);
+  assert.match(copies[0], /a governed\n# repository's copy checks out Toolkit main, or the commit its TOOLKIT_REF variable pins/);
 });
 
 test('cloud workflows: a renamed or removed CI workflow leaves a faithful gate copy outdated, never edited', t => {
@@ -103,7 +105,7 @@ test('cloud workflows: a renamed or removed CI workflow leaves a faithful gate c
     fs.writeFileSync(ciFile, 'name: CI\non: push\n');
     fs.writeFileSync(gateFile, workflows.render('programme-sweep-gate', source(GATE.file), toolkit[at], { file: 'ci.yml', name: 'CI' }));
     const state = () => workflows.plan({ repo, root: toolkit.dir, commit: toolkit.two }).rows.find(row => row.id === 'programme-sweep-gate').state;
-    assert.equal(state(), at === 'two' ? 'current' : 'outdated', `${at}: faithful`);
+    assert.equal(state(), 'current', `${at}: faithful, and the gate's layout is the same at both commits`);
     fs.writeFileSync(ciFile, 'name: Build\non: push\n');
     assert.equal(state(), 'outdated', `${at}: CI workflow renamed`);
     fs.rmSync(ciFile);
@@ -192,9 +194,12 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'edited');
   assert.equal(run(['--repo', repo]), 0, 'a refresh rewrites an edited copy');
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.every(row => row.state === 'current'), true);
-  // A copy rendered at another commit is outdated.
+  // Stale means the layout only: a copy another commit rendered with the same body is current, and a
+  // copy from before layouts, pinned to one commit, is outdated.
   fs.writeFileSync(sweepFile, workflows.render('programme-sweep', source(SWEEP.file), OTHER));
-  assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'outdated');
+  assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'current');
+  fs.writeFileSync(sweepFile, pinnedCopy(workflows.render('programme-sweep', source(SWEEP.file), COMMIT), COMMIT));
+  assert.deepEqual(['state', 'pinned'].map(key => workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep')[key]), ['outdated', true]);
   // A Dependabot bump of an action pin reads as an older copy, not a hand edit.
   workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
   const bumped = fs.readFileSync(sweepFile, 'utf8').replace(/actions\/setup-node@[0-9a-f]{40} # v[\d.]+/, `actions/setup-node@${'b'.repeat(40)} # v99.0.0`);
@@ -203,10 +208,12 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   // A pin moved to a branch is a hand edit, even though the hash leaves pins out.
   fs.writeFileSync(sweepFile, bumped.replace(/actions\/create-github-app-token@[0-9a-f]{40} # v[\d.]+/, 'actions/create-github-app-token@main'));
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'edited');
-  // A hand edit of the Toolkit checkout with a recomputed hash is still an edit.
-  const pinned = workflows.render('programme-sweep', source(SWEEP.file), COMMIT);
-  const lines = pinned.split('\n');
-  const forged = lines.slice(1).join('\n').replace(`ref: ${COMMIT}\n          path: .toolkit\n          persist-credentials: false\n\n`, `ref: ${OTHER}\n          path: .toolkit\n          persist-credentials: false\n\n`);
+  // A hand edit of the Toolkit checkout with a recomputed hash is still an edit: a copy with a layout
+  // pinned to a commit by hand (the TOOLKIT_REF variable is the way to pin).
+  const current = workflows.render('programme-sweep', source(SWEEP.file), COMMIT);
+  const lines = current.split('\n');
+  const forged = lines.slice(1).join('\n').replace("ref: ${{ vars.TOOLKIT_REF || 'main' }}\n          path: .toolkit\n          persist-credentials: false\n\n", `ref: ${OTHER}\n          path: .toolkit\n          persist-credentials: false\n\n`);
+  assert.notEqual(forged, lines.slice(1).join('\n'));
   const crypto = require('node:crypto');
   const hash = crypto.createHash('sha256').update(forged.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
   fs.writeFileSync(sweepFile, `${lines[0].replace(/sha256=[0-9a-f]{12}/, `sha256=${hash}`)}\n${forged}`);
@@ -254,14 +261,17 @@ test('cloud workflows: a Toolkit checkout, another default branch and an unpubli
   assert.equal(workflows.toolkitCommit(toolkit), git(toolkit, ['rev-parse', 'HEAD']));
 });
 
-test('cloud workflows: governance check reports a missing or edited copy as drift and an older pin as a note', t => {
+test('cloud workflows: governance check reports a missing or edited copy as drift and a pinned copy as a note', t => {
   const repo = tempRepo(t);
   const ids = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT }).map(entry => `${entry.id}:${entry.severity}`);
   assert.deepEqual(ids(), ['CLOUD_WORKFLOW_DRIFT:drift', 'CLOUD_WORKFLOW_DRIFT:drift']);
   workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
   assert.deepEqual(ids(), []);
   fs.writeFileSync(path.join(repo, SWEEP.file), workflows.render('programme-sweep', source(SWEEP.file), OTHER));
+  assert.deepEqual(ids(), [], 'another commit, same layout: current');
+  fs.writeFileSync(path.join(repo, SWEEP.file), pinnedCopy(workflows.render('programme-sweep', source(SWEEP.file), OTHER), OTHER));
   assert.deepEqual(ids(), ['CLOUD_WORKFLOW_OUTDATED:info']);
+  assert.match(conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT })[0].message, /pinned to one older Toolkit commit[^]*--refresh-pr/);
   assert.deepEqual(conformance.cloudWorkflowFindings({ root: ROOT }, ROOT), [], 'the Toolkit runs its own files');
 });
 

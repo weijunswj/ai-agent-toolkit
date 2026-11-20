@@ -363,7 +363,7 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     if (row.state === 'current') continue;
     // The file, the copy's pin and whether a refresh from this checkout moves it forward ride along for
     // the session-start note (toolkit-governance-gate.cjs stalePinLines).
-    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`), file: row.file, pin: row.toolkit || null, head, refreshable: direction(row.toolkit) }));
+    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), file: row.file, pin: row.toolkit || null, pinned: Boolean(row.pinned), head, refreshable: direction(row.toolkit) }));
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
   // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:

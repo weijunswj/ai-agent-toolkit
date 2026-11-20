@@ -1560,15 +1560,11 @@ const FINDING_ACTIONS = Object.freeze({
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
   const checkpoints = [];
-  // Stale pins: the governance check's CLOUD_WORKFLOW_OUTDATED rows (the sweep, its gate and the test
-  // shards copies). The repository's cloud sweep runs the Toolkit commit its copies are pinned to, so a
-  // fix released since reaches it only after a rules refresh re-pins them. Local reads only: git on the
+  // Stale copies: the governance check's CLOUD_WORKFLOW_OUTDATED rows (the sweep, its gate and the test
+  // shards copies). Copies run Toolkit main, but a layout change (or a copy still pinned to one
+  // commit) reaches the repository only through a refresh pull request. Local reads only: git on the
   // Toolkit checkout and the repository (about ten short processes), no gh or network call.
-  try {
-    const toolkitRoot = deps.toolkitRoot || path.join(__dirname, '..', '..');
-    const check = deps.cloudWorkflowFindings || (target => require('./toolkit-governance-conformance.cjs').cloudWorkflowFindings(target, toolkitRoot, deps.toolkitRoot ? { ...registryOptions, toolkitRoot } : registryOptions));
-    lines.push(...stalePinLines(check(state).filter(entry => entry.id === 'CLOUD_WORKFLOW_OUTDATED' && entry.file), state.root));
-  } catch { /* no stale-pin line */ }
+  lines.push(...staleCopyLines(state, registryOptions, deps));
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
     if (!binding || !binding.repository) return { lines, checkpoints };
@@ -1592,16 +1588,26 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
   return { lines, checkpoints };
 }
 
-// The refresh command only when it moves every outdated copy forward (each pin is already in this
-// computer's Toolkit checkout, which is on main). Otherwise a refresh from here would roll a newer pin
-// back, so the line asks for the checkout to be updated first and names no refresh.
+// The stale-copy line for one repository, or none (also when the copies cannot be checked).
+function staleCopyLines(state, registryOptions = {}, deps = {}) {
+  try {
+    const toolkitRoot = deps.toolkitRoot || path.join(__dirname, '..', '..');
+    const check = deps.cloudWorkflowFindings || (target => require('./toolkit-governance-conformance.cjs').cloudWorkflowFindings(target, toolkitRoot, deps.toolkitRoot ? { ...registryOptions, toolkitRoot } : registryOptions));
+    return stalePinLines(check(state).filter(entry => entry.id === 'CLOUD_WORKFLOW_OUTDATED' && entry.file), state.root);
+  } catch { return []; }
+}
+
+// The refresh command only when it moves every outdated copy forward (each copy's commit is already in
+// this computer's Toolkit checkout, which is on main). Otherwise a refresh from here would roll a newer
+// copy back, so the line asks for the checkout to be updated first and names no refresh.
 function stalePinLines(rows, root) {
   if (!rows.length) return [];
   const files = rows.map(entry => entry.file).join(', ');
   const verb = rows.length === 1 ? 'is' : 'are';
-  if (rows.every(entry => entry.refreshable === true)) return [`⚠️ Stale Toolkit pins: ${files} ${verb} pinned to an older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since. Controller: this session, update the Toolkit checkout to the latest main, then refresh them with \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root}\` from it and land the changed files through a pull request for the owner to merge.`];
+  const pinned = rows.filter(entry => entry.pinned).map(entry => entry.file);
+  if (rows.every(entry => entry.refreshable === true)) return [`⚠️ Stale Toolkit copies: ${files} ${verb} behind the Toolkit's current layout${pinned.length ? `, and ${pinned.join(', ')} ${pinned.length === 1 ? 'is' : 'are'} pinned to one older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since` : ''}. Controller: this session, update the Toolkit checkout to the latest main, then run \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root} --refresh-pr\` from it; it opens or updates one pull request for the owner to merge.`];
   const head = rows.find(entry => entry.head)?.head;
-  return [`⚠️ Toolkit checkout behind: ${files} ${verb} pinned to a Toolkit commit that this computer's Toolkit checkout${head ? ` (${head.slice(0, 7)})` : ''} does not contain, or the checkout is not on main, so a rules refresh from it would roll them back. Controller: update the Toolkit checkout to the latest main before any rules refresh here; the next session start then says whether the copies are stale.`];
+  return [`⚠️ Toolkit checkout behind: ${files} ${verb} made by a Toolkit commit that this computer's Toolkit checkout${head ? ` (${head.slice(0, 7)})` : ''} does not contain, or the checkout is not on main, so a refresh from it would roll them back. Controller: update the Toolkit checkout to the latest main before any refresh here; the next session start then says whether the copies are stale.`];
 }
 
 function decidedLine(state) {
@@ -1661,7 +1667,8 @@ function cloudRepositories(cwd) {
   return { roots, inside: false };
 }
 
-// The cloud session-start text: null when the start folder holds no repository. Each child
+// The cloud session-start text: null when the start folder holds no repository. Each ENABLED
+// repository's line also carries its stale-copy line (staleCopyLines), as on a computer. Each child
 // repository's merged binding is refreshed first (the start folder's own repository was refreshed by
 // startSession), all before any is judged, so an evidence store is seen as one whatever its order.
 // Each repository's decision comes from the binding merged on its default branch, as on a computer.
@@ -1669,7 +1676,7 @@ function cloudRepositories(cwd) {
 // `limit` (the hook passes what its own cloud line leaves of the host's limit): from the last
 // repository up, a state line first shrinks to its short form, so the rules and every repository
 // they bind are always seen in full.
-function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT } = {}) {
+function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT, staleCopies = null } = {}) {
   const { roots, inside } = cloudRepositories(cwd);
   if (!roots.length) return null;
   if (!inside) for (const root of roots) {
@@ -1677,12 +1684,18 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
   }
   const lines = [];
   const enabled = [];
+  // A Toolkit clone in the session renders the stale-copy check; otherwise the plugin copy finds the
+  // managed checkout, and with none the check is skipped (the cloud sweep's CLOUD_LAYOUT_STALE
+  // finding still reaches the controller).
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  const clone = roots.find(root => { try { return workflows.isToolkitCheckout(root) && workflows.isToolkitClone(root); } catch { return false; } });
   for (const root of roots) {
     let state;
     try { state = governance.governanceState(root, registryOptions); } catch { state = { state: 'UNAVAILABLE', notes: ['could-not-check-governance'] }; }
     const name = state.repository || path.basename(root);
     if (state.state === 'ENABLED') enabled.push(name);
-    lines.push({ full: `- ${name}: ${CLOUD_OPEN[state.state] || decidedLine(state)}`, short: `- ${name}: ${shortState(state)}` });
+    const stale = state.state === 'ENABLED' && Date.now() < deadline ? (staleCopies || (target => staleCopyLines(target, registryOptions, clone ? { toolkitRoot: clone } : {})))({ ...state, root }) : [];
+    lines.push({ full: `- ${name}: ${CLOUD_OPEN[state.state] || decidedLine(state)}${stale.map(line => `\n  ${line}`).join('')}`, short: `- ${name}: ${shortState(state)}` });
   }
   const rules = enabled.length ? `\n\nThe Toolkit-governed rules below bind only ${enabled.join(', ')}.\n\n${governedRules()}` : '';
   return fitLines(lines, (kept, leftOut) => {

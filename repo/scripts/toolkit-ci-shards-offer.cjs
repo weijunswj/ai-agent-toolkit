@@ -120,7 +120,8 @@ function firstList(root, estimate = null) {
   return { ok: true, manifest, text: `${JSON.stringify(manifest, null, 2)}\n`, shards: shards.length };
 }
 
-// The pinned Toolkit copies of the sweep in `root` that may not read a binding key: { tooOld, unchecked }.
+// The Toolkit copies of the sweep in `root` still pinned to one commit (from before layouts) that may
+// not read a binding key: { tooOld, unchecked }.
 // `reads(commit, git)` says whether the Toolkit at that commit does (tooOld when not). A copy whose commit
 // this Toolkit copy cannot read (not a git checkout, or the commit is not in it) is unchecked; callers
 // hold for both, and say which is which.
@@ -130,7 +131,10 @@ function oldSweepCopies(root, toolkitRoot, reads) {
   const tooOld = [], unchecked = [];
   for (const copy of workflows.markedCopies(root).filter(entry => SWEEP_IDS.includes(entry.id))) {
     const text = readText(path.join(root, ...copy.file.split('/'))) || '';
-    const commit = workflows.MARKER.exec(text.replace(/\r\n/g, '\n'))?.[2];
+    const marker = workflows.MARKER.exec(text.replace(/\r\n/g, '\n'));
+    // A copy with a layout runs Toolkit main, which reads every binding key this Toolkit knows.
+    if (marker?.[4]) continue;
+    const commit = marker?.[2];
     const known = commit && git(['cat-file', '-e', `${commit}^{commit}`]).status === 0;
     if (!known) unchecked.push(copy.file);
     else if (!reads(commit, git)) tooOld.push(copy.file);

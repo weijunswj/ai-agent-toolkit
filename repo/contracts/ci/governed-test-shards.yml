@@ -1,12 +1,12 @@
 # Toolkit Test Shards: this repository's tests, split into parallel shards by its shard list.
 #
 # The shard list (.github/toolkit-test-shards.json) says how to find the test files on each system
-# and the command that runs one. Each shard job runs its files through the pinned Toolkit runner,
-# once per file and with no shell, and uploads its summary even when a test fails. The gate job,
-# "Toolkit test shards", then checks from those summaries that every discovered test file ran
-# exactly once on each system on this run's commit and passed, naming any file that did not. It
-# adds to the repository's own CI and replaces none of it. Toolkit Shard Timings reads these
-# summaries to rebalance the shards.
+# and the command that runs one. Each shard job runs its files through the Toolkit runner (Toolkit
+# main, or the commit the repository's TOOLKIT_REF variable pins), once per file and with no shell,
+# and uploads its summary even when a test fails. The gate job, "Toolkit test shards", then checks
+# from those summaries that every discovered test file ran exactly once on each system on this run's
+# commit and passed, naming any file that did not. It adds to the repository's own CI and replaces
+# none of it. Toolkit Shard Timings reads these summaries to rebalance the shards.
 #
 # The token only reads the repository, no secret is used and no checkout keeps credentials. The
 # Toolkit copy of this file sets the shard ids from the shard list; a change to the list's shards
@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: weijunswj/ai-agent-toolkit
-          ref: TOOLKIT_COMMIT
+          ref: TOOLKIT_CHECKOUT_REF
           path: .toolkit
           persist-credentials: false
           sparse-checkout: repo/scripts
@@ -85,7 +85,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: weijunswj/ai-agent-toolkit
-          ref: TOOLKIT_COMMIT
+          ref: TOOLKIT_CHECKOUT_REF
           path: .toolkit
           persist-credentials: false
           sparse-checkout: repo/scripts
@@ -123,7 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: weijunswj/ai-agent-toolkit
-          ref: TOOLKIT_COMMIT
+          ref: TOOLKIT_CHECKOUT_REF
           path: .toolkit
           persist-credentials: false
           sparse-checkout: repo/scripts

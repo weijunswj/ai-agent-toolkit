@@ -438,6 +438,23 @@ function ownerWaitsOf(context, parentDoc) {
   }
 }
 
+// The cloud sweep's layout check: CLOUD_LAYOUT_STALE when this repository's Toolkit workflow copies
+// differ from what a refresh writes from the Toolkit this sweep runs (its `.toolkit` checkout). The
+// sweep never changes workflows itself (its App holds no workflow permission); a controller chat opens
+// the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). Local reads only; any failure
+// adds nothing, and the Toolkit's own repository is never checked.
+function cloudLayoutFindings(context, deps = {}) {
+  if (deps.cloudLayoutFindings) return deps.cloudLayoutFindings(context);
+  try {
+    const toolkitRoot = path.resolve(__dirname, '..', '..', '..');
+    const workflows = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
+    let ciShards = null;
+    try { ciShards = JSON.parse(fs.readFileSync(path.join(context.repoRoot, '.github', 'toolkit-programme.json'), 'utf8'))?.ci_shards?.answer || null; } catch { ciShards = null; }
+    const result = workflows.plan({ repo: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), ciShards });
+    return result.rows.some(row => row.state !== 'current') ? ['CLOUD_LAYOUT_STALE'] : [];
+  } catch { return []; }
+}
+
 function readParent(context) {
   const { doc } = context.store.read('parent', context.binding.parent_issue);
   if (!doc) throw new ProgrammeError('PARENT_STATE_MISSING', `No parent state document for #${context.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.`);
@@ -722,7 +739,7 @@ const commands = {
     const lease = context.lease;
     const queued = lease ? {
       since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
-      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(), host: lease.host,
+      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: [...lease.findings(), ...(lease.host === 'cloud' ? cloudLayoutFindings(context, deps) : [])], host: lease.host,
       // The board's stuck rule, counting this pass's own reads.
       stuck: read => lease.stuck(read),
       canRead: (pages, needsPage) => context.requests.canStartTask(pages, needsPage) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
@@ -1491,4 +1508,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });
+module.exports = Object.freeze({ cloudLayoutFindings, parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });
