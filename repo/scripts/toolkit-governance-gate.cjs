@@ -38,6 +38,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
+const bindingCache = require('./toolkit-governance-binding.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
 const { BankTickets, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand, explainRequest } = require('./toolkit-governance-bank.cjs');
@@ -1096,7 +1097,7 @@ class PromptHold {
     const verdict = this.#gate.evaluate(cwd, { sessionId, refreshPending: true });
     if (!verdict.open) {
       if (verdict.pending) return { action: 'pass', context: verdict.pending.text };
-      return verdict.reason === 'unavailable' ? { action: 'pass', context: "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked." } : { action: 'pass' };
+      return verdict.reason === 'unavailable' ? { action: 'pass', context: unavailableText(verdict.state?.state === 'UNAVAILABLE' ? causeOf(verdict.state) : PROPOSAL_CAUSE) } : { action: 'pass' };
     }
     // Answers are read from the user's own reply; every other message is ordinary work.
     const message = ownerMessage(String(prompt || ''));
@@ -1490,17 +1491,19 @@ class ToolGate {
 
 // ---- session line -----------------------------------------------------------------------------
 
-function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {} } = {}) {
+// `refresh` is this session start's own refresh result (startSession's onRefresh), so a "couldn't check
+// governance" line names why that read failed.
+function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   // Toolkit runs no scheduled tasks on a computer any more (the cloud sweep does that work), so the
   // session line reads no task registry and names no computer task.
-  return verdictLine(verdict, registryOptions, programmeDeps);
+  return verdictLine(verdict, registryOptions, programmeDeps, refresh);
 }
 
-function verdictLine(verdict, registryOptions, programmeDeps) {
+function verdictLine(verdict, registryOptions, programmeDeps, refresh = null) {
   const state = verdict.state;
   if (verdict.pending) return verdict.pending.text;
-  if (verdict.reason === 'unavailable') return "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.";
+  if (verdict.reason === 'unavailable') return unavailableText(causeOf(state, refresh));
   if (verdict.open) {
     return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
   }
@@ -1513,7 +1516,7 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
   // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
   return fitLines(checkpoints, (kept, leftOut) => {
     const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
-    return `${[decidedLine(state), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
+    return `${[decidedLine(state, refresh), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
   });
 }
 
@@ -1620,8 +1623,20 @@ function stalePinLines(rows, root) {
   return [`⚠️ Toolkit checkout behind: ${files} ${verb} made by a Toolkit commit that this computer's Toolkit checkout${head ? ` (${head.slice(0, 7)})` : ''} does not contain, or the checkout is not on main, so a refresh from it would roll them back. Controller: update the Toolkit checkout to the latest main before any refresh here; the next session start then says whether the copies are stale.`];
 }
 
-function decidedLine(state) {
-  if (state.notes?.includes('could-not-check-governance')) return `Toolkit: couldn't check governance. The last repository decision was ${state.state.toLowerCase()}. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.`;
+// Why governance could not be checked, as fixed words (toolkit-governance-binding.cjs refreshCause):
+// this start's own failed refresh first, else the failed refresh this computer's cache recorded, else
+// the identity read's code. Nothing from git's output, the environment or a path is ever shown.
+function causeOf(state, refresh = null) {
+  const own = refresh && typeof refresh === 'object' && refresh.refreshed === false && refresh.error !== 'not-applicable' ? refresh.error : null;
+  return bindingCache.refreshCause(own || state?.merged?.refresh_error || state?.error_code || null);
+}
+const PROPOSAL_CAUSE = 'the open governance proposal on GitHub could not be checked';
+function unavailableText(cause) {
+  return `Toolkit: couldn't check governance (${cause}). Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.`;
+}
+
+function decidedLine(state, refresh = null) {
+  if (state.notes?.includes('could-not-check-governance')) return `Toolkit: couldn't check governance (${causeOf(state, refresh)}). The last repository decision was ${state.state.toLowerCase()}. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.`;
   if (state.rule === 'M2' && state.notes?.includes('merged-binding-stale')) return 'Toolkit: the last repository decision was disabled, read over 24 hours ago. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.';
   if (state.rule === 'S1') return "Toolkit governance: DISABLED here: this repository is an evidence store (agent-managed, not governed). Follow the global rules and the evidence-store line of the Toolkit-governed rules (repo/contracts/agent-rules/toolkit-governed-rules.md in the installed Toolkit).";
   if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
@@ -1658,10 +1673,7 @@ function governedRules() {
 const CLOUD_SCAN_LIMIT = 16;
 // States the session line words through the gate's verdict on a computer; a cloud session is never
 // asked the governance question.
-const CLOUD_OPEN = Object.freeze({
-  UNDECIDED: 'Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules, coding gates included; a cloud session is not asked the governance question.',
-  UNAVAILABLE: "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.",
-});
+const CLOUD_UNDECIDED = 'Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules, coding gates included; a cloud session is not asked the governance question.';
 function cloudRepositories(cwd) {
   const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
   const own = governance.findGitRoot(start);
@@ -1680,17 +1692,24 @@ function cloudRepositories(cwd) {
 // The cloud session-start text: null when the start folder holds no repository. Each ENABLED
 // repository's line also carries its stale-copy line (staleCopyLines), as on a computer. Each child
 // repository's merged binding is refreshed first (the start folder's own repository was refreshed by
-// startSession), all before any is judged, so an evidence store is seen as one whatever its order.
+// startSession, whose result the hook passes as `refresh`), all before any is judged, so an evidence
+// store is seen as one whatever its order. The children are read side by side, each with the whole
+// deadline (toolkit-governance-refresh.cjs), so one slow read never spends the others' time; a line
+// that could not check governance names its own read's cause. `refreshBinding` (tests) reads them one
+// after another instead.
 // Each repository's decision comes from the binding merged on its default branch, as on a computer.
 // The governed rules are given once, naming the repositories they bind. The whole text stays within
 // `limit` (the hook passes what its own cloud line leaves of the host's limit): from the last
 // repository up, a state line first shrinks to its short form, so the rules and every repository
 // they bind are always seen in full.
-function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT, staleCopies = null } = {}) {
+function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT, staleCopies = null, refresh = null, refreshWorker = undefined } = {}) {
   const { roots, inside } = cloudRepositories(cwd);
   if (!roots.length) return null;
-  if (!inside) for (const root of roots) {
-    try { (refreshBinding || (folder => governance.refreshMergedBinding(folder, registryOptions, { deadline })))(root); } catch { /* offline keeps the last read */ }
+  let refreshed = new Map(inside ? [[roots[0], refresh]] : []);
+  if (!inside && refreshBinding) for (const root of roots) {
+    try { refreshed.set(root, refreshBinding(root, { deadline })); } catch { /* offline keeps the last read */ }
+  } else if (!inside) {
+    try { refreshed = require('./toolkit-governance-refresh.cjs').refreshAll(roots, { registryOptions, deadline, module: refreshWorker }); } catch { /* offline keeps the last read */ }
   }
   const lines = [];
   const enabled = [];
@@ -1705,7 +1724,9 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
     const name = state.repository || path.basename(root);
     if (state.state === 'ENABLED') enabled.push(name);
     const stale = state.state === 'ENABLED' && Date.now() < deadline ? (staleCopies || (target => staleCopyLines(target, registryOptions, clone ? { toolkitRoot: clone } : {})))({ ...state, root }) : [];
-    lines.push({ full: `- ${name}: ${CLOUD_OPEN[state.state] || decidedLine(state)}${stale.map(line => `\n  ${line}`).join('')}`, short: `- ${name}: ${shortState(state)}` });
+    const own = refreshed.get(root) || null;
+    const text = state.state === 'UNDECIDED' ? CLOUD_UNDECIDED : state.state === 'UNAVAILABLE' ? unavailableText(causeOf(state, own)) : decidedLine(state, own);
+    lines.push({ full: `- ${name}: ${text}${stale.map(line => `\n  ${line}`).join('')}`, short: `- ${name}: ${shortState(state, own)}` });
   }
   const rules = enabled.length ? `\n\nThe Toolkit-governed rules below bind only ${enabled.join(', ')}.\n\n${governedRules()}` : '';
   return fitLines(lines, (kept, leftOut) => {
@@ -1716,9 +1737,9 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
 }
 
 // One repository's state in a few words, for a cloud line that had to shrink.
-function shortState(state) {
-  if (state.state === 'UNAVAILABLE') return 'could not check governance';
-  if (state.notes?.includes('could-not-check-governance')) return `could not check governance; last decision ${state.state.toLowerCase()}, governed effects hold`;
+function shortState(state, refresh = null) {
+  if (state.state === 'UNAVAILABLE') return `could not check governance (${causeOf(state, refresh)})`;
+  if (state.notes?.includes('could-not-check-governance')) return `could not check governance (${causeOf(state, refresh)}); last decision ${state.state.toLowerCase()}, governed effects hold`;
   if (state.rule === 'S1') return 'DISABLED (evidence store)';
   if (state.state === 'ENABLED') return state.governed_effects_hold ? 'ENABLED (binding read over 24 hours ago; governed effects hold)' : 'ENABLED';
   if (state.state === 'UNDECIDED') return 'not decided yet (counts as off)';
