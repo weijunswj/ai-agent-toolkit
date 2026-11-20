@@ -41,6 +41,7 @@ const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
 const { BankTickets, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand, explainRequest } = require('./toolkit-governance-bank.cjs');
+const { programmeCommand } = require('./toolkit-user-state.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
 // removes the file, which is Toolkit's own, because its text is never delivered again.
@@ -1165,6 +1166,10 @@ class PromptHold {
     const drop = () => { try { this.#bank.drop(sessionId); } catch { /* the note lapses in half an hour */ } };
     if (this.#launched(sessionId)) { drop(); return { action: 'pass' }; }
     if (!ownTyped(message)) return null;
+    // Typing toolkit governance (or another phrase for the bank) again asks for the bank afresh, so
+    // it never answers the shown one: the note is dropped and the typed command's own line shows it.
+    // As a reply it got a ticket and was told never to show the bank, beside a line to show it.
+    if (require('./toolkit-commands.cjs').typedCommand(message.text)?.action === 'guide') { drop(); return null; }
     if (this.#epochs.repository(shown.repository_id) !== shown.repository_mark) {
       drop();
       return { action: 'pass', context: `${BANK_MOVED}
@@ -1504,7 +1509,7 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
   const rules = state.state === 'ENABLED' ? `\n\n${governedRules()}` : '';
   // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
   return fitLines(checkpoints, (kept, leftOut) => {
-    const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own programme.cjs show --session <its id> shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
+    const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
     return `${[decidedLine(state), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
   });
 }
@@ -1581,12 +1586,12 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
     if (attention.refresh && (deps.startRefresh || !offline) && cache.claimBackgroundStart(binding.repository, deps)) {
       try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
-    if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.${/Run programme\.cjs attention/.test(attention.line) ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`);
+    if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.${attention.open ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`);
   } catch { /* no attention line */ }
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
     for (const session of checkpoint.localSessionsFor(state.root, deps)) {
-      if (session.errors.pending) checkpoints.push(`Checkpoint: last turn's record failed (${session.errors.pending.code}); see programme.cjs show --session <that session's id> (session ${session.hash.slice(0, 8)}). ${FINDING_ACTIONS.checkpoint}`);
+      if (session.errors.pending) checkpoints.push(`Checkpoint: last turn's record failed (${session.errors.pending.code}); see ${programmeCommand('show --session <that session\'s id>', { userHome: deps.home })} (session ${session.hash.slice(0, 8)}). ${FINDING_ACTIONS.checkpoint}`);
     }
   } catch { /* no checkpoint line */ }
   return { lines, checkpoints };

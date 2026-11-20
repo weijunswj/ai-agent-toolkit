@@ -112,7 +112,7 @@ test('the parent has its own handover file: attention, findings and the parent d
     '# HANDOVER #421: Issue 421', '## OPEN PRS', '## HOLDS AND FINDINGS', '## RECENT DECISIONS', '## PLAN', '## EVIDENCE']);
   assert.ok(out.includes('- PATH: #421'), out);
   assert.match(out, /^- Status: programme parent; Attention: (?:clear|\d+ new)/m);
-  assert.ok(out.includes('- Next action: Controller: read CURRENT, answer attention (`programme.cjs attention`), then run the queue'), out);
+  assert.ok(out.includes('- Next action: Controller: read CURRENT, answer attention (`node <Toolkit>/skills/github-program-reconciler/scripts/programme.cjs attention`), then run the queue'), out);
   assert.ok(out.includes('- Full list: `programme.cjs trace 421`'));
 });
 

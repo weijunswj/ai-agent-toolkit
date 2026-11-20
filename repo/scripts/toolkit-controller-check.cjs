@@ -166,7 +166,7 @@ function checkProgramme(run, checkout) {
     if (match) codes[match[1]] = (codes[match[1]] || 0) + 1;
   }
   const byCode = Object.entries(codes).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code} ${n}`).join(', ');
-  return { state: 'attention', lines: [byCode ? `${first} (${byCode})` : first, ...lines.slice(1).filter(line => line.startsWith('- '))], command: 'programme.cjs attention' };
+  return { state: 'attention', lines: [byCode ? `${first} (${byCode})` : first, ...lines.slice(1).filter(line => line.startsWith('- '))], command: require('./toolkit-user-state.cjs').programmeCommand('attention') };
 }
 
 function checkTraces(run, repo, parents) {

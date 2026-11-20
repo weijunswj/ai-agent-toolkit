@@ -752,7 +752,7 @@ function boundAttention(list) {
 function answerFinding(doc, { id, state, reason = null, next = null, due = null, now }) {
   if (!['acknowledged', 'disposed'].includes(state)) throw new ProgrammeError('USAGE', 'A finding is acknowledged or disposed.');
   const entry = (doc.attention || []).find(item => item.id === id);
-  if (!entry) throw new ProgrammeError('FINDING_UNKNOWN', `No finding ${id} on the parent document. Run programme.cjs attention to list them.`);
+  if (!entry) throw new ProgrammeError('FINDING_UNKNOWN', `No finding ${id} on the parent document. Run ${require('../../../repo/scripts/toolkit-user-state.cjs').programmeCommand('attention')} to list them.`);
   if (state === 'acknowledged' && WORK_QUEUE_CODES.has(entry.code)) {
     throw new ProgrammeError('QUEUE_FINDING_NEEDS_ACTION', `Finding ${id} (${entry.code}) is on the work queue: act on it (${FINDING_CODES[entry.code].next_action}), or dispose --finding ${id} --reason <text>. It clears by itself once the task moves.`);
   }

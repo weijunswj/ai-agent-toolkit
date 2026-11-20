@@ -3851,7 +3851,7 @@ function cloudSweepSkipLines({ bindings = () => require('./toolkit-governance-st
   const lines = [];
   for (const binding of known) {
     const reason = skipReason(binding);
-    if (reason) lines.push(`Cloud sweep: ${binding.repository} is skipped because ${reason.why}. ${reason.fix}; until then run programme.cjs refresh there by hand.`);
+    if (reason) lines.push(`Cloud sweep: ${binding.repository} is skipped because ${reason.why}. ${reason.fix}; until then run ${require('./toolkit-user-state.cjs').programmeCommand('refresh')} there by hand.`);
   }
   lines.push('Cloud sweep: to check the governance App and the sweep workflow too, run toolkit governance check in each governed repository.');
   return lines;
