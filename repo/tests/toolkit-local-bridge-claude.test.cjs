@@ -68,7 +68,9 @@ test('Claude hook reports the install check and never runs Codex refresh', () =>
   const { file, text } = renderer.render('G0');
   fs.writeFileSync(path.join(agents, file), text.replace(/SHA-256 `[0-9a-f]{64}`/, `SHA-256 \`${'0'.repeat(64)}\``));
 
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+  // Repository updates have their own tests; this session start skips them (the flag the delegated
+  // sync uses), so it runs only the maintenance under test and never touches the recorded checkout.
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--skip-repo-auto-update', '--sync-source', 'claude-plugin'], {
     env: claudeHookEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);

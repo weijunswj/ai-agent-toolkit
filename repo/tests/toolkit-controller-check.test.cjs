@@ -17,12 +17,14 @@ const CLEAN = {
 };
 
 // A fake child-process runner: canned results per script, and every call recorded.
-function world({ results = {}, binding = GOVERNED, library = true } = {}) {
+function world({ results = {}, binding = GOVERNED, library = true, hub = null, git = null } = {}) {
   const calls = [];
   const deps = {
     run(script, args, options) { calls.push({ script, args, options }); return { stderr: '', error: null, ...(results[script] || CLEAN[script]) }; },
     exists: () => library,
     readBinding: checkout => (checkout ? binding : null),
+    readHubState: () => hub,
+    git(cwd, args) { calls.push({ git: args, cwd }); return { stderr: '', error: null, ...(git ? git(args) : { status: 1, stdout: '' }) }; },
     now: () => new Date('2026-11-14T12:00:00Z'),
   };
   return { deps, calls };
@@ -38,7 +40,7 @@ const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md'
 test('a clean run prints one line and exits 0', () => {
   const { code, text } = run(ALL);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces ci footer refs)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces ci footer refs; skipped: toolkit)\n');
 });
 
 test('checks are segregated by host and governance, and skip cleanly with the reason', () => {
@@ -62,7 +64,7 @@ test('checks are segregated by host and governance, and skip cleanly with the re
 test('--skip leaves out checks the caller already ran', () => {
   const { calls, text } = run([...ALL, '--skip', 'guidebook,programme']);
   assert.equal(calls.some(call => [SCRIPTS.guidebook, SCRIPTS.programme].includes(call.script)), false);
-  assert.match(text, /skipped: guidebook programme/);
+  assert.match(text, /skipped: toolkit guidebook programme/);
 });
 
 test('findings print compactly: counts by code and the top items, full detail behind --expand', () => {
@@ -71,7 +73,7 @@ test('findings print compactly: counts by code and the top items, full detail be
   const compact = run(ALL, { results });
   assert.equal(compact.code, 1);
   assert.deepEqual(compact.text.trimEnd().split('\n'), [
-    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer refs)',
+    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer refs; skipped: toolkit)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
     '  ... 3 more (--expand, or programme.cjs attention)',
@@ -128,6 +130,32 @@ test('every child runs in its read-only mode with the inputs given', () => {
   assert.deepEqual(defaults.args, ['--repo', 'acme/app', '--since', '2026-11-13T10:00:00.000Z']);
 });
 
+test('a chat controller sees when this computer\'s Toolkit checkout is behind its origin branch, with the update command', () => {
+  const HEAD = 'a'.repeat(40), NEWER = 'b'.repeat(40);
+  const hub = { repo_path: '/home/me/.ai-agent-toolkit/source', repo_branch: 'main' };
+  const gitAt = (upstream, lsRemoteStatus = 0) => (args) => (args[0] === 'rev-parse' ? { status: 0, stdout: `${HEAD}\n` }
+    : { status: lsRemoteStatus, stdout: lsRemoteStatus ? '' : `${upstream}\trefs/heads/main\n`, stderr: lsRemoteStatus ? 'fatal: unable to access remote\n' : '' });
+  const toolkit = (setup, argv = ['--host', 'chat']) => {
+    const { deps, calls } = world(setup);
+    return { check: controllerCheck(parseArgs(argv), deps).checks.find(check => check.name === 'toolkit'), calls };
+  };
+  const current = toolkit({ hub, git: gitAt(HEAD) });
+  assert.deepEqual(current.check, { name: 'toolkit', state: 'ok', lines: ["this computer's Toolkit is current with origin main at aaaaaaa"] });
+  // Read-only: one local read and one remote read, in the checkout.
+  assert.deepEqual(current.calls.filter(call => call.git).map(call => [call.cwd, call.git.join(' ')]),
+    [[hub.repo_path, 'rev-parse HEAD'], [hub.repo_path, 'ls-remote --exit-code origin refs/heads/main']]);
+  const behind = toolkit({ hub, git: gitAt(NEWER) }).check;
+  assert.equal(behind.state, 'attention');
+  assert.equal(behind.command, 'node "/home/me/.ai-agent-toolkit/source/repo/scripts/toolkit-local-bridge.cjs" --repo-update-now --write');
+  assert.equal(behind.lines[0], `this computer's Toolkit is at aaaaaaa, origin main is at bbbbbbb: run ${behind.command}, then reread CONTROLLER.md and the global rules`);
+  const offline = toolkit({ hub, git: gitAt(NEWER, 128) }).check;
+  assert.deepEqual(offline, { name: 'toolkit', state: 'failed', lines: ['cannot read origin main: fatal: unable to access remote'] });
+  assert.deepEqual(toolkit({ hub: null }).check.lines, ['no managed Toolkit checkout on this computer (setup toolkit records one)']);
+  const projects = toolkit({ hub, git: gitAt(NEWER) }, []);
+  assert.deepEqual(projects.check.lines, ['chat only']);
+  assert.equal(projects.calls.some(call => call.git), false);
+});
+
 test('bad arguments exit 2 with the usage', () => {
   for (const argv of [['--host', 'web'], ['--task', 'nightly=x.md'], ['--skip', 'nothing'], ['--repo', 'bad'], ['--since', 'soon'], ['--checkout'], ['--what']]) {
     const { code, text } = run(argv);
@@ -141,16 +169,16 @@ test('--json prints the report as data', () => {
   const report = JSON.parse(text);
   assert.equal(report.host, 'projects');
   assert.equal(report.governed, true);
-  assert.equal(report.checks.length, 9);
+  assert.equal(report.checks.length, 10);
   assert.equal(format(report).split('\n')[0].startsWith('CONTROLLER CHECK: clear'), true);
 });
 
 test('a run where every check is skipped says nothing ran and exits 1, never clear', () => {
   const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
   assert.equal(code, 1);
-  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: guidebook instructions memory tasks programme traces ci footer refs\): pass the inputs each skipped check names/);
+  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks programme traces ci footer refs\): pass the inputs each skipped check names/);
   // With no inputs at all only the Toolkit's own script-reference check runs, which is not a clear run.
   const bare = run(['--host', 'chat']);
   assert.equal(bare.code, 1);
-  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: guidebook instructions memory tasks programme traces ci footer\)/);
+  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks programme traces ci footer\)/);
 });

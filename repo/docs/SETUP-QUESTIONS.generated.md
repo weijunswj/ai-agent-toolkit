@@ -3,17 +3,16 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 9 questions across 3 sections
+Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: Y81E-SJE1-QBEJ-YJX5
+Bank reference: 0667-16DK-3DVP-6AY3
 
 Quick index
 
 1.1 Update source - Recommended: A - Keep current
-1.2 Automatic updates - Recommended: B - Turn on
-1.3 Update reports - Recommended: A - Keep current
-1.4 Report retention - Recommended: A - Keep current
-1.5 Raise Codex's instruction limit - Recommended: A - Keep current
+1.2 Update reports - Recommended: A - Keep current
+1.3 Report retention - Recommended: A - Keep current
+1.4 Raise Codex's instruction limit - Recommended: A - Keep current
 2.1 Codex helper capacity - Recommended: B - One helper
 2.2 Codex Toolkit maintenance - Recommended: A - Keep current
 3.1 Keep Toolkit available in Codex? - Recommended: A - Keep current
@@ -48,33 +47,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ---
 
-### 1.2 Automatic updates
-
-**What this controls:** Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.
-
-**Current:** Automatic startup update checks are on.
-
-**Verification:** verified
-
-**Recommended:** B - Turn on
-
-**Recommended outcome:** Turn on clean, verified automatic updates.
-
-**Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
-
-**Choices:**
-
-- **A. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
-- **B. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
-- **C. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-
-**After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
-
-**Selected:** B - Turn on
-
----
-
-### 1.3 Update reports
+### 1.2 Update reports
 
 **What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
@@ -99,7 +72,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ---
 
-### 1.4 Report retention
+### 1.3 Report retention
 
 **What this controls:** How long Toolkit keeps only its own maintenance reports before best-effort cleanup. It does not modify project files, application logs, or unrelated operational logs.
 
@@ -124,7 +97,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ---
 
-### 1.5 Raise Codex's instruction limit
+### 1.4 Raise Codex's instruction limit
 
 **What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
 
@@ -275,7 +248,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 Reply with either:
 
 - `all recommended`
-- only your changes, for example: `1.2=A, 1.3=B`
+- only your changes, for example: `1.1=B, 1.2=B`
 
 Anything you do not list takes its recommendation.
 
@@ -283,16 +256,15 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 11 questions across 3 sections
+Toolkit setup choices - 10 questions across 3 sections
 
-Bank reference: 3XHN-RKB0-S16G-38YD
+Bank reference: 8QDS-XDTD-8C8Y-7CWA
 
 Quick index
 
 1.1 Update source - Recommended: A - Keep current
-1.2 Automatic updates - Recommended: B - Turn on
-1.3 Update reports - Recommended: A - Keep current
-1.4 Report retention - Recommended: A - Keep current
+1.2 Update reports - Recommended: A - Keep current
+1.3 Report retention - Recommended: A - Keep current
 2.1 How should Claude Code use agents? - Recommended: B - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: B - Install or refresh
 3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: B - Turn on
@@ -329,33 +301,7 @@ Quick index
 
 ---
 
-### 1.2 Automatic updates
-
-**What this controls:** Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.
-
-**Current:** Automatic startup update checks are on.
-
-**Verification:** verified
-
-**Recommended:** B - Turn on
-
-**Recommended outcome:** Turn on clean, verified automatic updates.
-
-**Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
-
-**Choices:**
-
-- **A. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
-- **B. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
-- **C. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-
-**After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
-
-**Selected:** B - Turn on
-
----
-
-### 1.3 Update reports
+### 1.2 Update reports
 
 **What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
@@ -380,7 +326,7 @@ Quick index
 
 ---
 
-### 1.4 Report retention
+### 1.3 Report retention
 
 **What this controls:** How long Toolkit keeps only its own maintenance reports before best-effort cleanup. It does not modify project files, application logs, or unrelated operational logs.
 

@@ -208,7 +208,7 @@ test('a piped toolkit-direct answer is not a topology choice and writes nothing'
   const fake = recordingClaude(root);
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--claude-cli', fake.command,
-  ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'enable', 'default', 'enable', 'toolkit-direct', 'instructions', 'keep', ''].join('\n') });
+  ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'default', 'enable', 'toolkit-direct', 'instructions', 'keep', ''].join('\n') });
   assert.notEqual(result.status, 0, result.stdout);
   assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: keep, root-only, broader-native/);
   assert.equal(fs.existsSync(control.profilePath('claude-code', { root: profileRootOf(root) })), false);

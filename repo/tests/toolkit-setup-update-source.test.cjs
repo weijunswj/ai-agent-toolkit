@@ -12,7 +12,7 @@ function auditState(repoPath) {
     update_report_open_enabled: false,
     update_report_retention_days: 7,
     codex_plugin_auto_refresh_enabled: false,
-    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: repoPath },
+    repo_auto_update: { enabled: Boolean(repoPath), last_status: 'configured', repo_path: repoPath },
     targets: {
       opencode: { detected: false, enabled: false, synced: false },
       ag2: { detected: false, enabled: false, synced: false },

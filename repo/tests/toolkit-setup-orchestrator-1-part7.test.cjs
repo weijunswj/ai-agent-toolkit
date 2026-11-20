@@ -23,30 +23,30 @@ function snapshotTree(root) {
 test('choice-activated custom retention detail follows the displayed canonical order', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
-  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+  const result = run(['--execute', '--repo-remote', origin], {
     env: isolatedHomeEnv(root),
     input: ['A', 'A', 'B', 'keep', 'A', '14'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is B\/custom/);
-  assert.match(result.stdout, /Detail 2 1\.4 Report retention: positive report-retention duration in days - 14 days/);
+  assert.match(result.stdout, /2\. 1\.3 Report retention: positive report-retention duration in days \(when 1\.3 is B\/custom/);
+  assert.match(result.stdout, /Detail 2 1\.3 Report retention: positive report-retention duration in days - 14 days/);
 });
 
 test('simultaneous custom checkout and retention consume details in displayed order', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
   const customPath = path.join(root, 'Two Detail Managed Source');
-  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+  const result = run(['--execute', '--repo-remote', origin], {
     env: isolatedHomeEnv(root),
     input: ['custom', 'A', 'B', 'keep', 'A', customPath, '21'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
-  assert.ok(bank.indexOf('1. 1.1 Update source: custom managed-checkout path') < bank.indexOf('2. 1.4 Report retention: positive report-retention duration'));
-  assert.ok(result.stdout.indexOf('Detail 1 1.1 Update source') < result.stdout.indexOf('Detail 2 1.4 Report retention'));
-  assert.match(result.stdout, /Detail 2 1\.4 Report retention:[^\n]*21 days/);
+  assert.ok(bank.indexOf('1. 1.1 Update source: custom managed-checkout path') < bank.indexOf('2. 1.3 Report retention: positive report-retention duration'));
+  assert.ok(result.stdout.indexOf('Detail 1 1.1 Update source') < result.stdout.indexOf('Detail 2 1.3 Report retention'));
+  assert.match(result.stdout, /Detail 2 1\.3 Report retention:[^\n]*21 days/);
   assert.equal(fs.existsSync(path.join(customPath, 'BRIDGE_ARGS.log')), true);
 });
 
@@ -55,7 +55,7 @@ test('preselected path and helper details share rendering consumption and summar
   const { origin } = createGitBackedSetupRepo(root);
   const customPath = path.join(root, 'Preselected Detail Source');
   const result = run([
-    '--execute', '--repo-remote', origin, '--managed-checkout', 'custom', '--enable-repo-auto-update',
+    '--execute', '--repo-remote', origin, '--managed-checkout', 'custom',
     '--codex-helper-capacity', 'custom', '--codex-cli', createFakeCodexAppServer(root),
     '--approve-codex-config-proposal',
   ], {
@@ -67,13 +67,13 @@ test('preselected path and helper details share rendering consumption and summar
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   const rendered = [
     bank.indexOf('1. 1.1 Update source: custom managed-checkout path'),
-    bank.indexOf('2. 1.4 Report retention: positive report-retention duration'),
+    bank.indexOf('2. 1.3 Report retention: positive report-retention duration'),
     bank.indexOf('3. 2.1 Codex helper capacity: bounded Codex helper count'),
   ];
   assert.ok(rendered.every((index) => index >= 0) && rendered[0] < rendered[1] && rendered[1] < rendered[2]);
   const summary = [
     result.stdout.indexOf('Detail 1 1.1 Update source'),
-    result.stdout.indexOf('Detail 2 1.4 Report retention'),
+    result.stdout.indexOf('Detail 2 1.3 Report retention'),
     result.stdout.indexOf('Detail 3 2.1 Codex helper capacity'),
   ];
   assert.ok(summary.every((index) => index >= 0) && summary[0] < summary[1] && summary[1] < summary[2]);

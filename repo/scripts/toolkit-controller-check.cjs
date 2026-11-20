@@ -7,6 +7,10 @@
 // as a child process with the same Node, in its read-only mode.
 //
 // Where each check applies:
+//   toolkit                                  chat only, where this computer has a managed Toolkit
+//                                            checkout: it compares the checkout with its origin
+//                                            branch (git directly), so a long-running controller
+//                                            chat updates Toolkit and rereads its rules on its own
 //   guidebook, instructions, memory, tasks   Claude Projects only
 //   programme, traces                        only where the checkout's programme binding says
 //                                            governance is enabled
@@ -36,13 +40,14 @@
 // Exit 0 clear, 1 something needs attention, could not run, or nothing ran at all, 2 bad arguments.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const LIBRARY = '/mnt/project-files/toolkit/web-controller-projects';
 const BINDING_REL = '.github/toolkit-programme.json';
-const CHECKS = ['guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'ci', 'footer', 'refs'];
+const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'ci', 'footer', 'refs'];
 const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
@@ -99,6 +104,16 @@ function defaultRun(script, args, { cwd } = {}) {
   return { status: result.error ? null : result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), error: result.error ? result.error.message : null };
 }
 
+function defaultGit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 30000, windowsHide: true });
+  return { status: result.error ? null : result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), error: result.error ? result.error.message : null };
+}
+
+// The Toolkit Local Bridge's hub state on this computer; null when there is none.
+function readHubState() {
+  try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.ai-agent-toolkit', 'current', 'state.json'), 'utf8')); } catch { return null; }
+}
+
 const linesOf = text => String(text || '').split(/\r?\n/).map(line => line.trimEnd()).filter(Boolean);
 const why = result => result.error || linesOf(result.stderr).at(-1) || linesOf(result.stdout).at(-1) || `exit ${result.status}`;
 
@@ -116,6 +131,19 @@ function statusCheck(run, script, args, command) {
   if (result.status === 0) return { state: 'ok', lines: lines.length ? lines : ['current'] };
   if (result.status === 1) return { state: 'attention', lines, command };
   return { state: 'failed', lines: [why(result)] };
+}
+
+// The managed checkout against its origin branch, the same comparison the bridge makes at a session
+// start. A chat that runs for days never starts again, so its controller updates from here.
+function checkToolkit(git, checkout, branch) {
+  const head = git(checkout, ['rev-parse', 'HEAD']);
+  if (head.status !== 0) return { state: 'failed', lines: [`cannot read the Toolkit checkout: ${why(head)}`] };
+  const remote = git(checkout, ['ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`]);
+  if (remote.status !== 0) return { state: 'failed', lines: [`cannot read origin ${branch}: ${why(remote)}`] };
+  const local = head.stdout.trim(), upstream = remote.stdout.trim().split(/\s+/)[0];
+  if (local === upstream) return { state: 'ok', lines: [`this computer's Toolkit is current with origin ${branch} at ${local.slice(0, 7)}`] };
+  const command = `node "${path.join(checkout, 'repo', 'scripts', 'toolkit-local-bridge.cjs').replace(/\\/g, '/')}" --repo-update-now --write`;
+  return { state: 'attention', lines: [`this computer's Toolkit is at ${local.slice(0, 7)}, origin ${branch} is at ${upstream.slice(0, 7)}: run ${command}, then reread CONTROLLER.md and the global rules`], command };
 }
 
 function checkTasks(run, tasks) {
@@ -183,6 +211,7 @@ function checkFooter(run, repo, since) {
 
 function controllerCheck(options, deps = {}) {
   const run = deps.run || defaultRun;
+  const hub = (deps.readHubState || readHubState)();
   const exists = deps.exists || (file => fs.existsSync(file));
   const now = deps.now ? deps.now() : new Date();
   const host = options.host || (exists(LIBRARY) ? 'projects' : 'chat');
@@ -198,7 +227,12 @@ function controllerCheck(options, deps = {}) {
     if (options.skip.has(name)) { skip(name, 'run elsewhere by the caller'); continue; }
     if (PROJECTS_ONLY.has(name) && host !== 'projects') { skip(name, 'Claude Projects only'); continue; }
     let outcome;
-    if (name === 'guidebook') outcome = statusCheck(run, SCRIPTS.guidebook, ['--check', guidebook], 'toolkit-projects-guidebook.cjs --check');
+    if (name === 'toolkit') {
+      // A Projects controller runs Toolkit from the guidebook its cloud thread clones fresh.
+      if (host === 'projects') { skip(name, 'chat only'); continue; }
+      if (!hub || typeof hub.repo_path !== 'string' || !hub.repo_path) { skip(name, 'no managed Toolkit checkout on this computer (setup toolkit records one)'); continue; }
+      outcome = checkToolkit(deps.git || defaultGit, hub.repo_path, hub.repo_branch || 'main');
+    } else if (name === 'guidebook') outcome = statusCheck(run, SCRIPTS.guidebook, ['--check', guidebook], 'toolkit-projects-guidebook.cjs --check');
     else if (name === 'instructions') {
       if (!options.instructions) { skip(name, 'pass --instructions <file> (the project instructions, saved)'); continue; }
       outcome = statusCheck(run, SCRIPTS.instructions, ['--check', options.instructions], 'toolkit-projects-instructions.cjs --check');
