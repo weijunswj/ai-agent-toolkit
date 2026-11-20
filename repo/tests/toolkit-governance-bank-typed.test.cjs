@@ -432,3 +432,48 @@ test('typing toolkit governance while a bank is open asks for the bank afresh, n
   await run(ctx, ['setup']);
   assert.match(prompt('1.4=A'), /--ticket [0-9a-f]{32}/);
 });
+
+// #1373: a fresh session, no bank open yet. `setup` first reads the merged binding again; one failed
+// read marked it unread, and setup printed no bank but a pointer to `status`, so the owner got a status
+// summary. Now setup reads once more with a longer limit and shows the bank when that read works; when
+// it fails too, the owner gets one line to type the command again and the agent is told to show no
+// status. An answer still writes nothing on an unread binding.
+test('a fresh session whose binding read fails just now gets the bank or a line to type it again, never a status', async t => {
+  const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
+  for (const recovers of [true, false]) {
+    const ctx = fixture(t);
+    const stateDir = path.dirname(ctx.registryOptions.registryPath);
+    const identity = governance.readIdentity(ctx.repo);
+    const good = cache.readBindingCache(identity, stateDir);
+    const budgets = [];
+    ctx.cli = {
+      refresh: (cwd, budget) => {
+        budgets.push(budget);
+        cache.writeCache(stateDir, budgets.length > 1 && recovers ? { ...good, fetched_at: new Date().toISOString() } : { ...good, refresh_error: 'timeout' });
+        return budgets.length > 1 && recovers ? { refreshed: true } : { refreshed: false, error: 'timeout' };
+      },
+    };
+    assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), null, 'no bank is open yet');
+    const shown = await run(ctx, ['setup']);
+    assert.equal(budgets.length, 2, 'one more read after the failed one');
+    assert.ok(budgets[1]?.timeout > cache.GIT_TIMEOUT_MS, 'the second read has a longer limit');
+    assert.doesNotMatch(shown.out + shown.err, /toolkit-governance\.cjs"? (?:status|check)|online first/, 'no status route');
+    if (recovers) {
+      assert.equal(shown.code, 0);
+      assert.match(shown.out, /Bank reference: \S+/, 'the bank once the read works');
+      agentsLast(shown.out);
+      continue;
+    }
+    assert.equal(shown.code, 1);
+    assert.doesNotMatch(shown.out, /Bank reference|^\| 1\.1 \|/m, 'no bank from an unread binding');
+    assert.match(shown.out, /^The governance question bank could not be shown because GitHub could not be read just now.*Type toolkit governance again in a moment\.$/m);
+    assert.match(shown.out, /Run no other governance command, and never show a status, check or summary in place of the bank\./);
+    agentsLast(shown.out);
+    assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), null, 'nothing waits for a reply');
+    // The answer step keeps its refusal, before any ticket is taken: nothing is written from an unread binding.
+    const answered = await run(ctx, ['setup', '--answers', 'ABCD-EFGH-JKMN-PQRS: 1.4=A', '--ticket', 'a'.repeat(32)]);
+    assert.equal(answered.code, 1);
+    assert.match(answered.out, /^Nothing changed, and this answer was not used: GitHub could not be read just now/m);
+    assert.doesNotMatch(answered.out, /toolkit-governance\.cjs"? status/);
+  }
+});

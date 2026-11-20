@@ -45,6 +45,13 @@ const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'chec
 const BANK_SHOWN = 0;
 // How many replies the owner's own terminal reads for one bank before it stops with nothing written.
 const TERMINAL_TRIES = 5;
+// A bank asked for when the merged binding could not be read just now reads it once more, with a longer
+// limit for each git step than the first read had (a slow fetch or a lock held by another git process).
+const BANK_REREAD_TIMEOUT_MS = 3 * bindingCache.GIT_TIMEOUT_MS;
+// When even that read fails: the owner gets a plain line to type the command again, never a status.
+const BANK_UNREAD = 'The governance question bank could not be shown because GitHub could not be read just now, so this computer cannot confirm the settings merged for this repository. Nothing changed. Type toolkit governance again in a moment.';
+const BANK_UNREAD_AGENTS = 'Agents: this line is for you alone. Show the owner the line above exactly as printed, leaving out this line, then stop. Run no other governance command, and never show a status, check or summary in place of the bank.';
+const ANSWER_UNREAD = 'Nothing changed, and this answer was not used: GitHub could not be read just now, so this computer cannot confirm the settings merged for this repository. Type toolkit governance again in a moment to see the bank and answer it.';
 const CLOUD_BANK = `This is a cloud session, where Toolkit cannot check that a reply is the owner's own, so an answer in this chat cannot be recorded. Answer this bank from a Remote Control session on your computer, or run ${CMD('setup')} in your own terminal.`;
 const ALIASES = Object.freeze({ decline: 'disable' });
 const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|publish|security> [--json]')}\n`
@@ -114,7 +121,7 @@ class ToolkitGovernanceCli {
     this.#cwd = cwd;
     this.#registryOptions = registryOptions;
     this.#discoveryGh = discoveryGh;
-    this.#refresh = refresh || (cwd => governance.refreshMergedBinding(cwd, registryOptions));
+    this.#refresh = refresh || ((cwd, budget) => governance.refreshMergedBinding(cwd, registryOptions, budget));
     this.#rulesetReader = rulesetReader;
     this.#rulesetCreator = rulesetCreator;
     this.#stateRulesetCreator = stateRulesetCreator;
@@ -444,14 +451,21 @@ class ToolkitGovernanceCli {
   // owner was shown and nothing else: no ticket, no note, no write (#explainShown).
   async #bank(json, answers, ticket, explain = null) {
     this.#refresh(this.#cwd);
-    const state = this.#state();
+    let state = this.#state();
+    // One failed read of the merged binding is often a moment's network or git trouble: read once more.
+    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+      this.#refresh(this.#cwd, { timeout: BANK_REREAD_TIMEOUT_MS });
+      state = this.#state();
+    }
     if (state.rule === 'ERROR' || state.state === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code || 'ERROR'}). Nothing was written.`);
     if (['R1', 'R8', 'S1', 'R1s'].includes(state.rule)) {
       this.#print(json, { state: state.state, writes: 0 }, ['GitHub governance is off automatically here; there is nothing to set up.', ...describe(state).slice(2)]);
       return 0;
     }
+    // Still unread: no bank and no governed write from an old read. The bank's own line asks the owner
+    // to type it again; an answer is refused with nothing written (main adds its Agents line).
     if (state.state === 'ENABLED' && !state.programme_records_bind) {
-      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. The binding merged on the default branch could not be read again just now; run ${CMD('status')} online first.`]);
+      this.#print(json, { state: state.state, writes: 0 }, answers === null && !explain ? [BANK_UNREAD, '', BANK_UNREAD_AGENTS] : [ANSWER_UNREAD]);
       return 1;
     }
     // The open governance pull requests are read again first, so one closed outside Toolkit no longer
