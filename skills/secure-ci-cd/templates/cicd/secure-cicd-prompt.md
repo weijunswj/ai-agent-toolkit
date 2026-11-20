@@ -16,7 +16,7 @@ Verify the following:
 8. You can identify whether there are uncommitted changes.
 9. You can inspect existing GitHub Actions workflows, if any.
 10. You can commit, push to a non-default branch and open or update its pull request without asking, since those steps are reversible; before any direct push to the default branch or force-push you must pause, name the branch and remote, explain the risk, and ask for my approval.
-11. Before merging, you must pause, name the pull request, explain what will happen, and ask for my approval; a merge guard's own question is that ask.
+11. Before merging, you must pause, name the pull request, explain what will happen, and ask for my approval; where a merge guard is known to run, its own question is that ask.
 12. Before deploying, you must pause, name the environment and deployment target, explain the risk, and ask for my approval.
 13. Before deleting files, rewriting history, rotating secrets, or performing destructive actions, you must pause, name the exact target/action, explain the risk, and ask for explicit approval.
 14. You must not expose, print, or commit secrets.
@@ -380,7 +380,7 @@ After I approve the deployment plan:
 8. Update `docs/ci-cd/CURRENT_CICD_STATUS.md` with deployment status, required secrets, manual steps, and rollback notes.
 9. Never hardcode secrets.
 10. Never print secrets.
-11. Push only to a non-default branch; ask before any default-branch push.
+11. Push only to a non-default branch; ask before any default-branch push or any push whose workflow deploys outside the approved plan.
 12. Ask before triggering production deployment.
 
 Phase 8: GitHub Secrets guidance.
@@ -453,7 +453,7 @@ Before pushing:
 2. Tell me whether this is the default branch or a setup branch.
 3. If it is the default branch, pause, explain why direct push is risky, and ask for explicit approval before pushing.
 4. Tell me what workflows will run after push.
-5. Push a setup branch without asking; ask only for the default branch (step 3).
+5. Push a setup branch without asking; ask for the default branch (step 3) or when a workflow from step 4 deploys outside the approved plan.
 
 Pull request policy:
 1. Prefer opening a pull request instead of pushing directly to the default branch.

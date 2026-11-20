@@ -18,7 +18,7 @@ The prompt template is not optional background material. It defines the required
 
 When this skill applies, its approval gates override any repo-local default that would otherwise merge, deploy, push to the default branch or force-push.
 
-Commits, pushes to a non-default branch and opening or updating its pull request are reversible, so do them without asking. Before merging, deploying, pushing to the default branch, force-pushing, deleting, or changing real keys or secrets, pause, explain the risk, name the exact target and action, and ask for explicit user approval for that exact action; for a merge, a merge guard's own question is that ask.
+Commits, pushes to a non-default branch and opening or updating its pull request are reversible, so do them without asking. Before merging, deploying, pushing to the default branch, force-pushing, deleting, or changing real keys or secrets, pause, explain the risk, name the exact target and action, and ask for explicit user approval for that exact action; for a merge where a merge guard is known to run, its own question is that ask.
 
 ## Required Execution Shape
 
@@ -33,7 +33,7 @@ Commits, pushes to a non-default branch and opening or updating its pull request
 - Never ask the user to paste secret values into chat.
 - Create or update `docs/ci-cd/CURRENT_CICD_STATUS.md`.
 - Define a metadata-only deployment and AI-module observability baseline before deployment, provider integrations, notification tests, or background AI features are enabled.
-- Commit, push a non-default branch and open or update its PR without asking; ask a clear approval question before a merge (a merge guard's question is that ask), deployment, default-branch or force push, delete, or real-key change.
+- Commit, push a non-default branch and open or update its PR without asking; ask a clear approval question before a merge (where a merge guard is known to run, its question is that ask), deployment, default-branch or force push, delete, or real-key change.
 
 ## Manual Secret Handling
 

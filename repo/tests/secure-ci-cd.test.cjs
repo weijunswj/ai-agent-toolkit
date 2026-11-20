@@ -97,7 +97,7 @@ test('Secure CI/CD source and generated skills summarize required safe execution
     /Use GitHub Secrets for private values/i,
     /Never ask the user to paste secret values into chat/i,
     /Create or update `docs\/ci-cd\/CURRENT_CICD_STATUS\.md`/i,
-    /Commit, push a non-default branch and open or update its PR without asking; ask a clear approval question before a merge \(a merge guard's question is that ask\), deployment, default-branch or force push, delete, or real-key change/i,
+    /Commit, push a non-default branch and open or update its PR without asking; ask a clear approval question before a merge \(where a merge guard is known to run, its question is that ask\), deployment, default-branch or force push, delete, or real-key change/i,
     /beginner-friendly GitHub Secret setup instructions using secret names only/i,
     /Tell the user where to paste values directly in GitHub or the external platform/i
   ];
@@ -166,5 +166,9 @@ test('Secure CI/CD runs reversible Git steps without asking and keeps the ask fo
     'skills/secure-ci-cd/templates/cicd/ci-checkup.md': /ask before merge or deploy where the repository has no standing approval/,
     'repo/docs/SKILL-SAFETY-MATRIX.md': /explicit approval required before merge, deploy, default-branch or force push, delete, settings, secret, release, or other external mutation/
   };
+  // A push to a non-default branch whose workflow deploys outside the approved plan is a deploy, so it keeps the ask.
+  const prompt = readText('skills/secure-ci-cd/templates/cicd/secure-cicd-prompt.md');
+  assert.match(prompt, /11\. Push only to a non-default branch; ask before any default-branch push or any push whose workflow deploys outside the approved plan\./);
+  assert.match(prompt, /5\. Push a setup branch without asking; ask for the default branch \(step 3\) or when a workflow from step 4 deploys outside the approved plan\./);
   for (const [relPath, pattern] of Object.entries(keepsAsk)) assert.match(readText(relPath), pattern, relPath);
 });

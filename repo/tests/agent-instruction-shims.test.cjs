@@ -199,8 +199,9 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
-    // Agents once asked their own merge question before the merge guard could ask its exact one.
-    /Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes or a merge guard's question counts, so let the guard ask \(gate rules\)\./,
+    // Agents once asked their own merge question before the merge guard could ask its exact one,
+    // and a merge guard is optional, so the guard's question replaces the agent's only where one runs.
+    /Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts; where a merge guard is known to run, let it ask and take the owner's yes; else ask \(gate rules\)\./,
     /\*\*Generic, platform first:\*\* shared rules and tools name no project, issue, record or harness unless needed; state outcomes and safety floors, not steps/
   ]) assert.match(text, rule);
   // The coding gates, risk tiers and delegation apply wherever the plugin is installed, so they live here.
@@ -263,6 +264,31 @@ test("action-blocking questions use the harness's native question method, with b
     });
   }
   assert.deepEqual(found, [], 'question wording names the native question method, never a host UI or bold by default');
+});
+
+// A merge guard is an optional hook: a harness can skip it or let a merge through when it fails, and a
+// skill-only copy has none. A line that let the guard ask without that condition let an agent merge
+// with no owner OK, so every line handing the merge ask to a guard keeps the condition.
+test('a merge guard stands in for the merge ask only where it is known to run', () => {
+  const files = [...shippedInstructionFiles(), 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'];
+  const handed = [];
+  const unconditional = [];
+  for (const rel of files) {
+    readText(rel).split('\n').forEach((line, index) => {
+      if (!/merge guard/i.test(line) || !/\b(ask|question|OK)\b/.test(line)) return;
+      handed.push(rel);
+      if (!/merge guard is known to run/.test(line)) unconditional.push(`${rel}:${index + 1}`);
+    });
+  }
+  for (const rel of ['repo/contracts/agent-rules/global-rules.md', 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md', 'skills/secure-ci-cd/SKILL.md']) assert.ok(handed.includes(rel), rel);
+  assert.deepEqual(unconditional, [], 'a merge guard question replaces the merge ask only where the guard is known to run');
+});
+
+// The reset message once ended with its bold question while the agent also asked it natively, so the
+// user saw the same question twice.
+test('the session reset question is asked once', () => {
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  assert.match(skill, /Ask its last line with the harness's native question method \(continue here best-effort, or start a new session\) and leave that line out of the message; where none works, keep it/);
 });
 
 test('no standing approval covers a Windows task command on any approval surface', () => {

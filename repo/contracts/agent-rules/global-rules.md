@@ -13,7 +13,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values; fixtures use reserved fakes (`example.com`, `.test`).
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
-- Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes or a merge guard's question counts, so let the guard ask (gate rules).
+- Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts; where a merge guard is known to run, let it ask and take the owner's yes; else ask (gate rules).
 - Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
@@ -95,7 +95,7 @@ All development aims at these; repository rules may add, never relax:
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
 - **Fix the root cause, upstream:** reuse first, then the smallest real fix; where it matters, make it in the shared source that copies, prompts and later runs inherit; any fallback narrow, visible, tested.
-- **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
+- **Ship, then improve:** basics, ship, observe, improve.
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
 - **Plain words:** plain names, current behaviour; owner terminal steps short, Enter-only.
