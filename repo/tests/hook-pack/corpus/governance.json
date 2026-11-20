@@ -1660,6 +1660,18 @@
       "expect": {"decision":"deny"},
       "status": "pass",
       "note": "The explain row's command with an answer in place of the explain. Codex runs the same tool gate inside its helper hook, so the refusing hook differs by host."
+    },
+    {
+      "id": "GOV.unavailable-names-cause",
+      "source": "#1376: a session start that cannot check governance says why in fixed words instead of a bare line",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"undecided","binding_status":"unavailable"}},
+      "expect": {"decision":"allow","context_contains":["couldn't check governance ("]},
+      "status": "pass",
+      "note": "The pack turns session-start refresh off, so the cause read here is the offline or not-recorded phrase; the cloud side-by-side read and read-timed-out are covered by toolkit-governance-cause.test.cjs and a live probe."
     }
   ]
 }
