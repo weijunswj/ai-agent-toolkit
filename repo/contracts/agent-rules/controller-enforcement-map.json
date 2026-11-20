@@ -272,6 +272,30 @@
     },
     {
       "file": "repo/controller/principles.md",
+      "rule": "**Polish child:**",
+      "covers": "The controller check's daily stale sweep flags a polish child at 8 rows (POLISH FULL), above 8 rows or with two open (POLISH OVER CAP). Filing a Low as a row, and fixing a one-line Low in the PR, stay judgement.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-controller-check.cjs",
+          "test": "repo/tests/toolkit-controller-check.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Daily stale sweep:**",
+      "covers": "The controller check's stale check runs once per local date per repository and lists done, unexplained new, closed-with-open-work and full polish children. Obsolete and duplicate children, and sending the owner the list, stay judgement.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-controller-check.cjs",
+          "test": "repo/tests/toolkit-controller-check.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/principles.md",
       "rule": "**Controller is the brain:**",
       "instruction_only": "How the controller gets a capability it lacks is a per-harness judgement."
     },

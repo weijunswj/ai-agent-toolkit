@@ -202,3 +202,14 @@ test('work runs where the controller runs, and scheduled tasks prefer the cloud 
   ]) assert.ok(line.includes(phrase), phrase);
   assert.doesNotMatch(page, /no computer scheduled tasks|\*\*Cloud first:\*\*/);
 });
+
+test('lean children: one capped polish child, a daily stale sweep and automate-first in the global principles', () => {
+  const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(page, /^- \*\*Polish child:\*\* review Lows and small UAT nits are rows on one rolling Later polish child \(title starts `Polish`[^\n]*at most 8 rows; when full it ships as one batched PR and closes, and a fresh one opens\.$/m);
+  assert.match(page, /^- \*\*Daily stale sweep:\*\* once a day, date-stamped, on the daily run and never the hourly or 2-hourly one, send the owner one list of done, obsolete and duplicate children to approve closing \(reconciler skill; `toolkit-controller-check\.cjs` `stale` check\)\.$/m);
+  const global = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), 'utf8').replace(/\r\n/g, '\n');
+  // Clear-cut rules go into code first; judgement stays with controllers (owner, 20 November).
+  assert.match(global, /^- \*\*Automate first:\*\* enforce clear-cut rules in code \(hooks, scripts, CI\), else in writing, memory last; controllers still decide judgement calls; checks prove results, not self-grading\.$/m);
+  assert.doesNotMatch(global, /\*\*Checks over judgement:\*\*/);
+  assert.match(global, /^- \*\*Written, not remembered:\*\* progress and decisions live in the branch, PR and records\.$/m);
+});

@@ -61,6 +61,31 @@ test('a missing UAT line, an invalid one and a missing or doubled Bump line each
   }
 });
 
+test('an owner UAT ask needs one visible Agent UAT: PASSED line with evidence first', () => {
+  const owner = extra => GOOD.replace('UAT: NOT_REQUIRED (no owner-facing change)', `UAT: OWNER_TEST_NEEDED (the owner opens the app)\n${extra}`.trimEnd());
+  const asked = /owner UAT is asked before every agent step passed/;
+  const refused = [
+    ['', /\(has 0\)/],
+    ['Agent UAT: FAILED (A2 red)', /has Agent UAT: FAILED/],
+    ['Agent UAT: PENDING (A1 running)', /has Agent UAT: PENDING/],
+    ['Agent UAT: PASSED', /PASSED with no evidence/],
+    ['Agent UAT: PASSED (A1)\nAgent UAT: PASSED (A2)', /\(has 2\)/],
+    ['<!--\nAgent UAT: PASSED (hidden)\n-->', /\(has 0\)/],
+    ['```\nAgent UAT: PASSED (in code)\n```', /\(has 0\)/],
+  ];
+  for (const [extra, why] of refused) {
+    const result = run(owner(extra));
+    assert.equal(result.code, 1, extra);
+    const line = result.report.problems.find(problem => asked.test(problem));
+    assert.ok(line && why.test(line), `${extra}\n${result.report.problems.join('\n')}`);
+  }
+  assert.equal(run(owner('Agent UAT: PASSED (A1 to A3 green: evidence/run-1)')).code, 0);
+  // Bodies that ask the owner nothing are unaffected, with or without the line.
+  assert.equal(run(GOOD).code, 0);
+  assert.equal(run(GOOD.replace('NOT_REQUIRED (no owner-facing change)', "PASSED (the owner's OK)")).code, 0);
+  assert.equal(run(`${GOOD}Agent UAT: FAILED (not asked)\n`).code, 0);
+});
+
 test('personal data the builder must fix by hand is reported, never silently removed', () => {
   const address = ['jane.tan', 'mailbox-sg.com'].join('@');
   const body = `${GOOD}Contact ${address} for details.\n`;
