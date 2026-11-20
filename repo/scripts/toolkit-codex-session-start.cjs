@@ -57,15 +57,22 @@ function readHookInput() {
 }
 
 // Records the run's session mark (so a later process that resumes the session cannot answer the
-// governance question) and returns one line stating this repository's governance state; nothing
-// outside a repository. SessionStart cannot block, so a failure here only drops the line.
-function governanceLine(input, dependencies) {
+// governance question) and returns the session's lines: the local default-branch catch-up's line
+// when it moved or could not move (toolkit-repo-catchup.cjs, from this start's fresh read), then
+// one line stating this repository's governance state; nothing outside a repository.
+// SessionStart cannot block, so a failure here only drops a line.
+function sessionLines(input, dependencies) {
   try {
     const gate = dependencies.gate || require('./toolkit-governance-gate.cjs');
-    gate.startSession(input, { host: 'codex' });
+    let fresh = null;
+    gate.startSession(input, { host: 'codex', onRefresh: read => { fresh = read; } });
+    let caughtUp = null;
+    try { caughtUp = (dependencies.catchUp || require('./toolkit-repo-catchup.cjs')).catchUp(fresh); } catch { caughtUp = null; }
+    let governance = null;
     // Codex always sends the session's cwd; without one there is no repository to describe.
-    return input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null;
-  } catch { return null; }
+    try { governance = input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null; } catch { governance = null; }
+    return [caughtUp, governance].filter(Boolean);
+  } catch { return []; }
 }
 
 function main(argv = process.argv.slice(2), dependencies = {}) {
@@ -86,8 +93,7 @@ function main(argv = process.argv.slice(2), dependencies = {}) {
   }
   let input = {};
   try { input = dependencies.input || (dependencies.readInput ? dependencies.readInput() : {}); } catch { input = {}; }
-  const line = governanceLine(input, dependencies);
-  if (line) console.log(line);
+  for (const line of sessionLines(input, dependencies)) console.log(line);
   return 0;
 }
 

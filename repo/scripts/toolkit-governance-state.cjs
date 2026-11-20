@@ -662,7 +662,9 @@ function governanceState(cwd, options = {}) {
 
 // Refreshes this computer's cache of the merged binding for the repository at cwd (`toolkit
 // governance status`, session start, or a prompt after a known proposal closes). Never throws; returns
-// { refreshed, error }. Nothing to refresh outside a github.com repository.
+// { refreshed, error }, and for a read made now also the repository root, the default branch and the
+// commit just fetched for it (the session-start catch-up, toolkit-repo-catchup.cjs, moves to that
+// commit). Nothing to refresh outside a github.com repository.
 // With TOOLKIT_GOVERNANCE_OFFLINE=1 (set for test runs), or for a test registry, nothing reads the
 // network unless a git runner is passed in: the last read stays, so governed effects hold once it is
 // over 24 hours old.
@@ -672,7 +674,8 @@ function refreshMergedBinding(cwd, options = {}, { runGit, timeout, deadline, no
     const identity = readIdentity(cwd);
     if (!identity.root || !identity.valid || notGitHubOf(identity)) return { refreshed: false, error: 'not-applicable' };
     const outcome = bindingCache.refreshBindingCache(identity, userStateDirectory(options), { runGit, timeout, deadline, now, environment });
-    return { refreshed: outcome.refreshed, error: outcome.error };
+    if (!outcome.refreshed) return { refreshed: false, error: outcome.error };
+    return { refreshed: true, error: null, root: identity.root, default_branch: outcome.entry.default_branch, commit: outcome.entry.commit };
   } catch (error) { return { refreshed: false, error: codeOf(error) }; }
 }
 
