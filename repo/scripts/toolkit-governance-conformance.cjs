@@ -326,17 +326,23 @@ function leftoverBlockFindings(repoRoot, toolkitRoot) {
 // list. A missing or hand-edited copy is drift; one rendered from an older Toolkit commit or an older
 // shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
 // own files and is skipped.
-// Whether a rules refresh from this Toolkit checkout moves a copy pinned to `pin` forward: only when
-// the checkout's HEAD is on origin/main and already contains the pin. A newer pin (another computer
-// refreshed from a later main) or a checkout off main would roll the copy back, or the refresh refuses.
-// Two git reads at most per pin, local only.
+// Whether a rules refresh from this Toolkit checkout moves a copy pinned to `pin` forward: true only
+// when the checkout's HEAD is on origin/main and already contains the pin. A newer pin (another
+// computer refreshed from a later main) or a checkout off main would roll the copy back, or the
+// refresh refuses: false. 'shallow' when the checkout is on main but is a shallow clone (cloud
+// sessions clone 50 commits deep), whose history may just stop before the pin. Three git reads at
+// most per pin, local only.
 function pinDirection(toolkitRoot, head) {
-  const git = args => { const run = spawnSync('git', args, { cwd: toolkitRoot, encoding: 'utf8', windowsHide: true, shell: false }); return !run.error && run.status === 0; };
+  const git = args => { const run = spawnSync('git', args, { cwd: toolkitRoot, encoding: 'utf8', windowsHide: true, shell: false }); return !run.error && run.status === 0 ? String(run.stdout || '').trim() : null; };
   let onMain;
+  let shallow;
   return pin => {
     if (!/^[0-9a-f]{40}$/.test(String(pin || '')) || !/^[0-9a-f]{40}$/.test(String(head || ''))) return false;
-    if (onMain === undefined) onMain = git(['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main']);
-    return onMain && git(['merge-base', '--is-ancestor', pin, head]);
+    if (onMain === undefined) onMain = git(['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main']) !== null;
+    if (!onMain) return false;
+    if (git(['merge-base', '--is-ancestor', pin, head]) !== null) return true;
+    if (shallow === undefined) shallow = git(['rev-parse', '--is-shallow-repository']) === 'true';
+    return shallow ? 'shallow' : false;
   };
 }
 
@@ -363,7 +369,7 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     if (row.state === 'current') continue;
     // The file, the copy's pin and whether a refresh from this checkout moves it forward ride along for
     // the session-start note (toolkit-governance-gate.cjs stalePinLines).
-    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`), file: row.file, pin: row.toolkit || null, head, refreshable: direction(row.toolkit) }));
+    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), file: row.file, pin: row.toolkit || null, pinned: Boolean(row.pinned), head, refreshable: direction(row.toolkit) }));
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
   // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:
