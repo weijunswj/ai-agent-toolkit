@@ -21,7 +21,6 @@ const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'
 const UNINSTALLED_LINE = /^Toolkit: this session runs an uninstalled Toolkit copy \(.+\); session-start maintenance is skipped and nothing is recorded\.$/m;
 // The Claude app's account copy hands the session start to this PC's checkout; these fixture
 // checkouts carry versions only, so the hand-off says it could not run and writes nothing.
-const ACCOUNT_LINE = /^Toolkit: this Claude app chat runs the Toolkit copy from the claude\.ai account, so session-start maintenance runs from this PC's Toolkit folder\.$/m;
 const NO_SCRIPT_LINE = /^Toolkit: this PC's Toolkit folder .+ has no bridge script, so session-start maintenance did not run\. Run `setup toolkit`\.$/m;
 
 function tmpRoot(t) {
@@ -60,6 +59,8 @@ function env(root, extra = {}) {
     LOCALAPPDATA: path.join(root, 'local-app-data'),
     CLAUDE_CONFIG_DIR: path.join(root, '.claude'),
     AI_AGENT_TOOLKIT_CONTROL_ROOT: path.join(root, '.ai-agent-toolkit', 'agent-control'),
+    // A computer, even when the tests run in a cloud session.
+    CLAUDE_CODE_REMOTE: '',
     ...extra,
   };
 }
@@ -207,7 +208,6 @@ test('a Claude app copy older than this PC\'s Toolkit shows the owner the update
   assert.equal(STEPS.length, 4);
   const context = output.hookSpecificOutput.additionalContext;
   assert.equal(output.hookSpecificOutput.hookEventName, 'SessionStart');
-  assert.match(context, ACCOUNT_LINE);
   assert.match(context, NO_SCRIPT_LINE);
   assert.ok(context.includes(`Toolkit update reminder for the owner: ${output.systemMessage} Say this reminder to the owner once, in your first reply.`), context);
   assert.equal(treeDigest(hub), hubBefore, 'hub untouched');
@@ -225,7 +225,7 @@ test('a current Claude app copy, a --plugin-dir copy and an unreadable checkout 
     assert.equal(result.stdout.trim().split(/\r?\n/).length, lines.length, result.stdout);
   };
   // Same version as this PC.
-  plainOnly(hook(root, hub, accountCopy(root, '9.9.1')), [ACCOUNT_LINE, NO_SCRIPT_LINE]);
+  plainOnly(hook(root, hub, accountCopy(root, '9.9.1')), [NO_SCRIPT_LINE]);
   // A test candidate outside the app's account-plugin folders.
   const candidate = path.join(root, 'pc', 'candidate');
   fakeToolkit(candidate, '9.8.0');
@@ -236,7 +236,7 @@ test('a current Claude app copy, a --plugin-dir copy and an unreadable checkout 
   const missing = recordManagedCheckout(tmpRoot(t), null);
   const unreadable = hook(root, missing.hub, older);
   assert.equal(unreadable.status, 0, unreadable.stderr);
-  assert.match(unreadable.stdout, ACCOUNT_LINE);
+  assert.match(unreadable.stdout, NO_SCRIPT_LINE);
   assert.match(unreadable.stdout, /^Toolkit: could not compare this claude\.ai copy with this PC's Toolkit \(the Toolkit folder .+ has no readable version\), so no update reminder is shown\.$/m);
   assert.doesNotMatch(unreadable.stdout, /systemMessage/);
 
@@ -261,7 +261,7 @@ test('a Claude app chat never mentions Codex, even when Codex runs an older Tool
   // A current app copy: plain lines only, no reminder JSON and no Codex text.
   const current = hook(root, hub, accountCopy(root, '9.9.1'));
   assert.equal(current.status, 0, current.stderr);
-  assert.match(current.stdout, ACCOUNT_LINE);
+  assert.match(current.stdout, NO_SCRIPT_LINE);
   assert.doesNotMatch(current.stdout, /systemMessage|codex/i);
   assert.doesNotMatch(current.stderr, /codex/i);
 

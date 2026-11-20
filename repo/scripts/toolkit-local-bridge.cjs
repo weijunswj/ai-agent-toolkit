@@ -551,10 +551,14 @@ function changedFilesBetween(repoPath, fromCommit, toCommit) {
     .sort((left, right) => left.localeCompare(right));
 }
 
-// The folder beside the hub snapshot directory: update.lock, the notice ledger and the marker.
+// The folder beside the hub snapshot directory: update.lock, remote-check.json and the update markers
+// (toolkit-update-marker.cjs).
 function controlRootOf(args = {}) {
   return path.dirname(path.resolve(args.hub || defaultHubPath()));
 }
+
+// A move that another session start's reader held off for the whole wait; the update runs at the next start.
+const READERS_BUSY = Object.freeze({ ok: false, status: 1, stdout: '', stderr: "another session start was still reading Toolkit's files after 15 seconds; the update runs at the next session start" });
 
 // A session start whose managed checkout already matches the remote does no fetch, validation or
 // copy. It costs one state read, one local git call and at most one `git ls-remote`, and none
@@ -633,7 +637,7 @@ function validateAndUpdateRepo(state, args = {}) {
   }
   let branchSwitchedFrom = '';
   if (currentBranch !== branch) {
-    const switchResult = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['switch', branch], { timeout: 120000 }));
+    const switchResult = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['switch', branch], { timeout: 120000 })) || READERS_BUSY;
     if (!switchResult.ok) {
       throw repoUpdateError('skipped', `git switch ${branch} failed: ${commandOutput(switchResult)}`, {
         error: 'branch switch failed'
@@ -668,7 +672,7 @@ function validateAndUpdateRepo(state, args = {}) {
       });
     }
     if (fromCommit !== fetchedCommit) {
-      const merge = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 }));
+      const merge = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 })) || READERS_BUSY;
       if (!merge.ok) {
         throw repoUpdateError('skipped', `git merge --ff-only ${fetchedCommit} failed: ${commandOutput(merge)}`, {
           fromCommit,
@@ -3051,15 +3055,24 @@ function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process
 // this PC has a managed checkout, its own bridge script runs the session start instead, as the
 // installed copy (HANDOFF_ENV names the account copy that handed off). Returns its output lines.
 const HANDOFF_ENV = 'TOOLKIT_BRIDGE_HANDOFF_FROM';
+// A checkout from before the hand-off does not know HANDOFF_ENV, so it would call itself an
+// uninstalled copy and do nothing: it is not run, and the owner is told (`owner`) to refresh once.
 function handOffToCheckout(args, accountRoot, checkout) {
   const script = path.join(checkout, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-  if (!fs.existsSync(script)) return [`Toolkit: this PC's Toolkit folder ${slash(checkout)} has no bridge script, so session-start maintenance did not run. Run \`setup toolkit\`.`];
+  let source = '';
+  try { source = fs.readFileSync(script, 'utf8'); } catch {
+    return { lines: [`Toolkit: this PC's Toolkit folder ${slash(checkout)} has no bridge script, so session-start maintenance did not run. Run \`setup toolkit\`.`] };
+  }
+  if (!source.includes(HANDOFF_ENV)) {
+    return { lines: [], owner: `Toolkit: this PC's Toolkit folder ${slash(checkout)} is older than the Claude app's Toolkit and cannot take its session-start maintenance, so it is not updating. Say \`refresh toolkit\` once; after that it updates itself at each session start.` };
+  }
   const result = runCommand(process.execPath, [script, ...args.argv], {
     cwd: process.cwd(), timeout: 300000, env: { CLAUDE_PLUGIN_ROOT: checkout, [HANDOFF_ENV]: accountRoot }
   });
-  const lines = String(result.stdout || '').split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  const lines = ["Toolkit: this Claude app chat runs the Toolkit copy from the claude.ai account, so session-start maintenance runs from this PC's Toolkit folder.",
+    ...String(result.stdout || '').split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean)];
   if (!result.ok) lines.push(`Toolkit: session-start maintenance from this PC's Toolkit folder stopped (${sanitizeOutputMessage(commandOutput(result)).slice(0, 300) || 'no output'}); it runs again at the next session start.`);
-  return lines;
+  return { lines };
 }
 
 function codexNativePluginCacheStatus(args, state) {
@@ -3261,6 +3274,8 @@ class RepositoryAutoUpdateOperation {
     const lock = acquireLock(path.dirname(hubPath), args);
     if (!lock.acquired) {
       console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
+      // Only the start that moves the checkout prints the notice, so this session is told instead.
+      if (args.hook) console.log("Toolkit: another session start is updating Toolkit on this computer now. If it moves Toolkit's files, this session runs the new hook scripts without an update notice; start a new session for new hooks and skills.");
       return { status: 0, audit: buildAudit({ args, hubPath, state: this.#state, checksum: this.#checksum }) };
     }
     try {
@@ -3613,21 +3628,23 @@ class LocalBridgeRun {
     // A cloud session always runs a synced copy and has no checkout to maintain; it hears about
     // its copy only when the copy is older than a Toolkit repository it works in.
     if (process.env.CLAUDE_CODE_REMOTE === 'true' && !newer) return true;
-    const lines = isClaudeAccountCopy(root) && managedCheckout
-      ? [`Toolkit: this Claude app chat runs the Toolkit copy from the claude.ai account, so session-start maintenance runs from this PC's Toolkit folder.`, ...handOffToCheckout(args, root, managedCheckout)]
-      : [`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`];
+    const handOff = isClaudeAccountCopy(root) && managedCheckout
+      ? handOffToCheckout(args, root, managedCheckout)
+      : { lines: [`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`] };
+    const lines = handOff.lines;
     if (newer) lines.push(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
     const appCopy = claudeAppCopyStatus(root, managedCheckout);
     if (appCopy.context) lines.push(appCopy.context);
     // Only this app's own copy is reported here: a Claude session never reports Codex's Toolkit state.
-    if (!appCopy.reminder) {
+    const owner = [handOff.owner, appCopy.reminder].filter(Boolean).join('\n');
+    if (!owner) {
       for (const line of lines) console.log(line);
       return true;
     }
-    // Hook text on stdout reaches only the model, so the reminder goes to the owner twice over: in
-    // the hook's systemMessage, and as a context line asking the session to say it in its first reply.
-    lines.push(`Toolkit update reminder for the owner: ${appCopy.reminder} Say this reminder to the owner once, in your first reply.`);
-    console.log(JSON.stringify({ systemMessage: appCopy.reminder, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } }));
+    // Hook text on stdout reaches only the model, so what the owner must act on goes to them twice
+    // over: in the hook's systemMessage, and as a context line asking the session to say it in its first reply.
+    lines.push(`Toolkit update reminder for the owner: ${owner} Say this reminder to the owner once, in your first reply.`);
+    console.log(JSON.stringify({ systemMessage: owner, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } }));
     return true;
   }
 

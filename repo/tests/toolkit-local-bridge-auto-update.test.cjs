@@ -167,6 +167,70 @@ test('the tree-moving marker makes a reader wait, and a stale, dead or missing o
   assert.equal(marker.waitForSteadyTree(root, { timeoutMs: 0, now: () => Date.now() + marker.STALE_MS + 1000 }), true);
 });
 
+test('a session start that finds another one updating is told it may run moved files without the notice', (t) => {
+  const root = tmpRoot(t);
+  const { origin, managed } = staleManagedCheckout(root);
+  installToolkit(root, managed);
+  const hub = recordCheckout(root, managed, origin);
+  const head = git(managed, ['rev-parse', 'HEAD']);
+  // Another session start's live bridge holds the update lock.
+  writeJson(path.join(path.dirname(hub), 'update.lock'), { created_at: new Date().toISOString(), pid: process.pid, token: 'other-start' });
+  const result = hook(root, hub, managed, { bridge: path.join(managed, 'repo', 'scripts', 'toolkit-local-bridge.cjs') });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^Toolkit: another session start is updating Toolkit on this computer now\. If it moves Toolkit's files, this session runs the new hook scripts without an update notice; start a new session for new hooks and skills\.$/m);
+  assert.doesNotMatch(result.stdout, NOTICE);
+  assert.equal(git(managed, ['rev-parse', 'HEAD']), head);
+});
+
+// A bridge in another process trying to move the tree, as the bridge hook at the same session start
+// does; prints what whileTreeMoves returned ('moved', or null when a reader held it off).
+const markerScript = path.join(repoRoot, 'repo', 'scripts', 'toolkit-update-marker.cjs');
+function moveFromAnotherProcess(controlRoot, timeoutMs) {
+  const code = `const m = require(${JSON.stringify(markerScript)});\n`
+    + `process.stdout.write(String(m.whileTreeMoves(${JSON.stringify(controlRoot)}, () => 'moved', { timeoutMs: ${timeoutMs} })));`;
+  const result = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 60000 });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+
+test('a reader holds a move off for its whole run; a dead or stale reader does not', (t) => {
+  const root = tmpRoot(t);
+  assert.deepEqual(marker.whileReading(root, () => moveFromAnotherProcess(root, 300)), { steady: true, value: 'null' });
+  assert.equal(moveFromAnotherProcess(root, 300), 'moved', 'the reader released it');
+  fs.mkdirSync(marker.readersPath(root), { recursive: true });
+  fs.writeFileSync(path.join(marker.readersPath(root), 'gone'), JSON.stringify({ pid: 999999 }));
+  const stale = path.join(marker.readersPath(root), 'stale');
+  fs.writeFileSync(stale, JSON.stringify({ pid: process.pid }));
+  const old = new Date(Date.now() - marker.STALE_MS - 1000);
+  fs.utimesSync(stale, old, old);
+  assert.equal(marker.whileTreeMoves(root, () => 'moved', { timeoutMs: 300, alive: (pid) => pid === process.pid }), 'moved');
+  // A reader that arrives while a move is running waits for it, then reads.
+  let clock = 0;
+  const steps = [];
+  fs.writeFileSync(marker.markerPath(root), JSON.stringify({ pid: process.pid }));
+  const read = marker.whileReading(root, () => { steps.push('read'); return 'value'; }, {
+    now: () => clock, sleep: (ms) => { clock += ms; if (clock >= 300) { steps.push('moved'); fs.rmSync(marker.markerPath(root), { force: true }); } },
+  });
+  assert.deepEqual(read, { steady: true, value: 'value' });
+  assert.deepEqual(steps, ['moved', 'read']);
+  assert.deepEqual(fs.readdirSync(marker.readersPath(root)), [], 'readers clean up after themselves');
+});
+
+test('the governance hook holds a move off while it reads the governance state', (t) => {
+  const root = tmpRoot(t);
+  const { respond } = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-governance-hook.cjs'));
+  const environment = { HOME: root, USERPROFILE: root };
+  const controlRoot = marker.defaultControlRoot(environment);
+  // The governance reads (here the session line) run while the bridge hook tries to move the tree.
+  const gate = {
+    HOST_SESSION_VARIABLE: 'TOOLKIT_HOST_SESSION', sessionIdOf: () => 's1', startSession: () => {},
+    sessionLine: () => `a move during the read returned ${moveFromAnotherProcess(controlRoot, 300)}`,
+  };
+  const output = respond('SessionStart', { cwd: root, session_id: 's1' }, { gate, environment });
+  assert.equal(output.hookSpecificOutput.additionalContext, 'a move during the read returned null');
+  assert.equal(moveFromAnotherProcess(controlRoot, 300), 'moved', 'released once the hook is done');
+});
+
 test('the governance hook reads no governance state while an update is moving the checkout, and does once it is steady', (t) => {
   const root = tmpRoot(t);
   const home = path.join(root, 'home');

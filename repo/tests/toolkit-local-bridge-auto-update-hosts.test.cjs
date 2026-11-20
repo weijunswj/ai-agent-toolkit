@@ -34,6 +34,34 @@ test('the Claude app account copy hands the session start to the stale managed c
   assert.doesNotMatch(result.stdout, /hook scripts in this session run the new code/);
 });
 
+test('a Toolkit folder older than the hand-off is not run; the owner is told once to say refresh toolkit', (t) => {
+  const root = tmpRoot(t);
+  const { origin, managed } = staleManagedCheckout(root);
+  // The checkout's bridge as it was before the hand-off existed: run from the account copy, it does
+  // not know it was handed the session start, so it calls itself uninstalled and does nothing.
+  const ran = path.join(root, 'old-bridge-ran');
+  fs.writeFileSync(path.join(managed, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    "'use strict';",
+    `require('node:fs').writeFileSync(${JSON.stringify(ran)}, 'ran');`,
+    "console.log('Toolkit: this session runs an uninstalled Toolkit copy; session-start maintenance is skipped and nothing is recorded.');",
+    '',
+  ].join('\n'));
+  const head = git(managed, ['rev-parse', 'HEAD']);
+  // The same on a computer that had automatic updates turned off: only the new script turns them on.
+  for (const extra of [{}, { repo_auto_update_enabled: false }]) {
+    const hub = recordCheckout(root, managed, origin, extra);
+    const result = hook(root, hub, accountCopy(root));
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.match(output.systemMessage, /^Toolkit: this PC's Toolkit folder .+ is older than the Claude app's Toolkit and cannot take its session-start maintenance, so it is not updating\. Say `refresh toolkit` once; after that it updates itself at each session start\.$/);
+    const context = output.hookSpecificOutput.additionalContext;
+    assert.equal(context.split('refresh toolkit').length - 1, 1, context);
+    assert.doesNotMatch(context, /uninstalled Toolkit copy|maintenance runs from this PC's Toolkit folder/);
+    assert.equal(fs.existsSync(ran), false, 'the old script is not run');
+    assert.equal(git(managed, ['rev-parse', 'HEAD']), head);
+  }
+});
+
 test('the hand-off needs a recorded checkout; a --plugin-dir copy never hands off or moves the checkout', (t) => {
   const root = tmpRoot(t);
   const { origin, managed } = staleManagedCheckout(root);

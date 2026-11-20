@@ -12,8 +12,9 @@
 //                     points an agent's own merge question (AskUserQuestion) at the merge card.
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
-//   SessionStart      first waits (up to 15 s) while the bridge hook moves the Toolkit checkout's
-//                     files (toolkit-update-marker.cjs); then adds context stating the effective
+//   SessionStart      runs as a reader of the Toolkit checkout (toolkit-update-marker.cjs): it
+//                     waits (up to 15 s) for a move the bridge hook is making, and no move starts
+//                     until it is done. It adds context stating the effective
 //                     governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
@@ -75,10 +76,16 @@ function respond(event, input, options = {}) {
     if (route) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: route } };
   }
   // The bridge hook may be fast-forwarding the Toolkit checkout this hook runs from at this same
-  // session start; read nothing from it until the files stop moving.
-  if (event === 'SessionStart' && !cloud && !(options.steadyTree || steadyTree)()) {
-    return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: TREE_MOVING } };
+  // session start: the whole session-start read runs as a reader, so no move runs during it.
+  if (event === 'SessionStart' && !cloud) {
+    const read = whileReading(options.environment || process.env, () => respondSteady(event, input, options));
+    return read.steady ? read.value : { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: TREE_MOVING } };
   }
+  return respondSteady(event, input, options);
+}
+
+function respondSteady(event, input, options) {
+  const cloud = options.cloud === true;
   let gate;
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
@@ -149,10 +156,13 @@ function respond(event, input, options = {}) {
 
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
 
-// Waits (bounded) while the bridge moves the Toolkit checkout's files; a broken marker module never
-// stops the session start.
-function steadyTree() {
-  try { return require('./toolkit-update-marker.cjs').waitForSteadyTree(); } catch { return true; }
+// Runs fn as a reader of the Toolkit checkout (toolkit-update-marker.cjs): no move starts while it
+// reads, and it waits (bounded) for a move already running. A broken marker module never stops the
+// session start. This script file and the marker module load before the guard.
+function whileReading(environment, fn) {
+  let marker;
+  try { marker = require('./toolkit-update-marker.cjs'); } catch { return { steady: true, value: fn() }; }
+  return marker.whileReading(marker.defaultControlRoot(environment), fn);
 }
 const TREE_MOVING = "Toolkit: an update was still writing Toolkit's files after 15 seconds, so this session start could not read the governance state safely. Continue with the global rules; no governance effects or standing task auto-merge until the next session start.";
 
