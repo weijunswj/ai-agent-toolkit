@@ -15,7 +15,8 @@
 //   SessionStart      runs as a reader of the Toolkit checkout (toolkit-update-marker.cjs): it
 //                     waits (up to 15 s) for a move the bridge hook is making, and no move starts
 //                     until it is done. It adds context stating the effective
-//                     governance state, exports the session's
+//                     governance state, after a line from the local default-branch catch-up
+//                     (toolkit-repo-catchup.cjs) when it moved or could not move, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
 //                     mark, so a later process that resumes the session cannot answer.
@@ -131,7 +132,8 @@ function respondSteady(event, input, options) {
       return card ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: card.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
-    gate.startSession(input, { ...options, host: 'claude-code' });
+    let fresh = null;
+    gate.startSession(input, { ...options, host: 'claude-code', onRefresh: read => { fresh = read; } });
     let text;
     if (cloud) {
       // The start folder's repository, or each repository cloned directly under it (a Projects
@@ -140,8 +142,12 @@ function respondSteady(event, input, options) {
       const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`${CLOUD_LINE}\n\n`, 'utf8');
       const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit });
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
-    } else text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
-    return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
+    } else {
+      // The catch-up moves the checkout first, so the governance line reads the moved tree.
+      const caughtUp = catchUpLine(fresh, options);
+      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) })].filter(Boolean).join('\n');
+    }
+    return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch {
     // A failed governance check outside a repository may still allow a merge there. Consume its
     // approval only if that failure path actually allows the call.
@@ -155,6 +161,13 @@ function respondSteady(event, input, options) {
 }
 
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+// The session-start catch-up's one line (toolkit-repo-catchup.cjs), from this start's fresh read of
+// origin's default branch. Local sessions only: a cloud container starts from a fresh clone. Any
+// failure drops only this line.
+function catchUpLine(fresh, options) {
+  try { return (options.repoCatchUp || require('./toolkit-repo-catchup.cjs')).catchUp(fresh, { environment: options.environment || process.env }); } catch { return null; }
+}
 
 // Runs fn as a reader of the Toolkit checkout (toolkit-update-marker.cjs): no move starts while it
 // reads, and it waits (bounded) for a move already running. A broken marker module never stops the

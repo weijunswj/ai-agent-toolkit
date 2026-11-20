@@ -26,6 +26,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-repository-identity.cjs');
+const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const CACHE_SCHEMA = 'toolkit.governance-binding-cache.v1';
 const CACHE_DIR = 'governance-binding-cache';
@@ -95,12 +96,19 @@ function cacheFileFor(stateDirectory, repositoryId) {
   return path.join(cacheDirFor(stateDirectory), `${name}.json`);
 }
 
-function defaultRunGit(args, { cwd, timeout }) {
-  const run = spawnSync('git', args, {
-    cwd, timeout, windowsHide: true, maxBuffer: 1024 * 1024,
-    // Replace refs would make rev-parse, ls-tree and cat-file read other objects than the fetched ones.
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_NO_REPLACE_OBJECTS: '1' },
-  });
+// Runs git from its PATH location with no prompts. A bare `git` on Windows would first run a git.exe
+// in the working folder, which is the repository being read (resolvePathExecutable). `input` feeds
+// stdin, `environment` replaces process.env and `spawn` is for tests; a git that cannot be found or
+// started reads as a failed call.
+function defaultRunGit(args, { cwd, timeout, input, maxBuffer = 1024 * 1024, environment = process.env, spawn = spawnSync } = {}) {
+  let run;
+  try {
+    run = spawn(resolvePathExecutable('git', { env: environment }), args, {
+      cwd, timeout, input, windowsHide: true, maxBuffer,
+      // Replace refs would make rev-parse, ls-tree and cat-file read other objects than the fetched ones.
+      env: { ...environment, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_NO_REPLACE_OBJECTS: '1' },
+    });
+  } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   return { status: run.error ? null : run.status, stdout: run.stdout || Buffer.alloc(0), stderr: run.stderr || Buffer.alloc(0) };
 }
 
