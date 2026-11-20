@@ -150,7 +150,7 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
   const fixture = realManagedFixture();
   const result = await runWithUnclosedStdin(script, [
     '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
-    '--use-default-managed-checkout', '--enable-repo-auto-update', '--enable-update-reports',
+    '--use-default-managed-checkout', '--enable-update-reports',
     '--default-update-report-retention-days', '--claude-topology', 'root-only',
     '--claude-plugin-behavior', 'instructions', '--claude-settings', 'enable',
   ], { env: isolatedHomeEnv(fixture.root), deadlineMs: 300000 });
@@ -166,7 +166,7 @@ test('managed partial explicit flags preserve one bank and truthful child guidan
   const fixture = realManagedFixture();
   const result = await runWithUnclosedStdin(script, [
     '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
-    '--enable-repo-auto-update',
+    '--enable-update-reports',
   ], {
     env: isolatedHomeEnv(fixture.root),
     closeStdinAfterOutput: core.QUESTION_BANK_COMPLETE,
@@ -179,7 +179,7 @@ test('managed partial explicit flags preserve one bank and truthful child guidan
   assert.match(result.stdout, /Some visible questions are already resolved by explicit setup flags/);
   assert.match(result.stdout, /Reply with one line for each unresolved question in this exact order/);
   assert.equal((result.stdout.match(/After those question-answer lines, append detail lines in this exact canonical order/g) || []).length, 1);
-  assert.match(result.stdout, /1\. 1\.1 Update source: custom managed-checkout path[\s\S]*2\. 1\.4 Report retention: positive report-retention duration/);
+  assert.match(result.stdout, /1\. 1\.1 Update source: custom managed-checkout path[\s\S]*2\. 1\.3 Report retention: positive report-retention duration/);
   assert.doesNotMatch(result.stdout, /Reply with either:/);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
 });

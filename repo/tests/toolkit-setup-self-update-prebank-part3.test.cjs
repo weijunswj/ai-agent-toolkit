@@ -7,20 +7,21 @@ const {
 const BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 const VERSION_REL = 'repo/contracts/toolkit-local-bridge/version.json';
-function audit(managedPath, enabled, repoPath = managedPath) {
+// Automatic updates are on whenever a repo_path is recorded; no repo_path means no update source yet.
+function audit(managedPath, repoPath = managedPath) {
   return JSON.stringify({
     update_report_enabled: true, update_report_open_enabled: false, update_report_retention_days: 7,
     codex_plugin_auto_refresh_enabled: false,
-    repo_auto_update: { enabled, last_status: 'configured', repo_path: repoPath },
+    repo_auto_update: { enabled: repoPath !== '', last_status: 'configured', repo_path: repoPath },
     update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(managedPath, 'tmp-reports') },
   });
 }
-function fixture({ autoUpdate = true, repoPath } = {}) {
+function fixture({ repoPath } = {}) {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedRealSetupRepo(root);
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
-  const env = { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: audit(managedPath, autoUpdate, repoPath) };
+  const env = { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: audit(managedPath, repoPath) };
   return { root, origin, setupRepo, managedPath, env, head: () => runTestGit(managedPath, ['rev-parse', 'HEAD']) };
 }
 function runManaged(f, { input = '', extra = ['--execute'], env = {} } = {}) {
@@ -47,7 +48,7 @@ function bankCount(stdout, marker) {
 }
 
 // Complete test declarations, split to keep the per-file time budget.
-test('automatic updates on: plan and explain runs never update the managed copy', () => {
+test('a recorded update source: plan and explain runs never update the managed copy', () => {
   const f = fixture();
   const before = f.head();
   pushRelease(f);
@@ -58,7 +59,7 @@ test('automatic updates on: plan and explain runs never update the managed copy'
   }
 });
 
-test('automatic updates on: a dirty managed copy stops before any table and writes nothing', () => {
+test('a recorded update source: a dirty managed copy stops before any table and writes nothing', () => {
   const f = fixture();
   const before = f.head();
   pushRelease(f);

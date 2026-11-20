@@ -1176,8 +1176,6 @@ test('reconciliation rejects every unrelated command flag before mutation', () =
     ['--sync-enabled'],
     ['--enable-auto-sync'],
     ['--disable-auto-sync'],
-    ['--enable-repo-auto-update'],
-    ['--disable-repo-auto-update'],
     ['--repo-path', root],
     ['--repo-branch', 'main'],
     ['--repo-remote', 'https://example.invalid/repo'],
@@ -2486,7 +2484,9 @@ function runSessionStartHook(cwd, home, syncSource = 'codex-plugin') {
   const hub = path.join(home, 'hub', 'current');
   if (!fs.existsSync(path.join(hub, 'state.json'))) writeDisabledHookHub(hub);
   installToolkitCopy(home);
-  return run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', syncSource], {
+  // Repository updates have their own tests; this session start skips them (the flag the delegated
+  // sync uses), so it runs only the maintenance under test and never touches the recorded checkout.
+  return run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--skip-repo-auto-update', '--sync-source', syncSource], {
     cwd,
     env: claudeHookEnv(home, { PATH: process.env.PATH, PLUGIN_ROOT: repoRoot })
   });
@@ -2798,7 +2798,6 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   const updatedCommit = pushRepoToolkitUpdate(fixture, 'report-fast-forward');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
@@ -2839,7 +2838,6 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
   const hub = path.join(fixture.root, 'hub', 'current');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
@@ -2872,7 +2870,6 @@ test('hook report is generated when repo was already advanced before the hook ru
   const hub = path.join(fixture.root, 'hub', 'current');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
@@ -2915,11 +2912,14 @@ test('active hook writes persist each source independently without requiring a r
   state.update_report_enabled = false;
   writeJson(path.join(fixture.hub, 'state.json'), state);
 
+  // Repository updates have their own tests; this session start skips them (the flag the delegated
+  // sync uses), so it runs only the maintenance under test and never touches the recorded checkout.
   let result = runFixtureBridge(fixture, [
     '--hub', fixture.hub,
     '--hook',
     '--sync-enabled',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'claude-plugin'
   ]);
   assert.equal(result.status, 0);
@@ -2956,6 +2956,7 @@ test('active hook writes persist each source independently without requiring a r
     '--hook',
     '--sync-enabled',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'repo',
     '--suppress-update-report'
   ]);
@@ -2971,6 +2972,7 @@ test('active hook writes persist each source independently without requiring a r
     '--hook',
     '--sync-enabled',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'codex-plugin'
   ]);
   assert.equal(result.status, 0);
@@ -2989,6 +2991,7 @@ test('active hook writes persist each source independently without requiring a r
     '--hook',
     '--sync-enabled',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'codex-plugin'
   ]);
   assert.equal(result.status, 0);
@@ -3003,6 +3006,7 @@ test('active hook writes persist each source independently without requiring a r
     '--hub', fixture.hub,
     '--hook',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'claude-plugin'
   ]);
   assert.equal(result.status, 0);
@@ -3077,16 +3081,18 @@ test('disabled hook remains no-write and active lock contention reports an unper
   const hookEnv = claudeHookEnv(fixture.root, { TEMP: fixture.temp, TMP: fixture.temp, CLAUDE_PLUGIN_ROOT: fixture.sourceRepo });
   let state = readJson(path.join(fixture.hub, 'state.json'));
   state.auto_sync_enabled = false;
-  state.repo_auto_update_enabled = false;
   writeJson(path.join(fixture.hub, 'state.json'), state);
   const statePath = path.join(fixture.hub, 'state.json');
   const disabledBytes = fs.readFileSync(statePath);
+  // Repository updates have their own tests; these session starts skip them (the flag the delegated
+  // sync uses), so they run only the hub sync under test.
 
   let result = run([
     '--hub', fixture.hub,
     '--hook',
     '--sync-enabled',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'claude-plugin'
   ], { env: fixture.env });
   assert.equal(result.status, 0, result.stderr);
@@ -3103,6 +3109,7 @@ test('disabled hook remains no-write and active lock contention reports an unper
     '--hook',
     '--sync-enabled',
     '--write',
+    '--skip-repo-auto-update',
     '--sync-source', 'claude-plugin'
   ], { env: fixture.env });
   assert.equal(result.status, 0, result.stderr);
@@ -3158,13 +3165,12 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
   assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
 });
 
-test('enabling repo auto-update records repo path branch and remote in hub state', () => {
+test('setting the repo path records repo path branch and remote in hub state and turns repo auto-update on', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
 
   const result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
@@ -3180,37 +3186,12 @@ test('enabling repo auto-update records repo path branch and remote in hub state
   assert.equal(state.last_repo_update_status, 'configured');
 });
 
-test('hook mode does nothing when repo auto-update is disabled', () => {
-  const fixture = createRepoAutoUpdateFixture();
-  const hub = path.join(fixture.root, 'hub', 'current');
-  const marker = path.join(fixture.root, 'delegate.log');
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1,
-    architecture_version: 2,
-    hub_version: '2.0.0',
-    auto_sync_enabled: false,
-    repo_auto_update_enabled: false,
-    repo_path: fixture.repo,
-    repo_branch: 'main',
-    repo_remote: fixture.origin,
-    targets: {}
-  });
-
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
-    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.existsSync(marker), false);
-  assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_status || '', '');
-});
-
 test('hook mode refuses a dirty repo before update and does not sync targets', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
   const marker = path.join(fixture.root, 'delegate.log');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
@@ -3251,7 +3232,6 @@ test('hook mode auto-switches a clean repo back to main before update and sync',
   const marker = path.join(fixture.root, 'delegate.log');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
@@ -3290,7 +3270,6 @@ test('hook mode rejects a repo whose origin remote does not match configured rem
   const marker = path.join(fixture.root, 'delegate.log');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-remote', `${fixture.origin}-other`,
     '--enable-auto-sync',
@@ -3319,7 +3298,6 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
   const updatedCommit = pushRepoToolkitUpdate(fixture, 'fast-forward');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
@@ -3369,7 +3347,6 @@ test('repo update failure does not sync targets', () => {
   const marker = path.join(fixture.root, 'delegate.log');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
@@ -3403,7 +3380,6 @@ test('validation failure after update does not sync targets', () => {
   const updatedCommit = pushRepoToolkitUpdate(fixture, 'validation-failure');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-remote', fixture.origin,
     '--enable-auto-sync',
@@ -3463,7 +3439,6 @@ test('audit output reports repo auto-update state and last status', () => {
   const hub = path.join(fixture.root, 'hub', 'current');
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,

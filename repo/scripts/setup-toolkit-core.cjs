@@ -129,7 +129,6 @@ const TASK_AUTO_MERGE_MOVED = "Task auto-merge now lives in each repository's go
 function emptySetupChoices() {
   return {
     managedCheckout: '',
-    repoAutoUpdate: '',
     updateReports: '',
     updateReportRetention: '',
     codexDocLimit: '',
@@ -159,7 +158,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     codexCli: '',
     hub: '',
     verifyClaudePlugin: false,
-    repoAutoUpdate: true,
     updateReports: true,
     updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
     updateReportRetentionDaysExplicit: false,
@@ -258,13 +256,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     } else if (arg === '--approve-codex-config-proposal') {
       args.approveCodexConfigProposal = true;
     }
-    else if (arg === '--write-repo-auto-update' || arg === '--enable-repo-auto-update') {
-      args.repoAutoUpdate = true;
-      args.setupChoices.repoAutoUpdate = 'enable';
-    } else if (arg === '--skip-repo-auto-update' || arg === '--disable-repo-auto-update') {
-      args.repoAutoUpdate = false;
-      args.setupChoices.repoAutoUpdate = 'disable';
-    } else if (arg === '--keep-repo-auto-update') args.setupChoices.repoAutoUpdate = 'keep';
     else if (arg === '--enable-update-reports') {
       args.updateReports = true;
       args.setupChoices.updateReports = 'enable';
@@ -384,7 +375,6 @@ function relNodeCommand(relScript, extraArgs = []) {
 function preferenceSummary(options) {
   const choices = options.setupChoices || emptySetupChoices();
   return {
-    repo_backed_auto_update: choices.repoAutoUpdate || 'question-required',
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
       : 'manual-verification-only',
@@ -429,23 +419,18 @@ function setupPlan(options = {}) {
   }
   if (reportArgs.length) reportArgs.push('--write', ...hubArgs);
 
-  const repoAutoArgs = [];
-  if (choices.repoAutoUpdate === 'enable') {
-    repoAutoArgs.push(
-      '--enable-repo-auto-update',
-      '--repo-path',
-      quote(repoRoot),
-      '--repo-branch',
-      repoBranch,
-      '--repo-remote',
-      quote(options.repoRemote || DEFAULT_REPO_REMOTE),
-      '--enable-auto-sync',
-      '--write',
-      ...hubArgs
-    );
-  } else if (choices.repoAutoUpdate === 'disable') {
-    repoAutoArgs.push('--disable-repo-auto-update', '--write', ...hubArgs);
-  }
+  // Automatic updates are always on: recording the managed checkout as the update source turns them on.
+  const repoAutoArgs = [
+    '--repo-path',
+    quote(repoRoot),
+    '--repo-branch',
+    repoBranch,
+    '--repo-remote',
+    quote(options.repoRemote || DEFAULT_REPO_REMOTE),
+    '--enable-auto-sync',
+    '--write',
+    ...hubArgs
+  ];
 
   return {
     name: 'setup toolkit',
@@ -529,7 +514,7 @@ function setupPlan(options = {}) {
         id: 'bridge_preferences',
         title: 'Persist repo update, update report, retention, and host cache preferences together',
         commands: [
-          ...(repoAutoArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', repoAutoArgs)] : []),
+          relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', repoAutoArgs),
           ...(reportArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', reportArgs)] : []),
           ...(host === 'codex'
             && ['enable', 'disable'].includes(choices.codexPluginAutoRefresh)
@@ -624,9 +609,6 @@ function printHelp() {
     '                               approve an exact technical proposal that replaces user-owned effective helper controls',
     '  --managed-checkout keep|default|custom',
     '                               choose the managed checkout answer non-interactively',
-    '  --enable-repo-auto-update   enable repo-backed auto-update from the managed checkout',
-    '  --skip-repo-auto-update     disable repo-backed auto-update',
-    '  --keep-repo-auto-update     preserve repo-backed auto-update preference',
     '  --enable-update-reports     write meaningful update reports',
     '  --disable-update-reports    disable future meaningful update report writes',
     '  --keep-update-reports       preserve meaningful update report write preference',
@@ -1343,7 +1325,6 @@ function recommendedChoice(key, current, args) {
   if (key === 'managedCheckout') {
     return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
   }
-  if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'codexDocLimit') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
@@ -1608,15 +1589,6 @@ function recommendedUpdateSource(current, args) {
   return recommendedChoice('managedCheckout', current, args) === 'keep' ? current.managed.currentPath : defaultManagedSourcePath();
 }
 
-// Automatic updates are on, with startup sync, and already check the source 1.1 recommends, so
-// Turn on would write the same values again.
-function automaticUpdatesUnchanged(current, args) {
-  const saved = current.audit?.repo_auto_update || {};
-  return saved.enabled === true && current.audit?.auto_sync_enabled === true && Boolean(saved.repo_path)
-    && samePath(saved.repo_path, recommendedUpdateSource(current, args))
-    && saved.repo_branch === args.repoBranch && normalizeRemote(saved.repo_remote) === normalizeRemote(args.repoRemote);
-}
-
 // Root-only is stored and the one-layer depth setting is already in place (set by Toolkit, or 1 set
 // by you), so choosing root-only would change nothing. Keep resolves to root-only here too, whether or
 // not the stored profile still verifies.
@@ -1821,33 +1793,6 @@ function setupQuestionSpecs(args, current) {
           ? 'The current source is offered only because its configured path, Git state, cleanliness, branch, remote, and safe location all verify.'
           : 'Keep current is omitted because no configured source can be preserved safely; the default and custom choices remain available.',
       },
-    }),
-    resolvedQuestion({
-      id: 'automatic-updates',
-      key: 'repoAutoUpdate',
-      section: 'Updates and reports',
-      title: 'Automatic updates',
-      prompt: 'Automatic Toolkit updates choice',
-      whatThisControls: 'Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.',
-      choices: [
-        wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.'),
-        wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')} The update source it checks stays as it is.`),
-      ],
-      // Turn on also points updates at the update source chosen in 1.1, which keep does not, so it is
-      // the one kept under the Keep current label.
-      currentChoice: automaticUpdatesUnchanged(current, args) ? 'enable' : '',
-      keepAs: 'Keep automatic updates on. They check the update source chosen in 1.1; if you choose another source there, they follow it.',
-      recommendation: {
-        value: recommendedChoice('repoAutoUpdate', current, args),
-        outcome: 'Turn on clean, verified automatic updates.',
-        reason: 'Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.',
-      },
-      selected: args.setupChoices.repoAutoUpdate,
-      currentShort: shortOnOff(current.audit?.repo_auto_update?.enabled),
-      current: currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.'),
-      currentVerification: typeof current.audit?.repo_auto_update?.enabled === 'boolean' ? 'verified' : 'unverified',
-      afterApplying: 'This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.',
     }),
     resolvedQuestion({
       id: 'update-reports',
@@ -2221,7 +2166,7 @@ function approvedDetailSummary(entry, args) {
 }
 
 function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {}) {
-  const example = changedOnlyExample(specs, ['automatic-updates', 'update-reports']);
+  const example = changedOnlyExample(specs, ['update-reports']);
   if (mode === 'tty') {
     return [
       'After this complete bank, enter either:',
@@ -2347,7 +2292,6 @@ function documentationFixtureState() {
       remote: DEFAULT_REPO_REMOTE,
     },
     audit: {
-      repo_auto_update: { enabled: true },
       update_report_enabled: true,
       update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
       codex_doc_limit_enabled: true,
@@ -2435,7 +2379,6 @@ function emitCompleteQuestionBank(specs, options = {}) {
 
 function assignChoice(args, key, choice) {
   if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
-  else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexDocLimit') args.setupChoices.codexDocLimit = choice;
@@ -2450,7 +2393,6 @@ function assignChoice(args, key, choice) {
 
 function choiceForKey(args, key) {
   if (key === 'managedCheckout') return args.setupChoices.managedCheckout;
-  if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
   if (key === 'updateReports') return args.setupChoices.updateReports;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'codexDocLimit') return args.setupChoices.codexDocLimit;
@@ -2622,7 +2564,6 @@ async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
 }
 
 function effectiveChoiceSummary(args, current, spec, value) {
-  if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
   if (spec.key === 'codexDocLimit') return args.codexDocLimit ? 'enable' : 'disable';
@@ -3040,9 +2981,6 @@ function applySetupChoices(args, current) {
     args.repoRootExplicit = true;
   }
 
-  if (choices.repoAutoUpdate === 'keep') args.repoAutoUpdate = current.audit?.repo_auto_update?.enabled === true;
-  else args.repoAutoUpdate = choices.repoAutoUpdate === 'enable';
-
   if (choices.updateReports === 'keep') args.updateReports = current.audit?.update_report_enabled !== false;
   else args.updateReports = choices.updateReports === 'enable';
 
@@ -3106,16 +3044,16 @@ function setupSelfUpdateRerun(args, managed, { beforeChoices = false } = {}) {
   ].join('\n');
 }
 
-// When automatic updates are recorded on for this managed copy and setup runs straight from it,
-// setup makes the same clean fast-forward the session start makes before it shows the choices, so
-// the choices come from the newest setup and the owner is not asked a second time after answering.
-// A delegated child, a plan or explain run, a missing copy, a copy on another branch, and automatic
-// updates that are off, undecided or recorded for another folder keep the update after the answers.
+// When setup runs straight from the managed copy that is recorded as the update source, setup makes
+// the same clean fast-forward the session start makes before it shows the choices, so the choices
+// come from the newest setup and the owner is not asked a second time after answering.
+// A delegated child, a plan or explain run, a missing copy, a copy on another branch, and a copy not
+// recorded as the update source keep the update after the answers.
 function updateBeforeChoices(args) {
   if (!args.execute || Number(process.env[MANAGED_DELEGATION_DEPTH_ENV] || 0) > 0) return null;
   if (!fs.existsSync(args.repoRoot) || !samePath(repoRootFromScript(), args.repoRoot)) return null;
   const saved = runBridgeAuditReadOnly(args).repo_auto_update || {};
-  if (saved.enabled !== true || !saved.repo_path || !samePath(saved.repo_path, args.repoRoot)) return null;
+  if (!saved.repo_path || !samePath(saved.repo_path, args.repoRoot)) return null;
   if (runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current', true, true) !== args.repoBranch) return null;
   const managed = verifyAndUpdateTrustedRepo(args, null);
   return { managed, rerun: setupSelfUpdateRerun(args, managed, { beforeChoices: true }) };
@@ -3423,29 +3361,21 @@ function runBridgeWrite(args, label, extraArgs) {
 
 function writeBridgePreferences(args) {
   const choices = args.setupChoices || emptySetupChoices();
-  if (choices.repoAutoUpdate === 'enable') {
-    runBridgeWrite(
-      args,
-      'node repo/scripts/toolkit-local-bridge.cjs repo/update preferences --write',
-      [
-        '--enable-repo-auto-update',
-        '--repo-path',
-        args.repoRoot,
-        '--repo-branch',
-        args.repoBranch,
-        '--repo-remote',
-        args.repoRemote,
-        '--enable-auto-sync',
-        '--write'
-      ]
-    );
-  } else if (choices.repoAutoUpdate === 'disable') {
-    runBridgeWrite(
-      args,
-      'node repo/scripts/toolkit-local-bridge.cjs repo/update preferences --write',
-      ['--disable-repo-auto-update', '--write']
-    );
-  }
+  // Automatic updates are always on: recording the managed checkout as the update source turns them on.
+  runBridgeWrite(
+    args,
+    'node repo/scripts/toolkit-local-bridge.cjs repo/update preferences --write',
+    [
+      '--repo-path',
+      args.repoRoot,
+      '--repo-branch',
+      args.repoBranch,
+      '--repo-remote',
+      args.repoRemote,
+      '--enable-auto-sync',
+      '--write'
+    ]
+  );
 
   const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
@@ -3581,7 +3511,6 @@ function subagentDepthOutcomeSummary(result) {
 }
 
 function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit, questionBank, validationResults, installCheck }) {
-  const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
   console.log('');
@@ -3708,9 +3637,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log('');
   }
   console.log('## Bridge state');
-  console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
-  console.log('Repo auto-update path: <managed-toolkit-checkout>');
-  console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
+  console.log('Automatic updates: on, from the managed checkout; Toolkit updates itself at each session start, and `remove toolkit` is the only way to stop it.');
   console.log(`Update report writes enabled: ${args.updateReports}`);
   if (args.host === 'codex') console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');

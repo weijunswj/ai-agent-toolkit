@@ -21,6 +21,8 @@ const { AntigravitySessionRefresh, copyPortableSkills, refreshLock, sessionRefre
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
+const { whileTreeMoves } = require('./toolkit-update-marker.cjs');
+const { updateNotice } = require('./toolkit-update-notice.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { TOOLKIT_VERSION, compareVersions, isToolkitSourceCheckout } = require('./toolkit-version.cjs');
 
@@ -106,8 +108,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     forceDowngrade: false,
     enableAutoSync: false,
     disableAutoSync: false,
-    enableRepoAutoUpdate: false,
-    disableRepoAutoUpdate: false,
     repoPath: '',
     repoBranch: '',
     repoRemote: '',
@@ -140,8 +140,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--force-downgrade') args.forceDowngrade = true;
     else if (arg === '--enable-auto-sync') args.enableAutoSync = true;
     else if (arg === '--disable-auto-sync') args.disableAutoSync = true;
-    else if (arg === '--enable-repo-auto-update') args.enableRepoAutoUpdate = true;
-    else if (arg === '--disable-repo-auto-update') args.disableRepoAutoUpdate = true;
     else if (arg === '--repo-path') args.repoPath = next();
     else if (arg.startsWith('--repo-path=')) args.repoPath = arg.slice('--repo-path='.length);
     else if (arg === '--repo-branch') args.repoBranch = next();
@@ -196,9 +194,6 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (args.enableAutoSync && args.disableAutoSync) {
     throw new Error('--enable-auto-sync and --disable-auto-sync cannot be used together');
-  }
-  if (args.enableRepoAutoUpdate && args.disableRepoAutoUpdate) {
-    throw new Error('--enable-repo-auto-update and --disable-repo-auto-update cannot be used together');
   }
   if (args.enableUpdateReportOpen && args.disableUpdateReportOpen) {
     throw new Error('--enable-update-report-open and --disable-update-report-open cannot be used together');
@@ -271,8 +266,6 @@ function printHelp() {
     '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
-    '  --enable-repo-auto-update',
-    '  --disable-repo-auto-update',
     '  --repo-path <path>',
     '  --repo-branch <branch>',
     '  --repo-remote <url>',
@@ -558,6 +551,46 @@ function changedFilesBetween(repoPath, fromCommit, toCommit) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+// The folder beside the hub snapshot directory: update.lock, the notice ledger and the marker.
+function controlRootOf(args = {}) {
+  return path.dirname(path.resolve(args.hub || defaultHubPath()));
+}
+
+// A session start whose managed checkout already matches the remote does no fetch, validation or
+// copy. It costs one state read, one local git call and at most one `git ls-remote`, and none
+// within REMOTE_CHECK_INTERVAL_MS of the last check that found it current. The record of that check
+// (remote-check.json, beside the hub snapshot directory) holds the checkout, branch and commit only.
+const REMOTE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const REMOTE_CHECK_FILE = 'remote-check.json';
+const CURRENT_STATUSES = new Set(['updated', 'up-to-date']);
+
+function remoteCheckFile(args) {
+  return path.join(controlRootOf(args), REMOTE_CHECK_FILE);
+}
+
+// Whether this session start may skip the repository update. Any doubt (a failed last update, a
+// checkout moved by hand, another branch, an unreadable remote, a version not yet recorded for this
+// source) answers false, so the full update path runs and reports as before.
+function checkoutAlreadyCurrent(args, state, { now = Date.now() } = {}) {
+  if (!args.hook || !state.repo_path || args.syncSource === 'codex-plugin') return false;
+  if (!CURRENT_STATUSES.has(state.last_repo_update_status) || !state.last_repo_update_to_commit) return false;
+  if (recordedBridgeVersionForSource(state, args.syncSource) !== BRIDGE_VERSION) return false;
+  const repoPath = path.resolve(state.repo_path);
+  const branch = state.repo_branch || DEFAULT_REPO_BRANCH;
+  const last = readJsonIfExists(remoteCheckFile(args));
+  const recordMatches = last && last.repo_path === repoPath && last.branch === branch && last.commit === state.last_repo_update_to_commit;
+  if (recordMatches && now - Date.parse(last.checked_at) >= 0 && now - Date.parse(last.checked_at) < REMOTE_CHECK_INTERVAL_MS) return true;
+  const local = gitCommand(repoPath, ['rev-parse', 'HEAD', '--abbrev-ref', 'HEAD']);
+  const [head, current] = local.ok ? local.stdout.trim().split(/\r?\n/) : [];
+  if (!head || current !== branch || head !== state.last_repo_update_to_commit) return false;
+  const remote = gitCommand(repoPath, ['ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`], { timeout: 20000 });
+  const remoteHead = remote.ok ? remote.stdout.trim().split(/\s+/)[0] : '';
+  if (remoteHead !== head) return false;
+  try { writeJson(remoteCheckFile(args), { schema_version: 1, repo_path: repoPath, branch, commit: head, checked_at: new Date(now).toISOString() }); }
+  catch { /* the next start checks the remote again */ }
+  return true;
+}
+
 function validateAndUpdateRepo(state, args = {}) {
   const repoPath = path.resolve(state.repo_path || '');
   const branch = state.repo_branch || DEFAULT_REPO_BRANCH;
@@ -600,7 +633,7 @@ function validateAndUpdateRepo(state, args = {}) {
   }
   let branchSwitchedFrom = '';
   if (currentBranch !== branch) {
-    const switchResult = gitCommand(repoPath, ['switch', branch], { timeout: 120000 });
+    const switchResult = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['switch', branch], { timeout: 120000 }));
     if (!switchResult.ok) {
       throw repoUpdateError('skipped', `git switch ${branch} failed: ${commandOutput(switchResult)}`, {
         error: 'branch switch failed'
@@ -635,7 +668,7 @@ function validateAndUpdateRepo(state, args = {}) {
       });
     }
     if (fromCommit !== fetchedCommit) {
-      const merge = gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 });
+      const merge = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 }));
       if (!merge.ok) {
         throw repoUpdateError('skipped', `git merge --ff-only ${fetchedCommit} failed: ${commandOutput(merge)}`, {
           fromCommit,
@@ -737,6 +770,7 @@ function defaultState() {
     bridge_versions_by_source: {},
     auto_sync_enabled: false,
     repo_auto_update_enabled: false,
+    auto_update_forced_at: '',
     repo_path: '',
     repo_branch: DEFAULT_REPO_BRANCH,
     repo_remote: DEFAULT_REPO_REMOTE,
@@ -775,6 +809,13 @@ function normalizedState(raw) {
   state.repo_branch = state.repo_branch || DEFAULT_REPO_BRANCH;
   state.repo_remote = state.repo_remote || DEFAULT_REPO_REMOTE;
   state.repo_path = state.repo_path || '';
+  // Automatic updates are always on once a managed checkout is recorded; only `remove toolkit`
+  // stops them. The key stays in the state for older Toolkit copies (a Codex plugin cache, an older
+  // account copy) that still read it, and the first write after an owner had turned it off records
+  // when that choice was overridden.
+  if (raw?.repo_auto_update_enabled === false && state.repo_path && !state.auto_update_forced_at) state.auto_update_forced_at = timestamp();
+  state.auto_update_forced_at = typeof state.auto_update_forced_at === 'string' ? state.auto_update_forced_at : '';
+  state.repo_auto_update_enabled = Boolean(state.repo_path);
   state.last_repo_update = state.last_repo_update || '';
   state.last_repo_update_status = state.last_repo_update_status || '';
   state.last_repo_update_from_commit = state.last_repo_update_from_commit || '';
@@ -806,17 +847,13 @@ function applyRequestedState(state, args) {
   const next = normalizedState(state);
   if (args.enableAutoSync) next.auto_sync_enabled = true;
   if (args.disableAutoSync) next.auto_sync_enabled = false;
+  const source = [next.repo_path, next.repo_branch, next.repo_remote];
   if (args.repoPath) next.repo_path = path.resolve(args.repoPath);
   if (args.repoBranch) next.repo_branch = args.repoBranch;
   if (args.repoRemote) next.repo_remote = args.repoRemote;
-  if (args.enableRepoAutoUpdate) {
-    next.repo_auto_update_enabled = true;
+  if ([next.repo_path, next.repo_branch, next.repo_remote].some((value, index) => value !== source[index])) {
+    next.repo_auto_update_enabled = Boolean(next.repo_path);
     next.last_repo_update_status = 'configured';
-    next.last_repo_update_error = '';
-  }
-  if (args.disableRepoAutoUpdate) {
-    next.repo_auto_update_enabled = false;
-    next.last_repo_update_status = 'disabled';
     next.last_repo_update_error = '';
   }
   if (args.enableUpdateReportOpen || args.disableUpdateReportOpen) next.update_report_open_enabled = false;
@@ -2868,7 +2905,8 @@ function buildAudit({ args, hubPath, state, checksum }) {
     codex_plugin_auto_refresh_enabled: state.codex_plugin_auto_refresh_enabled,
     last_update_report_path: state.last_update_report_path,
     repo_auto_update: {
-      enabled: state.repo_auto_update_enabled,
+      enabled: Boolean(state.repo_path),
+      forced_at: state.auto_update_forced_at,
       repo_path: state.repo_path,
       repo_branch: state.repo_branch,
       repo_remote: state.repo_remote,
@@ -2886,14 +2924,14 @@ function buildAudit({ args, hubPath, state, checksum }) {
 function isHookNoop(args, existingState) {
   if (!args.hook) return false;
   if (!existingState || !existingState.hub_version) return true;
-  const repoAutoUpdateActive = existingState.repo_auto_update_enabled && !args.skipRepoAutoUpdate;
+  const repoAutoUpdateActive = Boolean(existingState.repo_path) && !args.skipRepoAutoUpdate;
   return !repoAutoUpdateActive && !existingState.auto_sync_enabled;
 }
 
 function shouldRunRepoAutoUpdate(args, state) {
   if (!args.write) return false;
   if (args.skipRepoAutoUpdate) return false;
-  if (!state.repo_auto_update_enabled) return false;
+  if (!state.repo_path) return false;
   return args.hook || args.repoUpdateNow;
 }
 
@@ -2980,8 +3018,17 @@ function newerWorkspaceToolkit(runningRoot, start = process.env.CLAUDE_PROJECT_D
 // { context } when it could not compare, and {} otherwise (a --plugin-dir test copy, a cloud
 // session, or a current account copy).
 // `app` is true for any copy inside those folders.
+function isClaudeAccountCopy(runningRoot, environment = process.env) {
+  return claudeAccountPluginFolders(environment).some((folder) => samePath(path.dirname(runningRoot), folder));
+}
+
+// claude.ai syncs the account copy within minutes of a release (measured at about 7 minutes), so
+// an account copy behind the checkout is reminded about only once the checkout's commit is older
+// than this; a copy still behind then is stuck.
+const ACCOUNT_SYNC_GRACE_MS = 60 * 60 * 1000;
+
 function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process.env) {
-  if (!claudeAccountPluginFolders(environment).some((folder) => samePath(path.dirname(runningRoot), folder))) return {};
+  if (!isClaudeAccountCopy(runningRoot, environment)) return {};
   const versionAt = (dir) => {
     try {
       const { version } = JSON.parse(fs.readFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), 'utf8'));
@@ -2995,7 +3042,24 @@ function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process
     return { app: true, context: `Toolkit: could not compare this claude.ai copy with this PC's Toolkit (${missing}), so no update reminder is shown.` };
   }
   if (compareVersions(account, local) >= 0) return { app: true };
+  const committed = Number(gitCommand(managedCheckout, ['log', '-1', '--format=%ct', 'HEAD']).stdout.trim()) * 1000;
+  if (committed > 0 && Date.now() - committed < ACCOUNT_SYNC_GRACE_MS) return { app: true };
   return { app: true, reminder: accountCopyBehind(account, local) };
+}
+
+// The Claude desktop app runs the account copy, which does no maintenance with its own code. When
+// this PC has a managed checkout, its own bridge script runs the session start instead, as the
+// installed copy (HANDOFF_ENV names the account copy that handed off). Returns its output lines.
+const HANDOFF_ENV = 'TOOLKIT_BRIDGE_HANDOFF_FROM';
+function handOffToCheckout(args, accountRoot, checkout) {
+  const script = path.join(checkout, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
+  if (!fs.existsSync(script)) return [`Toolkit: this PC's Toolkit folder ${slash(checkout)} has no bridge script, so session-start maintenance did not run. Run \`setup toolkit\`.`];
+  const result = runCommand(process.execPath, [script, ...args.argv], {
+    cwd: process.cwd(), timeout: 300000, env: { CLAUDE_PLUGIN_ROOT: checkout, [HANDOFF_ENV]: accountRoot }
+  });
+  const lines = String(result.stdout || '').split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  if (!result.ok) lines.push(`Toolkit: session-start maintenance from this PC's Toolkit folder stopped (${sanitizeOutputMessage(commandOutput(result)).slice(0, 300) || 'no output'}); it runs again at the next session start.`);
+  return lines;
 }
 
 function codexNativePluginCacheStatus(args, state) {
@@ -3351,6 +3415,21 @@ class RepositoryAutoUpdateOperation {
     return { status: 0, audit: finalAudit };
   }
 
+  // The same-session notice when this run moved the checkout (toolkit-update-notice.cjs). A
+  // notice that cannot be built is left out; the update and its report stand.
+  #printNotice() {
+    const update = this.#updateResult;
+    if (!update || update.fromCommit === update.toCommit) return;
+    const args = this.#args;
+    const hooksRunCheckout = args.syncSource === 'claude-plugin' && !process.env[HANDOFF_ENV]
+      && samePath(runtimeClaudePluginRoot(), update.repoPath);
+    try {
+      const notice = updateNotice({ git: (gitArgs) => gitCommand(update.repoPath, gitArgs), fromCommit: update.fromCommit,
+        toCommit: update.toCommit, changedFiles: update.changedFiles, syncSource: args.syncSource, hooksRunCheckout });
+      if (notice) console.log(notice);
+    } catch { /* no notice */ }
+  }
+
   run() {
     const early = this.#updateRepository();
     if (early) return early;
@@ -3358,7 +3437,9 @@ class RepositoryAutoUpdateOperation {
     const failed = this.#delegateSync();
     if (failed) return failed;
     this.#installCheck = sessionStartInstallCheck(this.#args, this.#hubPath, this.#codexGlobalRules);
-    return this.#finalReport();
+    const result = this.#finalReport();
+    this.#printNotice();
+    return result;
   }
 }
 function runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks = {}, codexGlobalRules = null }) {return new RepositoryAutoUpdateOperation({args,hubPath,state,checksum,testHooks,codexGlobalRules}).run();}
@@ -3410,7 +3491,7 @@ function persistActiveWrite({
 // One bridge invocation: isolated project commands, hook no-ops, audit, the
 // repository auto-update path, active no-target bookkeeping and the locked target sync.
 class LocalBridgeRun {
-  #argv; #testHooks; #args = null; #hubPath = null; #codexGlobalRules = null;
+  #argv; #testHooks; #args = null; #hubPath = null; #codexGlobalRules = null; #installCheck; #checkoutCurrent = false;
   constructor(argv, testHooks = {}) { this.#argv = argv; this.#testHooks = testHooks; }
 
   // The project-local Antigravity skill copy never touches hub state.
@@ -3428,8 +3509,20 @@ class LocalBridgeRun {
     return {
       repo: repoReportContextFromState(state, args),
       nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
-      installCheck: sessionStartInstallCheck(args, this.#hubPath, this.#codexGlobalRules)
+      installCheck: this.#installCheck !== undefined ? this.#installCheck : sessionStartInstallCheck(args, this.#hubPath, this.#codexGlobalRules)
     };
+  }
+
+  // A session start whose checkout already matches the remote skips the update and the hub write.
+  // The install check still runs (it copies only what is stale), and a result that needs a person
+  // goes through the usual report path, without the update.
+  #unchangedStart() {
+    const check = sessionStartInstallCheck(this.#args, this.#hubPath, this.#codexGlobalRules);
+    // A check that refreshed something (helpers, global rules, Antigravity copies) still gets its report.
+    if (!check || (check.status === 'passed' && !(check.checks || []).some((entry) => entry.updated === true))) return { status: 0, audit: null };
+    this.#installCheck = check;
+    this.#checkoutCurrent = true;
+    return null;
   }
 
   // Prunes old update reports on write; otherwise reports the last recorded cleanup.
@@ -3467,7 +3560,7 @@ class LocalBridgeRun {
 
   #hasConfiguredState(existingState) {
     return Boolean(existingState.hub_version || Object.keys(existingState.bridge_versions_by_source || {}).length
-      || existingState.auto_sync_enabled || existingState.repo_auto_update_enabled);
+      || existingState.auto_sync_enabled || existingState.repo_path);
   }
 
   // Writes the hub snapshot for a settings change under the hub lock.
@@ -3505,16 +3598,24 @@ class LocalBridgeRun {
 
   // A Claude Code session started from a Toolkit copy that is not the installed plugin (a
   // test candidate loaded with --plugin-dir, or an account-synced copy) does no session-start
-  // maintenance and records nothing: the update state and the managed checkout belong to the
-  // installed copy. Claude Code runs the installed copy from its marketplace folder, which
-  // must also be the managed checkout recorded in the hub state.
+  // maintenance with its own code and records nothing: the update state and the managed checkout
+  // belong to the installed copy. Claude Code runs the installed copy from its marketplace folder,
+  // which must also be the managed checkout recorded in the hub state. The Claude desktop app's
+  // account copy hands the session start to that checkout's own script, so the checkout, global
+  // rules and helpers stay current on a PC that only uses the app.
   #uninstalledClaudeCopy(args) {
     if (!args.hook || args.syncSource !== 'claude-plugin') return false;
     const root = runtimeClaudePluginRoot();
     const managedCheckout = normalizedState(readJsonIfExists(path.join(args.hub || defaultHubPath(), 'state.json'))).repo_path;
-    if (managedCheckout && samePath(root, managedCheckout) && new ClaudePluginRegistry().isRunningCopy(root)) return false;
-    const lines = [`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`];
+    if (managedCheckout && samePath(root, managedCheckout)
+      && (this.#handedOff() || new ClaudePluginRegistry().isRunningCopy(root))) return false;
     const newer = newerWorkspaceToolkit(root);
+    // A cloud session always runs a synced copy and has no checkout to maintain; it hears about
+    // its copy only when the copy is older than a Toolkit repository it works in.
+    if (process.env.CLAUDE_CODE_REMOTE === 'true' && !newer) return true;
+    const lines = isClaudeAccountCopy(root) && managedCheckout
+      ? [`Toolkit: this Claude app chat runs the Toolkit copy from the claude.ai account, so session-start maintenance runs from this PC's Toolkit folder.`, ...handOffToCheckout(args, root, managedCheckout)]
+      : [`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`];
     if (newer) lines.push(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
     const appCopy = claudeAppCopyStatus(root, managedCheckout);
     if (appCopy.context) lines.push(appCopy.context);
@@ -3528,6 +3629,13 @@ class LocalBridgeRun {
     lines.push(`Toolkit update reminder for the owner: ${appCopy.reminder} Say this reminder to the owner once, in your first reply.`);
     console.log(JSON.stringify({ systemMessage: appCopy.reminder, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } }));
     return true;
+  }
+
+  // The managed checkout's own script, run by the account copy's hand-off (HANDOFF_ENV names a
+  // copy inside the Claude app's account-plugin folders).
+  #handedOff() {
+    const from = process.env[HANDOFF_ENV];
+    return Boolean(from) && isClaudeAccountCopy(path.resolve(from));
   }
 
   execute() {
@@ -3550,13 +3658,14 @@ class LocalBridgeRun {
       }
       return { status: 0, audit: null };
     }
+    if (shouldRunRepoAutoUpdate(args, existingState) && checkoutAlreadyCurrent(args, existingState)) {
+      const unchanged = this.#unchangedStart();
+      if (unchanged) return unchanged;
+    }
     this.#codexGlobalRules = maybeRefreshCodexGlobalRules(args, existingState);
 
     const requested = applyRequestedState(existingState, args);
     const cleanupResult = this.#cleanupReports(requested);
-    if (args.enableRepoAutoUpdate && !requested.repo_path) {
-      throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
-    }
     const snapshot = deriveSnapshotGeneration({ args, state: requested });
     const state = snapshot.state;
     const { checksum } = snapshot;
@@ -3565,11 +3674,10 @@ class LocalBridgeRun {
     const audit = buildAudit({ args, hubPath, state, checksum });
     if (args.audit || !args.write) console.log(JSON.stringify(audit, null, 2));
     if (!args.write) return { status: 0, audit };
-    if (shouldRunRepoAutoUpdate(args, state)) {
+    if (shouldRunRepoAutoUpdate(args, state) && !this.#checkoutCurrent) {
       return runRepoAutoUpdate({ args, hubPath, state, checksum, testHooks: this.#testHooks, codexGlobalRules: this.#codexGlobalRules });
     }
-    const plainSync = args.syncEnabled && !args.enableAutoSync && !args.disableAutoSync
-      && !args.enableRepoAutoUpdate && !args.disableRepoAutoUpdate;
+    const plainSync = args.syncEnabled && !args.enableAutoSync && !args.disableAutoSync;
     if (plainSync) {
       if (!this.#hasConfiguredState(existingState)) {
         if (!args.hook) console.log('Toolkit local bridge: nothing configured to sync.');

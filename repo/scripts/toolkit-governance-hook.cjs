@@ -12,7 +12,9 @@
 //                     points an agent's own merge question (AskUserQuestion) at the merge card.
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
-//   SessionStart      adds context stating the effective governance state, exports the session's
+//   SessionStart      first waits (up to 15 s) while the bridge hook moves the Toolkit checkout's
+//                     files (toolkit-update-marker.cjs); then adds context stating the effective
+//                     governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
 //                     mark, so a later process that resumes the session cannot answer.
@@ -71,6 +73,11 @@ function respond(event, input, options = {}) {
     // A gate session off its stack-registry pin, or a verdict or G1 body with the wrong route stamp.
     const route = gateRouteDecision(input, options);
     if (route) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: route } };
+  }
+  // The bridge hook may be fast-forwarding the Toolkit checkout this hook runs from at this same
+  // session start; read nothing from it until the files stop moving.
+  if (event === 'SessionStart' && !cloud && !(options.steadyTree || steadyTree)()) {
+    return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: TREE_MOVING } };
   }
   let gate;
   try {
@@ -141,6 +148,13 @@ function respond(event, input, options = {}) {
 }
 
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+// Waits (bounded) while the bridge moves the Toolkit checkout's files; a broken marker module never
+// stops the session start.
+function steadyTree() {
+  try { return require('./toolkit-update-marker.cjs').waitForSteadyTree(); } catch { return true; }
+}
+const TREE_MOVING = "Toolkit: an update was still writing Toolkit's files after 15 seconds, so this session start could not read the governance state safely. Continue with the global rules; no governance effects or standing task auto-merge until the next session start.";
 
 // The gate route check (toolkit-gate-route.cjs). It refuses only in a gate session or on a verdict
 // or G1 body write; when the module cannot load, only a launcher-marked gate session is refused.
@@ -215,4 +229,4 @@ function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'ut
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, STATE_CHANGING_TOOLS, exportHostSession, respond, main });
+module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, STATE_CHANGING_TOOLS, TREE_MOVING, exportHostSession, respond, main });

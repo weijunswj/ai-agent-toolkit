@@ -109,7 +109,7 @@ for (const host of ['codex', 'claude-code']) {
         const before = snapshotTree(root);
         const quotedPreload = preload.replace(/[\\"]/g, (char) => `\\${char}`);
         const result = run([...mode, '--host', host, '--yes-recommended',
-          '--enable-repo-auto-update', '--enable-codex-plugin-auto-refresh', '--claude-settings', 'enable'], {
+          '--enable-codex-plugin-auto-refresh', '--claude-settings', 'enable'], {
           env: { ...env, NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ') },
         });
         assert.equal(result.status, 0, result.stderr || result.stdout);

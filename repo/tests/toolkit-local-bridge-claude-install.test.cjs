@@ -19,6 +19,10 @@ const { STEPS, STEPS_TEXT, accountCopyBehind } = require('../scripts/toolkit-cla
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
 const UNINSTALLED_LINE = /^Toolkit: this session runs an uninstalled Toolkit copy \(.+\); session-start maintenance is skipped and nothing is recorded\.$/m;
+// The Claude app's account copy hands the session start to this PC's checkout; these fixture
+// checkouts carry versions only, so the hand-off says it could not run and writes nothing.
+const ACCOUNT_LINE = /^Toolkit: this Claude app chat runs the Toolkit copy from the claude\.ai account, so session-start maintenance runs from this PC's Toolkit folder\.$/m;
+const NO_SCRIPT_LINE = /^Toolkit: this PC's Toolkit folder .+ has no bridge script, so session-start maintenance did not run\. Run `setup toolkit`\.$/m;
 
 function tmpRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-claude-install-'));
@@ -91,6 +95,19 @@ function reports() {
   const dir = path.join(os.tmpdir(), 'ai-agent-toolkit', 'update-reports');
   try { return fs.readdirSync(dir).filter((name) => name.endsWith('.md')).map((name) => fs.readFileSync(path.join(dir, name), 'utf8')); }
   catch { return []; }
+}
+
+// A hub naming this repository as the managed checkout, which a session start a few minutes ago
+// found current with its remote. This session start then takes the unchanged path: it runs the
+// install check and its maintenance, and never fetches, validates or moves this repository.
+function currentCheckoutHub(root, hub, extra = {}) {
+  const head = git(repoRoot, ['rev-parse', 'HEAD']);
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot,
+    repo_branch: 'main', last_repo_update_status: 'up-to-date', last_repo_update_to_commit: head, ...extra,
+    bridge_versions_by_source: { 'claude-plugin': BRIDGE_VERSION, ...extra.bridge_versions_by_source },
+  });
+  writeJson(path.join(path.dirname(hub), 'remote-check.json'), { schema_version: 1, repo_path: path.resolve(repoRoot), branch: 'main', commit: head, checked_at: new Date().toISOString() });
 }
 
 // A managed checkout with a reachable origin and one unpulled commit, so a hook from the
@@ -190,7 +207,8 @@ test('a Claude app copy older than this PC\'s Toolkit shows the owner the update
   assert.equal(STEPS.length, 4);
   const context = output.hookSpecificOutput.additionalContext;
   assert.equal(output.hookSpecificOutput.hookEventName, 'SessionStart');
-  assert.match(context, UNINSTALLED_LINE);
+  assert.match(context, ACCOUNT_LINE);
+  assert.match(context, NO_SCRIPT_LINE);
   assert.ok(context.includes(`Toolkit update reminder for the owner: ${output.systemMessage} Say this reminder to the owner once, in your first reply.`), context);
   assert.equal(treeDigest(hub), hubBefore, 'hub untouched');
   assert.equal(treeDigest(checkout), checkoutBefore, 'managed checkout untouched');
@@ -200,25 +218,25 @@ test('a Claude app copy older than this PC\'s Toolkit shows the owner the update
 test('a current Claude app copy, a --plugin-dir copy and an unreadable checkout show no reminder', (t) => {
   const root = tmpRoot(t);
   const { hub } = recordManagedCheckout(root, '9.9.1');
-  const plainOnly = (result) => {
+  const plainOnly = (result, lines) => {
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, UNINSTALLED_LINE);
+    for (const line of lines) assert.match(result.stdout, line);
     assert.doesNotMatch(result.stdout, /systemMessage|update reminder|could not compare/);
-    assert.equal(result.stdout.trim().split(/\r?\n/).length, 1, result.stdout);
+    assert.equal(result.stdout.trim().split(/\r?\n/).length, lines.length, result.stdout);
   };
   // Same version as this PC.
-  plainOnly(hook(root, hub, accountCopy(root, '9.9.1')));
+  plainOnly(hook(root, hub, accountCopy(root, '9.9.1')), [ACCOUNT_LINE, NO_SCRIPT_LINE]);
   // A test candidate outside the app's account-plugin folders.
   const candidate = path.join(root, 'pc', 'candidate');
   fakeToolkit(candidate, '9.8.0');
-  plainOnly(hook(root, hub, candidate));
+  plainOnly(hook(root, hub, candidate), [UNINSTALLED_LINE]);
 
   // The recorded checkout is missing: say so in context only.
   const older = accountCopy(root, '9.8.0');
   const missing = recordManagedCheckout(tmpRoot(t), null);
   const unreadable = hook(root, missing.hub, older);
   assert.equal(unreadable.status, 0, unreadable.stderr);
-  assert.match(unreadable.stdout, UNINSTALLED_LINE);
+  assert.match(unreadable.stdout, ACCOUNT_LINE);
   assert.match(unreadable.stdout, /^Toolkit: could not compare this claude\.ai copy with this PC's Toolkit \(the Toolkit folder .+ has no readable version\), so no update reminder is shown\.$/m);
   assert.doesNotMatch(unreadable.stdout, /systemMessage/);
 
@@ -243,7 +261,7 @@ test('a Claude app chat never mentions Codex, even when Codex runs an older Tool
   // A current app copy: plain lines only, no reminder JSON and no Codex text.
   const current = hook(root, hub, accountCopy(root, '9.9.1'));
   assert.equal(current.status, 0, current.stderr);
-  assert.match(current.stdout, UNINSTALLED_LINE);
+  assert.match(current.stdout, ACCOUNT_LINE);
   assert.doesNotMatch(current.stdout, /systemMessage|codex/i);
   assert.doesNotMatch(current.stderr, /codex/i);
 
@@ -319,7 +337,7 @@ test('the installed copy is recognised in any path spelling and keeps its sessio
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
-  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
+  currentCheckoutHub(root, hub);
   // Claude Code passes CLAUDE_PLUGIN_ROOT with forward slashes; Windows paths are case-insensitive.
   const spelled = process.platform === 'win32' ? repoRoot.replace(/\\/g, '/').toUpperCase() : repoRoot;
   const result = hook(root, hub, spelled);
@@ -335,7 +353,7 @@ test('installed Claude session start never prints a Codex reminder, whether the 
     const root = tmpRoot(t);
     installToolkit(root, repoRoot);
     const hub = path.join(root, '.ai-agent-toolkit', 'current');
-    writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
+    currentCheckoutHub(root, hub);
     // Codex runs an older Toolkit than the copy Claude Code runs (the managed checkout here).
     const codexHome = path.join(root, '.codex');
     fs.mkdirSync(codexHome, { recursive: true });
@@ -361,10 +379,7 @@ test('a newer recorded version names the likely cause and the one-step recovery'
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION, auto_sync_enabled: true, repo_path: repoRoot,
-    bridge_versions_by_source: { 'claude-plugin': '99.0.0' },
-  });
+  currentCheckoutHub(root, hub, { hub_version: BRIDGE_VERSION, bridge_versions_by_source: { 'claude-plugin': '99.0.0' } });
   const before = treeDigest(hub);
   const result = hook(root, hub, repoRoot);
   assert.equal(result.status, 0, result.stderr);
@@ -379,7 +394,7 @@ test('session start refreshes a stale Toolkit helper definition and reports it',
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
-  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
+  currentCheckoutHub(root, hub);
   const renderer = ClaudeHelperAgentRenderer.fromRepository('owner-claude', repoRoot);
   const agents = path.join(root, '.claude', 'agents');
   fs.mkdirSync(agents, { recursive: true });
@@ -407,7 +422,7 @@ test('session start refreshes Toolkit\'s Antigravity copies only when the owner 
     const root = tmpRoot(t);
     installToolkit(root, repoRoot);
     const hub = path.join(root, '.ai-agent-toolkit', 'current');
-    writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
+    currentCheckoutHub(root, hub);
     return { root, hub };
   };
   const unchosen = setUp();
@@ -434,10 +449,7 @@ test('session start reports a newer recorded repo version as action required', (
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);
   const hub = path.join(root, '.ai-agent-toolkit', 'current');
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot,
-    bridge_versions_by_source: { repo: '99.0.0' },
-  });
+  currentCheckoutHub(root, hub, { bridge_versions_by_source: { repo: '99.0.0' } });
   const result = hook(root, hub, repoRoot);
   assert.equal(result.status, 0, result.stderr);
   const report = reports().find((text) => /## Install check/.test(text) && /action-required/.test(text));

@@ -13,7 +13,7 @@ test('missing and misordered conditional details fail before every setup write',
     const input = mode === 'missing'
       ? ['custom', 'A', 'A', 'keep', 'A'].join('\n')
       : ['custom', 'A', 'B', 'keep', 'A', '14', customPath].join('\n');
-    const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    const result = run(['--execute', '--repo-remote', origin], {
       env: isolatedHomeEnv(root), input, timeout: 300000,
     });
     assert.notEqual(result.status, 0);
@@ -30,7 +30,7 @@ test('fully explicit setup does not wait for or advertise setup-question stdin',
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = await runWithUnclosedStdin(script, [
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--enable-update-reports', '--default-update-report-retention-days',
     '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'keep',
   ], { env: isolatedHomeEnv(root), deadlineMs: 300000 });
   assert.equal(result.code, 0, result.stderr || result.stdout);
@@ -45,7 +45,7 @@ test('Windows drive-letter path with spaces remains line-by-line detail input', 
   const { origin, setupRepo } = createGitBackedSetupRepo(fixtureRoot);
   const result = run([
     '--execute', '--managed-checkout', 'custom', '--repo-remote', origin,
-    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--enable-update-reports', '--default-update-report-retention-days',
     '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'keep',
   ], { env: isolatedHomeEnv(fixtureRoot), input: `${setupRepo}\n`, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
