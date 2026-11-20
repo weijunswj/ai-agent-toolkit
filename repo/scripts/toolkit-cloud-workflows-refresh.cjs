@@ -127,8 +127,10 @@ function bodyText(files, commit, notes) {
   ].join('\n');
 }
 
-// The governed-only, clean-checkout and same-head checks, then the files. { note } when there is
-// nothing to do, else { repository, base, branch, files, notes }.
+// The governed-only, Toolkit commit, clean-checkout and same-head checks, then the files. { note } when
+// there is nothing to do, else { repository, base, branch, files, notes, commit }. Governance comes
+// before the Toolkit commit, so a repository that is not governed gets its one note whatever the
+// Toolkit checkout's state.
 function prepare({ target, root, commit, ci, ciShards, workflows, governance, github }) {
   if (workflows.isToolkitCheckout(target)) return { note: 'This is a Toolkit source checkout, which runs its own workflow files; there is nothing to refresh.' };
   const state = governance(target);
@@ -137,6 +139,7 @@ function prepare({ target, root, commit, ci, ciShards, workflows, governance, gi
     return { note: `No refresh pull request: ${why}, and only governed repositories carry Toolkit copies.` };
   }
   if (state.governed_effects_hold || state.notes?.includes('could-not-check-governance')) throw new RefreshError('the merged programme binding could not be read in the last 24 hours; run refresh governance online first.');
+  const at = commit || workflows.toolkitCommit(root);
   const repository = state.repository;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(repository || ''))) throw new RefreshError('the governed repository\'s name could not be read.');
   const repo = github(`repos/${repository}`);
@@ -145,9 +148,9 @@ function prepare({ target, root, commit, ci, ciShards, workflows, governance, gi
   const head = git(target, ['rev-parse', 'HEAD']).stdout.trim();
   if (head !== base) throw new RefreshError(`the checkout is at ${head.slice(0, 7) || 'no commit'}, not at ${branch}'s head ${base.slice(0, 7)} on GitHub; update it (git fetch, then fast-forward ${branch}) and run this again.`);
   if (git(target, ['status', '--porcelain', '--', '.github']).stdout.trim()) throw new RefreshError('the checkout has local changes under .github; commit or set them aside first.');
-  const { files, notes } = changes({ target, root, commit, ci, ciShards, workflows });
+  const { files, notes } = changes({ target, root, commit: at, ci, ciShards, workflows });
   if (!files.length) return { note: `The Toolkit copies in ${repository} are current; no refresh pull request is needed.${notes.length ? ` ${notes.join(' ')}` : ''}` };
-  return { repository, base, branch, files, notes };
+  return { repository, base, branch, files, notes, commit: at };
 }
 
 // The body without the Toolkit commit it names, so a rerun from a newer commit with the same files
@@ -223,10 +226,9 @@ function refreshPr({ repo, ci = null, root, commit, ciShards, workflows = requir
   try {
     const target = path.resolve(repo);
     if (!fs.existsSync(path.join(target, '.git'))) throw new RefreshError(`${target} is not a git checkout.`);
-    const at = commit || workflows.toolkitCommit(root);
-    const ready = prepare({ target, root, commit: at, ci, ciShards, workflows, governance, github });
+    const ready = prepare({ target, root, commit, ci, ciShards, workflows, governance, github });
     if (ready.note) return { code: 0, line: ready.note };
-    const result = publish({ ...ready, commit: at, github, workflows });
+    const result = publish({ ...ready, github, workflows });
     const verb = { opened: 'Opened', updated: 'Updated', unchanged: 'Unchanged' }[result.outcome];
     return { code: 0, line: `${verb} refresh pull request ${result.url} (${ready.files.length} file${ready.files.length === 1 ? '' : 's'}: ${ready.files.map(entry => entry.file).join(', ')}). Ask the owner to merge it; nothing merges it automatically.`, result };
   } catch (error) {
