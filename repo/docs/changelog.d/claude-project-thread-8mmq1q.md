@@ -1,0 +1,7 @@
+### Changed
+
+- **Native questions by default:** the global rules now ask each action-blocking question with the harness's native question method, explanation first and "(my pick)" on the best option, and fall back to one fully bold sentence only where no native method works. The repository-agent-rules skill, the controller takeover playbook, the toolkit-setup skill and the bridge doc follow the same wording, and a test stops bold-by-default or host-named question wording from coming back.
+- **Merges let the guard ask:** the global merge line and both safety-gates lists say a merge guard's own question is the owner's OK, so agents run the merge and let the guard ask instead of asking their own merge question first. The Projects skill's ask list leaves merges to its merge rule.
+- **Generic, platform first:** the two principles merge into one that also names harnesses, and says to state outcomes and safety floors rather than steps. The root `AGENTS.md` points to it.
+- **Secure CI/CD asks only before irreversible steps:** commits, pushes to a non-default branch and opening or updating a pull request now run without asking. Merges, deployments, default-branch and force pushes, deletes and real-key changes keep their approval ask, in the skill, its reference, the setup prompt, the CI check-up and the safety matrix.
+- **Leaner always-on rules:** the n8n renaming detail and the safe-mode check now live only in the n8n rules and the model-safety-flags playbook, where they already were.

@@ -187,7 +187,6 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /Words like `continue`, `next`, `apply` or `do it` stay within the approved scope/,
     /its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use/,
     /Never disguise genuinely offensive work/,
-    /`claude --safe-mode`/,
     /`COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`/,
     /the minimum floor and `SHIP_BLOCKER`\/`POST_SHIP` triage are in the gate rules/,
     /check the real installed or deployed result where one exists/,
@@ -200,7 +199,9 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
-    /one fully bold sentence/
+    // Agents once asked their own merge question before the merge guard could ask its exact one.
+    /Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes or a merge guard's question counts, so let the guard ask \(gate rules\)\./,
+    /\*\*Generic, platform first:\*\* shared rules and tools name no project, issue, record or harness unless needed; state outcomes and safety floors, not steps/
   ]) assert.match(text, rule);
   // The coding gates, risk tiers and delegation apply wherever the plugin is installed, so they live here.
   for (const rule of [
@@ -222,11 +223,46 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /Undecided GitHub holds for yes\/no\/later, except verified read-only: continue/,
     /Read a repo map where one exists; keep one only where an ENABLED repository's governed rules ask/,
   ]) assert.match(text, rule);
+  // The safe-mode trigger check lives in its playbook, read when a flag happens, not in always-on text.
+  assert.match(readText('skills/toolkit-playbooks/model-safety-flags.md'), /Start `claude --safe-mode` in the same folder/);
   assert.doesNotMatch(text, /G0 MUST|CURRENT admission|weijunswj\/TRANSPORT|Decision traces|takeover record/, 'GitHub-tracking rules stay out of the global layer');
   assert.doesNotMatch(text, /maintain repo maps/, 'plugin-only sessions never start writing repo maps');
   // Toolkit-improvement feedback is the owner's own rule, kept in their instructions, never Toolkit's.
   assert.doesNotMatch(text, /TOOLKIT_FEEDBACK|Toolkit feedback/);
   for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
+});
+
+// Questions once defaulted to bold text, so agents typed a question where the harness had a native one,
+// and a few pages named one harness's question UI in shared text.
+function shippedInstructionFiles() {
+  const files = ['AGENTS.md', 'repo/CONTROLLER.md'];
+  const walk = (dir, deep) => {
+    for (const entry of fs.readdirSync(path.join(repoRoot, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) { if (deep) walk(rel, deep); } else if (entry.name.endsWith('.md') && entry.name !== 'CHANGELOG.md') files.push(rel);
+    }
+  };
+  walk('repo/controller', false);
+  walk('repo/contracts/agent-rules', true);
+  walk('repo/docs', false);
+  walk('repo/docs/agent-playbooks', false);
+  walk('skills', true);
+  return files;
+}
+
+test("action-blocking questions use the harness's native question method, with bold text only as the fallback", () => {
+  const communication = readText(globalPath).split('## Communication\n\n')[1];
+  assert.match(communication, /^Ask each action-blocking question \(choose, approve, confirm, give a path, continue\) with the harness's native question method[^\n]*; where none works, one fully bold sentence\./);
+  const files = shippedInstructionFiles();
+  assert.ok(files.includes('skills/toolkit-setup/SKILL.md') && files.includes('repo/docs/agent-playbooks/controller-takeover.md'));
+  const found = [];
+  for (const rel of files) {
+    readText(rel).split('\n').forEach((line, index) => {
+      const boldDefault = /question.*\bbold|\bbold.*question/i.test(line) && !line.includes('native question method');
+      if (boldDefault || /question UI/i.test(line)) found.push(`${rel}:${index + 1}`);
+    });
+  }
+  assert.deepEqual(found, [], 'question wording names the native question method, never a host UI or bold by default');
 });
 
 test('no standing approval covers a Windows task command on any approval surface', () => {

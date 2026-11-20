@@ -18,7 +18,7 @@ const HARD_STOPS = [
   'Force-pushes and history rewrites.',
   'Deleting the only copy of evidence.',
   'Pushing task or product source to the default branch.',
-  "Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).",
+  "Merging without the owner's OK on a summary of its external effects (each merge its own OK; a merge guard's question is that OK).",
   'Production, live-system, deployment, firewall or security-setting changes.',
   'Turning off tests, validation, guardrails, attribution rules or any safety check.',
   'Anything the host hard-denies.',

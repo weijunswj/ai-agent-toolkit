@@ -19,7 +19,7 @@ Installs and maintains a repository's Toolkit files: the CI checks a governed re
 - Write a repository's own instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/`) only when its governance state is ENABLED (`toolkit-governance.cjs status`), and then only the `CLAUDE.md` shim and the retired `GEMINI.md` removal below. An accepted pending yes also permits preparing exactly the CI check files for its adoption pull request. Preparation never activates governance, programme records or standing task auto-merge. In other states, report what would change and write nothing. The repository's own rules stay authoritative for everything that is its own.
 - **Leftovers:** a `TOOLKIT-GOVERNED-RULES` block (or an older `GLOBAL-AGENTS.MD-TEMPLATE` or `N8N-AGENT-RULES-ADAPTER` v1 block) in `AGENTS.md`, `.agents/rules/00-agent-toolkit-bootstrap.md` and Toolkit copies under `docs/agent-playbooks/` were written by older setups. Report them as leftovers: never refresh, repair or add one. The installed Toolkit's rules win over an older copy. To remove them where governance is on, the owner answers Clean up in `refresh governance`, or run `node <toolkit>/repo/scripts/toolkit-governance-cleanup.cjs --repo <repo>` to preview, then, with the owner's OK, `--write`, and carry the changes to one pull request as below; it deletes files, so the owner merges it and it never goes through task auto-merge.
 
-All action-blocking questions to the user are fully bold.
+Ask action-blocking questions as the global rules' Communication section says.
 
 ## Cheap state check
 
@@ -103,7 +103,7 @@ When the repository has no GitHub remote, leave the refreshed files uncommitted 
 
 **Should I continue in this same session best-effort after reading the updated instructions, or will you start a new agent session?**
 
-Keep the full reset message and question bolded exactly as shown. Do not continue implementation work until the user answers. If the user chooses to continue in the same session, read the updated instruction files first, say that same-session continuation is best-effort and not equivalent to a fresh startup load, then continue only if the task remains safe and clearly scoped.
+Keep the reset message bolded exactly as shown. Ask its question with the harness's native question method (continue here best-effort, or start a new session); where none works, use the bold question line above. Do not continue implementation work until the user answers. If the user chooses to continue in the same session, read the updated instruction files first, say that same-session continuation is best-effort and not equivalent to a fresh startup load, then continue only if the task remains safe and clearly scoped.
 
 ## Boundaries
 
