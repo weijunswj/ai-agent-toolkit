@@ -95,8 +95,9 @@ function ageText(ms) {
 }
 
 // The session-start line for a repository, or null when there is nothing to say, and whether a
-// background refresh is due: { line, refresh, age }, plus queueOnly when every open finding is on the
-// work queue. `age` is set when the cache is over an hour old.
+// background refresh is due: { line, refresh, age }, plus open when findings are open (the line then
+// names the runnable attention command) and queueOnly when every open finding is on the work queue.
+// `age` is set when the cache is over an hour old.
 // While a finding is new or acknowledged the line shows at every start; "clear" shows once after each
 // change (every line shown records its set); with no cache it never says clear. The caller says
 // whether a refresh started.
@@ -113,7 +114,9 @@ function sessionAttention(repository, deps = {}) {
   const queue = open > 0 ? queueText(cache.queue) : null;
   // Every open finding is on the work queue: the caller offers no ack, since those cannot be acked.
   const queueOnly = Boolean(queue) && queueOf(cache.queue).count >= open;
-  const shown = result(open > 0 ? `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}.${queue ? ` ${queue}.` : ''} Run programme.cjs attention for the list` : `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
+  if (open === 0) return result(`${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
+  const list = require('../../../repo/scripts/toolkit-user-state.cjs').programmeCommand('attention', { userHome: deps.home });
+  const shown = { ...result(`${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}.${queue ? ` ${queue}.` : ''} Run ${list} for the list`), open: true };
   return queueOnly ? { ...shown, queueOnly: true } : shown;
 }
 

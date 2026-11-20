@@ -13,7 +13,9 @@
 // where the managed Toolkit checkout is, to name the governance command from there. A phrase
 // inside a longer message, or with other words around it, is ordinary text and gets no line.
 //
-// Usage: node repo/scripts/toolkit-commands.cjs    prints the command list
+// Usage: node repo/scripts/toolkit-commands.cjs              prints the command list
+//        node repo/scripts/toolkit-commands.cjs "<message>"  prints the line the prompt hook adds for that
+//          typed command, for a session whose message came with no hook line (exit 1 if it is none)
 
 const { managedScript } = require('./toolkit-user-state.cjs');
 
@@ -91,6 +93,16 @@ function phraseContext(text) {
   return command ? `Toolkit command: the user typed \`${command.phrase}\`. ${CONTEXT[command.action]()}` : '';
 }
 
-module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext, bankGuide: CONTEXT.guide });
+module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext, bankGuide: CONTEXT.guide, main });
 
-if (require.main === module) process.stdout.write(`${listText()}\n`);
+// With the user's message, the same line the prompt hook would have added, so a session whose hooks
+// did not run (hooks off, or the hook ran out of time) takes the same action as one whose hooks did.
+function main(argv = process.argv.slice(2), out = process.stdout, err = process.stderr) {
+  if (!argv.length) { out.write(`${listText()}\n`); return 0; }
+  const line = argv.length === 1 ? phraseContext(argv[0]) : '';
+  if (!line) { err.write('Not a typed Toolkit command: read the message as plain language.\n'); return 1; }
+  out.write(`${line}\n`);
+  return 0;
+}
+
+if (require.main === module) process.exitCode = main();

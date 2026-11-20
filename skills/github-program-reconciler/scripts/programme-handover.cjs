@@ -148,7 +148,7 @@ function writeFile(transport, store, file, text, previous) {
 function parentView(state, parentDoc) {
   if (!parentDoc) return null;
   return { parent: true, lifecycle: `programme parent; ${state.attentionLine(parentDoc.attention)}`, gate: {}, release: null, pr: null, prs: [], blockers: [],
-    next_action: 'Controller: read CURRENT, answer attention (`programme.cjs attention`), then run the queue' };
+    next_action: `Controller: read CURRENT, answer attention (\`node <Toolkit>/${require('../../../repo/scripts/toolkit-user-state.cjs').PROGRAMME_SCRIPT} attention\`), then run the queue` };
 }
 
 function command(argv, deps, out, openContext) {

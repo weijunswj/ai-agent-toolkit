@@ -22,7 +22,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORTABLE_PATH = 'Without hooks, run programme.cjs refresh and programme.cjs attention by hand at session start and before each gate.';
+// The hand-run path when a host here runs no hooks, naming the runnable commands.
+function portablePath() {
+  const { programmeCommand } = require('./toolkit-user-state.cjs');
+  return `Without hooks, run ${programmeCommand('refresh')} and ${programmeCommand('attention')} by hand at session start and before each gate.`;
+}
 const CODEX_PLUGIN_ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
 
 function isDir(folder) { try { return fs.statSync(folder).isDirectory(); } catch { return false; } }
@@ -99,8 +103,8 @@ function hookCapability({ environment = process.env, homeDir = os.homedir(), rea
 
 function describeHooks(result) {
   const lines = result.hosts.map(entry => `Hooks: ${entry.host} ${entry.state}${entry.detail ? ` (${entry.detail})` : ''}`);
-  if (result.portable) lines.push(PORTABLE_PATH);
+  if (result.portable) lines.push(portablePath());
   return lines;
 }
 
-module.exports = Object.freeze({ PORTABLE_PATH, hookCapability, describeHooks, accountHookCopy });
+module.exports = Object.freeze({ hookCapability, describeHooks, accountHookCopy });

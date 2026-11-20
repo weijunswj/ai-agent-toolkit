@@ -311,7 +311,7 @@ for (const row of [
     assert.ok(current.includes(`- ${state.findingText(entry)}`), 'CURRENT shows the reopened stop without an acknowledged label');
     const cacheDeps = { attentionDir, now: () => NOW };
     assert.deepEqual(attentionCache.readCache(f.binding.repository, cacheDeps).counts, listed.counts);
-    assert.match(attentionCache.sessionAttention(f.binding.repository, cacheDeps).line, /^Attention: 1 new, 0 acknowledged\. Run programme\.cjs attention/);
+    assert.match(attentionCache.sessionAttention(f.binding.repository, cacheDeps).line, /^Attention: 1 new, 0 acknowledged\. Run node "[^"]*programme\.cjs" attention/);
     const parent = f.store.read('parent', 421).doc;
     assert.deepEqual(state.validateParent(parent), []);
     const Ajv = require('ajv/dist/2020');

@@ -1156,6 +1156,28 @@
       "status": "pass"
     },
     {
+      "id": "CMD.toolkit-governance-with-a-bank-open-shows-it-afresh",
+      "source": "owner test of 20 Nov 2026: toolkit governance typed while a governance bank was open gave a status summary; the prompt hook read the phrase as a bank reply, with a ticket and a never-show-the-bank line beside the line to show it",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit governance" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "owner_session": true, "bank_open": true },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \""], "context_excludes": ["may answer it", "--ticket", "Never show the bank again yourself"] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.bank-reply-with-a-bank-open-gets-a-ticket",
+      "source": "control for the row above: with the same open bank, any other own message still gets its one-use ticket",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "1.4=A" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "owner_session": true, "bank_open": true },
+      "expect": { "decision": "allow", "context_contains": ["setup --answers \"ABCD-EFGH-JKMN-PQRS: ANSWER\" --ticket "], "context_excludes": ["Toolkit command:"] },
+      "status": "pass"
+    },
+    {
       "id": "CMD.toolkit-governance-check-is-not-a-command",
       "source": "owner 14 Nov 2026: the governance tools are run by agents, setup and CI, not typed",
       "kind": "benign",
