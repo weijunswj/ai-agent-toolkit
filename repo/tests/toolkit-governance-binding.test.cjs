@@ -414,7 +414,8 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(seed, ['push', '--quiet', mirror, 'disabled:main']);
   const disabledCommit = git(seed, ['rev-parse', 'disabled']);
   const enabledCommit = git(clone, ['rev-parse', 'refs/remotes/origin/main']);
-  const refreshedOk = { refreshed: true, error: null };
+  // A fresh read also names the root, default branch and fetched commit (the session-start catch-up's input).
+  const refreshedOk = { refreshed: true, error: null, root: clone, default_branch: 'main', commit: enabledCommit };
   // N2: a replace ref that swaps the fetched tip for the mirror's commit is not followed.
   git(clone, ['fetch', '--quiet', mirror, 'main']);
   git(clone, ['replace', enabledCommit, disabledCommit]);

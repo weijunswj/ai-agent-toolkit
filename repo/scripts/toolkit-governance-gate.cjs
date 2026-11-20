@@ -458,12 +458,15 @@ class SessionEpochs {
 // the repository it starts in, after refreshing this computer's read of the binding merged on that
 // repository's default branch (bounded; offline keeps the last read). Never throws. `refreshBinding`
 // is for tests; a test registry or test run never reaches the network (refreshMergedBinding).
-function startSession(input, { registryOptions = {}, now, environment = process.env, host = null, refreshBinding = null, proposalTransport = null, programmeDeps = {} } = {}) {
+// `onRefresh` receives that refresh's result (the session-start catch-up uses its fresh read).
+function startSession(input, { registryOptions = {}, now, environment = process.env, host = null, refreshBinding = null, proposalTransport = null, programmeDeps = {}, onRefresh = null } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
       // Refresh the merged binding with bounded network reads into this computer's cache.
-      try { (refreshBinding || governance.refreshMergedBinding)(input.cwd, registryOptions); } catch { /* offline keeps the last read */ }
+      let refreshed = null;
+      try { refreshed = (refreshBinding || governance.refreshMergedBinding)(input.cwd, registryOptions); } catch { /* offline keeps the last read */ }
+      if (typeof onRefresh === 'function') { try { onRefresh(refreshed); } catch { /* the catch-up is optional */ } }
       let current = null;
       try { current = governance.governanceState(input.cwd, registryOptions); repositoryId = current.repository_id || null; } catch { repositoryId = null; }
       if (current?.merged?.fresh && ['M1', 'M2'].includes(current.rule)) {
