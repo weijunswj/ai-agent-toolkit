@@ -72,6 +72,7 @@ test('an owner UAT ask needs one visible Agent UAT: PASSED line with evidence fi
     ['Agent UAT: PASSED (A1)\nAgent UAT: PASSED (A2)', /\(has 2\)/],
     ['<!--\nAgent UAT: PASSED (hidden)\n-->', /\(has 0\)/],
     ['```\nAgent UAT: PASSED (in code)\n```', /\(has 0\)/],
+    ['Agent UAT: PASSED (   )', /PASSED with no evidence/],
   ];
   for (const [extra, why] of refused) {
     const result = run(owner(extra));
@@ -80,6 +81,12 @@ test('an owner UAT ask needs one visible Agent UAT: PASSED line with evidence fi
     assert.ok(line && why.test(line), `${extra}\n${result.report.problems.join('\n')}`);
   }
   assert.equal(run(owner('Agent UAT: PASSED (A1 to A3 green: evidence/run-1)')).code, 0);
+  // A fence closes on a run at least as long as its opening one, as GitHub renders it.
+  assert.equal(run(owner('````\ncode\n`````\nAgent UAT: PASSED (A1 green)')).code, 0);
+  // A long line with no closing bracket is refused in linear time.
+  const started = Date.now();
+  assert.equal(prBody.lineProblems(owner(`Agent UAT: PASSED (${'x '.repeat(100000)}`), { toolkit: true }).length, 1);
+  assert.ok(Date.now() - started < 2000);
   // Bodies that ask the owner nothing are unaffected, with or without the line.
   assert.equal(run(GOOD).code, 0);
   assert.equal(run(GOOD.replace('NOT_REQUIRED (no owner-facing change)', "PASSED (the owner's OK)")).code, 0);

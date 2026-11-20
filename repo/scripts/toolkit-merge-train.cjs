@@ -697,6 +697,8 @@ function body(manifest) {
     `Tier: ${trainTier(members)}`,
     level === 'none' ? 'Bump: none' : `Bump: ${level}`,
     uat,
+    // The body check asks an owner-test body for its agent UAT line; each such member carries its own.
+    ...(tests.length ? [`Agent UAT: PASSED (each owner-test member's own line: ${tests.map(member => `#${member.pr}`).join(', ')})`] : []),
     '',
     // A Closes line would close its issue before the owner's test, which the issue-closure guard
     // refuses; on such a train it becomes Refs, and the member's own Closes line closes the issue

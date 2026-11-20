@@ -202,15 +202,44 @@ function sweep({ findings = [], children = [], stamps = {}, attention = null, gh
   return { check: report.checks.find(check => check.name === 'stale'), calls: setup.calls, written: setup.written };
 }
 
-test('the stale sweep lists done children to close and stamps the day', () => {
-  const { check, calls, written } = sweep({ findings: [{ code: 'TASK_MERGED_OPEN', issue: 12 }, { code: 'READY_TO_CLOSE', issue: 12 }, { code: 'READY_TO_CLOSE', issue: 13 }, { code: 'STALE_PR', issue: 14 }] });
+test('the stale sweep lists done children to close, merged ones to judge, and stamps the day with its list', () => {
+  const findings = [{ state: 'new', code: 'TASK_MERGED_OPEN', issue: 12 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 12 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 13 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 15 }, { state: 'new', code: 'STALE_PR', issue: 14 }];
+  const { check, calls, written } = sweep({ findings, children: [issue(12), issue(13), issue(15)] });
   assert.equal(check.state, 'attention');
-  assert.deepEqual(check.lines.slice(1), ['CLOSE? #12 done (TASK_MERGED_OPEN)', 'CLOSE? #13 done (READY_TO_CLOSE)']);
-  assert.match(check.lines[0], /^2 to put to the owner in one approve list \(\d{4}-\d{2}-\d{2}\); add obsolete children by judgement$/);
+  const rows = ['CLOSE? #12 done (READY_TO_CLOSE)', 'CLOSE? #13 done (READY_TO_CLOSE)', 'JUDGE? #15 every PR merged: close it as done or plan its next slice (TASK_MERGED_OPEN)'];
+  assert.deepEqual(check.lines.slice(1), rows);
+  assert.match(check.lines[0], /^3 to put to the owner in one approve list \(\d{4}-\d{2}-\d{2}\); add obsolete children by judgement$/);
   // Read only: attention without --refresh, and one paginated sub-issue read of the parent.
   assert.deepEqual(calls.find(call => call.script === SCRIPTS.programme && call.args.includes('--json')).args, ['attention', '--json', '--repo-root', '/repo']);
   assert.deepEqual(calls.filter(call => call.gh).map(call => call.gh.slice(0, 3)), [['api', '--paginate', 'repos/acme/app/issues/7/sub_issues?per_page=100']]);
-  assert.deepEqual(written, [{ 'acme/app': { date: TODAY, at: NOW.toISOString() } }]);
+  assert.deepEqual(written, [{ 'acme/app': { date: TODAY, at: NOW.toISOString(), rows } }]);
+});
+
+// The stale check never proposes closing live work: an acknowledged finding (the controller's own
+// hold), an unchecked DONE WHEN row, an open sub-issue or a child it cannot read is held, not CLOSE?.
+test('the stale sweep holds done findings whose child is still live and never lists them to close', () => {
+  const doneWhen = '## DONE WHEN\n\n- [x] PR B lands\n- [ ] PR A lands\n\n## PLAN\n\n- [x] other\n';
+  const children = [issue(30), issue(31), issue(32, { body: doneWhen }), issue(33, { sub_issues_summary: { total: 2, completed: 1 } }), issue(35, { state: 'closed' }), issue(36, { body: '## DONE WHEN\n\n- [x] all done\n' })];
+  const findings = [
+    { state: 'acknowledged', code: 'READY_TO_CLOSE', issue: 30, due: '2026-11-15T08:00:00Z', promised: 'Not closing: slice 2 unbuilt' },
+    { state: 'acknowledged', code: 'TASK_MERGED_OPEN', issue: 31 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 32 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 33 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 34 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 35 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 36 },
+  ];
+  const { check } = sweep({ findings, children });
+  assert.equal(check.lines.some(line => /^CLOSE\? #(30|31|32|33|34|35) /.test(line)), false, check.lines.join('\n'));
+  assert.deepEqual(check.lines.slice(1), [
+    'CLOSE? #36 done (READY_TO_CLOSE)',
+    'held, not proposed: #30 acknowledged, #32 1 unchecked DONE WHEN row(s), #33 1 open sub-issue(s), #34 not a sub-issue of a registered parent, #35 already closed, #31 acknowledged',
+  ]);
+  assert.match(check.lines[0], /^1 to put to the owner/);
+  // All held: nothing to put to the owner, and the held line still says why.
+  const none = sweep({ findings: findings.slice(0, 2), children }).check;
+  assert.equal(none.state, 'ok');
+  assert.match(none.lines[0], /^no stale children .*; held, not proposed: #30 acknowledged, #31 acknowledged$/);
 });
 
 test('a second run on the same day says so and reads nothing', () => {
@@ -221,6 +250,33 @@ test('a second run on the same day says so and reads nothing', () => {
   // Another repository's stamp, or yesterday's, does not count.
   assert.equal(sweep({ stamps: { 'acme/other': { date: TODAY, at: '2026-11-14T01:00:00Z' } } }).written.length, 1);
   assert.equal(sweep({ stamps: { 'acme/app': { date: '2026-11-13', at: '2026-11-13T01:00:00Z' } } }).written.length, 1);
+});
+
+test('compact output prints every stale row, and a same-day run shows the day\'s list again', () => {
+  const children = Array.from({ length: 6 }, (_, i) => issue(50 + i, { body: 'No reason given', created_at: '2026-11-14T02:00:00Z' }));
+  const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [] }) } };
+  const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: children.map(child => JSON.stringify(child)).join('\n') }) });
+  let kept = {};
+  setup.deps.stamp = { read: () => structuredClone(kept), write: value => { kept = value; } };
+  const argv = ['--host', 'chat', '--checkout', '/repo', '--skip', 'toolkit,programme,traces,ci,footer,refs'];
+  const first = format(controllerCheck(parseArgs(argv), setup.deps));
+  const rows = children.map(child => `  FOLD? #${child.number} new under #7 with no Nearest child: line`);
+  assert.deepEqual(first.split('\n').filter(line => line.startsWith('  ')), rows);
+  assert.doesNotMatch(first, /more \(--expand/);
+  const again = controllerCheck(parseArgs(argv), setup.deps).checks.find(check => check.name === 'stale');
+  assert.equal(again.state, 'attention');
+  assert.match(again.lines[0], /^6 to put to the owner in one approve list \(\d{4}-\d{2}-\d{2}, swept at 2026-11-14T12:00:00.000Z, shown again\)$/);
+  assert.deepEqual(again.lines.slice(1), rows.map(row => row.trim()));
+  assert.equal(setup.calls.filter(call => call.gh).length, 1);
+});
+
+test('a stamp that cannot be written fails the stale line only, keeping its rows', () => {
+  const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [] }) } };
+  const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: JSON.stringify(issue(60, { body: 'none', created_at: '2026-11-14T02:00:00Z' })) }) });
+  setup.deps.stamp = { read: () => ({}), write: () => { throw new Error('EACCES: permission denied'); } };
+  const report = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), setup.deps);
+  assert.deepEqual(report.checks.find(check => check.name === 'stale'), { name: 'stale', state: 'failed', lines: ['stamp not written (EACCES: permission denied); the next run sweeps again', 'FOLD? #60 new under #7 with no Nearest child: line'] });
+  assert.equal(report.checks.find(check => check.name === 'ci').state, 'ok');
 });
 
 test('a child opened since the last sweep with no Nearest child: line is a fold candidate', () => {

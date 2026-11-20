@@ -63,9 +63,14 @@ const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
 const COMPACT_LINES = 3;
-// The polish child's row cap, and the findings that mean a child's work is done.
+// The polish child's row cap, and the findings that may mean a child's work is done, with the
+// owner-list word for each (a merged task with no verdict yet is a judgement, not a close).
 const POLISH_CAP = 8;
-const DONE_CODES = new Set(['TASK_MERGED_OPEN', 'READY_TO_CLOSE']);
+const DONE_CODES = new Map([['READY_TO_CLOSE', 'CLOSE? #%d done'], ['TASK_MERGED_OPEN', 'JUDGE? #%d every PR merged: close it as done or plan its next slice']]);
+// Checks whose every detail line prints even in compact output: the stale list is the day's one
+// owner list, and a hidden row could not be recovered once the day is stamped.
+const UNCUT = new Set(['stale']);
+const DONE_WHEN = /^#{1,6} +DONE WHEN\b.*$/im;
 const SCRIPTS = {
   guidebook: 'repo/scripts/toolkit-projects-guidebook.cjs',
   instructions: 'repo/scripts/toolkit-projects-instructions.cjs',
@@ -215,33 +220,59 @@ function checkTraces(run, repo, parents) {
   return { state, lines };
 }
 
+// The text under a heading, up to the next heading of the same or a higher level; null without it.
+function sectionOf(body, heading) {
+  const text = String(body || '').replace(/\r\n?/g, '\n');
+  const start = heading.exec(text);
+  if (!start) return null;
+  const level = /^#+/.exec(start[0])[0].length;
+  const rest = text.slice(start.index + start[0].length);
+  const end = new RegExp(`^#{1,${level}} `, 'm').exec(rest);
+  return { heading: start[0], text: end ? rest.slice(0, end.index) : rest };
+}
+
 // Polish rows are the checkboxes under the child's ROWS heading, else under DONE WHEN; the sweep
 // says which it counted, so a body in another shape is visible rather than silently miscounted.
 function polishRows(body) {
-  const text = String(body || '').replace(/\r\n?/g, '\n');
-  for (const heading of [/^#{1,6} +ROWS\b.*$/im, /^#{1,6} +DONE WHEN\b.*$/im]) {
-    const start = heading.exec(text);
-    if (!start) continue;
-    const level = /^#+/.exec(start[0])[0].length;
-    const rest = text.slice(start.index + start[0].length);
-    const end = new RegExp(`^#{1,${level}} `, 'm').exec(rest);
-    const rows = (end ? rest.slice(0, end.index) : rest).match(/^ {0,3}[-*+] \[[ xX]\] /gm) || [];
-    return { rows: rows.length, under: /ROWS/i.test(start[0]) ? 'ROWS' : 'DONE WHEN' };
+  for (const heading of [/^#{1,6} +ROWS\b.*$/im, DONE_WHEN]) {
+    const found = sectionOf(body, heading);
+    if (!found) continue;
+    const rows = found.text.match(/^ {0,3}[-*+] \[[ xX]\] /gm) || [];
+    return { rows: rows.length, under: /ROWS/i.test(found.heading) ? 'ROWS' : 'DONE WHEN' };
   }
   return { rows: 0, under: 'no ROWS or DONE WHEN heading' };
+}
+
+// Why a done finding's child is still live, or null when nothing says so. Programme findings fire on
+// a merged PR whatever the child still owes, so only a new finding on an open child the sweep read,
+// with no open sub-issue and no unchecked DONE WHEN row (nested ones too), is put to the owner.
+function heldBecause(finding, child) {
+  if (finding.state !== 'new') return 'acknowledged';
+  if (!child) return 'not a sub-issue of a registered parent';
+  if (child.state !== 'open') return 'already closed';
+  const summary = child.sub_issues_summary;
+  if (summary && summary.total > summary.completed) return `${summary.total - summary.completed} open sub-issue(s)`;
+  const doneWhen = sectionOf(child.body, DONE_WHEN);
+  const unchecked = doneWhen ? (doneWhen.text.match(/^[ \t]*[-*+] \[ \] /gm) || []).length : 0;
+  return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : null;
 }
 
 // The local date (YYYY-MM-DD) of a time, which is the day the stamp counts in.
 const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`;
 
-// The daily stale sweep: one owner-approve list of children done (CLOSE?), new beside an open child
-// with no reason (FOLD?), closed while holding open work (MOVE?) and a full or over-cap polish child.
-// Read only; it writes its date stamp only after every read succeeded, so a failed run retries.
+// The daily stale sweep: one owner-approve list of children done (CLOSE?) or merged and awaiting a
+// verdict (JUDGE?), new beside an open child with no reason (FOLD?), closed while holding open work
+// (MOVE?) and a full or over-cap polish child. Read only; it writes its date stamp, with the day's
+// list, only after every read succeeded, so a failed run retries and a same-day run shows the list again.
 function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const today = localDate(now);
   const stamps = stamp.read() || {};
   const last = stamps[repo];
-  if (last && last.date === today) return { state: 'ok', lines: [`ran today (${today})`] };
+  if (last && last.date === today) {
+    const kept = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
+    const heldAgain = typeof last.held === 'string' && last.held ? [last.held] : [];
+    return kept.length ? { state: 'attention', lines: [`${kept.length} to put to the owner in one approve list (${today}, swept at ${last.at}, shown again)`, ...kept, ...heldAgain] } : { state: 'ok', lines: [`ran today (${today})`] };
+  }
   const attention = run(SCRIPTS.programme, ['attention', '--json', '--repo-root', checkout], { cwd: checkout });
   let report = null;
   try { report = JSON.parse(attention.stdout); } catch { /* reported below */ }
@@ -254,11 +285,16 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   }
   const since = last && !Number.isNaN(Date.parse(last.at)) ? new Date(last.at) : new Date(now.getTime() - 26 * 3600000);
   const rows = [];
+  const held = [];
   const done = new Set();
-  for (const finding of report.findings) {
-    if (!DONE_CODES.has(finding.code) || !Number.isInteger(finding.issue) || done.has(finding.issue)) continue;
+  // READY_TO_CLOSE first: of the two findings on one child, it is the stronger evidence.
+  const doneFindings = report.findings.filter(finding => DONE_CODES.has(finding.code) && Number.isInteger(finding.issue));
+  for (const finding of [...doneFindings.filter(f => f.code === 'READY_TO_CLOSE'), ...doneFindings.filter(f => f.code !== 'READY_TO_CLOSE')]) {
+    if (done.has(finding.issue)) continue;
     done.add(finding.issue);
-    rows.push(`CLOSE? #${finding.issue} done (${finding.code})`);
+    const why = heldBecause(finding, children.find(child => child.number === finding.issue));
+    if (why) held.push(`#${finding.issue} ${why}`);
+    else rows.push(`${DONE_CODES.get(finding.code).replace('%d', finding.issue)} (${finding.code})`);
   }
   const open = children.filter(child => child.state === 'open');
   for (const child of open) {
@@ -275,9 +311,12 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     if (count > POLISH_CAP) rows.push(`POLISH OVER CAP #${child.number}: ${count} rows (${under}), cap ${POLISH_CAP}`);
     else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
   }
-  stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString() } });
-  if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)`] };
-  return { state: 'attention', lines: [`${rows.length} to put to the owner in one approve list (${today}); add obsolete children by judgement`, ...rows] };
+  const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
+  try { stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) } }); } catch (error) {
+    return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
+  }
+  if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
+  return { state: 'attention', lines: [`${rows.length} to put to the owner in one approve list (${today}); add obsolete children by judgement`, ...rows, ...(heldLine ? [heldLine] : [])] };
 }
 
 function checkCi(run, checkout) {
@@ -373,7 +412,7 @@ function format(report, { expand = false } = {}) {
   for (const state of expand ? ['attention', 'failed', 'ok', 'skipped'] : ['attention', 'failed']) {
     for (const check of report.checks.filter(item => item.state === state)) {
       const detail = check.lines.slice(1);
-      const shown = expand ? detail : detail.slice(0, COMPACT_LINES);
+      const shown = expand || UNCUT.has(check.name) ? detail : detail.slice(0, COMPACT_LINES);
       lines.push(`${label[state]} ${check.name}: ${check.lines[0]}`, ...shown.map(line => `  ${line}`));
       if (shown.length < detail.length) lines.push(`  ... ${detail.length - shown.length} more (--expand, or ${check.command || 'the check itself'})`);
     }

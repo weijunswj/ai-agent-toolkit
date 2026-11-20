@@ -45,9 +45,10 @@ const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const GUARD = path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
 const ATTRIBUTION = Object.freeze(['PDG-AI-FOOTER', 'PDG-AI-SESSION-LINK', 'PDG-AI-MARKER']);
 const BUMP = /^Bump: (patch|minor|major|none)[ \t]*$/gm;
-const AGENT_UAT = /^Agent UAT:[ \t]*(\S+)(?:[ \t]+\((.*\S.*)\))?[ \t]*$/gm;
-// Text a reader never sees: HTML comments and fenced code. An Agent UAT line there does not count.
-const HIDDEN = /<!--[\s\S]*?(?:-->|$(?![\s\S]))|^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|$(?![\s\S]))/gm;
+const AGENT_UAT = /^Agent UAT:[ \t]*(\S+)(?:[ \t]+\((.*)\))?[ \t]*$/gm;
+// Text a reader never sees: HTML comments and fenced code (closed by a run of its character at least
+// as long as the opening one). An Agent UAT line there does not count.
+const HIDDEN = /<!--[\s\S]*?(?:-->|$(?![\s\S]))|^ {0,3}((`|~)\2{2,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1\2*[ \t]*$|$(?![\s\S]))/gm;
 const RULE_LINE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
 const TOOLKIT_MARKER = path.join('repo', 'contracts', 'agent-rules', 'global-rules.md');
 const MAX_BODY_BYTES = 512 * 1024;
@@ -111,7 +112,7 @@ function lineProblems(body, { toolkit }) {
     const agent = [...body.replace(/\r\n?/g, '\n').replace(HIDDEN, '').matchAll(AGENT_UAT)];
     const why = 'owner UAT is asked before every agent step passed: run each UAT step a tool reaches (Chrome, computer use, Remote Control) first, then add exactly one line Agent UAT: PASSED (<evidence>)';
     if (agent.length !== 1) problems.push(`${why} (has ${agent.length})`);
-    else if (agent[0][1] !== 'PASSED' || !agent[0][2]) problems.push(`${why} (has Agent UAT: ${agent[0][1]}${agent[0][2] ? '' : ' with no evidence'})`);
+    else if (agent[0][1] !== 'PASSED' || !agent[0][2] || !agent[0][2].trim()) problems.push(`${why} (has Agent UAT: ${agent[0][1]}${agent[0][2] && agent[0][2].trim() ? '' : ' with no evidence'})`);
   }
   if (toolkit) {
     const bumps = [...body.matchAll(BUMP)].length;

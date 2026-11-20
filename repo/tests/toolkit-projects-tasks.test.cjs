@@ -1125,6 +1125,10 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   const projects = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const daily = fs.readFileSync(path.join(projects, 'tasks', 'daily-check-in.md'), 'utf8');
   assert.match(daily, /\[parent\]   Stale sweep \(once a day, here only, never in the hourly nudge\): skip it when state\.md's `Stale sweep:` date is today[^\n]*`FOLD\? #<n> into #<open> \(<area>\)` for an issue opened since LAST that has no `Nearest child:` line, or whose area[^\n]*`POLISH FULL #<n>`[^\n]*"STALE SWEEP: <n> \| "[^\n]*records no date\./);
+  // CLOSE? comes from a source the daily run has, and never for live work: the controller's holds, open
+  // sub-issues and unchecked DONE WHEN rows stay off the list.
+  assert.match(daily, /`CLOSE\? #<n> done` for a `READY_TO_CLOSE` finding and `JUDGE\? #<n>` for a `TASK_MERGED_OPEN` one, taken from the `attention` list of the stored parent document `<store path>parent-<n>\.json`[^\n]*only for a finding in state `new` on an open child with no open sub-issue and no unchecked box under its DONE WHEN heading \(an acknowledged finding is the controller's hold/);
+  assert.doesNotMatch(daily.split('\n').find(line => line.includes('Stale sweep (once a day')), /step 5b's/);
   assert.doesNotMatch(daily, /Fold check:/);
   // The controller check's own stale sweep runs only from the daily run: every other Projects call skips it.
   const nudge = fs.readFileSync(path.join(projects, 'tasks', 'hourly-nudge.md'), 'utf8');
