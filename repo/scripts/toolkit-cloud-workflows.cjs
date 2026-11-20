@@ -399,7 +399,7 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
   if (ciShards === undefined || options.refreshPr) { try { refresh(path.resolve(options.repo)); } catch { /* the last read stays */ } }
   if (options.refreshPr) {
-    const result = require('./toolkit-cloud-workflows-refresh.cjs').refreshPr({ repo: options.repo, ci: options.ci, root, commit, ciShards, ...(github ? { github } : {}), ...(governance ? { governance } : {}) });
+    const result = require('./toolkit-cloud-workflows-refresh.cjs').refreshPr({ repo: options.repo, ci: options.ci, root, commit, ciShards, workflows: module.exports, ...(github ? { github } : {}), ...(governance ? { governance } : {}) });
     (result.code ? err : out).write(`${result.line}\n`);
     return result.code;
   }
@@ -417,6 +417,6 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
   }
 }
 
-if (require.main === module) process.exitCode = main();
-
 module.exports = Object.freeze({ installerAt, isToolkitClone, sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+
+if (require.main === module) process.exitCode = main();

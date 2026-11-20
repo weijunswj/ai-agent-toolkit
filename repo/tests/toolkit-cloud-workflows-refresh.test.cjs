@@ -296,4 +296,11 @@ test('refresh PR: current copies need no pull request; the command line wires --
   assert.match(out.join(''), /^Opened refresh pull request /);
   assert.equal(workflows.main(['--repo', stale, '--refresh-pr', '--check'], { ...io, root: ROOT, commit: COMMIT, refresh: () => {} }), 2);
   assert.match(err.join(''), /choose --check or --refresh-pr/);
+  // Run as a command, the script hands the refresh its own finished exports, never a half-loaded copy.
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'refresh-cli-'));
+  t.after(() => fs.rmSync(plain, { recursive: true, force: true }));
+  git(plain, ['init', '-q']);
+  const command = spawnSync(process.execPath, [path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'), '--repo', plain, '--refresh-pr'], { cwd: plain, encoding: 'utf8', windowsHide: true });
+  assert.equal(command.status, 2, command.stderr);
+  assert.match(command.stderr, /^No refresh pull request: [^\n]+\n$/);
 });
