@@ -34,6 +34,13 @@ test('hook wiring: both Claude copies send prompts and tools to the hook, with o
     assert.match('AskUserQuestion', new RegExp(picked.matcher));
     for (const name of ['AskUserQuestionX', 'Bash']) assert.doesNotMatch(name, new RegExp(picked.matcher), name);
     assert.ok(hooks.SessionStart[0].hooks.some(hook => hook.command.endsWith('toolkit-governance-hook.cjs" --event SessionStart')));
+    // Both session-start hooks show the same fixed spinner text, so a start that waits on an update says why.
+    const starts = hooks.SessionStart[0].hooks;
+    for (const script of ['toolkit-local-bridge.cjs', 'toolkit-governance-hook.cjs']) {
+      const hook = starts.find(entry => entry.command.includes(script));
+      assert.ok(hook, `${file}: ${script}`);
+      assert.equal(hook.statusMessage, 'Toolkit: checking for updates', `${file}: ${script}`);
+    }
   }
   for (const file of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {
     const hooks = JSON.parse(fs.readFileSync(path.join(repoRoot, file), 'utf8'));
