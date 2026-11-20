@@ -202,21 +202,22 @@ function sweep({ findings = [], children = [], stamps = {}, attention = null, gh
   return { check: report.checks.find(check => check.name === 'stale'), calls: setup.calls, written: setup.written };
 }
 
-test('the stale sweep lists done children to close, merged ones to judge, and stamps the day with its list', () => {
+test('the stale sweep lists children whose PRs merged for the controller to judge, and stamps the day with its list', () => {
   const findings = [{ state: 'new', code: 'TASK_MERGED_OPEN', issue: 12 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 12 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 13 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 15 }, { state: 'new', code: 'STALE_PR', issue: 14 }];
   const { check, calls, written } = sweep({ findings, children: [issue(12), issue(13), issue(15)] });
   assert.equal(check.state, 'attention');
-  const rows = ['CLOSE? #12 done (READY_TO_CLOSE)', 'CLOSE? #13 done (READY_TO_CLOSE)', 'JUDGE? #15 every PR merged: close it as done or plan its next slice (TASK_MERGED_OPEN)'];
+  const judge = 'PR merged: check its DONE WHEN before it goes to the owner';
+  const rows = [`JUDGE? #12 ${judge} (READY_TO_CLOSE)`, `JUDGE? #13 ${judge} (READY_TO_CLOSE)`, `JUDGE? #15 ${judge} (TASK_MERGED_OPEN)`];
   assert.deepEqual(check.lines.slice(1), rows);
-  assert.match(check.lines[0], /^3 to put to the owner in one approve list \(\d{4}-\d{2}-\d{2}\); add obsolete children by judgement$/);
+  assert.match(check.lines[0], /^3 rows \(\d{4}-\d{2}-\d{2}\): judge each JUDGE\? against its child's DONE WHEN/);
   // Read only: attention without --refresh, and one paginated sub-issue read of the parent.
   assert.deepEqual(calls.find(call => call.script === SCRIPTS.programme && call.args.includes('--json')).args, ['attention', '--json', '--repo-root', '/repo']);
   assert.deepEqual(calls.filter(call => call.gh).map(call => call.gh.slice(0, 3)), [['api', '--paginate', 'repos/acme/app/issues/7/sub_issues?per_page=100']]);
   assert.deepEqual(written, [{ 'acme/app': { date: TODAY, at: NOW.toISOString(), rows } }]);
 });
 
-// The stale check never proposes closing live work: an acknowledged finding (the controller's own
-// hold), an unchecked DONE WHEN row, an open sub-issue or a child it cannot read is held, not CLOSE?.
+// The stale check never proposes live work: an acknowledged finding (the controller's own hold), an
+// unchecked DONE WHEN row, an open sub-issue or a child it cannot read is held, not a JUDGE? row.
 test('the stale sweep holds done findings whose child is still live and never lists them to close', () => {
   const doneWhen = '## DONE WHEN\n\n- [x] PR B lands\n- [ ] PR A lands\n\n## PLAN\n\n- [x] other\n';
   const children = [issue(30), issue(31), issue(32, { body: doneWhen }), issue(33, { sub_issues_summary: { total: 2, completed: 1 } }), issue(35, { state: 'closed' }), issue(36, { body: '## DONE WHEN\n\n- [x] all done\n' })];
@@ -230,16 +231,64 @@ test('the stale sweep holds done findings whose child is still live and never li
     { state: 'new', code: 'READY_TO_CLOSE', issue: 36 },
   ];
   const { check } = sweep({ findings, children });
-  assert.equal(check.lines.some(line => /^CLOSE\? #(30|31|32|33|34|35) /.test(line)), false, check.lines.join('\n'));
+  assert.equal(check.lines.some(line => /^(CLOSE|JUDGE)\? #(30|31|32|33|34|35) /.test(line)), false, check.lines.join('\n'));
   assert.deepEqual(check.lines.slice(1), [
-    'CLOSE? #36 done (READY_TO_CLOSE)',
+    'JUDGE? #36 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)',
     'held, not proposed: #30 acknowledged, #32 1 unchecked DONE WHEN row(s), #33 1 open sub-issue(s), #34 not a sub-issue of a registered parent, #35 already closed, #31 acknowledged',
   ]);
-  assert.match(check.lines[0], /^1 to put to the owner/);
+  assert.match(check.lines[0], /^1 row \(/);
   // All held: nothing to put to the owner, and the held line still says why.
   const none = sweep({ findings: findings.slice(0, 2), children }).check;
   assert.equal(none.state, 'ok');
   assert.match(none.lines[0], /^no stale children .*; held, not proposed: #30 acknowledged, #31 acknowledged$/);
+});
+
+// Live-shaped children: most write DONE WHEN as plain text and keep their hold in the reconciler's
+// `Kept open:` line or in an acknowledgement note that lapses after its due time (the finding turns
+// `new` again, keeping its due and note). Neither may reach the owner as done, and no programme
+// finding is ever called done: a merged PR is a JUDGE? row the controller checks against DONE WHEN.
+const graph = (n, kept = '') => `<!-- programme-state child=${n}@45 -->\n<!-- Task status: IN PROGRESS -->\n# PR GRAPH\n\n| PR Task | PR # | Status | Merged SHA |\n|---|---|---|---|\n|\`Slice A\`|#1176|MERGED|[b2dde08](x)|\n${kept ? `\n${kept}\n` : ''}`;
+const plainDoneWhen = '# TASK\n\n## DONE WHEN\n\n- A green scheduled cloud sweep is recorded first.\n- Setup makes no Windows task call.\n\n# PLAN\n\nSlices 0, A, B, C.\n\n';
+const LIVE_SHAPED = [
+  // #886 and #827: plain DONE WHEN bullets, held by the reconciler's Kept open line.
+  issue(886, { body: `${plainDoneWhen}${graph(886, 'Kept open: Closes once child 1164 completes (since 2026-11-18 08:13Z)')}` }),
+  issue(827, { body: `${plainDoneWhen}${graph(827, 'Kept open: Waits for the proof run; then close with the owner\'s OK. (since 2026-11-16 02:34Z)')}` }),
+  // #473: a "Complete when" heading, held by Kept open.
+  issue(473, { body: `# PATH\n\n${graph(473, 'Kept open: Lows moved to 1275; close 473 after 1275 lands (since 2026-11-18 09:22Z)')}\n# W1\n\n## Complete when\n\n- Source watch conforms.\n` }),
+  // #1030: a prose Done when: paragraph, held only by the controller's lapsed acknowledgement note.
+  issue(1030, { body: `# PATH\n\n${graph(1030)}\n# AGENT CONTEXT\n\nDone when: a train lands that member with the markers rebuilt, and tests cover both cases.\n` }),
+  // #759: no DONE WHEN at all, held only by the lapsed note.
+  issue(759, { body: `# PATH\n\n${graph(759)}\n# Toolkit 4.0\n\n## Folded jobs\n\n- several\n` }),
+  // #893: checkbox DONE WHEN rows and Kept open.
+  issue(893, { body: `# TASK\n\n## DONE WHEN\n\n- [ ] Slice 2 lands.\n- [x] Slice 1 lands.\n\n${graph(893, 'Kept open: Slice 2 unbuilt (since 2026-11-18 06:27Z)')}` }),
+  // A child with nothing holding it: its merged PR is still only a judgement.
+  issue(901, { body: `# TASK\n\n## DONE WHEN\n\n- Everything lands.\n\n${graph(901)}` }),
+];
+const LAPSED = { due: '2026-11-21T08:00:00Z', overdue: true };
+
+test('red: a live-shaped child kept open or under a lapsed hold is never put to the owner as done', () => {
+  const findings = [
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 886 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 827 },
+    { state: 'new', code: 'TASK_MERGED_OPEN', issue: 473 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 1030, ...LAPSED, promised: 'Not closing: slice 2 unbuilt' },
+    { state: 'new', code: 'TASK_MERGED_OPEN', issue: 759, ...LAPSED, promised: 'Plan the 4.0 slices' },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 893 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 901 },
+  ];
+  const { check } = sweep({ findings, children: LIVE_SHAPED });
+  assert.equal(check.lines.slice(1).some(line => /^CLOSE\?|\bdone\b/.test(line) && !line.startsWith('held')), false, check.lines.join('\n'));
+  assert.deepEqual(check.lines.slice(1), [
+    'JUDGE? #901 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)',
+    'held, not proposed: #886 Kept open line, #827 Kept open line, #1030 hold lapsed at 2026-11-21T08:00:00Z (Not closing: slice 2 unbuilt), #893 Kept open line, #473 Kept open line, #759 hold lapsed at 2026-11-21T08:00:00Z (Plan the 4.0 slices)',
+  ]);
+  assert.match(check.lines[0], /^1 row \(\d{4}-\d{2}-\d{2}\): judge each JUDGE\? against its child's DONE WHEN, PR GRAPH and notes; only children judged done go on the owner's one approve list, with the other rows and obsolete children$/);
+});
+
+test('red: a Kept open line only counts at the start of a line', () => {
+  const quoted = issue(902, { body: `# TASK\n\nSome children say Kept open: when the controller holds them.\n\n${graph(902)}` });
+  const { check } = sweep({ findings: [{ state: 'new', code: 'READY_TO_CLOSE', issue: 902 }], children: [quoted] });
+  assert.deepEqual(check.lines.slice(1), ['JUDGE? #902 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)']);
 });
 
 test('a second run on the same day says so and reads nothing', () => {
@@ -265,7 +314,7 @@ test('compact output prints every stale row, and a same-day run shows the day\'s
   assert.doesNotMatch(first, /more \(--expand/);
   const again = controllerCheck(parseArgs(argv), setup.deps).checks.find(check => check.name === 'stale');
   assert.equal(again.state, 'attention');
-  assert.match(again.lines[0], /^6 to put to the owner in one approve list \(\d{4}-\d{2}-\d{2}, swept at 2026-11-14T12:00:00.000Z, shown again\)$/);
+  assert.match(again.lines[0], /^6 rows \(\d{4}-\d{2}-\d{2}, swept at 2026-11-14T12:00:00.000Z, shown again\): judge each JUDGE\? /);
   assert.deepEqual(again.lines.slice(1), rows.map(row => row.trim()));
   assert.equal(setup.calls.filter(call => call.gh).length, 1);
 });
