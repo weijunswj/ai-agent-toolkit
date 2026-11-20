@@ -63,7 +63,8 @@ function fixture(t) {
       commitFile(seed, file, `change ${pushed}\n`);
     }
     git(seed, ['push', '--quiet', origin, 'main']);
-    git(clone, ['fetch', '--quiet', 'origin']);
+    // As the session start's refresh does: only origin's default branch, into its tracking ref.
+    git(clone, ['fetch', '--quiet', origin, '+refs/heads/main:refs/remotes/origin/main']);
     return git(origin, ['rev-parse', 'main']);
   };
   const read = (at = clone) => ({ refreshed: true, error: null, root: at, default_branch: 'main', commit: git(origin, ['rev-parse', 'main']) });
@@ -106,24 +107,24 @@ test('1: a clean default branch that is behind is fast-forwarded to the fetched 
 });
 
 test('2 and 3: uncommitted changes, tracked or untracked, keep the checkout where it is, with one line', t => {
-  for (const [label, dirty] of [
-    ['tracked', clone => fs.writeFileSync(path.join(clone, 'README.md'), 'local edit\n')],
-    ['untracked', clone => fs.writeFileSync(path.join(clone, 'note.txt'), 'x\n')],
+  const f = fixture(t);
+  const before = head(f.clone);
+  f.behind(2);
+  for (const [label, dirty, clean] of [
+    ['tracked', () => fs.writeFileSync(path.join(f.clone, 'README.md'), 'local edit\n'), () => fs.writeFileSync(path.join(f.clone, 'README.md'), 'one\n')],
+    ['untracked', () => fs.writeFileSync(path.join(f.clone, 'note.txt'), 'x\n'), () => fs.rmSync(path.join(f.clone, 'note.txt'))],
   ]) {
-    const f = fixture(t);
-    const before = head(f.clone);
-    f.behind(2);
-    dirty(f.clone);
+    dirty();
     const { line } = run(f);
     assert.equal(head(f.clone), before, label);
     assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['2', 'uncommitted changes'], label);
+    clean();
   }
   // An ignored file is not a change.
-  const f = fixture(t);
   fs.writeFileSync(path.join(f.clone, '.git', 'info', 'exclude'), 'ignored.log\n');
   fs.writeFileSync(path.join(f.clone, 'ignored.log'), 'x\n');
   const target = f.behind(1);
-  assert.match(run(f).line, /^Toolkit: brought local main up to date/);
+  assert.match(run(f).line, /^Toolkit: brought local main up to date with origin\/main \([0-9a-f]{7} to [0-9a-f]{7}, 3 commits\)\.$/);
   assert.equal(head(f.clone), target);
 });
 
@@ -163,19 +164,21 @@ test('6 and 7: only the session\'s own worktree moves, and only when it has the 
 });
 
 test('8: no upstream, or an upstream that is not origin/<default>, is not moved, with one line', t => {
-  for (const [label, setup] of [
-    ['no upstream', clone => git(clone, ['branch', '--unset-upstream'])],
-    ['another remote', clone => { git(clone, ['remote', 'add', 'fork', path.join(clone, '..', 'origin.git')]); git(clone, ['config', 'branch.main.remote', 'fork']); }],
-    ['another branch', clone => git(clone, ['config', 'branch.main.merge', 'refs/heads/release'])],
+  const f = fixture(t);
+  const before = head(f.clone);
+  f.behind(1);
+  for (const [label, setup, undo] of [
+    ['no upstream', () => git(f.clone, ['branch', '--unset-upstream']), () => git(f.clone, ['branch', '--quiet', '--set-upstream-to=origin/main'])],
+    ['another remote', () => { git(f.clone, ['remote', 'add', 'fork', f.origin]); git(f.clone, ['config', 'branch.main.remote', 'fork']); }, () => git(f.clone, ['config', 'branch.main.remote', 'origin'])],
+    ['another branch', () => git(f.clone, ['config', 'branch.main.merge', 'refs/heads/release']), () => git(f.clone, ['config', 'branch.main.merge', 'refs/heads/main'])],
   ]) {
-    const f = fixture(t);
-    const before = head(f.clone);
-    f.behind(1);
-    setup(f.clone);
+    setup();
     const { line } = run(f);
     assert.equal(head(f.clone), before, label);
     assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'its upstream is not origin/main'], label);
+    undo();
   }
+  assert.match(run(f).line, /^Toolkit: brought/, 'tracking origin/main again, it moves');
 });
 
 test('9 and 10: a diverged branch keeps its commits and reflog; a branch only ahead prints nothing', t => {
@@ -194,28 +197,27 @@ test('9 and 10: a diverged branch keeps its commits and reflog; a branch only ah
 });
 
 test('11: a merge, rebase, cherry-pick, revert or bisect in progress keeps the checkout, with one line', t => {
-  for (const marker of catchup.IN_PROGRESS) {
-    const f = fixture(t);
-    const before = head(f.clone);
-    f.behind(1);
-    const file = path.join(f.clone, '.git', marker);
-    if (marker.startsWith('rebase-')) fs.mkdirSync(file);
-    else fs.writeFileSync(file, `${before}\n`);
-    const { line } = run(f);
-    assert.equal(head(f.clone), before, marker);
-    assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'a merge, rebase, cherry-pick, revert or bisect is in progress'], marker);
-  }
-  // A real merge left open (MERGE_HEAD written by git itself).
   const f = fixture(t);
   f.behind(1);
   git(f.clone, ['switch', '--quiet', '-c', 'side']);
   commitFile(f.clone, 'side.txt', 'side\n');
   git(f.clone, ['switch', '--quiet', 'main']);
   const before = head(f.clone);
+  const IN_PROGRESS_LINE = ['1', 'a merge, rebase, cherry-pick, revert or bisect is in progress'];
+  for (const marker of catchup.IN_PROGRESS) {
+    const file = path.join(f.clone, '.git', marker);
+    if (marker.startsWith('rebase-')) fs.mkdirSync(file);
+    else fs.writeFileSync(file, `${before}\n`);
+    const { line } = run(f);
+    assert.equal(head(f.clone), before, marker);
+    assert.deepEqual(NOT_MOVED.exec(line).slice(1), IN_PROGRESS_LINE, marker);
+    fs.rmSync(file, { recursive: true });
+  }
+  // A real merge left open (MERGE_HEAD written by git itself).
   git(f.clone, [...ID, 'merge', '--no-ff', '--no-commit', 'side']);
   const { line } = run(f);
   assert.equal(head(f.clone), before);
-  assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'a merge, rebase, cherry-pick, revert or bisect is in progress']);
+  assert.deepEqual(NOT_MOVED.exec(line).slice(1), IN_PROGRESS_LINE);
 });
 
 test('12, 13 and 14: a failed, killed or cached read moves nothing and runs no git at all', t => {
@@ -249,24 +251,27 @@ test('12, 13 and 14: a failed, killed or cached read moves nothing and runs no g
 });
 
 test('15: a repository with a merge or checkout hook is never moved, and its hook never runs', t => {
-  for (const hook of catchup.MOVE_HOOKS) {
-    for (const where of ['.git/hooks', 'core.hooksPath']) {
-      const f = fixture(t);
-      const before = head(f.clone);
-      f.behind(1);
-      const sentinel = path.join(f.root, 'hook-ran');
-      const folder = where === '.git/hooks' ? path.join(f.clone, '.git', 'hooks') : path.join(f.root, 'own-hooks');
-      fs.mkdirSync(folder, { recursive: true });
-      fs.writeFileSync(path.join(folder, hook), `#!/bin/sh\necho x > "${sentinel.replace(/\\/g, '/')}"\n`, { mode: 0o755 });
-      if (where === 'core.hooksPath') git(f.clone, ['config', 'core.hooksPath', folder.replace(/\\/g, '/')]);
-      const { line } = run(f);
-      assert.equal(head(f.clone), before, `${hook} in ${where}`);
-      assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'the repository has merge or checkout hooks, which Toolkit does not run'], `${hook} in ${where}`);
-      assert.equal(fs.existsSync(sentinel), false, `${hook} in ${where} did not run`);
-    }
-  }
-  // Sample hooks git ships are not hooks.
   const f = fixture(t);
+  const before = head(f.clone);
+  f.behind(1);
+  const sentinel = path.join(f.root, 'hook-ran');
+  const ownHooks = path.join(f.root, 'own-hooks');
+  const cases = [
+    ...catchup.MOVE_HOOKS.map(hook => ['.git/hooks', path.join(f.clone, '.git', 'hooks'), hook]),
+    ['core.hooksPath', ownHooks, 'post-merge'],
+  ];
+  for (const [where, folder, hook] of cases) {
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, hook), `#!/bin/sh\necho x > "${sentinel.replace(/\\/g, '/')}"\n`, { mode: 0o755 });
+    if (where === 'core.hooksPath') git(f.clone, ['config', 'core.hooksPath', folder.replace(/\\/g, '/')]);
+    const { line } = run(f);
+    assert.equal(head(f.clone), before, `${hook} in ${where}`);
+    assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'the repository has merge or checkout hooks, which Toolkit does not run'], `${hook} in ${where}`);
+    assert.equal(fs.existsSync(sentinel), false, `${hook} in ${where} did not run`);
+    fs.rmSync(path.join(folder, hook));
+  }
+  // Sample hooks git ships are not hooks; with only those, it moves.
+  git(f.clone, ['config', '--unset', 'core.hooksPath']);
   fs.writeFileSync(path.join(f.clone, '.git', 'hooks', 'post-merge.sample'), '#!/bin/sh\n');
   const target = f.behind(1);
   assert.match(run(f).line, /^Toolkit: brought/);
@@ -293,29 +298,24 @@ test('16: a move that changes a file with a filter attribute (Git LFS) is not ma
 });
 
 test('17: Toolkit\'s own checkouts are never moved by the catch-up, and print nothing', t => {
+  const f = fixture(t);
+  const before = head(f.clone);
+  f.behind(1);
   // The managed checkout the bridge records.
-  const managed = fixture(t);
-  const before = head(managed.clone);
-  managed.behind(1);
-  fs.mkdirSync(path.join(managed.control, 'current'), { recursive: true });
-  fs.writeFileSync(path.join(managed.control, 'current', 'state.json'), JSON.stringify({ repo_path: managed.clone }));
-  assert.deepEqual(run(managed), { line: null, calls: [] });
-  assert.equal(head(managed.clone), before);
+  const state = path.join(f.control, 'current', 'state.json');
+  fs.mkdirSync(path.dirname(state), { recursive: true });
+  fs.writeFileSync(state, JSON.stringify({ repo_path: f.clone }));
+  assert.deepEqual(run(f), { line: null, calls: [] });
+  fs.rmSync(state);
   // The running plugin root.
-  const plugin = fixture(t);
-  const pluginHead = head(plugin.clone);
-  plugin.behind(1);
-  assert.deepEqual(run(plugin, plugin.read(), { pluginRoot: plugin.clone }), { line: null, calls: [] });
-  assert.equal(head(plugin.clone), pluginHead);
+  assert.deepEqual(run(f, f.read(), { pluginRoot: f.clone }), { line: null, calls: [] });
+  assert.equal(head(f.clone), before);
   // Anything under ~/.ai-agent-toolkit.
-  const under = fixture(t);
-  const nestedHead = head(under.clone);
-  under.behind(1);
-  const nested = path.join(under.control, 'source', 'ai-agent-toolkit');
+  const nested = path.join(f.control, 'source', 'ai-agent-toolkit');
   fs.mkdirSync(path.dirname(nested), { recursive: true });
-  fs.renameSync(under.clone, nested);
-  assert.deepEqual(run(under, under.read(nested)), { line: null, calls: [] });
-  assert.equal(head(nested), nestedHead);
+  fs.renameSync(f.clone, nested);
+  assert.deepEqual(run(f, f.read(nested)), { line: null, calls: [] });
+  assert.equal(head(nested), before);
 });
 
 // The Claude Code governance hook's session start, with this start's read injected.
@@ -323,15 +323,16 @@ function hookStart(f, registryOptions, input, { cloud = false } = {}) {
   const spy = recorder();
   const repoCatchUp = { catchUp: (fresh, options) => catchup.catchUp(fresh, { ...options, runGit: spy.runGit, controlRoot: f.control }) };
   const home = path.join(f.root, 'home');
-  const environment = { HOME: home, USERPROFILE: home, ...(cloud ? { CLAUDE_CODE_REMOTE: 'true' } : {}) };
+  // The hook runs with the host's whole environment (PATH included, which finds git on Windows).
+  const environment = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_REMOTE: cloud ? 'true' : '' };
   const output = claudeHook.respond('SessionStart', { session_id: 's1', ...input }, { registryOptions, environment, refreshBinding: () => f.read(input.cwd), repoCatchUp });
   ALL_CALLS.push(...spy.calls);
   return { context: output.hookSpecificOutput ? output.hookSpecificOutput.additionalContext : '', calls: spy.calls };
 }
 
 // A test registry in the fixture's own home (the governance gate's scratch layout).
-function registryOf(f) {
-  const home = path.join(f.root, 'home');
+function registryOf(f, name = 'home') {
+  const home = path.join(f.root, name);
   return { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true, home, userHome: home };
 }
 
@@ -352,20 +353,20 @@ test('18: a compacted or cleared session, and a cloud session, run no catch-up g
 });
 
 test('19: governance enabled, disabled or not decided gives the same catch-up, before the governance line', t => {
+  const f = fixture(t);
+  git(f.clone, ['remote', 'set-url', 'origin', REMOTE]);
   const lines = [];
   for (const decision of ['enable', 'disable', null]) {
-    const f = fixture(t);
     const before = head(f.clone);
     const target = f.behind(2);
-    git(f.clone, ['remote', 'set-url', 'origin', REMOTE]);
-    const registryOptions = registryOf(f);
+    const registryOptions = registryOf(f, decision || 'undecided');
     if (decision) seedMerged(f.clone, decision, { registryOptions });
     for (const source of ['startup', 'resume']) {
       const { context } = hookStart(f, registryOptions, { cwd: f.clone, source });
       const [first, ...rest] = context.split('\n');
       if (source === 'startup') {
         assert.equal(first, `Toolkit: brought local main up to date with origin/main (${before.slice(0, 7)} to ${target.slice(0, 7)}, 2 commits).`, String(decision));
-        assert.ok(rest.join('\n').trim().length > 0, 'the governance line follows');
+        assert.match(rest.join('\n'), decision === 'enable' ? /Toolkit governance: ENABLED/ : /\S/, 'the governance line follows');
         lines.push(first.replace(/[0-9a-f]{7} to [0-9a-f]{7}/, 'X to Y'));
       } else assert.doesNotMatch(context, /Toolkit: (brought|local main)/, 'nothing new on resume');
     }
@@ -376,22 +377,23 @@ test('19: governance enabled, disabled or not decided gives the same catch-up, b
 
 test('20: a move that changes AGENTS.md, CLAUDE.md or a file CLAUDE.md imports asks the session to read them again', t => {
   const REREAD = ' AGENTS.md or CLAUDE.md changed; read them again before acting.';
+  const f = fixture(t);
   for (const [label, files, expected] of [
     ['AGENTS.md', ['AGENTS.md'], true],
     ['nested CLAUDE.md', ['docs/CLAUDE.md'], true],
     ['an ordinary file', ['src/app.txt'], false],
   ]) {
-    const f = fixture(t);
     f.behind(1, files);
     assert.equal(run(f).line.endsWith(REREAD), expected, label);
   }
   // A file the root CLAUDE.md imports.
-  const f = fixture(t);
   commitFile(f.seed, 'CLAUDE.md', '# Rules\n\n@docs/agent-rules.md\n');
-  git(f.seed, ['push', '--quiet', f.origin, 'main']);
-  git(f.clone, ['pull', '--quiet', '--ff-only']);
+  f.behind(0);
+  assert.ok(run(f).line.endsWith(REREAD), 'CLAUDE.md itself');
   f.behind(1, ['docs/agent-rules.md']);
-  assert.ok(run(f).line.endsWith(REREAD));
+  assert.ok(run(f).line.endsWith(REREAD), 'an imported file');
+  f.behind(1, ['docs/other.md']);
+  assert.ok(!run(f).line.endsWith(REREAD), 'a file it does not import');
 });
 
 // Runs after every row above: the catch-up only ever ran the allowed read verbs and one fast-forward.
