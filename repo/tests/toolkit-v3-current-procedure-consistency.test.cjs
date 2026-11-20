@@ -323,7 +323,8 @@ function ownerUatScopeContract(texts) {
   assert.match(texts['repo/CONTROLLER.md'], /Missing authority never waives a needed UAT; it runs after merge on the installed build; at that merge record UAT PENDING on each `Refs` task, open until it passes \(gate rules\), and keep the UAT ask on the owner's waiting list until it is answered\./);
   assert.match(texts[V3_DOC], /User acceptance covers only the final product: features the user runs and sees/);
   assert.match(texts[GLOBAL], /G0, G1, full G2; after merge, real-host agent UAT and owner UAT for any final-product steps/);
-  assert.match(texts[V3_DOC], /RISKY work gets agent UAT plus owner UAT for any final-product steps;/);
+  // Agent UAT first at every tier that needs UAT; the owner gets only what no tool reaches, after it is green.
+  assert.match(texts[V3_DOC], /at every tier that needs UAT, agent UAT runs first on the real installed hosts, through every step a tool reaches \(the Chrome plugin, computer use or Remote Control on the owner's computer\), and owner UAT gets only the remaining final-product steps, once every agent step is green at that build, each with why no tool reaches it and a link to the agent UAT\./);
   assert.match(texts[V3_DOC], /listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required/);
   assert.match(texts[GLOBAL], /Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before acceptance, check the real installed or deployed result where one exists\./);
   assert.match(texts[V3_DOC], /G2 starts after G1's working version is accepted; user UAT follows the merge\./);
@@ -339,7 +340,8 @@ test('owner UAT is limited to final-product steps on every current surface', () 
     [GLOBAL, 'CI, tests, G2 and agent UAT prove internals', 'the owner proves internals'],
     [GLOBAL, 'owner UAT for any final-product steps', 'owner UAT for any owner-hands steps'],
     [GLOBAL, 'full G2; after merge, real-host', 'full G2; before merge, real-host'],
-    [V3_DOC, 'owner UAT for any final-product steps;', 'owner UAT for any owner-hands steps;'],
+    [V3_DOC, 'owner UAT gets only the remaining final-product steps', 'owner UAT gets every step'],
+    [V3_DOC, 'once every agent step is green at that build', 'while agent steps still run'],
     [GOVERNED, 'any owner UAT passed', "the owner's UAT passed"],
     [GATE_RULES, '(owner UAT follows the merge)', '(after owner UAT acceptance)'],
     [GATE_RULES, 'owner UAT never holds a merge', 'owner UAT holds the merge'],

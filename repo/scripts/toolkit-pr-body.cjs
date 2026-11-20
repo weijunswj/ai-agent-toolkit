@@ -20,8 +20,11 @@
 //   - checked: the personal-data guard's own `pr` mode on the title and the cleaned body (the
 //     Validate personal-data job runs the same rules), with the repository's guard config or, where
 //     it has none, a default with pull request text and AI attribution on (the output says which), exactly one UAT line the auto-merge check
-//     accepts (toolkit-auto-merge-eligible.cjs, uatVerdict), and, in the Toolkit repository,
-//     exactly one `Bump: patch|minor|major|none` line (the merge train finder's rule).
+//     accepts (toolkit-auto-merge-eligible.cjs, uatVerdict), with `UAT: OWNER_TEST_NEEDED` also
+//     exactly one visible `Agent UAT: PASSED (<evidence>)` line (agent UAT runs every step a tool
+//     reaches before the owner is asked; the merge check does not read this line), and, in the
+//     Toolkit repository, exactly one `Bump: patch|minor|major|none` line (the merge train finder's
+//     rule).
 // It writes nothing to GitHub and reads no network. The merge scope (whether the pull request
 // waits for the owner's typed merge) is not a body problem: toolkit-auto-merge-eligible.cjs
 // answers that at merge time.
@@ -42,6 +45,10 @@ const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const GUARD = path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
 const ATTRIBUTION = Object.freeze(['PDG-AI-FOOTER', 'PDG-AI-SESSION-LINK', 'PDG-AI-MARKER']);
 const BUMP = /^Bump: (patch|minor|major|none)[ \t]*$/gm;
+const AGENT_UAT = /^Agent UAT:[ \t]*(\S+)(?:[ \t]+\((.*)\))?[ \t]*$/gm;
+// Text a reader never sees: HTML comments and fenced code (closed by a run of its character at least
+// as long as the opening one). An Agent UAT line there does not count.
+const HIDDEN = /<!--[\s\S]*?(?:-->|$(?![\s\S]))|^ {0,3}((`|~)\2{2,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1\2*[ \t]*$|$(?![\s\S]))/gm;
 const RULE_LINE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
 const TOOLKIT_MARKER = path.join('repo', 'contracts', 'agent-rules', 'global-rules.md');
 const MAX_BODY_BYTES = 512 * 1024;
@@ -100,6 +107,12 @@ function lineProblems(body, { toolkit }) {
     problems.push(uat.state === 'absent'
       ? 'no UAT line: add exactly one, at the start of a line, as UAT: NOT_REQUIRED (why), UAT: OWNER_TEST_NEEDED (what the owner tries) or UAT: PASSED (the owner\'s OK)'
       : `the UAT line is invalid: ${uat.problem}`);
+  }
+  if (uat.state === 'OWNER_TEST_NEEDED') {
+    const agent = [...body.replace(/\r\n?/g, '\n').replace(HIDDEN, '').matchAll(AGENT_UAT)];
+    const why = 'owner UAT is asked before every agent step passed: run each UAT step a tool reaches (Chrome, computer use, Remote Control) first, then add exactly one line Agent UAT: PASSED (<evidence>)';
+    if (agent.length !== 1) problems.push(`${why} (has ${agent.length})`);
+    else if (agent[0][1] !== 'PASSED' || !agent[0][2] || !agent[0][2].trim()) problems.push(`${why} (has Agent UAT: ${agent[0][1]}${agent[0][2] && agent[0][2].trim() ? '' : ' with no evidence'})`);
   }
   if (toolkit) {
     const bumps = [...body.matchAll(BUMP)].length;

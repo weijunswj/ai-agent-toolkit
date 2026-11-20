@@ -12,18 +12,27 @@
 //                                            branch (git directly), so a long-running controller
 //                                            chat updates Toolkit and rereads its rules on its own
 //   guidebook, instructions, memory, tasks   Claude Projects only
-//   programme, traces                        only where the checkout's programme binding says
-//                                            governance is enabled
+//   programme, traces, stale                 only where the checkout's programme binding says
+//                                            governance is enabled; stale is the daily stale sweep:
+//                                            at most once per local date per repository (a stamp file
+//                                            in the Toolkit user-state folder, local bookkeeping only,
+//                                            never GitHub or repository state), it lists children to
+//                                            close, fold or move and a full polish child, as one
+//                                            owner-approve list; obsolete children need judgement, so
+//                                            the controller adds them to that list itself
 //   ci, footer, refs                         any controller (refs checks this Toolkit copy: no
 //                                            permission row or document names a retired or missing
 //                                            script)
+// Every check runs an existing script as a child process, except stale, which also reads the
+// parents' sub-issues read-only with `gh api` (it needs a signed-in gh).
 // The host is `projects` when the Projects library folder exists (only Claude Projects has
 // /mnt/project-files), else `chat`; --host overrides it. A check outside its context, or missing its
 // input, prints one SKIPPED line saying why or what to pass.
 //
 // Usage: node repo/scripts/toolkit-controller-check.cjs [--host projects|chat] [--checkout <dir>]
 //          [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>]
-//          [--task <kind>=<prompt file>]... [--since <ISO time>] [--skip <name,...>] [--expand] [--json]
+//          [--task <kind>=<prompt file>]... [--since <ISO time>] [--stale-stamp <file>] [--skip <name,...>]
+//          [--expand] [--json]
 //   --checkout       a checkout of the controlled repository (CI check-up and the programme binding)
 //   --repo           the GitHub repository for the footer scan (default: the binding's repository)
 //   --guidebook      the Projects library copy of the skill (default on a Projects host:
@@ -32,6 +41,8 @@
 //   --memory         project memory (MEMORY.md), saved to a file
 //   --task           a stored task prompt and its kind (daily-check-in or hourly-nudge); repeatable
 //   --since          footer scan start (default: 26 hours ago)
+//   --stale-stamp    the stale sweep's date stamp (default: stale-sweep.json in the Toolkit user-state
+//                    folder)
 //   --skip           checks the caller already ran elsewhere
 //   --expand         every line of every check, passed and skipped ones included (default: one
 //                    line when clear; otherwise each check that needs attention or could not run,
@@ -47,11 +58,21 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const LIBRARY = '/mnt/project-files/toolkit/web-controller-projects';
 const BINDING_REL = '.github/toolkit-programme.json';
-const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'ci', 'footer', 'refs'];
+const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'stale', 'ci', 'footer', 'refs'];
 const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
 const COMPACT_LINES = 3;
+// The polish child's row cap, and the findings that fire when a child's PRs merged. Whether that
+// child is done is the controller's judgement against its DONE WHEN, so they are JUDGE? rows, never CLOSE?.
+const POLISH_CAP = 8;
+const DONE_CODES = new Set(['READY_TO_CLOSE', 'TASK_MERGED_OPEN']);
+// Checks whose every detail line prints even in compact output: the stale list is the day's one
+// owner list, and a hidden row could not be recovered once the day is stamped.
+const UNCUT = new Set(['stale']);
+const DONE_WHEN = /^#{1,6} +DONE WHEN\b.*$/im;
+// The reconciler writes this line under a child's PR GRAPH while the controller keeps it open on purpose.
+const KEPT_OPEN = /^Kept open: /m;
 const SCRIPTS = {
   guidebook: 'repo/scripts/toolkit-projects-guidebook.cjs',
   instructions: 'repo/scripts/toolkit-projects-instructions.cjs',
@@ -62,10 +83,10 @@ const SCRIPTS = {
   footer: 'repo/scripts/toolkit-github-footer-sweep.cjs',
   refs: 'repo/scripts/check-script-references.cjs',
 };
-const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--json]';
+const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--stale-stamp <file>] [--skip <name,...>] [--json]';
 
 function parseArgs(argv) {
-  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, skip: new Set(), json: false, expand: false };
+  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, staleStamp: null, skip: new Set(), json: false, expand: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -93,7 +114,8 @@ function parseArgs(argv) {
         if (!CHECKS.includes(name)) throw new Error(`--skip names unknown check ${name}`);
         options.skip.add(name);
       }
-    } else if (['--checkout', '--guidebook', '--instructions', '--memory'].includes(arg)) options[arg.slice(2)] = value();
+    } else if (arg === '--stale-stamp') options.staleStamp = value();
+    else if (['--checkout', '--guidebook', '--instructions', '--memory'].includes(arg)) options[arg.slice(2)] = value();
     else throw new Error(`unknown argument ${arg}`);
   }
   return options;
@@ -103,6 +125,17 @@ function defaultRun(script, args, { cwd } = {}) {
   const result = spawnSync(process.execPath, [path.join(ROOT, script), ...args], { cwd: cwd || ROOT, encoding: 'utf8', timeout: 300000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
   return { status: result.error ? null : result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), error: result.error ? result.error.message : null };
 }
+
+function defaultGh(args) {
+  const result = spawnSync('gh', args, { encoding: 'utf8', timeout: 120000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  return { status: result.error ? null : result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), error: result.error ? result.error.message : null };
+}
+
+// The stale sweep's stamp: { "<owner/name>": { date, at } }. A missing or unreadable file is no stamp.
+const defaultStamp = file => ({
+  read() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } },
+  write(value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); },
+});
 
 function defaultGit(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 30000, windowsHide: true });
@@ -189,6 +222,110 @@ function checkTraces(run, repo, parents) {
   return { state, lines };
 }
 
+// The text under a heading, up to the next heading of the same or a higher level; null without it.
+function sectionOf(body, heading) {
+  const text = String(body || '').replace(/\r\n?/g, '\n');
+  const start = heading.exec(text);
+  if (!start) return null;
+  const level = /^#+/.exec(start[0])[0].length;
+  const rest = text.slice(start.index + start[0].length);
+  const end = new RegExp(`^#{1,${level}} `, 'm').exec(rest);
+  return { heading: start[0], text: end ? rest.slice(0, end.index) : rest };
+}
+
+// Polish rows are the checkboxes under the child's ROWS heading, else under DONE WHEN; the sweep
+// says which it counted, so a body in another shape is visible rather than silently miscounted.
+function polishRows(body) {
+  for (const heading of [/^#{1,6} +ROWS\b.*$/im, DONE_WHEN]) {
+    const found = sectionOf(body, heading);
+    if (!found) continue;
+    const rows = found.text.match(/^ {0,3}[-*+] \[[ xX]\] /gm) || [];
+    return { rows: rows.length, under: /ROWS/i.test(found.heading) ? 'ROWS' : 'DONE WHEN' };
+  }
+  return { rows: 0, under: 'no ROWS or DONE WHEN heading' };
+}
+
+// Why a merged-PR finding's child is still live, or null when nothing says so. Programme findings fire
+// on a merged PR whatever the child still owes, so only a new finding with no lapsed hold, on an open
+// child the sweep read, not kept open, with no open sub-issue and no unchecked DONE WHEN row (nested
+// ones too), becomes a JUDGE? row.
+function heldBecause(finding, child) {
+  if (finding.state !== 'new') return 'acknowledged';
+  // An acknowledgement past its due turns new again but keeps its due and note: the hold still stands.
+  if (finding.promised) return `hold lapsed at ${finding.due} (${finding.promised})`;
+  if (!child) return 'not a sub-issue of a registered parent';
+  if (child.state !== 'open') return 'already closed';
+  if (KEPT_OPEN.test(String(child.body || '').replace(/\r\n?/g, '\n'))) return 'Kept open line';
+  const summary = child.sub_issues_summary;
+  if (summary && summary.total > summary.completed) return `${summary.total - summary.completed} open sub-issue(s)`;
+  const doneWhen = sectionOf(child.body, DONE_WHEN);
+  const unchecked = doneWhen ? (doneWhen.text.match(/^[ \t]*[-*+] \[ \] /gm) || []).length : 0;
+  return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : null;
+}
+
+// The local date (YYYY-MM-DD) of a time, which is the day the stamp counts in.
+const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`;
+
+// The daily stale sweep: children whose PRs merged, for the controller to judge done or not first
+// (JUDGE?), then for the owner's one approve list: new beside an open child with no reason (FOLD?),
+// closed while holding open work (MOVE?) and a full or over-cap polish child. Read only; it writes its date stamp, with the day's
+// list, only after every read succeeded, so a failed run retries and a same-day run shows the list again.
+function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
+  const today = localDate(now);
+  const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes; only children judged done go on the owner's one approve list, with the other rows and obsolete children`;
+  const stamps = stamp.read() || {};
+  const last = stamps[repo];
+  if (last && last.date === today) {
+    const kept = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
+    const heldAgain = typeof last.held === 'string' && last.held ? [last.held] : [];
+    return kept.length ? { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain] } : { state: 'ok', lines: [`ran today (${today})`] };
+  }
+  const attention = run(SCRIPTS.programme, ['attention', '--json', '--repo-root', checkout], { cwd: checkout });
+  let report = null;
+  try { report = JSON.parse(attention.stdout); } catch { /* reported below */ }
+  if (!report || !Array.isArray(report.findings)) return { state: 'failed', lines: [`programme attention: ${report && report.line ? report.line : why(attention)}; no stamp written`] };
+  const children = [];
+  for (const parent of parents) {
+    const read = gh(['api', '--paginate', `repos/${repo}/issues/${parent.issue}/sub_issues?per_page=100`, '--jq', '.[] | {number, title, state, body, created_at, sub_issues_summary}']);
+    if (read.status !== 0) return { state: 'failed', lines: [`#${parent.issue} sub-issues: ${why(read)}; no stamp written`] };
+    try { for (const line of linesOf(read.stdout)) children.push({ parent: parent.issue, ...JSON.parse(line) }); } catch { return { state: 'failed', lines: [`#${parent.issue} sub-issues: unreadable gh output; no stamp written`] }; }
+  }
+  const since = last && !Number.isNaN(Date.parse(last.at)) ? new Date(last.at) : new Date(now.getTime() - 26 * 3600000);
+  const rows = [];
+  const held = [];
+  const done = new Set();
+  // READY_TO_CLOSE first: of the two findings on one child, it is the stronger evidence.
+  const doneFindings = report.findings.filter(finding => DONE_CODES.has(finding.code) && Number.isInteger(finding.issue));
+  for (const finding of [...doneFindings.filter(f => f.code === 'READY_TO_CLOSE'), ...doneFindings.filter(f => f.code !== 'READY_TO_CLOSE')]) {
+    if (done.has(finding.issue)) continue;
+    done.add(finding.issue);
+    const why = heldBecause(finding, children.find(child => child.number === finding.issue));
+    if (why) held.push(`#${finding.issue} ${why}`);
+    else rows.push(`JUDGE? #${finding.issue} PR merged: check its DONE WHEN before it goes to the owner (${finding.code})`);
+  }
+  const open = children.filter(child => child.state === 'open');
+  for (const child of open) {
+    if (Date.parse(child.created_at) > since.getTime() && !/Nearest child:/.test(child.body || '')) rows.push(`FOLD? #${child.number} new under #${child.parent} with no Nearest child: line`);
+  }
+  for (const child of children.filter(item => item.state === 'closed')) {
+    const summary = child.sub_issues_summary;
+    if (summary && summary.total > summary.completed) rows.push(`MOVE? #${child.number} closed under #${child.parent} with ${summary.total - summary.completed} open sub-issue(s): move them to the parent so it detaches`);
+  }
+  const polish = open.filter(child => /^Polish\b/i.test(child.title || ''));
+  if (polish.length > 1) rows.push(`POLISH OVER CAP: ${polish.length} open polish children (${polish.map(child => `#${child.number}`).join(', ')}); keep one`);
+  for (const child of polish) {
+    const { rows: count, under } = polishRows(child.body);
+    if (count > POLISH_CAP) rows.push(`POLISH OVER CAP #${child.number}: ${count} rows (${under}), cap ${POLISH_CAP}`);
+    else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
+  }
+  const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
+  try { stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) } }); } catch (error) {
+    return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
+  }
+  if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
+  return { state: 'attention', lines: [head(rows.length, today), ...rows, ...(heldLine ? [heldLine] : [])] };
+}
+
 function checkCi(run, checkout) {
   const result = run(SCRIPTS.ci, ['--repo', checkout, '--json']);
   let report = null;
@@ -242,12 +379,15 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'tasks') {
       if (!options.tasks.length) { skip(name, 'pass --task <kind>=<file> (each stored task prompt)'); continue; }
       outcome = checkTasks(run, options.tasks);
-    } else if (name === 'programme' || name === 'traces') {
+    } else if (name === 'programme' || name === 'traces' || name === 'stale') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       if (!binding) { skip(name, 'no programme binding in the checkout'); continue; }
       if (!governed) { skip(name, 'governance off'); continue; }
-      if (name === 'traces' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
-      outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
+      if (name !== 'programme' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
+      if (name === 'stale') {
+        const stamp = deps.stamp || defaultStamp(options.staleStamp || path.join(require('./toolkit-user-state.cjs').userStateDirectory(), 'stale-sweep.json'));
+        outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo, parents, now });
+      } else outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
     } else if (name === 'ci') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       outcome = checkCi(run, options.checkout);
@@ -279,7 +419,7 @@ function format(report, { expand = false } = {}) {
   for (const state of expand ? ['attention', 'failed', 'ok', 'skipped'] : ['attention', 'failed']) {
     for (const check of report.checks.filter(item => item.state === state)) {
       const detail = check.lines.slice(1);
-      const shown = expand ? detail : detail.slice(0, COMPACT_LINES);
+      const shown = expand || UNCUT.has(check.name) ? detail : detail.slice(0, COMPACT_LINES);
       lines.push(`${label[state]} ${check.name}: ${check.lines[0]}`, ...shown.map(line => `  ${line}`));
       if (shown.length < detail.length) lines.push(`  ... ${detail.length - shown.length} more (--expand, or ${check.command || 'the check itself'})`);
     }
@@ -298,5 +438,5 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return report.attention || report.failed || !ranForController(report) ? 1 : 0;
 }
 
-module.exports = { parseArgs, controllerCheck, format, main, CHECKS, SCRIPTS };
+module.exports = { parseArgs, controllerCheck, format, main, polishRows, CHECKS, SCRIPTS };
 if (require.main === module) process.exitCode = main();

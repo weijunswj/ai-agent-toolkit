@@ -521,7 +521,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook and controller check'));
   for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
     '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,ci`', 'adding `--repo example-owner/example-repo` when step 9a applies',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,stale,ci`', 'adding `--repo example-owner/example-repo` when step 9a applies',
     '`CONTROLLER CHECK: clear ...`: write "**Guidebook:** current" and "**Controller check:** clear", and read no further',
     '`node TK/repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects`', 'the same with `--check` in place of `--out`',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
@@ -1080,7 +1080,7 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
     assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
   }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
-  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, TRACE GAPS, WORKFLOW FAILING, CI GAPS, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, STALE SWEEP, TRACE GAPS, WORKFLOW FAILING, CI GAPS, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
@@ -1115,16 +1115,35 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'evidence-and-finish.md'), 'utf8');
   for (const required of ['- **Findings:** the controller owns every finding whoever raised it', 'Dispose only with a recorded reason',
     'the same finding on two runs in a row, goes to the owner once with the exact step', 'never a bare unknown',
-    'Re-read owed lists (promises, Lows children, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
+    'Re-read owed lists (promises, polish child, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
   // Findings and leftovers go to their area's open child, not a new child per review.
   assert.match(page, /add it to a lane's next slice or its area's open child, or ask the owner/);
-  assert.match(core, /extend\/reopen its area's child \(Lows and leftovers too\), else create\/attach a native child/);
+  assert.match(core, /extend\/reopen its area's child \(leftovers too\), else create\/attach a native child/);
   for (const text of [page, core]) assert.doesNotMatch(text, /a tracked child|a follow-up child starts|extend\/reopen an owner/);
-  // The daily check-in catches a child opened beside an open one in the same area, whoever filed it.
-  const daily = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'tasks', 'daily-check-in.md'), 'utf8');
-  assert.match(daily, /\[parent\]   Fold check: for each issue opened under #\{\{parent_issue\}\} since LAST, look for an open child in the same area[^\n]*`\*\*Fold:\*\* #<new> into #<open> \(<area>\)`[^\n]*asks the owner once to close the new one as not planned/);
+  // The daily check-in's stale sweep catches a child opened beside an open one in the same area, or with no
+  // Nearest child: line, whoever filed it, once a day and never in the hourly nudge.
+  const projects = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const daily = fs.readFileSync(path.join(projects, 'tasks', 'daily-check-in.md'), 'utf8');
+  assert.match(daily, /\[parent\]   Stale sweep \(once a day, here only, never in the hourly nudge\): skip it when state\.md's `Stale sweep:` date is today[^\n]*`FOLD\? #<n> into #<open> \(<area>\)` for an issue opened since LAST that has no `Nearest child:` line, or whose area[^\n]*`POLISH FULL #<n>`[^\n]*"STALE SWEEP: <n> \| "[^\n]*records no date\./);
+  // JUDGE? comes from a source the daily run has, and never for live work: the controller's holds (live
+  // or lapsed), Kept open lines, open sub-issues and unchecked DONE WHEN rows stay off the list, and only
+  // the coordinator's judgement against DONE WHEN turns a merged child into CLOSE?. The script runs it
+  // when gh is signed in; the hand steps are the fallback.
+  assert.match(daily, /when `gh auth status` succeeds, run `node TK\/repo\/scripts\/toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,traces,ci,footer,refs --stale-stamp \{\{report_dir\}\}\/stale-sweep\.json`[^\n]*; else read #\{\{parent_issue\}\}'s sub-issues/);
+  assert.match(daily, /`JUDGE\? #<n>` for a `READY_TO_CLOSE` or `TASK_MERGED_OPEN` finding, taken from the `attention` list of the stored parent document `<store path>parent-<n>\.json`[^\n]*only for a finding in state `new` with no `promised` note \(a lapsed hold\) on an open child with no `Kept open:` line, no open sub-issue and no unchecked box under its DONE WHEN heading \(an acknowledged finding is the controller's hold; merged PRs alone never make a child done: the coordinator judges each `JUDGE\?`[^\n]*`CLOSE\? #<n> done \(<why>\)`\)/);
+  assert.doesNotMatch(daily, /`CLOSE\? #<n> done` for a/);
+  assert.doesNotMatch(daily.split('\n').find(line => line.includes('Stale sweep (once a day')), /step 5b's/);
+  assert.doesNotMatch(daily, /Fold check:/);
+  // The controller check's own stale sweep runs only from the daily run: every other Projects call skips it.
+  const nudge = fs.readFileSync(path.join(projects, 'tasks', 'hourly-nudge.md'), 'utf8');
+  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,stale,ci`/);
+  assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`/);
+  const periodicRuns = fs.readFileSync(path.join(projects, 'reference', 'periodic-runs.md'), 'utf8');
+  assert.match(periodicRuns, /  - `STALE SWEEP`: judge each `JUDGE\?` row against its child's DONE WHEN, PR GRAPH and notes first[^\n]*send the owner one list with the native question method[^\n]*never one ask per child\. For `FOLD\?`, name the open child it folds into and copy its text there before closing it as not planned/);
+  const ownerAsks = fs.readFileSync(path.join(projects, 'reference', 'owner-asks.md'), 'utf8');
+  assert.match(ownerAsks, /\*\*Owner UAT comes after agent UAT\.\*\* Ask the owner for UAT only once every agent UAT step at that build passed[^\n]*lists only the steps no tool reaches[^\n]*links the agent UAT evidence/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
-  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on its area's open child, in Later when it holds only Lows, unless the owner accepted it)",
+  for (const required of ["follow-up (Low or `POST_SHIP`: a one-line Low fixed in the PR, else the polish child; others on their area's open child, unless the owner accepted it)",
     "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child',
     'Before a merge record is written, the G2 report is archived to the evidence store and read back, and the record (and its brief) names that path and the PASS head.']) assert.ok(gates.includes(required), required);
   // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
@@ -1207,7 +1226,7 @@ test('rendered daily check-ins run workflow health, and the decision trace and C
   const text = rendered('daily-check-in');
   const step = text.slice(text.indexOf('11b. CHECKERS'), text.indexOf('12. Promises'));
   for (const phrase of ['the hourly controller check skips them', 'R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,footer,refs`',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`',
     '"TRACE GAPS: <its counts> | "', '--repair --out <file>', 'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', '"CI GAPS: <n> | "']) {
     assert.ok(step.includes(phrase), phrase);
   }
