@@ -1,6 +1,6 @@
 {
   "schema": "toolkit.cloud-workflows-layout.v1",
-  "description": "What the Toolkit cloud workflow copies in governed repositories run: each step that runs or checks out Toolkit code, its Toolkit script calls, the environment names it passes and its sparse checkout. Copies run Toolkit main, so main serves this layout and the previous one. A change here needs a new layout number (LAYOUT in repo/scripts/toolkit-cloud-workflows-render.cjs), with the old calls kept under previous while main still serves them.",
+  "description": "What the Toolkit cloud workflow copies in governed repositories run: each step that runs or checks out Toolkit code, its Toolkit script calls, the environment names it passes (under stepEnv, those only the step's own shell reads; main reads every other one) and its sparse checkout. Copies run Toolkit main, so main serves this layout and the previous one. A change here needs a new layout number (LAYOUT in repo/scripts/toolkit-cloud-workflows-render.cjs), with the old calls kept under previous while main still serves them.",
   "layout": 1,
   "calls": [
     {
@@ -152,6 +152,10 @@
         "GH_TOKEN",
         "MINT_OUTCOME",
         "TOOLKIT_SHARD_PUBLISH_TOKEN"
+      ],
+      "stepEnv": [
+        "APP_SLUG",
+        "MINT_OUTCOME"
       ]
     }
   ],

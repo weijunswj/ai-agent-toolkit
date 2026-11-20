@@ -25,7 +25,25 @@ function renders() {
   return [...workflows.WORKFLOWS, ...workflows.SHARD_WORKFLOWS].map(row => ({ id: row.id, text: workflows.render(row.id, source(row.source || row.file), COMMIT, inputs[row.id]) }));
 }
 
-// The steps of a copy that run or check out Toolkit code: { copy, step, run[], env[], sparse }.
+// The Toolkit script a run line calls, with the script's own text and the text of the Toolkit modules
+// it requires directly, where an argument or an environment name may be read.
+function scriptOf(line) {
+  const [script, first] = line.split(/\s+/);
+  const file = path.join(ROOT, script.replace(/^\.toolkit\//, ''));
+  if (!fs.existsSync(file)) return { script, first, file, own: null, text: null };
+  const own = fs.readFileSync(file, 'utf8');
+  const text = [own, ...[...own.matchAll(/require\(\s*'\.\/([a-z0-9-]+\.cjs)'\s*\)/g)].map(match => fs.readFileSync(path.join(path.dirname(file), match[1]), 'utf8'))].join('\n');
+  return { script, first, file, own, text };
+}
+
+// Whether Toolkit code reads an environment name: as env.NAME or env['NAME'], or, for GH_TOKEN, by
+// running the GitHub CLI, which reads it.
+const reads = (text, name) => new RegExp(`\\benv(?:\\.${name}\\b|\\[\\s*['"]${name}['"]\\s*\\])`).test(text) || (name === 'GH_TOKEN' && /\(\s*'gh'\s*,/.test(text));
+const scriptsRead = (run, name) => run.some(line => { const { text } = scriptOf(line); return text !== null && reads(text, name); });
+
+// The steps of a copy that run or check out Toolkit code: { copy, step, run[], env[], stepEnv[], sparse }.
+// stepEnv: the names the step's own shell reads and no Toolkit script of the step reads. They are part
+// of the copy, so main need not serve them; every other passed name is read by Toolkit main.
 function callSurface(id, text) {
   const calls = [];
   for (const step of text.split(/\n(?= {6}- name: )/).slice(1)) {
@@ -35,7 +53,10 @@ function callSurface(id, text) {
     if (!runs.length && !toolkit) continue;
     const env = /\n {8}env:\n((?: {10}[A-Z_]+:[^\n]*\n)+)/.exec(`${step}\n`);
     const sparse = /\n {10}sparse-checkout: ([^\n]+)/.exec(step);
-    calls.push({ copy: id, step: name, run: runs, env: env ? [...env[1].matchAll(/^ {10}([A-Z_]+):/gm)].map(match => match[1]).sort() : [], ...(toolkit ? { sparse: sparse ? sparse[1] : null } : {}) });
+    const names = env ? [...env[1].matchAll(/^ {10}([A-Z_]+):/gm)].map(match => match[1]).sort() : [];
+    const shell = (/\n {8}run: ([\s\S]*)$/.exec(step) || [])[1] || '';
+    const stepEnv = names.filter(env => !scriptsRead(runs, env) && new RegExp(`\\$\\{?${env}\\b`).test(shell));
+    calls.push({ copy: id, step: name, run: runs, env: names, ...(stepEnv.length ? { stepEnv } : {}), ...(toolkit ? { sparse: sparse ? sparse[1] : null } : {}) });
   }
   return calls;
 }
@@ -55,16 +76,21 @@ test('layout contract: main still serves every call of this layout and the previ
   const recorded = contract();
   for (const call of [...recorded.calls, ...(recorded.previous?.calls || [])]) {
     for (const line of call.run) {
-      const [script, first] = line.split(/\s+/);
-      const file = path.join(ROOT, script.replace(/^\.toolkit\//, ''));
-      assert.ok(fs.existsSync(file), `${call.copy} / ${call.step}: ${script} is still in the Toolkit`);
-      // The script and the Toolkit modules it requires directly, where an argument may be parsed.
-      const own = fs.readFileSync(file, 'utf8');
-      const text = [own, ...[...own.matchAll(/require\(\s*'\.\/([a-z0-9-]+\.cjs)'\s*\)/g)].map(match => fs.readFileSync(path.join(path.dirname(file), match[1]), 'utf8'))].join('\n');
-      if (first && !first.startsWith('-')) assert.ok(text.includes(`'${first}'`), `${call.copy} / ${call.step}: ${script} still takes ${first}`);
+      const { script, first, file, own, text } = scriptOf(line);
+      assert.ok(own !== null, `${call.copy} / ${call.step}: ${script} is still in the Toolkit`);
+      // A subcommand is one the script's own dispatch names, not any quoted word in its modules.
+      if (first && !first.startsWith('-')) assert.ok(own.includes(`process.argv[2] === '${first}'`), `${call.copy} / ${call.step}: ${path.relative(ROOT, file)} still dispatches ${first}`);
       for (const flag of line.match(/(?<=\s)--[a-z][a-z-]*/g) || []) assert.ok(text.includes(`'${flag}'`) || text.includes(`"${flag}"`), `${call.copy} / ${call.step}: ${script} still takes ${flag}`);
     }
+    // Every name the step passes for Toolkit code is still read by the step's scripts on main.
+    for (const name of call.env.filter(env => !(call.stepEnv || []).includes(env))) assert.ok(scriptsRead(call.run, name), `${call.copy} / ${call.step}: no Toolkit script of this step reads ${name} any more`);
     // A sparse checkout of one script needs that script to stand alone.
     if (call.sparse && /\.cjs$/.test(call.sparse)) assert.doesNotMatch(fs.readFileSync(path.join(ROOT, call.sparse), 'utf8'), /require\(\s*['"]\.{1,2}\//, `${call.sparse} is checked out alone, so it may require no Toolkit module`);
   }
+});
+
+test('layout contract: the sweep action refuses an unknown command instead of running a refresh', () => {
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'), 'stores'], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unknown command; use store, refresh or footers/);
 });
