@@ -199,6 +199,33 @@ test('refresh PR: governed repositories only; any other repository gets one note
   assert.match(held.line, /^No refresh pull request: [^\n]*refresh governance/);
 });
 
+// A Toolkit checkout whose HEAD is not on its origin/main (a pull request's merge commit, a local
+// branch): its own one commit, origin set to the Toolkit repository and no origin/main.
+function offMainToolkit(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-refresh-offmain-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  git(root, ['init', '--quiet', '-b', 'main']);
+  git(root, ['commit', '--quiet', '--allow-empty', '-m', 'one']);
+  git(root, ['remote', 'add', 'origin', 'https://github.com/weijunswj/ai-agent-toolkit.git']);
+  return root;
+}
+
+test('refresh PR: governance is checked before the Toolkit commit, so a Toolkit checkout off main only stops a governed repository', t => {
+  const dir = governedCheckout(t);
+  const root = offMainToolkit(t);
+  const run = (github, governance) => refresh.refreshPr({ repo: dir, root, ciShards: null, governance, github: github.api() });
+  const ungoverned = new FakeGitHub(dir);
+  const note = run(ungoverned, () => ({ state: 'DISABLED' }));
+  assert.equal(note.code, 0, note.line);
+  assert.equal(note.line, 'No refresh pull request: its governance is off, and only governed repositories carry Toolkit copies.');
+  assert.deepEqual(ungoverned.calls, [], 'nothing read from GitHub');
+  const governed = new FakeGitHub(dir);
+  const stopped = run(governed, ENABLED);
+  assert.equal(stopped.code, 2, stopped.line);
+  assert.match(stopped.line, /^No refresh pull request: Toolkit commit [0-9a-f]{7} is not on origin\/main, so GitHub could not fetch it\. Update the Toolkit checkout to main first\.$/);
+  assert.deepEqual(governed.calls, [], 'stopped before any GitHub read or write');
+});
+
 test('refresh PR: one pull request with only Toolkit-made files, read back and never merged; a rerun adds nothing', t => {
   const dir = governedCheckout(t);
   const github = new FakeGitHub(dir);
@@ -357,7 +384,10 @@ test('refresh PR: current copies need no pull request; the command line wires --
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'refresh-cli-'));
   t.after(() => fs.rmSync(plain, { recursive: true, force: true }));
   git(plain, ['init', '-q']);
+  // A plain folder is not governed (not a github.com repository), and that note comes before the
+  // Toolkit commit check, so the result is the same wherever this checkout's HEAD is.
   const command = spawnSync(process.execPath, [path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'), '--repo', plain, '--refresh-pr'], { cwd: plain, encoding: 'utf8', windowsHide: true });
-  assert.equal(command.status, 2, command.stderr);
-  assert.match(command.stderr, /^No refresh pull request: [^\n]+\n$/);
+  assert.equal(command.status, 0, command.stderr);
+  assert.equal(command.stdout, 'No refresh pull request: its governance is off, and only governed repositories carry Toolkit copies.\n');
+  assert.equal(command.stderr, '');
 });
