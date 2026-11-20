@@ -879,7 +879,7 @@ const commands = {
       log({ ...entry, done: [...done].sort((a, b) => a - b), results: [...entry.results, ran].slice(-holderOrder.MAX_OPS), by });
     }
     log({ ...entry, finished_at: nowText(deps) });
-    return { mode: 'apply', ...summary, outcome: 'DONE', results, next_action: 'Run programme.cjs refresh so the pages show these writes, then report the digest and results to the controller.' };
+    return { mode: 'apply', ...summary, outcome: 'DONE', results, next_action: `Run ${require('../../../repo/scripts/toolkit-user-state.cjs').programmeCommand('refresh')} so the pages show these writes, then report the digest and results to the controller.` };
   },
 
   // The one write to a page's hand-written text (programme-page-archive markArchive): the parent's
@@ -1127,7 +1127,7 @@ function formatReport(report) {
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
   if (report.reads) lines.push('', `Reads: ${report.reads.rows} child issue(s) read from the parent's list; ${report.reads.reused} task(s) left to their turn, ${report.reads.reread} read on rotation; parent comments ${report.reads.bookmark === 'used' ? 'read from the bookmark' : report.reads.bookmark === 'full' ? 'read in full' : 'not read'}`);
   if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
-  if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
+  if (report.attention) lines.push('', `${report.attention} (${require('../../../repo/scripts/toolkit-user-state.cjs').programmeCommand('attention')} lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
   if (report.mode === 'apply') lines.push('', `Writes: ${report.writes.state} state, ${report.writes.github} GitHub`);
   if (report.metrics) lines.push(report.metrics);

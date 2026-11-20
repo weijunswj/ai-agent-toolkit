@@ -397,7 +397,7 @@ function cloudSweepSkipReason(binding) {
 function cloudSweepReachFindings(state, options = {}) {
   const reason = cloudSweepSkipReason((options.mergedBinding || governance.mergedBinding)(state.root, options));
   if (!reason) return [];
-  return [finding(reason.code, 'info', `The cloud sweep skips this repository: ${reason.why}. ${reason.fix}; until then nothing sweeps this repository, so run programme.cjs refresh by hand.`)];
+  return [finding(reason.code, 'info', `The cloud sweep skips this repository: ${reason.why}. ${reason.fix}; until then nothing sweeps this repository, so run ${require('./toolkit-user-state.cjs').programmeCommand('refresh')} by hand.`)];
 }
 
 // Toolkit workflow copies left in a repository whose merged binding turns governance off: the sweep
