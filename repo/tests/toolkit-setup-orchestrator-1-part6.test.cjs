@@ -38,11 +38,11 @@ test('partial explicit flags reject concise input before writes and accept only 
 
   const accepted = run(args, {
     env,
-    input: ['disable', 'enable', 'default', 'one-helper', 'keep'].join('\n'),
+    input: ['enable', 'default', 'one-helper', 'keep'].join('\n'),
     timeout: 300000,
   });
   assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
-  assert.match(accepted.stdout, /1\.2 Automatic updates: C - Turn off/);
+  assert.match(accepted.stdout, /1\.2 Update reports: A - Keep current/);
 });
 
 test('multiple explicit flags render and accept one remaining ordered non-TTY answer', () => {
@@ -50,14 +50,14 @@ test('multiple explicit flags render and accept one remaining ordered non-TTY an
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--enable-update-reports', '--default-update-report-retention-days',
   ], { env: isolatedHomeEnv(root), input: 'keep\nA\n', timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   const guide = bank.slice(bank.indexOf('Some visible questions'));
   // Maintenance is off already, so Turn off folds into Keep current and A is Keep current.
   assert.match(guide, /\*\*2\.2\*\* Codex Toolkit maintenance \[A-B\]/);
-  assert.doesNotMatch(guide, /\*\*1\.2\*\* Automatic updates \[A-C\]|: all recommended/);
+  assert.doesNotMatch(guide, /Automatic updates|: all recommended/);
   assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: A - Keep current \(canonical: keep; effective: disable\)/);
 });
 
@@ -65,7 +65,7 @@ test('choice-activated custom checkout detail is rendered and consumed in the ca
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
   const customPath = path.join(root, 'Chosen Managed Source');
-  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+  const result = run(['--execute', '--repo-remote', origin], {
     env: isolatedHomeEnv(root),
     input: ['custom', 'A', 'A', 'keep', 'A', customPath].join('\n'),
     timeout: 300000,

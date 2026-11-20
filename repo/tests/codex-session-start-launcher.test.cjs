@@ -70,6 +70,8 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
     'repo/scripts/toolkit-claude-account-copy.cjs',
+    'repo/scripts/toolkit-update-marker.cjs',
+    'repo/scripts/toolkit-update-notice.cjs',
     'repo/scripts/toolkit-canonical-path.cjs',
     'repo/scripts/toolkit-global-rules.cjs',
     'repo/scripts/toolkit-managed-block.cjs',
@@ -202,7 +204,7 @@ test('manual bridge command retains a non-zero exit for an equivalent explicit c
   const root = tmpRoot();
   const result = spawnSync(process.execPath, [
     path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'),
-    '--enable-repo-auto-update', '--write', '--hub', path.join(root, 'hub', 'current')
+    '--copy-antigravity-skills', '--write', '--hub', path.join(root, 'hub', 'current')
   ], {
     env: { ...process.env, HOME: root, USERPROFILE: root },
     encoding: 'utf8',
@@ -210,7 +212,7 @@ test('manual bridge command retains a non-zero exit for an equivalent explicit c
     windowsHide: true,
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /requires --repo-path/);
+  assert.match(result.stderr, /--copy-antigravity-skills requires --antigravity-project-root/);
 });
 
 test('the launcher leaves the hook input on stdin for the bridge before reading it for the governance line', () => {

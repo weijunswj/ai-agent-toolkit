@@ -213,7 +213,7 @@ test('--refresh refuses every other answer source before any write', () => {
   const base = ['--execute', '--profile', 'auto-main', '--refresh'];
   for (const extra of [
     ['--yes-recommended'], ['--approve-codex-config-proposal'], ['--approve-high-helper-capacity'],
-    ['--keep-repo-auto-update'], ['--codex-helper-count', '1'],
+    ['--enable-update-reports'], ['--codex-helper-count', '1'],
     ['--update-report-retention-days', '3'], ['--repo-root', os.tmpdir()], ['--claude-settings', 'keep'],
     ['--codex-plugin-behavior', 'install'],
   ]) {

@@ -66,22 +66,22 @@ test('distinct piped answers follow the canonical question order without shifts'
     '--codex-cli', createFakeCodexAppServer(root),
   ], {
     env: isolatedHomeEnv(root),
-    input: ['disable', 'enable', 'default', 'one-helper', 'keep', 'install'].join('\n'),
+    input: ['enable', 'default', 'one-helper', 'keep', 'install'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
   // The Codex home exists, so 3.1 asks about the Codex plugin; the Codex hooks status line takes no answer line.
-  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance[\s\S]*\*\*3\.1\*\* Keep Toolkit available in Codex\?/);
+  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Update reports[\s\S]*\*\*1\.3\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance[\s\S]*\*\*3\.1\*\* Keep Toolkit available in Codex\?/);
   assert.doesNotMatch(bank, /\*\*\d+\.\d+\*\* Toolkit hooks in Codex|\| \d+\.\d+ \| Toolkit hooks in Codex/);
   assert.match(bank, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: /);
   assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: A - Keep current \(canonical: keep; effective: disable\)/);
   // Reports are already kept for seven days, so "enable" and "default" name the hidden twins of the
   // recommended Keep current and apply as keep, with the same effect.
-  assert.match(result.stdout, /1\.3 Update reports: A - Keep current \(canonical: keep; effective: enable\)/);
-  assert.match(result.stdout, /1\.4 Report retention: A - Keep current \(canonical: keep; effective: 7 days\)/);
+  assert.match(result.stdout, /1\.2 Update reports: A - Keep current \(canonical: keep; effective: enable\)/);
+  assert.match(result.stdout, /1\.3 Report retention: A - Keep current \(canonical: keep; effective: 7 days\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -89,7 +89,9 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(result.stdout, /Question bank stopped for answers: no/);
   assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY/);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
-  assert.match(bridgeArgs, /--disable-repo-auto-update/);
+  // Automatic updates are always on: setup records the managed checkout as the update source, with no switch.
+  assert.match(bridgeArgs, /--repo-path \S+ --repo-branch main --repo-remote \S+ --enable-auto-sync --write/);
+  assert.doesNotMatch(bridgeArgs, /--enable-repo-auto-update|--disable-repo-auto-update/);
   assert.match(bridgeArgs, /--disable-update-report-open --write/);
   assert.doesNotMatch(bridgeArgs, /--enable-update-reports|--update-report-retention-days/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);

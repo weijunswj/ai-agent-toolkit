@@ -94,7 +94,9 @@ test('Codex SessionStart hook adds no rules notice for a repository with only it
   const hub = path.join(root, '.test-home', 'hub', 'current');
   writeDisabledHookHub(hub);
 
-  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+  // Repository updates have their own tests; this session start skips them (the flag the delegated
+  // sync uses), so it runs only the maintenance under test and never touches the recorded checkout.
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--skip-repo-auto-update', '--sync-source', 'codex-plugin'], {
     cwd: root,
     env: isolatedHomeEnv(path.join(root, '.test-home'), {
       PATH: process.env.PATH,
@@ -162,10 +164,14 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
   const hub = path.join(root, 'hub', 'current');
 
   writeCodexPluginRefreshFixture(sourceRepo);
+  // The checkout is clean and current with its origin, as a real managed checkout is.
+  commitAll(sourceRepo, 'codex plugin refresh fixture');
+  git(sourceRepo, ['push', 'origin', 'main']);
   writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
   let result = run([
     '--hub', hub,
     '--repo-path', sourceRepo,
+    '--repo-remote', fixture.origin,
     '--write',
     '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh',
@@ -199,9 +205,12 @@ test('Codex auto-refresh across a version bump checks the newly installed cache 
   const hub = path.join(root, 'hub', 'current');
 
   writeCodexPluginRefreshFixture(fixture.repo);
+  // The checkout is clean and current with its origin, as a real managed checkout is.
+  commitAll(fixture.repo, 'codex plugin refresh fixture');
+  git(fixture.repo, ['push', 'origin', 'main']);
   writeFile(path.join(oldPluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
   let result = run([
-    '--hub', hub, '--repo-path', fixture.repo, '--write', '--enable-auto-sync',
+    '--hub', hub, '--repo-path', fixture.repo, '--repo-remote', fixture.origin, '--write', '--enable-auto-sync',
     '--enable-codex-plugin-auto-refresh', '--sync-source', 'codex-plugin'
   ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
@@ -229,7 +238,6 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
 
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
@@ -269,7 +277,6 @@ test('Codex auto-refresh runs before a delegated hub sync failure', () => {
 
   let result = run([
     '--hub', hub,
-    '--enable-repo-auto-update',
     '--repo-path', fixture.repo,
     '--repo-branch', 'main',
     '--repo-remote', fixture.origin,
@@ -326,7 +333,9 @@ test('Codex session start refreshes Toolkit\'s Antigravity copies from the manag
   const env = isolatedHomeEnv(root, { PATH: process.env.PATH });
   let result = run(['--hub', hub, '--repo-path', sourceRepo, '--write', '--enable-auto-sync', '--sync-source', 'codex-plugin'], { env });
   assert.equal(result.status, 0, result.stderr);
-  const hook = () => run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], { env });
+  // Repository updates have their own tests; this session start skips them (the flag the delegated
+  // sync uses), so it runs only the maintenance under test and never touches the recorded checkout.
+  const hook = () => run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--skip-repo-auto-update', '--sync-source', 'codex-plugin'], { env });
   const gemini = path.join(root, '.gemini');
 
   // Not chosen: nothing is created under Antigravity's folder.

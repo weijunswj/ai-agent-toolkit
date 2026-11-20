@@ -11,7 +11,6 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const expectedCodexRows = [
   ['update-source', 'Update source'],
-  ['automatic-updates', 'Automatic updates'],
   ['update-reports', 'Update reports'],
   ['report-retention', 'Report retention'],
   ['codex-instruction-limit', "Raise Codex's instruction limit"],
@@ -194,10 +193,7 @@ test('generated document consistency treats only CRLF and LF as equivalent', () 
 test('headings, choice effects and native mutation surfaces remain distinct', () => {
   const byId = Object.fromEntries(allRows().map((row) => [row.id, row]));
   assert.equal(byId['update-source'].title, 'Update source');
-  assert.equal(byId['automatic-updates'].title, 'Automatic updates');
-  assert.notEqual(byId['update-source'].title, byId['automatic-updates'].title);
   assert.match(byId['update-source'].choices.find((choice) => choice.value === 'custom').consequence, /not migrated or deleted/i);
-  assert.match(byId['automatic-updates'].choices.find((choice) => choice.value === 'disable').consequence, /manual `setup toolkit`/i);
   assert.match(byId['update-reports'].whatThisControls, /private absolute paths/i);
   assert.match(byId['report-retention'].whatThisControls, /does not modify project files, application logs, or unrelated operational logs/i);
   assert.equal(byId['codex-helper-agents'], undefined);
@@ -333,9 +329,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
   const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
-  assert.equal(codex[0].presentation.total_visible_question_count, 7);
+  assert.equal(codex[0].presentation.total_visible_question_count, 6);
   assert.equal(codex[0].presentation.total_visible_section_count, 2);
-  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '2.2']);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2']);
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
@@ -343,9 +339,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
   // Claude Code setup does not ask about Codex's instruction limit.
-  assert.equal(claude[0].presentation.total_visible_question_count, 10);
+  assert.equal(claude[0].presentation.total_visible_question_count, 9);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5']);
 });
 
 test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
@@ -382,14 +378,13 @@ test('compact table, full text, recommendations, and choices share one indexed o
       row.presentation.recommended_choice_ref,
     );
   }
-  assert.doesNotMatch(rendered, /## \d+\. Automatic updates\s+### \d+\.\d+ Automatic updates/);
 });
 
 test('conditional questions renumber without gaps and change the bound bank identity', () => {
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '2.1', '2.2', '3.1', '3.2', '']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -414,7 +409,7 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.equal(all.selections.at(-1).question_ref, '3.2');
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 3.3=A`, rows), /unavailable question 3\.3/);
 
-  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=c, 2.2 = b`, rows);
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.2 = b`, rows);
   assert.equal(changed.mode, 'recommended-except');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '2.2').canonical_value, 'disable');
@@ -438,7 +433,7 @@ test('concise answers tolerate case, spacing, hyphens and look-alike reference l
       core.assertQuestionBankAnswerBinding(parsed, rows);
     }
   }
-  for (const form of ['1.2=C 2.1=d', '1.2 = c; 2.1=D', '1.2=c,2.1=d', '1.2=C ; 2.1=D']) {
+  for (const form of ['1.2=B 2.1=d', '1.2 = b; 2.1=D', '1.2=b,2.1=d', '1.2=B ; 2.1=D']) {
     const parsed = core.parseConciseQuestionBankAnswer(`${reference} ${form}`, rows);
     assert.equal(parsed?.mode, 'recommended-except', form);
     assert.equal(parsed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
@@ -517,7 +512,7 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   current.audit.update_report_enabled = true;
   current.audit.update_report_retention_days = 7;
   current.audit.codex_plugin_auto_refresh_enabled = false;
-  const args = core.parseArgs(['--execute', '--host', 'codex', '--enable-repo-auto-update']);
+  const args = core.parseArgs(['--execute', '--host', 'codex']);
   const rows = core.setupQuestionSpecs(args, current);
   const plan = core.buildNonTtyAnswerPlan(rows, args);
   assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
@@ -530,14 +525,14 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   assert.deepEqual(plan.details.map((entry) => entry.order), [1, 2, 3, 4]);
   assert.equal(plan.details[0].question_ref, '1.1');
   assert.equal(plan.details[0].activation_choice_ref, rows.find((row) => row.id === 'update-source').choices.find((choice) => choice.value === 'custom').presentation_ref);
-  assert.equal(plan.details[1].question_ref, '1.4');
+  assert.equal(plan.details[1].question_ref, '1.3');
   // Seven days is the current retention, so only Keep current and Choose another duration show.
   assert.deepEqual(rows.find((row) => row.id === 'report-retention').choices.map((choice) => choice.value), ['keep', 'custom']);
   assert.equal(plan.details[1].activation_choice_ref, 'B');
 
   const advanced = core.parseArgs([
     '--execute', '--host', 'codex', '--managed-checkout', 'custom',
-    '--codex-helper-capacity', 'custom', '--enable-repo-auto-update',
+    '--codex-helper-capacity', 'custom',
   ]);
   const advancedRows = core.setupQuestionSpecs(advanced, current);
   const advancedPlan = core.buildNonTtyAnswerPlan(advancedRows, advanced);
@@ -603,12 +598,11 @@ test('bank reference covers host, order, recommendations and approval-visible se
 });
 
 test('display letters and canonical textual values resolve without becoming stored identities', () => {
-  const automatic = allRows().find((row) => row.id === 'automatic-updates');
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'c'), 'disable');
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'DISABLE'), 'disable');
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, ''), automatic.recommended);
   // Reports are kept already, so "Keep reports" is hidden; typing its canonical word still works, as keep.
   const reports = allRows().find((row) => row.id === 'update-reports');
+  assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'b'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'DISABLE'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(reports, ''), reports.recommended);
   assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'Enable'), 'keep');
   assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'c'), 'c', 'a hidden choice has no letter');
 });
@@ -624,9 +618,6 @@ test('the choice matching the current state folds into Keep current, whatever is
     return { row: core.setupQuestionSpecs(args, current).find((spec) => spec.id === id), args };
   };
   const cases = [
-    // On, but with no saved source matching 1.1, Turn on would re-point updates, so nothing folds here
-    // (the matching case is in the next test).
-    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, '', ['keep', 'enable', 'disable'], 'enable'],
     ['update-reports', (c) => { c.audit.update_report_enabled = true; }, 'enable', ['keep', 'disable'], 'keep'],
     // Off already: Do not keep reports is hidden and Keep reports stays recommended.
     ['update-reports', (c) => { c.audit.update_report_enabled = false; }, 'disable', ['keep', 'enable'], 'enable'],
@@ -681,33 +672,9 @@ test('the choice matching the current state folds into Keep current, whatever is
 
 // Where the choice that changes nothing also re-checks or follows another answer, it stays and takes the
 // Keep current label, and keep is hidden instead.
-test('automatic updates, Claude agents, the Claude plugin and Codex helpers read Keep current when nothing would change', () => {
+test('Claude agents, the Claude plugin and Codex helpers read Keep current when nothing would change', () => {
   const source = core.defaultManagedSourcePath();
   const noSource = () => stateWithManaged(managedState({ currentPath: '', selectedPath: '', exists: false, git: false }));
-  const automatic = (change = () => {}, argv = []) => {
-    const current = noSource();
-    current.audit.repo_auto_update = { enabled: true, repo_path: source, repo_branch: core.DEFAULT_REPO_BRANCH, repo_remote: core.DEFAULT_REPO_REMOTE };
-    current.audit.auto_sync_enabled = true;
-    change(current);
-    const args = core.parseArgs(['--plan', '--host', 'codex', ...argv]);
-    return { row: core.setupQuestionSpecs(args, current).find((spec) => spec.id === 'automatic-updates'), args };
-  };
-  const { row: same } = automatic();
-  assert.deepEqual(same.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Keep current'], ['disable', 'Turn off']]);
-  assert.equal(same.recommended, 'enable');
-  assert.deepEqual([same.folded_value, same.folded_into], ['keep', 'enable']);
-  assert.match(core.renderSetupQuestionBank([same]), /\| A\. Keep current \| B\. Turn off \|/);
-  assert.equal(core.resolveDisplayedChoiceAnswer(same, 'keep'), 'enable');
-  assert.equal(automatic(() => {}, ['--keep-repo-auto-update']).args.setupChoices.repoAutoUpdate, 'enable');
-  for (const [label, change] of [
-    ['another saved source', (c) => { c.audit.repo_auto_update.repo_path = path.resolve(repoRoot, '..', 'elsewhere'); }],
-    ['startup sync off', (c) => { c.audit.auto_sync_enabled = false; }],
-    ['another remote', (c) => { c.audit.repo_auto_update.repo_remote = 'https://example.test/other.git'; }],
-    ['updates off', (c) => { c.audit.repo_auto_update.enabled = false; }],
-  ]) {
-    const { row } = automatic(change);
-    assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['keep', 'Keep current'], ['enable', 'Turn on'], ['disable', 'Turn off']], label);
-  }
 
   const claude = (change) => {
     const current = noSource();
@@ -1008,8 +975,6 @@ test('source-dependent Keep current rows retain verification and source-followin
       const current = core.documentationFixtureState();
       const source = current.managed.currentPath;
       const custom = path.resolve(repoRoot, '..', 'approved-other-update-copy');
-      current.audit.repo_auto_update = { enabled: true, repo_path: source, repo_branch: core.DEFAULT_REPO_BRANCH, repo_remote: core.DEFAULT_REPO_REMOTE };
-      current.audit.auto_sync_enabled = true;
       current.claudePluginInstall = { installed: true, enabled: true, recordCurrent: true, version: '9.9.9', runningRoot: source };
       current.nativePlugin = { status: 'verification-deferred', manifest_version: '9.9.9' };
       const pluginKey = host === 'codex' ? 'codexPluginBehavior' : 'claudePluginBehavior';
@@ -1018,7 +983,7 @@ test('source-dependent Keep current rows retain verification and source-followin
         ...(sourceMode === 'explicit-custom' ? ['--repo-root', custom, `--${host === 'codex' ? 'codex' : 'claude'}-plugin-behavior`, 'install'] : [])]);
       const rows = core.setupQuestionSpecs(args, current);
       if (sourceMode === 'explicit-custom') assert.equal(args.setupChoices[pluginKey], 'install', 'an explicit source selection must not drop plugin checks');
-      for (const [id, action] of [['automatic-updates', 'enable'], [pluginId, 'install']]) {
+      for (const [id, action] of [[pluginId, 'install']]) {
         const row = rows.find((row) => row.id === id);
         const label = `${host}/${sourceMode}/${id}`;
         assert.deepEqual([row.folded_value, row.folded_into], ['keep', action], label);
@@ -1043,7 +1008,6 @@ test('source-dependent Keep current rows retain verification and source-followin
       core.setupQuestionSpecs(args, current);
       core.applySetupChoices(args, current);
       assert.equal(args.setupChoices[pluginKey], 'install', `${host}/${sourceMode}: plugin verification retained`);
-      assert.equal(args.setupChoices.repoAutoUpdate, 'enable', `${host}/${sourceMode}: source-following retained`);
       assert.equal(args.repoRoot, sourceMode === 'unchanged' ? source : custom);
     }
   }
@@ -1052,7 +1016,6 @@ test('source-dependent Keep current rows retain verification and source-followin
 test('both banks put Keep current first and keep the other choices in their original relative order', () => {
   const originalOrder = {
     managedCheckout: ['default', 'keep', 'custom'],
-    repoAutoUpdate: ['enable', 'disable', 'keep'],
     updateReports: ['enable', 'disable', 'keep'],
     updateReportRetention: ['default', 'custom', 'keep'],
     codexDocLimit: ['enable', 'disable', 'keep'],
@@ -1112,27 +1075,27 @@ test('TTY all recommended and changed-only commands execute after exactly one co
   assert.equal((all.bank.match(/setup-toolkit-question-bank:complete/g) || []).length, 1);
   assert.match(all.bank, /enter either:[\s\S]*all recommended[\s\S]*press Enter to answer questions one at a time/i);
 
-  const specs = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), stateWithManaged(managedState()));
-  const automatic = specs.find((row) => row.id === 'automatic-updates');
-  const off = automatic.choices.find((choice) => choice.value === 'disable');
-  const changed = await runInjectedTTY([`${automatic.presentation.question_ref}=${off.presentation_ref}`]);
+  const specs = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState());
+  const reports = specs.find((row) => row.id === 'update-reports');
+  const off = reports.choices.find((choice) => choice.value === 'disable');
+  const changed = await runInjectedTTY([`${reports.presentation.question_ref}=${off.presentation_ref}`]);
   assert.equal(changed.result.answer_source, 'interactive recommended except listed changes');
-  assert.equal(changed.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(changed.args.setupChoices.updateReports, 'disable');
 });
 
 test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
   // Keep current is A when available; use the recommendation's displayed letter.
   const updateSource = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState()).find((row) => row.id === 'update-source');
   const recommendedLetter = updateSource.presentation.recommended_choice_ref;
-  const journey = await runInjectedTTY(['', 'Z', recommendedLetter, 'disable', 'enable', 'default', 'enable', 'keep', 'enable']);
+  const journey = await runInjectedTTY(['', 'Z', recommendedLetter, 'disable', 'default', 'enable', 'keep', 'enable']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
   assert.ok(journey.prompts[1].includes(`Enter=${recommendedLetter}`));
   assert.match(journey.prompts[2], /1\.1 Update source/);
-  assert.match(journey.prompts[3], /1\.2 Automatic updates/);
+  assert.match(journey.prompts[3], /1\.2 Update reports/);
   assert.equal(journey.args.setupChoices.managedCheckout, 'default');
-  assert.equal(journey.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(journey.args.setupChoices.updateReports, 'disable');
   assert.equal(journey.remaining.length, 0);
 });
 
@@ -1143,15 +1106,15 @@ test('TTY one-at-a-time "all recommended" applies the recommendation to that que
   assert.equal(rest.remaining.length, 0);
   assert.match(rest.prompts[1], /1\.1 Update source .*"all recommended" for the rest/);
   assert.equal(rest.prompts.length, 4, 'no question is asked after "all recommended"');
-  assert.equal(rest.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(rest.args.setupChoices.updateReports, 'disable');
   for (const [key, value] of Object.entries(enters.args.setupChoices)) {
-    if (key !== 'repoAutoUpdate') assert.equal(rest.args.setupChoices[key], value, key);
+    if (key !== 'updateReports') assert.equal(rest.args.setupChoices[key], value, key);
   }
 });
 
 test('TTY malformed concise input can be corrected and secondary details are collected', async () => {
-  const corrected = await runInjectedTTY(['1.2=B, 1.2=C', '9.9=A', '1.2=B,, 2.1=A', '1.2=C']);
-  assert.equal(corrected.args.setupChoices.repoAutoUpdate, 'disable');
+  const corrected = await runInjectedTTY(['1.2=B, 1.2=C', '9.9=A', '1.2=B,, 2.1=A', '1.2=B']);
+  assert.equal(corrected.args.setupChoices.updateReports, 'disable');
   assert.equal(corrected.prompts.filter((prompt) => /all recommended/.test(prompt)).length, 4);
 
   const rows = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState());
@@ -1210,7 +1173,7 @@ test('the Codex instruction limit question is recommended on, explains the edit 
 test('explain shows the full text of one question, numbered as in the whole bank', () => {
   const rows = allRows();
   const text = core.renderQuestionRows(rows, '1.2');
-  assert.match(text, /^## 1\. Updates and reports\n\n### 1\.2 Automatic updates\n/);
+  assert.match(text, /^## 1\. Updates and reports\n\n### 1\.2 Update reports\n/);
   assert.match(text, /\*\*What this controls:\*\*/);
   assert.equal((text.match(/^### /gm) || []).length, 1);
   assert.equal(core.renderQuestionRows(rows, '9.9'), '');
@@ -1221,4 +1184,31 @@ test('explain shows the full text of one question, numbered as in the whole bank
 test('an empty --explain is refused', () => {
   assert.throws(() => core.parseArgs(['--explain']), /--explain needs a question number/);
   assert.throws(() => core.parseArgs(['--explain=']), /--explain needs a question number/);
+});
+
+// Automatic updates are always on, so setup asks nothing about them and the old switches are unknown.
+test('automatic updates have no setup question, and the removed switches are unknown arguments', () => {
+  for (const host of ['codex', 'claude-code']) {
+    const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', host]), core.documentationFixtureState());
+    assert.equal(rows.some((row) => row.id === 'automatic-updates' || row.key === 'repoAutoUpdate'), false, host);
+  }
+  for (const flag of ['--enable-repo-auto-update', '--disable-repo-auto-update', '--skip-repo-auto-update', '--keep-repo-auto-update', '--write-repo-auto-update']) {
+    assert.throws(() => core.parseArgs(['--plan', flag]), /Unknown argument/, flag);
+  }
+});
+
+test('setup records the managed checkout as the update source with the bridge, never with the removed bridge switches', () => {
+  const args = core.parseArgs(['--plan', '--host', 'codex']);
+  const plan = core.setupPlan({
+    host: 'codex',
+    repoRoot: path.resolve(repoRoot, '..', 'managed-copy'),
+    repoBranch: args.repoBranch,
+    repoRemote: args.repoRemote,
+    setupChoices: args.setupChoices,
+  });
+  const bridge = plan.steps.find((step) => step.id === 'bridge_preferences');
+  const command = bridge.commands.find((line) => /toolkit-local-bridge\.cjs --repo-path /.test(line));
+  assert.ok(command, bridge.commands.join('\n'));
+  assert.match(command, /--repo-branch main --repo-remote \S+ --enable-auto-sync --write$/);
+  assert.doesNotMatch(bridge.commands.join('\n'), /--enable-repo-auto-update|--disable-repo-auto-update/);
 });

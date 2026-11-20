@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata, English setup routing, opt-in repo auto-update, and portable Antigravity skills copying.",
+  "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata, English setup routing, automatic repo-backed updates, and portable Antigravity skills copying.",
   "author": {
     "name": "weijunswj",
     "url": "https://github.com/weijunswj"
@@ -17,5 +17,5 @@
   ],
   "skills": "./skills",
   "hooks": "./.claude-plugin/hooks/hooks.json",
-  "version": "3.155.2"
+  "version": "3.156.0"
 }

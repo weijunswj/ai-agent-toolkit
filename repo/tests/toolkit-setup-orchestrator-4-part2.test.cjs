@@ -31,16 +31,16 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   const reference = displayedBankReference(preview.stdout);
   const result = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true,
     env,
-    input: `${reference}: 1.2=c, 2.2=A\n`,
+    input: `${reference}: 1.2=b, 2.2=A\n`,
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
-  assert.match(result.stdout, /1\.2 Automatic updates: C - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /1\.2 Update reports: B - Do not keep reports \(canonical: disable; effective: disable\)/);
   // Maintenance is off already, so Turn off folds into Keep current and A is Keep current.
   assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: A - Keep current \(canonical: keep; effective: disable\)/);
-  // Reports are already kept, so the recommendation is the single Keep current.
-  assert.match(result.stdout, /1\.3 Update reports: A - Keep current \(canonical: keep; effective: enable\)/);
+  // Report retention is at its seven days, so the recommendation is the single Keep current.
+  assert.match(result.stdout, /1\.3 Report retention: A - Keep current \(canonical: keep; effective: 7 days\)/);
 });
 
 test('cross-process concise replay fails before mapping across a host change', () => {
