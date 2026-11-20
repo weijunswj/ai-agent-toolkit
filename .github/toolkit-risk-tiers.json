@@ -40,6 +40,7 @@
     "repo/tests/toolkit-governed-fixture-support.cjs",
     "repo/tests/toolkit-local-bridge*.test.cjs",
     "repo/tests/support/toolkit-local-bridge-fixture.cjs",
+    "repo/tests/support/toolkit-auto-update-fixture.cjs",
     "repo/tests/support/toolkit-fetch-race-fixture.cjs",
     "repo/tests/support/retired-instruction-copies.cjs",
     "repo/tests/toolkit-test-temp-guard.cjs",
