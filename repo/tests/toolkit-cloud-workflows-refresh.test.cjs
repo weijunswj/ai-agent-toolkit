@@ -120,6 +120,11 @@ class FakeGitHub {
         return { status, files: this.diff(mergeBase, to) };
       }
       if ((match = /^\/git\/commits\/([0-9a-f]+)$/.exec(rest))) return { tree: { sha: this.commits.get(match[1]).tree } };
+      if ((match = /^\/contents\/([^?]+)\?ref=([0-9a-f]+)$/.exec(rest))) {
+        const text = this.filesOf(match[2])[match[1].split('/').map(decodeURIComponent).join('/')];
+        if (text === undefined) { if (missing) return null; throw new refresh.RefreshError('404'); }
+        return { encoding: 'base64', content: Buffer.from(text, 'utf8').toString('base64') };
+      }
       if (rest === '/git/trees' && verb === 'POST') {
         const files = { ...this.trees.get(input.base_tree) };
         for (const entry of input.tree) files[entry.path] = entry.content;
@@ -156,6 +161,21 @@ class FakeGitHub {
     };
   }
   writes() { return this.calls.filter(call => !call.startsWith('GET ')); }
+}
+
+// A Toolkit checkout on main whose history does not hold the copies' commit (COMMIT): A, then B on
+// top, sharing this checkout's objects. `shallow` marks B as its oldest commit, as a clone made 50
+// commits deep does. { root, commit } for runRefresh.
+function unrelatedToolkit(t, { shallow = false } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-refresh-toolkit-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  git(root, ['init', '--quiet', '-b', 'main']);
+  fs.writeFileSync(path.join(root, '.git', 'objects', 'info', 'alternates'), `${path.resolve(ROOT, git(ROOT, ['rev-parse', '--git-path', 'objects']))}\n`);
+  const tree = git(ROOT, ['rev-parse', 'HEAD^{tree}']);
+  const B = git(root, ['commit-tree', tree, '-p', git(root, ['commit-tree', tree, '-m', 'a']), '-m', 'b']);
+  git(root, ['update-ref', 'refs/heads/main', B]);
+  if (shallow) fs.writeFileSync(path.join(root, '.git', 'shallow'), `${B}\n`);
+  return { root, commit: B };
 }
 
 const runRefresh = (dir, github, extra = {}) => refresh.refreshPr({ repo: dir, root: ROOT, commit: COMMIT, ciShards: null, governance: ENABLED, github: github.api(), ...extra });
@@ -211,6 +231,29 @@ test('refresh PR: one pull request with only Toolkit-made files, read back and n
   assert.deepEqual(github.writes().slice(writes).filter(call => !/^POST .*\/git\/trees$/.test(call)), [], 'only the tree is rebuilt to compare');
 });
 
+test('refresh PR: a rerun from a newer Toolkit commit with the same layout and copies adds no commit and leaves the pull request', t => {
+  const dir = governedCheckout(t);
+  const github = new FakeGitHub(dir);
+  assert.equal(runRefresh(dir, github).code, 0);
+  const before = github.refs.get(BRANCH);
+  // The pull request was opened from an older Toolkit commit, and the next Toolkit commit renders the
+  // same copies: only the header's toolkit= differs.
+  github.pulls[0].body = github.pulls[0].body.replace(` from Toolkit ${COMMIT.slice(0, 7)}. `, ' from Toolkit 0123456. ');
+  const body = github.pulls[0].body;
+  const newer = 'f'.repeat(40);
+  const later = { ...workflows, plan: options => { const result = workflows.plan(options); return { ...result, rows: result.rows.map(row => ({ ...row, expected: row.expected.replace(`toolkit=${COMMIT}`, `toolkit=${newer}`) })) }; } };
+  const writes = github.writes().length;
+  const again = runRefresh(dir, github, { workflows: later });
+  assert.match(again.line, /^Unchanged refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 /, again.line);
+  assert.equal(github.refs.get(BRANCH), before, 'the branch does not move');
+  assert.equal(github.pulls[0].body, body, 'the pull request body is left as it is');
+  assert.deepEqual(github.writes().slice(writes).filter(call => !/^POST .*\/git\/trees$/.test(call)), [], 'no commit, branch move or body edit');
+  // A copy whose body changes still gets a new commit.
+  const changed = { ...workflows, plan: options => { const result = workflows.plan(options); return { ...result, rows: result.rows.map(row => row.id === 'programme-sweep' ? { ...row, expected: workflows.render(row.id, `${source(row.file)}# one more line\n`, newer) } : row) }; } };
+  assert.match(runRefresh(dir, github, { workflows: changed }).line, /^Updated refresh pull request /);
+  assert.notEqual(github.refs.get(BRANCH), before);
+});
+
 test('refresh PR: after main moves, the open pull request is updated by a merge commit, never doubled or forced; a branch left without one gets one', t => {
   const dir = governedCheckout(t);
   const github = new FakeGitHub(dir);
@@ -263,7 +306,8 @@ test('refresh PR: it stops, with the step, on a stale or changed checkout, a cop
     const github = new FakeGitHub(dir);
     change(dir, github);
     if (name !== 'checkout behind main' && name !== 'local change under .github') { github.seed(git(dir, ['rev-parse', 'HEAD']), [github.refs.get('main')], treeOf(dir, 'HEAD')); github.refs.set('main', git(dir, ['rev-parse', 'HEAD'])); }
-    const result = runRefresh(dir, github);
+    // A full Toolkit checkout, so the newer copy is known to be missing whatever this checkout's depth.
+    const result = runRefresh(dir, github, name === 'copy from a newer Toolkit' ? unrelatedToolkit(t) : {});
     assert.equal(result.code, 2, name);
     assert.match(result.line, why, `${name}: ${result.line}`);
     assert.deepEqual(github.writes(), [], `${name}: nothing written`);
@@ -279,6 +323,19 @@ test('refresh PR: it stops, with the step, on a stale or changed checkout, a cop
   assert.equal(result.code, 2);
   assert.match(result.line, /branch toolkit\/refresh-cloud-workflows also changes src\/app\.js; land or remove that work first/);
   assert.deepEqual(github.writes(), []);
+});
+
+test('refresh PR: a shallow Toolkit clone that cannot reach a copy\'s commit is told to fetch its history, not to update to main', t => {
+  for (const [shallow, why, not] of [[false, /which this Toolkit checkout [^]*update the Toolkit checkout to the latest main first/, /unshallow/], [true, /which this shallow Toolkit checkout \([0-9a-f]{7}\) cannot reach; run git fetch --unshallow origin in the Toolkit checkout, then run this again\.$/, /latest main/]]) {
+    const toolkit = unrelatedToolkit(t, { shallow });
+    const dir = governedCheckout(t);
+    const github = new FakeGitHub(dir);
+    const result = runRefresh(dir, github, toolkit);
+    assert.equal(result.code, 2, result.line);
+    assert.match(result.line, why);
+    assert.doesNotMatch(result.line, not);
+    assert.deepEqual(github.writes(), [], 'nothing written');
+  }
 });
 
 test('refresh PR: current copies need no pull request; the command line wires --refresh-pr and refuses it with --check', t => {

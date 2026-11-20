@@ -20,7 +20,7 @@
 //   - Fixed branch toolkit/refresh-cloud-workflows. The tree and commit are made first and the branch
 //     is created or moved last (fast-forward, or a merge commit when an older refresh branch is
 //     there), so a failure leaves no partial pull request. An open refresh pull request is updated,
-//     never doubled, and a rerun with nothing new changes nothing.
+//     never doubled, and a rerun with nothing new changes nothing, even from a newer Toolkit commit.
 //   - The pull request is read back (head commit, branch and changed files) and never merged.
 //
 // Exit codes: 0 opened, updated, unchanged or nothing to do (a note says which), 2 no pull request
@@ -74,6 +74,8 @@ function changes({ target, root, commit, ci, ciShards, workflows }) {
     if (row.state === 'current') continue;
     // A copy rendered by a newer Toolkit than this checkout would be rolled back.
     if (row.toolkit && !git(root, ['merge-base', '--is-ancestor', row.toolkit, commit]).ok) {
+      // A shallow clone (cloud sessions clone 50 commits deep) may just not reach an older commit.
+      if (git(root, ['rev-parse', '--is-shallow-repository']).stdout.trim() === 'true') throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this shallow Toolkit checkout (${commit.slice(0, 7)}) cannot reach; run git fetch --unshallow origin in the Toolkit checkout, then run this again.`);
       throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this Toolkit checkout (${commit.slice(0, 7)}) does not contain; update the Toolkit checkout to the latest main first.`);
     }
     out.push({ file: row.file, text: row.expected, why: row.state === 'missing' ? 'added' : row.state === 'edited' ? 'edited by hand, rewritten' : row.pinned ? 'pinned to one Toolkit commit, now follows Toolkit main' : 'layout changed' });
@@ -148,6 +150,10 @@ function prepare({ target, root, commit, ci, ciShards, workflows, governance, gi
   return { repository, base, branch, files, notes };
 }
 
+// The body without the Toolkit commit it names, so a rerun from a newer commit with the same files
+// leaves the pull request as it is.
+const sansCommit = body => String(body || '').replace(/ from Toolkit [0-9a-f]{7}\. /, ' ');
+
 // Makes or updates the refresh pull request on GitHub and reads it back.
 function publish({ repository, base, branch, files, notes, commit, github, workflows }) {
   const owner = repository.split('/')[0];
@@ -159,8 +165,16 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
     const foreign = (compared.files || []).map(entry => entry.filename).filter(name => !allowed.has(name) && !isToolkitFile(name, workflows));
     if (foreign.length) throw new RefreshError(`branch ${BRANCH} also changes ${foreign.slice(0, 3).join(', ')}${foreign.length > 3 ? ' and more' : ''}; land or remove that work first.`);
   }
+  // A workflow copy the refresh branch already holds with this layout and body stays as it is: only
+  // its header's Toolkit commit would change, which is no reason for a new commit and CI run.
+  const texts = files.map(entry => {
+    if (!existing || workflows.MARKER.exec(entry.text)?.index !== 0) return entry.text;
+    const held = github(`repos/${repository}/contents/${entry.file.split('/').map(encodeURIComponent).join('/')}?ref=${existing}`, { missing: true });
+    const text = held?.encoding === 'base64' ? Buffer.from(held.content, 'base64').toString('utf8') : null;
+    return text !== null && workflows.copyState(text, entry.text).state === 'current' ? text : entry.text;
+  });
   const baseCommit = github(`repos/${repository}/git/commits/${base}`);
-  const tree = github(`repos/${repository}/git/trees`, { method: 'POST', input: { base_tree: baseCommit.tree.sha, tree: files.map(entry => ({ path: entry.file, mode: '100644', type: 'blob', content: entry.text })) } });
+  const tree = github(`repos/${repository}/git/trees`, { method: 'POST', input: { base_tree: baseCommit.tree.sha, tree: files.map((entry, index) => ({ path: entry.file, mode: '100644', type: 'blob', content: texts[index] })) } });
   let headSha = existing;
   let moved = false;
   const branchTree = existing ? github(`repos/${repository}/git/commits/${existing}`).tree.sha : null;
@@ -180,7 +194,7 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
   let outcome;
   if (open.length) {
     number = open[0].number;
-    if (moved || open[0].body !== body) github(`repos/${repository}/pulls/${number}`, { method: 'PATCH', input: { title: TITLE, body } });
+    if (moved || sansCommit(open[0].body) !== sansCommit(body)) github(`repos/${repository}/pulls/${number}`, { method: 'PATCH', input: { title: TITLE, body } });
     outcome = moved ? 'updated' : 'unchanged';
   } else {
     number = github(`repos/${repository}/pulls`, { method: 'POST', input: { title: TITLE, head: BRANCH, base: branch, body } }).number;

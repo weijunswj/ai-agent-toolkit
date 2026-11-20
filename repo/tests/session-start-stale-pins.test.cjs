@@ -88,6 +88,18 @@ test('the session line names stale cloud workflow copies and the refresh command
     assert.doesNotMatch(text, /Stale Toolkit/, name);
     assert.doesNotMatch(text, COMMAND, name);
   }
+  // A shallow clone on main (as cloud sessions make) whose history stops before the pin: fetch the
+  // rest of its history, then the refresh command; never update a checkout that is already on main.
+  fs.writeFileSync(path.join(toolkit.root, '.git', 'shallow'), `${toolkit.B}\n`);
+  toolkit.at(toolkit.B, toolkit.B);
+  const shallow = line(older);
+  assert.match(shallow, new RegExp(`⚠️ Toolkit checkout shallow: ${FILES} are made by a Toolkit commit that this computer's Toolkit checkout \\(${toolkit.B.slice(0, 7)}\\) cannot reach`), shallow);
+  assert.ok(shallow.includes(`run \`git fetch --unshallow origin\` in the Toolkit checkout, then run \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${older.repo} --refresh-pr\` from it`), shallow);
+  assert.doesNotMatch(shallow, /latest main|Toolkit checkout behind|Stale Toolkit/);
+  // Shallow and off main: the checkout is behind whatever its history holds.
+  toolkit.at(toolkit.B, toolkit.A);
+  assert.match(line(older), BEHIND);
+  fs.rmSync(path.join(toolkit.root, '.git', 'shallow'));
   // Only outdated copies count: a missing or hand-edited copy is drift the governance check reports.
   toolkit.at(toolkit.B, toolkit.B);
   for (const findings of [[], [{ id: 'CLOUD_WORKFLOW_DRIFT', severity: 'drift', message: 'x' }], [{ id: 'CLOUD_WORKFLOWS_UNCHECKED', severity: 'info', message: 'x' }]]) {
