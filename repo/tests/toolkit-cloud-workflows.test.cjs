@@ -291,7 +291,7 @@ test('governance check names a governed repository the cloud sweep skips, with t
   assert.deepEqual(ids(), []);
   merged = { repository: 'acme/app', state: { branch: 'toolkit-state' } };
   assert.deepEqual(ids(), ['CLOUD_SWEEP_PUBLIC_STATE:info']);
-  assert.match(reach()[0].message, /public branch[^]*toolkit store[^]*programme\.cjs refresh by hand/);
+  assert.match(reach()[0].message, /public branch[^]*toolkit store[^]*node "[^"]*programme\.cjs" refresh by hand/);
   merged = { repository: 'acme/app', store: { repository: 'someone/evidence' } };
   assert.deepEqual(ids(), ['CLOUD_SWEEP_FOREIGN_STORE:info']);
   assert.match(reach()[0].message, /someone\/evidence belongs to another owner/);

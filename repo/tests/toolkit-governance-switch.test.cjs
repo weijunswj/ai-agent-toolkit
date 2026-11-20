@@ -127,7 +127,7 @@ test('once the merged switch is read back, refresh and status remove the old per
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }), 25 * 60 * 60 * 1000);
   const stale = await run(ctx, ['refresh']);
   assert.equal(stale.code, 1);
-  assert.match(stale.out, /run .*status.* online first/);
+  assert.match(stale.out, /^The governance question bank could not be shown because GitHub could not be read just now.*Type toolkit governance again in a moment\.$/m);
   assert.equal(present().length, 2, 'a stale read is not a read-back');
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }));
   const result = await run(ctx, ['refresh']);

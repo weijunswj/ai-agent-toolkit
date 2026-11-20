@@ -124,10 +124,25 @@ test('the list is one two-column table per group, in group order, with every com
   assert.equal(lines.filter(line => line.startsWith('| `')).length, commands.COMMANDS.length);
 });
 
-test('the toolkit-setup skill runs the list itself when no hook line came with the message', () => {
+// A session whose message came with no hook line (hooks off, or the hook ran out of time) once read
+// `toolkit governance` on its own and gave a status summary instead of the bank (#1373). The skill
+// sends every typed command to the script, which prints the hook's own line for it.
+test('with no hook line, the toolkit-setup skill gets the hook\'s own line for any typed command from the script', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
-  assert.match(skill.match(/^description: .*$/m)[0], /`toolkit cmd`/);
-  assert.match(skill, /If the whole message is `toolkit cmd` or `toolkit command` and no `Toolkit command:` hook line came with it[^\n]*run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs`[^\n]*show its output exactly/);
+  assert.match(skill.match(/^description: .*$/m)[0], /`toolkit cmd`, `toolkit governance`/);
+  assert.match(skill, /If the whole message looks like a typed Toolkit command \(such as `toolkit cmd` or `toolkit governance`\) and no `Toolkit command:` hook line came with it[^\n]*run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs "<the message>"`[^\n]*do exactly what the line it prints says[^\n]*For `toolkit governance` that is the governance question bank, never a status or check summary\./);
+  for (const phrase of commands.PHRASES) {
+    const run = spawnSync(process.execPath, [SCRIPT, ` ${phrase.toUpperCase()}. `], { encoding: 'utf8' });
+    assert.equal(run.status, 0, phrase);
+    assert.equal(run.stdout, `${commands.phraseContext(phrase)}\n`, phrase);
+  }
+  for (const text of ['toolkit governance check', 'please toolkit governance', '']) {
+    const run = spawnSync(process.execPath, [SCRIPT, text], { encoding: 'utf8' });
+    assert.equal(run.status, 1, text);
+    assert.equal(run.stdout, '', text);
+    assert.match(run.stderr, /^Not a typed Toolkit command: read the message as plain language\.$/m);
+  }
+  assert.equal(spawnSync(process.execPath, [SCRIPT, 'toolkit', 'cmd'], { encoding: 'utf8' }).status, 1, 'the message is one argument');
 });
 
 test('the how-to guide shows the same commands', () => {

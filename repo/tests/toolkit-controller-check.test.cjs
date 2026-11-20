@@ -76,7 +76,7 @@ test('findings print compactly: counts by code and the top items, full detail be
     'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer refs; skipped: toolkit)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
-    '  ... 3 more (--expand, or programme.cjs attention)',
+    `  ... 3 more (--expand, or ${require('../scripts/toolkit-user-state.cjs').programmeCommand('attention')})`,
   ]);
   const expanded = run([...ALL, '--expand'], { results });
   for (const line of findings) assert.ok(expanded.text.includes(`  ${line}\n`));

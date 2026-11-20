@@ -361,7 +361,7 @@ test('E3: the session-start line shows open findings every time, clear once afte
   const write = list => cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
   const finding = (issue, findingState = 'new') => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', issue, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue, head: null, state: findingState, first_seen: now, changed_at: now });
   write([finding(470)]);
-  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new, 0 acknowledged\. Run programme\.cjs attention/);
+  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new, 0 acknowledged\. Run node "[^"]*programme\.cjs" attention/);
   write([finding(470, 'acknowledged')]);
   assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 0 new, 1 acknowledged/, 'acknowledged never hides');
   assert.match(cache.sessionAttention('acme/app', deps).line, /1 acknowledged/, 'and again next session');
@@ -379,7 +379,7 @@ test('E3: the session-start line shows open findings every time, clear once afte
   write([finding(472)]);
   now = '2026-10-28T16:00:00.000Z';
   const stale = cache.sessionAttention('acme/app', deps);
-  assert.match(stale.line, /^Attention: 1 new, 0 acknowledged \(as of 3 h ago\)\. Run programme\.cjs attention/);
+  assert.match(stale.line, /^Attention: 1 new, 0 acknowledged \(as of 3 h ago\)\. Run node "[^"]*programme\.cjs" attention/);
   assert.doesNotMatch(stale.line, /started/, 'the cache never claims a refresh started');
   assert.equal(stale.refresh, true);
 });
@@ -416,7 +416,7 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   const hash = checkpoint.sessionHash('exec-a');
   checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: 'g1-a1', repo_root: root, bound_at: 'x' }, { sessionsDir });
   checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir });
-  assert.match(evaluate(enabled), new RegExp(`Checkpoint: last turn's record failed \\(GH_AUTH\\); see programme\\.cjs show --session <that session's id> \\(session ${hash.slice(0, 8)}\\)`));
+  assert.match(evaluate(enabled), new RegExp(`Checkpoint: last turn's record failed \\(GH_AUTH\\); see node "[^"]*programme\\.cjs" show --session <that session's id> \\(session ${hash.slice(0, 8)}\\)`));
   fs.writeFileSync(checkpoint.errorsFile(hash, { sessionsDir }), JSON.stringify({ pending: null, recent: [] }));
   assert.doesNotMatch(evaluate(enabled), /Checkpoint:/, 'gone after a later good checkpoint');
 });
@@ -520,6 +520,9 @@ test('E3: refresh and attention write this computer\'s cache, and a cloud surfac
 
 // ---- F. Hook capability -------------------------------------------------------------------------
 
+// The hand-run path names both programme commands runnable, from where the script really is.
+const PORTABLE = /^Without hooks, run node "[^"]*programme\.cjs" refresh and node "[^"]*programme\.cjs" attention by hand at session start and before each gate\.$/;
+
 test('F: the Hooks lines for each host, with the portable path whenever a host has no running hook', () => {
   const home = () => {
     const dir = tmp();
@@ -552,10 +555,12 @@ test('F: the Hooks lines for each host, with the portable path whenever a host h
     const result = hooks.hookCapability({ environment: {}, homeDir: dir, readers });
     const lines = hooks.describeHooks(result);
     assert.deepEqual(lines.filter(line => line.startsWith('Hooks:')), expected, name);
-    assert.equal(lines.includes(hooks.PORTABLE_PATH), portable, `${name}: portable path`);
+    assert.equal(lines.some(line => PORTABLE.test(line)), portable, `${name}: portable path`);
   }
   const nothing = hooks.describeHooks(hooks.hookCapability({ environment: {}, homeDir: tmp(), readers: {} }));
-  assert.deepEqual(nothing, ['Hooks: Toolkit plugin absent', hooks.PORTABLE_PATH]);
+  assert.equal(nothing.length, 2);
+  assert.equal(nothing[0], 'Hooks: Toolkit plugin absent');
+  assert.match(nothing[1], PORTABLE);
 });
 
 test('every attention and inventory script stays free of model calls', () => {
@@ -593,7 +598,7 @@ test('status: Hooks lines for each host, and Queue only while turns wait', async
   assert.match(present, /Hooks: Claude Code present \(trust not checkable\)\nHooks: Codex present, trust unknown\n/);
   assert.doesNotMatch(present, /Queue:|by hand/);
   const waiting = await run({ hookReader: hostsOf([{ host: 'Claude Code', state: 'plugin absent' }]), queueReader: () => ({ count: 3, oldest: '2026-10-27T08:00:00.000Z' }) });
-  assert.match(waiting, /Hooks: Claude Code plugin absent\nWithout hooks, run programme\.cjs refresh and programme\.cjs attention by hand/);
+  assert.match(waiting, /Hooks: Claude Code plugin absent\nWithout hooks, run node "[^"]*programme\.cjs" refresh and node "[^"]*programme\.cjs" attention by hand/);
   assert.match(waiting, /Queue: 3 turns waiting \(oldest 2026-10-27\); they are written at the next turn end that can reach GitHub, and dropped unwritten after seven days\./);
   const broken = await run({ hookReader: () => { throw new Error('unreadable'); }, queueReader: () => { throw new Error('unreadable'); } });
   assert.match(broken, /Hooks: could not be checked on this computer\./);
@@ -830,7 +835,7 @@ test('every session-start problem line names who acts and when', () => {
   const line = evaluate();
   for (const [key, action] of Object.entries(gate.FINDING_ACTIONS)) if (key !== 'queue') assert.ok(line.includes(action), `${action} in ${line}`);
   assert.ok(!line.includes(gate.FINDING_ACTIONS.queue), 'the queue action is only for a queue-only line');
-  assert.match(line, /Attention: 2 new[^]*Run programme\.cjs attention for the list\. Controller: answer each new or overdue finding this turn/);
+  assert.match(line, /Attention: 2 new[^]*Run node "[^"]*programme\.cjs" attention for the list\. Controller: answer each new or overdue finding this turn/);
 
   // Only work-queue findings open: the action names the queue step and never offers an ack, which
   // a work-queue finding refuses.
@@ -872,10 +877,10 @@ test('E3: the session-start line names the longest-stalled work-queue task and i
   cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true,
     queue: { count: 2, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } }, deps);
   const line = cache.sessionAttention('acme/app', deps).line;
-  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run programme\.cjs attention for the list$/);
+  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run node "[^"]*programme\.cjs" attention for the list$/);
   // A cache from before this field, or with a malformed one, shows the plain line.
   cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
-  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Run programme\.cjs attention/);
+  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Run node "[^"]*programme\.cjs" attention/);
   for (const bad of [{ count: 0, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'x' } }, { count: 1, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'a\nb' } }, { count: 1, oldest: { issue: 1, code: 'lower', since: now, next: 'x' } }]) {
     assert.equal(cache.queueText(bad), null, JSON.stringify(bad));
   }
@@ -928,4 +933,60 @@ test('attention lists every task waiting on the owner, read from the children at
   assert.equal(broken.result.owner_waits, null);
   assert.equal(broken.result.owner_waits_unknown, 'STATE_INVALID');
   assert.match(fx.run(['attention'], {}, { json: false }).result, /^Owner waits: unknown \(STATE_INVALID\)$/m, 'never an empty list from a failed read');
+});
+
+// ---- runnable programme.cjs hints (#1373) ---------------------------------------------------------
+
+// A session read "Run programme.cjs attention for the list", looked where most Toolkit scripts are
+// (repo/scripts) and said the script was missing. Every hint a session on this computer reads names
+// the runnable command, from where the script really is.
+const userState = require('../scripts/toolkit-user-state.cjs');
+const TOOLKIT_ROOT = path.join(__dirname, '..', '..');
+
+test('programme.cjs hints name the runnable command: the managed checkout\'s copy when recorded, else this copy\'s', () => {
+  const home = fs.realpathSync.native(tmp());
+  const own = path.join(TOOLKIT_ROOT, ...userState.PROGRAMME_SCRIPT.split('/'));
+  assert.ok(fs.existsSync(own), 'the named script is there');
+  assert.equal(userState.programmeCommand('attention', { userHome: home }), `node "${own}" attention`, 'no recorded checkout: this copy');
+  const checkout = path.join(home, 'GitHub', 'ai-agent-toolkit');
+  fs.mkdirSync(path.join(home, '.ai-agent-toolkit', 'current'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.ai-agent-toolkit', 'current', 'state.json'), JSON.stringify({ repo_path: checkout }));
+  assert.equal(userState.programmeCommand('attention', { userHome: home }), `node "${own}" attention`, 'a recorded checkout without the script: this copy');
+  const managed = path.join(checkout, ...userState.PROGRAMME_SCRIPT.split('/'));
+  fs.mkdirSync(path.dirname(managed), { recursive: true });
+  fs.writeFileSync(managed, '');
+  const expected = `node "${checkout.replace(/\\/g, '/')}/skills/github-program-reconciler/scripts/programme.cjs" attention`;
+  assert.equal(userState.programmeCommand('attention', { userHome: home }), expected);
+  // The session-start attention line takes the same command from the same home.
+  const deps = { attentionDir: tmp(), home, now: () => '2026-11-20T00:00:00.000Z' };
+  cache.writeCache('acme/app', { line: 'Attention: 1 new, 2 acknowledged', counts: { new: 1, acknowledged: 2 }, digest: 'd', complete: true }, deps);
+  assert.equal(cache.sessionAttention('acme/app', deps).line, `Attention: 1 new, 2 acknowledged. Run ${expected} for the list`);
+});
+
+// Text kept on GitHub or in the evidence store is read on other computers, so it keeps a portable
+// name; every other `programme.cjs <command>` in Toolkit's scripts is built by programmeCommand.
+test('every programme.cjs hint a session on this computer reads is built by the shared helper', () => {
+  const allowed = [
+    [/^toolkit-programme-sweep-(?:action|gate)\.cjs$/, /./, 'the cloud sweep runs in GitHub Actions'],
+    [/./, /Usage: programme\.cjs|finding id that programme\.cjs attention lists/, 'usage text of the script itself'],
+    [/^programme-state\.cjs$/, /every programme\.cjs command refuses|Only programme\.cjs migrate-state --apply creates it/, 'says which command may act, not what to run'],
+    [/^programme-state\.cjs$/, /`programme\.cjs (?:trace|attention)\b|INVENTORY_INCOMPLETE: /, 'GitHub page and stored finding text'],
+    [/^programme-handover\.cjs$/, /Generated by `programme\.cjs handover`|`programme\.cjs trace \$\{issue\}\\?`/, 'the handover file in the evidence store'],
+  ];
+  const folders = [path.join(TOOLKIT_ROOT, 'repo', 'scripts'), ...fs.readdirSync(path.join(TOOLKIT_ROOT, 'skills')).map(name => path.join(TOOLKIT_ROOT, 'skills', name, 'scripts'))];
+  const bare = [];
+  let kept = 0;
+  for (const folder of folders.filter(dir => fs.existsSync(dir))) {
+    for (const name of fs.readdirSync(folder).filter(file => file.endsWith('.cjs'))) {
+      fs.readFileSync(path.join(folder, name), 'utf8').split('\n').forEach((line, index) => {
+        if (/^\s*(?:\/\/|\*)/.test(line) || !/programme\.cjs [a-z<-]/.test(line)) return;
+        if (allowed.some(([file, text]) => file.test(name) && text.test(line))) { kept += 1; return; }
+        bare.push(`${name}:${index + 1}`);
+      });
+    }
+  }
+  assert.deepEqual(bare, [], 'a bare programme.cjs hint: build it with programmeCommand');
+  assert.ok(kept > 0, 'the scan reads the scripts');
+  const handover = fs.readFileSync(path.join(TOOLKIT_ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-handover.cjs'), 'utf8');
+  assert.match(handover, /answer attention \(\\`node <Toolkit>\/\$\{[^}]*PROGRAMME_SCRIPT\} attention\\`\)/, 'the stored handover names the script from the Toolkit root');
 });
