@@ -6,11 +6,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs\" --hook --sync-enabled --write --sync-source claude-plugin"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs\" --hook --sync-enabled --write --sync-source claude-plugin",
+            "statusMessage": "Toolkit: checking for updates"
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event SessionStart"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event SessionStart",
+            "statusMessage": "Toolkit: checking for updates"
           }
         ]
       }
