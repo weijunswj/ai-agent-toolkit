@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { parseArgs, controllerCheck, format, main, SCRIPTS } = require('../scripts/toolkit-controller-check.cjs');
+const { parseArgs, controllerCheck, format, main, polishRows, SCRIPTS } = require('../scripts/toolkit-controller-check.cjs');
 
 const GOVERNED = { repository: 'acme/app', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'INT-7-' }] };
 const CLEAN = {
@@ -16,18 +16,27 @@ const CLEAN = {
   [SCRIPTS.refs]: { status: 0, stdout: 'SCRIPT REFERENCES: clear\n' },
 };
 
+const NOW = new Date('2026-11-14T12:00:00Z');
+// The local date the stale sweep stamps, whatever time zone the tests run in.
+const TODAY = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, '0')}-${String(NOW.getDate()).padStart(2, '0')}`;
+// By default the stale sweep already ran today for every repository the tests use.
+const SWEPT = { 'acme/app': { date: TODAY, at: '2026-11-14T01:00:00Z' }, 'acme/other': { date: TODAY, at: '2026-11-14T01:00:00Z' } };
+
 // A fake child-process runner: canned results per script, and every call recorded.
-function world({ results = {}, binding = GOVERNED, library = true, hub = null, git = null } = {}) {
+function world({ results = {}, binding = GOVERNED, library = true, hub = null, git = null, stamps = SWEPT, gh = null } = {}) {
   const calls = [];
+  const written = [];
   const deps = {
     run(script, args, options) { calls.push({ script, args, options }); return { stderr: '', error: null, ...(results[script] || CLEAN[script]) }; },
     exists: () => library,
     readBinding: checkout => (checkout ? binding : null),
     readHubState: () => hub,
     git(cwd, args) { calls.push({ git: args, cwd }); return { stderr: '', error: null, ...(git ? git(args) : { status: 1, stdout: '' }) }; },
-    now: () => new Date('2026-11-14T12:00:00Z'),
+    gh(args) { calls.push({ gh: args }); return { stderr: '', error: null, ...(gh ? gh(args) : { status: 4, stdout: '', stderr: 'gh not stubbed' }) }; },
+    stamp: { read: () => structuredClone(stamps), write: value => written.push(value) },
+    now: () => NOW,
   };
-  return { deps, calls };
+  return { deps, calls, written };
 }
 const run = (argv, setup) => {
   const { deps, calls } = world(setup);
@@ -40,7 +49,7 @@ const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md'
 test('a clean run prints one line and exits 0', () => {
   const { code, text } = run(ALL);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces ci footer refs; skipped: toolkit)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces stale ci footer refs; skipped: toolkit)\n');
 });
 
 test('checks are segregated by host and governance, and skip cleanly with the reason', () => {
@@ -49,9 +58,9 @@ test('checks are segregated by host and governance, and skip cleanly with the re
   for (const name of ['guidebook', 'instructions', 'memory', 'tasks']) {
     assert.deepEqual(chat.checks.find(check => check.name === name), { name, state: 'skipped', lines: ['Claude Projects only'] });
   }
-  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['programme', 'traces', 'ci', 'footer', 'refs']);
+  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['programme', 'traces', 'stale', 'ci', 'footer', 'refs']);
   const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
-  assert.deepEqual(off.checks.filter(check => check.state === 'skipped').map(check => `${check.name}: ${check.lines[0]}`).slice(-2), ['programme: governance off', 'traces: governance off']);
+  assert.deepEqual(off.checks.filter(check => check.state === 'skipped').map(check => `${check.name}: ${check.lines[0]}`).slice(-3), ['programme: governance off', 'traces: governance off', 'stale: governance off']);
   const none = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: null }).deps);
   assert.equal(none.checks.find(check => check.name === 'programme').lines[0], 'no programme binding in the checkout');
   assert.equal(none.checks.find(check => check.name === 'footer').lines[0], 'pass --repo <owner/name>');
@@ -73,7 +82,7 @@ test('findings print compactly: counts by code and the top items, full detail be
   const compact = run(ALL, { results });
   assert.equal(compact.code, 1);
   assert.deepEqual(compact.text.trimEnd().split('\n'), [
-    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer refs; skipped: toolkit)',
+    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces stale ci footer refs; skipped: toolkit)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
     `  ... 3 more (--expand, or ${require('../scripts/toolkit-user-state.cjs').programmeCommand('attention')})`,
@@ -169,16 +178,202 @@ test('--json prints the report as data', () => {
   const report = JSON.parse(text);
   assert.equal(report.host, 'projects');
   assert.equal(report.governed, true);
-  assert.equal(report.checks.length, 10);
+  assert.equal(report.checks.length, 11);
   assert.equal(format(report).split('\n')[0].startsWith('CONTROLLER CHECK: clear'), true);
 });
 
 test('a run where every check is skipped says nothing ran and exits 1, never clear', () => {
   const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
   assert.equal(code, 1);
-  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks programme traces ci footer refs\): pass the inputs each skipped check names/);
+  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks programme traces stale ci footer refs\): pass the inputs each skipped check names/);
   // With no inputs at all only the Toolkit's own script-reference check runs, which is not a clear run.
   const bare = run(['--host', 'chat']);
   assert.equal(bare.code, 1);
-  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks programme traces ci footer\)/);
+  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks programme traces stale ci footer\)/);
+});
+
+// The daily stale sweep, against a canned attention report and the parent's sub-issues.
+const issue = (number, extra = {}) => ({ number, title: `Task ${number}`, state: 'open', body: 'Nearest child: #1, a different script', created_at: '2026-11-01T00:00:00Z', sub_issues_summary: { total: 0, completed: 0 }, ...extra });
+const rowsBody = n => `# TASK\n\n### ROWS\n\n${Array.from({ length: n }, (_, i) => `- [ ] **P${i + 1}** fix it\n`).join('')}\n## DONE WHEN\n\n- [ ] Every row ticked.\n`;
+function sweep({ findings = [], children = [], stamps = {}, attention = null, gh = null } = {}) {
+  const results = { [SCRIPTS.programme]: attention || { status: 1, stdout: JSON.stringify({ line: 'Attention: 1 new', findings }) } };
+  const setup = world({ results, stamps, gh: gh || (() => ({ status: 0, stdout: children.map(child => JSON.stringify(child)).join('\n') })) });
+  const report = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), setup.deps);
+  return { check: report.checks.find(check => check.name === 'stale'), calls: setup.calls, written: setup.written };
+}
+
+test('the stale sweep lists children whose PRs merged for the controller to judge, and stamps the day with its list', () => {
+  const findings = [{ state: 'new', code: 'TASK_MERGED_OPEN', issue: 12 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 12 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 13 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 15 }, { state: 'new', code: 'STALE_PR', issue: 14 }];
+  const { check, calls, written } = sweep({ findings, children: [issue(12), issue(13), issue(15)] });
+  assert.equal(check.state, 'attention');
+  const judge = 'PR merged: check its DONE WHEN before it goes to the owner';
+  const rows = [`JUDGE? #12 ${judge} (READY_TO_CLOSE)`, `JUDGE? #13 ${judge} (READY_TO_CLOSE)`, `JUDGE? #15 ${judge} (TASK_MERGED_OPEN)`];
+  assert.deepEqual(check.lines.slice(1), rows);
+  assert.match(check.lines[0], /^3 rows \(\d{4}-\d{2}-\d{2}\): judge each JUDGE\? against its child's DONE WHEN/);
+  // Read only: attention without --refresh, and one paginated sub-issue read of the parent.
+  assert.deepEqual(calls.find(call => call.script === SCRIPTS.programme && call.args.includes('--json')).args, ['attention', '--json', '--repo-root', '/repo']);
+  assert.deepEqual(calls.filter(call => call.gh).map(call => call.gh.slice(0, 3)), [['api', '--paginate', 'repos/acme/app/issues/7/sub_issues?per_page=100']]);
+  assert.deepEqual(written, [{ 'acme/app': { date: TODAY, at: NOW.toISOString(), rows } }]);
+});
+
+// The stale check never proposes live work: an acknowledged finding (the controller's own hold), an
+// unchecked DONE WHEN row, an open sub-issue or a child it cannot read is held, not a JUDGE? row.
+test('the stale sweep holds done findings whose child is still live and never lists them to close', () => {
+  const doneWhen = '## DONE WHEN\n\n- [x] PR B lands\n- [ ] PR A lands\n\n## PLAN\n\n- [x] other\n';
+  const children = [issue(30), issue(31), issue(32, { body: doneWhen }), issue(33, { sub_issues_summary: { total: 2, completed: 1 } }), issue(35, { state: 'closed' }), issue(36, { body: '## DONE WHEN\n\n- [x] all done\n' })];
+  const findings = [
+    { state: 'acknowledged', code: 'READY_TO_CLOSE', issue: 30, due: '2026-11-15T08:00:00Z', promised: 'Not closing: slice 2 unbuilt' },
+    { state: 'acknowledged', code: 'TASK_MERGED_OPEN', issue: 31 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 32 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 33 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 34 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 35 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 36 },
+  ];
+  const { check } = sweep({ findings, children });
+  assert.equal(check.lines.some(line => /^(CLOSE|JUDGE)\? #(30|31|32|33|34|35) /.test(line)), false, check.lines.join('\n'));
+  assert.deepEqual(check.lines.slice(1), [
+    'JUDGE? #36 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)',
+    'held, not proposed: #30 acknowledged, #32 1 unchecked DONE WHEN row(s), #33 1 open sub-issue(s), #34 not a sub-issue of a registered parent, #35 already closed, #31 acknowledged',
+  ]);
+  assert.match(check.lines[0], /^1 row \(/);
+  // All held: nothing to put to the owner, and the held line still says why.
+  const none = sweep({ findings: findings.slice(0, 2), children }).check;
+  assert.equal(none.state, 'ok');
+  assert.match(none.lines[0], /^no stale children .*; held, not proposed: #30 acknowledged, #31 acknowledged$/);
+});
+
+// Live-shaped children: most write DONE WHEN as plain text and keep their hold in the reconciler's
+// `Kept open:` line or in an acknowledgement note that lapses after its due time (the finding turns
+// `new` again, keeping its due and note). Neither may reach the owner as done, and no programme
+// finding is ever called done: a merged PR is a JUDGE? row the controller checks against DONE WHEN.
+const graph = (n, kept = '') => `<!-- programme-state child=${n}@45 -->\n<!-- Task status: IN PROGRESS -->\n# PR GRAPH\n\n| PR Task | PR # | Status | Merged SHA |\n|---|---|---|---|\n|\`Slice A\`|#1176|MERGED|[b2dde08](x)|\n${kept ? `\n${kept}\n` : ''}`;
+const plainDoneWhen = '# TASK\n\n## DONE WHEN\n\n- A green scheduled cloud sweep is recorded first.\n- Setup makes no Windows task call.\n\n# PLAN\n\nSlices 0, A, B, C.\n\n';
+const LIVE_SHAPED = [
+  // #886 and #827: plain DONE WHEN bullets, held by the reconciler's Kept open line.
+  issue(886, { body: `${plainDoneWhen}${graph(886, 'Kept open: Closes once child 1164 completes (since 2026-11-18 08:13Z)')}` }),
+  issue(827, { body: `${plainDoneWhen}${graph(827, 'Kept open: Waits for the proof run; then close with the owner\'s OK. (since 2026-11-16 02:34Z)')}` }),
+  // #473: a "Complete when" heading, held by Kept open.
+  issue(473, { body: `# PATH\n\n${graph(473, 'Kept open: Lows moved to 1275; close 473 after 1275 lands (since 2026-11-18 09:22Z)')}\n# W1\n\n## Complete when\n\n- Source watch conforms.\n` }),
+  // #1030: a prose Done when: paragraph, held only by the controller's lapsed acknowledgement note.
+  issue(1030, { body: `# PATH\n\n${graph(1030)}\n# AGENT CONTEXT\n\nDone when: a train lands that member with the markers rebuilt, and tests cover both cases.\n` }),
+  // #759: no DONE WHEN at all, held only by the lapsed note.
+  issue(759, { body: `# PATH\n\n${graph(759)}\n# Toolkit 4.0\n\n## Folded jobs\n\n- several\n` }),
+  // #893: checkbox DONE WHEN rows and Kept open.
+  issue(893, { body: `# TASK\n\n## DONE WHEN\n\n- [ ] Slice 2 lands.\n- [x] Slice 1 lands.\n\n${graph(893, 'Kept open: Slice 2 unbuilt (since 2026-11-18 06:27Z)')}` }),
+  // A child with nothing holding it: its merged PR is still only a judgement.
+  issue(901, { body: `# TASK\n\n## DONE WHEN\n\n- Everything lands.\n\n${graph(901)}` }),
+];
+const LAPSED = { due: '2026-11-21T08:00:00Z', overdue: true };
+
+test('red: a live-shaped child kept open or under a lapsed hold is never put to the owner as done', () => {
+  const findings = [
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 886 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 827 },
+    { state: 'new', code: 'TASK_MERGED_OPEN', issue: 473 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 1030, ...LAPSED, promised: 'Not closing: slice 2 unbuilt' },
+    { state: 'new', code: 'TASK_MERGED_OPEN', issue: 759, ...LAPSED, promised: 'Plan the 4.0 slices' },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 893 },
+    { state: 'new', code: 'READY_TO_CLOSE', issue: 901 },
+  ];
+  const { check } = sweep({ findings, children: LIVE_SHAPED });
+  assert.equal(check.lines.slice(1).some(line => /^CLOSE\?|\bdone\b/.test(line) && !line.startsWith('held')), false, check.lines.join('\n'));
+  assert.deepEqual(check.lines.slice(1), [
+    'JUDGE? #901 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)',
+    'held, not proposed: #886 Kept open line, #827 Kept open line, #1030 hold lapsed at 2026-11-21T08:00:00Z (Not closing: slice 2 unbuilt), #893 Kept open line, #473 Kept open line, #759 hold lapsed at 2026-11-21T08:00:00Z (Plan the 4.0 slices)',
+  ]);
+  assert.match(check.lines[0], /^1 row \(\d{4}-\d{2}-\d{2}\): judge each JUDGE\? against its child's DONE WHEN, PR GRAPH and notes; only children judged done go on the owner's one approve list, with the other rows and obsolete children$/);
+});
+
+test('red: a Kept open line only counts at the start of a line', () => {
+  const quoted = issue(902, { body: `# TASK\n\nSome children say Kept open: when the controller holds them.\n\n${graph(902)}` });
+  const { check } = sweep({ findings: [{ state: 'new', code: 'READY_TO_CLOSE', issue: 902 }], children: [quoted] });
+  assert.deepEqual(check.lines.slice(1), ['JUDGE? #902 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)']);
+});
+
+test('a second run on the same day says so and reads nothing', () => {
+  const { check, calls, written } = sweep({ stamps: { 'acme/app': { date: TODAY, at: '2026-11-14T01:00:00Z' } }, findings: [{ code: 'READY_TO_CLOSE', issue: 12 }] });
+  assert.deepEqual(check, { name: 'stale', state: 'ok', lines: [`ran today (${TODAY})`] });
+  assert.equal(calls.some(call => call.gh || (call.script === SCRIPTS.programme && call.args.includes('--json'))), false);
+  assert.deepEqual(written, []);
+  // Another repository's stamp, or yesterday's, does not count.
+  assert.equal(sweep({ stamps: { 'acme/other': { date: TODAY, at: '2026-11-14T01:00:00Z' } } }).written.length, 1);
+  assert.equal(sweep({ stamps: { 'acme/app': { date: '2026-11-13', at: '2026-11-13T01:00:00Z' } } }).written.length, 1);
+});
+
+test('compact output prints every stale row, and a same-day run shows the day\'s list again', () => {
+  const children = Array.from({ length: 6 }, (_, i) => issue(50 + i, { body: 'No reason given', created_at: '2026-11-14T02:00:00Z' }));
+  const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [] }) } };
+  const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: children.map(child => JSON.stringify(child)).join('\n') }) });
+  let kept = {};
+  setup.deps.stamp = { read: () => structuredClone(kept), write: value => { kept = value; } };
+  const argv = ['--host', 'chat', '--checkout', '/repo', '--skip', 'toolkit,programme,traces,ci,footer,refs'];
+  const first = format(controllerCheck(parseArgs(argv), setup.deps));
+  const rows = children.map(child => `  FOLD? #${child.number} new under #7 with no Nearest child: line`);
+  assert.deepEqual(first.split('\n').filter(line => line.startsWith('  ')), rows);
+  assert.doesNotMatch(first, /more \(--expand/);
+  const again = controllerCheck(parseArgs(argv), setup.deps).checks.find(check => check.name === 'stale');
+  assert.equal(again.state, 'attention');
+  assert.match(again.lines[0], /^6 rows \(\d{4}-\d{2}-\d{2}, swept at 2026-11-14T12:00:00.000Z, shown again\): judge each JUDGE\? /);
+  assert.deepEqual(again.lines.slice(1), rows.map(row => row.trim()));
+  assert.equal(setup.calls.filter(call => call.gh).length, 1);
+});
+
+test('a stamp that cannot be written fails the stale line only, keeping its rows', () => {
+  const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [] }) } };
+  const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: JSON.stringify(issue(60, { body: 'none', created_at: '2026-11-14T02:00:00Z' })) }) });
+  setup.deps.stamp = { read: () => ({}), write: () => { throw new Error('EACCES: permission denied'); } };
+  const report = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), setup.deps);
+  assert.deepEqual(report.checks.find(check => check.name === 'stale'), { name: 'stale', state: 'failed', lines: ['stamp not written (EACCES: permission denied); the next run sweeps again', 'FOLD? #60 new under #7 with no Nearest child: line'] });
+  assert.equal(report.checks.find(check => check.name === 'ci').state, 'ok');
+});
+
+test('a child opened since the last sweep with no Nearest child: line is a fold candidate', () => {
+  const stamps = { 'acme/app': { date: '2026-11-13', at: '2026-11-13T09:00:00Z' } };
+  const children = [
+    issue(20, { body: 'No reason given', created_at: '2026-11-14T02:00:00Z' }),
+    issue(21, { created_at: '2026-11-14T02:00:00Z' }),
+    issue(22, { body: 'Older than the last sweep', created_at: '2026-11-12T00:00:00Z' }),
+    issue(23, { body: 'Closed', state: 'closed', created_at: '2026-11-14T02:00:00Z' }),
+  ];
+  const { check } = sweep({ stamps, children });
+  assert.deepEqual(check.lines.slice(1), ['FOLD? #20 new under #7 with no Nearest child: line']);
+});
+
+test('a closed child holding open work is a move candidate', () => {
+  const children = [issue(30, { state: 'closed', sub_issues_summary: { total: 3, completed: 1 } }), issue(31, { state: 'closed', sub_issues_summary: { total: 2, completed: 2 } })];
+  assert.deepEqual(sweep({ children }).check.lines.slice(1), ['MOVE? #30 closed under #7 with 2 open sub-issue(s): move them to the parent so it detaches']);
+});
+
+test('the polish child is flagged full at 8 rows and over cap above 8 or when a second one is open', () => {
+  const full = sweep({ children: [issue(40, { title: 'Polish 1: leftovers', body: rowsBody(8) })] }).check;
+  assert.deepEqual(full.lines.slice(1), ['POLISH FULL #40: 8 rows (ROWS): ship it as one PR, then open a fresh one']);
+  const over = sweep({ children: [issue(41, { title: 'Polish 2: more', body: rowsBody(9) }), issue(42, { title: 'polish 3', body: rowsBody(2) })] }).check;
+  assert.deepEqual(over.lines.slice(1), ['POLISH OVER CAP: 2 open polish children (#41, #42); keep one', 'POLISH OVER CAP #41: 9 rows (ROWS), cap 8']);
+  assert.deepEqual(sweep({ children: [issue(43, { title: 'Polish 4', body: rowsBody(7) }), issue(44, { title: 'Polishing the docs', body: rowsBody(9) })] }).check.lines,
+    [`no stale children (${TODAY}, 2 children read)`]);
+  // Rows are counted under ROWS, else DONE WHEN, and the count says which.
+  assert.deepEqual(polishRows(rowsBody(3)), { rows: 3, under: 'ROWS' });
+  assert.deepEqual(polishRows('## DONE WHEN\n\n- [x] one\n- [ ] two\n\n# PLAN\n\n- [ ] not a row\n'), { rows: 2, under: 'DONE WHEN' });
+  assert.deepEqual(polishRows('Just text'), { rows: 0, under: 'no ROWS or DONE WHEN heading' });
+});
+
+test('a sweep that cannot read programme attention or the sub-issues fails and writes no stamp', () => {
+  const unknown = sweep({ attention: { status: 1, stdout: JSON.stringify({ line: 'Attention: unknown (gh not signed in)', reason: 'gh not signed in' }) } });
+  assert.deepEqual(unknown.check, { name: 'stale', state: 'failed', lines: ['programme attention: Attention: unknown (gh not signed in); no stamp written'] });
+  assert.deepEqual(unknown.written, []);
+  const ghDown = sweep({ gh: () => ({ status: 1, stdout: '', stderr: 'HTTP 401: Bad credentials\n' }) });
+  assert.deepEqual(ghDown.check, { name: 'stale', state: 'failed', lines: ['#7 sub-issues: HTTP 401: Bad credentials; no stamp written'] });
+  assert.deepEqual(ghDown.written, []);
+  assert.equal(sweep({ gh: () => ({ status: 0, stdout: 'not json\n' }) }).written.length, 0);
+});
+
+test('the stale sweep runs only with governance on and a repository, and --skip stale leaves it out', () => {
+  const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
+  assert.deepEqual(off.checks.find(check => check.name === 'stale').lines, ['governance off']);
+  const norepo = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { governance: 'enabled', parents: [] } }).deps);
+  assert.deepEqual(norepo.checks.find(check => check.name === 'stale').lines, ['pass --repo <owner/name>']);
+  const skipped = run(['--host', 'chat', '--checkout', '/repo', '--skip', 'stale']);
+  assert.equal(skipped.calls.some(call => call.gh), false);
+  assert.equal(parseArgs(['--stale-stamp', '/tmp/s.json']).staleStamp, '/tmp/s.json');
 });

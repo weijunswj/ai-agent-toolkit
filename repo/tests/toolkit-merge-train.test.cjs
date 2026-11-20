@@ -316,6 +316,9 @@ test('body lists every member with one Bump line, the strictest UAT line and eve
   assert.match(text, /^Bump: minor$/m);
   assert.match(text, /^UAT: OWNER_TEST_NEEDED \(each member's own test after the merge: #2\)$/m);
   assert.equal(text.match(/^UAT: /gm).length, 1);
+  // The body check's agent UAT rule holds for a train with an owner-test member, and only there.
+  assert.match(text, /^Agent UAT: PASSED \(each owner-test member's own line: #2\)$/m);
+  assert.deepEqual(require('../scripts/toolkit-pr-body.cjs').lineProblems(text, { toolkit: true }), []);
   assert.match(text, /^Refs #101 \(member #1, UAT: NOT_REQUIRED\)$/m, 'each link line names its member and that member\'s own UAT state');
   assert.doesNotMatch(text, /^(Closes|Fixes|Resolves) /m, 'no closing line on a train that waits on an owner test');
   assert.match(text, /^Refs #7 \(member #2, UAT: OWNER_TEST_NEEDED; closed by #2's own closing line when the train lands\)$/m);
@@ -324,6 +327,7 @@ test('body lists every member with one Bump line, the strictest UAT line and eve
   const quiet = train.body(train.checkManifest({ members: [f.member(3, '3'.repeat(40), { bump: 'none', uat: 'UAT: PASSED (owner OK)' })] }));
   assert.match(quiet, /^Bump: none$/m);
   assert.match(quiet, /^UAT: NOT_REQUIRED \(no member needs an owner test: #3\)$/m);
+  assert.doesNotMatch(quiet, /^Agent UAT:/m);
   const closing = train.body(train.checkManifest({ members: [f.member(4, '4'.repeat(40), { links: ['Closes #8'] })] }));
   assert.match(closing, /^Closes #8 \(member #4, UAT: NOT_REQUIRED\)$/m, 'a train with no owner test keeps its closing lines');
   const { closingReferences } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
