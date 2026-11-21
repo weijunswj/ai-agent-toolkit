@@ -741,8 +741,8 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
   const f=fixture(); pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD}));
   owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD}}));
   f.run();
-  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT on PR #22']);
-  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · merged, awaiting proof · agent UAT on PR #22');
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT on PR #22, not started']);
+  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · merged, awaiting proof · agent UAT on PR #22, not started');
   assert.doesNotMatch(f.github.issues.get(1).body,/waiting on you/);
   assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])),[]);
   // The agent's FAILED result keeps it the agent's; its PASS hands the UAT to the owner.

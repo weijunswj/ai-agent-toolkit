@@ -419,6 +419,18 @@ function requireGateWriter(context, parentDoc, child, outcome) {
   return requireParentHolder(context, parentDoc);
 }
 
+// Agent UAT starts as each PR lands, in parallel with the gate lane: a new G0 or G1 assignment
+// (assign, or reopening an accepted gate) is refused while a landed task's agent UAT has not started
+// (state.unstartedAgentUats, which reads each flagged task again). Nothing is written. G2 never waits,
+// and a started UAT, however long, never blocks.
+function refuseUnstartedAgentUat(context, parentDoc, role) {
+  if (!['G0', 'G1'].includes(role)) return;
+  const waiting = state.unstartedAgentUats(parentDoc, issue => context.store.read('child', issue).doc);
+  if (!waiting.length) return;
+  const named = waiting.map(entry => `#${entry.issue} at ${entry.head.slice(0, 7)}`).join(', ');
+  throw new ProgrammeError('AGENT_UAT_UNSTARTED', `${role} not assigned: the agent UAT of ${named} has not started. Controller: start it now in its own lane, in parallel with the gate lane, and record its start (update --issue <n> --patch with private.agent_uat state STARTED, at_head <the full head> and where it runs), then assign again; or dispose --finding ${waiting.map(entry => entry.id).join(' / ')} --reason <why>. A started agent UAT never blocks.`);
+}
+
 function outcomeFor(parentDoc, issue) {
   const outcome = parentDoc.outcomes.find(entry => entry.issue === issue);
   if (!outcome) throw usage(`#${issue} is not in the outcome catalogue of #${parentDoc.parent_issue}.`);
@@ -989,7 +1001,10 @@ const commands = {
     const parentDoc = readParent(context);
     const outcome = outcomeFor(parentDoc, args.issue);
     const attention = showAttention(parentDoc, args, deps);
-    const writer = requireGateWriter(context, parentDoc, context.store.read('child', args.issue).doc, outcome);
+    const current = context.store.read('child', args.issue).doc;
+    const writer = requireGateWriter(context, parentDoc, current, outcome);
+    // An assignment already issued (a repeated order) is not a new gate start.
+    if (current?.gate?.assignment?.id !== args.assignment) refuseUnstartedAgentUat(context, parentDoc, args.role);
     const files = context.store.listJournals(args.issue);
     let dropped = [];
     const result = context.store.mutate('child', args.issue, {
@@ -1006,6 +1021,9 @@ const commands = {
   reopen(args, context) {
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
+    // Reopening an accepted gate opens a new assignment of its role; sending a return back does not.
+    const gate = context.store.read('child', args.issue).doc?.gate;
+    if (gate?.state === 'RETIRED') refuseUnstartedAgentUat(context, parentDoc, gate.role);
     const files = context.store.listJournals(args.issue);
     let dropped = [];
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => {

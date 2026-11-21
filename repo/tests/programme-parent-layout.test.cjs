@@ -339,7 +339,7 @@ test('merged and waiting on the owner with a UAT owed: the status says merged an
   const t = mergedFixture();
   const child = t.merge(501, { lifecycle: 'WAITING_OWNER' });
   Object.assign(child.uat, { state: 'PENDING', at_head: MERGED_HEAD });
-  assert.equal(t.board(501), 'NOW · AGENT UAT | Agent: UAT on PR #3501', 'the agent\'s UAT comes first');
+  assert.equal(t.board(501), 'NOW · AGENT UAT | Agent: UAT on PR #3501, not started', 'the agent\'s UAT comes first');
   agentPassed(child);
   assert.equal(t.board(501), `${MERGED} | Owner: UAT on PR #3501`);
 });

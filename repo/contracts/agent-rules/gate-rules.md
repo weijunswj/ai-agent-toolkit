@@ -30,7 +30,7 @@ A gate works in the primary checkout unless it needs its own worktree, then uses
 ## UAT
 
 - G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding.
-- Agent UAT passes each step a tool reaches before owner UAT gets the rest; on a delta, rerun only the affected rows.
+- Agent UAT starts as each PR lands, in parallel with the gate lane: it never waits behind a build, and a long one never holds the lane. It passes each step a tool reaches before owner UAT gets the rest; on a delta, rerun only the affected rows.
 - **Owner test after merge:** owner UAT never holds a merge. An `OWNER_TEST_NEEDED` PR merges on G2 PASS and green CI; the controller records UAT PENDING on each `Refs` task at merge, open until the owner's OK on the installed build; a failure gets a fix-forward or revert PR.
 - **One real-host round per release:** CI's Linux and Windows runs cover each PR; the qualification matrix and real-host smoke run once per release batch, after its merges, on the installed build, before the owner tests. On a delta, run the rows whose code changed plus one smoke row per mode.
 - A new SHA alone does not invalidate UAT: supply impact evidence and record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED.
@@ -38,8 +38,6 @@ A gate works in the primary checkout unless it needs its own worktree, then uses
 ## G2 review
 
 G2 starts after the working result (owner UAT follows the merge), in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers rate findings: High breaks an agreed criterion or the safety floor; Medium is a plausible supported-path break, missing needed proof or an unexplained loosening (below); both block only with proof: a failing test or a supported-path trace with the reason (missing proof: name what is absent). An unproven Medium becomes Low; an unproven High goes to the owner's card and does not block alone. Low is the rest and never blocks: the builder fixes a one-line Low in the PR's files with its next round, else it joins the polish child. G2 scans every commit, title and body of a PR for personal data, confirms the body's `UAT:` line (git-completion playbook), and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
-
-Windows Codex review briefs name the temp root, local tests and authorised network commands, owner and exact-SHA evidence. Use the [recipe](../../docs/HOST-CONTRACT.md#review-cli-permissions): confirm elevated; set temp variables inside review commands. Missing required results block acceptance; reviewers retain full responsibility.
 
 - **No-weakening proof:** for changed detection or guard code, run base tests and fixtures on the head; each case blocked or flagged on base and now allowed needs a stated reason.
 - **Early returns keep the guards:** every early return or fast path in changed code must still run the generic guards first (identity, path, secret, personal-data, approval), or show they are not needed, with a test.

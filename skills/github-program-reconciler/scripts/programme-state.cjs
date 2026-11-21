@@ -368,7 +368,7 @@ const FINDING_ID = /^[0-9a-f]{12}$/;
 const ATTENTION_KEEP = 200;
 const ATTENTION_LIMIT = 500;
 // Codes whose finding speaks for one PR head; a new head is a new finding.
-const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED']);
+const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED']);
 const FINDING_CODES = Object.freeze({
   // reconcile source: what the reconciler reports but never changes itself.
   ISSUE_MISSING: { source: 'reconcile', next_action: 'Controller: fix or remove the catalogue entry; the issue cannot be read or is a pull request' },
@@ -403,6 +403,7 @@ const FINDING_CODES = Object.freeze({
   BATCH_NEXT: { source: 'reconcile', queue: true, next_action: "Controller: no NOW task needs a gate lane. Start the batch's next task (picked tasks lead LATER); if none is left, read all of LATER and pick the next batch: top priority, then quickest, at most 6 PRs and one large task; set their order to lead LATER and record the pick" },
   QUEUED_BUT_MOVING: { source: 'reconcile', queue: true, next_action: 'Controller: queue the gate\'s missed `assign` (it drops the lane wait), or dispose with a reason if no gate is working it' },
   TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
+  AGENT_UAT_UNSTARTED: { source: 'reconcile', queue: true, next_action: 'Controller: start this task\'s agent UAT now in its own lane, in parallel with the gate lane, and record its start (update --patch, private.agent_uat state STARTED); until then a new G0 or G1 assignment is refused. Or dispose with a reason' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: the sweep records a single open PR from this repository itself; for several PRs, a fork or bot PR, or a finished task, pick the PR and record it with update --patch, or dispose of the finding' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -958,11 +959,12 @@ function validatePrHeads(errors, heads) {
   `private.pr_heads must list at most ${PR_HEADS_LIMIT} different heads, each as a PR number and its full head SHA`);
 }
 
-// The agent's UAT result on an owed UAT (agent UAT first): PASSED, FAILED or OWNER_ONLY (no step a
-// tool can reach; the evidence says why), at the full head SHA of the UAT it ran, with its evidence,
-// normally an evidence store path. Only the controller writes it (applyPatch). Like pr_heads it lives
-// in the child's private part, so older Toolkit readers still load the document.
-const AGENT_UAT_STATES = Object.freeze(['PASSED', 'FAILED', 'OWNER_ONLY']);
+// The agent's UAT on an owed UAT (agent UAT first): STARTED (running; the evidence says where), then
+// its result PASSED, FAILED or OWNER_ONLY (no step a tool can reach; the evidence says why), at the
+// full head SHA of the owed UAT, with its evidence, normally an evidence store path. Only the
+// controller writes it (applyPatch). Like pr_heads it lives in the child's private part, so older
+// Toolkit readers still load the document. STARTED keeps the UAT the agent's (uatOwer).
+const AGENT_UAT_STATES = Object.freeze(['STARTED', 'PASSED', 'FAILED', 'OWNER_ONLY']);
 // Agent results that hand an owed UAT to the owner.
 const AGENT_UAT_HANDED = Object.freeze(['PASSED', 'OWNER_ONLY']);
 function validateAgentUat(errors, record) {
@@ -2038,6 +2040,34 @@ function agentUatDue(outcome, child) {
   return awaitingProof(outcome, child) && uatOwer(child) === 'agent';
 }
 
+// The head of a landed task's owed agent UAT that has not started, or null: the agent owes it
+// (agentUatDue) at a recorded head and nothing is recorded at that head (a record at an older head
+// does not count). AGENT_UAT_UNSTARTED flags it and a new G0 or G1 assignment waits for it
+// (unstartedAgentUats); its start (STARTED) or any result clears it.
+function agentUatUnstarted(outcome, child) {
+  if (!child || !agentUatDue(outcome, child) || !isSha(child.uat.at_head)) return null;
+  return agentUatAt(child, child.uat.at_head) === null ? child.uat.at_head : null;
+}
+
+// The agent UATs a new G0 or G1 assignment waits for: each open AGENT_UAT_UNSTARTED finding on the
+// parent whose task, read again now (`readChild`), still owes an unstarted agent UAT at the finding's
+// head. A start recorded since the last pass lets the assignment through at once; a disposed finding
+// (its reason kept) never blocks. Returns [{ id, issue, head }].
+function unstartedAgentUats(parentDoc, readChild) {
+  const outcomes = new Map((parentDoc?.outcomes || []).map(outcome => [outcome.issue, outcome]));
+  return openFindings(parentDoc?.attention || []).filter(entry => entry.code === 'AGENT_UAT_UNSTARTED' && outcomes.has(entry.issue) && isSha(entry.head))
+    .filter(entry => agentUatUnstarted(outcomes.get(entry.issue), readChild(entry.issue)) === entry.head)
+    .map(entry => ({ id: entry.id, issue: entry.issue, head: entry.head }));
+}
+
+// How far a landed task's owed agent UAT has got, for the graph and the task page: `started` once
+// STARTED is recorded at the owed head, `not started` while AGENT_UAT_UNSTARTED holds, else null.
+function agentUatProgress(outcome, child) {
+  if (uatOwer(child) !== 'agent') return null;
+  if (agentUatAt(child, child.uat.at_head) === 'STARTED') return 'started';
+  return outcome && agentUatUnstarted(outcome, child) ? 'not started' : null;
+}
+
 // True when a task in progress has only proof left: its tracked task PR merged, no task PR is open
 // or draft, no blocker is listed and no gate is still at it (none, or its gate RETIRED; an assigned,
 // active, submitted, owner-waiting or interrupted gate keeps the task in progress). The issue stays
@@ -2123,7 +2153,8 @@ function ownerStep(outcome, child) {
 function agentStep(outcome, child) {
   if (!child || isFinished(outcome, child) || child.blockers?.length || ownerStep(outcome, child) || uatOwer(child) !== 'agent') return null;
   const uat = owedUat(child);
-  const ask = agentUatAt(child, child.uat.at_head) === 'FAILED' ? uat.replace(/^UAT/, 'UAT failed') : uat;
+  const progress = agentUatProgress(outcome, child);
+  const ask = agentUatAt(child, child.uat.at_head) === 'FAILED' ? uat.replace(/^UAT/, 'UAT failed') : progress ? `${uat}, ${progress}` : uat;
   return { ask, after: gateAtWork(child) ? publicText(child.gate.role) : null };
 }
 
@@ -2296,7 +2327,7 @@ function pageTitles(body) {
   for (const match of block.body.matchAll(/^\|`((?:\\\||[^`|])*)`\|#([1-9][0-9]*)\|/gm)) titles.set(Number(match[2]), match[1].replace(/\\\|/g, '|'));
   return titles;
 }
-function prGraphLines(child, titles = null) {
+function prGraphLines(child, titles = null, outcome = null) {
   const listed = child.prs || [];
   const tracked = child.pr?.number && !listed.some(pr => pr.number === child.pr.number)
     ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
@@ -2307,7 +2338,8 @@ function prGraphLines(child, titles = null) {
   const owed = OWED_UAT_STATES.includes(child.uat?.state);
   const trackedPr = child.pr?.number ?? null;
   const uatOn = owed && isSha(child.uat.at_head) ? uatPr(child) : trackedPr;
-  const uat = owed ? `${uatOwer(child) === 'owner' ? 'Owner' : 'Agent'} UAT owed${uatOn === null && isSha(child.uat.at_head) ? ` at ${shortSha(child.uat.at_head)}` : ''}` : '';
+  const progress = owed ? agentUatProgress(outcome, child) : null;
+  const uat = owed ? `${uatOwer(child) === 'owner' ? 'Owner' : 'Agent'} UAT owed${progress ? `, ${progress}` : ''}${uatOn === null && isSha(child.uat.at_head) ? ` at ${shortSha(child.uat.at_head)}` : ''}` : '';
   const apart = uat && uatOn !== trackedPr;
   const task = [gate, apart ? '' : uat].filter(Boolean);
   if (!all.length) return [task.length ? ['None yet', ...task].join(' · ') : 'None yet.'];
@@ -2342,7 +2374,7 @@ function renderChildBlockBody(child, outcome, titles = null) {
     `<!-- Task status: ${status}${uat} -->`,
     '# PR GRAPH',
     '',
-    ...prGraphLines(child, titles),
+    ...prGraphLines(child, titles, outcome),
     ...kept,
   ].join('\n');
 }
@@ -5765,6 +5797,26 @@ class Reconciler {
     }
   }
 
+  // Work queue: AGENT_UAT_UNSTARTED, a landed task whose owed agent UAT has not started
+  // (agentUatUnstarted), bound to the owed UAT's head. Agent UAT starts as each PR lands, in parallel
+  // with the gate lane, so there is no quiet wait. It clears once the start (STARTED) or a result is
+  // recorded at that head, the UAT is no longer owed, or the head moves (a new finding). An open one
+  // makes a new G0 or G1 assignment wait (unstartedAgentUats). A pass that could not read every open
+  // PR raises none, since an unread open PR could mean the task has not landed.
+  diffAgentUat(parent, docs, observed, only, findings) {
+    if (observed.prGraph?.openComplete === false) return;
+    for (const outcome of parent.outcomes) {
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
+      if (observed.issues.get(outcome.issue)?.state === 'closed') continue;
+      const doc = docs.get(outcome.issue);
+      const head = agentUatUnstarted(outcome, doc);
+      if (!head) continue;
+      const pr = uatPr(doc);
+      findings.push({ code: 'AGENT_UAT_UNSTARTED', issue: outcome.issue, head,
+        detail: `landed, and its agent UAT on ${pr ? `PR #${pr}` : `head ${shortSha(head)}`} has not started. Controller: start it now in its own lane, in parallel with the gate lane, and record its start (update --issue ${outcome.issue} --patch with private.agent_uat state STARTED, at_head ${head} and where it runs); until then a new G0 or G1 assignment is refused. Or dispose with a reason` });
+    }
+  }
+
   // Work queue, batch rule (delivery contract section 3): lanes finish the NOW batch before LATER work
   // starts. BATCH_NEXT, on the parent, says a lane is free for LATER work: the graph has an open LATER
   // task and no open NOW task still needs a gate lane. A NOW task needs none when it waits on the owner
@@ -6745,6 +6797,7 @@ class Reconciler {
     this.diffIdle(parent, desiredDocs, observed, only, findings);
     this.diffQueuedMoving(parent, projected, observed, only, findings);
     this.diffBatch(parent, desiredDocs, observed, only, findings);
+    this.diffAgentUat(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
@@ -7992,7 +8045,7 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
-  evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, uatOwer, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, uatOwer, agentUatUnstarted, unstartedAgentUats, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
