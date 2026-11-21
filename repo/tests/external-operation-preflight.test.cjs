@@ -11,7 +11,7 @@ const skillRoot = path.join(repoRoot, 'skills', 'external-operation-preflight');
 const checkerPath = path.join(skillRoot, 'scripts', 'preflight-check.cjs');
 const examplePath = path.join(skillRoot, 'templates', 'operation-plan.example.json');
 const {
-  BACKUP_LEVELS, NON_PRODUCTION_WORDS, PLAN_SCHEMA, PRODUCTION_WORDS, REASONS, TEMPORARY_WORDS, TRIGGERS, checkPlan, planHash
+  BACKUP_LEVELS, NON_PRODUCTION_WORDS, PLAN_SCHEMA, PRODUCTION_WORDS, REASONS, ROUTES, TEMPORARY_WORDS, TRIGGERS, checkPlan, planHash
 } = require(checkerPath);
 
 const NOW = Date.parse('2026-10-25T00:00:00Z');
@@ -459,6 +459,7 @@ test('routes: fallback rules', async (t) => {
   const first = { route: 'mcp', target: 'app', privilege: 'deploy', credential: 'PLATFORM_ALPHA_TOKEN', effect: 'deploy' };
   const rows = [
     { name: 'one selected route', routes: [{ ...first, outcome: 'selected', pre_approved: true }], verdict: 'ALLOW', codes: [] },
+    { name: 'one selected ssh route', routes: [{ ...first, route: 'ssh', outcome: 'selected', pre_approved: true }], verdict: 'ALLOW', codes: [] },
     {
       name: 'pre-approved fallback after a failure before any effect',
       routes: [{ ...first, outcome: 'failed_before_effect' }, { ...first, route: 'api', outcome: 'selected', pre_approved: true }],
@@ -716,7 +717,7 @@ test('remaining refusal rules each have a row', async (t) => {
       plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: ['app'] }, targets, resources }),
       codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.RESOURCE_IDENTITY_MISMATCH, REASONS.ROLLBACK_EVIDENCE_MISSING]
     })),
-    { name: 'selected route with an unknown name', plan: plan({ routes: [{ ...first, route: 'ssh', outcome: 'selected', pre_approved: true }] }), codes: [REASONS.PLAN_INVALID] }
+    { name: 'selected route with an unknown name', plan: plan({ routes: [{ ...first, route: 'telnet', outcome: 'selected', pre_approved: true }] }), codes: [REASONS.PLAN_INVALID] }
   ];
   for (const row of rows) {
     await t.test(row.name, () => {
@@ -768,6 +769,8 @@ test('skill text stays within its budget and names every reason the checker can 
   assert.deepEqual(listed('has a production word ('), [...PRODUCTION_WORDS], 'SKILL.md production words should match the checker');
   assert.deepEqual(listed('none of these words: '), [...NON_PRODUCTION_WORDS], 'SKILL.md non-production words should match the checker');
   assert.deepEqual(listed('whose name has '), [...TEMPORARY_WORDS], 'SKILL.md temporary words should match the checker');
+  const routeLine = skill.split('\n').find((entry) => entry.includes('**Pick the route**')) || '';
+  assert.deepEqual([...routeLine.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]), [...ROUTES], 'SKILL.md routes should match the checker, in order');
   const contract = fs.readFileSync(path.join(skillRoot, 'references', 'backup-and-recovery.md'), 'utf8');
   for (const claim of ['configured', 'local copy made', 'uploaded', 'retrievable', 'database recoverable', 'fully recoverable', 'unlimited']) {
     assert.ok(contract.includes(claim), `backup contract should state the "${claim}" level`);
