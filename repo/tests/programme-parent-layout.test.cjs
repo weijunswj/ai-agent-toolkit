@@ -14,6 +14,8 @@ const { renderScaleFixture } = require('./support/programme-render-scale.cjs');
 const HEADER = '| Task | Child # | Status | Waiting on | Last Updated (SGT) |';
 const cellsOf = row => row.slice(1, -1).split(/(?<!\\)\|/);
 const rowsOf = text => text.split('\n').filter(line => line.startsWith('|') && /^#\d+$/.test(cellsOf(line)[1] || ''));
+// Agent UAT first: an owed UAT is the owner's step only once the agent's UAT passed at its head.
+const agentPassed = child => { child.private = { ...child.private, agent_uat: { state: 'PASSED', at_head: child.uat.at_head, evidence: 'evidence/agent-uat/REPORT.md' } }; };
 
 test('graph columns: the task name, its child number, one status, what it waits on and the update time; PRs stay on the task page', () => {
   const f = renderScaleFixture(state);
@@ -40,7 +42,7 @@ test('Waiting on names the owner ask, a blocker or the gate, and nothing for que
   const at = issue => cellsOf(rowsOf(state.renderParentBlockBody(f.parent, f.children, f.issues)).find(row => cellsOf(row)[1] === `#${issue}`))[3];
   const set = (issue, change) => { const child = f.children.get(issue); change(child); };
   set(500, child => { child.lifecycle = 'WAITING_OWNER'; });
-  set(501, child => { child.gate.role = 'G2'; child.pr.number = 2005; child.pr.state = 'OPEN'; child.uat.state = 'PENDING'; });
+  set(501, child => { child.gate.role = 'G2'; Object.assign(child.pr, { number: 2005, state: 'OPEN', head: 'c'.repeat(40) }); Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) }); agentPassed(child); });
   set(502, child => { child.blockers = ['waits for PR 1098']; });
   set(503, child => { child.gate.role = 'G1'; });
   assert.equal(at(500), 'Owner: decision');
@@ -58,6 +60,7 @@ test('a gate at work is the current step; a UAT still owed on an earlier PR show
   const child = f.children.get(504);
   Object.assign(child.pr, { number: 2017, state: 'MERGED', head: 'c'.repeat(40) });
   Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) });
+  agentPassed(child);
   Object.assign(child.gate, { role: 'G1', state: 'ACTIVE', assignment: { id: 'a-504-g1', role: 'G1' } });
   assert.equal(row(504), 'G1, then Owner: UAT on PR #2017');
   assert.match(current(), /^- #504 [^\n]* · PR #2017 · G1 · then your UAT on PR #2017$/m);
@@ -84,6 +87,7 @@ test('a task waiting on the owner with a UAT still owed waits on that UAT, in th
   child.lifecycle = 'WAITING_OWNER';
   Object.assign(child.pr, { number: 2017, state: 'MERGED', head: 'c'.repeat(40) });
   Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) });
+  agentPassed(child);
   assert.equal(row(504), 'Owner: UAT on PR #2017');
   assert.match(current(), /^- #504 [^\n]* · PR #2017 · merged, awaiting proof · waiting on you: your UAT on PR #2017$/m);
   Object.assign(child.gate, { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'a-504-g2', role: 'G2' } });
@@ -106,7 +110,7 @@ function ownerFixture(changes) {
 
 test('owner waits: one owner step per task feeds the board and the list, so the Waiting on cell says Owner: exactly for listed tasks', () => {
   const head = 'c'.repeat(40);
-  const uat = (child, number) => { Object.assign(child.pr, { number, state: 'OPEN', head }); Object.assign(child.uat, { state: 'PENDING', at_head: head }); };
+  const uat = (child, number, agent = true) => { Object.assign(child.pr, { number, state: 'OPEN', head }); Object.assign(child.uat, { state: 'PENDING', at_head: head }); if (agent) agentPassed(child); };
   const f = ownerFixture({
     601: child => { Object.assign(child.gate, { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'a-601', role: 'G2' } }); },
     602: child => { child.lifecycle = 'WAITING_OWNER'; uat(child, 2602); },
@@ -116,6 +120,8 @@ test('owner waits: one owner step per task feeds the board and the list, so the 
     606: child => { child.blockers = ['waits for #605']; },
     607: child => { child.lifecycle = 'DONE'; uat(child, 2607); },
     608: child => { child.lifecycle = 'PLANNED'; },
+    609: child => { child.lifecycle = 'WAITING_OWNER'; uat(child, 2609, false); },
+    610: child => { uat(child, 2610, false); },
   });
   assert.deepEqual(state.ownerWaits(f.parent, f.children), [
     { issue: 601, ask: 'decision', after: null, pr: null, head: null },
@@ -123,12 +129,13 @@ test('owner waits: one owner step per task feeds the board and the list, so the 
     { issue: 603, ask: 'decision', after: null, pr: null, head: null },
     { issue: 604, ask: 'UAT on PR #2604', after: null, pr: 2604, head },
     { issue: 605, ask: 'UAT on PR #2605', after: 'G2', pr: 2605, head },
-  ], 'blocked, finished and queued tasks wait on nobody');
+  ], 'blocked, finished and queued tasks, and UATs the agent still owes, wait on nobody');
   const listed = new Set(state.ownerWaits(f.parent, f.children).map(entry => entry.issue));
   for (const issue of f.children.keys()) {
     assert.equal(/\bOwner: /.test(f.cell(issue)[3]), listed.has(issue), `#${issue}: ${f.cell(issue)[3]}`);
   }
   assert.equal(f.cell(605)[3], 'G2, then Owner: UAT on PR #2605');
+  assert.deepEqual([f.cell(609)[3], f.cell(610)[3]], ['Agent: UAT on PR #2609', 'Agent: UAT on PR #2610']);
 });
 
 test('CURRENT never says a blocked task waits on the owner: a blocker is not an owner step', () => {
@@ -332,6 +339,8 @@ test('merged and waiting on the owner with a UAT owed: the status says merged an
   const t = mergedFixture();
   const child = t.merge(501, { lifecycle: 'WAITING_OWNER' });
   Object.assign(child.uat, { state: 'PENDING', at_head: MERGED_HEAD });
+  assert.equal(t.board(501), 'NOW · AGENT UAT | Agent: UAT on PR #3501', 'the agent\'s UAT comes first');
+  agentPassed(child);
   assert.equal(t.board(501), `${MERGED} | Owner: UAT on PR #3501`);
 });
 
@@ -345,7 +354,7 @@ test('merged rows sort after NOW · IN PROGRESS and before NOW · QUEUED, and th
   assert.ok(firstMerged > 0, 'a merged row is drawn after the rows in progress');
   assert.ok(order.slice(0, firstMerged).every(issue => statusOf(issue) === 'NOW · IN PROGRESS'), 'rows in progress lead');
   assert.equal(statusOf(order[firstMerged + 1]), 'NOW · QUEUED', 'queued rows follow the merged band');
-  assert.match(t.graph(), /Order: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER/);
+  assert.match(t.graph(), /Order: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW · QUEUED, LATER/);
 });
 
 test('CURRENT agrees with the graph: a merged task reads merged, awaiting proof, not its returned gate', () => {

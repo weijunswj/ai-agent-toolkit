@@ -631,18 +631,21 @@ const owedOn = (f, n = 2) => {
   return { waiting: cells[3], current, prRows, under };
 };
 const owing = (f, change = {}) => f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,uat:{state:'UAT_PARTIAL_REQUIRED',at_head:UAT_HEAD},...change(doc)})});
+// The owner's UAT step needs the agent's UAT first: these tests record the agent's PASS at the UAT's head.
+const ownerOwing = (f, change = doc => ({})) => owing(f, doc => { const next = {uat:{state:'UAT_PARTIAL_REQUIRED',at_head:UAT_HEAD},...change(doc)};
+  return {...next,private:{...(next.private || doc.private),agent_uat:{state:'PASSED',at_head:next.uat.at_head,evidence:'evidence/uat-2-agent/REPORT.md'}}}; });
 
 test('owed UAT T1 (SQAG #334): a UAT owed at merged PR #374\'s head stays on #374 while open PR #357 is tracked',()=>{
   const f=fixture();
   pr(f,374,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD})); pr(f,357,{head:NEW,body:'Refs #2'});
-  owing(f, doc=>({pr:{...doc.pr,number:357}}));
+  ownerOwing(f, doc=>({pr:{...doc.pr,number:357}}));
   f.run();
   assert.deepEqual([...tracked(f),f.child(2).pr.head],[357,'OPEN',NEW]);
   assert.deepEqual(f.child(2).private.pr_heads,[{pr:357,head:NEW},{pr:374,head:UAT_HEAD}],'the refresh keeps the head of every task PR it read');
   const seen=owedOn(f);
   assert.equal(seen.waiting,'Owner: UAT on PR #374');
   assert.equal(seen.current,'- #2 Issue 2 · PR #357 · waiting on you: your UAT on PR #374');
-  assert.deepEqual(seen.prRows,['#357 OPEN','#374 MERGED · UAT owed'],'the task page puts the owed UAT on #374, not on the tracked #357');
+  assert.deepEqual(seen.prRows,['#357 OPEN','#374 MERGED · Owner UAT owed'],'the task page puts the owed UAT on #374, not on the tracked #357');
   assert.deepEqual(seen.under,[]);
   const writesBefore=writes(f); f.run();
   assert.equal(writes(f),writesBefore,'a pass that sees no new head writes nothing');
@@ -650,23 +653,23 @@ test('owed UAT T1 (SQAG #334): a UAT owed at merged PR #374\'s head stays on #37
 
 test('owed UAT T2: a head no known PR has shows as the short head SHA, with no PR number',()=>{
   const f=fixture(); pr(f,357,{head:NEW,body:'Refs #2'});
-  owing(f, doc=>({pr:{...doc.pr,number:357}}));
+  ownerOwing(f, doc=>({pr:{...doc.pr,number:357}}));
   f.run();
   const seen=owedOn(f);
   assert.equal(seen.waiting,'Owner: UAT at ccccccc');
   assert.equal(seen.current,'- #2 Issue 2 · PR #357 · waiting on you: your UAT at ccccccc');
   assert.deepEqual(seen.prRows,['#357 OPEN']);
-  assert.deepEqual(seen.under,['Task: UAT owed at ccccccc']);
+  assert.deepEqual(seen.under,['Task: Owner UAT owed at ccccccc']);
 });
 
 test('owed UAT T3: with no replacement (the tracked PR is the UAT\'s PR) the pages read as before',()=>{
   const f=fixture(); pr(f,22,{head:UAT_HEAD,body:'Refs #2'});
-  owing(f, doc=>({pr:{...doc.pr,number:22},gate:{...doc.gate,role:'G2',state:'ACTIVE'}}));
+  ownerOwing(f, doc=>({pr:{...doc.pr,number:22},gate:{...doc.gate,role:'G2',state:'ACTIVE'}}));
   f.run();
   const seen=owedOn(f);
   assert.equal(seen.waiting,'G2, then Owner: UAT on PR #22');
   assert.equal(seen.current,'- #2 Issue 2 · PR #22 · G2 · then your UAT on PR #22');
-  assert.deepEqual(seen.prRows,['#22 OPEN · G2 ACTIVE · UAT owed']);
+  assert.deepEqual(seen.prRows,['#22 OPEN · G2 ACTIVE · Owner UAT owed']);
   assert.deepEqual(seen.under,[]);
 });
 
@@ -694,12 +697,123 @@ test('owed UAT T4: the sweep writes only its PR heads into private, and the stor
 test('owed UAT T5: past the limit the oldest heads go first, but never the head an owed UAT names',()=>{
   const f=fixture(); pr(f,357,{head:NEW,body:'Refs #2'});
   const old=Array.from({length:20},(_,i)=>({pr:357,head:(i+1).toString(16).padStart(40,'0')}));
-  owing(f, doc=>({pr:{...doc.pr,number:357},uat:{state:'PENDING',at_head:old[0].head},private:{...doc.private,pr_heads:old}}));
+  ownerOwing(f, doc=>({pr:{...doc.pr,number:357},uat:{state:'PENDING',at_head:old[0].head},private:{...doc.private,pr_heads:old}}));
   f.run();
   const heads=f.child(2).private.pr_heads.map(entry=>entry.head);
   assert.equal(heads.length,20);
   assert.deepEqual([heads[0],heads[1],heads.at(-1)],[old[0].head,old[2].head,NEW],'the second-oldest went; the UAT\'s head stayed');
   assert.equal(owedOn(f).waiting,'Owner: UAT on PR #357');
+});
+
+// Agent UAT first (#1405 row 4): an owed UAT is the agent's step until private.agent_uat records
+// PASSED or OWNER_ONLY at the UAT's own head; only then is it the owner's. One decider (uatOwer)
+// draws the Waiting on cell, CURRENT, the PR GRAPH and attention's owner waits.
+const OTHER_HEAD = 'd'.repeat(40);
+const agentRecord = (agentState, head = UAT_HEAD) => ({state:agentState,at_head:head,evidence:'evidence/uat-2-agent/REPORT.md'});
+const AGENT_MATRIX = [
+  // [row, uat, agent_uat, gate, lifecycle, waiting, CURRENT tail, owner waits, PR row]
+  ['1 settled', {state:'NOT_REQUIRED',at_head:null}, agentRecord('FAILED'), null, 'ACTIVE', '-', '', [], '#22 OPEN'],
+  ['2 owed, no agent result', null, null, null, 'ACTIVE', 'Agent: UAT on PR #22', ' · agent UAT on PR #22', [], '#22 OPEN · Agent UAT owed'],
+  ['3 owed, agent PASSED', null, agentRecord('PASSED'), null, 'ACTIVE', 'Owner: UAT on PR #22', ' · waiting on you: your UAT on PR #22', [2], '#22 OPEN · Owner UAT owed'],
+  ['4 owed, OWNER_ONLY', null, agentRecord('OWNER_ONLY'), null, 'ACTIVE', 'Owner: UAT on PR #22', ' · waiting on you: your UAT on PR #22', [2], '#22 OPEN · Owner UAT owed'],
+  ['5 owed, agent FAILED', null, agentRecord('FAILED'), null, 'ACTIVE', 'Agent: UAT failed on PR #22', ' · agent UAT failed on PR #22', [], '#22 OPEN · Agent UAT owed'],
+  ['6 owed again at a new head', null, agentRecord('PASSED', OTHER_HEAD), null, 'ACTIVE', 'Agent: UAT on PR #22', ' · agent UAT on PR #22', [], '#22 OPEN · Agent UAT owed'],
+  ['7 gate waiting on the owner', null, null, {role:'G2',state:'WAITING_OWNER'}, 'ACTIVE', 'Owner: decision', ' · G2 · waiting on you: your decision', [2], '#22 OPEN · G2 WAITING_OWNER · Agent UAT owed'],
+  ['8 gate at work, no agent result', null, null, {role:'G2',state:'ACTIVE'}, 'ACTIVE', 'G2, then Agent: UAT on PR #22', ' · G2 · then agent UAT on PR #22', [], '#22 OPEN · G2 ACTIVE · Agent UAT owed'],
+  ['8b gate at work, agent PASSED', null, agentRecord('PASSED'), {role:'G2',state:'ACTIVE'}, 'ACTIVE', 'G2, then Owner: UAT on PR #22', ' · G2 · then your UAT on PR #22', [2], '#22 OPEN · G2 ACTIVE · Owner UAT owed'],
+  ['I1 task waiting on the owner, no agent result', null, null, null, 'WAITING_OWNER', 'Agent: UAT on PR #22', ' · agent UAT on PR #22', [], '#22 OPEN · Agent UAT owed'],
+  ['I1 task waiting on the owner, agent PASSED', null, agentRecord('PASSED'), null, 'WAITING_OWNER', 'Owner: UAT on PR #22', ' · waiting on you: your UAT on PR #22', [2], '#22 OPEN · Owner UAT owed'],
+];
+for (const [row, uat, agent, gate, lifecycle, waiting, tail, waits, prRow] of AGENT_MATRIX) test(`agent UAT first row ${row}: ${waiting}`,()=>{
+  const f=fixture(); pr(f,22,{head:UAT_HEAD,body:'Refs #2'});
+  owing(f, doc=>({pr:{...doc.pr,number:22},lifecycle,...(uat ? {uat} : {}),...(gate ? {gate:{...doc.gate,...gate}} : {}),...(agent ? {private:{...doc.private,agent_uat:agent}} : {})}));
+  f.run();
+  const seen=owedOn(f);
+  assert.equal(seen.waiting,waiting,'the Waiting on cell');
+  assert.equal(seen.current,`- #2 Issue 2 · PR #22${tail}`,'CURRENT agrees with the cell');
+  assert.deepEqual(seen.prRows,[prRow],'the PR GRAPH says whose UAT is owed');
+  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>entry.issue),waits,'attention lists an owner wait only for the owner\'s step');
+  assert.deepEqual(state.validateChild(f.child(2)),[]);
+});
+
+const statusOf = (f, n = 2) => f.github.issues.get(1).body.split('\n').find(line => line.startsWith('|') && line.includes(`|#${n}|`)).slice(1, -1).split('|')[2];
+test('agent UAT first (#1405): a merged task with a UAT owed and no agent result reads NOW · AGENT UAT and never waits on the owner',()=>{
+  const f=fixture(); pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD}));
+  owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD}}));
+  f.run();
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT on PR #22']);
+  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · merged, awaiting proof · agent UAT on PR #22');
+  assert.doesNotMatch(f.github.issues.get(1).body,/waiting on you/);
+  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])),[]);
+  // The agent's FAILED result keeps it the agent's; its PASS hands the UAT to the owner.
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('FAILED')}})}); f.run();
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT failed on PR #22']);
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('PASSED')}})}); f.run();
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['MERGED · awaiting proof','Owner: UAT on PR #22']);
+  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>entry.issue),[2]);
+});
+
+test('agent UAT first: a listed blocker still queues a merged task and shows in place of the agent step',()=>{
+  const f=fixture(); pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD}));
+  owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD},blockers:['Laptop offline']}));
+  f.run();
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · QUEUED','Blocked: Laptop offline']);
+  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · blocked: Laptop offline');
+});
+
+test('agent UAT first: NOW · AGENT UAT rows sort after work in progress and before merged rows awaiting proof',()=>{
+  const f=fixture([2,3,4]);
+  pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD})); pr(f,33,{head:NEW,body:'Refs #3'}); pr(f,44,merged('2026-11-07T00:00:00Z','Refs #4',{head:OTHER_HEAD}));
+  owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD}}));
+  f.store.mutate('child',3,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,pr:{...doc.pr,number:33}})});
+  f.store.mutate('child',4,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,pr:{...doc.pr,number:44}})});
+  f.run();
+  const rows=f.github.issues.get(1).body.split('\n').filter(line=>/^\|[^|]*\|#\d+\|/.test(line)).map(line=>line.split('|').slice(2,4).join(' '));
+  assert.deepEqual(rows,['#3 NOW · IN PROGRESS','#2 NOW · AGENT UAT','#4 MERGED · awaiting proof']);
+  assert.match(f.github.issues.get(1).body,/Order: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW · QUEUED, LATER/);
+});
+
+const OWNER_PASS = {uat:{state:'PASSED',at_head:UAT_HEAD}};
+const owedDoc = (f, agent) => ({...f.child(2),uat:{state:'PENDING',at_head:UAT_HEAD},private:{...f.child(2).private,...(agent ? {agent_uat:agent} : {})}});
+for (const [name, agent, allowed] of [['no agent result',null,false],['agent PASSED',agentRecord('PASSED'),true],['OWNER_ONLY',agentRecord('OWNER_ONLY'),true],
+  ['agent FAILED',agentRecord('FAILED'),false],['agent PASSED at an older head',agentRecord('PASSED',OTHER_HEAD),false]]) test(`agent UAT first guard: owner PASS with ${name} is ${allowed ? 'allowed' : 'refused'}`,()=>{
+  const f=fixture(); const doc=owedDoc(f,agent);
+  const write=()=>state.applyPatch('child',doc,OWNER_PASS,{writer:holder,parentDoc:f.parent()});
+  if (allowed) assert.equal(write().uat.state,'PASSED');
+  else assert.throws(write,{code:'UAT_AGENT_FIRST'});
+});
+
+test('agent UAT first guard: one controller write may record the agent result and the owner PASS; a settled PASS is not re-checked',()=>{
+  const f=fixture();
+  const both=state.applyPatch('child',owedDoc(f,null),{...OWNER_PASS,private:{agent_uat:agentRecord('PASSED')}},{writer:holder,parentDoc:f.parent()});
+  assert.deepEqual([both.uat.state,both.private.agent_uat.state],['PASSED','PASSED']);
+  const settled={...f.child(2),uat:{state:'PASSED',at_head:UAT_HEAD}};
+  assert.equal(state.applyPatch('child',settled,{next_action:'Close the task'},{writer:holder,parentDoc:f.parent()}).uat.state,'PASSED','a PASS recorded before the guard stays');
+  for (const uat of [{state:'NOT_REQUIRED',at_head:null},{state:'UAT_RETAINED',at_head:UAT_HEAD},{state:'UAT_FULL_REQUIRED',at_head:OTHER_HEAD}]) {
+    assert.equal(state.applyPatch('child',owedDoc(f,null),{uat},{writer:holder,parentDoc:f.parent()}).uat.state,uat.state,`${uat.state} is not guarded`);
+  }
+});
+
+test('agent UAT first: only the controller writes or removes the agent record',()=>{
+  const f=fixture(); const executor={session:'executor',prefix:'BUILD-'};
+  assert.throws(()=>state.applyPatch('child',owedDoc(f,null),{private:{agent_uat:agentRecord('PASSED')}},{writer:executor,parentDoc:f.parent()}),{code:'ROLE_REFUSED'});
+  for (const patch of [{private:null},{private:{agent_uat:null}},{private:{agent_uat:{state:'FAILED'}}}]) {
+    assert.throws(()=>state.applyPatch('child',owedDoc(f,agentRecord('PASSED')),patch,{writer:executor,parentDoc:f.parent()}),{code:'ROLE_REFUSED'},JSON.stringify(patch));
+  }
+  assert.equal(state.applyPatch('child',owedDoc(f,agentRecord('PASSED')),{private:{keep_open:{reason:'Follow-up'}}},{writer:executor,parentDoc:f.parent()}).private.agent_uat.state,'PASSED','other private keys stay open to every writer');
+  assert.equal(state.applyPatch('child',owedDoc(f,null),{private:{agent_uat:agentRecord('PASSED')}},{writer:holder,parentDoc:f.parent()}).private.agent_uat.state,'PASSED');
+});
+
+test('agent UAT first: the record\'s shape is checked and adds no key older readers refuse',()=>{
+  const f=fixture(); const child=owedDoc(f,agentRecord('PASSED'));
+  assert.deepEqual(state.validateChild(child),[]);
+  const OLDER_CHILD_KEYS=['schema','repository','issue','revision','fence','lifecycle','completed_at','release','gate','candidate','pr','uat','review','blockers','next_action','pending_effects','journals_seen','private','volatile','prs','before_close','closed_by_sweep','added_by_sweep'];
+  assert.deepEqual(Object.keys(child).filter(key=>!OLDER_CHILD_KEYS.includes(key)),[]);
+  assert.deepEqual(Object.keys(child.uat).sort(),['at_head','state'],'uat keeps its strict shape');
+  for (const bad of [{state:'PASS',at_head:UAT_HEAD,evidence:'x'},{state:'PASSED',at_head:'short',evidence:'x'},{state:'PASSED',at_head:UAT_HEAD},{state:'PASSED',at_head:UAT_HEAD,evidence:''},
+    {state:'PASSED',at_head:UAT_HEAD,evidence:'x'.repeat(501)},{state:'PASSED',at_head:UAT_HEAD,evidence:'x',extra:1},{state:'PASSED',at_head:UAT_HEAD,evidence:'ghp_'+'a'.repeat(36)},null,[]]) {
+    assert.ok(state.validateChild({...child,private:{...child.private,agent_uat:bad}}).some(error=>error.startsWith('private.agent_uat')),JSON.stringify(bad)?.slice(0,60));
+  }
 });
 
 test('a complete pass advances the private close watermark; old closes and parent links stay excluded',()=>{

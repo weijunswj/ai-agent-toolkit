@@ -205,7 +205,10 @@ test('patches touch only the holder fields, and only the controller records acce
     assert.throws(() => state.applyPatch('child', doc, patch), { code: 'ROLE_REFUSED' }, 'no writer means no controller');
   }
   assert.throws(() => state.applyPatch('child', { ...doc, lifecycle: 'DONE' }, { lifecycle: 'ACTIVE' }, { writer, parentDoc }), { code: 'ROLE_REFUSED' }, 'nor reopen a finished outcome');
-  const next = state.applyPatch('child', doc, { uat: { state: 'PASSED', at_head: SHA_A }, lifecycle: 'DONE' }, { writer: controller, parentDoc });
+  // Agent UAT first: the controller's owner PASS needs the agent's result at that head.
+  assert.throws(() => state.applyPatch('child', doc, { uat: { state: 'PASSED', at_head: SHA_A } }, { writer: controller, parentDoc }), { code: 'UAT_AGENT_FIRST' });
+  const next = state.applyPatch('child', doc, { uat: { state: 'PASSED', at_head: SHA_A }, lifecycle: 'DONE',
+    private: { agent_uat: { state: 'PASSED', at_head: SHA_A, evidence: 'evidence/agent-uat/REPORT.md' } } }, { writer: controller, parentDoc });
   assert.deepEqual(next.uat, { state: 'PASSED', at_head: SHA_A });
   assert.equal(next.lifecycle, 'DONE');
   assert.throws(() => state.applyPatch('child', doc, { pr: { number: 1 } }), { code: 'PATCH_REFUSED' });
@@ -576,7 +579,7 @@ test('an outcome pinned last sorts after every unpinned open outcome in its stat
   const current = body => state.renderCurrentBlockBody(body, new Map(), new Map());
   const body = state.renderParentBlockBody(parent, new Map(), new Map());
   assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
-  assert.match(body, /Order: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER; pinned tasks end their band\), then the latest 10 COMPLETED/);
+  assert.match(body, /Order: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER; pinned tasks end their band\), then the latest 10 COMPLETED/);
   assert.equal(rows(body)[0], 2, 'the top unpinned task leads, so it starts next');
   assert.doesNotMatch(current(parent), /Start next/, 'CURRENT leaves what starts next to the graph');
   // A task added later takes the next order and still lands before the pinned one.
@@ -588,7 +591,7 @@ test('an outcome pinned last sorts after every unpinned open outcome in its stat
   const done = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 3, class: 'COMPLETED', parent: 7, order: 2, last: true }, { issue: 2, class: 'COMMITTED', parent: 7, order: 9 }] });
   const doneBody = state.renderParentBlockBody(done, new Map(), new Map());
   assert.deepEqual(rows(doneBody), [2, 3]);
-  assert.match(doneBody, /Order: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER\), then the latest 10 COMPLETED/);
+  assert.match(doneBody, /Order: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER\), then the latest 10 COMPLETED/);
   assert.doesNotMatch(doneBody, /pinned tasks/, 'the order line names pinned tasks only while one is open');
   assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /pinned tasks/);
   // Pinned rows tie only with each other.
@@ -640,7 +643,7 @@ test('the generated CURRENT summary is slim: work in progress with its PR, gate 
     '',
     '**In progress**',
     '- #1 Task 1 · PR #541 · G1',
-    '- #2 Task 2 · PR #543 · G1 · then your UAT on PR #543', // the active G1 is the current step; the owed UAT comes after it
+    '- #2 Task 2 · PR #543 · G1 · then agent UAT on PR #543', // the active G1 is the current step; the owed UAT comes after it, the agent's first
     '- #3 Task 3 · waiting on you: your decision',
     '- #4 Task 4 · blocked: needs the key', // a blocker is not an owner step
     '',

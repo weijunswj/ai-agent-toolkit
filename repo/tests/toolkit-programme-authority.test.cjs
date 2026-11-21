@@ -311,7 +311,7 @@ test('the close list shows evidence at an older head as STALE_HEAD', () => {
   store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), create: () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), authorise: true,
     change: doc => {
       const next = gatedChild(state, doc, { role: 'G1', returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: parentDoc(), head: SHA_A });
-      return state.applyPatch('child', next, { candidate: { branch: 'feature' }, uat: { state: 'PASSED', at_head: SHA_A },
+      return state.applyPatch('child', next, { candidate: { branch: 'feature' }, uat: { state: 'PASSED', at_head: SHA_A }, private: { agent_uat: { state: 'PASSED', at_head: SHA_A, evidence: 'evidence/agent-uat/REPORT.md' } },
         review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } }, { writer: controller, parentDoc: parentDoc() });
     } });
   github.addPr(540, { head: SHA_B, merged: true, state: 'MERGED', contexts: [green('validate')], branch: 'feature' });
@@ -402,7 +402,7 @@ test('UAT or review evidence without its head is refused on write and rendered s
   assert.throws(() => write({ uat: { state: 'UAT_RETAINED', at_head: null } }), { code: 'STATE_INVALID' });
   assert.throws(() => write({ review: { state: 'PASSED', verdicts: [] } }), { code: 'STATE_INVALID' });
   assert.throws(() => write({ review: { state: 'NOT_PASSED' } }), { code: 'STATE_INVALID' });
-  write({ candidate: { branch: 'feature', head: SHA_A }, uat: { state: 'PASSED', at_head: SHA_A }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } });
+  write({ candidate: { branch: 'feature', head: SHA_A }, uat: { state: 'PASSED', at_head: SHA_A }, private: { agent_uat: { state: 'PASSED', at_head: SHA_A, evidence: 'evidence/agent-uat/REPORT.md' } }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } });
   reconciler().run({ apply: true });
   assert.match(state.findStateBlock(github.issues.get(423).body).block.body, / · UAT: PASSED -->/);
   github.prs.get(540).head = SHA_B;
