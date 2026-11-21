@@ -750,7 +750,10 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
   assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT failed on PR #22']);
   f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('PASSED')}})}); f.run();
   assert.deepEqual([statusOf(f),owedOn(f).waiting],['MERGED · awaiting proof','Owner: UAT on PR #22']);
-  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>entry.issue),[2]);
+  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat]),[[2,'PASSED']]);
+  // OWNER_ONLY hands it over too, but says the owner must still test: never a close OK.
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('OWNER_ONLY')}})}); f.run();
+  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat]),[[2,'OWNER_ONLY']]);
 });
 
 test('agent UAT first: a listed blocker still queues a merged task and shows in place of the agent step',()=>{

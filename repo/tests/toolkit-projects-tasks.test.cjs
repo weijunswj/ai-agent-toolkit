@@ -1151,6 +1151,8 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.match(daily, /when `gh auth status` succeeds, run `node TK\/repo\/scripts\/toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,traces,ci,footer,refs --stale-stamp \{\{report_dir\}\}\/stale-sweep\.json`[^\n]*; else read #\{\{parent_issue\}\}'s sub-issues/);
   assert.match(daily, /`JUDGE\? #<n>` for a `READY_TO_CLOSE` or `TASK_MERGED_OPEN` finding, taken from the `attention` list of the stored parent document `<store path>parent-<n>\.json`[^\n]*only for a finding in state `new` with no `promised` note \(a lapsed hold\) on an open child with no `Kept open:` line, no open sub-issue and no unchecked box under its DONE WHEN heading \(an acknowledged finding is the controller's hold; merged PRs alone never make a child done: the coordinator judges each `JUDGE\?`[^\n]*`CLOSE\? #<n> done \(<why>\)`\)/);
   assert.doesNotMatch(daily, /`CLOSE\? #<n> done` for a/);
+  // The day's close list reaches the owner as its own message every run, empty days included.
+  assert.match(daily, /Post its `CLOSE LIST` block to the owner as its own message[^\n]*every run, empty days included[^\n]*never only in a read-back/);
   assert.doesNotMatch(daily.split('\n').find(line => line.includes('Stale sweep (once a day')), /step 5b's/);
   assert.doesNotMatch(daily, /Fold check:/);
   // The controller check's own stale sweep runs only from the daily run: every other Projects call skips it.
@@ -1158,7 +1160,7 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,stale,ci`/);
   assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`/);
   const periodicRuns = fs.readFileSync(path.join(projects, 'reference', 'periodic-runs.md'), 'utf8');
-  assert.match(periodicRuns, /  - `STALE SWEEP`: judge each `JUDGE\?` row against its child's DONE WHEN, PR GRAPH and notes first[^\n]*send the owner one list with the native question method[^\n]*never one ask per child\. For `FOLD\?`, name the open child it folds into and copy its text there before closing it as not planned/);
+  assert.match(periodicRuns, /  - `STALE SWEEP`: judge each `JUDGE\?` row against its child's DONE WHEN, PR GRAPH and notes first[^\n]*post the sweep's `CLOSE LIST` block to the owner, one line per child[^\n]*"nothing to close today" line on an empty day; never one ask per child\. For `FOLD\?`, name the open child it folds into and copy its text there before closing it as not planned/);
   const ownerAsks = fs.readFileSync(path.join(projects, 'reference', 'owner-asks.md'), 'utf8');
   assert.match(ownerAsks, /\*\*Owner UAT comes after agent UAT\.\*\* Ask the owner for UAT only once every agent UAT step at that build passed[^\n]*lists only the steps no tool reaches[^\n]*links the agent UAT evidence/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');

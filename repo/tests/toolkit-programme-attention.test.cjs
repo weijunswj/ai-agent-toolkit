@@ -923,8 +923,8 @@ test('attention lists every task waiting on the owner, read from the children at
   assert.equal(json.error, null);
   // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the MERGED · awaiting proof band after it.
   assert.deepEqual(json.result.owner_waits, [
-    { issue: 425, ask: 'UAT on PR #901', after: 'G2', pr: 901, head: SHA_B },
-    { issue: 423, ask: 'UAT on PR #900', after: null, pr: 900, head: SHA_A },
+    { issue: 425, ask: 'UAT on PR #901', after: 'G2', agent_uat: 'PASSED', pr: 901, head: SHA_B },
+    { issue: 423, ask: 'UAT on PR #900', after: null, agent_uat: 'PASSED', pr: 900, head: SHA_A },
   ], 'a blocked task, a task with no document and a UAT the agent still owes are not owner waits');
   const text = fx.run(['attention'], {}, { json: false }).result;
   assert.match(text, /^Owner waits \(2\)\n- #425 UAT on PR #901 after G2 · PR #901 · bbbbbbb\n- #423 UAT on PR #900 · PR #900 · aaaaaaa$/m);
