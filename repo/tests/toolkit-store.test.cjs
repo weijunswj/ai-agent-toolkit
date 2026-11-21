@@ -247,11 +247,11 @@ test('the command line refuses unknown commands, flags and messages, and the fla
     status: ['--store', '--repo-root'], sync: ['--store', '--repo-root'], save: ['--store', '--repo-root', '--path', '--message'],
     move: ['--store', '--repo-root', '--from', '--to', '--message'], 'merge-branch': ['--store', '--repo-root', '--branch', '--message'],
     'delete-merged-branch': ['--store', '--repo-root', '--branch'],
-    handoff: ['--store', '--out', '--repo-root', '--memory', '--instructions', '--file'],
+    handoff: ['--store', '--out', '--repo-root', '--memory', '--instructions', '--file', '--baseline'],
   });
   const flags = [...fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--name-only', '--verify', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
-    ['--branch', '--check', '--file', '--from', '--instructions', '--json', '--memory', '--message', '--out', '--path', '--repo-root', '--store', '--to'], 'every caller flag is in the pinned table');
+  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--name-only', '--verify', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--unshallow', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
+    ['--baseline', '--branch', '--check', '--file', '--from', '--instructions', '--json', '--memory', '--message', '--out', '--path', '--repo-root', '--store', '--to'], 'every caller flag is in the pinned table');
   assert.equal(store.mergedStoreBinding(os.tmpdir()).ok, false);
 });
 

@@ -1,8 +1,8 @@
 'use strict';
 
 // The controller handoff snapshot: `toolkit-store.cjs handoff` saves it only when a file changed, the
-// after-tool hook starts that save after a gate-end store save or a remembered-source write, and the
-// controller health check flags a stale one at session start. Real Git against a local bare store.
+// after-tool hook starts that save when a remembered source's content moved (whatever tool moved it),
+// and the controller health check flags a stale one at session start. Real Git against a local bare store.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -26,8 +26,9 @@ function sources(t) {
   git(base, 'init', '--quiet', repo);
   git(repo, 'remote', 'add', 'origin', 'https://github.com/acme/widget.git');
   const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); return path.join(base, rel); };
-  put('memory/MEMORY.md', '# Memory\n- queue: #1 > #2\n');
-  put('memory/owner-rules.md', 'merge commits only\n');
+  // Saved at different times, as a synced memory copy keeps each file's save time.
+  fs.utimesSync(put('memory/MEMORY.md', '# Memory\n- queue: #1 > #2\n'), new Date('2026-11-21T10:00:00Z'), new Date('2026-11-21T10:00:00Z'));
+  fs.utimesSync(put('memory/owner-rules.md', 'merge commits only\n'), new Date('2026-11-20T09:00:00Z'), new Date('2026-11-20T09:00:00Z'));
   const hourly = put('hourly/additions.md', 'hourly step\n');
   const daily = put('daily/additions.md', 'daily step\n');
   const instructions = put('instructions.md', 'project instructions\n');
@@ -63,14 +64,14 @@ test('handoff saves the per-repository snapshot with its manifest, then sends no
   assert.equal(w.remoteTip(), tip);
   assert.equal(pushes(w.calls).length, pushed, 'an unchanged snapshot pushes nothing');
 
-  // One changed memory file is saved; a removed one stays in the store but leaves the manifest.
+  // One changed memory file is saved; a file missing here is unknown, so its copy and row stay.
   s.put('memory/MEMORY.md', '# Memory\n- queue: #2\n');
   fs.rmSync(path.join(s.memory, 'owner-rules.md'));
   const changed = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW });
   assert.equal(changed.result.handoff, 'SAVED');
   assert.match(w.remoteFile(`${FOLDER}/MEMORY.md`), /queue: #2/);
   assert.ok(w.remoteHas(`${FOLDER}/memory/owner-rules.md`), 'nothing is deleted');
-  assert.ok(!JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).files.some(row => row.path === 'memory/owner-rules.md'));
+  assert.ok(JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).files.some(row => row.path === 'memory/owner-rules.md'));
 });
 
 test('a snapshot an earlier run could not push is sent by the next run, never reported unchanged', t => {
@@ -301,67 +302,493 @@ test('the controller check runs the handoff check only with its inputs, and the 
   }
 });
 
-test('the after-tool hook starts one background refresh after a store save or a remembered-source write, and nothing else', t => {
+
+// ---- after-tool hook ------------------------------------------------------------------------------
+
+const MINUTE = 60 * 1000;
+// Sets a file's modified time, as a synced memory copy keeps the time each file was saved.
+const touch = (file, iso) => fs.utimesSync(file, new Date(iso), new Date(iso));
+// A memory folder whose files were saved at different times (real modified times).
+function aged(s) {
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T10:00:00Z');
+  touch(path.join(s.memory, 'owner-rules.md'), '2026-11-20T09:00:00Z');
+}
+
+// A hook harness: a fresh state folder, a fake clock and a spawn that records each start.
+function hookHarness(s, { cwd = s.base, record = s.state } = {}) {
   const hook = hookModule();
-  const s = sources(t);
-  const dir = path.dirname(s.state);
-  const out = path.join(s.base, 'drive');
-  assert.equal(store.main(['handoff', '--out', out, '--repo-root', s.repo, '--memory', s.memory, '--file', s.hourly], { handoffState: s.state, now: NOW, stdout: () => {}, stderr: () => {} }), 0);
+  const dir = path.join(s.base, `hook-state-${path.basename(cwd)}`);
   const started = [];
-  let clock = Date.parse('2026-11-21T13:00:00Z');
-  const fire = (payload, extra = {}) => hook.main({ stdin: JSON.stringify({ hook_event_name: 'PostToolUse', cwd: s.base, ...payload }), stateDirectory: dir, now: () => clock, spawn: (command, args, options) => { started.push({ args, options }); return { unref() {} }; }, ...extra });
-  const saved = { tool_name: 'Bash', tool_input: { command: 'node repo/scripts/toolkit-store.cjs save --store ../store --path evidence/x --message "gate end"' }, tool_response: { stdout: 'Done: save store=owner/store commit=abc read_back=true\n' } };
+  const clock = { now: Date.parse('2026-11-21T13:00:00Z') };
+  const fire = (payload = {}, extra = {}) => hook.main({
+    stdin: JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 'session-a', cwd, tool_name: 'Bash', tool_input: { command: 'true' }, ...payload }),
+    stateDirectory: dir, handoffRecord: record, now: () => clock.now,
+    spawn: (command, args, options) => { started.push({ command, args, options }); return { unref() {} }; }, ...extra,
+  });
+  return { hook, dir, started, fire, later: minutes => { clock.now += minutes * MINUTE; } };
+}
 
-  // Ignored: other commands, a failed save, a write outside the sources, another event.
-  assert.equal(fire({ tool_name: 'Bash', tool_input: { command: 'git status' }, tool_response: { stdout: '' } }), 0);
-  assert.equal(fire({ ...saved, tool_response: { stdout: '', stderr: 'Stopped: secret scan found 1 match(es)' } }), 0);
-  assert.equal(fire({ tool_name: 'Write', tool_input: { file_path: path.join(s.base, 'elsewhere.md') } }), 0);
-  assert.equal(fire({ ...saved, hook_event_name: 'PreToolUse' }), 0);
-  assert.equal(started.length, 0);
+const runOut = (s, out) => (argv, now = NOW) => {
+  const lines = [];
+  const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv, '--json'], { handoffState: s.state, now, stdout: text => lines.push(text), stderr: text => lines.push(text) });
+  return { code, result: JSON.parse(lines.join('')) };
+};
 
-  // A successful store save starts one run with the recorded folder and repository.
-  assert.equal(fire(saved), 0);
-  assert.equal(started.length, 1);
-  assert.deepEqual(started[0].args.slice(1), ['handoff', '--out', out, '--repo-root', s.repo]);
-  assert.match(started[0].args[0], /toolkit-store\.cjs$/);
-  assert.equal(started[0].options.detached, true);
-  assert.equal(started[0].options.stdio, 'ignore');
+test('the after-tool hook starts one refresh when a remembered source\'s content moves, whatever tool moved it', t => {
+  const s = sources(t);
+  aged(s);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory, '--file', s.hourly]).code, 0);
+  const h = hookHarness(s);
 
-  // Debounced: a memory write five minutes later starts nothing; eleven minutes later it does.
-  clock += 5 * 60 * 1000;
-  fire({ tool_name: 'Edit', tool_input: { file_path: path.join(s.memory, 'MEMORY.md') } });
-  assert.equal(started.length, 1);
-  clock += 6 * 60 * 1000;
-  fire({ tool_name: 'Edit', tool_input: { file_path: path.join(s.memory, 'MEMORY.md') } });
-  assert.equal(started.length, 2);
-  clock += 11 * 60 * 1000;
-  fire({ tool_name: 'apply_patch', tool_input: { input: `*** Begin Patch\n*** Update File: ${s.hourly}\n@@\n-a\n+b\n*** End Patch\n` } });
-  assert.equal(started.length, 3, 'a patch to a remembered working file');
+  // Nothing moved: no start, whatever the tool.
+  assert.equal(h.fire({ tool_name: 'Bash', tool_input: { command: 'git status' } }), 0);
+  h.later(2);
+  fs.writeFileSync(path.join(s.base, 'elsewhere.md'), 'x\n');
+  assert.equal(h.fire({ tool_name: 'Write', tool_input: { file_path: path.join(s.base, 'elsewhere.md') } }), 0);
+  assert.equal(h.started.length, 0, 'an unrelated write starts nothing');
 
-  // A start that fails after the hook returns (the recorded folder is gone) is swallowed (G2 L1).
-  clock += 11 * 60 * 1000;
-  const late = new (require('node:events'))();
-  late.unref = () => {};
-  assert.equal(fire(saved, { spawn: () => late }), 0);
-  assert.doesNotThrow(() => late.emit('error', new Error('spawn ENOENT')));
+  // A memory tool with an unknown name and no path saves a newer memory file: one start.
+  h.later(2);
+  s.put('memory/MEMORY.md', '# Memory\n- queue: #7\n');
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T13:03:00Z');
+  assert.equal(h.fire({ tool_name: 'update_memory', tool_input: { text: 'queue: #7' } }), 0);
+  assert.equal(h.started.length, 1);
+  const [first] = h.started;
+  assert.match(first.args[0], /toolkit-store\.cjs$/);
+  assert.deepEqual(first.args.slice(1, 6), ['handoff', '--out', out, '--repo-root', s.repo]);
+  assert.equal(first.args[6], '--baseline');
+  assert.ok(fs.existsSync(first.args[7]), 'the session baseline file exists');
+  assert.equal(first.options.detached, true);
+  assert.equal(first.options.stdio, 'ignore');
 
-  // Fails open: no record, a broken record, a spawn that throws, unreadable input.
-  clock += 11 * 60 * 1000;
-  assert.equal(fire(saved, { stateDirectory: path.join(s.base, 'no-state') }), 0);
-  assert.equal(fire(saved, { spawn: () => { throw new Error('spawn failed'); } }), 0);
-  assert.equal(hook.main({ stdin: '{not json', stateDirectory: dir }), 0);
-  fs.writeFileSync(s.state, '{broken');
-  clock += 11 * 60 * 1000;
-  assert.equal(fire(saved), 0);
-  assert.equal(started.length, 3);
+  // A read-only tool never compares; other events are ignored.
+  h.later(11);
+  s.put('hourly/additions.md', 'hourly step two\n');
+  assert.equal(h.fire({ tool_name: 'Read', tool_input: { file_path: s.hourly } }), 0);
+  assert.equal(h.fire({ hook_event_name: 'PreToolUse' }), 0);
+  assert.equal(h.started.length, 1);
+  // A shell write (sed -i) to a remembered working file: the shell call itself starts one.
+  assert.equal(h.fire({ tool_name: 'Bash', tool_input: { command: `sed -i s/step/step-two/ ${s.hourly}` } }), 0);
+  assert.equal(h.started.length, 2);
 });
 
-test('the store command refuses handoff without exactly one of --store or --out, and the hook is wired for Claude Code', () => {
+test('the hook compares at most once a minute, starts at most once per 10 minutes, and a change inside the window is not lost', t => {
+  const s = sources(t);
+  aged(s);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory]).code, 0);
+  const h = hookHarness(s);
+  assert.equal(h.fire(), 0); // first call: the session baseline
+  s.put('memory/MEMORY.md', '# Memory\n- one\n');
+  h.fire();
+  assert.equal(h.started.length, 0, 'compared under a minute ago');
+  h.later(1);
+  h.fire();
+  assert.equal(h.started.length, 1);
+  // The refresh has not landed (the snapshot still differs), and a second change comes in.
+  h.later(3);
+  s.put('memory/second.md', 'second\n');
+  h.fire();
+  assert.equal(h.started.length, 1, 'inside the 10-minute window');
+  h.later(8);
+  h.fire();
+  assert.equal(h.started.length, 2, 'the next call after the window still sees the difference');
+});
+
+test('a session with no handoff record finds the snapshot in a nearby store checkout and refreshes it', t => {
+  const w = world(t);
+  const s = sources(t);
+  aged(s);
+  // The controlled repository's checkout sits next to the store checkout, as cloud sessions clone them.
+  const repo = path.join(w.base, 'widget');
+  git(w.base, 'init', '--quiet', repo);
+  git(repo, 'remote', 'add', 'origin', 'https://github.com/acme/widget.git');
+  const saved = w.act(['handoff', '--repo-root', repo, '--memory', s.memory], { handoffState: path.join(s.base, 'gate-end', 'handoff-refresh.json'), now: NOW });
+  assert.equal(saved.result.handoff, 'SAVED', JSON.stringify(saved.result));
+
+  const none = path.join(s.base, 'no-record.json');
+  const h = hookHarness(s, { cwd: repo, record: none });
+  assert.equal(h.fire({ tool_name: 'some_new_tool' }), 0);
+  assert.equal(h.started.length, 0, 'found, but nothing moved yet');
+  h.later(2);
+  s.put('memory/MEMORY.md', '# Memory\n- from the coordinator\n');
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T13:01:00Z');
+  assert.equal(h.fire({ tool_name: 'some_new_tool' }), 0);
+  assert.equal(h.started.length, 1);
+  assert.deepEqual(h.started[0].args.slice(1, 6), ['handoff', '--store', w.dir, '--repo-root', repo]);
+
+  // A session with no record and no nearby snapshot starts nothing.
+  const lone = path.join(s.base, 'lone');
+  fs.mkdirSync(lone);
+  const miss = hookHarness(s, { cwd: lone, record: none });
+  for (let index = 0; index < 3; index += 1) { assert.equal(miss.fire(), 0); miss.later(2); }
+  assert.equal(miss.started.length, 0);
+});
+
+test('a hook-started refresh writes a file only when this copy is newer, adds what the snapshot lacks and drops only what this session deleted', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const manifest = () => JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8'));
+  const row = name => manifest().files.find(item => item.path === name);
+  const copy = name => fs.readFileSync(path.join(out, FOLDER, name), 'utf8');
+  // A newer copy (the coordinator's 12:00 save) is in the snapshot.
+  s.put('memory/MEMORY.md', '# Memory\n- newest queue\n');
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T12:00:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  assert.equal(row('MEMORY.md').modified, '2026-11-21T12:00:00.000Z', 'each row records its file\'s modified time');
+
+  // This session started earlier: its MEMORY.md copy is older.
+  s.put('memory/MEMORY.md', '# Memory\n- old queue\n');
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T08:00:00Z');
+  const baseline = path.join(s.base, 'baseline.json');
+  fs.writeFileSync(baseline, JSON.stringify({ rows: require('../scripts/toolkit-handoff.cjs').sessionRows({ memory: s.memory, instructions: null, files: [] }) }));
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'UNCHANGED');
+  // Its own change is written; the newer row stays.
+  s.put('memory/owner-rules.md', 'merge commits only; no rebase\n');
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
+  assert.match(copy('MEMORY.md'), /newest queue/);
+  assert.match(copy('memory/owner-rules.md'), /no rebase/);
+  // A file the snapshot lacks is added, whatever its time.
+  s.put('memory/older-topic.md', 'saved long ago\n');
+  touch(path.join(s.memory, 'older-topic.md'), '2026-11-19T00:00:00Z');
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
+  assert.ok(row('memory/older-topic.md'));
+  // The baseline moves to what each run saw; a file this session then deletes leaves the manifest.
+  assert.ok(JSON.parse(fs.readFileSync(baseline, 'utf8')).rows.some(item => item.path === 'memory/older-topic.md'), 'the baseline moves');
+  fs.rmSync(path.join(s.memory, 'older-topic.md'));
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
+  assert.ok(!row('memory/older-topic.md'));
+  assert.ok(row('MEMORY.md'), 'a row this session did not delete stays');
+  // A plain run follows the same rule: the newer row still stays.
+  assert.equal(run([]).result.handoff, 'UNCHANGED');
+  assert.match(copy('MEMORY.md'), /newest queue/);
+});
+
+test('where modified times are not real (a plain copy), only this session\'s own changes are written', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  for (const name of ['MEMORY.md', 'owner-rules.md']) touch(path.join(s.memory, name), '2026-11-21T12:00:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  // An older session's plain copy: every file copied at one moment, MEMORY.md older in content.
+  s.put('memory/MEMORY.md', '# Memory\n- old queue\n');
+  for (const name of ['MEMORY.md', 'owner-rules.md']) touch(path.join(s.memory, name), '2026-11-21T12:30:00Z');
+  const baseline = path.join(s.base, 'baseline.json');
+  const seen = require('../scripts/toolkit-handoff.cjs').sessionRows({ memory: s.memory, instructions: null, files: [] });
+  fs.writeFileSync(baseline, JSON.stringify({ rows: seen }));
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'UNCHANGED', 'not newer: the copy times are not real');
+  s.put('memory/owner-rules.md', 'changed here\n');
+  touch(path.join(s.memory, 'owner-rules.md'), '2026-11-21T12:30:10Z');
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
+  assert.match(fs.readFileSync(path.join(out, FOLDER, 'memory', 'owner-rules.md'), 'utf8'), /changed here/);
+  assert.doesNotMatch(fs.readFileSync(path.join(out, FOLDER, 'MEMORY.md'), 'utf8'), /old queue/);
+});
+
+test('a hook-started refresh readies a shallow, detached store clone (as a fresh cloud session has) and saves', t => {
+  const w = world(t);
+  const s = sources(t);
+  aged(s);
+  const first = w.act(['handoff', '--repo-root', s.repo, '--memory', s.memory], { handoffState: s.state, now: NOW });
+  assert.equal(first.result.handoff, 'SAVED', JSON.stringify(first.result));
+  // Replace the store checkout with a fresh shallow clone on a detached HEAD.
+  fs.rmSync(w.dir, { recursive: true, force: true });
+  git(w.base, 'clone', '--quiet', '--depth', '1', `file://${w.remote}`, w.dir);
+  git(w.dir, 'config', 'user.name', 'Test');
+  git(w.dir, 'config', 'user.email', 'test@example.invalid');
+  git(w.dir, 'checkout', '--quiet', '--detach');
+  s.put('memory/MEMORY.md', '# Memory\n- newer\n');
+  const baseline = path.join(s.base, 'baseline.json');
+  fs.writeFileSync(baseline, JSON.stringify({ rows: [] }));
+  // A manual run is refused as before; the hook-started run readies the checkout first.
+  assert.notEqual(w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW }).code, 0);
+  const hooked = w.act(['handoff', '--repo-root', s.repo, '--baseline', baseline], { handoffState: s.state, now: NOW });
+  assert.equal(hooked.result.handoff, 'SAVED', JSON.stringify(hooked.result));
+  assert.match(w.remoteFile(`${FOLDER}/MEMORY.md`), /newer/);
+  assert.equal(git(w.dir, 'rev-parse', '--is-shallow-repository'), 'false');
+  assert.equal(git(w.dir, 'symbolic-ref', '--short', 'HEAD'), 'main');
+});
+
+test('the hook fails open and never prints', t => {
+  const s = sources(t);
+  const h = hookHarness(s);
+  assert.equal(h.hook.main({ stdin: '{not json', stateDirectory: h.dir }), 0);
+  fs.mkdirSync(path.dirname(s.state), { recursive: true });
+  fs.writeFileSync(s.state, '{broken');
+  assert.equal(h.fire(), 0);
+  assert.equal(h.fire({}, { spawn: () => { throw new Error('spawn failed'); } }), 0);
+  assert.equal(h.started.length, 0);
+});
+
+test('the store command refuses handoff without exactly one of --store or --out, and the hook runs for every tool but known read-only ones', () => {
   for (const argv of [['handoff'], ['handoff', '--store', 'a', '--out', 'b'], ['handoff', '--out', 'b', '--path', 'x'], ['save', '--store', 'x', '--path', 'a', '--message', 'm', '--check']]) {
     assert.equal(store.main(argv, { stdout: () => {}, stderr: () => {} }), 2, argv.join(' '));
   }
+  const { READ_ONLY_TOOLS, MATCHER } = hookModule();
   for (const file of ['.claude-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json']) {
     const entry = JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')).hooks.PostToolUse.at(-1);
-    assert.deepEqual(entry, { matcher: '^(?:Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit)$', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-handoff-hook.cjs"', timeout: 10 }] }, file);
+    assert.deepEqual(entry, { matcher: MATCHER, hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-handoff-hook.cjs"', timeout: 10 }] }, file);
+    const matches = name => new RegExp(entry.matcher).test(name);
+    for (const name of READ_ONLY_TOOLS) assert.equal(matches(name), false, name);
+    for (const name of ['Bash', 'PowerShell', 'Edit', 'Write', 'update_memory', 'mcp__memory__save', 'SomeFutureTool']) assert.equal(matches(name), true, name);
   }
 });
+
+// ---- G2 round 1 probes: strictly per file, absent means unknown ----------------------------------
+
+const handoffLib = () => require('../scripts/toolkit-handoff.cjs');
+// A memory folder with set save times, as a synced copy keeps them.
+const putAt = (s, rel, text, iso) => { const file = s.put(rel, text); touch(file, iso); return file; };
+const view = out => ({
+  row: name => JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8')).files.find(item => item.path === name),
+  copy: name => fs.readFileSync(path.join(out, FOLDER, name), 'utf8'),
+});
+// A session baseline as the hook takes it: the files this session holds now.
+const baselineOf = (s, file) => { fs.writeFileSync(file, JSON.stringify({ rows: handoffLib().sessionRows({ memory: s.memory, instructions: null, files: [] }) })); return file; };
+
+test('an older session that later saves its own file never drops a newer file it never had (G2 H1, P1)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  putAt(s, 'memory/MEMORY.md', '# Memory\n', '2026-11-21T08:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v1\n', '2026-11-21T09:00:00Z');
+  putAt(s, 'memory/newer-topic.md', 'saved by the coordinator at 10:30\n', '2026-11-21T10:30:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  // Session A synced at 10:00: it never had newer-topic.md. At 11:00 it saves its own file.
+  fs.rmSync(path.join(s.memory, 'newer-topic.md'));
+  const a = baselineOf(s, path.join(s.base, 'session-a.json'));
+  putAt(s, 'memory/owner-rules.md', 'rules v2 (session A)\n', '2026-11-21T11:00:00Z');
+  assert.equal(run(['--baseline', a]).result.handoff, 'WRITTEN');
+  assert.match(v.copy('memory/owner-rules.md'), /session A/, 'its own newer edit is written');
+  assert.ok(v.row('memory/newer-topic.md'), 'a file this session does not hold is unknown here, never dropped');
+});
+
+test('a coordinator\'s new file reaches the snapshot through the next session that holds it (G2 H1, P1c)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  putAt(s, 'memory/MEMORY.md', '# Memory\n', '2026-11-21T08:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v1\n', '2026-11-21T09:00:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  // An older thread saves owner-rules.md at 11:00; its run writes that row.
+  const a = baselineOf(s, path.join(s.base, 'a.json'));
+  putAt(s, 'memory/owner-rules.md', 'rules v2 (thread)\n', '2026-11-21T11:00:00Z');
+  assert.equal(run(['--baseline', a]).result.handoff, 'WRITTEN');
+  // A later session holds the coordinator's 10:30 file.
+  putAt(s, 'memory/coordinator-new.md', 'coordinator decision at 10:30\n', '2026-11-21T10:30:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 'b.json'))]).result.handoff, 'WRITTEN');
+  assert.ok(view(out).row('memory/coordinator-new.md'));
+});
+
+test('a gate-end manual run from an older session never reverts or drops newer memory (G2 M3, P2)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- newest queue (12:00)\n', '2026-11-21T12:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules\n', '2026-11-21T09:00:00Z');
+  putAt(s, 'memory/newer-topic.md', 'new at 11:30\n', '2026-11-21T11:30:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  // An older gate thread (synced 10:00) ends its gate with a plain run.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- old queue (08:00)\n', '2026-11-21T08:00:00Z');
+  fs.rmSync(path.join(s.memory, 'newer-topic.md'));
+  assert.equal(run([]).result.handoff, 'UNCHANGED');
+  assert.doesNotMatch(v.copy('MEMORY.md'), /old queue/);
+  assert.ok(v.row('memory/newer-topic.md'));
+  // Its own newer save is written by the same plain run.
+  putAt(s, 'memory/owner-rules.md', 'rules, gate end\n', '2026-11-21T12:30:00Z');
+  assert.equal(run([]).result.handoff, 'WRITTEN');
+  assert.match(v.copy('memory/owner-rules.md'), /gate end/);
+  assert.doesNotMatch(v.copy('MEMORY.md'), /old queue/);
+});
+
+test('a plain copy stays baseline-only after the session edits a file minutes later (G2 M1, P3)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- newest queue\n', '2026-11-21T12:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules\n', '2026-11-21T12:00:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  // An older session's plain copy: every file copied at 12:30, MEMORY.md older in content.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- old queue\n', '2026-11-21T12:30:00Z');
+  touch(path.join(s.memory, 'owner-rules.md'), '2026-11-21T12:30:00Z');
+  const baseline = baselineOf(s, path.join(s.base, 'session.json'));
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'UNCHANGED');
+  putAt(s, 'memory/owner-rules.md', 'changed here\n', '2026-11-21T12:32:00Z');
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
+  assert.match(v.copy('memory/owner-rules.md'), /changed here/);
+  assert.doesNotMatch(v.copy('MEMORY.md'), /old queue/, 'the decision was made when the session started');
+  // Later runs keep that decision.
+  putAt(s, 'memory/owner-rules.md', 'changed again\n', '2026-11-21T12:40:00Z');
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
+  assert.doesNotMatch(v.copy('MEMORY.md'), /old queue/);
+});
+
+test('equal modified times keep the snapshot row (P5)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- snapshot\n', '2026-11-21T12:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules\n', '2026-11-21T09:00:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- same time other text\n', '2026-11-21T12:00:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 'b.json'))]).result.handoff, 'UNCHANGED');
+  assert.match(view(out).copy('MEMORY.md'), /snapshot/);
+});
+
+test('readying a detached store checkout never moves a local branch that holds unsent commits (G2 M2, P6)', t => {
+  const w = world(t);
+  const s = sources(t);
+  aged(s);
+  const first = w.act(['handoff', '--repo-root', s.repo, '--memory', s.memory], { handoffState: s.state, now: NOW });
+  assert.equal(first.result.handoff, 'SAVED', JSON.stringify(first.result));
+  // An unsent evidence commit on local main (a save whose push failed), then HEAD detached at origin.
+  w.write('archives/unsent/report.md', 'sole copy\n');
+  git(w.dir, 'add', '-A');
+  git(w.dir, 'commit', '--quiet', '-m', 'unsent evidence');
+  const unsent = git(w.dir, 'rev-parse', 'HEAD');
+  git(w.dir, 'checkout', '--quiet', '--detach', 'origin/main');
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- newer\n', '2026-11-21T12:00:00Z');
+  const baseline = path.join(s.base, 'b.json');
+  fs.writeFileSync(baseline, JSON.stringify({ rows: [] }));
+  const hooked = w.act(['handoff', '--repo-root', s.repo, '--baseline', baseline], { handoffState: s.state, now: NOW });
+  assert.notEqual(hooked.code, 0, 'refused: the checkout is not on the bound branch');
+  assert.equal(git(w.dir, 'rev-parse', 'main'), unsent, 'local main is left where it was');
+});
+
+test('a source the hook cannot read still records the once-a-minute check (G2 L2, P7)', t => {
+  const s = sources(t);
+  aged(s);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  fs.writeFileSync(path.join(s.memory, 'binary.md'), Buffer.from([0xff, 0xfe, 0x00, 0xc3]));
+  const h = hookHarness(s);
+  assert.equal(h.fire(), 0);
+  const sessions = path.join(h.dir, 'handoff-sessions');
+  const files = fs.existsSync(sessions) ? fs.readdirSync(sessions) : [];
+  assert.equal(files.length, 1, 'the session file is written');
+  assert.ok(Number.isFinite(JSON.parse(fs.readFileSync(path.join(sessions, files[0]), 'utf8')).checked_at));
+});
+
+test('discovery adopts the working repository\'s own snapshot, and none when it is ambiguous (G2 L1, P8)', t => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tk-discover-')));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const make = (name, origin) => { const dir = path.join(base, name); git(base, 'init', '--quiet', dir); git(dir, 'remote', 'add', 'origin', origin); return dir; };
+  const storeDir = make('store', 'https://github.com/owner/store.git');
+  const widget = make('widget', 'https://github.com/acme/widget.git');
+  const own = make('zapp', 'https://github.com/zeta/zapp.git');
+  for (const slug of ['acme/widget', 'zeta/zapp']) {
+    const folder = path.join(storeDir, 'evidence', 'handoff', ...slug.split('/'));
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'manifest.json'), JSON.stringify({ schema: handoffLib().SCHEMA, stamp: { taken_at: '2026-11-21T10:00:00Z' }, sources: { memory: '/x', instructions: null, files: [] }, files: [] }));
+  }
+  const { discover } = hookModule();
+  assert.equal(discover(own)?.repository, 'zeta/zapp');
+  assert.equal(discover(widget)?.repository, 'acme/widget');
+  assert.equal(discover(base), null, 'two candidates and no working repository: none');
+});
+
+// ---- G2 round 2 probes: rows with no time, unreachable sources, untested guards -----------------
+
+test('a row with no time gets a fixed one, so a newer save still lands after another file was written (G2 r2 H1, Q3)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  const manifestFile = path.join(out, FOLDER, 'manifest.json');
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- queue v0 (17:00)\n', '2026-11-21T17:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v0\n', '2026-11-21T16:00:00Z');
+  assert.equal(run(['--memory', s.memory], () => new Date('2026-11-21T18:07:00Z')).result.handoff, 'WRITTEN');
+  // As a snapshot written before rows carried a time.
+  const m = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  m.files = m.files.map(({ modified, ...rest }) => rest);
+  fs.writeFileSync(manifestFile, `${JSON.stringify(m, null, 2)}\n`);
+  // Session T1 (synced 18:00) saves its own owner-rules.md at 18:30; its run writes it.
+  const t1 = baselineOf(s, path.join(s.base, 't1.json'));
+  putAt(s, 'memory/owner-rules.md', 'rules v1 (thread T1)\n', '2026-11-21T18:30:00Z');
+  assert.equal(run(['--baseline', t1], () => new Date('2026-11-21T18:31:00Z')).result.handoff, 'WRITTEN');
+  assert.equal(v.row('MEMORY.md').modified, '2026-11-21T17:00:00.000Z', 'the matching copy fixed the row\'s time');
+  // The coordinator saved MEMORY.md v1 at 18:20; session T2 holds it and runs.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- queue v1 (coordinator 18:20)\n', '2026-11-21T18:20:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 't2.json'))], () => new Date('2026-11-21T18:41:00Z')).result.handoff, 'WRITTEN');
+  assert.match(v.copy('MEMORY.md'), /queue v1/);
+  // An older copy still cannot overwrite it.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- queue v0.5 (17:30)\n', '2026-11-21T17:30:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 't3.json'))]).result.handoff, 'UNCHANGED');
+  assert.match(v.copy('MEMORY.md'), /queue v1/);
+});
+
+test('a row with no time and different content here takes the snapshot\'s time once, and that time does not move', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  const manifestFile = path.join(out, FOLDER, 'manifest.json');
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- snapshot copy\n', '2026-11-21T17:00:00Z');
+  assert.equal(run(['--memory', s.memory], () => new Date('2026-11-21T18:07:00Z')).result.handoff, 'WRITTEN');
+  const m = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  m.files = m.files.map(({ modified, ...rest }) => rest);
+  fs.writeFileSync(manifestFile, `${JSON.stringify(m, null, 2)}\n`);
+  // An older copy of MEMORY.md here: the row keeps its content and gets the 18:07 snapshot time.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- older copy\n', '2026-11-21T16:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v1\n', '2026-11-21T18:30:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 'a.json'))], () => new Date('2026-11-21T18:31:00Z')).result.handoff, 'WRITTEN');
+  assert.equal(v.row('MEMORY.md').modified, '2026-11-21T18:07:00.000Z');
+  assert.match(v.copy('MEMORY.md'), /snapshot copy/);
+  putAt(s, 'memory/owner-rules.md', 'rules v2\n', '2026-11-21T19:00:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 'b.json'))], () => new Date('2026-11-21T19:01:00Z')).result.handoff, 'WRITTEN');
+  assert.equal(v.row('MEMORY.md').modified, '2026-11-21T18:07:00.000Z', 'later writes do not move it');
+});
+
+test('a hook-started run keeps every row of a source it cannot reach (G2 r2 M1, Q1 and Q1b)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  assert.equal(run(['--memory', s.memory, '--file', s.hourly]).result.handoff, 'WRITTEN');
+  const baseline = baselineOf(s, path.join(s.base, 'session.json'));
+  fs.renameSync(s.memory, `${s.memory}.away`);
+  fs.rmSync(s.hourly);
+  const result = run(['--baseline', baseline]).result;
+  fs.renameSync(`${s.memory}.away`, s.memory);
+  assert.equal(result.handoff, 'UNCHANGED', JSON.stringify(result));
+  for (const name of ['MEMORY.md', 'memory/owner-rules.md', 'files/additions.md']) assert.ok(v.row(name), name);
+});
+
+test('the hook starts a run for a file its session deleted, which only the baseline shows', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  const h = hookHarness(s);
+  assert.equal(h.fire(), 0);
+  fs.rmSync(path.join(s.memory, 'owner-rules.md'));
+  h.later(2);
+  assert.equal(h.fire(), 0);
+  assert.equal(h.started.length, 1);
+});
+
+for (const [name, setup] of [
+  ['a detached HEAD holding its own commit', w => { w.write('archives/detached/report.md', 'only here\n'); git(w.dir, 'add', '-A'); git(w.dir, 'commit', '--quiet', '-m', 'detached work'); }],
+  ['a work tree with an unsaved file', w => { w.write('archives/loose/notes.md', 'not saved\n'); }],
+]) {
+  test(`readying a detached store checkout leaves ${name} as it is`, t => {
+    const w = world(t);
+    const s = sources(t);
+    assert.equal(w.act(['handoff', '--repo-root', s.repo, '--memory', s.memory], { handoffState: s.state, now: NOW }).result.handoff, 'SAVED');
+    git(w.dir, 'checkout', '--quiet', '--detach');
+    setup(w);
+    const head = git(w.dir, 'rev-parse', 'HEAD');
+    const status = git(w.dir, 'status', '--porcelain');
+    s.put('memory/MEMORY.md', '# Memory\n- newer\n');
+    const baseline = path.join(s.base, 'b.json');
+    fs.writeFileSync(baseline, JSON.stringify({ rows: [] }));
+    const hooked = w.act(['handoff', '--repo-root', s.repo, '--baseline', baseline], { handoffState: s.state, now: NOW });
+    assert.notEqual(hooked.code, 0, 'refused: not on the bound branch');
+    assert.equal(git(w.dir, 'rev-parse', 'HEAD'), head);
+    assert.equal(git(w.dir, 'status', '--porcelain'), status);
+    assert.throws(() => git(w.dir, 'symbolic-ref', '-q', 'HEAD'), 'HEAD stays detached');
+  });
+}
