@@ -163,7 +163,7 @@ send_telegram() {
 
 send_email() {
   local subject="$1" body_file="$2"
-  subject="${ALERT_EMAIL_SUBJECT_PREFIX:-[host-observability]} $subject"
+  subject="${ALERT_EMAIL_SUBJECT_PREFIX:+$ALERT_EMAIL_SUBJECT_PREFIX }$subject"
   if have mail; then
     mail -s "$subject" "$ALERT_EMAIL_TO" < "$body_file"
   elif [ -x "$SENDMAIL" ]; then
