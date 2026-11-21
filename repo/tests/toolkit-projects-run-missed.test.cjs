@@ -102,3 +102,54 @@ test('the command exits 0 when clear, 1 on a missed run and 2 on bad input', t =
   }
   assert.equal(spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' }).status, 2, 'no --input');
 });
+
+// Receipt ledger: each stamp's .relayed and .done files, read from the task's run folder. Every
+// state that breaks "`.done` only after `.relayed`, each with its content line" or leaves a run
+// unfinished prints a line, so nobody counts receipts by hand. Fixtures copy real folder shapes.
+const BIHOURLY = 'CRON_TZ=Asia/Singapore 10 7-23/2 * * *';
+const ledger = (receipts, extra = {}) => task({ cron_expression: BIHOURLY, last_fired_at: '2026-11-20T11:10:04Z', stamps: Object.keys(receipts).filter(run => receipts[run].stamp !== false), receipts: Object.fromEntries(Object.entries(receipts).map(([run, { stamp, ...files }]) => [run, files])), ...extra });
+const lines = (now, tasks) => report(check({ now, tasks })).trim().split('\n').slice(1);
+
+test('receipt ledger: every broken or unfinished receipt state prints its line', () => {
+  const rows = [
+    ['relayed then done, each with content', { '20261120T111000Z': { relayed: 'relayed 20261120T111000Z at x', done: 'done 20261120T111000Z at x' } }, []],
+    ['empty .done', { '20261120T111000Z': { relayed: 'relayed x', done: '' } }, ['RECEIPT BROKEN: Hourly nudge 20261120T111000Z (empty .done)']],
+    ['empty .relayed', { '20261120T111000Z': { relayed: '  ', done: 'done x' } }, ['RECEIPT BROKEN: Hourly nudge 20261120T111000Z (empty .relayed)']],
+    ['.done without .relayed', { '20261120T111000Z': { done: 'done x' } }, ['RECEIPT BROKEN: Hourly nudge 20261120T111000Z (.done without .relayed)']],
+    ['stamp only, under 15 minutes old', { '20261120T112200Z': {} }, []],
+    ['stamp only, over 15 minutes old', { '20261120T111000Z': {} }, ['RUN PENDING: Hourly nudge 20261120T111000Z (not relayed, 26 min)']],
+    ['relayed, not done, before the next fire', { '20261120T111000Z': { relayed: 'relayed x' } }, []],
+    ['receipt with no stamp', { '20261120T091000Z': { stamp: false, relayed: 'relayed x', done: 'done x' }, '20261120T111000Z': { relayed: 'r', done: 'd' } }, ['RECEIPT ORPHAN: Hourly nudge 20261120T091000Z (.relayed, .done with no stamp)']]
+  ];
+  for (const [label, receipts, want] of rows) assert.deepEqual(lines('2026-11-20T11:36:00Z', [ledger(receipts)]), want, label);
+  // Past the next fire (13:10 Singapore, 05:10Z): a relayed run without .done is pending, with its age.
+  assert.deepEqual(lines('2026-11-20T13:11:00Z', [ledger({ '20261120T111000Z': { relayed: 'relayed x' }, '20261120T131000Z': { relayed: 'r', done: 'd' } }, { last_fired_at: '2026-11-20T13:10:04Z' })]),
+    ['RUN PENDING: Hourly nudge 20261120T111000Z (not done, 2 h)']);
+});
+
+test('receipt ledger: the paused weekly run is flagged until it is finished, and stopped tasks are skipped', () => {
+  const weekly = { name: 'Weekly session audit', cron_expression: 'CRON_TZ=Asia/Singapore 30 8 * * 3', created_at: '2026-11-10T00:00:00Z', last_fired_at: '2026-11-18T00:30:04Z',
+    stamps: ['20261118T003530Z'], receipts: { '20261118T003530Z': {} } };
+  assert.deepEqual(lines('2026-11-20T19:50:00Z', [weekly]), ['RUN PENDING: Weekly session audit 20261118T003530Z (not relayed, 67 h)']);
+  assert.deepEqual(lines('2026-11-20T19:50:00Z', [{ ...weekly, stopped: true }]), []);
+  const result = check({ now: '2026-11-20T19:50:00Z', tasks: [weekly] });
+  assert.equal(report(result).split('\n')[0], 'RUN CHECK: tasks 1, checked 1, missed 0, pending 1, broken 0, orphan 0');
+});
+
+test('receipt ledger: long lists keep five lines per task and state, then a count', () => {
+  const receipts = {};
+  for (let hour = 1; hour <= 8; hour += 1) receipts[`20261120T0${hour}1000Z`] = { relayed: 'r', done: '' };
+  receipts['20261120T111000Z'] = { relayed: 'r', done: 'd' };
+  const out = lines('2026-11-20T11:36:00Z', [ledger(receipts)]);
+  assert.equal(out.length, 6, out.join('\n'));
+  assert.equal(out[0], 'RECEIPT BROKEN: Hourly nudge 20261120T011000Z (empty .done)');
+  assert.equal(out[5], 'RECEIPT BROKEN: Hourly nudge and 3 more');
+});
+
+test('receipt ledger: input without receipts gives the same output as before, and bad receipts are refused', t => {
+  const old = check({ now: '2026-11-18T23:31:00Z', tasks: [task()] });
+  assert.equal(report(old), 'RUN CHECK: tasks 1, checked 1, missed 1\nRUN MISSED: Hourly nudge 2026-11-18T23:10Z (not fired)\n');
+  for (const receipts of [[], { yesterday: {} }, { '20261120T111000Z': { relayed: 3 } }, { '20261120T111000Z': { seen: 'x' } }]) {
+    assert.throws(() => check({ now: '2026-11-20T11:36:00Z', tasks: [task({ receipts })] }), /receipts/, JSON.stringify(receipts));
+  }
+});

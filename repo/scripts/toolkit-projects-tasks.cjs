@@ -4,20 +4,28 @@
 // Renders and checks the scheduled task prompts a Claude Projects coordinator runs (the daily
 // check-in, the hourly nudge and the shell around a project's own tasks), and checks the two
 // memory lines Toolkit defines. Read-only: it prints to stdout and never writes a prompt, a task
-// or memory. A stored prompt is a pointer: one Toolkit block (TASK-POINTER), the params block and
-// the project layer (every line outside the block). Each run loads its instructions with --expand
-// from Toolkit main, so a release reaches every task without touching its stored prompt. The
-// pointer is checked by its text, not its version stamp, so it only goes out of date when its own
-// text changes. A prompt from before pointers (the full instructions as blocks) checks outdated,
-// and a refresh turns it into a pointer.
+// or memory.
+// The two Toolkit tasks store a ping: one Toolkit block (TASK-PING) and the params block, nothing
+// else. Each run stamps itself and posts one line, and the coordinator works the task's checklist
+// from the guidebook copy; project additions live in <report_dir>/project-additions.md. A pointer
+// or a full prompt from before pings checks outdated; --refresh turns it into the ping only once
+// its project additions are saved (--additions-from prints them, --additions-saved proves the save).
+// Until every project swaps, --expand for a Toolkit task prints the ping with a TASKS OUTDATED
+// prefix, so an unswapped pointer runs as a ping and asks for its swap.
+// A project's own (custom) task stores a pointer: one Toolkit block (TASK-POINTER), the params
+// block and the project layer (every line outside the block). Each run loads its instructions with
+// --expand from Toolkit main, so a release reaches it without touching its stored prompt.
+// Both are checked by their text, not their version stamp.
 //
-//   --render <kind> --params <file> [--project-text <file>]   the stored prompt (the pointer)
+//   --render <kind> --params <file> [--project-text <file>]   the stored prompt (custom: needs its text)
 //   --expand <kind> --params <file>                            this run's Toolkit instructions
 //   --name <kind> --params <file>                              the task name
 //   --check <kind> <prompt-file>        current | outdated | edited | missing | misplaced | malformed
 //   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>] [--session <bound|fresh>]
+//             [--additions-saved <file>]
 //                                       the refreshed prompt; a Toolkit task needs --session, the
 //                                       session its replacement runs in, so a swap always sets it
+//   --additions-from <kind> <prompt-file>   the project additions a Toolkit task's old prompt holds
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
 //
@@ -44,6 +52,8 @@ const SHELL = Object.freeze({
   delivery: { name: 'TASK-DELIVERY', file: 'delivery.md' }
 });
 const POINTER = Object.freeze({ name: 'TASK-POINTER', file: 'pointer.md' });
+const PING = Object.freeze({ name: 'TASK-PING', file: 'ping.md' });
+const pinged = kind => Boolean(KINDS[kind].checks);
 const CUSTOM_CHECKS = "CHECKS\n- This task's own steps are the project additions in its stored prompt. Run them in order.";
 const PROJECT_HEADING = 'Project additions (kept on every refresh; they override the Toolkit base where they differ):';
 const KEPT_LABEL = '(kept from an edit inside the block)';
@@ -128,7 +138,7 @@ function taskSlug(kind, params) {
 // Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound], [raised].
 // [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
-function fill(template, kind, params) {
+function fill(template, kind, params, extra = {}) {
   const session = params.session || KINDS[kind].session;
   const values = {
     ...params,
@@ -141,7 +151,8 @@ function fill(template, kind, params) {
   const conditions = {
     repo: params.repo !== 'none', 'no-repo': params.repo === 'none', parent: params.parent_issue !== 'none',
     toolkit: params.repo === params.toolkit_repo,
-    fresh: session === 'fresh', bound: session === 'bound', raised: Boolean(params.raise_reason)
+    fresh: session === 'fresh', bound: session === 'bound', raised: Boolean(params.raise_reason),
+    pointer: extra.pointer === true
   };
   const lines = [];
   for (const line of normalizeBody(template).split('\n')) {
@@ -236,40 +247,49 @@ class ProjectsTasks {
     return { source: SOURCE, name: POINTER.name, version: this.version(), body: fill(this.template(POINTER.file), kind, params) };
   }
 
+  pingBlock(kind, params) {
+    return { source: SOURCE, name: PING.name, version: this.version(), body: fill(this.template(PING.file), kind, params) };
+  }
+
+  // The block a current stored prompt holds: the ping for a Toolkit task, the pointer for custom.
+  storedBlock(kind, params) {
+    return pinged(kind) ? this.pingBlock(kind, params) : this.pointerBlock(kind, params);
+  }
+
   // The stored prompt. fenceText keeps a live prompt's own params block, byte for byte, on a refresh.
+  // A ping carries no project text: its project additions live in <report_dir>/project-additions.md.
   render(kind, params, projectText, fenceText = paramsFence(params)) {
+    if (pinged(kind)) {
+      if (projectText !== undefined && lfText(projectText).trim()) throw new TaskInputError('TASK_PROJECT_TEXT');
+      return [renderBlock(this.pingBlock(kind, params)), '', fenceText, ''].join('\n');
+    }
     const project = normalizeProjectText(kind, projectText);
     return [renderBlock(this.pointerBlock(kind, params)), '', fenceText, '', project, ''].join('\n');
   }
 
-  // What a run follows: plain text, no markers, read fresh from this checkout every run.
+  // What a run follows: plain text, no markers, read fresh from this checkout every run. A Toolkit
+  // task only reaches this from an unswapped pointer, so it gets the ping, asking for its swap.
   expand(kind, params) {
-    const blocks = this.instructionBlocks(kind, params).map(block => normalizeBody(block.body).replace(/\n+$/, ''));
-    if (kind === 'custom') blocks.splice(1, 0, CUSTOM_CHECKS);
     const label = KINDS[kind].title ? taskName(kind, params) : 'a project task';
-    return [`TOOLKIT TASK INSTRUCTIONS (${label}, toolkit ${this.version()})`, ...blocks].join('\n\n') + '\n';
+    const header = `TOOLKIT TASK INSTRUCTIONS (${label}, toolkit ${this.version()})`;
+    if (pinged(kind)) return [header, normalizeBody(fill(this.template(PING.file), kind, params, { pointer: true })).replace(/\n+$/, '')].join('\n\n') + '\n';
+    const blocks = this.instructionBlocks(kind, params).map(block => normalizeBody(block.body).replace(/\n+$/, ''));
+    blocks.splice(1, 0, CUSTOM_CHECKS);
+    return [header, ...blocks].join('\n\n') + '\n';
   }
 
   check(kind, text) {
-    return checkTask(kind, text, params => ({ pointer: this.pointerBlock(kind, params), legacy: this.instructionBlocks(kind, params) }));
+    return checkTask(kind, text, params => ({
+      current: this.storedBlock(kind, params),
+      legacy: [...(pinged(kind) ? [this.pointerBlock(kind, params)] : []), ...this.instructionBlocks(kind, params)]
+    }));
   }
 
-  refresh(kind, text, { params: override, projectText, session } = {}) {
-    const result = this.check(kind, text);
-    if (result.state === 'malformed') throw new TaskInputError('TASK_MALFORMED');
-    if (session !== undefined && (!KINDS[kind].session || !PARAMS.session.test(session))) throw new TaskInputError('TASK_ARGUMENTS');
-    const withSession = params => (session === undefined ? params : validateParams(kind, { ...params, session }));
-    if (result.state === 'missing') {
-      if (!override) throw new TaskInputError('TASK_PARAMS');
-      return this.render(kind, withSession(override), projectText);
-    }
-    if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
-    const lf = lfText(text);
-    const { params: stored, legacy } = storedParams(kind, lf);
-    const params = withSession(stored);
-    const expected = [this.pointerBlock(kind, params), ...this.instructionBlocks(kind, params)];
-    const { blocks } = findBlocks(lf);
-    const own = blocks.filter(block => block.source === SOURCE);
+  // The project text of a stored prompt: every line outside the Toolkit blocks and the params block,
+  // plus lines typed inside an edited block, labelled. An untouched default section counts as none.
+  projectText(kind, lf, params) {
+    const expected = [this.storedBlock(kind, params), this.pointerBlock(kind, params), ...this.instructionBlocks(kind, params)];
+    const own = findBlocks(lf).blocks.filter(block => block.source === SOURCE);
     const kept = [];
     for (const block of own) {
       if (!tampered(block)) continue;
@@ -277,9 +297,45 @@ class ProjectsTasks {
       const base = new Set(normalizeBody(want.body).split('\n').map(line => line.trim()));
       for (const line of normalizeBody(block.body).split('\n')) if (line.trim() && !base.has(line.trim())) kept.push(line);
     }
-    const fence = findParams(lf);
-    let project = projectSegments(lf, own, fence).join('\n\n');
+    let project = projectSegments(lf, own, findParams(lf)).join('\n\n');
     if (kept.length) project = [project, KEPT_LABEL, ...kept].filter(Boolean).join('\n');
+    return project;
+  }
+
+  // The project additions a Toolkit task's stored prompt holds, to move into project-additions.md
+  // before its swap: '' when there are none.
+  additions(kind, text) {
+    if (!pinged(kind)) throw new TaskInputError('TASK_KIND');
+    const result = this.check(kind, text);
+    if (result.state === 'malformed' || result.state === 'missing') throw new TaskInputError('TASK_MALFORMED');
+    const lf = lfText(text);
+    const project = this.projectText(kind, lf, storedParams(kind, lf).params);
+    return project === `${PROJECT_HEADING}\n- none` ? '' : project;
+  }
+
+  // additions: the text of <report_dir>/project-additions.md as read back after the save. A Toolkit
+  // task's prompt holding project additions refreshes only when that text holds them word for word.
+  refresh(kind, text, { params: override, projectText, session, additions } = {}) {
+    const result = this.check(kind, text);
+    if (result.state === 'malformed') throw new TaskInputError('TASK_MALFORMED');
+    if (session !== undefined && (!KINDS[kind].session || !PARAMS.session.test(session))) throw new TaskInputError('TASK_ARGUMENTS');
+    if (additions !== undefined && !pinged(kind)) throw new TaskInputError('TASK_ARGUMENTS');
+    const withSession = params => (session === undefined ? params : validateParams(kind, { ...params, session }));
+    if (result.state === 'missing') {
+      if (!override || (pinged(kind) && projectText !== undefined)) throw new TaskInputError(override ? 'TASK_ARGUMENTS' : 'TASK_PARAMS');
+      return this.render(kind, withSession(override), projectText);
+    }
+    if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
+    const lf = lfText(text);
+    const { params: stored, legacy } = storedParams(kind, lf);
+    const params = withSession(stored);
+    let project = this.projectText(kind, lf, stored);
+    if (pinged(kind)) {
+      const moved = this.additions(kind, lf);
+      if (moved && (additions === undefined || !lfText(additions).includes(moved))) throw new TaskInputError('TASK_ADDITIONS_UNSAVED');
+      project = undefined;
+    }
+    const fence = findParams(lf);
     // A session change or a legacy migration rewrites the params block; otherwise it is kept byte for byte.
     const fenceText = params.session === stored.session && !legacy ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
@@ -319,8 +375,9 @@ function projectSegments(lf, own, fence) {
 }
 
 // States, worst first: malformed, edited, outdated, misplaced, current. missing = no Toolkit
-// blocks at all (a hand-written prompt). A pointer is current while its text matches main's,
-// whatever release stamped it; a prompt from before pointers is outdated (edited when touched).
+// blocks at all (a hand-written prompt). The stored block (the ping, or a custom task's pointer) is
+// current while its text matches main's, whatever release stamped it; an older shape is outdated
+// (edited when touched), and so is a ping that still carries project text.
 function checkTask(kind, text, expectedFor) {
   kindOf(kind);
   const lf = lfText(text);
@@ -337,20 +394,24 @@ function checkTask(kind, text, expectedFor) {
     throw error;
   }
   const legacyNames = new Set(expected.legacy.map(block => block.name));
-  const pointers = own.filter(block => block.name === POINTER.name);
+  const stored = own.filter(block => block.name === expected.current.name);
   const legacy = own.filter(block => legacyNames.has(block.name));
-  if (pointers.length + legacy.length !== own.length || pointers.length > 1) return { state: 'malformed', exitCode: 2 };
-  // A pointer that loads another kind's instructions is another task's prompt, never this one's to refresh.
+  const pointers = own.filter(block => block.name === POINTER.name);
+  if (stored.length + legacy.length !== own.length || stored.length > 1 || pointers.length > 1) return { state: 'malformed', exitCode: 2 };
+  // A pointer that loads another kind's instructions, or a ping that stamps another kind's runs, is
+  // another task's prompt, never this one's to refresh.
   const loads = pointers.length ? /toolkit-projects-tasks\.cjs --expand ([a-z-]+) /.exec(pointers[0].body) : null;
   if (loads && loads[1] !== kind) return { state: 'malformed', exitCode: 2 };
+  if (stored.length && expected.current.name === PING.name && Object.keys(KINDS).some(other => other !== kind && stored[0].body.includes(`/task-runs/${other}-`))) return { state: 'malformed', exitCode: 2 };
   let state;
   if (own.some(tampered)) state = 'edited';
-  else if (legacy.length || pointers[0].format !== FORMAT || normalizeBody(pointers[0].body) !== normalizeBody(expected.pointer.body)) state = 'outdated';
-  else state = inOrder(lf, pointers[0], fence) ? 'current' : 'misplaced';
+  else if (legacy.length || !stored.length || stored[0].format !== FORMAT || normalizeBody(stored[0].body) !== normalizeBody(expected.current.body)) state = 'outdated';
+  else if (expected.current.name === PING.name && projectSegments(lf, own, fence).length) state = 'outdated';
+  else state = inOrder(lf, stored[0], fence) ? 'current' : 'misplaced';
   return { state, exitCode: state === 'current' ? 0 : 1 };
 }
 
-// The pointer first (only blank lines before it), then the params block.
+// The stored block first (only blank lines before it), then the params block.
 function inOrder(lf, pointer, fence) {
   const lineOf = offset => lf.slice(0, offset).split('\n').length - 1;
   return !lf.slice(0, pointer.start).trim() && fence.startLine > lineOf(pointer.end);
@@ -403,12 +464,12 @@ function parseArgs(args) {
     if (positional.length !== 1 || !options['--params']) throw new TaskInputError('TASK_ARGUMENTS');
     return { mode: mode.slice(2), kind: kindArg(positional[0]), params: options['--params'], projectText: options['--project-text'] };
   }
-  if (mode === '--check' || mode === '--refresh') {
-    const positional = take(mode === '--refresh' ? ['--params', '--project-text', '--session'] : []);
+  if (mode === '--check' || mode === '--refresh' || mode === '--additions-from') {
+    const positional = take(mode === '--refresh' ? ['--params', '--project-text', '--session', '--additions-saved'] : []);
     if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS');
     const kind = kindArg(positional[0]);
     if (mode === '--refresh' && KINDS[kind].session && !options['--session']) throw new TaskInputError('TASK_ARGUMENTS');
-    return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'] };
+    return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'], additions: options['--additions-saved'] };
   }
   if (mode === '--params-from' || mode === '--check-memory') {
     const positional = take([]);
@@ -450,8 +511,12 @@ function main(args = process.argv.slice(2)) {
       output = tasks.refresh(options.kind, read(options.file), {
         params: options.params === undefined ? undefined : readParamsFile(options.kind, options.params),
         projectText: read(options.projectText),
-        session: options.session
+        session: options.session,
+        additions: read(options.additions)
       });
+    } else if (options.mode === 'additions-from') {
+      const moved = tasks.additions(options.kind, read(options.file));
+      output = moved ? `${moved}\n` : '';
     } else if (options.mode === 'params-from') {
       const fence = findParams(read(options.file));
       if (!fence) throw new TaskInputError('TASK_PARAMS_FENCE');
