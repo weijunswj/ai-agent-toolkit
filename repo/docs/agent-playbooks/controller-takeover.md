@@ -39,16 +39,16 @@ One denied command does not prove a missing ability. Before recording a probe as
 | (e) | Start a fresh gate with model and effort pinned and a readable launch record. | Own launch route, qualified executor launcher, then a Gate pack. Required before the first gate; no pasted brief alone qualifies. |
 | (f) | Wake the controller later: inspect supported wake facilities. | Use what is proven; otherwise the owner's next message. Check-ins and nudges remain Projects-only. An executor cannot promise to wake a chat. |
 | (g) | Read the latest Programme Sweep workflow run on the default branch (GitHub connector, or `gh run list --workflow toolkit-programme-sweep.yml --limit 1`). | Any route with GitHub read; only after the governance guard. Otherwise report "not checked here". |
-| (h) | Host question UI: inspect the native picker or card tools. | Questions stay in the controller's chat; typed answers are the final fallback. |
+| (h) | Native question method: inspect the harness's own question tools. | Questions stay in the controller's chat; typed answers are the final fallback. |
 | (i) | Toolkit hooks loaded: inspect the actual host's hook-state evidence and Toolkit version. | Inspect each effect host, including executor or relay. A report is not hook qualification. The Codex gate hold still applies. |
 
 A working GitHub connector is route 1 for reads and GitHub writes. Before any connector write, prove the signed-in GitHub account and target permissions; verify every connector write by read-back of the comment id, URL, author login and full body (or the changed object's id and revision). Without Toolkit hooks, never merge, close a parent issue or start a gate through a connector, and never push task or product source to a default branch through one. Before any connector commit, comment or pull request write, check its text yourself for AI attribution and personal data, since a hook may not see it. Keep all merge, parent-close, gate, approval and exact-head rules. Shell, pinned-route gate, task and hook needs follow their own probes through routes 2 or 3 when required. A working connector never supplies those proofs by itself.
 
 Required now: (a), (b) and a reachable record write, through (d) or the verified private evidence store. Required before gates: (e). Without (c) on any route, governance is unreadable. Missing optional abilities hold only dependent effects. A required ability unreachable by all three routes: no record; give read-only status, the missing ability and the cheapest concrete fix, then hold. Resume the journey when the owner names an available route. No surface is barred by name.
 
-When relay is needed, ask once using the host UI, else typed: "Which chat can you paste into on your own computer?" Choices: Claude Code (my pick), Codex, neither; accept another actual harness the owner names. Prove its abilities and account, never assume them. On neither, hold only abilities no other route reaches. If its Toolkit is stale, say "say 'refresh toolkit' in that chat"; never ask the owner to type shell commands.
+When relay is needed, ask once with the native question method, else one fully bold sentence: "Which chat can you paste into on your own computer?" Choices: Claude Code (my pick), Codex, neither; accept another actual harness the owner names. Prove its abilities and account, never assume them. On neither, hold only abilities no other route reaches. If its Toolkit is stale, say "say 'refresh toolkit' in that chat"; never ask the owner to type shell commands.
 
-Report one line filled from the probes: `Surface: <harness> (<host evidence>). Probe results: a <proof, route>, b <proof, route>, c <proof, route>, d <account, route>, e <launch proof or hold>, f <wake>, g <plan or not checked here>, h <UI or typed>, i <hook evidence or unknown>. Relay harness: <owner's answer or not needed>.` This is a report, not a lookup table.
+Report one line filled from the probes: `Surface: <harness> (<host evidence>). Probe results: a <proof, route>, b <proof, route>, c <proof, route>, d <account, route>, e <launch proof or hold>, f <wake>, g <plan or not checked here>, h <native method or typed>, i <hook evidence or unknown>. Relay harness: <owner's answer or not needed>.` This is a report, not a lookup table.
 
 ## Journey
 
@@ -58,7 +58,7 @@ Show the checklist once. Each step is verified with evidence, supplied by user w
 
 No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim. Complete, consistent user-supplied evidence is visibly labelled; it never becomes independent verification or gate/merge authority.
 
-Questions use the host's native question UI with plain option labels and "(my pick)" on the recommended one. Explain the problem, fix and consequence first; put the question card last, below the explanation. If that UI leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A card that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
+Questions use the harness's native question method (global rules) with plain option labels and "(my pick)" on the recommended one. Explain the problem, fix and consequence first; put the question last, below the explanation. If that method leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A question that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
 
 ### 1. The capability check
 

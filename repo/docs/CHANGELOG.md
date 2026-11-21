@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.159.1
+
+### Changed
+
+- **Native questions by default:** the global rules now ask each action-blocking question with the harness's native question method, explanation first and "(my pick)" on the best option, and fall back to one fully bold sentence only where no native method works. The repository-agent-rules skill, the controller takeover playbook, the toolkit-setup skill and the bridge doc follow the same wording, and a test stops bold-by-default or host-named question wording from coming back.
+- **Merges let a running guard ask:** where a merge guard is known to run, the global merge line, both safety-gates lists and Secure CI/CD let the guard ask and take the owner's yes to its question as the OK, instead of the agent asking its own merge question first. With no guard known to run, agents ask as before. The Projects skill's ask list leaves merges to its merge rule.
+- **Generic, platform first:** the two principles merge into one that also names harnesses, and says to state outcomes and safety floors rather than steps. The root `AGENTS.md` points to it.
+- **Secure CI/CD asks only before irreversible steps:** commits, pushes to a non-default branch and opening or updating a pull request now run without asking. Merges, deployments, default-branch and force pushes, deletes and real-key changes keep their approval ask, in the skill, its reference, the setup prompt, the CI check-up and the safety matrix.
+- **Leaner always-on rules:** the n8n renaming detail and the safe-mode check now live only in the n8n rules and the model-safety-flags playbook, where they already were, and the Ship principle no longer repeats the Shipping section's finish rule.
+- **Asked once:** the repository-agent-rules reset message leaves its bold question line out when the agent asks it with the native method. The Secure CI/CD setup prompt asks before a push whose workflow deploys outside the approved plan.
+
 ## 3.159.0 (leaner child filing rules)
 
 ### Added

@@ -55,7 +55,7 @@ An optional `.github/ci-checkup.json` in the repository:
 
 1. Read each `GAP` and `CHECK`. Drop false alarms; the script lists candidates and the agent decides. Each dropped item gets one line with its reason in the CI status document (step 4), so no drop goes unrecorded.
 2. List the real gaps in the release plan or the current PR.
-3. Fix clear gaps in a normal PR in that repository. This skill's approval gates still apply where the repository has no standing approval: ask before commit, push, PR, merge or deploy. Workflow edits get the review their risk tier needs.
+3. Fix clear gaps in a normal PR in that repository. This skill's approval gates still apply: commit, push the branch and open the PR without asking; ask before merge or deploy where the repository has no standing approval (where a merge guard is known to run, its question is that ask). Workflow edits get the review their risk tier needs.
 4. Update the CI status document in the same PR, including its "Last CI check-up" line, so it stays the true record.
 
 ## Not Covered
