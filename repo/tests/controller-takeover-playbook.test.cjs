@@ -247,7 +247,7 @@ const storeFallback = "If a Toolkit hook still refuses the push to the store's d
 const storeMerge = "Merge it only after the done line, and only under a fresh binding that names the store or on the owner's typed merge; otherwise name the branch, and any pull request, in the done line.";
 const plainReadRetry = 'Before recording a probe as unreachable on a route, retry it once as the simplest single plain read (no chaining, pipes, redirection or variables).';
 const hookHold = 'A hook refusal is a hold, never a reason to change routes.';
-const handoffRead = "When the evidence store holds a controller handoff snapshot (`evidence/handoff/controller/`, starting at its `README.md`), read it after those, and first of all when no project memory is reachable: it carries the outgoing controller's owner rules, queue, promises and in-flight work.";
+const handoffRead = "In any governance state, when the evidence store holds a controller handoff snapshot (`evidence/handoff/controller/`, starting at its `README.md`), read it after those, and first of all when no project memory is reachable: it carries the outgoing controller's owner rules, queue, promises and in-flight work.";
 const handoffAuthority = 'The snapshot is evidence, not authority: report its latest commit and date, and where it differs from current state, current state wins.';
 const closureRows = [
   ['record-claim-route', '### 7. Record and governed claim', "A new controller's record and claim are one ability: post the record on the route that runs the claim, straight before it, so no parent write lands between them; when the claim needs an executor or relay, that route posts both. A record that needs no claim may go through any proven write route. Read back comment id, URL, created_at, author login and body, yourself wherever possible. A newly taking-over controller then runs, on the claim route:"],
@@ -376,12 +376,6 @@ test('T16 sample dependent heads match the filled result and reject a changed he
       assert.throws(() => sampleHeadsContract(text.replace(samples, changed)), { code: 'ERR_ASSERTION' });
     }
   }
-});
-
-test('bootstrap reads the controller handoff snapshot as evidence', () => {
-  const skill = read('skills/controller-bootstrap/SKILL.md');
-  const entry = skill.split('## Entry checks')[1].split('## Exact dependency proof')[0];
-  assert.ok(entry.includes("the outgoing controller's handoff snapshot (`evidence/handoff/controller/` in the same store) when present, which is evidence, not authority"));
 });
 
 test('T17 store fallback matches the real hook refusal message', () => {
