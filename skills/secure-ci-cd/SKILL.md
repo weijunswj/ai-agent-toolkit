@@ -12,13 +12,13 @@ Use this skill as a safety-gated router for this toolkit's Secure CI/CD installe
 
 When this skill is invoked, read and follow [`templates/cicd/secure-cicd-prompt.md`](templates/cicd/secure-cicd-prompt.md) as the source-of-truth execution procedure.
 
-The prompt template is not optional background material. It defines the required phases, safety gates, status tracking, secret-handling rules, and commit/push/PR/deployment approval policy.
+The prompt template is not optional background material. It defines the required phases, safety gates, status tracking, secret-handling rules, and approval policy.
 
 ## Approval Gate Precedence
 
-When this skill applies, its approval gates override any repo-local default that would otherwise auto-commit, push, open a pull request, merge, or deploy.
+When this skill applies, its approval gates override any repo-local default that would otherwise merge, deploy, push to the default branch or force-push.
 
-Before committing, pushing, creating a pull request, merging, or deploying, pause, explain the risk, name the exact target and action, and ask for explicit user approval for that exact action.
+Commits, pushes to a non-default branch and opening or updating its pull request are reversible, so do them without asking. Before merging, deploying, pushing to the default branch, force-pushing, deleting, or changing real keys or secrets, pause, explain the risk, name the exact target and action, and ask for explicit user approval for that exact action; for a merge where a merge guard is known to run, its own question is that ask.
 
 ## Required Execution Shape
 
@@ -33,7 +33,7 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - Never ask the user to paste secret values into chat.
 - Create or update `docs/ci-cd/CURRENT_CICD_STATUS.md`.
 - Define a metadata-only deployment and AI-module observability baseline before deployment, provider integrations, notification tests, or background AI features are enabled.
-- Ask a clear approval question before commit, push, PR creation, merge, or deployment.
+- Commit, push a non-default branch and open or update its PR without asking; ask a clear approval question before a merge (where a merge guard is known to run, its question is that ask), deployment, default-branch or force push, delete, or real-key change.
 
 ## Manual Secret Handling
 

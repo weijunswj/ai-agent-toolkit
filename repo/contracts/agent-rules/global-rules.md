@@ -13,7 +13,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values; fixtures use reserved fakes (`example.com`, `.test`).
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
-- Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts (gate rules).
+- Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts; where a merge guard is known to run, let it ask and take the owner's yes; else ask (gate rules).
 - Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
@@ -68,7 +68,7 @@ For an external service, prefer in order: its connector or plugin, its MCP serve
 
 ## Model Safety Flags
 
-Prefer plain accurate words (`stop`, `remove`, `skip check`) over loaded ones; keep exact terms and real API names. Never disguise genuinely offensive work to avoid a safety classifier. If you or a subagent are switched to a fallback model, stop, report the time, request ID if shown and request, and retry in a fresh session with a clearer request or ask the owner. `claude --safe-mode` shows whether instruction files caused the flag.
+Prefer plain accurate words (`stop`, `remove`, `skip check`) over loaded ones; keep exact terms and real API names. Never disguise genuinely offensive work to avoid a safety classifier. If you or a subagent are switched to a fallback model, stop, report the time, request ID if shown and request, and retry in a fresh session with a clearer request or ask the owner.
 
 ## Shipping
 
@@ -87,16 +87,15 @@ All development aims at these; repository rules may add, never relax:
 - **Fast CI:** shard or cache with coverage unchanged, each file within its time budget; no duplicate runs; free fixes first; tests and CI evolve with the code.
 - **Grouped changes:** one coherent PR per goal; dependency updates grouped, not one PR per package.
 - **Slim:** no dead code or unneeded compatibility (Change-local hygiene); no scraps.
-- **Platform first:** use built-in host features; custom guards only for real risks, each naming the failure it prevents.
 - **Never silently wrong:** fail loudly and heal missed steps.
-- **Generic:** shared rules and tools name no project, issue or record unless needed.
+- **Generic, platform first:** shared rules and tools name no project, issue, record or harness unless needed; state outcomes and safety floors, not steps; use host defaults, and custom guards only for real risks, each naming the failure it prevents.
 - **One source of truth:** every rule or fact has one home; edit the source and regenerate, never a copy or summary.
 - **Lean always-on text:** always-loaded instructions stay short; detail lives in files read at the step that needs it.
 - **Automate first:** enforce clear-cut rules in code (hooks, scripts, CI), else in writing, memory last; controllers still decide judgement calls; checks prove results, not self-grading.
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
 - **Fix the root cause, upstream:** reuse first, then the smallest real fix; where it matters, make it in the shared source that copies, prompts and later runs inherit; any fallback narrow, visible, tested.
-- **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
+- **Ship, then improve:** basics, ship, observe, improve.
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
 - **Plain words:** plain names, current behaviour; owner terminal steps short, Enter-only.
@@ -127,7 +126,7 @@ When a file says it is generated, edit its source, template or generator and reg
 
 ## Human-readable Work
 
-New or changed human-facing work (screens, labels, messages, errors, documents, operator output, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows follow `n8n-safety-router`'s readable presentation; renames keep node IDs, expressions, connections and credentials. Unrelated work triggers no blanket rename, but misleading text is a real defect. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition. User-facing text (skills, prompts, CLI output, docs) describes current behaviour only; versions, release qualifiers and roadmap labels go in changelogs and records.
+New or changed human-facing work (screens, labels, messages, errors, documents, operator output, n8n and other workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. Unrelated work triggers no blanket rename, but misleading text is a real defect. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition. User-facing text (skills, prompts, CLI output, docs) describes current behaviour only; versions, release qualifiers and roadmap labels go in changelogs and records.
 
 ## Validation And Git
 
@@ -141,4 +140,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, explanation first and "(my pick)" on the best option; where none works, one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.

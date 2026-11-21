@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-20.1
+Version: 2026-11-21.1
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -159,7 +159,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Cloud threads, when used for code, push only to their own branch.
 
 ## Approvals
-- Ask before hard-to-undo or outward-facing actions: closing PRs or issues other than completed children (`CONTROLLER.md`), deleting branches/folders, merging, production/VM changes, live external writes and emails outside the project. Apply the global agent-created scratch exception; it grants no native permission. Transport stores are the exception: agents manage them fully, merges and deletions included (`CONTROLLER.md` transport-store rule).
+- Ask before hard-to-undo or outward-facing actions: closing PRs or issues other than completed children (`CONTROLLER.md`), deleting branches/folders, production/VM changes, live external writes and emails outside the project. Apply the global agent-created scratch exception; it grants no native permission. Transport stores are the exception: agents manage them fully, merges and deletions included (`CONTROLLER.md` transport-store rule).
 - **Before every merge** outside a transport store, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup and other repos) with the diff link. Only the one merge thread merges: on a fresh fetch it runs `node repo/scripts/toolkit-auto-merge-eligible.cjs --base <base SHA> --head <head SHA> --body-file <PR body>` at that exact head, then merges with `--match-head-commit <full SHA>`. With the repo switch On (`toolkit-governance.cjs status`; Off project line wins), governance ENABLED and the gate rules' other auto-merge conditions, exit 0 merges after the notice; scope exit 1 asks by merge card, a UAT reason goes to its gate, exit 2 or no run holds. Else only a tap on its own merge card merges (`reference/cloud-hook-parity.md`). Toolkit PRs hold main's version. Ready PRs ride rolling merge trains unasked (cheap, no gates: `CONTROLLER.md`); a lone one: the merge thread, before the check and any card, merges `main` in, runs `bump-version.cjs --next <level>` (body `Bump:` line) and waits for green CI. Card steps: `reference/merge-card.md`. UAT follows the merge. Its closing checklist carries "coordinator: refresh the guidebook" (**Guidebook copy**, fast route).
 - Use a decision card with a recommendation for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines (**Style**).
 - **Standing permission asks:** when any thread is stopped on the user (an approval, a host prompt or a safety check they may clear), read `reference/permission-asks.md` beside this skill before you ask. Never offer or honour a hard stop.
