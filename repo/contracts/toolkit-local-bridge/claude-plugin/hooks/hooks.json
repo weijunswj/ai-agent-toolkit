@@ -104,7 +104,7 @@
         ]
       },
       {
-        "matcher": "^(?:Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit)$",
+        "matcher": "^(?!(?:Read|Grep|Glob|LS|NotebookRead|WebFetch|WebSearch|ToolSearch|TodoWrite|TaskGet|TaskList|TaskOutput)$)",
         "hooks": [
           {
             "type": "command",
