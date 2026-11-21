@@ -17,10 +17,10 @@
 // started) never overwrites or drops what another session wrote later:
 //   - a file the snapshot lacks is added;
 //   - a file whose content differs is written only when this copy of that file is newer than its row
-//     (a row with no time counts as the snapshot's taken_at; an equal time keeps the row);
+//     (an equal time keeps the row; a row with no time is given a fixed one, see pick);
 //   - a row whose file is missing here stays: missing means unknown, not deleted. It is dropped only
 //     when the session baseline (the files this session held, from the after-tool hook) shows this
-//     session held that file and deleted it;
+//     session held that file and deleted it, and its source is reachable here;
 //   - a source whose modified times are not real (most of its files saved within one minute: a plain
 //     copy) is judged once, from the baseline when there is one; then a differing file is written only
 //     when this session changed it since its baseline.
@@ -197,17 +197,25 @@ function realBySource(rows) {
 // The file set a run records (see the top of this file). `session` is the hook's session file:
 // { rows: the files this session held when last seen, real: each source's realness when it started },
 // or null for a run with no session (no deletions, realness judged from the files here now).
-function pick({ entries }, previous, session = null) {
+function pick({ entries, kept }, previous, session = null) {
   const prev = new Map((previous?.files || []).map(row => [row.path, row]));
   const baseline = Array.isArray(session?.rows) ? session.rows.filter(row => row && typeof row.path === 'string') : null;
   const seen = baseline ? new Map(baseline.map(row => [row.path, row.sha256])) : null;
   const real = session?.real && typeof session.real === 'object' ? session.real : realBySource(baseline || entries);
-  const takenAt = Date.parse(previous?.stamp?.taken_at || '');
-  const rowTime = row => { const time = Date.parse(row.modified || ''); return Number.isNaN(time) ? (Number.isNaN(takenAt) ? -Infinity : takenAt) : time; };
+  // A row with no time (written before rows carried one) gets a fixed time the first time a run
+  // keeps it: this copy's own time when its content matches (and its source's times are real), else
+  // the time of the snapshot that wrote it. It then never moves with later snapshots.
+  const takenAt = typeof previous?.stamp?.taken_at === 'string' && !Number.isNaN(Date.parse(previous.stamp.taken_at)) ? new Date(previous.stamp.taken_at).toISOString() : null;
+  const timed = (row, entry = null) => {
+    if (row.modified) return row;
+    const own = entry && entry.sha256 === row.sha256 && real[entry.source] !== false ? entry.modified : null;
+    return own || takenAt ? { ...row, modified: own || takenAt } : row;
+  };
+  const rowTime = row => { const time = Date.parse(row.modified || ''); return Number.isNaN(time) ? -Infinity : time; };
   const out = [];
   const writes = [];
   for (const entry of entries) {
-    const row = prev.get(entry.path);
+    const row = prev.get(entry.path) ? timed(prev.get(entry.path), entry) : null;
     let take;
     if (!row) take = true;
     else if (row.sha256 === entry.sha256) take = false;
@@ -215,9 +223,11 @@ function pick({ entries }, previous, session = null) {
     else take = Boolean(seen) && seen.get(entry.path) !== entry.sha256;
     if (take) { out.push(rowOf(entry)); writes.push(entry); } else out.push(row);
   }
+  // A row whose file is missing here stays, unless this session held that file and deleted it while
+  // its source was reachable.
   const here = new Set(entries.map(entry => entry.path));
   for (const row of prev.values()) {
-    if (!here.has(row.path) && !(seen && seen.has(row.path))) out.push(row);
+    if (!here.has(row.path) && !(seen && seen.has(row.path) && !(kept || []).includes(row.source))) out.push(timed(row));
   }
   return { files: out.sort(byPath), writes, real };
 }
