@@ -251,6 +251,30 @@ function polishRows(body) {
   return { rows: 0, under: 'no ROWS or DONE WHEN heading' };
 }
 
+// Why a child holds open work whatever its findings say, or null: unread, closed, kept open or with
+// an open sub-issue.
+function childHold(child) {
+  if (!child) return 'not a sub-issue of a registered parent';
+  if (child.state !== 'open') return 'already closed';
+  if (KEPT_OPEN.test(String(child.body || '').replace(/\r\n?/g, '\n'))) return 'Kept open line';
+  const summary = child.sub_issues_summary;
+  return summary && summary.total > summary.completed ? `${summary.total - summary.completed} open sub-issue(s)` : null;
+}
+
+// The unchecked DONE WHEN rows of a child, nested ones too.
+function uncheckedRows(child) {
+  const doneWhen = sectionOf(child.body, DONE_WHEN);
+  return doneWhen ? (doneWhen.text.match(/^[ \t]*[-*+] \[ \] /gm) || []).length : 0;
+}
+
+// Why an owner-only hold still needs the controller's judgement, or '': no DONE WHEN heading to read,
+// or an unchecked row under it.
+function ownerOnlyDoubt(child) {
+  if (!sectionOf(child.body, DONE_WHEN)) return 'no DONE WHEN heading';
+  const unchecked = uncheckedRows(child);
+  return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : '';
+}
+
 // Why a merged-PR finding's child is still live, or null when nothing says so. Programme findings fire
 // on a merged PR whatever the child still owes, so only a new finding with no lapsed hold, on an open
 // child the sweep read, not kept open, with no open sub-issue and no unchecked DONE WHEN row (nested
@@ -259,37 +283,61 @@ function heldBecause(finding, child) {
   if (finding.state !== 'new') return 'acknowledged';
   // An acknowledgement past its due turns new again but keeps its due and note: the hold still stands.
   if (finding.promised) return `hold lapsed at ${finding.due} (${finding.promised})`;
-  if (!child) return 'not a sub-issue of a registered parent';
-  if (child.state !== 'open') return 'already closed';
-  if (KEPT_OPEN.test(String(child.body || '').replace(/\r\n?/g, '\n'))) return 'Kept open line';
-  const summary = child.sub_issues_summary;
-  if (summary && summary.total > summary.completed) return `${summary.total - summary.completed} open sub-issue(s)`;
-  const doneWhen = sectionOf(child.body, DONE_WHEN);
-  const unchecked = doneWhen ? (doneWhen.text.match(/^[ \t]*[-*+] \[ \] /gm) || []).length : 0;
+  const hold = childHold(child);
+  if (hold) return hold;
+  const unchecked = uncheckedRows(child);
   return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : null;
 }
+
+// The day's close list, ready to post to the owner as its own message: one row per owner-only hold,
+// and the empty line only when nothing is ready and the sweep has no rows at all (JUDGE?, FOLD?,
+// MOVE?, POLISH), so other asks never hide behind "nothing to close".
+function closeList(today, ready, rowCount) {
+  const empty = `CLOSE LIST ${today}: nothing to close today`;
+  if (!ready.length && !rowCount) return [empty];
+  return [`CLOSE LIST ${today} (${ready.length} ready): post to the owner as its own message`, ...ready,
+    ...(rowCount ? [`add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "${empty}"`] : [])];
+}
+
+// A stored close list shown again on a same-day run: the first line says so, so a second session
+// does not post it twice.
+const closeShownAgain = (close, at) => [`${close[0]} [shown again from the sweep at ${at}: post it only if it was not posted yet]`, ...close.slice(1)];
 
 // The local date (YYYY-MM-DD) of a time, which is the day the stamp counts in.
 const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`;
 
 // The daily stale sweep: children whose PRs merged, for the controller to judge done or not first
 // (JUDGE?), then for the owner's one approve list: new beside an open child with no reason (FOLD?),
-// closed while holding open work (MOVE?) and a full or over-cap polish child. Read only; it writes its date stamp, with the day's
-// list, only after every read succeeded, so a failed run retries and a same-day run shows the list again.
+// closed while holding open work (MOVE?) and a full or over-cap polish child. A merged child whose only
+// step left is the owner's, after the agent's UAT PASSED (an owner-only hold), goes on the day's close
+// list, or is a JUDGE? row when an unchecked DONE WHEN row or an acknowledgement note says otherwise.
+// The close list is always returned, empty days included. Read only; it writes its date stamp, with
+// the day's list, only after every read succeeded, so a failed run retries and a same-day run shows
+// the list again.
 function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const today = localDate(now);
+  const readyLine = (count, when) => `${count} ready to close (${when}): post the close list to the owner`;
   const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes; only children judged done go on the owner's one approve list, with the other rows and obsolete children`;
   const stamps = stamp.read() || {};
   const last = stamps[repo];
   if (last && last.date === today) {
     const kept = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
     const heldAgain = typeof last.held === 'string' && last.held ? [last.held] : [];
-    return kept.length ? { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain] } : { state: 'ok', lines: [`ran today (${today})`] };
+    // A stamp from before the close list existed has none: that day's sweep ran without one.
+    const closeAgain = Array.isArray(last.close) && last.close.length && last.close.every(line => typeof line === 'string') ? { close: closeShownAgain(last.close, last.at) } : {};
+    const readyAgain = closeAgain.close ? closeAgain.close.filter(line => line.startsWith('- #')).length : 0;
+    if (kept.length) return { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain], ...closeAgain };
+    return readyAgain ? { state: 'attention', lines: [readyLine(readyAgain, `${today}, swept at ${last.at}, shown again`), ...heldAgain], ...closeAgain } : { state: 'ok', lines: [`ran today (${today})`], ...closeAgain };
   }
   const attention = run(SCRIPTS.programme, ['attention', '--json', '--repo-root', checkout], { cwd: checkout });
   let report = null;
   try { report = JSON.parse(attention.stdout); } catch { /* reported below */ }
   if (!report || !Array.isArray(report.findings)) return { state: 'failed', lines: [`programme attention: ${report && report.line ? report.line : why(attention)}; no stamp written`] };
+  // A failed owner-wait read never makes an empty close list: the next run retries.
+  if (!Array.isArray(report.owner_waits)) return { state: 'failed', lines: [`owner waits unknown (${report.owner_waits_unknown || 'not in the attention report'}); no stamp written`] };
+  // Owner-only holds: the agent's UAT PASSED and no gate still works on the task (a wait `after` a
+  // gate is live work, which keeps the judged path).
+  const passed = new Map(report.owner_waits.filter(wait => wait && wait.agent_uat === 'PASSED' && !wait.after && Number.isInteger(wait.issue)).map(wait => [wait.issue, wait]));
   const children = [];
   for (const parent of parents) {
     const read = gh(['api', '--paginate', `repos/${repo}/issues/${parent.issue}/sub_issues?per_page=100`, '--jq', '.[] | {number, title, state, body, created_at, sub_issues_summary}']);
@@ -299,13 +347,28 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const since = last && !Number.isNaN(Date.parse(last.at)) ? new Date(last.at) : new Date(now.getTime() - 26 * 3600000);
   const rows = [];
   const held = [];
+  const ready = [];
   const done = new Set();
   // READY_TO_CLOSE first: of the two findings on one child, it is the stronger evidence.
   const doneFindings = report.findings.filter(finding => DONE_CODES.has(finding.code) && Number.isInteger(finding.issue));
   for (const finding of [...doneFindings.filter(f => f.code === 'READY_TO_CLOSE'), ...doneFindings.filter(f => f.code !== 'READY_TO_CLOSE')]) {
     if (done.has(finding.issue)) continue;
     done.add(finding.issue);
-    const why = heldBecause(finding, children.find(child => child.number === finding.issue));
+    const child = children.find(item => item.number === finding.issue);
+    const wait = passed.get(finding.issue);
+    if (wait && !childHold(child)) {
+      const doubt = ownerOnlyDoubt(child);
+      if (doubt) rows.push(`JUDGE? #${finding.issue} owner-only hold: agent UAT PASSED, but ${doubt}; judge it done before it goes on the close list (${finding.code})`);
+      else {
+        // The row names the head the agent's UAT ran at (the owner's OK is recorded there), and shows
+        // the controller's acknowledgement note so the owner reads it before saying ok.
+        const pr = wait.pr ? `PR #${wait.pr}${wait.pr_state === 'MERGED' ? ' merged' : ''}, ` : '';
+        const at = typeof wait.uat_head === 'string' && wait.uat_head ? ` at ${wait.uat_head.slice(0, 7)}` : '';
+        ready.push(`- #${finding.issue} ${child.title}: ${pr}agent UAT PASSED${at}${finding.promised ? `; controller note: ${finding.promised}` : ''}; reply ok to close`);
+      }
+      continue;
+    }
+    const why = heldBecause(finding, child);
     if (why) held.push(`#${finding.issue} ${why}`);
     else rows.push(`JUDGE? #${finding.issue} PR merged: check its DONE WHEN before it goes to the owner (${finding.code})`);
   }
@@ -325,11 +388,13 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
   }
   const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
-  try { stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) } }); } catch (error) {
-    return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
+  const close = closeList(today, ready, rows.length);
+  try { stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}), close } }); } catch (error) {
+    return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])], close };
   }
-  if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
-  return { state: 'attention', lines: [head(rows.length, today), ...rows, ...(heldLine ? [heldLine] : [])] };
+  if (!rows.length && !ready.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`], close };
+  if (!rows.length) return { state: 'attention', lines: [readyLine(ready.length, today), ...(heldLine ? [heldLine] : [])], close };
+  return { state: 'attention', lines: [head(rows.length, today), ...rows, ...(heldLine ? [heldLine] : [])], close };
 }
 
 function checkCi(run, checkout) {
@@ -433,6 +498,8 @@ function format(report, { expand = false } = {}) {
       if (shown.length < detail.length) lines.push(`  ... ${detail.length - shown.length} more (--expand, or ${check.command || 'the check itself'})`);
     }
   }
+  // A close list prints last, whatever its check's state, so an empty day still says so.
+  for (const check of report.checks.filter(item => Array.isArray(item.close))) lines.push('', ...check.close);
   return `${lines.join('\n')}\n`;
 }
 
