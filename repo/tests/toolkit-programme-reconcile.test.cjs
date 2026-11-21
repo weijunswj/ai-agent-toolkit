@@ -1344,7 +1344,7 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   github.addPr(540, { head: SHA_A, contexts: [green('validate')], branch: 'feature' });
   reconciler().run({ apply: true });
   store.mutate('child', 423, { writer, parentDoc: store.read('parent', 421).doc, change: doc => state.applyPatch('child', doc, {
-    candidate: { branch: 'feature', head: SHA_A }, uat: { state: 'PASSED', at_head: SHA_A }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] }, next_action: 'Owner merge decision',
+    candidate: { branch: 'feature', head: SHA_A }, uat: { state: 'PASSED', at_head: SHA_A }, private: { agent_uat: { state: 'PASSED', at_head: SHA_A, evidence: 'evidence/agent-uat/REPORT.md' } }, review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] }, next_action: 'Owner merge decision',
   }, { writer, parentDoc: store.read('parent', 421).doc }) });
   const settled = reconciler().run({ apply: true });
   assert.ok(codes(settled).includes('CHECKS_GREEN_AT_HEAD #423'));

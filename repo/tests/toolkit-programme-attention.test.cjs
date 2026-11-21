@@ -901,27 +901,31 @@ test('E3: attention writes the longest-stalled work-queue task into this compute
 // ---- Owner waits --------------------------------------------------------------------------------
 
 test('attention lists every task waiting on the owner, read from the children at read time, and says unknown when a child cannot be read', () => {
-  const catalogue = [423, 424, 425, 426].map((issue, order) => ({ issue, class: 'COMMITTED', parent: 421, order }));
+  const catalogue = [423, 424, 425, 426, 427].map((issue, order) => ({ issue, class: 'COMMITTED', parent: 421, order }));
+  // Agent UAT first: an owed UAT waits on the owner only once the agent's UAT passed at its head.
+  const agentPassed = (doc, head) => { doc.private = { ...doc.private, agent_uat: { state: 'PASSED', at_head: head, evidence: 'evidence/agent-uat/REPORT.md' } }; };
   const fx = fixture({ catalogue });
   const write = (issue, change) => {
     const doc = { ...state.newChild({ repository: 'acme/app', outcome: catalogue.find(outcome => outcome.issue === issue) }), lifecycle: 'ACTIVE' };
     change(doc);
     fx.store.write('child', issue, doc, { sha: null, previous: null });
   };
-  write(423, doc => { doc.lifecycle = 'WAITING_OWNER'; Object.assign(doc.pr, { number: 900, state: 'MERGED', head: SHA_A }); Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_A }); });
+  write(423, doc => { doc.lifecycle = 'WAITING_OWNER'; Object.assign(doc.pr, { number: 900, state: 'MERGED', head: SHA_A }); Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_A }); agentPassed(doc, SHA_A); });
   write(424, doc => { doc.blockers = ['waits for #423']; });
   write(425, doc => {
     Object.assign(doc.pr, { number: 901, state: 'OPEN', head: SHA_B });
     Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_B });
     Object.assign(doc.gate, { role: 'G2', state: 'ACTIVE', assignment: { id: 'a-425-g2', role: 'G2' } });
+    agentPassed(doc, SHA_B);
   });
+  write(427, doc => { doc.lifecycle = 'WAITING_OWNER'; Object.assign(doc.pr, { number: 902, state: 'MERGED', head: SHA_B }); Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_B }); });
   const json = fx.run(['attention']);
   assert.equal(json.error, null);
   // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the MERGED · awaiting proof band after it.
   assert.deepEqual(json.result.owner_waits, [
     { issue: 425, ask: 'UAT on PR #901', after: 'G2', pr: 901, head: SHA_B },
     { issue: 423, ask: 'UAT on PR #900', after: null, pr: 900, head: SHA_A },
-  ], 'a blocked task and a task with no document are not owner waits');
+  ], 'a blocked task, a task with no document and a UAT the agent still owes are not owner waits');
   const text = fx.run(['attention'], {}, { json: false }).result;
   assert.match(text, /^Owner waits \(2\)\n- #425 UAT on PR #901 after G2 · PR #901 · bbbbbbb\n- #423 UAT on PR #900 · PR #900 · aaaaaaa$/m);
   assert.match(text, /^Attention: /, 'the Attention line still leads');

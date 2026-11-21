@@ -482,7 +482,7 @@ test('H2: detached registry and attention diagnostics fail closed in runtime and
 test('H2: lost-reply comments edited or transferred before registration cannot hold the page', () => {
   for (const mode of ['changed', 'foreign']) {
     // Sized clear of the 19-digit placeholder link id used to size unposted archive comments, so the pass needs no same-run edit.
-    const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + 'Notes. '.repeat(5750) });
+    const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + 'Notes. '.repeat(5747) });
     let lost = false;
     f.github.intercept(call => {
       if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {

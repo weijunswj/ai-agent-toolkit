@@ -320,7 +320,7 @@ function ownerUatScopeContract(texts) {
   assert.match(texts['repo/CONTROLLER.md'], /irreversible actions \(force-push, other closes\) need owner OK/);
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for final-product steps \(global rules\), objective acceptance \(CI, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT;/);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness; owner UAT follows the merge \(gate rules\)/);
-  assert.match(texts['repo/CONTROLLER.md'], /Missing authority never waives a needed UAT; it runs after merge on the installed build; at that merge record UAT PENDING on each `Refs` task, open until it passes \(gate rules\), and keep the UAT ask on the owner's waiting list until it is answered\./);
+  assert.match(texts['repo/CONTROLLER.md'], /Missing authority never waives a needed UAT; it runs after merge on the installed build; at that merge record UAT PENDING on each `Refs` task, open until it passes \(gate rules\); agent UAT runs first, and only its pass puts the ask on the owner's waiting list\./);
   assert.match(texts[V3_DOC], /User acceptance covers only the final product: features the user runs and sees/);
   assert.match(texts[GLOBAL], /G0, G1, full G2; after merge, real-host agent UAT and owner UAT for any final-product steps/);
   // Agent UAT first at every tier that needs UAT; the owner gets only what no tool reaches, after it is green.

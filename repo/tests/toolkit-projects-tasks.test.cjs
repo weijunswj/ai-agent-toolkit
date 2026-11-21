@@ -1163,7 +1163,7 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.match(ownerAsks, /\*\*Owner UAT comes after agent UAT\.\*\* Ask the owner for UAT only once every agent UAT step at that build passed[^\n]*lists only the steps no tool reaches[^\n]*links the agent UAT evidence/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
   for (const required of ["follow-up (Low or `POST_SHIP`: a one-line Low fixed in the PR, else the polish child; others on their area's open child, unless the owner accepted it)",
-    "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child',
+    "agent UAT runs first, and only its pass puts the ask on the owner's waiting list", 'then relaunch one successor or record the hold on the child',
     'Before a merge record is written, the G2 report is archived to the evidence store and read back, and the record (and its brief) names that path and the PASS head.']) assert.ok(gates.includes(required), required);
   // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
   assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);

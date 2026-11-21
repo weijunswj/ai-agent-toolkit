@@ -216,29 +216,32 @@ test('the task status block is a PR GRAPH: PR title, number, status and merge co
   assert.match(state.renderChildBlockBody(child, OUTCOME), /^\|-\|#852\|/m, 'a PR whose title is not read yet shows -');
 });
 
-test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owed', () => {
+test('the tracked PR\'s Status cell says who owes the UAT (the agent first) while a UAT is owed', () => {
   const tracked = uat => childDoc({ lifecycle: 'ACTIVE', gate: { role: 'G2', state: 'PASSED', session_id: null, route: null, returns: [] },
     pr: { number: 852, state: 'MERGED', head: SHA_A, checks: null }, uat: { state: uat, at_head: uat === 'UAT_PARTIAL_REQUIRED' ? SHA_A : null },
     prs: [{ number: 853, state: 'OPEN', merge_sha: null }, { number: 852, state: 'MERGED', merge_sha: SHA_A }] });
   const titles = new Map([[853, 'Follow-up'], [852, 'Main change']]);
   for (const uat of ['PENDING', 'UAT_FULL_REQUIRED', 'UAT_PARTIAL_REQUIRED']) {
     const body = state.renderChildBlockBody(tracked(uat), OUTCOME, titles);
-    assert.match(body, /^\|`Main change`\|#852\|MERGED · G2 PASSED · UAT owed\|\[aaaaaaa\]/m, uat);
+    assert.match(body, /^\|`Main change`\|#852\|MERGED · G2 PASSED · Agent UAT owed\|\[aaaaaaa\]/m, uat);
     assert.match(body, /^\|`Follow-up`\|#853\|OPEN\|-\|$/m, 'only the tracked PR carries the gate and UAT');
     assert.match(body, new RegExp(`^<!-- Task status: IN PROGRESS · UAT: ${uat}\\b`, 'm'), 'the exact UAT state stays out of sight for the closure check');
   }
+  const handed = tracked('UAT_PARTIAL_REQUIRED');
+  handed.private = { ...handed.private, agent_uat: { state: 'PASSED', at_head: SHA_A, evidence: 'evidence/agent-uat/REPORT.md' } };
+  assert.match(state.renderChildBlockBody(handed, OUTCOME, titles), /^\|`Main change`\|#852\|MERGED · G2 PASSED · Owner UAT owed\|/m, 'after the agent\'s PASS at the UAT head the owner owes it');
   assert.doesNotMatch(state.renderChildBlockBody(tracked('PASSED'), OUTCOME), /UAT owed/);
   const none = state.renderChildBlockBody(childDoc({ uat: { state: 'PENDING', at_head: null } }), OUTCOME);
-  assert.match(none, /# PR GRAPH\n\nNone yet · UAT owed$/, 'with no PR yet the owed UAT still shows');
+  assert.match(none, /# PR GRAPH\n\nNone yet · Agent UAT owed$/, 'with no PR yet the owed UAT still shows');
   // PRs listed but none tracked: the owed UAT and the gate show on one line under the graph.
   const untracked = state.renderChildBlockBody(childDoc({ gate: { role: 'G2', state: 'ACTIVE', session_id: null, route: null, returns: [] }, uat: { state: 'PENDING', at_head: null },
     prs: [{ number: 852, state: 'MERGED', merge_sha: SHA_A }] }), OUTCOME, titles);
   assert.match(untracked, /^\|`Main change`\|#852\|MERGED\|/m);
-  assert.match(untracked, /\n\nTask: G2 ACTIVE · UAT owed$/);
+  assert.match(untracked, /\n\nTask: G2 ACTIVE · Agent UAT owed$/);
   // A tracked PR only on the Earlier line: the same line carries them.
   const older = Array.from({ length: 11 }, (unused, index) => ({ number: 700 - index, state: 'MERGED', merge_sha: SHA_A }));
   const earlier = state.renderChildBlockBody(childDoc({ uat: { state: 'PENDING', at_head: null }, pr: { number: 690, state: 'MERGED', head: SHA_A, checks: null }, prs: older }), OUTCOME);
-  assert.match(earlier, /Earlier: #690\n\nTask: UAT owed$/);
+  assert.match(earlier, /Earlier: #690\n\nTask: Agent UAT owed$/);
   assert.doesNotMatch(state.renderChildBlockBody(childDoc({ prs: [{ number: 852, state: 'OPEN', merge_sha: null }] }), OUTCOME), /Task:/, 'nothing to carry, no line');
 });
 
@@ -249,7 +252,7 @@ test('an owed UAT recorded on a PR shown only on the Earlier line is named on th
   child.private = { ...child.private, pr_heads: [{ pr: 690, head: SHA_A }, { pr: 852, head: 'b'.repeat(40) }] };
   const body = state.renderChildBlockBody(child, OUTCOME);
   assert.match(body, /^\|-\|#852\|OPEN\|-\|$/m, 'the tracked PR does not carry a UAT recorded on another PR');
-  assert.match(body, /Earlier: #690\n\nTask: UAT owed on PR #690$/);
+  assert.match(body, /Earlier: #690\n\nTask: Agent UAT owed on PR #690$/);
 });
 
 test('a task page\'s AGENT CONTEXT links its handover file when the binding names a GitHub store', () => {
@@ -267,7 +270,7 @@ test('a task page\'s AGENT CONTEXT links its handover file when the binding name
 test('a task with no PR yet shows its gate on the None yet line', () => {
   const gate = { role: 'G0', state: 'ACTIVE', session_id: null, route: null, returns: [] };
   assert.match(state.renderChildBlockBody(childDoc({ gate }), OUTCOME), /# PR GRAPH\n\nNone yet · G0 ACTIVE$/);
-  assert.match(state.renderChildBlockBody(childDoc({ gate, uat: { state: 'UAT_FULL_REQUIRED', at_head: null } }), OUTCOME), /\nNone yet · G0 ACTIVE · UAT owed$/);
+  assert.match(state.renderChildBlockBody(childDoc({ gate, uat: { state: 'UAT_FULL_REQUIRED', at_head: null } }), OUTCOME), /\nNone yet · G0 ACTIVE · Agent UAT owed$/);
 });
 
 test('long PR titles are cut to 60 characters, so the PR GRAPH stays well inside the task page budget', () => {

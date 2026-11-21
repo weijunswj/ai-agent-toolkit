@@ -514,7 +514,7 @@ test('closing words wait while the rendered task page records an owed UAT', () =
   const { owedUat } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
   const pending = renderedTaskPage('PENDING');
   assert.match(pending, /^<!-- Task status: IN PROGRESS · UAT: PENDING -->$/m, 'the renderer\'s own task status line');
-  assert.match(pending, /^\|-\|#12\|OPEN · G2 ACTIVE · UAT owed\|-\|$/m, 'the PR GRAPH shows the owed UAT in the tracked PR\'s Status cell');
+  assert.match(pending, /^\|-\|#12\|OPEN · G2 ACTIVE · Agent UAT owed\|-\|$/m, 'the PR GRAPH shows the owed UAT, and who owes it, in the tracked PR\'s Status cell');
   assert.equal(owedUat(pending), 'PENDING');
   assert.equal(owedUat(renderedTaskPage('UAT_FULL_REQUIRED')), 'UAT_FULL_REQUIRED');
   const stale = renderedTaskPage('UAT_PARTIAL_REQUIRED', { head: 'b'.repeat(40) });
