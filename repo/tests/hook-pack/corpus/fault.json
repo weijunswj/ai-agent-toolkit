@@ -187,6 +187,28 @@
       "expect": {"decision": "allow"},
       "fault": {"type": "throw-module", "file": "repo/scripts/toolkit-handoff-hook.cjs"},
       "status": "pass"
+    },
+    {
+      "id": "HANDOFF.memory-tool-call-allowed",
+      "source": "Handoff refresh 1435: the hook now runs after any tool but a read-only one, so a host memory tool with no path runs it and is never blocked",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "update_memory", "tool_input": {"text": "queue: #7"}, "tool_response": "saved"},
+      "fixture": {"repo": {"governance": "enabled"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.shell-edit-allowed",
+      "source": "Handoff refresh 1435: a shell edit of a working file runs the content compare and is never blocked",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i s/one/two/ notes.md"}, "tool_response": {"stdout": "", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "enabled"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
     }
   ]
 }
