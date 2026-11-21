@@ -73,6 +73,20 @@ test('handoff saves the per-repository snapshot with its manifest, then sends no
   assert.ok(!JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).files.some(row => row.path === 'memory/owner-rules.md'));
 });
 
+test('a snapshot an earlier run could not push is sent by the next run, never reported unchanged', t => {
+  const w = world(t);
+  const s = sources(t);
+  w.hooks.refusePushes = 4;
+  const failed = w.act(['handoff', '--repo-root', s.repo, '--memory', s.memory], { handoffState: s.state, now: NOW });
+  assert.equal(failed.code, 1, JSON.stringify(failed.result));
+  assert.ok(!w.remoteHas(`${FOLDER}/MEMORY.md`));
+  const again = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: () => new Date('2026-11-21T14:00:00Z') });
+  assert.equal(again.code, 0, JSON.stringify(again.result));
+  assert.equal(again.result.handoff, 'SAVED');
+  assert.equal(again.result.taken_at, '2026-11-21T13:00:00.000Z', 'the stamp is the one the files carry');
+  assert.ok(w.remoteHas(`${FOLDER}/MEMORY.md`));
+});
+
 test('a secret-shaped source refuses the whole run: nothing written, nothing pushed', t => {
   const w = world(t);
   const s = sources(t);
