@@ -1,0 +1,6 @@
+### Changed
+
+- **Agent UAT starts as each PR lands:** the controller records an agent UAT's start as `private.agent_uat` state `STARTED`, and the UAT stays the agent's until its result. A landed task whose owed agent UAT has not started is the work-queue finding `AGENT_UAT_UNSTARTED`, bound to the owed UAT's head; it clears once the start or a result is recorded, the UAT is no longer owed, or the head moves.
+- **New G0 and G1 assignments wait for it:** while such a finding is open, `programme.cjs assign` of a G0 or G1, and `reopen` of an accepted G0 or G1, are refused with `AGENT_UAT_UNSTARTED` and nothing is written. Each flagged task is read again first, so a start recorded since the last pass lets the assignment through at once. A started UAT, however long, never blocks; G2 never waits; `dispose --reason` lifts it and keeps the reason.
+- **Board:** the Waiting on cell reads `Agent: UAT on PR #<n>, not started` or `, started`, and the task page's PR GRAPH `Agent UAT owed, not started` or `, started`.
+- **Gate rules:** agent UAT starts as each PR lands, in parallel with the gate lane, and a long one never holds the lane. The Windows Codex review brief paragraph moved from the gate rules into the host contract's review CLI permissions section.
