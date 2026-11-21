@@ -88,6 +88,8 @@ function main(deps = {}) {
     fs.writeFileSync(lock, `${new Date(now).toISOString()}\n`);
     fs.utimesSync(lock, new Date(now), new Date(now));
     const child = (deps.spawn || spawn)(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true, cwd: record.repo_root });
+    // A start that fails later (the recorded folder is gone) must not crash the hook or print.
+    if (child && typeof child.on === 'function') child.on('error', () => {});
     if (child && typeof child.unref === 'function') child.unref();
   } catch {
     // A refresh is never worth blocking or failing a tool call.

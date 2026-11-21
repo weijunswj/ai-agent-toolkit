@@ -22,7 +22,8 @@ const SCHEMA = 'toolkit.handoff-snapshot.v1';
 const ROOT = 'evidence/handoff';
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 2000;
-const UTF8 = new TextDecoder('utf-8', { fatal: true });
+// ignoreBOM keeps a byte-order mark in the copy, so the copy's sha256 is the one its manifest row records.
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const NAME = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
 const README = repository => `# Controller handoff snapshot: ${repository}\n\n`
   + 'Written by `toolkit-store.cjs handoff`; never edit it by hand.\n\n'
@@ -49,6 +50,15 @@ function normaliseSources({ memory = null, instructions = null, files = [] } = {
   return { memory: full(memory), instructions: full(instructions), files: [...new Set((files || []).map(full).filter(Boolean))] };
 }
 const hasSources = sources => Boolean(sources && (sources.memory || sources.instructions || sources.files.length));
+
+// The sources a run copies: each kind the run names (memory folder, instructions, working files)
+// replaces that kind, and every kind it does not name keeps what the last manifest remembered, so a
+// run that adds one working file never drops the memory folder.
+function chooseSources(sources, previous) {
+  const remembered = previous?.sources ? normaliseSources(previous.sources) : { memory: null, instructions: null, files: [] };
+  const named = sources || { memory: null, instructions: null, files: [] };
+  return { memory: named.memory || remembered.memory, instructions: named.instructions || remembered.instructions, files: named.files.length ? named.files : remembered.files };
+}
 
 // Each working file's name under files/: its own name, or <parent folder>-<name> when two share one.
 function fileNames(files) {
@@ -135,7 +145,7 @@ function plan({ base, repository, sources, stamp, fs = nodeFs }) {
   const folder = snapshotFolder(repository);
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'run it from a checkout of the controlled repository, or name one with --repo-root.');
   const previous = readManifest(base, folder, { fs });
-  const chosen = hasSources(sources) ? sources : previous?.sources ? normaliseSources(previous.sources) : null;
+  const chosen = chooseSources(sources, previous);
   if (!hasSources(chosen)) throw new HandoffError('no sources were named and no earlier snapshot remembers any.', 'name --memory <folder>, --instructions <file> or --file <path> once; later runs remember them.');
   const read = readSources(chosen, { fs });
   const files = fileSet(read, previous);
@@ -144,15 +154,29 @@ function plan({ base, repository, sources, stamp, fs = nodeFs }) {
   return { folder, previous, manifest, unchanged, kept: read.kept, writes: read.entries };
 }
 
+// Writes the snapshot and returns an undo that puts every file it touched back as it was (a file it
+// created is removed), for a save that stops before it commits.
 function write(base, { folder, manifest, writes }, repository, { fs = nodeFs } = {}) {
+  const before = [];
   const put = (rel, text) => {
     const target = path.join(base, folder, ...rel.split('/'));
+    let old = null;
+    try { old = fs.readFileSync(target); } catch { old = null; }
+    before.push([target, old]);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, text);
   };
-  for (const entry of writes) put(entry.path, entry.text);
-  put('README.md', README(repository));
-  put('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+  try {
+    for (const entry of writes) put(entry.path, entry.text);
+    put('README.md', README(repository));
+    put('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+  } catch (error) { undo(); throw error; }
+  function undo() {
+    for (const [target, old] of before.reverse()) {
+      try { if (old === null) fs.rmSync(target, { force: true }); else fs.writeFileSync(target, old); } catch { /* best effort; the next run rebuilds it */ }
+    }
+  }
+  return undo;
 }
 
 // Read-only: is the snapshot current with its live sources? STALE names what changed; a source not
@@ -162,7 +186,7 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'name the controlled repository\'s checkout with --repo-root.');
   const previous = readManifest(base, folder, { fs });
   if (!previous) return { state: 'MISSING', folder };
-  const chosen = hasSources(sources) ? sources : normaliseSources(previous.sources || {});
+  const chosen = chooseSources(sources, previous);
   const read = readSources(chosen, { fs });
   const files = fileSet(read, previous);
   const before = new Map(previous.files.map(row => [row.path, row.sha256]));

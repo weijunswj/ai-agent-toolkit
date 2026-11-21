@@ -87,6 +87,82 @@ test('a snapshot an earlier run could not push is sent by the next run, never re
   assert.ok(w.remoteHas(`${FOLDER}/MEMORY.md`));
 });
 
+test('a run that names one kind of source keeps every remembered kind it does not name (G2 M1)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const act = argv => { const lines = []; const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv], { handoffState: s.state, now: NOW, stdout: text => lines.push(text), stderr: text => lines.push(text) }); return { code, text: lines.join('') }; };
+  assert.equal(act(['--memory', s.memory, '--instructions', s.instructions, '--file', s.hourly]).code, 0);
+  const plan = s.put('plans/G0-plan.md', 'the plan\n');
+  assert.equal(act(['--file', plan]).code, 0);
+  const manifest = JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.sources.memory, s.memory, 'memory stays remembered');
+  assert.equal(manifest.sources.instructions, s.instructions);
+  assert.deepEqual(manifest.sources.files, [plan], 'a named --file list replaces the file list');
+  assert.ok(manifest.files.some(row => row.path === 'MEMORY.md'));
+  // A memory change is still seen by --check and copied by the next run with no sources named.
+  s.put('memory/MEMORY.md', '# Memory\n- queue: #3\n');
+  assert.match(act(['--check']).text, /^HANDOFF STALE .*changed=MEMORY\.md/);
+  assert.match(act([]).text, /^HANDOFF WRITTEN /);
+  assert.match(fs.readFileSync(path.join(out, FOLDER, 'MEMORY.md'), 'utf8'), /queue: #3/);
+});
+
+test('a save that stops before its commit puts the snapshot folder back, so later saves are not blocked (G2 M2)', t => {
+  const w = world(t);
+  const s = sources(t);
+  assert.equal(w.act(['handoff', '--repo-root', s.repo, '--memory', s.memory], { handoffState: s.state, now: NOW }).code, 0);
+  s.put('memory/MEMORY.md', '# Memory\n- queue: #9\n');
+  // The second fetch of the run (save's, after the snapshot is written) drops.
+  let fetches = 0;
+  const run = (cmd, args, options) => {
+    const rest = args.slice(args.indexOf('-C') + 2);
+    if (rest[0] === 'fetch' && (fetches += 1) === 2) return { status: 128, stdout: '', stderr: 'network down in the test' };
+    return w.deps.run(cmd, args, options);
+  };
+  const failed = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW, run });
+  assert.equal(failed.code, 1, JSON.stringify(failed.result));
+  assert.equal(git(w.dir, 'status', '--porcelain'), '', 'the checkout is back to its committed copy');
+  // Another writer refreshes the snapshot; the next gate-end save and the next handoff still run.
+  w.raceIn(`${FOLDER}/MEMORY.md`, '# Memory\n- from the other writer\n')();
+  w.write('evidence/g2-x/report.md', 'report\n');
+  assert.equal(w.act(['save', '--path', 'evidence/g2-x/report.md', '--message', 'gate end']).code, 0);
+  const again = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW });
+  assert.equal(again.code, 0, JSON.stringify(again.result));
+  assert.equal(again.result.handoff, 'SAVED');
+  assert.match(w.remoteFile(`${FOLDER}/MEMORY.md`), /queue: #9/);
+});
+
+test('handoff syncs before it compares: a snapshot another writer already pushed is unchanged here', t => {
+  const w = world(t);
+  const s = sources(t);
+  assert.equal(w.act(['handoff', '--repo-root', s.repo, '--memory', s.memory], { handoffState: s.state, now: NOW }).code, 0);
+  // The other clone pushes the same snapshot content with a later stamp; this checkout is behind.
+  git(w.other, 'pull', '--quiet', '--no-rebase', 'origin', w.branch);
+  const manifestPath = path.join(w.other, FOLDER, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  s.put('memory/MEMORY.md', '# Memory\n- queue: #5\n');
+  fs.writeFileSync(path.join(w.other, FOLDER, 'MEMORY.md'), '# Memory\n- queue: #5\n');
+  manifest.files.find(row => row.path === 'MEMORY.md').sha256 = require('node:crypto').createHash('sha256').update('# Memory\n- queue: #5\n').digest('hex');
+  manifest.stamp.taken_at = '2026-11-21T13:30:00.000Z';
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'other writer'); git(w.other, 'push', '--quiet', 'origin', w.branch);
+  const tip = w.remoteTip();
+  const run = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW });
+  assert.equal(run.result.handoff, 'UNCHANGED', JSON.stringify(run.result));
+  assert.equal(run.result.taken_at, '2026-11-21T13:30:00.000Z');
+  assert.equal(w.remoteTip(), tip);
+});
+
+test('a byte-order mark stays in the copy, so its sha256 is the one the manifest records (G2 L3)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const bom = s.put('bom.md', '﻿with a mark\n');
+  assert.equal(store.main(['handoff', '--out', out, '--repo-root', s.repo, '--file', bom], { handoffState: s.state, now: NOW, stdout: () => {}, stderr: () => {} }), 0);
+  const copy = fs.readFileSync(path.join(out, FOLDER, 'files', 'bom.md'));
+  const row = JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8')).files.find(item => item.path === 'files/bom.md');
+  assert.equal(require('node:crypto').createHash('sha256').update(copy).digest('hex'), row.sha256);
+  assert.deepEqual(copy, fs.readFileSync(bom));
+});
+
 test('a secret-shaped source refuses the whole run: nothing written, nothing pushed', t => {
   const w = world(t);
   const s = sources(t);
@@ -196,6 +272,13 @@ test('the after-tool hook starts one background refresh after a store save or a 
   clock += 11 * 60 * 1000;
   fire({ tool_name: 'apply_patch', tool_input: { input: `*** Begin Patch\n*** Update File: ${s.hourly}\n@@\n-a\n+b\n*** End Patch\n` } });
   assert.equal(started.length, 3, 'a patch to a remembered working file');
+
+  // A start that fails after the hook returns (the recorded folder is gone) is swallowed (G2 L1).
+  clock += 11 * 60 * 1000;
+  const late = new (require('node:events'))();
+  late.unref = () => {};
+  assert.equal(fire(saved, { spawn: () => late }), 0);
+  assert.doesNotThrow(() => late.emit('error', new Error('spawn ENOENT')));
 
   // Fails open: no record, a broken record, a spawn that throws, unreadable input.
   clock += 11 * 60 * 1000;

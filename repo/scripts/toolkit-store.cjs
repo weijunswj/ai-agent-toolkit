@@ -525,6 +525,9 @@ class EvidenceStore {
     return dirty || (Number.isInteger(ahead) && ahead > 0);
   }
 
+  // The checkout's HEAD commit.
+  head() { return this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim(); }
+
   status() {
     const { ahead, behind } = this.#position();
     const changes = this.#git(['status', '--porcelain', '--untracked-files=all']).out.split(/\r?\n/).filter(Boolean).length;
@@ -732,13 +735,23 @@ function runHandoff(options, deps) {
   const store = new EvidenceStore(deps);
   try {
     store.open({ store: options.store, repoRoot: options.repoRoot });
-    store.sync();
+    // Sync first, so the compare reads the snapshot the store already holds (another writer's too).
+    const synced = store.sync();
     const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs }));
     // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
     // save sends them now rather than calling them unchanged.
     if (planned.unchanged && !store.pending(planned.folder)) { remember(); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }
-    if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
-    const saved = store.save({ paths: [planned.folder], message: `Refresh controller handoff snapshot for ${repository}` });
+    const undo = planned.unchanged ? null : handoff.write(base, planned, repository, { fs });
+    let saved;
+    try { saved = store.save({ paths: [planned.folder], message: `Refresh controller handoff snapshot for ${repository}` }); } catch (error) {
+      // Stopped before a commit (a dropped fetch, a refused scan): put the snapshot folder back as it
+      // was, so the checkout can still fast-forward and the next save is not blocked. A kept commit
+      // stays for the next run to send.
+      let head = null;
+      try { head = store.head(); } catch { head = null; }
+      if (undo && head === synced.commit) undo();
+      throw error;
+    }
     remember();
     return { handoff: 'SAVED', folder: planned.folder, taken_at: planned.unchanged ? planned.previous.stamp?.taken_at || null : stamp.taken_at, ...saved, ...kept(planned) };
   } finally { store.close(); }
