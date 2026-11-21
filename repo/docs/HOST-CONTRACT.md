@@ -124,6 +124,8 @@ A writing gate works only inside its own session's writable folders, so the owne
 
 ### Review CLI permissions
 
+A Windows Codex review brief names the temp root, the local tests and the authorised network commands it runs, and the owner and exact-SHA evidence it reports. Missing required results block acceptance, and reviewers keep full responsibility for the review.
+
 The Windows review permission recipe was measured on the Codex CLI release named in the [validation strategy](VALIDATION-STRATEGY.md#review-temp-permissions), model `gpt-6.1-sol`, effort `high`, using the real authenticated Codex home with optional MCP servers disabled for that invocation. One command passed all eleven boundary and fixture checks. A later `xhigh` launch read back the same permissions and completed one targeted run: 68 of 69 tests passed; the default-root test failed before any write. The hook pack returned no result in 30 minutes. None of these measurements qualifies a complete suite.
 
 Before launch, keep a private pre-run copy of the real `config.toml` outside the grant for comparison without publishing its contents. Inspect the effective Windows backend in the real home and any selected configuration layers: `windows.sandbox` must already be `"elevated"`. Stop if it is different or cannot be verified. Never set or change it for the owner. The same-home helper comparison measured Node children and network refusal under elevated; unelevated returned child-process `EPERM` and an HTTP response. Unelevated is a network boundary failure, not a usable alternative.
