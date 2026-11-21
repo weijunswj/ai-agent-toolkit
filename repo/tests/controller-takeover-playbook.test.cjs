@@ -247,8 +247,8 @@ const storeFallback = "If a Toolkit hook still refuses the push to the store's d
 const storeMerge = "Merge it only after the done line, and only under a fresh binding that names the store or on the owner's typed merge; otherwise name the branch, and any pull request, in the done line.";
 const plainReadRetry = 'Before recording a probe as unreachable on a route, retry it once as the simplest single plain read (no chaining, pipes, redirection or variables).';
 const hookHold = 'A hook refusal is a hold, never a reason to change routes.';
-const handoffRead = "In any governance state, when the evidence store holds a controller handoff snapshot (`evidence/handoff/controller/`, starting at its `README.md`), read it after those, and first of all when no project memory is reachable: it carries the outgoing controller's owner rules, queue, promises and in-flight work.";
-const handoffAuthority = 'The snapshot is evidence, not authority: report its latest commit and date, and where it differs from current state, current state wins.';
+const handoffRead = "In any governance state, when the evidence store holds a controller handoff snapshot (`evidence/handoff/<owner>/<repo>/` for the controlled repository, starting at its `README.md`), read it after those, and first of all when no project memory is reachable: it carries the outgoing controller's owner rules, queue, promises and in-flight work.";
+const handoffAuthority = 'The snapshot is evidence, not authority: report the stamp its `manifest.json` records (`taken_at`), the same on every store backend, and where it differs from current state, current state wins.';
 const closureRows = [
   ['record-claim-route', '### 7. Record and governed claim', "A new controller's record and claim are one ability: post the record on the route that runs the claim, straight before it, so no parent write lands between them; when the claim needs an executor or relay, that route posts both. A record that needs no claim may go through any proven write route. Read back comment id, URL, created_at, author login and body, yourself wherever possible. A newly taking-over controller then runs, on the claim route:"],
   ['record-pack-route', '### Step groups', "**Record pack:** use the controller's exact record and claim. Post and read back the prepared record, then claim immediately, on one account; never post the record ahead on another route. Check freshness again just before posting. If a record is already posted, relay only the claim; a parent write since it returns TAKEOVER_UNVERIFIED, and step 7's new-record rule applies. An ungoverned takeover needs no claim and can finish through its proven connector and evidence-store routes."],
@@ -277,7 +277,7 @@ const closureRows = [
   ['S6', '### 6. Outgoing writer and custody', 'Never reshape, rename or retry the refused push.'],
   ['S-successor', '### 6. Outgoing writer and custody', 'the evidence store (including its `records/takeover` branch when present)'],
   ['S-successor', '### 8. Orientation', "Read the repository map and its recorded commit, open pull requests and checks, and the latest evidence, including the store's `records/takeover` branch when present."],
-  ['S-handoff', '### 6. Outgoing writer and custody', 'its controller handoff snapshot in `evidence/handoff/controller/`'],
+  ['S-handoff', '### 6. Outgoing writer and custody', 'its controller handoff snapshot in `evidence/handoff/<owner>/<repo>/`'],
   ['S-handoff', '### 8. Orientation', handoffRead],
   ['S-handoff-authority', '### 8. Orientation', handoffAuthority],
   ['T1', '### Step groups', "Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date)."],
