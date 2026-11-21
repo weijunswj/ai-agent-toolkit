@@ -25,7 +25,8 @@
 //     copy) is judged once, from the baseline when there is one; then a differing file is written only
 //     when this session changed it since its baseline.
 // Ordering trusts each machine's clock, so clock skew between machines can misorder saves made within
-// the skew.
+// the skew. A file deleted in one session comes back when a later session still holds an older copy
+// of it (the earlier full-copy refresh did the same).
 
 const crypto = require('node:crypto');
 const nodeFs = require('node:fs');
