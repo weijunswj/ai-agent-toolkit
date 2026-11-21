@@ -106,6 +106,71 @@ test('a run that names one kind of source keeps every remembered kind it does no
   assert.match(fs.readFileSync(path.join(out, FOLDER, 'MEMORY.md'), 'utf8'), /queue: #3/);
 });
 
+// Paths in the other operating system's style: what a snapshot looks like after the owner's other
+// computer saved it (Windows drive paths read here on Linux, Linux paths read here on Windows).
+const FOREIGN = process.platform === 'win32'
+  ? { memory: '/home/wj/memory', instructions: '/home/wj/instructions.md', files: ['/home/wj/plans/G0-plan.md'] }
+  : { memory: 'C:\\Users\\wj\\memory', instructions: 'C:\\Users\\wj\\instructions.md', files: ['C:\\Users\\wj\\plans\\G0-plan.md'] };
+const sha = text => require('node:crypto').createHash('sha256').update(text).digest('hex');
+
+test('a snapshot the other operating system saved keeps its paths exactly as saved and never loses their rows (G2 H1)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const act = argv => { const lines = []; const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv], { handoffState: s.state, now: NOW, stdout: text => lines.push(text), stderr: text => lines.push(text) }); return { code, text: lines.join('') }; };
+  const copies = { 'MEMORY.md': '# Memory\n- queue: #9\n', 'memory/owner-rules.md': 'merge commits only\n', 'files/instructions.md': 'other computer instructions\n', 'files/G0-plan.md': 'the plan\n' };
+  const sourceOf = rel => (rel === 'files/G0-plan.md' ? FOREIGN.files[0] : rel === 'files/instructions.md' ? FOREIGN.instructions : FOREIGN.memory);
+  for (const [rel, text] of Object.entries(copies)) { fs.mkdirSync(path.dirname(path.join(out, FOLDER, rel)), { recursive: true }); fs.writeFileSync(path.join(out, FOLDER, rel), text); }
+  const seeded = `${JSON.stringify({ schema: 'toolkit.handoff-snapshot.v1', stamp: { taken_at: '2026-11-21T12:00:00.000Z', toolkit_version: '3.162.1', repository_commit: null }, sources: FOREIGN,
+    files: Object.entries(copies).map(([rel, text]) => ({ path: rel, sha256: sha(text), source: sourceOf(rel) })).sort((a, b) => a.path.localeCompare(b.path)) }, null, 2)}\n`;
+  fs.writeFileSync(path.join(out, FOLDER, 'manifest.json'), seeded);
+
+  // Nothing here can reach those paths: every row and copy stays, nothing is written, the check is CURRENT.
+  let run = act([]);
+  assert.equal(run.code, 0, run.text);
+  assert.match(run.text, /^HANDOFF UNCHANGED /);
+  assert.equal(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8'), seeded);
+  run = act(['--check']);
+  assert.equal(run.code, 0, run.text);
+  assert.match(run.text, /^HANDOFF CURRENT /);
+
+  // Naming one source here replaces only that kind; the other computer's paths stay exactly as saved.
+  run = act(['--instructions', s.instructions]);
+  assert.match(run.text, /^HANDOFF WRITTEN /, run.text);
+  const manifest = JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.sources.memory, FOREIGN.memory);
+  assert.deepEqual(manifest.sources.files, FOREIGN.files);
+  assert.equal(manifest.sources.instructions, s.instructions);
+  const rows = Object.fromEntries(manifest.files.map(row => [row.path, row]));
+  assert.deepEqual(Object.keys(rows), ['files/G0-plan.md', 'files/instructions.md', 'MEMORY.md', 'memory/owner-rules.md'].sort((a, b) => a.localeCompare(b)));
+  assert.equal(rows['MEMORY.md'].source, FOREIGN.memory);
+  assert.equal(rows['MEMORY.md'].sha256, sha(copies['MEMORY.md']));
+  assert.equal(rows['files/G0-plan.md'].source, FOREIGN.files[0]);
+  assert.equal(rows['files/instructions.md'].sha256, sha('project instructions\n'));
+  assert.match(act(['--check']).text, /^HANDOFF CURRENT /);
+});
+
+test('a run on the other operating system never reads, rewrites or drops this computer\'s saved paths (G2 H1)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const other = process.platform === 'win32' ? 'linux' : 'win32';
+  const touched = [];
+  // That computer's view of this disk: every path is recorded, so a read of a path saved here shows.
+  const otherFs = new Proxy(fs, { get: (target, key) => (typeof target[key] === 'function' ? (...args) => { if (typeof args[0] === 'string') touched.push(args[0]); return target[key](...args); } : target[key]) });
+  const act = (argv, deps = {}) => { const lines = []; const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv], { handoffState: s.state, now: NOW, stdout: text => lines.push(text), stderr: text => lines.push(text), ...deps }); return { code, text: lines.join('') }; };
+  assert.equal(act(['--memory', s.memory, '--instructions', s.instructions, '--file', s.hourly]).code, 0);
+  const saved = fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8');
+  const there = { platform: other, fs: otherFs, readRepository: () => ({ repository: 'acme/widget', commit: null }) };
+
+  let run = act([], there);
+  assert.equal(run.code, 0, run.text);
+  assert.match(run.text, /^HANDOFF UNCHANGED /);
+  assert.equal(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8'), saved, 'every row and saved path stays');
+  run = act(['--check'], there);
+  assert.equal(run.code, 0, run.text);
+  assert.match(run.text, /^HANDOFF CURRENT /);
+  assert.deepEqual(touched.filter(file => [s.memory, s.instructions, s.hourly].some(source => file.startsWith(source))), [], 'no saved source was read there');
+});
+
 test('a save that stops before its commit puts the snapshot folder back, so later saves are not blocked (G2 M2)', t => {
   const w = world(t);
   const s = sources(t);

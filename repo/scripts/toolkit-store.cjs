@@ -716,16 +716,17 @@ function runHandoff(options, deps) {
   if (!repository) throw new StoreError('--repo-root is not a GitHub repository checkout with one origin.', 'run it from the controlled repository\'s checkout, or name it with --repo-root.');
   const base = path.resolve(cwd, options.store || options.out);
   const sources = handoff.normaliseSources({ memory: options.memory, instructions: options.instructions, files: options.files }, cwd);
+  const platform = deps.platform || process.platform;
   const wrap = action => { try { return action(); } catch (error) { if (error instanceof handoff.HandoffError) throw new StoreError(error.stopped, error.next); throw error; } };
   if (options.check) {
-    const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs }));
+    const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs, platform }));
     return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...(found.changed?.length ? { changed: found.changed.join(',') } : {}), ...(found.kept?.length ? { kept: found.kept.join(',') } : {}) };
   }
   const stamp = { taken_at: (deps.now ? deps.now() : new Date()).toISOString(), toolkit_version: require('./toolkit-version.cjs').readToolkitVersion(), repository_commit: commit };
   const remember = () => rememberHandoff(deps, { [options.store ? 'store' : 'out']: base, repo_root: repoRoot, repository, at: stamp.taken_at });
   const kept = planned => (planned.kept.length ? { kept: planned.kept.join(',') } : {});
   if (options.out) {
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs }));
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform }));
     if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
     remember();
     return planned.unchanged
@@ -737,7 +738,7 @@ function runHandoff(options, deps) {
     store.open({ store: options.store, repoRoot: options.repoRoot });
     // Sync first, so the compare reads the snapshot the store already holds (another writer's too).
     const synced = store.sync();
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs }));
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform }));
     // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
     // save sends them now rather than calling them unchanged.
     if (planned.unchanged && !store.pending(planned.folder)) { remember(); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }
