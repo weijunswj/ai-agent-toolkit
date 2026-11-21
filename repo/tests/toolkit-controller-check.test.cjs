@@ -213,7 +213,7 @@ test('the stale sweep lists children whose PRs merged for the controller to judg
   // Read only: attention without --refresh, and one paginated sub-issue read of the parent.
   assert.deepEqual(calls.find(call => call.script === SCRIPTS.programme && call.args.includes('--json')).args, ['attention', '--json', '--repo-root', '/repo']);
   assert.deepEqual(calls.filter(call => call.gh).map(call => call.gh.slice(0, 3)), [['api', '--paginate', 'repos/acme/app/issues/7/sub_issues?per_page=100']]);
-  const close = [`CLOSE LIST ${TODAY} (0 ready): post to the owner as its own message`, `add each JUDGE? you judge done as a row; if none remain and no rows above, post "Close list ${TODAY}: nothing to close today"`];
+  const close = [`CLOSE LIST ${TODAY} (0 ready): post to the owner as its own message`, `add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "CLOSE LIST ${TODAY}: nothing to close today"`];
   assert.deepEqual(check.close, close);
   assert.deepEqual(written, [{ 'acme/app': { date: TODAY, at: NOW.toISOString(), rows, close } }]);
 });
@@ -318,7 +318,8 @@ test('compact output prints every stale row, and a same-day run shows the day\'s
   assert.equal(again.state, 'attention');
   assert.match(again.lines[0], /^6 rows \(\d{4}-\d{2}-\d{2}, swept at 2026-11-14T12:00:00.000Z, shown again\): judge each JUDGE\? /);
   assert.deepEqual(again.lines.slice(1), rows.map(row => row.trim()));
-  assert.deepEqual(again.close, [`CLOSE LIST ${TODAY}: nothing to close today`], 'the stored close list comes back with the rows');
+  assert.deepEqual(again.close, [`CLOSE LIST ${TODAY} (0 ready): post to the owner as its own message [shown again from the sweep at 2026-11-14T12:00:00.000Z: post it only if it was not posted yet]`,
+    `add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "CLOSE LIST ${TODAY}: nothing to close today"`], 'the stored close list comes back with the rows, marked');
   assert.equal(setup.calls.filter(call => call.gh).length, 1);
 });
 
@@ -327,7 +328,8 @@ test('a stamp that cannot be written fails the stale line only, keeping its rows
   const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: JSON.stringify(issue(60, { body: 'none', created_at: '2026-11-14T02:00:00Z' })) }) });
   setup.deps.stamp = { read: () => ({}), write: () => { throw new Error('EACCES: permission denied'); } };
   const report = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), setup.deps);
-  assert.deepEqual(report.checks.find(check => check.name === 'stale'), { name: 'stale', state: 'failed', lines: ['stamp not written (EACCES: permission denied); the next run sweeps again', 'FOLD? #60 new under #7 with no Nearest child: line'], close: [`CLOSE LIST ${TODAY}: nothing to close today`] });
+  assert.deepEqual(report.checks.find(check => check.name === 'stale'), { name: 'stale', state: 'failed', lines: ['stamp not written (EACCES: permission denied); the next run sweeps again', 'FOLD? #60 new under #7 with no Nearest child: line'],
+    close: [`CLOSE LIST ${TODAY} (0 ready): post to the owner as its own message`, `add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "CLOSE LIST ${TODAY}: nothing to close today"`] });
   assert.equal(report.checks.find(check => check.name === 'ci').state, 'ok');
 });
 
@@ -382,38 +384,63 @@ test('the stale sweep runs only with governance on and a repository, and --skip 
 });
 
 // The daily close list: owner-only holds (a merged PR whose only owed step is the owner's UAT after
-// the agent's UAT PASSED there) reach the owner as one ready-to-post block, every run, empty days too.
+// the agent's UAT PASSED there, with no gate still at work) reach the owner as one ready-to-post block,
+// every run, empty days too. Acknowledged findings always carry the controller's note (`ack` needs one,
+// with its due), so the row shows it rather than holding the child back.
 const SHA = 'a'.repeat(40);
+const TRAIN = 'b'.repeat(40);
+const ACK = { state: 'acknowledged', code: 'READY_TO_CLOSE', due: '2026-11-22T08:00:00Z', overdue: false, promised: 'Owner UAT owed; close on the owner\'s OK' };
+const passedWait = (issue, extra = {}) => ({ issue, ask: `UAT at ${TRAIN.slice(0, 7)}`, after: null, agent_uat: 'PASSED', uat_head: TRAIN, pr_state: 'MERGED', pr: 900 + issue, head: SHA, ...extra });
 test('red: a held child that waits only on the owner after an agent UAT PASS reaches the close list', () => {
   const ticked = '## DONE WHEN\n\n- [x] PR lands\n';
-  const children = [issue(40, { body: ticked }), issue(41, { body: ticked }), issue(42, { body: `${ticked}\nKept open: slice 2 (since 2026-11-18 06:27Z)\n` })];
-  const findings = [40, 41, 42].map(n => ({ state: 'acknowledged', code: 'READY_TO_CLOSE', issue: n }));
-  const waits = [
-    { issue: 40, ask: 'UAT on PR #900', after: null, agent_uat: 'PASSED', pr: 900, head: SHA },
-    { issue: 41, ask: 'UAT on PR #901', after: null, agent_uat: 'OWNER_ONLY', pr: 901, head: SHA },
-    { issue: 42, ask: 'UAT on PR #902', after: null, agent_uat: 'PASSED', pr: 902, head: SHA },
-  ];
+  const children = [issue(40, { body: ticked }), issue(41, { body: ticked }), issue(42, { body: `${ticked}\nKept open: slice 2 (since 2026-11-18 06:27Z)\n` }), issue(45, { body: ticked })];
+  const findings = [40, 41, 42].map(n => ({ ...ACK, issue: n })).concat({ state: 'new', code: 'READY_TO_CLOSE', issue: 45 });
+  const waits = [passedWait(40), passedWait(41, { agent_uat: 'OWNER_ONLY' }), passedWait(42), passedWait(45, { after: 'G2' })];
   const { check, written } = sweep({ findings, children, waits });
+  // The row names the head the agent's UAT ran at (a train merge here), never the PR head.
   assert.deepEqual(check.close, [
     `CLOSE LIST ${TODAY} (1 ready): post to the owner as its own message`,
-    '- #40 Task 40: PR #900 merged, agent UAT PASSED at aaaaaaa; reply ok to close',
+    '- #40 Task 40: PR #940 merged, agent UAT PASSED at bbbbbbb; controller note: Owner UAT owed; close on the owner\'s OK; reply ok to close',
+    `add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "CLOSE LIST ${TODAY}: nothing to close today"`,
   ]);
-  assert.match(check.lines.at(-1), /^held, not proposed: #41 acknowledged, #42 acknowledged$/);
+  // OWNER_ONLY and Kept open stay held; a wait behind a gate still at work keeps the judged path.
+  assert.deepEqual(check.lines.slice(1), [
+    'JUDGE? #45 PR merged: check its DONE WHEN before it goes to the owner (READY_TO_CLOSE)',
+    'held, not proposed: #41 acknowledged, #42 acknowledged',
+  ]);
   assert.deepEqual(written[0]['acme/app'].close, check.close);
   assert.equal(check.state, 'attention', 'a ready row needs the owner, so the check is never clear');
+  // A same-day rerun shows the list again, marked so a second session does not post it twice.
   const again = sweep({ stamps: written[0] }).check;
-  assert.deepEqual([again.state, again.close], ['attention', check.close], 'a same-day rerun shows the ready list again');
-  // An unticked DONE WHEN row or an acknowledgement note makes it a judgement, never a silent hold.
-  const unsure = sweep({ findings: [{ state: 'acknowledged', code: 'READY_TO_CLOSE', issue: 43, promised: 'Not closing: slice 2 unbuilt' }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 44 }],
-    children: [issue(43, { body: ticked }), issue(44, { body: '## DONE WHEN\n\n- [ ] Slice 2 lands\n' })],
-    waits: [{ issue: 43, ask: 'UAT on PR #903', after: null, agent_uat: 'PASSED', pr: 903, head: SHA }, { issue: 44, ask: 'UAT on PR #904', after: null, agent_uat: 'PASSED', pr: 904, head: SHA }] }).check;
+  assert.equal(again.state, 'attention');
+  assert.deepEqual(again.close, [`${check.close[0]} [shown again from the sweep at ${NOW.toISOString()}: post it only if it was not posted yet]`, ...check.close.slice(1)]);
+  // A ready-only day stays attention on its rerun too.
+  const readyOnly = sweep({ findings: [{ ...ACK, issue: 40 }], children: [issue(40, { body: ticked })], waits: [passedWait(40)] });
+  assert.equal(readyOnly.check.state, 'attention');
+  assert.equal(sweep({ stamps: readyOnly.written[0] }).check.state, 'attention');
+  // An unticked DONE WHEN row, or no DONE WHEN heading at all, makes it a judgement, never a silent hold.
+  const unsure = sweep({ findings: [{ ...ACK, issue: 43 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 44 }],
+    children: [issue(43, { body: '## DONE WHEN\n\n- [ ] Slice 2 lands\n' }), issue(44, { body: 'Nearest child: #1, a different script' })],
+    waits: [passedWait(43), passedWait(44)] }).check;
   assert.deepEqual(unsure.lines.slice(1), [
-    'JUDGE? #43 owner-only hold: agent UAT PASSED, but ack note (Not closing: slice 2 unbuilt); judge it done before it goes on the close list (READY_TO_CLOSE)',
-    'JUDGE? #44 owner-only hold: agent UAT PASSED, but 1 unchecked DONE WHEN row(s); judge it done before it goes on the close list (TASK_MERGED_OPEN)',
+    'JUDGE? #43 owner-only hold: agent UAT PASSED, but 1 unchecked DONE WHEN row(s); judge it done before it goes on the close list (READY_TO_CLOSE)',
+    'JUDGE? #44 owner-only hold: agent UAT PASSED, but no DONE WHEN heading; judge it done before it goes on the close list (TASK_MERGED_OPEN)',
   ]);
   assert.deepEqual(unsure.close, [
     `CLOSE LIST ${TODAY} (0 ready): post to the owner as its own message`,
-    `add each JUDGE? you judge done as a row; if none remain and no rows above, post "Close list ${TODAY}: nothing to close today"`,
+    `add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "CLOSE LIST ${TODAY}: nothing to close today"`,
+  ]);
+  // A PR not shown merged is named without "merged".
+  const open = sweep({ findings: [{ ...ACK, issue: 46 }], children: [issue(46, { body: ticked })], waits: [passedWait(46, { pr_state: 'CLOSED' })] }).check;
+  assert.equal(open.close[1], '- #46 Task 46: PR #946, agent UAT PASSED at bbbbbbb; controller note: Owner UAT owed; close on the owner\'s OK; reply ok to close');
+});
+
+test('red: a day with only other rows never says nothing to close', () => {
+  const { check } = sweep({ children: [issue(20, { body: 'No reason given', created_at: '2026-11-14T02:00:00Z' })] });
+  assert.deepEqual(check.lines.slice(1), ['FOLD? #20 new under #7 with no Nearest child: line']);
+  assert.deepEqual(check.close, [
+    `CLOSE LIST ${TODAY} (0 ready): post to the owner as its own message`,
+    `add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "CLOSE LIST ${TODAY}: nothing to close today"`,
   ]);
 });
 
@@ -431,8 +458,8 @@ test('red: an empty day still prints its close list, and an unknown owner-wait l
   assert.match(format(report), new RegExp(`^CLOSE LIST ${TODAY}: nothing to close today$`, 'm'), 'compact output prints it although the check is ok');
   // A same-day rerun shows the stored list again.
   const again = controllerCheck(parseArgs(argv), setup.deps);
-  assert.deepEqual(again.checks.find(item => item.name === 'stale').close, check.close);
-  assert.match(format(again), /nothing to close today/);
+  assert.deepEqual(again.checks.find(item => item.name === 'stale').close, [`CLOSE LIST ${TODAY}: nothing to close today [shown again from the sweep at ${NOW.toISOString()}: post it only if it was not posted yet]`]);
+  assert.match(format(again), /nothing to close today \[shown again/);
   // A failed owner-wait read never reads as an empty day.
   const unknown = sweep({ attention: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: null, owner_waits_unknown: 'STATE_INVALID' }) }, children: [issue(70)] });
   assert.deepEqual(unknown.check, { name: 'stale', state: 'failed', lines: ['owner waits unknown (STATE_INVALID); no stamp written'] });

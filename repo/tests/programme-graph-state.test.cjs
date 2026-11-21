@@ -750,9 +750,14 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
   assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT failed on PR #22']);
   f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('PASSED')}})}); f.run();
   assert.deepEqual([statusOf(f),owedOn(f).waiting],['MERGED · awaiting proof','Owner: UAT on PR #22']);
-  assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat]),[[2,'PASSED']]);
+  const waitOf = () => state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat,entry.uat_head,entry.pr_state,entry.head]);
+  assert.deepEqual(waitOf(),[[2,'PASSED',UAT_HEAD,'MERGED',UAT_HEAD]]);
+  // A UAT owed at a train merge names that head, not the PR head: the owner's OK is recorded there.
+  const TRAIN='d'.repeat(40);
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,uat:{...doc.uat,at_head:TRAIN},private:{...doc.private,agent_uat:agentRecord('PASSED',TRAIN)}})}); f.run();
+  assert.deepEqual(waitOf(),[[2,'PASSED',TRAIN,'MERGED',UAT_HEAD]]);
   // OWNER_ONLY hands it over too, but says the owner must still test: never a close OK.
-  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('OWNER_ONLY')}})}); f.run();
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('OWNER_ONLY',TRAIN)}})}); f.run();
   assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat]),[[2,'OWNER_ONLY']]);
 });
 
