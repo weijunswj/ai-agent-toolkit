@@ -1,0 +1,6 @@
+### Changed
+
+- **Agent UAT first on the programme board:** an owed UAT is now the agent's step until the controller records the agent's result on the task (`private.agent_uat`: PASSED, FAILED or OWNER_ONLY at the owed UAT's head, with evidence). One function decides who owes it. Until then the Waiting on cell reads `Agent: UAT on PR #n`, CURRENT reads `agent UAT on PR #n`, the task page says `Agent UAT owed`, and the task never joins the owner's waiting list; after an agent PASS or an owner-only finding at that head they read the owner forms. A UAT owed at a new head is the agent's again.
+- **New status `NOW · AGENT UAT`:** a merged task whose agent UAT is still owed shows this status, sorted after work in progress and before `MERGED · awaiting proof`; it moves to `MERGED · awaiting proof` with `Owner: UAT` once the agent's UAT passes. A listed blocker still queues the task.
+- **Owner PASS needs the agent's result:** a write that newly records the owner's UAT as PASSED at a head is refused (`UAT_AGENT_FIRST`) unless the agent's PASSED or OWNER_ONLY result is recorded at that head in the same or an earlier write. Only the controller writes or removes the agent record. PASS records already stored are unchanged.
+- **Gates page:** the merge-time UAT rule now says the agent runs the UAT first and the ask reaches the owner only after that.

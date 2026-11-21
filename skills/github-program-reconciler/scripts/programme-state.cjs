@@ -940,6 +940,7 @@ function validateChild(doc) {
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
     if (isObject(doc.private) && doc.private.keep_open !== undefined) validateKeepOpen(errors, doc.private.keep_open);
     if (isObject(doc.private) && doc.private.pr_heads !== undefined) validatePrHeads(errors, doc.private.pr_heads);
+    if (isObject(doc.private) && doc.private.agent_uat !== undefined) validateAgentUat(errors, doc.private.agent_uat);
     if (isObject(doc.private) && doc.private.lane_wait !== undefined) validateLaneWaitStamp(errors, doc.private.lane_wait);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
       && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
@@ -955,6 +956,19 @@ function validatePrHeads(errors, heads) {
   check(errors, Array.isArray(heads) && heads.length <= PR_HEADS_LIMIT && new Set(heads.map(entry => entry?.head)).size === heads.length
     && heads.every(entry => isObject(entry) && Object.keys(entry).length === 2 && isInt(entry.pr, 1) && isSha(entry.head)),
   `private.pr_heads must list at most ${PR_HEADS_LIMIT} different heads, each as a PR number and its full head SHA`);
+}
+
+// The agent's UAT result on an owed UAT (agent UAT first): PASSED, FAILED or OWNER_ONLY (no step a
+// tool can reach; the evidence says why), at the full head SHA of the UAT it ran, with its evidence,
+// normally an evidence store path. Only the controller writes it (applyPatch). Like pr_heads it lives
+// in the child's private part, so older Toolkit readers still load the document.
+const AGENT_UAT_STATES = Object.freeze(['PASSED', 'FAILED', 'OWNER_ONLY']);
+// Agent results that hand an owed UAT to the owner.
+const AGENT_UAT_HANDED = Object.freeze(['PASSED', 'OWNER_ONLY']);
+function validateAgentUat(errors, record) {
+  check(errors, isObject(record) && Object.keys(record).length === 3 && AGENT_UAT_STATES.includes(record.state) && isSha(record.at_head)
+    && isText(record.evidence) && record.evidence.length <= JOURNAL_TEXT_LIMIT && !secretShaped(record.evidence),
+  `private.agent_uat must hold state (${AGENT_UAT_STATES.join(', ')}), at_head (the owed UAT's full head SHA) and evidence (text of at most ${JOURNAL_TEXT_LIMIT} characters, no secret)`);
 }
 
 // Adds the heads a pass saw (`seen`, from PR discovery, then the tracked PR's head) to the task's
@@ -1707,7 +1721,22 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
     else next[key] = mergePatch(next[key], value, Object.hasOwn(SHAPES, key) ? SHAPES[key] : null);
   }
   if (kind === 'parent') refuseNewLegacy(doc, next);
+  if (kind === 'child') guardAgentUat(doc, next, isDecisionHolder(parentDoc, writer));
   return next;
+}
+
+// Agent UAT first. The agent's UAT record is the controller's, like `uat`: any other writer that
+// would add, change or remove it is refused. And a write that newly records the owner's UAT PASSED
+// at a head needs the agent's PASSED or OWNER_ONLY at that same head, in this write or an earlier
+// one. A PASS already on record is left as it is.
+function guardAgentUat(previous, next, holder) {
+  if (!holder && JSON.stringify(previous.private?.agent_uat ?? null) !== JSON.stringify(next.private?.agent_uat ?? null)) {
+    throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) records private.agent_uat.');
+  }
+  // A PASS with no head is left to validation, which refuses it (a PASS speaks for one head).
+  if (next.uat?.state !== 'PASSED' || !isSha(next.uat.at_head) || (previous.uat?.state === 'PASSED' && previous.uat.at_head === next.uat.at_head)) return;
+  if (AGENT_UAT_HANDED.includes(agentUatAt(next, next.uat.at_head))) return;
+  throw new ProgrammeError('UAT_AGENT_FIRST', `uat PASSED at ${shortSha(next.uat.at_head)} needs the agent's UAT first: record private.agent_uat with state PASSED or OWNER_ONLY, at_head ${next.uat.at_head} and its evidence, in this write or an earlier one.`);
 }
 
 // A write never adds an older class: an entry may keep one it already had until it is migrated.
@@ -1864,13 +1893,15 @@ function revisionLine(parent, children) {
 // A row's Status is worked out, never stored. A task in progress (an open or draft PR, or active,
 // waiting on the owner or held) is NOW: `NOW · IN PROGRESS`, or `NOW · QUEUED` while its state lists
 // a blocker, since it cannot move until that clears, or `MERGED · awaiting proof` once its task PR
-// merged while the issue stays open (awaitingProof). Every other open task, optional ones too, is
+// merged while the issue stays open (awaitingProof), or `NOW · AGENT UAT` before that while the
+// agent still owes its UAT (agentUatDue). Every other open task, optional ones too, is
 // `LATER`; a finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is
 // COMPLETED or RETIRED. A planned release names where the work merges; it does not change the
 // status. Waiting on names what an active task waits for; PRs, review and UAT are on its own page,
 // which lists every PR. Rows sort by these open bands, then COMPLETED, then RETIRED (graphOrder).
 const MERGED_AWAITING_PROOF = 'MERGED · awaiting proof';
-const GRAPH_BANDS = Object.freeze(['NOW · IN PROGRESS', MERGED_AWAITING_PROOF, 'NOW · QUEUED', 'LATER']);
+const NOW_AGENT_UAT = 'NOW · AGENT UAT';
+const GRAPH_BANDS = Object.freeze(['NOW · IN PROGRESS', NOW_AGENT_UAT, MERGED_AWAITING_PROOF, 'NOW · QUEUED', 'LATER']);
 const GRAPH_HEADER = ['| Task | Child # | Status | Waiting on | Last Updated (SGT) |', '|---|---|---|---|---|'];
 // The parent keeps this many COMPLETED rows, the most recent; older ones and every RETIRED row sit
 // in archive comments behind one link line.
@@ -1945,8 +1976,8 @@ function lastUpdated(outcome, child, issue, comments) {
   return Number.isFinite(newest) ? new Date(newest + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '-';
 }
 
-// Active rows by status band (GRAPH_BANDS: NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED,
-// LATER), so moving work
+// Active rows by status band (GRAPH_BANDS: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting
+// proof, NOW · QUEUED, LATER), so moving work
 // leads parked work. Inside a band: rows pinned last (`last`) after the rest, so tasks added later
 // still sort before them; optional tasks after the rest of LATER; then priority (`order`, lowest
 // first) and child issue number, so the top LATER row starts next. Then every finished row, oldest
@@ -1988,15 +2019,23 @@ function orderTies(parent, children) {
     .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
 }
 
-// The Status cell (see above): NOW · IN PROGRESS, MERGED · awaiting proof, NOW · QUEUED, LATER,
-// COMPLETED or RETIRED. A live gate outranks a listed blocker; once it returns, the blocker queues
-// the task again, merged or not.
+// The Status cell (see above): NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW ·
+// QUEUED, LATER, COMPLETED or RETIRED. A live gate outranks a listed blocker; once it returns, the
+// blocker queues the task again, merged or not.
 function statusCell(outcome, child) {
   const cls = graphClass(outcome, child);
   if (cls === '-') return statusText(outcome, child);
   if (cls !== 'NOW') return 'LATER';
   if (child?.blockers?.length && !gateLive(child)) return 'NOW · QUEUED';
-  return awaitingProof(outcome, child) ? MERGED_AWAITING_PROOF : 'NOW · IN PROGRESS';
+  if (!awaitingProof(outcome, child)) return 'NOW · IN PROGRESS';
+  return agentUatDue(outcome, child) ? NOW_AGENT_UAT : MERGED_AWAITING_PROOF;
+}
+
+// True when a merged task's only proof left starts with the agent's UAT (awaitingProof, and the
+// agent owes the owed UAT: uatOwer). Once the agent's UAT passes, or is found owner-only, the row
+// reads MERGED · awaiting proof with the owner's UAT.
+function agentUatDue(outcome, child) {
+  return awaitingProof(outcome, child) && uatOwer(child) === 'agent';
 }
 
 // True when a task in progress has only proof left: its tracked task PR merged, no task PR is open
@@ -2029,6 +2068,20 @@ function owedUat(child) {
   return pr ? `UAT on PR #${pr}` : `UAT at ${shortSha(child.uat.at_head)}`;
 }
 
+// The agent's UAT result at `head` (private.agent_uat), or null when none is recorded at that head.
+function agentUatAt(child, head) {
+  const record = child?.private?.agent_uat;
+  return isObject(record) && isSha(head) && record.at_head === head ? record.state : null;
+}
+
+// Who owes a task's owed UAT: null when none is owed; `owner` once the agent's UAT PASSED, or was
+// found OWNER_ONLY, at the owed UAT's head; else `agent` (agent UAT first). A UAT owed at a new head
+// is the agent's again. Every place that says whose UAT step it is reads this.
+function uatOwer(child) {
+  if (!OWED_UAT_STATES.includes(child?.uat?.state)) return null;
+  return AGENT_UAT_HANDED.includes(agentUatAt(child, child.uat.at_head)) ? 'owner' : 'agent';
+}
+
 // True while a gate is assigned or active on the task, blocked or not.
 function gateLive(child) {
   return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state));
@@ -2042,24 +2095,36 @@ function gateAtWork(child) {
 
 // What a task waiting on the owner asks of them, or null when it does not wait on the owner. A gate
 // waiting on the owner asked a question: `decision`, even with a UAT owed. A task waiting on the
-// owner with a UAT still owed waits for that UAT (owedUat); otherwise for a `decision`. The graph's
-// Waiting on cell and CURRENT's In progress line both read it, so they always agree.
+// owner with a UAT still owed waits for that UAT (owedUat) once it is the owner's (uatOwer); while
+// the agent owes it, the task waits on the agent, not the owner. Otherwise it waits for a
+// `decision`. The graph's Waiting on cell and CURRENT's In progress line both read it.
 function ownerAsk(child) {
   if (child.gate?.state === 'WAITING_OWNER') return 'decision';
   if (child.lifecycle !== 'WAITING_OWNER') return null;
-  return owedUat(child) || 'decision';
+  const ower = uatOwer(child);
+  if (ower === 'agent') return null;
+  return ower === 'owner' ? owedUat(child) : 'decision';
 }
 
 // The owner's next step on a task, or null: { ask, after }. The owner's ask (ownerAsk), else a UAT
-// still owed, now or `after` the gate at work. A blocker is never an owner step. The graph's Waiting
-// on cell, CURRENT and `attention`'s owner waits (ownerWaits) all read it, so they always agree.
+// the owner owes (uatOwer), now or `after` the gate at work. A blocker is never an owner step. The
+// graph's Waiting on cell, CURRENT and `attention`'s owner waits (ownerWaits) all read it.
 function ownerStep(outcome, child) {
   if (!child || isFinished(outcome, child)) return null;
   const ask = ownerAsk(child);
   if (ask) return { ask, after: null };
+  if (uatOwer(child) !== 'owner') return null;
+  return { ask: owedUat(child), after: gateAtWork(child) ? publicText(child.gate.role) : null };
+}
+
+// The agent's next step on a task, or null: { ask, after } for a UAT the agent owes (uatOwer), `UAT
+// failed ...` when its recorded result at that head is FAILED, now or `after` the gate at work. An
+// owner step and a listed blocker come first. Never an owner wait.
+function agentStep(outcome, child) {
+  if (!child || isFinished(outcome, child) || child.blockers?.length || ownerStep(outcome, child) || uatOwer(child) !== 'agent') return null;
   const uat = owedUat(child);
-  if (!uat) return null;
-  return { ask: uat, after: gateAtWork(child) ? publicText(child.gate.role) : null };
+  const ask = agentUatAt(child, child.uat.at_head) === 'FAILED' ? uat.replace(/^UAT/, 'UAT failed') : uat;
+  return { ask, after: gateAtWork(child) ? publicText(child.gate.role) : null };
 }
 
 // The tasks waiting on the owner, in Programme Graph order, each with its step, PR and head.
@@ -2077,6 +2142,8 @@ function waitingCell(outcome, child) {
   if (!child || isFinished(outcome, child)) return '-';
   const step = ownerStep(outcome, child);
   if (step) return `${step.after ? `${step.after}, then ` : ''}Owner: ${step.ask}`;
+  const agent = agentStep(outcome, child);
+  if (agent) return `${agent.after ? `${agent.after}, then ` : ''}Agent: ${agent.ask}`;
   if (child.blockers?.length) return `${gateLive(child) ? `${publicText(child.gate.role)}, then ` : ''}Blocked: ${child.blockers.map(publicText).join('; ')}`;
   return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role && !awaitingProof(outcome, child) ? publicText(child.gate.role) : '-';
 }
@@ -2111,7 +2178,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW · IN PROGRESS, ${MERGED_AWAITING_PROOF}, NOW · QUEUED, LATER, each by priority (optional tasks last in LATER${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? '; pinned tasks end their band' : ''}), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: NOW · IN PROGRESS, ${NOW_AGENT_UAT}, ${MERGED_AWAITING_PROOF}, NOW · QUEUED, LATER, each by priority (optional tasks last in LATER${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? '; pinned tasks end their band' : ''}), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2148,13 +2215,18 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
 // other finding is in `programme.cjs attention`.
 function renderCurrentBlockBody(parent, children, issues = new Map(), now = new Date().toISOString(), board = null) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
-  // The owner's step (ownerStep) says "waiting on you"; a blocker is only "blocked".
+  // The owner's step (ownerStep) says "waiting on you"; the agent's (agentStep) never does; a blocker
+  // is only "blocked".
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
-    const step = ownerStep(row.outcome, row.child);
+    const owner = ownerStep(row.outcome, row.child);
+    const agent = agentStep(row.outcome, row.child);
+    const step = owner || agent;
+    const whose = owner ? 'your' : 'agent';
     const blocked = !step && row.child.blockers.length ? `blocked: ${row.child.blockers.map(publicText).join('; ')}` : null;
     return `- ${[`#${row.outcome.issue} ${taskName(row.outcome, issues.get(row.outcome.issue))}`, row.child.pr.number ? `PR #${row.child.pr.number}` : null,
-      awaitingProof(row.outcome, row.child) ? 'merged, awaiting proof' : row.child.gate.role ? publicText(row.child.gate.role) : null, step && !step.after ? `waiting on you: your ${step.ask}` : blocked,
-      step?.after ? `then your ${step.ask}` : null].filter(Boolean).join(' · ')}`;
+      awaitingProof(row.outcome, row.child) ? 'merged, awaiting proof' : row.child.gate.role ? publicText(row.child.gate.role) : null,
+      step && !step.after ? (owner ? `waiting on you: your ${step.ask}` : `agent ${step.ask}`) : blocked,
+      step?.after ? `then ${whose} ${step.ask}` : null].filter(Boolean).join(' · ')}`;
   });
   const holds = rows.filter(row => row.child && !isFinished(row.outcome, row.child) && (row.child.lifecycle === 'HOLD' || row.child.blockers.length)).length;
   return [
@@ -2193,7 +2265,7 @@ const OWED_UAT_STATES = Object.freeze(['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_F
 
 // The PR GRAPH of a task page: every open PR, then the latest finished ones, older ones on one line.
 // A row is the PR's title (titleCell), its number, its status and its merge commit. The tracked PR's status cell also carries
-// the task's gate and, while the owner's test is owed, `UAT owed`. With no PR yet, or no tracked PR
+// the task's gate and, while a UAT is owed, `Agent UAT owed` or `Owner UAT owed` (uatOwer). With no PR yet, or no tracked PR
 // among the rows shown, one line under the graph carries them instead, so they always show. Review,
 // release and the next action are in the task's handover file.
 const PR_GRAPH_FINISHED = 10;
@@ -2227,10 +2299,11 @@ function prGraphLines(child, titles = null) {
   const all = [...tracked, ...listed];
   const gate = [child.gate?.role, child.gate?.state].filter(Boolean).map(publicText).join(' ');
   // An owed UAT goes on the PR it was recorded on (uatPr); one with no recorded head on the tracked PR.
+  // It names who owes it (uatOwer): the agent first, then the owner.
   const owed = OWED_UAT_STATES.includes(child.uat?.state);
   const trackedPr = child.pr?.number ?? null;
   const uatOn = owed && isSha(child.uat.at_head) ? uatPr(child) : trackedPr;
-  const uat = owed ? `UAT owed${uatOn === null && isSha(child.uat.at_head) ? ` at ${shortSha(child.uat.at_head)}` : ''}` : '';
+  const uat = owed ? `${uatOwer(child) === 'owner' ? 'Owner' : 'Agent'} UAT owed${uatOn === null && isSha(child.uat.at_head) ? ` at ${shortSha(child.uat.at_head)}` : ''}` : '';
   const apart = uat && uatOn !== trackedPr;
   const task = [gate, apart ? '' : uat].filter(Boolean);
   if (!all.length) return [task.length ? ['None yet', ...task].join(' · ') : 'None yet.'];
@@ -7915,7 +7988,7 @@ module.exports = Object.freeze({
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
-  evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, uatOwer, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
