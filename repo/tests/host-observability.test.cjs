@@ -295,7 +295,8 @@ test('a first pulse alerts once, pings the heartbeat, and a repeat with no chang
   const payload = JSON.parse(hooks(rx)[0].body);
   assert.equal(payload.source, 'host-observability');
   assert.equal(payload.host, 'test-host');
-  assert.match(payload.subject, /NORMAL/);
+  // Alert titles once started with the skill's name, which means nothing to the owner reading them.
+  assert.equal(payload.subject, 'Server monitor test-host: NORMAL');
   assert.equal(beats(rx).length, 1);
   const second = await run(pulseScript, [], host, alertEnv(rx));
   assert.match(second.stdout, /Alert: not needed/);
@@ -478,7 +479,7 @@ test('test alerts use the chosen webhook format', { skip }, async (t) => {
   for (const [format, check] of [
     ['slack', (r) => assert.match(JSON.parse(r.body).text, /test alert/)],
     ['discord', (r) => assert.match(JSON.parse(r.body).content, /test alert/)],
-    ['ntfy', (r) => { assert.match(r.headers.title, /test alert/); assert.match(r.body, /If you can read this/); }],
+    ['ntfy', (r) => { assert.equal(r.headers.title, 'Server monitor test-host: test alert'); assert.match(r.body, /\nTest alert from the server monitor on test-host\. If you can read this/); }],
     ['text', (r) => assert.match(r.headers['content-type'], /text\/plain/)]
   ]) {
     const before = hooks(rx).length;
@@ -495,6 +496,19 @@ test('test alerts use the chosen webhook format', { skip }, async (t) => {
   const plainBeat = await run(pulseScript, ['--test-heartbeat'], host, { HEARTBEAT_URL: 'http://beats.example.com/ping' });
   assert.equal(plainBeat.code, 1);
   assert.match(plainBeat.stdout, /must be https/);
+});
+
+test('email alerts start with the server monitor title, with an optional prefix', { skip }, async (t) => {
+  const host = makeHost(t);
+  const mailbox = path.join(host.dir, 'mailbox');
+  const sendmail = path.join(host.dir, 'sendmail');
+  writeExec(sendmail, `cat >> ${JSON.stringify(mailbox)}`);
+  const result = await run(pulseScript, ['--test-alert'], host, { ALERT_CHANNELS: 'email', ALERT_EMAIL_TO: 'owner', SENDMAIL: sendmail });
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(fs.readFileSync(mailbox, 'utf8'), /^Subject: Server monitor test-host: test alert$/m);
+  fs.rmSync(mailbox);
+  await run(pulseScript, ['--test-alert'], host, { ALERT_CHANNELS: 'email', ALERT_EMAIL_TO: 'owner', SENDMAIL: sendmail, ALERT_EMAIL_SUBJECT_PREFIX: '[servers]' });
+  assert.match(fs.readFileSync(mailbox, 'utf8'), /^Subject: \[servers\] Server monitor test-host: test alert$/m);
 });
 
 test('test commands name a missing curl', { skip }, async (t) => {

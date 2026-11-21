@@ -28,6 +28,7 @@ const { legacyTaskAnswersPresent } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
+const updateMarker = require('./toolkit-update-marker.cjs');
 const {
   wizardChoice, resolvedQuestion, choiceValues, selectedChoice, spreadsheetChoiceReference,
   questionBankApprovalPayload, questionBankSemanticIdentity, withPresentationMetadata, ensurePresentationMetadata,
@@ -3125,6 +3126,17 @@ function cloneManagedCheckoutIfMissing(args) {
   return true;
 }
 
+// Runs fn, which moves the managed checkout's files (git switch, git merge), while holding the
+// bridge's update.tree-moving marker beside the hub snapshot (toolkit-update-marker.cjs), so a
+// session-start hook reading Toolkit in place waits instead of loading half-moved modules. A reader
+// that still holds after the wait stops setup with nothing moved.
+function whileManagedTreeMoves(args, fn, options = {}) {
+  const controlRoot = args.hub ? path.dirname(path.resolve(args.hub)) : updateMarker.defaultControlRoot();
+  const moved = updateMarker.whileTreeMoves(controlRoot, () => ({ value: fn() }), options);
+  if (!moved) throw new Error("another session start was still reading Toolkit's files after 15 seconds, so setup did not move them; run setup again");
+  return moved.value;
+}
+
 function verifyAndUpdateTrustedRepo(args, validationResults) {
   validateManagedSourcePath(args);
   const cloned = cloneManagedCheckoutIfMissing(args);
@@ -3137,7 +3149,7 @@ function verifyAndUpdateTrustedRepo(args, validationResults) {
     throw new Error(`Unexpected origin remote for managed Toolkit source checkout: ${remote}`);
   }
 
-  runCommand(`git switch ${args.repoBranch}`, 'git', ['switch', args.repoBranch], { cwd: args.repoRoot, timeout: 60000 });
+  whileManagedTreeMoves(args, () => runCommand(`git switch ${args.repoBranch}`, 'git', ['switch', args.repoBranch], { cwd: args.repoRoot, timeout: 60000 }));
   const branch = runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current');
   if (branch !== args.repoBranch) throw new Error(`Expected managed source branch ${args.repoBranch}, found ${branch || '<detached>'}`);
 
@@ -3162,7 +3174,7 @@ function verifyAndUpdateTrustedRepo(args, validationResults) {
     allowFailure: true
   });
   if (ancestor.status !== 0) throw new Error(`Managed source checkout cannot fast-forward from ${headBefore} to ${fetchedCommit}`);
-  runCommand('git merge --ff-only FETCH_HEAD', 'git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: args.repoRoot, timeout: 120000 });
+  whileManagedTreeMoves(args, () => runCommand('git merge --ff-only FETCH_HEAD', 'git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: args.repoRoot, timeout: 120000 }));
   runManagedHookLightValidation(args, validationResults);
   const headAfter = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
   return {
@@ -3966,6 +3978,7 @@ module.exports = {
   applyAntigravitySkills,
   antigravityState,
   fastForwardLocalClone,
+  whileManagedTreeMoves,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,

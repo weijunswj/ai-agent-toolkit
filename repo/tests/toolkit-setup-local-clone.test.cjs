@@ -66,3 +66,22 @@ test('the managed checkout itself and folders that are not Toolkit clones are le
   assert.equal(core.fastForwardLocalClone({ ...f.args, repoRemote: 'https://github.com/someone/else' }, f.clone), null);
   assert.equal(core.fastForwardLocalClone(f.args, os.tmpdir()), null);
 });
+
+// Setup moves the managed checkout's files (switch, fast-forward) under the bridge's moving marker, so a
+// session-start hook reading Toolkit in place never loads half-moved modules; it once moved them unguarded.
+test('setup moves the managed checkout only under the moving marker, and never while a reader holds on', (t) => {
+  const marker = require('../scripts/toolkit-update-marker.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-setup-move-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const args = { hub: path.join(root, 'current') };
+  let seen = null;
+  assert.equal(core.whileManagedTreeMoves(args, () => { seen = fs.existsSync(marker.markerPath(root)); return 'moved'; }), 'moved');
+  assert.equal(seen, true, 'the marker is held while the files move');
+  assert.equal(fs.existsSync(marker.markerPath(root)), false, 'and released after');
+  fs.mkdirSync(marker.readersPath(root), { recursive: true });
+  fs.writeFileSync(path.join(marker.readersPath(root), 'reader'), JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+  let ran = false;
+  assert.throws(() => core.whileManagedTreeMoves(args, () => { ran = true; }, { timeoutMs: 50 }), /still reading Toolkit's files after 15 seconds, so setup did not move them; run setup again/);
+  assert.equal(ran, false, 'nothing moves while a reader holds on');
+  assert.equal(fs.existsSync(marker.markerPath(root)), false);
+});
