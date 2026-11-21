@@ -532,7 +532,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Model and effort: the cheapest step of the `agent-cost-control` ladder that can do the task \(small, mid or top tier; medium effort at least\), set on purpose, never left on a default/);
   assert.match(text, /\| raised <tier>\/<effort> <YYYY-MM-DD>: <reason>\]/);
   assert.match(text, /a template update never lowers a recorded raise/);
-  assert.match(text, /Write these requirements into every task prompt/);
+  assert.match(text, /For a project's own task, write these requirements into every task prompt/);
+  assert.match(text, /The daily check-in and the hourly nudge are pings, rendered from Toolkit `main`[^\n]*each run creates one run stamp, posts one line in its home thread and changes nothing else, and you work its checklist that turn/);
   for (const required of ['capped short message to the coordinator with retry', 'full report to `latest.md` and an immutable `runs/<run UTC>.md`',
     'only a fresh-session run resolves its own run thread after delivery', 'ALL unresolved threads and project-chat posts',
     'small page limits', 'ALL unanswered owner items with no reply or reaction', 'link and ask date',
@@ -580,7 +581,7 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   assert.match(text, /\*\*Binding check\*\* \(each daily check-in, read-only; the hourly nudge leaves it out\)/);
   assert.doesNotMatch(text, /^  1\. the \*\*Binding check\*\*/m);
   // Running projects pick up changed task behaviour.
-  assert.match(text, /The check-in and nudge load their instructions from `main` each run, so a skill update needs no swap\. Swap only on TASKS OUTDATED, in place/);
+  assert.match(text, /The check-in and nudge are pings: each run stamps itself and posts one line, and you work its checklist that turn \(`tasks\/ping-run\.md`\), so a skill update needs no swap\. Swap only on TASKS OUTDATED, in place/);
   // Threads at start: briefs carry the blob and a mismatch is reported first.
   assert.match(body, /bound by commit and blob SHA/);
   assert.match(body, /a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its brief/);
@@ -610,7 +611,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
   assert.doesNotMatch(body, /Keep any attribution header/);
-  assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
+  assert.match(body, /Each Toolkit scheduled task is a ping bound to its own home thread \(fallback: a fresh session per run\): it stamps its run and posts one line, and the coordinator works its checklist that turn\./);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
   assert.ok(body.includes('- Posts: read the newest page where you post, never memory.'));
   assert.ok(body.includes('Coordinator: new asks use **Call-to-action pings**: same turn, notify on, after restarts too; recovery lists count. Else edit your newest top-level post if no owner message follows'));
@@ -744,7 +745,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   }
   // Toolkit-made tasks: rendered as pointers, named, swapped in place; project and local tasks report-only.
   for (const required of ['toolkit-projects-tasks.cjs --render <daily-check-in|hourly-nudge> --params <file>',
-    '`<PROJECT>: Daily check-in`, `<PROJECT>: Hourly nudge`', '**Swap = update in place, recreate only to change the session.**', '**Stored prompts are pointers.**',
+    '`<PROJECT>: Daily check-in`, `<PROJECT>: Hourly nudge`', '**Swap = update in place, recreate only to change the session.**', '**Stored prompts are pointers.**', '**Toolkit tasks store pings.**',
     '`--expand <kind> --params <file>`', 'call `update_trigger` with only the new prompt', 'put the saved prompt back with `update_trigger` and report', '**Other projects\' Toolkit tasks.**', 'only then delete the old task',
     'If the read-back fails, delete the new one, keep the old one and report', 'Read it back with `get_trigger` (enabled, the right next run time, bound to its new home thread; never `fire_trigger` it, the first scheduled run is the proof); only then delete the old task', 'say undo task sync <name>',
     'A `malformed` prompt holds and is reported', '**The project\'s own tasks** are never changed without the owner',
@@ -968,7 +969,7 @@ test('the coordinator relays every task run and catches up missed ones from the 
   assert.ok(text.includes('one capped line in its home thread (first line and per-run report path), with a capped short message to the coordinator with retry when that post fails'));
   for (const prefix of ['`RELAY GAP`', '`UNRELAYED TASK RUNS`', '`LANES UNDER CAP`']) assert.ok(text.includes(prefix), prefix);
   assert.doesNotMatch(text, /Report to the coordinator only/);
-  assert.ok(body.includes('Each run files its report and run stamp, then posts one line in its home thread.'));
+  assert.ok(body.includes('it stamps its run and posts one line, and the coordinator works its checklist that turn.'));
 });
 
 test('recovery matrix covers replay, catch-up, interrupted actions, stop identity and old shells', () => {
@@ -1015,7 +1016,7 @@ test('task-run relay, catch-up and prefix actions all honour stopped by owner be
       '**Run records.**', '**Match the task before processing.**', '**Old custom shells.**', '**Recovery matrix.**']],
     ['reference/periodic-runs.md', ['  - `RELAY GAP`', '- `UNRELAYED TASK RUNS`']],
     ['tasks/delivery.md', ['- Run stamp:', '- If that post fails,', '- Failure file:']],
-    ['tasks/hourly-nudge.md', ['10. Task runs']],
+    ['tasks/hourly-nudge.md', ['10. TOOL STEP (shell, task reads): Task runs']],
     ['tasks/daily-check-in.md', ['   RELAY GAP:']]
   ];
   for (const [file, prefixes] of routes) {

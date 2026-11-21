@@ -8,7 +8,7 @@ Part of the [Toolkit Controller](../CONTROLLER.md); it binds like that file.
 - **Git hygiene:** never force-push or rewrite history; commit as the owner's identity.
 - **Controller is the brain:** it does the whole job, gets what it cannot reach through an executor or a paste-back prompt, and says what its harness cannot do (core).
 - **Local base:** the local rules are the base every harness inherits; a harness adds only its own mechanics, and a clash goes to the owner.
-- **Work runs where the controller runs:** a cloud controller runs work in the cloud and a local one on its computer, unless a step needs the other side. Scheduled tasks prefer the cloud; new scheduled work joins an existing task first and stays a short prod.
+- **Work runs where the controller runs:** a cloud controller runs work in the cloud and a local one on its computer, unless a step needs the other side. Scheduled tasks prefer the cloud; new scheduled work joins an existing task first and stays a short prod. A scheduled run the controller defers or pauses gets one notified owner line: why, and when it resumes.
 - **Finish fast:** lanes never idle; merge trains never wait.
 - **Plain owner posts:** in the owner's time zone, leading with problem, fix and skip; "(my pick)" is the best option on the evidence, not the owner's leaning.
 - **Free first:** no paid plans; reviews run on the subscription.
