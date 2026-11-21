@@ -143,6 +143,50 @@
       "expect": {"decision": "deny", "reason": "toolkit-claude-attribution-hook"},
       "fault": {"type": "throw-module", "file": "repo/scripts/toolkit-attribution-guard.cjs"},
       "status": "pass"
+    },
+    {
+      "id": "HANDOFF.store-save-passes",
+      "source": "Handoff refresh G0: the after-tool hook never blocks and fails open",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "node repo/scripts/toolkit-store.cjs save --store ../store --path evidence/gate --message \"gate end\""}, "tool_response": {"stdout": "Done: save store=owner/store commit=abc read_back=true\n", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "enabled"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.store-save-passes-off",
+      "source": "Handoff refresh G0: the after-tool hook never blocks and fails open",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "node repo/scripts/toolkit-store.cjs save --store ../store --path evidence/gate --message \"gate end\""}, "tool_response": {"stdout": "Done: save store=owner/store commit=abc read_back=true\n", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "disabled"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.memory-write-passes",
+      "source": "Handoff refresh G0: the after-tool hook never blocks and fails open",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Write", "tool_input": {"file_path": "{work}/memory/MEMORY.md", "content": "x\n"}, "tool_response": {"filePath": "{work}/memory/MEMORY.md"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.hook-throws-fails-open",
+      "source": "Handoff refresh G0: the after-tool hook never blocks and fails open",
+      "kind": "fault",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "node repo/scripts/toolkit-store.cjs save --store ../store --path evidence/gate --message \"gate end\""}, "tool_response": {"stdout": "Done: save store=owner/store commit=abc read_back=true\n", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "enabled"}},
+      "expect": {"decision": "allow"},
+      "fault": {"type": "throw-module", "file": "repo/scripts/toolkit-handoff-hook.cjs"},
+      "status": "pass"
     }
   ]
 }

@@ -14,6 +14,7 @@ const CLEAN = {
   [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify({ items: [{ level: 'CHECK', check: 'speed.jobs', path: '', message: 'judge' }] }) },
   [SCRIPTS.footer]: { status: 0, stdout: 'GitHub footer sweep (report only) of acme/app: no posts with the footer\n' },
   [SCRIPTS.refs]: { status: 0, stdout: 'SCRIPT REFERENCES: clear\n' },
+  [SCRIPTS.handoff]: { status: 0, stdout: 'HANDOFF CURRENT folder=evidence/handoff/acme/app\n' },
 };
 
 const NOW = new Date('2026-11-14T12:00:00Z');
@@ -44,12 +45,12 @@ const run = (argv, setup) => {
   const code = main(argv, { ...deps, stdout: chunk => { text += chunk; }, stderr: chunk => { text += chunk; } });
   return { code, text, calls };
 };
-const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md', '--task', 'hourly-nudge=h.md'];
+const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md', '--task', 'hourly-nudge=h.md', '--handoff', '/store'];
 
 test('a clean run prints one line and exits 0', () => {
   const { code, text } = run(ALL);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces stale ci footer refs; skipped: toolkit)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks handoff programme traces stale ci footer refs; skipped: toolkit)\n');
 });
 
 test('checks are segregated by host and governance, and skip cleanly with the reason', () => {
@@ -58,7 +59,7 @@ test('checks are segregated by host and governance, and skip cleanly with the re
   for (const name of ['guidebook', 'instructions', 'memory', 'tasks']) {
     assert.deepEqual(chat.checks.find(check => check.name === name), { name, state: 'skipped', lines: ['Claude Projects only'] });
   }
-  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['programme', 'traces', 'stale', 'ci', 'footer', 'refs']);
+  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['handoff', 'programme', 'traces', 'stale', 'ci', 'footer', 'refs']);
   const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
   assert.deepEqual(off.checks.filter(check => check.state === 'skipped').map(check => `${check.name}: ${check.lines[0]}`).slice(-3), ['programme: governance off', 'traces: governance off', 'stale: governance off']);
   const none = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: null }).deps);
@@ -82,7 +83,7 @@ test('findings print compactly: counts by code and the top items, full detail be
   const compact = run(ALL, { results });
   assert.equal(compact.code, 1);
   assert.deepEqual(compact.text.trimEnd().split('\n'), [
-    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces stale ci footer refs; skipped: toolkit)',
+    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks handoff traces stale ci footer refs; skipped: toolkit)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
     `  ... 3 more (--expand, or ${require('../scripts/toolkit-user-state.cjs').programmeCommand('attention')})`,
@@ -178,18 +179,18 @@ test('--json prints the report as data', () => {
   const report = JSON.parse(text);
   assert.equal(report.host, 'projects');
   assert.equal(report.governed, true);
-  assert.equal(report.checks.length, 11);
+  assert.equal(report.checks.length, 12);
   assert.equal(format(report).split('\n')[0].startsWith('CONTROLLER CHECK: clear'), true);
 });
 
 test('a run where every check is skipped says nothing ran and exits 1, never clear', () => {
   const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
   assert.equal(code, 1);
-  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks programme traces stale ci footer refs\): pass the inputs each skipped check names/);
+  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks handoff programme traces stale ci footer refs\): pass the inputs each skipped check names/);
   // With no inputs at all only the Toolkit's own script-reference check runs, which is not a clear run.
   const bare = run(['--host', 'chat']);
   assert.equal(bare.code, 1);
-  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks programme traces stale ci footer\)/);
+  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks handoff programme traces stale ci footer\)/);
 });
 
 // The daily stale sweep, against a canned attention report and the parent's sub-issues.
