@@ -26,8 +26,9 @@ function sources(t) {
   git(base, 'init', '--quiet', repo);
   git(repo, 'remote', 'add', 'origin', 'https://github.com/acme/widget.git');
   const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); return path.join(base, rel); };
-  put('memory/MEMORY.md', '# Memory\n- queue: #1 > #2\n');
-  put('memory/owner-rules.md', 'merge commits only\n');
+  // Saved at different times, as a synced memory copy keeps each file's save time.
+  fs.utimesSync(put('memory/MEMORY.md', '# Memory\n- queue: #1 > #2\n'), new Date('2026-11-21T10:00:00Z'), new Date('2026-11-21T10:00:00Z'));
+  fs.utimesSync(put('memory/owner-rules.md', 'merge commits only\n'), new Date('2026-11-20T09:00:00Z'), new Date('2026-11-20T09:00:00Z'));
   const hourly = put('hourly/additions.md', 'hourly step\n');
   const daily = put('daily/additions.md', 'daily step\n');
   const instructions = put('instructions.md', 'project instructions\n');
@@ -63,14 +64,14 @@ test('handoff saves the per-repository snapshot with its manifest, then sends no
   assert.equal(w.remoteTip(), tip);
   assert.equal(pushes(w.calls).length, pushed, 'an unchanged snapshot pushes nothing');
 
-  // One changed memory file is saved; a removed one stays in the store but leaves the manifest.
+  // One changed memory file is saved; a file missing here is unknown, so its copy and row stay.
   s.put('memory/MEMORY.md', '# Memory\n- queue: #2\n');
   fs.rmSync(path.join(s.memory, 'owner-rules.md'));
   const changed = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW });
   assert.equal(changed.result.handoff, 'SAVED');
   assert.match(w.remoteFile(`${FOLDER}/MEMORY.md`), /queue: #2/);
   assert.ok(w.remoteHas(`${FOLDER}/memory/owner-rules.md`), 'nothing is deleted');
-  assert.ok(!JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).files.some(row => row.path === 'memory/owner-rules.md'));
+  assert.ok(JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).files.some(row => row.path === 'memory/owner-rules.md'));
 });
 
 test('a snapshot an earlier run could not push is sent by the next run, never reported unchanged', t => {
@@ -425,7 +426,7 @@ test('a session with no handoff record finds the snapshot in a nearby store chec
   assert.equal(miss.started.length, 0);
 });
 
-test('a hook-started refresh writes only newer files: an older session copy never overwrites newer rows', t => {
+test('a hook-started refresh writes a file only when this copy is newer, adds what the snapshot lacks and drops only what this session deleted', t => {
   const s = sources(t);
   const out = path.join(s.base, 'drive');
   const run = runOut(s, out);
@@ -435,40 +436,34 @@ test('a hook-started refresh writes only newer files: an older session copy neve
   // A newer copy (the coordinator's 12:00 save) is in the snapshot.
   s.put('memory/MEMORY.md', '# Memory\n- newest queue\n');
   touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T12:00:00Z');
-  touch(path.join(s.memory, 'owner-rules.md'), '2026-11-20T09:00:00Z');
   assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
   assert.equal(row('MEMORY.md').modified, '2026-11-21T12:00:00.000Z', 'each row records its file\'s modified time');
 
   // This session started earlier: its MEMORY.md copy is older.
-  const baseline = path.join(s.base, 'baseline.json');
   s.put('memory/MEMORY.md', '# Memory\n- old queue\n');
   touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T08:00:00Z');
-  fs.writeFileSync(baseline, JSON.stringify({ rows: [] }));
-  const old = run(['--baseline', baseline]);
-  assert.equal(old.result.handoff, 'UNCHANGED', JSON.stringify(old.result));
-  // It changes owner-rules.md itself: only that file is written.
+  const baseline = path.join(s.base, 'baseline.json');
+  fs.writeFileSync(baseline, JSON.stringify({ rows: require('../scripts/toolkit-handoff.cjs').sessionRows({ memory: s.memory, instructions: null, files: [] }) }));
+  assert.equal(run(['--baseline', baseline]).result.handoff, 'UNCHANGED');
+  // Its own change is written; the newer row stays.
   s.put('memory/owner-rules.md', 'merge commits only; no rebase\n');
   assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
-  assert.match(copy('MEMORY.md'), /newest queue/, 'the newer row stays');
-  assert.equal(row('MEMORY.md').modified, '2026-11-21T12:00:00.000Z');
-  assert.match(copy('memory/owner-rules.md'), /no rebase/, 'this session\'s own change is written');
-  // A file the snapshot lacks: added only when newer than every row of its source.
-  s.put('memory/stale.md', 'deleted elsewhere long ago\n');
-  touch(path.join(s.memory, 'stale.md'), '2026-11-19T00:00:00Z');
-  assert.equal(run(['--baseline', baseline]).result.handoff, 'UNCHANGED');
-  s.put('memory/fresh.md', 'new topic\n');
+  assert.match(copy('MEMORY.md'), /newest queue/);
+  assert.match(copy('memory/owner-rules.md'), /no rebase/);
+  // A file the snapshot lacks is added, whatever its time.
+  s.put('memory/older-topic.md', 'saved long ago\n');
+  touch(path.join(s.memory, 'older-topic.md'), '2026-11-19T00:00:00Z');
   assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
-  assert.ok(row('memory/fresh.md'));
-  assert.ok(!row('memory/stale.md'));
+  assert.ok(row('memory/older-topic.md'));
   // The baseline moves to what each run saw; a file this session then deletes leaves the manifest.
-  assert.ok(JSON.parse(fs.readFileSync(baseline, 'utf8')).rows.some(item => item.path === 'memory/fresh.md'), 'the baseline moves');
-  fs.rmSync(path.join(s.memory, 'fresh.md'));
+  assert.ok(JSON.parse(fs.readFileSync(baseline, 'utf8')).rows.some(item => item.path === 'memory/older-topic.md'), 'the baseline moves');
+  fs.rmSync(path.join(s.memory, 'older-topic.md'));
   assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
-  assert.ok(!row('memory/fresh.md'));
+  assert.ok(!row('memory/older-topic.md'));
   assert.ok(row('MEMORY.md'), 'a row this session did not delete stays');
-  // A manual run still copies everything this session holds.
-  assert.equal(run([]).result.handoff, 'WRITTEN');
-  assert.match(copy('MEMORY.md'), /old queue/);
+  // A plain run follows the same rule: the newer row still stays.
+  assert.equal(run([]).result.handoff, 'UNCHANGED');
+  assert.match(copy('MEMORY.md'), /newest queue/);
 });
 
 test('where modified times are not real (a plain copy), only this session\'s own changes are written', t => {

@@ -5,15 +5,17 @@
 // It triggers on content, not tool names: after any tool call that is not a known read-only one (a
 // host memory tool, a shell edit, a patch, an MCP writer, a tool it has never heard of), at most once
 // a minute per session, it compares the snapshot's remembered sources (its manifest) with what this
-// session holds, by the same newer-only rule the refresh writes with (toolkit-handoff.cjs). When that
+// session holds, by the same file-by-file rule the refresh writes with (toolkit-handoff.cjs). When that
 // refresh would write something, it starts one `toolkit-store.cjs handoff --baseline <session file>`
 // run in the background, at most once per 10 minutes (a lock file's time); a change inside that window
 // is seen by the next call after it.
 // The store and repository come from the last good run's record or, in a session with none (a fresh
-// cloud container), from a snapshot manifest in a nearby store checkout whose owner/repo matches a
-// nearby checkout's origin. The session file keeps the session baseline: the sources as this session
-// first saw them. Finding a store grants nothing: the run's own pre-flight decides.
-// Any error: nothing happens. It never blocks, never prints and always exits 0; no scheduled task runs it.
+// cloud container), from a nearby store checkout's snapshot of the working repository (or, outside a
+// repository, the only snapshot matching a nearby checkout's origin). The session file keeps the
+// session baseline: the files this session holds and each source's realness, judged once when the
+// session starts. Finding a store grants nothing: the run's own pre-flight decides.
+// Any error: nothing happens. It never blocks, never prints and always exits 0. No scheduled task runs
+// it, but it acts in any session the host runs hooks in, a session a scheduled task starts included.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -81,6 +83,7 @@ function discover(cwd) {
     } catch { /* not a readable checkout */ }
   }
   const list = dir => { try { return fs.readdirSync(dir, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort(); } catch { return []; } };
+  const found = [];
   for (const store of checkouts) {
     const root = path.join(store, ...handoff.ROOT.split('/'));
     for (const owner of list(root)) {
@@ -88,12 +91,14 @@ function discover(cwd) {
         const repository = `${owner}/${repo}`;
         const repoRoot = origins.get(repository.toLowerCase());
         const snapshot = handoff.snapshotFolder(repository);
-        if (!repoRoot || repoRoot === store || !snapshot || !handoff.readManifest(store, snapshot)) continue;
-        return { store, repo_root: repoRoot, repository };
+        if (repoRoot && repoRoot !== store && snapshot && handoff.readManifest(store, snapshot)) found.push({ store, repo_root: repoRoot, repository });
       }
     }
   }
-  return null;
+  // The working repository's own snapshot first; otherwise only an unambiguous one.
+  const mine = own ? found.filter(item => item.repo_root === own) : [];
+  if (mine.length) return mine.length === 1 ? mine[0] : null;
+  return found.length === 1 ? found[0] : null;
 }
 
 // Session files older than a week are removed when a new session starts.
@@ -127,17 +132,20 @@ function main(deps = {}) {
       if (session.found === undefined) session.found = discover(input.cwd) || false;
       record = usable(session.found);
     }
+    // Recorded before any read, so a source that cannot be read still waits a minute.
+    writeJson(sessionFile, session);
     const handoff = record ? require('./toolkit-handoff.cjs') : null;
     const base = record ? record.store || record.out : null;
     const manifest = record ? handoff.readManifest(base, handoff.snapshotFolder(record.repository) || '') : null;
-    if (!manifest) { writeJson(sessionFile, session); return 0; }
+    if (!manifest) return 0;
     const platform = deps.platform || process.platform;
     if (!Array.isArray(session.rows)) {
       const saved = manifest.sources || {};
       session.rows = handoff.sessionRows({ memory: saved.memory || null, instructions: saved.instructions || null, files: Array.isArray(saved.files) ? saved.files : [] }, { platform });
+      session.real = handoff.realBySource(session.rows);
+      writeJson(sessionFile, session);
     }
-    const planned = handoff.plan({ base, repository: record.repository, sources: null, stamp: null, platform, newer: { baseline: session.rows }, scan: false });
-    writeJson(sessionFile, session);
+    const planned = handoff.plan({ base, repository: record.repository, sources: null, stamp: null, platform, session: { rows: session.rows, real: session.real || null }, scan: false });
     if (planned.unchanged) return 0;
     const lock = path.join(dir, 'handoff-refresh.lock');
     try { if (now - fs.statSync(lock).mtimeMs < DEBOUNCE_MS) return 0; } catch { /* no lock yet */ }

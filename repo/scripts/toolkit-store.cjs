@@ -47,15 +47,17 @@
 //                       only while the tip is unchanged, and GitHub is asked again afterwards.
 // handoff  the controller handoff snapshot (toolkit-handoff.cjs): syncs, copies the named memory
 //          folder, instructions and working files into evidence/handoff/<owner>/<repo>/ after a secret
-//          scan, and saves them as above only when a file's content changed (HANDOFF UNCHANGED sends
-//          nothing). The sources are remembered in its manifest, so later runs need none. --out writes
+//          scan, and saves them as above only when the snapshot changes (HANDOFF UNCHANGED sends
+//          nothing). It decides file by file (toolkit-handoff.cjs): it adds a file the snapshot lacks,
+//          writes a differing file only when this copy is newer than its row, and never drops a row
+//          for a file missing here, so an older copy never overwrites or drops newer memory. The sources are remembered in its manifest, so later runs need none. --out writes
 //          the same folder under a folder that is not a bound store (governance off), with no checks
 //          and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what changed.
 //          A successful run records its store and sources in the Toolkit user-state folder, where the
 //          after-tool hook (toolkit-handoff-hook.cjs) reads them. The hook starts runs with
-//          --baseline <its session file>: such a run writes only newer files (toolkit-handoff.cjs),
+//          --baseline <its session file>: such a run also drops rows for files that session deleted,
 //          first readies a fresh cloud clone of the store (unshallows it, and puts a clean detached
-//          HEAD already inside the bound branch onto that branch), and moves the session baseline.
+//          HEAD onto the bound branch only as a fast-forward of both), and moves the session baseline.
 //
 // Commits the remote lacks (kept by a failed push, made by hand, or a merge of the remote) are checked
 // again right before every push: every blob and every message scanned, and each change only adds,
@@ -270,8 +272,9 @@ class EvidenceStore {
 
   // Readies a fresh clone (as a cloud session gets one) for a hook-started handoff run: fetches the
   // full history of a shallow checkout, and puts a detached HEAD on the bound branch only when the
-  // work tree is clean and HEAD is already inside the fetched branch (a fast-forward). Both are local
-  // and lose nothing; anything else is left for the checks after it to refuse.
+  // work tree is clean and both HEAD and any local bound branch are already inside the fetched branch
+  // (a fast-forward of each). Both are local and lose nothing; anything else is left as it is for the
+  // checks after it to refuse.
   #prepare() {
     if (this.#git(['rev-parse', '--is-shallow-repository']).out.trim() === 'true') {
       this.#git(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--unshallow', 'origin', `+refs/heads/${this.#branch}:${this.#tracking}`], { timeout: 120000 });
@@ -280,6 +283,8 @@ class EvidenceStore {
     if (this.#git(['status', '--porcelain', '--untracked-files=all']).out.trim() !== '') return;
     this.#git(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${this.#branch}:${this.#tracking}`], { timeout: 120000 });
     if (!this.#git(['merge-base', '--is-ancestor', 'HEAD', this.#tracking]).ok) return;
+    const local = `refs/heads/${this.#branch}`;
+    if (this.#git(['rev-parse', '--verify', '--quiet', local]).ok && !this.#git(['merge-base', '--is-ancestor', local, this.#tracking]).ok) return;
     this.#git(['checkout', '--quiet', '-B', this.#branch, this.#tracking]);
   }
 
@@ -747,20 +752,22 @@ function runHandoff(options, deps) {
     return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...(found.changed?.length ? { changed: found.changed.join(',') } : {}), ...(found.kept?.length ? { kept: found.kept.join(',') } : {}) };
   }
   const stamp = { taken_at: (deps.now ? deps.now() : new Date()).toISOString(), toolkit_version: require('./toolkit-version.cjs').readToolkitVersion(), repository_commit: commit };
-  // A hook-started run: only newer files, from the session baseline it names; the baseline then moves
-  // to what this run saw.
-  const session = options.baseline ? path.resolve(cwd, options.baseline) : null;
-  const baselineFile = session ? readJsonFile(fs, session) : null;
-  const newer = session ? { baseline: Array.isArray(baselineFile?.rows) ? baselineFile.rows : null } : null;
+  // A hook-started run names the hook's session file: the files that session held (so a file it
+  // deleted leaves the snapshot) and each source's realness as judged when it started. Afterwards the
+  // held files move to what this run saw; the realness stays as first judged.
+  const sessionFile = options.baseline ? path.resolve(cwd, options.baseline) : null;
+  const held = sessionFile ? readJsonFile(fs, sessionFile) : null;
+  const session = sessionFile ? { rows: Array.isArray(held?.rows) ? held.rows : null, real: held?.real && typeof held.real === 'object' ? held.real : null } : null;
   const remember = planned => {
     rememberHandoff(deps, { [options.store ? 'store' : 'out']: base, repo_root: repoRoot, repository, at: stamp.taken_at });
-    if (session && planned) {
-      try { fs.writeFileSync(session, `${JSON.stringify({ ...(readJsonFile(fs, session) || {}), rows: planned.seen }, null, 2)}\n`, { mode: 0o600 }); } catch { /* the next run compares again */ }
+    if (sessionFile && planned) {
+      const now = readJsonFile(fs, sessionFile) || {};
+      try { fs.writeFileSync(sessionFile, `${JSON.stringify({ ...now, rows: planned.seen, real: now.real && typeof now.real === 'object' ? now.real : planned.real }, null, 2)}\n`, { mode: 0o600 }); } catch { /* the next run compares again */ }
     }
   };
   const kept = planned => (planned.kept.length ? { kept: planned.kept.join(',') } : {});
   if (options.out) {
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, newer }));
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session }));
     if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
     remember(planned);
     return planned.unchanged
@@ -769,10 +776,10 @@ function runHandoff(options, deps) {
   }
   const store = new EvidenceStore(deps);
   try {
-    store.open({ store: options.store, repoRoot: options.repoRoot, prepare: Boolean(session) });
+    store.open({ store: options.store, repoRoot: options.repoRoot, prepare: Boolean(sessionFile) });
     // Sync first, so the compare reads the snapshot the store already holds (another writer's too).
     const synced = store.sync();
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, newer }));
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session }));
     // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
     // save sends them now rather than calling them unchanged.
     if (planned.unchanged && !store.pending(planned.folder)) { remember(planned); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }

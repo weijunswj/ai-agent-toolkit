@@ -13,15 +13,19 @@
 // A file not listed in manifest.json is an older copy: nothing here deletes a file.
 // Every source is secret-scanned before anything is written; one finding refuses the whole run.
 //
-// A manual run copies every reachable source as this computer holds it. A run the after-tool hook
-// starts (`newer`) writes only what is newer, so a session holding an older copy (a memory folder
-// synced when it started) never overwrites rows another session wrote later:
-//   - a changed file is written when its modified time is after its row's (a row with none counts as
-//     the snapshot's taken_at); a file the snapshot lacks, when it is after every row of its source;
-//   - a row whose file is gone here is dropped only when this session saw the file and deleted it, or
-//     when its source's newest file here is after the row (so this copy is newer than the row);
-//   - where a source's modified times are not real (several files, all within a minute: a plain
-//     copy), only the session baseline counts: files changed or deleted since the session first looked.
+// Every run decides file by file, so a session holding an older copy (a memory folder synced when it
+// started) never overwrites or drops what another session wrote later:
+//   - a file the snapshot lacks is added;
+//   - a file whose content differs is written only when this copy of that file is newer than its row
+//     (a row with no time counts as the snapshot's taken_at; an equal time keeps the row);
+//   - a row whose file is missing here stays: missing means unknown, not deleted. It is dropped only
+//     when the session baseline (the files this session held, from the after-tool hook) shows this
+//     session held that file and deleted it;
+//   - a source whose modified times are not real (most of its files saved within one minute: a plain
+//     copy) is judged once, from the baseline when there is one; then a differing file is written only
+//     when this session changed it since its baseline.
+// Ordering trusts each machine's clock, so clock skew between machines can misorder saves made within
+// the skew.
 
 const crypto = require('node:crypto');
 const nodeFs = require('node:fs');
@@ -32,7 +36,7 @@ const SCHEMA = 'toolkit.handoff-snapshot.v1';
 const ROOT = 'evidence/handoff';
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 2000;
-// Several files whose modified times all fall within this span were copied at one moment.
+// Files whose modified times fall within this span were saved at one moment.
 const COPY_SPAN_MS = 60 * 1000;
 // ignoreBOM keeps a byte-order mark in the copy, so the copy's sha256 is the one its manifest row records.
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -166,59 +170,72 @@ function readManifest(base, folder, { fs = nodeFs } = {}) {
 // The file set a run would record: every reachable source as read now, plus the last manifest's rows
 // for sources not reachable here. Sorted by path, so the compare is stable.
 const rowOf = ({ path: dest, sha256: hash, source, modified }) => ({ path: dest, sha256: hash, source, ...(modified ? { modified } : {}) });
+const seenOf = entries => entries.map(({ path: dest, sha256: hash, source, modified }) => ({ path: dest, sha256: hash, source, ...(modified ? { modified } : {}) }));
 const byPath = (a, b) => a.path.localeCompare(b.path);
 
-function fileSet({ entries, kept }, previous) {
-  const rows = entries.map(rowOf);
-  const carried = (previous?.files || []).filter(row => kept.includes(row.source) && !rows.some(item => item.path === row.path));
-  return [...rows, ...carried].sort(byPath);
+// Whether a source's modified times are real: false when more than half of two or more files were
+// saved within one minute of each other (a plain copy, or a clone, gives every file one time).
+function realTimes(times) {
+  const sorted = times.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length !== times.length) return false;
+  if (sorted.length < 2) return true;
+  let most = 0;
+  for (let start = 0, end = 0; end < sorted.length; end += 1) {
+    while (sorted[end] - sorted[start] > COPY_SPAN_MS) start += 1;
+    most = Math.max(most, end - start + 1);
+  }
+  return most * 2 <= sorted.length;
 }
 
-// The newer-only file set (see the top of this file). `baseline` is the session's rows from when it
-// first looked (null: none recorded).
-function newerSet({ entries, kept }, previous, baseline) {
+// Each source's realness from a set of rows ({ source, modified }).
+function realBySource(rows) {
+  const times = new Map();
+  for (const row of rows) times.set(row.source, [...(times.get(row.source) || []), Date.parse(row.modified || '')]);
+  return Object.fromEntries([...times].map(([source, list]) => [source, realTimes(list)]));
+}
+
+// The file set a run records (see the top of this file). `session` is the hook's session file:
+// { rows: the files this session held when last seen, real: each source's realness when it started },
+// or null for a run with no session (no deletions, realness judged from the files here now).
+function pick({ entries }, previous, session = null) {
   const prev = new Map((previous?.files || []).map(row => [row.path, row]));
-  const seen = Array.isArray(baseline) ? new Map(baseline.filter(row => row && typeof row.path === 'string').map(row => [row.path, row.sha256])) : null;
+  const baseline = Array.isArray(session?.rows) ? session.rows.filter(row => row && typeof row.path === 'string') : null;
+  const seen = baseline ? new Map(baseline.map(row => [row.path, row.sha256])) : null;
+  const real = session?.real && typeof session.real === 'object' ? session.real : realBySource(baseline || entries);
   const takenAt = Date.parse(previous?.stamp?.taken_at || '');
   const rowTime = row => { const time = Date.parse(row.modified || ''); return Number.isNaN(time) ? (Number.isNaN(takenAt) ? -Infinity : takenAt) : time; };
-  const time = entry => Date.parse(entry.modified || '');
-  const sourceTimes = new Map();
-  for (const entry of entries) sourceTimes.set(entry.source, [...(sourceTimes.get(entry.source) || []), time(entry)]);
-  const real = source => { const times = sourceTimes.get(source) || []; return times.every(Number.isFinite) && (times.length < 2 || Math.max(...times) - Math.min(...times) > COPY_SPAN_MS); };
-  const newest = source => Math.max(-Infinity, ...(sourceTimes.get(source) || []).filter(Number.isFinite));
-  const rowsNewest = source => Math.max(-Infinity, ...[...prev.values()].filter(row => row.source === source).map(rowTime));
-  const changedHere = entry => Boolean(seen) && seen.get(entry.path) !== entry.sha256;
   const out = [];
   const writes = [];
   for (const entry of entries) {
     const row = prev.get(entry.path);
-    if (row && row.sha256 === entry.sha256) { out.push(row.modified ? row : rowOf(entry)); continue; }
-    const take = real(entry.source) ? time(entry) > (row ? rowTime(row) : rowsNewest(entry.source)) : changedHere(entry);
-    if (take) { out.push(rowOf(entry)); writes.push(entry); } else if (row) out.push(row);
+    let take;
+    if (!row) take = true;
+    else if (row.sha256 === entry.sha256) take = false;
+    else if (real[entry.source] !== false) take = Date.parse(entry.modified || '') > rowTime(row);
+    else take = Boolean(seen) && seen.get(entry.path) !== entry.sha256;
+    if (take) { out.push(rowOf(entry)); writes.push(entry); } else out.push(row);
   }
-  const live = new Set(entries.map(entry => entry.path));
+  const here = new Set(entries.map(entry => entry.path));
   for (const row of prev.values()) {
-    if (live.has(row.path)) continue;
-    const gone = !kept.includes(row.source) && ((seen && seen.has(row.path)) || (real(row.source) && newest(row.source) > rowTime(row)));
-    if (!gone) out.push(row);
+    if (!here.has(row.path) && !(seen && seen.has(row.path))) out.push(row);
   }
-  return { files: out.sort(byPath), writes };
+  return { files: out.sort(byPath), writes, real };
 }
 
 const sameFiles = (a, b) => JSON.stringify((a || []).map(row => [row.path, row.sha256])) === JSON.stringify((b || []).map(row => [row.path, row.sha256]));
 
 // Works out one run: the folder, the new manifest, what to write, and whether anything changed.
-function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform, newer = null, scan = true }) {
+function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform, session = null, scan = true }) {
   const folder = snapshotFolder(repository);
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'run it from a checkout of the controlled repository, or name one with --repo-root.');
   const previous = readManifest(base, folder, { fs });
   const chosen = chooseSources(sources, previous);
   if (!hasSources(chosen)) throw new HandoffError('no sources were named and no earlier snapshot remembers any.', 'name --memory <folder>, --instructions <file> or --file <path> once; later runs remember them.');
   const read = readSources(chosen, { fs, platform, scan });
-  const picked = newer ? newerSet(read, previous, newer.baseline) : { files: fileSet(read, previous), writes: read.entries };
+  const picked = pick(read, previous, session);
   const unchanged = Boolean(previous) && sameFiles(previous.files, picked.files);
   const manifest = { schema: SCHEMA, stamp, sources: chosen, files: picked.files };
-  return { folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, seen: read.entries.map(({ path: dest, sha256: hash }) => ({ path: dest, sha256: hash })) };
+  return { folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, seen: seenOf(read.entries), real: picked.real };
 }
 
 // Writes the snapshot and returns an undo that puts every file it touched back as it was (a file it
@@ -246,13 +263,13 @@ function write(base, { folder, manifest, writes }, repository, { fs = nodeFs } =
   return undo;
 }
 
-// The session baseline: each reachable source file's snapshot path and sha256 as this session holds
-// it now. Read-only, no secret scan (nothing is written from it).
+// The session baseline: each reachable source file's snapshot path, sha256, source and modified time
+// as this session holds it now. Read-only, no secret scan (nothing is written from it).
 function sessionRows(sources, { fs = nodeFs, platform = process.platform } = {}) {
-  return readSources(sources, { fs, platform, scan: false }).entries.map(({ path: dest, sha256: hash }) => ({ path: dest, sha256: hash }));
+  return seenOf(readSources(sources, { fs, platform, scan: false }).entries);
 }
 
-// Read-only: is the snapshot current with its live sources? STALE names what changed; a source not
+// Read-only: would a run change the snapshot? STALE names what it would change; a source not
 // reachable here is not counted as a change.
 function check({ base, repository, sources = null, now = new Date(), fs = nodeFs, platform = process.platform }) {
   const folder = snapshotFolder(repository);
@@ -261,7 +278,7 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   if (!previous) return { state: 'MISSING', folder };
   const chosen = chooseSources(sources, previous);
   const read = readSources(chosen, { fs, platform });
-  const files = fileSet(read, previous);
+  const { files } = pick(read, previous);
   const before = new Map(previous.files.map(row => [row.path, row.sha256]));
   const after = new Map(files.map(row => [row.path, row.sha256]));
   const changed = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key)).sort();
@@ -270,4 +287,4 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   return { state: changed.length ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, kept: read.kept };
 }
 
-module.exports = Object.freeze({ SCHEMA, ROOT, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, plan, write, check, sessionRows });
+module.exports = Object.freeze({ SCHEMA, ROOT, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, plan, write, check, sessionRows, realBySource });
