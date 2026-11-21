@@ -322,7 +322,7 @@ function hookHarness(s, { cwd = s.base, record = s.state } = {}) {
   const clock = { now: Date.parse('2026-11-21T13:00:00Z') };
   const fire = (payload = {}, extra = {}) => hook.main({
     stdin: JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 'session-a', cwd, tool_name: 'Bash', tool_input: { command: 'true' }, ...payload }),
-    stateDirectory: dir, handoffRecord: record, now: () => clock.now,
+    stateDirectory: dir, home: path.join(s.base, 'home'), handoffRecord: record, now: () => clock.now,
     spawn: (command, args, options) => { started.push({ command, args, options }); return { unref() {} }; }, ...extra,
   });
   return { hook, dir, started, fire, later: minutes => { clock.now += minutes * MINUTE; } };
@@ -769,6 +769,38 @@ test('the hook starts a run for a file its session deleted, which only the basel
   assert.equal(h.fire(), 0);
   assert.equal(h.started.length, 1);
 });
+
+// Owner rule: the refresh never runs in a scheduled task or cron session. Such a session sets the
+// signal without knowing its session id: TOOLKIT_HANDOFF_HOOK=off from its launcher, or the empty
+// file ~/.toolkit-handoff-off from its own first tool step. An ordinary session still refreshes (the
+// control).
+for (const [name, signal] of [
+  ['its launcher sets TOOLKIT_HANDOFF_HOOK=off', () => ({ env: { TOOLKIT_HANDOFF_HOOK: 'off' } })],
+  ['its first tool step created ~/.toolkit-handoff-off', s => { fs.mkdirSync(path.join(s.base, 'home'), { recursive: true }); fs.writeFileSync(path.join(s.base, 'home', '.toolkit-handoff-off'), ''); return { env: {} }; }],
+  ['ordinary session (control)', () => null],
+]) {
+  test(`a scheduled session never refreshes the handoff snapshot: ${name}`, t => {
+    const s = sources(t);
+    aged(s);
+    const out = path.join(s.base, 'drive');
+    assert.equal(runOut(s, out)(['--memory', s.memory]).code, 0);
+    const h = hookHarness(s);
+    const extra = signal(s);
+    const deps = extra || { env: {} };
+    // The task's first step, then a newer memory save inside the same session.
+    assert.equal(h.fire({ tool_name: 'Bash', tool_input: { command: 'touch ~/.toolkit-handoff-off' } }, deps), 0);
+    h.later(2);
+    s.put('memory/MEMORY.md', '# Memory\n- queue: #9\n');
+    touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T13:02:00Z');
+    assert.equal(h.fire({ tool_name: 'update_memory', tool_input: { text: 'queue: #9' } }, deps), 0);
+    if (!extra) {
+      assert.equal(h.started.length, 1, 'an ordinary session still refreshes');
+      return;
+    }
+    assert.equal(h.started.length, 0, 'no run starts');
+    assert.equal(fs.existsSync(h.dir), false, 'no session file or lock is written');
+  });
+}
 
 for (const [name, setup] of [
   ['a detached HEAD holding its own commit', w => { w.write('archives/detached/report.md', 'only here\n'); git(w.dir, 'add', '-A'); git(w.dir, 'commit', '--quiet', '-m', 'detached work'); }],

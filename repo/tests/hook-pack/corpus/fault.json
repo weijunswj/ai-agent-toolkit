@@ -209,6 +209,42 @@
       "fixture": {"repo": {"governance": "enabled"}},
       "expect": {"decision": "allow"},
       "status": "pass"
+    },
+    {
+      "id": "HANDOFF.scheduled-session-env-writes-nothing",
+      "source": "Handoff refresh 1435, owner rule: never in a scheduled task; a launcher sets TOOLKIT_HANDOFF_HOOK=off and the hook exits before writing its session file",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "update_memory", "tool_input": {"text": "queue: #7"}, "tool_response": "saved"},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff_off": "env"},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-handoff-write",
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.scheduled-session-file-writes-nothing",
+      "source": "Handoff refresh 1435, owner rule: never in a scheduled task; the task's first tool step made ~/.toolkit-handoff-off and the hook exits before writing its session file",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i s/one/two/ notes.md"}, "tool_response": {"stdout": "", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff_off": "file"},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-handoff-write",
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.ordinary-session-writes-session-file",
+      "source": "Handoff refresh 1435, control for the scheduled-session rows: with no signal the hook records its session check",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "update_memory", "tool_input": {"text": "queue: #7"}, "tool_response": "saved"},
+      "fixture": {"repo": {"governance": "enabled"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "handoff-write",
+      "status": "pass"
     }
   ]
 }

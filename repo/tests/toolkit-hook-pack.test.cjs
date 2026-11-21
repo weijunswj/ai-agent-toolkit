@@ -135,11 +135,14 @@ test('a row with a wrong shape is refused with the reason', () => {
     [row({ extra: true }), /unknown key extra/],
     [row({ host_session: 'arbitrary' }), /host_session must be one of/],
     [row({ fixture: { gate_role: 'G3' } }), /gate_role is one of G0, G1, G2/],
+    [row({ fixture: { handoff_off: 'yes' } }), /handoff_off is env or file/],
+    [row({ postcondition: 'handoff-maybe' }), /unknown postcondition/],
     [row({ fixture: { repo: { governance: 'enabled', cached_binding_store: true } } }), /cached_binding_store needs governance undecided/],
     [row({ fixture: { repo: { governance: 'enabled', owner: 'someone' } } }), /owner needs governance undecided/],
     [row({ fixture: { repo: { governance: 'enabled', nested_worktrees: ['lane'] } } }), /nested_worktrees lists \{ branch, commits \} objects/],
     [row({ fixture: { repo: { governance: 'enabled', nested_worktrees: [{ branch: 'lane', commits: [{}] }] } } }), /nested_worktrees lists/],
   ];
+  assert.deepEqual(pack.rowErrors(row({ fixture: { handoff_off: 'file' }, postcondition: 'no-handoff-write' })), []);
   assert.deepEqual(pack.rowErrors(row({ fixture: { gate_role: 'G1', repo: { governance: 'undecided', owner: 'someone', cached_binding_store: true, nested_worktrees: [{ branch: 'lane', commits: [{ files: {} }] }] } } })), []);
   for (const [bad, reason] of cases) assert.match(pack.rowErrors(bad).join('\n'), reason, JSON.stringify(bad));
   const parsed = pack.parseCorpusFile(JSON.stringify({ schema: pack.SCHEMA, family: 'other', rows: [] }), 'push.json');

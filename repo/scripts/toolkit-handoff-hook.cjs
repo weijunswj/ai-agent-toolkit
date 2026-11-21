@@ -14,10 +14,17 @@
 // repository, the only snapshot matching a nearby checkout's origin). The session file keeps the
 // session baseline: the files this session holds and each source's realness, judged once when the
 // session starts. Finding a store grants nothing: the run's own pre-flight decides.
-// Any error: nothing happens. It never blocks, never prints and always exits 0. No scheduled task runs
-// it, but it acts in any session the host runs hooks in, a session a scheduled task starts included.
+// Any error: nothing happens. It never blocks, never prints and always exits 0.
+// Never in a scheduled task or cron session (owner rule). No host marks a session as scheduled, so the
+// session says so itself, without knowing its session id: its launcher sets TOOLKIT_HANDOFF_HOOK=off
+// in the session's environment, or the task's first tool step creates the empty file
+// `~/.toolkit-handoff-off` in the home folder (outside Toolkit's user-state folder, which only Toolkit
+// itself changes). The hook runs after each tool call, so that first step is covered. With either set, the
+// hook exits before it reads, discovers or writes anything. The file holds for every session of that
+// user on that machine or container until removed; a cloud task's container is its own.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
@@ -34,6 +41,13 @@ const MATCHER = `^(?!(?:${READ_ONLY_TOOLS.join('|')})$)`;
 
 function stateDirectory(deps) {
   return deps.stateDirectory || require('./toolkit-user-state.cjs').userStateDirectory();
+}
+
+// The scheduled-session signal: the environment variable, or the file in the home folder.
+function skipped(deps) {
+  const env = deps.env || process.env;
+  if (/^off$/i.test(String(env.TOOLKIT_HANDOFF_HOOK || '').trim())) return true;
+  return fs.existsSync(path.join(deps.home || os.homedir(), '.toolkit-handoff-off'));
 }
 
 function readJson(file) {
@@ -114,6 +128,7 @@ function prune(folder, keep, now) {
 
 function main(deps = {}) {
   try {
+    if (skipped(deps)) return 0;
     const raw = deps.stdin !== undefined ? deps.stdin : fs.readFileSync(0, 'utf8');
     const input = JSON.parse(raw || '{}');
     if (!input || typeof input !== 'object' || (input.hook_event_name !== undefined && input.hook_event_name !== 'PostToolUse')) return 0;
