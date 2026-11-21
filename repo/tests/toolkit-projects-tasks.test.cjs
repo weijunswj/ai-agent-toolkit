@@ -1453,7 +1453,7 @@ test('ping transition: an unswapped pointer loads the ping, which asks for its o
 });
 
 test('ping coverage: every step of the old run maps to a step the coordinator works, each tool step labelled', () => {
-  const checklist = name => fs.readFileSync(path.join(TASKS, name), 'utf8').split('\n');
+  const checklist = name => fs.readFileSync(path.join(TASKS, name), 'utf8').split(/\r?\n/);
   // Main's step ids before pings (frozen), with the tools each needs ('' = the coordinator's own tools).
   const steps = {
     'hourly-nudge.md': { 1: '', 2: '', '2a': '', '2b': 'GitHub', 3: '', 4: '', '4a': 'shell', 5: 'GitHub', '5b': 'shell, GitHub', 6: '', 7: '', 8: 'task reads', 9: 'shell', '9a': '', 10: 'shell, task reads', 11: '' },
