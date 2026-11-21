@@ -1,30 +1,39 @@
 #!/usr/bin/env node
 'use strict';
 
-// Flags scheduled Projects task runs that never happened. The hourly nudge writes what it read for
-// each task on the SCHEDULED TASKS line (its trigger's cron, creation and last fire times, and the
-// run stamps in its task-runs folder) to a JSON file and runs this; the coordinator catches each
-// missed run up (`RUN MISSED` in the Projects skill's reference/periodic-runs.md). Read-only: it
-// prints to stdout and writes nothing.
+// Flags scheduled Projects task runs that never happened or never finished. The hourly nudge writes
+// what it read for each task on the SCHEDULED TASKS line (its trigger's cron, creation and last fire
+// times, the run stamps in its task-runs folder and, optionally, each run's receipts) to a JSON file
+// and runs this; the coordinator acts on each line (`RUN MISSED` and the receipt lines in the Projects
+// skill's reference/periodic-runs.md). Read-only: it prints to stdout and writes nothing.
 //
 //   node repo/scripts/toolkit-projects-run-missed.cjs --input <file>
 //
 // Input: { "now", "tasks": [{ "name", "cron_expression", "created_at", "last_fired_at", "stopped"?,
-// "stamps": [<run UTC>], "own_run"? }] }. `cron_expression` is the trigger's own, five fields with an
-// optional leading `CRON_TZ=<zone>`; each field takes `*`, numbers, ranges, lists and steps. A run UTC
-// is a stamp name (YYYYMMDDTHHMMSSZ) or an ISO time. `own_run` is the checking run's own time, given
-// only on its own task's entry and never as a stamp: it covers only the fire it answers (the newest
-// at or before it), so the checking task still sees its own earlier missed fires.
+// "stamps": [<run UTC>], "own_run"?, "receipts"? }] }. `cron_expression` is the trigger's own, five
+// fields with an optional leading `CRON_TZ=<zone>`; each field takes `*`, numbers, ranges, lists and
+// steps. A run UTC is a stamp name (YYYYMMDDTHHMMSSZ) or an ISO time. `own_run` is the checking run's
+// own time, given only on its own task's entry and never as a stamp: it covers only the fire it
+// answers (the newest at or before it), so the checking task still sees its own earlier missed fires.
+// `receipts` maps each <run UTC> that has a .relayed or .done file in the folder to
+// { "relayed"?: <its text>, "done"?: <its text> } (a key left out: no such file).
 //
 // Each fire time of the cron after the newer of the task's newest stamp and its creation, at most
 // 48 hours back, that is more than 20 minutes past and not the fire `own_run` answers is a missed
 // run: "fired, no stamp" when the trigger fired at or after it, else "not fired". A stopped task is
 // skipped. Hours the cron never fires (an hourly task's night) are never missed.
-// Exit 0 nothing missed, 1 a missed run, 2 bad input or arguments.
+// With `receipts`, each stamp is also checked: RUN PENDING when it is over 15 minutes old with no
+// .relayed, or has no .done once the task's next fire after it has passed; RECEIPT BROKEN for a .done
+// without .relayed or an empty receipt; RECEIPT ORPHAN for receipts with no stamp. Each task and
+// state lists its oldest 5 runs, then a count. Without `receipts` the output is as before.
+// Exit 0 nothing found, 1 a missed run or a receipt line, 2 bad input or arguments.
 
 const fs = require('node:fs');
 
 const GRACE_MINUTES = 20;
+const RELAY_MINUTES = 15;
+const LIST_LIMIT = 5;
+const STAMP = /^\d{8}T\d{6}Z$/;
 const LOOKBACK_HOURS = 48;
 const MINUTE = 60000;
 const USAGE = 'Usage: node repo/scripts/toolkit-projects-run-missed.cjs --input <file>';
@@ -109,7 +118,44 @@ function readTask(raw) {
     stopped: raw.stopped === true,
     stamps: raw.stamps.map(stamp => time(stamp, 'stamps')),
     ownRun: raw.own_run === null || raw.own_run === undefined ? null : time(raw.own_run, 'own_run'),
+    stampNames: raw.stamps.map(String),
+    receipts: raw.receipts === undefined ? null : readReceipts(raw.receipts),
   };
+}
+
+// { <run UTC>: { relayed?: text, done?: text } }, keyed by stamp name only.
+function readReceipts(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('receipts');
+  const receipts = new Map();
+  for (const [run, files] of Object.entries(raw)) {
+    if (!STAMP.test(run) || !files || typeof files !== 'object' || Array.isArray(files)) fail('receipts');
+    for (const [kind, text] of Object.entries(files)) if (!['relayed', 'done'].includes(kind) || typeof text !== 'string') fail('receipts');
+    receipts.set(run, files);
+  }
+  return receipts;
+}
+
+const age = ms => (ms < 60 * MINUTE ? `${Math.floor(ms / MINUTE)} min` : `${Math.floor(ms / (60 * MINUTE))} h`);
+
+// The receipt states of one task's runs, each as { state, run, why }, oldest run first.
+function receiptStates(task, now) {
+  const found = [];
+  const stamps = new Set(task.stampNames);
+  for (const run of [...task.stampNames].sort()) {
+    const files = task.receipts.get(run) || {};
+    const at = time(run, 'stamps');
+    if (files.done !== undefined && files.relayed === undefined) found.push({ state: 'RECEIPT BROKEN', run, why: '.done without .relayed' });
+    for (const kind of ['relayed', 'done']) if (files[kind] !== undefined && !files[kind].trim()) found.push({ state: 'RECEIPT BROKEN', run, why: `empty .${kind}` });
+    if (files.relayed === undefined && files.done === undefined && now - at > RELAY_MINUTES * MINUTE) found.push({ state: 'RUN PENDING', run, why: `not relayed, ${age(now - at)}` });
+    else if (files.done === undefined && files.relayed !== undefined) {
+      const next = fireTimes(task.cron, at, now)[0];
+      if (next !== undefined) found.push({ state: 'RUN PENDING', run, why: `not done, ${age(now - at)}` });
+    }
+  }
+  for (const [run, files] of [...task.receipts].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!stamps.has(run)) found.push({ state: 'RECEIPT ORPHAN', run, why: `${Object.keys(files).sort().reverse().map(kind => `.${kind}`).join(', ')} with no stamp` });
+  }
+  return found;
 }
 
 const minuteText = ms => `${new Date(ms).toISOString().slice(0, 16)}Z`;
@@ -127,12 +173,29 @@ function check(input) {
       missed.push({ task: task.name, at: minuteText(at), why: task.lastFired !== null && task.lastFired >= at ? 'fired, no stamp' : 'not fired' });
     }
   }
-  return { tasks: tasks.length, checked: tasks.filter(entry => !entry.stopped).length, missed };
+  const ledger = tasks.some(entry => entry.receipts !== null);
+  const receipts = [];
+  for (const task of tasks.filter(entry => !entry.stopped && entry.receipts !== null)) {
+    for (const entry of receiptStates(task, now)) receipts.push({ task: task.name, ...entry });
+  }
+  return { tasks: tasks.length, checked: tasks.filter(entry => !entry.stopped).length, missed, ledger, receipts };
 }
 
+const STATES = Object.freeze(['RUN PENDING', 'RECEIPT BROKEN', 'RECEIPT ORPHAN']);
+
 function report(result) {
-  return `${[`RUN CHECK: tasks ${result.tasks}, checked ${result.checked}, missed ${result.missed.length}`,
-    ...result.missed.map(entry => `RUN MISSED: ${entry.task} ${entry.at} (${entry.why})`)].join('\n')}\n`;
+  const count = state => result.receipts.filter(entry => entry.state === state).length;
+  const summary = `RUN CHECK: tasks ${result.tasks}, checked ${result.checked}, missed ${result.missed.length}`
+    + (result.ledger ? `, pending ${count(STATES[0])}, broken ${count(STATES[1])}, orphan ${count(STATES[2])}` : '');
+  const lines = [summary, ...result.missed.map(entry => `RUN MISSED: ${entry.task} ${entry.at} (${entry.why})`)];
+  for (const name of [...new Set(result.receipts.map(entry => entry.task))]) {
+    for (const state of STATES) {
+      const rows = result.receipts.filter(entry => entry.task === name && entry.state === state);
+      lines.push(...rows.slice(0, LIST_LIMIT).map(entry => `${state}: ${name} ${entry.run} (${entry.why})`));
+      if (rows.length > LIST_LIMIT) lines.push(`${state}: ${name} and ${rows.length - LIST_LIMIT} more`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
 }
 
 function main(args = process.argv.slice(2)) {
@@ -142,7 +205,7 @@ function main(args = process.argv.slice(2)) {
     try { input = JSON.parse(fs.readFileSync(args[1], 'utf8').replace(/^﻿/, '')); } catch { throw new RunInputError('json'); }
     const result = check(input);
     process.stdout.write(report(result));
-    return result.missed.length ? 1 : 0;
+    return result.missed.length || result.receipts.length ? 1 : 0;
   } catch (error) {
     if (!(error instanceof RunInputError)) throw error;
     process.stderr.write(`Run check input could not be read (${error.message}).\n${USAGE}\n`);
