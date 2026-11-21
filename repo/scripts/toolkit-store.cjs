@@ -10,6 +10,8 @@
 //   node repo/scripts/toolkit-store.cjs move                 --store <folder> --from <store path> --to <store path> --message <text> [--repo-root <checkout>] [--json]
 //   node repo/scripts/toolkit-store.cjs merge-branch         --store <folder> --branch <name> --message <text> [--repo-root <checkout>] [--json]
 //   node repo/scripts/toolkit-store.cjs delete-merged-branch --store <folder> --branch <name> [--repo-root <checkout>] [--json]
+//   node repo/scripts/toolkit-store.cjs handoff              --store <folder> | --out <folder> [--memory <folder>] [--instructions <file>]
+//                                                            [--file <path>]... [--check] [--repo-root <checkout>] [--json]
 //
 // Every subcommand first runs the same pre-flight and writes nothing when any part fails:
 //   - the governed repository (--repo-root, default the current folder) has a fresh, enabled merged
@@ -42,6 +44,14 @@
 // delete-merged-branch  deletes a remote store branch only when GitHub shows its tip already in the
 //                       bound branch, never the bound branch (in any letter case); the delete holds
 //                       only while the tip is unchanged, and GitHub is asked again afterwards.
+// handoff  the controller handoff snapshot (toolkit-handoff.cjs): syncs, copies the named memory
+//          folder, instructions and working files into evidence/handoff/<owner>/<repo>/ after a secret
+//          scan, and saves them as above only when a file's content changed (HANDOFF UNCHANGED sends
+//          nothing). The sources are remembered in its manifest, so later runs need none. --out writes
+//          the same folder under a folder that is not a bound store (governance off), with no checks
+//          and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what changed.
+//          A successful run records its store and sources in the Toolkit user-state folder, where the
+//          after-tool hook (toolkit-handoff-hook.cjs) reads them.
 //
 // Commits the remote lacks (kept by a failed push, made by hand, or a merge of the remote) are checked
 // again right before every push: every blob and every message scanned, and each change only adds,
@@ -72,7 +82,7 @@ class StoreError extends Error {
   constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; this.stopped = stopped; this.next = next; }
 }
 
-const COMMANDS = Object.freeze(['status', 'sync', 'save', 'move', 'merge-branch', 'delete-merged-branch']);
+const COMMANDS = Object.freeze(['status', 'sync', 'save', 'move', 'merge-branch', 'delete-merged-branch', 'handoff']);
 // Every flag each subcommand takes. A test pins this table, so a new flag fails until someone
 // decides whether the store permission line may still cover it.
 const VALUE_FLAGS = Object.freeze({
@@ -82,6 +92,7 @@ const VALUE_FLAGS = Object.freeze({
   move: ['--store', '--repo-root', '--from', '--to', '--message'],
   'merge-branch': ['--store', '--repo-root', '--branch', '--message'],
   'delete-merged-branch': ['--store', '--repo-root', '--branch'],
+  handoff: ['--store', '--out', '--repo-root', '--memory', '--instructions', '--file'],
 });
 
 const BRANCH = /^(?![-/.])[A-Za-z0-9._/-]{1,200}(?<![/.])$/;
@@ -633,14 +644,16 @@ const USAGE = `Usage: node repo/scripts/toolkit-store.cjs <${COMMANDS.join('|')}
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!COMMANDS.includes(command)) throw new StoreError(`unknown command ${JSON.stringify(command || '')}.`, 'see the usage line.', 2);
-  const options = { command, json: false, paths: [] };
-  const names = { '--store': 'store', '--repo-root': 'repoRoot', '--path': 'paths', '--message': 'message', '--from': 'from', '--to': 'to', '--branch': 'branch' };
+  const options = { command, json: false, paths: [], files: [], check: false };
+  const names = { '--store': 'store', '--repo-root': 'repoRoot', '--path': 'paths', '--message': 'message', '--from': 'from', '--to': 'to', '--branch': 'branch', '--out': 'out', '--memory': 'memory', '--instructions': 'instructions' };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === '--json') { options.json = true; continue; }
+    if (arg === '--check' && command === 'handoff') { options.check = true; continue; }
     const value = rest[index += 1];
     if (!VALUE_FLAGS[command].includes(arg) || value === undefined || value.startsWith('--')) throw new StoreError(`unknown or incomplete argument ${JSON.stringify(arg)} for ${command}.`, 'see the usage line.', 2);
     if (arg === '--path') options.paths.push(value);
+    else if (arg === '--file') options.files.push(value);
     else if (options[names[arg]] !== undefined) throw new StoreError(`${arg} was given twice.`, 'give it once.', 2);
     else options[names[arg]] = value;
   }
@@ -648,10 +661,81 @@ function parseArgs(argv) {
   if (command === 'save' && !options.paths.length) throw new StoreError('save needs at least one --path.', 'add --path <store path>.', 2);
   if (command === 'move' && (!options.from || !options.to)) throw new StoreError('move needs --from and --to.', 'add both.', 2);
   if (['merge-branch', 'delete-merged-branch'].includes(command) && !options.branch) throw new StoreError(`${command} needs --branch.`, 'add --branch <store branch>.', 2);
+  if (command === 'handoff' && Boolean(options.store) === Boolean(options.out)) throw new StoreError('handoff needs one of --store (a bound store checkout) or --out (any other folder).', 'add one of them.', 2);
   return options;
 }
 
+// ---- handoff -------------------------------------------------------------------------------------
+
+// The controlled repository's owner/name and default-branch commit (or HEAD), read-only.
+function readRepository(repoRoot, { environment = process.env, platform = process.platform } = {}) {
+  let identity;
+  try { identity = governanceState.readIdentity(repoRoot); } catch { identity = null; }
+  const repository = identity && identity.valid ? governanceState.remoteSlug(identity.remote) : null;
+  let commit = null;
+  try {
+    const gitPath = resolveGit({ env: environment, platform });
+    for (const ref of ['refs/remotes/origin/HEAD', 'HEAD']) {
+      const result = spawnSync(gitPath, ['-C', identity.root, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+      if (result.status === 0 && /^[0-9a-f]{40,64}$/.test(result.stdout.trim())) { commit = result.stdout.trim(); break; }
+    }
+  } catch { commit = null; }
+  return { repository, commit };
+}
+
+function handoffStateFile(deps) {
+  return deps.handoffState || path.join(require('./toolkit-user-state.cjs').userStateDirectory(), 'handoff-refresh.json');
+}
+
+// The after-tool hook's memory of the last good run: where it saved and what it copied. Best effort.
+function rememberHandoff(deps, record) {
+  try {
+    const file = handoffStateFile(deps);
+    (deps.fs || nodeFs).mkdirSync(path.dirname(file), { recursive: true });
+    (deps.fs || nodeFs).writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  } catch { /* the stale check is the backstop */ }
+}
+
+function runHandoff(options, deps) {
+  const handoff = require('./toolkit-handoff.cjs');
+  const fs = deps.fs || nodeFs;
+  const cwd = deps.cwd || process.cwd();
+  const repoRoot = path.resolve(cwd, options.repoRoot || '.');
+  const { repository, commit } = (deps.readRepository || readRepository)(repoRoot, deps);
+  if (!repository) throw new StoreError('--repo-root is not a GitHub repository checkout with one origin.', 'run it from the controlled repository\'s checkout, or name it with --repo-root.');
+  const base = path.resolve(cwd, options.store || options.out);
+  const sources = handoff.normaliseSources({ memory: options.memory, instructions: options.instructions, files: options.files }, cwd);
+  const wrap = action => { try { return action(); } catch (error) { if (error instanceof handoff.HandoffError) throw new StoreError(error.stopped, error.next); throw error; } };
+  if (options.check) {
+    const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs }));
+    return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...(found.changed?.length ? { changed: found.changed.join(',') } : {}), ...(found.kept?.length ? { kept: found.kept.join(',') } : {}) };
+  }
+  const stamp = { taken_at: (deps.now ? deps.now() : new Date()).toISOString(), toolkit_version: require('./toolkit-version.cjs').readToolkitVersion(), repository_commit: commit };
+  const remember = () => rememberHandoff(deps, { [options.store ? 'store' : 'out']: base, repo_root: repoRoot, repository, at: stamp.taken_at });
+  const kept = planned => (planned.kept.length ? { kept: planned.kept.join(',') } : {});
+  if (options.out) {
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs }));
+    if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
+    remember();
+    return planned.unchanged
+      ? { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, sent: 'nothing', ...kept(planned) }
+      : { handoff: 'WRITTEN', folder: path.join(base, planned.folder), taken_at: stamp.taken_at, sent: 'nothing', ...kept(planned) };
+  }
+  const store = new EvidenceStore(deps);
+  try {
+    store.open({ store: options.store, repoRoot: options.repoRoot });
+    store.sync();
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs }));
+    if (planned.unchanged) { remember(); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }
+    handoff.write(base, planned, repository, { fs });
+    const saved = store.save({ paths: [planned.folder], message: `Refresh controller handoff snapshot for ${repository}` });
+    remember();
+    return { handoff: 'SAVED', folder: planned.folder, taken_at: stamp.taken_at, ...saved, ...kept(planned) };
+  } finally { store.close(); }
+}
+
 function run(options, deps = {}) {
+  if (options.command === 'handoff') return runHandoff(options, deps);
   const store = new EvidenceStore(deps);
   try {
     store.open({ store: options.store, repoRoot: options.repoRoot });
@@ -673,9 +757,12 @@ function main(argv = process.argv.slice(2), deps = {}) {
   try { options = parseArgs(argv); } catch (error) { err(`${error.message}\n${USAGE}`); return 2; }
   try {
     const result = run(options, deps);
-    out(options.json ? `${JSON.stringify({ command: options.command, ok: true, ...result }, null, 2)}\n`
-      : `Done: ${options.command} ${Object.entries(result).map(([key, value]) => `${key}=${value}`).join(' ')}\n`);
-    return 0;
+    // A stale or missing handoff snapshot is a finding, not a failure: exit 1 with the result.
+    const stale = options.command === 'handoff' && ['STALE', 'MISSING'].includes(result.handoff);
+    out(options.json ? `${JSON.stringify({ command: options.command, ok: !stale, ...result }, null, 2)}\n`
+      : options.command === 'handoff' ? `HANDOFF ${result.handoff} ${Object.entries(result).filter(([key]) => key !== 'handoff').map(([key, value]) => `${key}=${value}`).join(' ')}\n`
+        : `Done: ${options.command} ${Object.entries(result).map(([key, value]) => `${key}=${value}`).join(' ')}\n`);
+    return stale ? 1 : 0;
   } catch (error) {
     if (!(error instanceof StoreError)) throw error;
     if (options.json) out(`${JSON.stringify({ command: options.command, ok: false, stopped: error.stopped, next: error.next }, null, 2)}\n`);

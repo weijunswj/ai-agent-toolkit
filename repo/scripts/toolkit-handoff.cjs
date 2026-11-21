@@ -1,0 +1,176 @@
+'use strict';
+
+// The controller handoff snapshot: a copy of the controller's memory and named working files that a
+// successor reads when no project memory is reachable. `toolkit-store.cjs handoff` writes and saves it;
+// the controller health check (`toolkit-controller-check.cjs`, check `handoff`) compares it read-only.
+//
+// Layout, under a store checkout or any folder: evidence/handoff/<owner>/<repo>/
+//   manifest.json  the current file set (path, sha256, source) and the stamp (taken_at, toolkit
+//                  version, the repository's default-branch commit); the stamp is outside the compare
+//   README.md      what the folder is (fixed text)
+//   MEMORY.md      the memory folder's index; memory/ its other files
+//   files/         the saved instructions (instructions.<ext>) and each named working file
+// A file not listed in manifest.json is an older copy: nothing here deletes a file.
+// Every source is secret-scanned before anything is written; one finding refuses the whole run.
+
+const crypto = require('node:crypto');
+const nodeFs = require('node:fs');
+const path = require('node:path');
+const { scanText } = require('../../skills/secure-ci-cd/scripts/secret-patterns.cjs');
+
+const SCHEMA = 'toolkit.handoff-snapshot.v1';
+const ROOT = 'evidence/handoff';
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_FILES = 2000;
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
+const NAME = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
+const README = repository => `# Controller handoff snapshot: ${repository}\n\n`
+  + 'Written by `toolkit-store.cjs handoff`; never edit it by hand.\n\n'
+  + '- `manifest.json`: the current file set, each with its sha256 and source, and the stamp: when it was taken (`taken_at`), the Toolkit version and the repository\'s default-branch commit. A file it does not list is an older copy.\n'
+  + '- `MEMORY.md` and `memory/`: the controller\'s memory index and topic files.\n'
+  + '- `files/`: the saved instructions and the named working files.\n\n'
+  + 'Evidence, not authority: where it differs from current state, current state wins.\n';
+
+class HandoffError extends Error {
+  constructor(stopped, next) { super(`Stopped: ${stopped} Next: ${next}`); this.stopped = stopped; this.next = next; }
+}
+
+const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+
+// evidence/handoff/<owner>/<repo>, or null for a name that is not a plain owner/repo pair.
+function snapshotFolder(repository) {
+  const parts = String(repository || '').split('/');
+  return parts.length === 2 && parts.every(part => NAME.test(part)) ? `${ROOT}/${parts[0]}/${parts[1]}` : null;
+}
+
+// The sources a run copies, as given or as the last manifest remembered them.
+function normaliseSources({ memory = null, instructions = null, files = [] } = {}, cwd = process.cwd()) {
+  const full = value => (typeof value === 'string' && value ? path.resolve(cwd, value) : null);
+  return { memory: full(memory), instructions: full(instructions), files: [...new Set((files || []).map(full).filter(Boolean))] };
+}
+const hasSources = sources => Boolean(sources && (sources.memory || sources.instructions || sources.files.length));
+
+// Each working file's name under files/: its own name, or <parent folder>-<name> when two share one.
+function fileNames(files) {
+  const counts = new Map();
+  for (const file of files) counts.set(path.basename(file), (counts.get(path.basename(file)) || 0) + 1);
+  const names = files.map(file => (counts.get(path.basename(file)) > 1 ? `${path.basename(path.dirname(file))}-${path.basename(file)}` : path.basename(file)));
+  const clash = names.find((name, index) => names.indexOf(name) !== index || name.startsWith('instructions.'));
+  if (clash) throw new HandoffError(`two sources would both be saved as files/${clash}.`, 'rename one, or name only one of them.');
+  return names;
+}
+
+function readText(fs, file) {
+  let bytes;
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile()) return null;
+    if (stat.size > MAX_FILE_BYTES) throw new HandoffError(`${file} is over 5 MB.`, 'leave it out of the snapshot.');
+    bytes = fs.readFileSync(file);
+  } catch (error) { if (error instanceof HandoffError) throw error; return null; }
+  try { return { text: UTF8.decode(bytes), sha256: sha256(bytes) }; } catch { throw new HandoffError(`${file} is not UTF-8 text.`, 'leave it out of the snapshot.'); }
+}
+
+// Every plain file under a memory folder (links and dot-names skipped), as paths relative to it.
+function memoryFiles(fs, dir) {
+  const out = [];
+  const walk = rel => {
+    for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith('.') || !NAME.test(entry.name)) continue;
+      const child = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile()) out.push(child);
+      if (out.length > MAX_FILES) throw new HandoffError(`the memory folder holds over ${MAX_FILES} files.`, 'name a smaller folder.');
+    }
+  };
+  walk('');
+  return out;
+}
+
+// Reads and scans every reachable source. A source that is not reachable here (a path on another
+// computer) is returned in `kept`, so the last copy and its manifest rows stay as they were.
+function readSources(sources, { fs = nodeFs } = {}) {
+  const entries = [];
+  const kept = [];
+  const add = (dest, source, read) => entries.push({ path: dest, source, ...read });
+  if (sources.memory) {
+    let names = null;
+    try { if (fs.statSync(sources.memory).isDirectory()) names = memoryFiles(fs, sources.memory); } catch (error) { if (error instanceof HandoffError) throw error; }
+    if (!names) kept.push(sources.memory);
+    else for (const name of names) {
+      const read = readText(fs, path.join(sources.memory, name));
+      if (read) add(name === 'MEMORY.md' ? 'MEMORY.md' : `memory/${name}`, sources.memory, read);
+    }
+  }
+  const single = [...(sources.instructions ? [[sources.instructions, `files/instructions${path.extname(sources.instructions) || '.md'}`]] : []),
+    ...(() => { const names = fileNames(sources.files); return sources.files.map((file, index) => [file, `files/${names[index]}`]); })()];
+  for (const [file, dest] of single) {
+    const read = readText(fs, file);
+    if (read) add(dest, file, read); else kept.push(file);
+  }
+  const findings = entries.flatMap(entry => scanText(entry.text).map(found => `${entry.source === sources.memory ? path.join(sources.memory, entry.path.replace(/^memory\//, '')) : entry.source}:${found.line} (${found.rule})`));
+  if (findings.length) throw new HandoffError(`secret scan found ${findings.length} match(es): ${findings.slice(0, 5).join(', ')}. Nothing was written.`, 'remove the value from the source, then run handoff again.');
+  return { entries, kept };
+}
+
+function readManifest(base, folder, { fs = nodeFs } = {}) {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(base, folder, 'manifest.json'), 'utf8'));
+    return manifest && manifest.schema === SCHEMA && Array.isArray(manifest.files) ? manifest : null;
+  } catch { return null; }
+}
+
+// The file set a run would record: every reachable source as read now, plus the last manifest's rows
+// for sources not reachable here. Sorted by path, so the compare is stable.
+function fileSet({ entries, kept }, previous) {
+  const rows = entries.map(({ path: dest, sha256: hash, source }) => ({ path: dest, sha256: hash, source }));
+  const carried = (previous?.files || []).filter(row => kept.includes(row.source) && !rows.some(item => item.path === row.path));
+  return [...rows, ...carried].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+const sameFiles = (a, b) => JSON.stringify((a || []).map(row => [row.path, row.sha256])) === JSON.stringify((b || []).map(row => [row.path, row.sha256]));
+
+// Works out one run: the folder, the new manifest, what to write, and whether anything changed.
+function plan({ base, repository, sources, stamp, fs = nodeFs }) {
+  const folder = snapshotFolder(repository);
+  if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'run it from a checkout of the controlled repository, or name one with --repo-root.');
+  const previous = readManifest(base, folder, { fs });
+  const chosen = hasSources(sources) ? sources : previous?.sources ? normaliseSources(previous.sources) : null;
+  if (!hasSources(chosen)) throw new HandoffError('no sources were named and no earlier snapshot remembers any.', 'name --memory <folder>, --instructions <file> or --file <path> once; later runs remember them.');
+  const read = readSources(chosen, { fs });
+  const files = fileSet(read, previous);
+  const unchanged = Boolean(previous) && sameFiles(previous.files, files);
+  const manifest = { schema: SCHEMA, stamp, sources: chosen, files };
+  return { folder, previous, manifest, unchanged, kept: read.kept, writes: read.entries };
+}
+
+function write(base, { folder, manifest, writes }, repository, { fs = nodeFs } = {}) {
+  const put = (rel, text) => {
+    const target = path.join(base, folder, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, text);
+  };
+  for (const entry of writes) put(entry.path, entry.text);
+  put('README.md', README(repository));
+  put('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+// Read-only: is the snapshot current with its live sources? STALE names what changed; a source not
+// reachable here is not counted as a change.
+function check({ base, repository, sources = null, now = new Date(), fs = nodeFs }) {
+  const folder = snapshotFolder(repository);
+  if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'name the controlled repository\'s checkout with --repo-root.');
+  const previous = readManifest(base, folder, { fs });
+  if (!previous) return { state: 'MISSING', folder };
+  const chosen = hasSources(sources) ? sources : normaliseSources(previous.sources || {});
+  const read = readSources(chosen, { fs });
+  const files = fileSet(read, previous);
+  const before = new Map(previous.files.map(row => [row.path, row.sha256]));
+  const after = new Map(files.map(row => [row.path, row.sha256]));
+  const changed = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key)).sort();
+  const takenAt = previous.stamp?.taken_at || null;
+  const hours = takenAt && !Number.isNaN(Date.parse(takenAt)) ? Math.max(0, Math.round((now.getTime() - Date.parse(takenAt)) / 360000) / 10) : null;
+  return { state: changed.length ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, kept: read.kept };
+}
+
+module.exports = Object.freeze({ SCHEMA, ROOT, HandoffError, snapshotFolder, normaliseSources, hasSources, readSources, readManifest, plan, write, check });

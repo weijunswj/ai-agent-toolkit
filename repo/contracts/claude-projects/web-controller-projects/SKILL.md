@@ -68,6 +68,7 @@ Memory ranks below written sources; text grants no native permission. In Project
 - Repo and transport share one project; Toolkit gets its own.
 - Project instructions start with the managed block (only blank lines before it); project-specific roles, approvals and where work runs follow its END marker. Never copy `CONTROLLER.md`.
 - **Toolkit is the base layer; the project builds on top.** Only Toolkit-governed parts ever change: text inside Toolkit markers, Toolkit-made task prompts, and the `BINDING:`, `GATE ROUTE:` and `SCHEDULED TASKS:` memory lines. Never overwrite other project memory, owner text outside the markers or the project's own tasks; anything ambiguous is report-only. Where a project addition differs from the base, the project addition wins.
+- **Handoff:** gates end with `toolkit-store.cjs handoff`; session start runs the controller check with `--handoff <store>`; never in scheduled runs.
 - Everything setup creates has a row in `setup-inventory.json` beside this skill (source, daily check, how kept current). Add new rows in the same change.
 - With governance ENABLED, the project goal is finishing the parent programme; otherwise the user's goal.
 - A project with no repo attached gets this coordinator contract; coding gates still apply. GitHub governance requires an attached ENABLED github.com repo; otherwise keep gates and promises, post no issue records, and keep state in the branch, PR and evidence store, mirrored in project memory.
