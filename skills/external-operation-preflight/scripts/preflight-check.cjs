@@ -22,7 +22,7 @@ const fs = require('node:fs');
 const PLAN_SCHEMA = 'toolkit.external-operation-plan.v1';
 const RESULT_SCHEMA = 'toolkit.external-operation-preflight.v1';
 
-const ROUTES = Object.freeze(['connector', 'mcp', 'api', 'cli', 'browser', 'computer_use']);
+const ROUTES = Object.freeze(['connector', 'mcp', 'api', 'cli', 'ssh', 'browser', 'computer_use']);
 const ROUTE_OUTCOMES = Object.freeze(['selected', 'failed_before_effect', 'failed_after_effect', 'outcome_unknown']);
 const TRIGGERS = Object.freeze(['NONE', 'MANUAL', 'AUTO_ON_MERGE', 'AUTO_ON_BRANCH_UPDATE', 'UNKNOWN']);
 const AUTO_TRIGGERS = Object.freeze(['AUTO_ON_MERGE', 'AUTO_ON_BRANCH_UPDATE']);
@@ -554,6 +554,6 @@ function main(argv) {
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
 module.exports = {
-  BACKUP_LEVELS, NON_PRODUCTION_WORDS, PLAN_SCHEMA, PRODUCTION_WORDS, REASONS, TEMPORARY_WORDS, TRIGGERS, checkPlan, findSecrets, parseDate,
-  planHash
+  BACKUP_LEVELS, NON_PRODUCTION_WORDS, PLAN_SCHEMA, PRODUCTION_WORDS, REASONS, ROUTES, TEMPORARY_WORDS, TRIGGERS, checkPlan, findSecrets,
+  parseDate, planHash
 };

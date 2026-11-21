@@ -9,7 +9,7 @@ Check one live change on an outside system before the owner approves it. The ski
 
 ## Steps
 
-1. **Pick the interface** in this order: the service's connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower one may win when clearly better; say why.
+1. **Pick the route** in this order: `connector` (or plugin), `mcp`, official `api` or `cli`, `ssh`, `browser`, `computer_use`. A lower one may win when clearly better; say why.
 2. **Read the live state** of the targets and every resource they use from the provider itself. Discovery stays passive: no writes, test sends or side-effect probes unless an approval names the target, allowed effects and cleanup.
 3. **Write the plan** as JSON from [the example](templates/operation-plan.example.json): one environment, the exact targets, each resource's name environment and provider environment, `temporary` (true or false) on everything, bindings, authority entries, `downstream` (trigger `NONE` when nothing is set off), routes tried, and for production a `rollback` plan and `backup_evidence`. Key names only, never a secret value.
 4. **Run** `node <this skill>/scripts/preflight-check.cjs plan.json`. It prints a verdict, typed reasons, the date checked and the plan's SHA-256.
@@ -44,7 +44,7 @@ It fails closed: a missing, unknown or malformed field holds the plan.
 
 - **Pausing a trigger** is its own live change, with before and after read-back.
 - **Host resizes** read capacity before and after; new headroom stays unassigned.
-- **SSH:** plain owner-managed SSH with the owner's keys first; an app-connected remote session only when SSH cannot do the job. No SSH broker.
+- **SSH:** for work inside a host, `ssh` with the owner's own keys comes first; an app-connected remote session only when SSH cannot do the job, recording the route it uses. No SSH broker.
 - **Backups and restores** follow [the backup and recovery contract](references/backup-and-recovery.md).
 
 ## Do Not Use
