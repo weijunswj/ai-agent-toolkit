@@ -2,7 +2,7 @@
 
 ## This Repository
 
-This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Governed repositories, this one included, get the Toolkit-governed rules from the installed Toolkit at session start, never from a copy in `AGENTS.md`. Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness.
+This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Governed repositories, this one included, get the Toolkit-governed rules from the installed Toolkit at session start, never from a copy in `AGENTS.md`. Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness. Keep Toolkit generic and least restrictive for every harness and agent (global Development Principles: Generic, platform first).
 
 - **Routing:** read the [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (it replaces the `toolkit-playbooks` skill index here), classify the task, and read only the smallest matching playbook set and the docs it names; with no match, continue baseline-only. If a required playbook is missing or conflicts with this file, stop and report.
 - **Programme:** for the programme, follow the [Toolkit delivery contract](repo/docs/TOOLKIT-DELIVERY.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
