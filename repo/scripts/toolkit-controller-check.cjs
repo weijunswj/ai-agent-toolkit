@@ -168,7 +168,8 @@ function statusCheck(run, script, args, command) {
   const result = run(script, args);
   const lines = linesOf(result.stdout);
   if (result.status === 0) return { state: 'ok', lines: lines.length ? lines : ['current'] };
-  if (result.status === 1) return { state: 'attention', lines, command };
+  // A check that stops (exit 1, nothing on stdout) still says why: its Stopped line from stderr.
+  if (result.status === 1) return { state: 'attention', lines: lines.length ? lines : [why(result)], command };
   return { state: 'failed', lines: [why(result)] };
 }
 

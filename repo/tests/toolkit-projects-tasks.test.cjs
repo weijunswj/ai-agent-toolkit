@@ -1461,6 +1461,16 @@ test('a hand-made Toolkit task refresh needs its project lines saved first: no o
   assert.equal(saved.stdout, pingOf('hourly-nudge'));
 });
 
+// A hand-made prompt with no project lines still needs the file saved, so the refusal and the reference say what
+// the file holds: the project lines word for word, or the line "- none" when there are none.
+test('a hand-made task with no project lines saves "- none", and the refusal and recurring-tasks.md say so', t => {
+  const reference = fs.readFileSync(path.join(path.dirname(SETUP), 'recurring-tasks.md'), 'utf8');
+  assert.match(reference, /A hand-written Toolkit prompt is refused until that file is saved non-empty[^\n]*write the line `- none` there/);
+  const refusal = run(['--refresh', 'hourly-nudge', file(t, 'hand.md', 'HOURLY PING\n1. Stamp.\n'), '--params', file(t, 'params.json', JSON.stringify(PARAMS['hourly-nudge'])), '--session', 'bound']);
+  assert.equal(refusal.status, 2);
+  assert.match(refusal.stderr, /a hand-made Toolkit task needs project-additions\.md saved first: write its project lines in it word for word, or the line "- none" when it has none; then pass that file as --additions-saved\.\n$/);
+});
+
 test('a refused refresh names its task and the rule it broke on stderr; any other failure keeps the generic line only', t => {
   const generic = 'Task prompt could not be processed (PROJECT_TASKS_INVALID).\n';
   const hand = file(t, 'hand.md', 'HOURLY PING\n1. Stamp.\n');
@@ -1472,9 +1482,9 @@ test('a refused refresh names its task and the rule it broke on stderr; any othe
   const cases = [
     [['--refresh', 'daily-check-in', hand], `${generic}Refresh of daily-check-in refused (TASK_ARGUMENTS): a Toolkit task refresh needs --session bound or fresh, the session its replacement runs in.\n`],
     [['--refresh', 'hourly-nudge', hand, '--params', noProject, '--session', 'bound', '--additions-saved', additions], `${generic}Refresh of hourly-nudge refused (TASK_PARAMS): a required param is missing: project.\n`],
-    [['--refresh', 'hourly-nudge', hand, '--params', paramsFile, '--session', 'bound'], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty.\n`],
+    [['--refresh', 'hourly-nudge', hand, '--params', paramsFile, '--session', 'bound'], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs project-additions.md saved first: write its project lines in it word for word, or the line "- none" when it has none; then pass that file as --additions-saved.\n`],
     // Options may come before the task kind; the refusal once read the kind only from the first argument after --refresh.
-    [['--refresh', '--session', 'bound', '--params', paramsFile, 'hourly-nudge', hand], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty.\n`],
+    [['--refresh', '--session', 'bound', '--params', paramsFile, 'hourly-nudge', hand], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs project-additions.md saved first: write its project lines in it word for word, or the line "- none" when it has none; then pass that file as --additions-saved.\n`],
     [['--refresh', 'nope', hand, '--session', 'bound'], generic]
   ];
   for (const [args, stderr] of cases) {

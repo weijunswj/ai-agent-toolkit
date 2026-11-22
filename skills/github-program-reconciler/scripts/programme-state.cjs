@@ -2126,6 +2126,13 @@ function gateLive(child) {
   return Boolean(child?.gate?.role && ['ASSIGNED', 'ACTIVE'].includes(child.gate.state));
 }
 
+// True while a gate is open on the task for the owner's close (gate_live): every gate state but RETIRED,
+// the accepted final one, blocked or not (assigned, active, submitted, interrupted or waiting on the owner).
+// gateLive stays narrower, since the board reads a submitted or interrupted gate as no work at hand.
+function gateOpen(child) {
+  return Boolean(child?.gate?.role && GATE_STATES.includes(child.gate.state) && child.gate.state !== 'RETIRED');
+}
+
 // True while a gate is at work on the task: live and not blocked. Its work is then the current
 // step, so a UAT still owed (often on an earlier PR) shows after it, not in its place.
 function gateAtWork(child) {
@@ -2172,7 +2179,7 @@ function agentStep(outcome, child) {
 // close OK, is all that is left) or OWNER_ONLY (the owner must still test), with `uat_head`, the head
 // the UAT is owed and the agent's result was recorded at (a train merge, say, not the PR head), and
 // `pr_state`. Decisions carry none. Every wait says whether a gate is live on the task (`gate_live`:
-// assigned or active, blocked or not), which `after` does not show for a gate on a task waiting on the
+// any gate but a RETIRED one, blocked or not), which `after` does not show for a gate on a task waiting on the
 // owner or a blocked gate; the stale check never offers the owner a close while one is.
 function ownerWaits(parent, children) {
   return graphOrder(parent, children, new Map()).flatMap(outcome => {
@@ -2181,7 +2188,7 @@ function ownerWaits(parent, children) {
     if (!step) return [];
     const agentUat = step.ask !== 'decision' && uatOwer(child) === 'owner'
       ? { agent_uat: agentUatAt(child, child.uat.at_head), uat_head: child.uat.at_head, pr_state: child.pr?.state || null } : {};
-    return [{ issue: outcome.issue, ...step, ...agentUat, gate_live: gateLive(child), pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }];
+    return [{ issue: outcome.issue, ...step, ...agentUat, gate_live: gateOpen(child), pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }];
   });
 }
 

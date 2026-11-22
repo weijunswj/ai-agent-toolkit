@@ -341,6 +341,14 @@ test('E2: the parent schema accepts the attention list the code writes', () => {
   assert.equal(state.ATTENTION_LIMIT + state.ATTENTION_KEEP, schema.properties.attention.maxItems);
 });
 
+test('E2: the parent schema enum lists every finding code the runtime table can emit', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'programme-state', 'parent-state-v1.schema.json'), 'utf8'));
+  const enumerated = schema.properties.attention.items.properties.code.enum;
+  const emitted = Object.keys(state.FINDING_CODES);
+  assert.deepEqual(emitted.filter(code => !enumerated.includes(code)), [], 'runtime codes missing from the schema enum');
+  assert.deepEqual(enumerated.filter(code => !emitted.includes(code)), [], 'schema codes the runtime table does not emit');
+});
+
 test('E2: validation refuses a finding with an unknown code, field, state or a forged id', () => {
   const good = { id: state.findingId('reconcile', 'CHECKS_RED', 423, SHA_A), source: 'reconcile', code: 'CHECKS_RED', issue: 423, head: SHA_A, state: 'new', first_seen: '2026-10-28T00:00:00Z', changed_at: '2026-10-28T00:00:00Z' };
   const parent = attention => ({ ...state.newParent({ repository: 'acme/app', parentIssue: 421 }), attention });
