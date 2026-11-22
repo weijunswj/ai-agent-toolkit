@@ -41,7 +41,8 @@ function fakeGh({ ownerType = 'User', names = [], namesAfterConversion = null, c
     if (first === 'secret' && second === 'set') { saved.push(third); return reply(''); }
     return reply('', 1);
   };
-  return { spawn, calls };
+  // `addName` sets a name on the repository as someone else would, for a test that changes it mid-prompt.
+  return { spawn, calls, addName: name => { saved.push(name); } };
 }
 
 // The owner's terminal and browser: Enter (true) or not, in order, the pages opened, GitHub sending the code back.
@@ -261,4 +262,22 @@ test('--save keeps an existing App unless --replace and Enter, and writes only t
   assert.equal(await setup.main(both, unread.deps), 1);
   assert.deepEqual([writes(unread), unread.asked], [[], []]);
   assert.match(unread.said.join('\n'), /could not be read/);
+});
+
+// The names are read before the prompt, so a name set while the owner reads it is one they were never
+// shown: --save stops and writes nothing, whichever of the two names it was going to write.
+test('--save writes nothing when a name appears on the repository between the prompt and the Enter', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-save-race-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keyFile = path.join(dir, 'key.pem');
+  fs.writeFileSync(keyFile, PEM);
+  for (const name of [app.APP.variable, app.APP.secret]) {
+    const run = owner(t, { answers: [true] });
+    const ask = run.deps.confirm;
+    run.deps.confirm = effect => { run.gh.addName(name); return ask(effect); };
+    assert.equal(await setup.main(['--repo', SLUG, '--save', 'both', '--client-id', 'Iv23example', '--key-file', keyFile], run.deps), 1, `${name} set during the prompt`);
+    assert.deepEqual(run.asked, [`save both on ${SLUG}`], name);
+    assert.deepEqual(run.gh.calls.filter(call => ['variable', 'secret'].includes(call.args[0])), [], `${name}: nothing is written`);
+    assert.match(run.said.join('\n'), /changed while the prompt was open.*Nothing changed\./s, name);
+  }
 });

@@ -10,6 +10,8 @@
 // from the guidebook copy; project additions live in <report_dir>/project-additions.md. A pointer
 // or a full prompt from before pings checks outdated; --refresh turns it into the ping only once
 // its project additions are saved (--additions-from prints them, --additions-saved proves the save).
+// A hand-made prompt (no Toolkit blocks) has no project section the script can read back, so its saved
+// file need only be non-empty.
 // Until every project swaps, --expand for a Toolkit task prints the ping with a TASKS OUTDATED
 // prefix, so an unswapped pointer runs as a ping and asks for its swap.
 // A project's own (custom) task stores a pointer: one Toolkit block (TASK-POINTER), the params
@@ -57,6 +59,7 @@ const pinged = kind => Boolean(KINDS[kind].checks);
 const CUSTOM_CHECKS = "CHECKS\n- This task's own steps are the project additions in its stored prompt. Run them in order.";
 const PROJECT_HEADING = 'Project additions (kept on every refresh; they override the Toolkit base where they differ):';
 const KEPT_LABEL = '(kept from an edit inside the block)';
+const NO_PROJECT_TEXT = 'a Toolkit task takes no project text; its project lines go to project-additions.md';
 
 const TIERS = Object.freeze(['small', 'mid', 'top']);
 const EFFORTS = Object.freeze(['medium', 'high', 'xhigh', 'max']);
@@ -85,7 +88,13 @@ const PARAMS = Object.freeze({
   session: { fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
 });
 
-class TaskInputError extends Error {}
+// rule: the plain reason a refused refresh names on stderr. It never repeats the input's own text.
+class TaskInputError extends Error {
+  constructor(code, rule) {
+    super(code);
+    this.rule = rule;
+  }
+}
 
 function kindOf(kind) {
   if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) throw new TaskInputError('TASK_KIND');
@@ -95,26 +104,26 @@ function kindOf(kind) {
 // Strict params: known keys only, string values, every value matched against its own pattern.
 function validateParams(kind, raw) {
   kindOf(kind);
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TaskInputError('TASK_PARAMS');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TaskInputError('TASK_PARAMS', 'the params must be one JSON object');
   const params = {};
   for (const key of Object.keys(raw)) {
     const rule = Object.hasOwn(PARAMS, key) ? PARAMS[key] : undefined;
-    if (!rule || (rule.customOnly && kind !== 'custom') || typeof raw[key] !== 'string') throw new TaskInputError('TASK_PARAMS');
+    if (!rule || (rule.customOnly && kind !== 'custom') || typeof raw[key] !== 'string') throw new TaskInputError('TASK_PARAMS', 'the params hold an unknown key, or a value that is not a string');
   }
   for (const [key, rule] of Object.entries(PARAMS)) {
     if (rule.customOnly && kind !== 'custom') continue;
     let fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
     if (key === 'model') fallback = KINDS[kind].tier;
     const value = raw[key] === undefined ? fallback : raw[key];
-    if (value === undefined && rule.required) throw new TaskInputError('TASK_PARAMS');
+    if (value === undefined && rule.required) throw new TaskInputError('TASK_PARAMS', `a required param is missing: ${key}`);
     if (value === undefined) continue;
-    if (!rule.test(value)) throw new TaskInputError('TASK_PARAMS');
+    if (!rule.test(value)) throw new TaskInputError('TASK_PARAMS', `the param ${key} has a value the params rules do not allow`);
     if (key === 'session' && KINDS[kind].session && value === KINDS[kind].session) continue;
     params[key] = value;
   }
   // A step above the kind's default tier, or effort above medium, carries its written reason.
   const raised = TIERS.indexOf(params.model) > TIERS.indexOf(KINDS[kind].tier) || params.effort !== EFFORTS[0];
-  if (raised && !params.raise_reason) throw new TaskInputError('TASK_PARAMS');
+  if (raised && !params.raise_reason) throw new TaskInputError('TASK_PARAMS', 'a model tier above the kind default, or an effort above medium, needs raise_reason');
   return params;
 }
 
@@ -260,7 +269,7 @@ class ProjectsTasks {
   // A ping carries no project text: its project additions live in <report_dir>/project-additions.md.
   render(kind, params, projectText, fenceText = paramsFence(params)) {
     if (pinged(kind)) {
-      if (projectText !== undefined && lfText(projectText).trim()) throw new TaskInputError('TASK_PROJECT_TEXT');
+      if (projectText !== undefined && lfText(projectText).trim()) throw new TaskInputError('TASK_PROJECT_TEXT', NO_PROJECT_TEXT);
       return [renderBlock(this.pingBlock(kind, params)), '', fenceText, ''].join('\n');
     }
     const project = normalizeProjectText(kind, projectText);
@@ -314,25 +323,31 @@ class ProjectsTasks {
   }
 
   // additions: the text of <report_dir>/project-additions.md as read back after the save. A Toolkit
-  // task's prompt holding project additions refreshes only when that text holds them word for word.
+  // task's prompt holding project additions refreshes only when that text holds them word for word; a
+  // hand-made Toolkit prompt refreshes only with a non-empty saved file.
   refresh(kind, text, { params: override, projectText, session, additions } = {}) {
     const result = this.check(kind, text);
-    if (result.state === 'malformed') throw new TaskInputError('TASK_MALFORMED');
-    if (session !== undefined && (!KINDS[kind].session || !PARAMS.session.test(session))) throw new TaskInputError('TASK_ARGUMENTS');
-    if (additions !== undefined && !pinged(kind)) throw new TaskInputError('TASK_ARGUMENTS');
+    if (result.state === 'malformed') throw new TaskInputError('TASK_MALFORMED', 'the prompt is malformed: a Toolkit block or the params block does not check');
+    if (session !== undefined && (!KINDS[kind].session || !PARAMS.session.test(session))) throw new TaskInputError('TASK_ARGUMENTS', '--session applies to a Toolkit task only, and takes bound or fresh');
+    if (additions !== undefined && !pinged(kind)) throw new TaskInputError('TASK_ARGUMENTS', '--additions-saved applies to a Toolkit task only');
     const withSession = params => (session === undefined ? params : validateParams(kind, { ...params, session }));
     if (result.state === 'missing') {
-      if (!override || (pinged(kind) && projectText !== undefined)) throw new TaskInputError(override ? 'TASK_ARGUMENTS' : 'TASK_PARAMS');
+      if (!override) throw new TaskInputError('TASK_PARAMS', 'a prompt with no Toolkit blocks needs --params to render it');
+      if (pinged(kind) && projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS', NO_PROJECT_TEXT);
+      // A hand-made prompt has no project section to read back, so its saved file is checked for presence only.
+      if (pinged(kind) && (additions === undefined || !lfText(additions).trim())) {
+        throw new TaskInputError('TASK_ADDITIONS_UNSAVED', 'a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty');
+      }
       return this.render(kind, withSession(override), projectText);
     }
-    if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
+    if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS', '--params and --project-text apply only to a prompt with no Toolkit blocks');
     const lf = lfText(text);
     const { params: stored, legacy } = storedParams(kind, lf);
     const params = withSession(stored);
     let project = this.projectText(kind, lf, stored);
     if (pinged(kind)) {
       const moved = this.additions(kind, lf);
-      if (moved && (additions === undefined || !lfText(additions).includes(moved))) throw new TaskInputError('TASK_ADDITIONS_UNSAVED');
+      if (moved && (additions === undefined || !lfText(additions).includes(moved))) throw new TaskInputError('TASK_ADDITIONS_UNSAVED', 'the saved additions file does not hold the project additions word for word');
       project = undefined;
     }
     const fence = findParams(lf);
@@ -349,10 +364,10 @@ function tampered(block) {
 
 function normalizeProjectText(kind, projectText) {
   const text = projectText === undefined ? '' : lfText(projectText).replace(/^\n+|\n+$/g, '');
-  if (findBlocks(text).blocks.length || findBlocks(text).errors.length) throw new TaskInputError('TASK_PROJECT_TEXT');
-  if (text.split('\n').some(line => FENCE_OPEN.test(line))) throw new TaskInputError('TASK_PROJECT_TEXT');
+  if (findBlocks(text).blocks.length || findBlocks(text).errors.length) throw new TaskInputError('TASK_PROJECT_TEXT', 'the project text holds a Toolkit block');
+  if (text.split('\n').some(line => FENCE_OPEN.test(line))) throw new TaskInputError('TASK_PROJECT_TEXT', 'the project text holds a params block line');
   if (text) return text;
-  if (kind === 'custom') throw new TaskInputError('TASK_PROJECT_TEXT');
+  if (kind === 'custom') throw new TaskInputError('TASK_PROJECT_TEXT', 'a custom task needs its own steps as project text');
   return `${PROJECT_HEADING}\n- none`;
 }
 
@@ -452,7 +467,7 @@ function parseArgs(args) {
     for (let index = 0; index < rest.length; index += 1) {
       const arg = rest[index];
       if (arg.startsWith('--')) {
-        if (!allowed.includes(arg) || options[arg] !== undefined || !rest[index + 1] || rest[index + 1].startsWith('--')) throw new TaskInputError('TASK_ARGUMENTS');
+        if (!allowed.includes(arg) || options[arg] !== undefined || !rest[index + 1] || rest[index + 1].startsWith('--')) throw new TaskInputError('TASK_ARGUMENTS', 'an option is unknown, repeated or has no value');
         options[arg] = rest[index += 1];
       } else positional.push(arg);
     }
@@ -466,9 +481,9 @@ function parseArgs(args) {
   }
   if (mode === '--check' || mode === '--refresh' || mode === '--additions-from') {
     const positional = take(mode === '--refresh' ? ['--params', '--project-text', '--session', '--additions-saved'] : []);
-    if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS');
+    if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS', 'a refresh takes a task kind and one prompt file');
     const kind = kindArg(positional[0]);
-    if (mode === '--refresh' && KINDS[kind].session && !options['--session']) throw new TaskInputError('TASK_ARGUMENTS');
+    if (mode === '--refresh' && KINDS[kind].session && !options['--session']) throw new TaskInputError('TASK_ARGUMENTS', 'a Toolkit task refresh needs --session bound or fresh, the session its replacement runs in');
     return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'], additions: options['--additions-saved'] };
   }
   if (mode === '--params-from' || mode === '--check-memory') {
@@ -486,11 +501,21 @@ function parseArgs(args) {
 // as long as stored prompts may lack it, or every unswapped task fails to load.
 function readParamsFile(kind, file, { tolerant = false } = {}) {
   let raw;
-  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new TaskInputError('TASK_PARAMS'); }
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new TaskInputError('TASK_PARAMS', 'the --params file could not be read as JSON'); }
   if (!tolerant) return validateParams(kind, raw);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TaskInputError('TASK_PARAMS');
   const known = Object.fromEntries(Object.entries(raw).filter(([key]) => Object.hasOwn(PARAMS, key)));
   return validateParams(kind, migrateLegacy(known).raw);
+}
+
+const GENERIC_REFUSAL = 'Task prompt could not be processed (PROJECT_TASKS_INVALID).\n';
+
+// A refused refresh also names its task (the kind, when it is a known one) and the rule it broke.
+// Every other failure prints the generic line only.
+function refusal(args, error) {
+  const kind = args[0] === '--refresh' ? args[1] : undefined;
+  if (!(error instanceof TaskInputError) || !error.rule || !Object.hasOwn(KINDS, kind)) return GENERIC_REFUSAL;
+  return `${GENERIC_REFUSAL}Refresh of ${kind} refused (${error.message}): ${error.rule}.\n`;
 }
 
 function main(args = process.argv.slice(2)) {
@@ -530,8 +555,8 @@ function main(args = process.argv.slice(2)) {
     }
     process.stdout.write(output);
     return exitCode;
-  } catch {
-    process.stderr.write('Task prompt could not be processed (PROJECT_TASKS_INVALID).\n');
+  } catch (error) {
+    process.stderr.write(refusal(args, error));
     return 2;
   }
 }

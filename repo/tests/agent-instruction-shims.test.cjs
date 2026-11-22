@@ -253,7 +253,12 @@ function shippedInstructionFiles() {
 
 test("action-blocking questions use the harness's native question method, with bold text only as the fallback", () => {
   const communication = readText(globalPath).split('## Communication\n\n')[1];
-  assert.match(communication, /^Ask each action-blocking question \(choose, approve, confirm, give a path, continue\) with the harness's native question method[^\n]*; where none works, one fully bold sentence\./);
+  // The fallback once read as a trailing clause ("where none works, one fully bold sentence"), and a
+  // smaller model whose native question tool failed asked in plain text; it is now its own imperative.
+  assert.match(communication, /^Ask each action-blocking question \(choose, approve, confirm, give a path, continue\) with the harness's native question method[^\n]*\. Failing that, ask in one fully bold sentence\./);
+  // The root-cause principle once read "make it in the shared source that copies, prompts and later runs
+  // inherit", which parses two ways beside "upstream" meaning third-party code.
+  assert.match(readText(globalPath), /make it at the shared source every copy, prompt and later run inherits;/);
   const files = shippedInstructionFiles();
   assert.ok(files.includes('skills/toolkit-setup/SKILL.md') && files.includes('repo/docs/agent-playbooks/controller-takeover.md'));
   const found = [];
@@ -268,16 +273,21 @@ test("action-blocking questions use the harness's native question method, with b
 
 // A merge guard is an optional hook: a harness can skip it or let a merge through when it fails, and a
 // skill-only copy has none. A line that let the guard ask without that condition let an agent merge
-// with no owner OK, so every line handing the merge ask to a guard keeps the condition.
+// with no owner OK, so every line handing the merge ask to a guard (or the merge hold) keeps the condition.
 test('a merge guard stands in for the merge ask only where it is known to run', () => {
   const files = [...shippedInstructionFiles(), 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'];
   const handed = [];
   const unconditional = [];
   for (const rel of files) {
     readText(rel).split('\n').forEach((line, index) => {
-      if (!/merge guard/i.test(line) || !/\b(ask|question|OK)\b/.test(line)) return;
+      // The merge hold is the code's and the Bridge doc's name for the same guard. A line naming it
+      // once handed the ask over unseen, so it counts when it hands the ask over, not when it only
+      // describes the hold.
+      const guard = /merge guard/i.test(line) && /\b(ask|question|OK)\b/.test(line);
+      const hold = /merge hold/i.test(line) && /\bquestion is (that|the) (ask|OK)\b|\blet (it|the merge hold) ask\b/i.test(line);
+      if (!guard && !hold) return;
       handed.push(rel);
-      if (!/merge guard is known to run/.test(line)) unconditional.push(`${rel}:${index + 1}`);
+      if (!/merge (guard|hold) is known to run/.test(line)) unconditional.push(`${rel}:${index + 1}`);
     });
   }
   for (const rel of ['repo/contracts/agent-rules/global-rules.md', 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md', 'skills/secure-ci-cd/SKILL.md']) assert.ok(handed.includes(rel), rel);

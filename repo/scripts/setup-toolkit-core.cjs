@@ -2801,11 +2801,15 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   let lines = rawStdin === null ? null : rawStdin.split(/\r?\n/);
   let approvedBankAnswer = null;
   let rl = null;
+  // Set whenever a question interface opens on this terminal. The RAM Enter prompt closes it (rl becomes
+  // null) before it asks, so the summary reads this flag rather than rl.
+  let promptedAtTerminal = false;
 
   if (isTTY && missing.length && initialMissingCount === answerable(initialSpecs).length) {
     rl = options.createReadlineInterface
       ? options.createReadlineInterface()
       : readline.createInterface({ input: process.stdin, output: process.stdout });
+    promptedAtTerminal = true;
     const conciseAnswer = await promptForTTYCommand(specs, rl);
     if (conciseAnswer) {
       assertQuestionBankAnswerBinding(conciseAnswer, specs);
@@ -2886,6 +2890,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     rl = options.createReadlineInterface
       ? options.createReadlineInterface()
       : readline.createInterface({ input: process.stdin, output: process.stdout });
+    promptedAtTerminal = true;
   }
   try {
     for (const [position, spec] of missing.entries()) {
@@ -2910,7 +2915,10 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       await requireHighHelperCapacityApproval(args, lines, options.confirm);
     }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
-      if (!lines && !rl) rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
+      if (!lines && !rl) {
+        rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
+        promptedAtTerminal = true;
+      }
       args.repoRoot = await promptForCustomPath(lines, rl);
       args.repoRootExplicit = true;
     }
@@ -2957,7 +2965,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     appeared: true,
     answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
-    answers_prompted_interactively: Boolean(rl),
+    answers_prompted_interactively: promptedAtTerminal,
     stopped_for_answers: false,
     answer_source: answerSource || 'none',
     remaining_input: lines ? lines.filter((line) => String(line).trim()) : [],

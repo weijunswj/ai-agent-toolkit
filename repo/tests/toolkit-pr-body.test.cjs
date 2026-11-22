@@ -61,6 +61,40 @@ test('a missing UAT line, an invalid one and a missing or doubled Bump line each
   }
 });
 
+// A body once opened over the board's pull request page budget, and was trimmed only after the board
+// flagged it; the check now stops it before the pull request opens, in a governed repository only.
+test('a body at or over the pull request page budget blocks in a governed repository', () => {
+  const { PAGE_BUDGETS } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  assert.equal(prBody.PR_PAGE_BUDGET, PAGE_BUDGETS.pr, 'one budget with the board');
+  const pad = (length) => GOOD.replace('Does a thing.', `Does a thing. ${'x'.repeat(length - GOOD.length - 1)}`);
+  const over = run(pad(prBody.PR_PAGE_BUDGET));
+  assert.equal(over.report.problems.length >= 1 && over.code, 1);
+  assert.ok(over.report.problems.some(line => /^the body is 3000 characters, at or over the 3000-character pull request page budget/.test(line)), over.report.problems.join('\n'));
+  const under = run(pad(prBody.PR_PAGE_BUDGET - 1));
+  assert.equal(under.code, 0, under.report.problems.join('\n'));
+  assert.deepEqual(prBody.lineProblems(pad(prBody.PR_PAGE_BUDGET), { toolkit: true }), [], 'an ungoverned repository has no page budget');
+});
+
+// A feature once shipped as `Bump: patch`, though the changelog rule says minor, and was only caught at
+// merge. A patch line beside a fragment with an Added section is now noted, never blocked.
+test('Bump: patch beside a changelog fragment with an Added section is a note, not a problem', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-body-bump-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const fragments = path.join(root, 'repo', 'docs', 'changelog.d');
+  fs.mkdirSync(fragments, { recursive: true });
+  fs.writeFileSync(path.join(fragments, 'README.md'), '### Added\n\n- not a fragment\n');
+  fs.writeFileSync(path.join(fragments, 'claude-fix.md'), '### Fixed\n\n- a fix\n');
+  assert.deepEqual(prBody.bumpNotes(GOOD, root), [], 'fixes only');
+  fs.writeFileSync(path.join(fragments, 'claude-feature.md'), 'Title: a thing\n\n### Added\n\n- a new command\n');
+  const [note, ...rest] = prBody.bumpNotes(GOOD, root);
+  assert.deepEqual(rest, []);
+  assert.match(note, /^Bump: patch, but the changelog fragment claude-feature\.md has an Added section; the changelog rule says minor/);
+  assert.deepEqual(prBody.bumpNotes(GOOD.replace('Bump: patch', 'Bump: minor'), root), [], 'minor already');
+  const result = run(GOOD);
+  assert.equal(result.code, 0, 'a note never blocks');
+  assert.ok(Array.isArray(result.report.notes));
+});
+
 test('an owner UAT ask needs one visible Agent UAT: PASSED line with evidence first', () => {
   const owner = extra => GOOD.replace('UAT: NOT_REQUIRED (no owner-facing change)', `UAT: OWNER_TEST_NEEDED (the owner opens the app)\n${extra}`.trimEnd());
   const asked = /owner UAT is asked before every agent step passed/;
