@@ -27,6 +27,11 @@
 //
 // Sync callers use pressEnterSync, which runs the same prompt in a child process sharing the terminal.
 //
+// Real-host smoke: CI has no real terminal, so each release batch's real-host smoke keeps one Windows
+// PowerShell row each for pressEnterSync (programme.cjs's owner Enter), setup's RAM-risk Enter for more
+// than one helper, and setup's Codex configuration Enter: a lone Enter after the quiet wait confirms, a
+// pasted block ending in a blank line does not, and Ctrl+C stops with nothing written.
+//
 //   node repo/scripts/owner-terminal.cjs press-enter "<effect>"   (exit 0 on Enter, 1 otherwise)
 
 const childProcess = require('node:child_process');
@@ -40,6 +45,9 @@ const PASTE_ON = '\x1b[?2004h';
 const PASTE_OFF = '\x1b[?2004l';
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
+// A marker is six characters: the last five characters read are kept, so a marker split across two reads
+// is whole in the next read's text.
+const MARKER_TAIL = Math.max(PASTE_START.length, PASTE_END.length) - 1;
 const ENTER = /^(?:\r\n|\r|\n)$/;
 const STOP_KEYS = /[\x03\x04]/;
 
@@ -104,6 +112,7 @@ function pressEnter(effect, { input = process.stdin, output = process.stderr, en
     let pasting = false;
     let timer = null;
     let done = false;
+    let recent = '';
     const wait = () => { armed = false; clearTimeout(timer); timer = setTimeout(() => { armed = !pasting; }, quietMs); };
     const finish = (value) => {
       if (done) return;
@@ -120,14 +129,17 @@ function pressEnter(effect, { input = process.stdin, output = process.stderr, en
     };
     function onEnd() { finish(false); }
     function onData(chunk) {
-      const text = String(chunk);
-      if (STOP_KEYS.test(text)) return finish(false);
+      const read = String(chunk);
+      if (STOP_KEYS.test(read)) return finish(false);
+      // The text starts with the tail of the reads before, so a paste marker split across reads is found.
+      const text = recent + read;
+      recent = text.slice(-MARKER_TAIL);
       if (pasting || text.includes(PASTE_START)) {
         const end = text.lastIndexOf(PASTE_END);
         pasting = end === -1 || text.lastIndexOf(PASTE_START) > end;
         return wait();
       }
-      if (armed && ENTER.test(text)) return finish(true);
+      if (armed && ENTER.test(read)) return finish(true);
       return wait();
     }
     try {

@@ -21,10 +21,12 @@ const path = require('node:path');
 
 const PLUGIN_ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
 const MARKETPLACE = 'ai-agent-toolkit-local';
-// Top-level entries of ~/.ai-agent-toolkit that are Toolkit's own and can be rebuilt by setup.
-// `env` (the list of your keys; the values sit in the computer's credential store) and `backups` are
-// never in this list, and anything else found there is kept and listed.
-const FOLDER_ENTRIES = Object.freeze(['source', 'current', 'user-state', 'agent-control', 'global-rules.json', 'n8n-official-skills.json', 'antigravity-toolkit-skills.json', 'antigravity-refresh']);
+// Top-level entries of ~/.ai-agent-toolkit that are Toolkit's own and can be rebuilt by setup, with
+// the update records the bridge keeps beside its hub snapshot. `env` (the list of your keys; the
+// values sit in the computer's credential store) and `backups` are never in this list, and anything
+// else found there is kept and listed.
+const FOLDER_ENTRIES = Object.freeze(['source', 'current', 'user-state', 'agent-control', 'global-rules.json', 'n8n-official-skills.json', 'antigravity-toolkit-skills.json', 'antigravity-refresh',
+  'remote-check.json', 'update.readers', 'agent-rules-notices.json', 'hook-skips.json']);
 // Backup folders inside Toolkit's own entries that stay with the rest of the backups.
 const KEPT_INSIDE = Object.freeze({ 'agent-control': ['backups'] });
 const KEPT_ENTRIES = Object.freeze(['env', 'backups']);

@@ -160,8 +160,10 @@ test('Secure CI/CD runs reversible Git steps without asking and keeps the ask fo
     const text = readText(relPath);
     for (const pattern of overStrict) assert.doesNotMatch(text, pattern, `${relPath}: ${pattern}`);
   }
+  // The reference once asked before every merge with no guard condition, so an agent reading only it asked
+  // its own merge question where the merge guard asks.
   const keepsAsk = {
-    'skills/secure-ci-cd/references/secure-ci-cd.md': /Before merging, deploying, pushing to the default branch, force-pushing or deleting, pause, name the exact target and action, explain the risk, and ask for explicit approval/,
+    'skills/secure-ci-cd/references/secure-ci-cd.md': /Before merging, deploying, pushing to the default branch, force-pushing or deleting, pause, name the exact target and action, explain the risk, and ask for explicit approval; for a merge where a merge guard is known to run, its own question is that ask\./,
     'skills/secure-ci-cd/templates/cicd/secure-cicd-prompt.md': /For merge, deploy, default-branch push, force-push, delete or secret actions, pause first, name the exact target\/action, explain the risk, and ask for my approval/,
     'skills/secure-ci-cd/templates/cicd/ci-checkup.md': /ask before merge or deploy where the repository has no standing approval/,
     'repo/docs/SKILL-SAFETY-MATRIX.md': /explicit approval required before merge, deploy, default-branch or force push, delete, settings, secret, release, or other external mutation/

@@ -14,7 +14,7 @@ This is a short reviewed operating overview and safety wrapper. It is not the fu
 - Inspect the target repo before editing.
 - Scan for risky files and secrets before setup.
 - Do not print secret values.
-- Commit, push a non-default branch and open or update its PR without asking. Before merging, deploying, pushing to the default branch, force-pushing or deleting, pause, name the exact target and action, explain the risk, and ask for explicit approval.
+- Commit, push a non-default branch and open or update its PR without asking. Before merging, deploying, pushing to the default branch, force-pushing or deleting, pause, name the exact target and action, explain the risk, and ask for explicit approval; for a merge where a merge guard is known to run, its own question is that ask.
 - Prefer CI first, deployment later.
 - Use GitHub Secrets for private values.
 - Keep `docs/ci-cd/CURRENT_CICD_STATUS.md` updated in the consumer repo, unless the repo already documents another CI/CD status path.

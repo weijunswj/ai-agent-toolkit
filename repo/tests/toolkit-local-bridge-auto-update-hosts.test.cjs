@@ -53,7 +53,9 @@ test('a Toolkit folder older than the hand-off is not run; the owner is told onc
     const result = hook(root, hub, accountCopy(root));
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(result.stdout);
-    assert.match(output.systemMessage, /^Toolkit: this PC's Toolkit folder .+ is older than the Claude app's Toolkit and cannot take its session-start maintenance, so it is not updating\. Say `refresh toolkit` once; after that it updates itself at each session start\.$/);
+    assert.match(output.systemMessage, /^Toolkit: this PC's Toolkit folder .+ is older than the Claude app's Toolkit, so this Claude app chat cannot hand it session-start maintenance \(sessions that run it directly may still keep it current\)\. Say `refresh toolkit` once; after that this chat runs it at each session start too\.$/);
+    // A computer whose own sessions run the checkout keeps it current, so the line never says it is not updating.
+    assert.doesNotMatch(output.systemMessage, /not updating/);
     const context = output.hookSpecificOutput.additionalContext;
     assert.equal(context.split('refresh toolkit').length - 1, 1, context);
     assert.doesNotMatch(context, /uninstalled Toolkit copy|maintenance runs from this PC's Toolkit folder/);

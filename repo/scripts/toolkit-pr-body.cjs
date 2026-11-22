@@ -24,7 +24,12 @@
 //     exactly one visible `Agent UAT: PASSED (<evidence>)` line (agent UAT runs every step a tool
 //     reaches before the owner is asked; the merge check does not read this line), and, in the
 //     Toolkit repository, exactly one `Bump: patch|minor|major|none` line (the merge train finder's
-//     rule).
+//     rule), and, where the repository is governed (it has .github/toolkit-programme.json), a body
+//     under the programme board's pull request page budget (PR_PAGE_BUDGET characters; the board
+//     raises BODY_OVER_BUDGET on a page at or over it, after adding its own blocks).
+// In the Toolkit repository it also prints a note, never a problem, when the body says `Bump: patch`
+// while one of the branch's changelog fragments has an `### Added` section: the changelog rule says
+// `minor` for a feature, a skill, a command or a new rule, and a wrong level is corrected at merge.
 // It writes nothing to GitHub and reads no network. The merge scope (whether the pull request
 // waits for the owner's typed merge) is not a body problem: toolkit-auto-merge-eligible.cjs
 // answers that at merge time.
@@ -52,6 +57,11 @@ const HIDDEN = /<!--[\s\S]*?(?:-->|$(?![\s\S]))|^ {0,3}((`|~)\2{2,})[^\n]*\n[\s\
 const RULE_LINE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
 const TOOLKIT_MARKER = path.join('repo', 'contracts', 'agent-rules', 'global-rules.md');
 const MAX_BODY_BYTES = 512 * 1024;
+// The programme board's pull request page budget in characters (PAGE_BUDGETS.pr in the reconciler's
+// programme-state.cjs; a test keeps the two equal). Bodies once opened over it and were trimmed later.
+const PR_PAGE_BUDGET = 3000;
+const PROGRAMME_FILE = path.join('.github', 'toolkit-programme.json');
+const FRAGMENTS = path.join('repo', 'docs', 'changelog.d');
 const REPO_CONFIG = path.join('.github', 'personal-data-guard.json');
 // The guard config used where the repository has none: pull request text and AI attribution
 // checked, nothing allowed. Only `pr` mode reads it, so the other scopes do not matter here.
@@ -100,8 +110,9 @@ function cleanBody(text) {
 }
 
 // The hand-fix problems in a cleaned body, apart from the personal-data guard's own findings.
-function lineProblems(body, { toolkit }) {
+function lineProblems(body, { toolkit, governed = false }) {
   const problems = [];
+  if (governed && body.length >= PR_PAGE_BUDGET) problems.push(`the body is ${body.length} characters, at or over the ${PR_PAGE_BUDGET}-character pull request page budget the programme board checks (it adds its own blocks too): trim it to the CHANGE shape`);
   const uat = uatVerdict(body);
   if (!uat.mergeable) {
     problems.push(uat.state === 'absent'
@@ -119,6 +130,19 @@ function lineProblems(body, { toolkit }) {
     if (bumps !== 1) problems.push(`needs exactly one Bump: patch|minor|major|none line at the start of a line (has ${bumps})`);
   }
   return problems;
+}
+
+// Notes that never block: a `Bump: patch` line beside a changelog fragment with an `### Added` section,
+// which the changelog rule makes `minor` (a patch release once shipped a feature that way).
+function bumpNotes(body, root) {
+  const levels = [...body.matchAll(BUMP)].map(match => match[1]);
+  if (levels.length !== 1 || levels[0] !== 'patch') return [];
+  let names = [];
+  try { names = fs.readdirSync(path.join(root, FRAGMENTS)).filter(name => name.endsWith('.md') && name !== 'README.md').sort(); } catch { return []; }
+  const added = names.filter(name => {
+    try { return /^### Added[ \t]*$/m.test(fs.readFileSync(path.join(root, FRAGMENTS, name), 'utf8')); } catch { return false; }
+  });
+  return added.length ? [`Bump: patch, but the changelog fragment ${added.join(', ')} has an Added section; the changelog rule says minor for a feature, a skill, a command or a new rule, so use Bump: minor unless those items are fixes or wording`] : [];
 }
 
 function gitRoot(cwd) {
@@ -162,7 +186,9 @@ function readBody(file, cwd, stdin) {
 
 const USAGE = 'Usage: node repo/scripts/toolkit-pr-body.cjs --body-file <file|-> --title <text> --out <file> [--json]\n'
   + 'Removes AI footers, session links and attribution lines, writes the cleaned body to --out, then checks it\n'
-  + 'with the personal-data guard, the UAT line rule and (in the Toolkit repository) the one-Bump-line rule.\n';
+  + 'with the personal-data guard, the UAT line rule, (in the Toolkit repository) the one-Bump-line rule and (in a\n'
+  + 'governed repository) the 3,000-character pull request page budget. In the Toolkit repository it also notes\n'
+  + 'Bump: patch beside a changelog fragment with an Added section; a note never fails the body.\n';
 
 function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, stdin, guard: guardScript = GUARD } = {}) {
   const value = (name) => { const at = argv.indexOf(name); return at >= 0 && at + 1 < argv.length ? argv[at + 1] : undefined; };
@@ -180,20 +206,22 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
   const guard = guardFindings(root, title, body, guardScript);
   if (guard.code === 2) { stderr.write('The personal-data guard could not scan the title and body, so the body is not known to pass. Run it from the repository folder with a readable guard config.\n'); return 2; }
   const problems = [
-    ...lineProblems(body, { toolkit: fs.existsSync(path.join(root, TOOLKIT_MARKER)) }),
+    ...lineProblems(body, { toolkit: fs.existsSync(path.join(root, TOOLKIT_MARKER)), governed: fs.existsSync(path.join(root, PROGRAMME_FILE)) }),
     ...guard.findings.map(finding => `the personal-data guard blocks ${finding} (place, class, rule): edit that line`),
     ...(guard.unread ? ['the personal-data guard blocked the title or body, but its report could not be read: run its pr mode directly to see why'] : []),
   ];
   const ok = problems.length === 0;
+  const notes = fs.existsSync(path.join(root, TOOLKIT_MARKER)) ? bumpNotes(body, root) : [];
   if (json) {
-    stdout.write(`${JSON.stringify({ ok, out, removed, problems, guard_config: guard.config }, null, 2)}\n`);
+    stdout.write(`${JSON.stringify({ ok, out, removed, problems, notes, guard_config: guard.config }, null, 2)}\n`);
   } else {
     const lines = [];
     if (guard.config === 'default') lines.push(`This repository has no ${REPO_CONFIG.split(path.sep).join('/')}, so the guard ran with the pre-flight's default (pull request text and AI attribution on).`);
     if (removed.length) lines.push(`Removed ${removed.length} line(s): ${removed.map(entry => `line ${entry.line} (${entry.rule})`).join(', ')}.`);
     lines.push(ok
-      ? `Body ready: ${out} passes the personal-data guard, the UAT line rule and the Bump line rule. Write it with a route that adds no footer, then read it back.`
+      ? `Body ready: ${out} passes the personal-data guard, the UAT line rule, the Bump line rule and the page budget. Write it with a route that adds no footer, then read it back.`
       : `Body not ready (${out} holds the cleaned body); fix by hand:\n${problems.map(problem => `- ${problem}`).join('\n')}`);
+    for (const note of notes) lines.push(`Note: ${note}.`);
     stdout.write(`${lines.join('\n')}\n`);
   }
   return ok ? 0 : 1;
@@ -201,4 +229,4 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = Object.freeze({ cleanBody, lineProblems, main });
+module.exports = Object.freeze({ cleanBody, lineProblems, bumpNotes, main, PR_PAGE_BUDGET });

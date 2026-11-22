@@ -178,6 +178,12 @@ async function saveValues(options, { read, spawn, say, confirm, look }) {
   say(ownerTerminal.facts(writes.map(key => [key === 'variable' ? 'Client ID' : 'Private key', `${app.APP[key]}${before[key] === 'found' ? ' (replaces the saved one)' : ''}${key === 'secret' ? `, from ${keyFile}` : ''}`]), look));
   const verb = taken.length ? 'replace' : 'save';
   if (await confirm(`${verb} ${writes.length === 2 ? 'both' : 'it'} on ${repo}`) !== true) throw new SetupStop('Enter was not pressed.', 'run it again when you are ready. Nothing changed.');
+  // The names above were read before the prompt. A name that was set or removed while the prompt was open
+  // is not the one the owner was shown, so nothing is written; --replace covers only the names shown.
+  const current = app.presence(repo, read);
+  if (writes.some(key => current[key] !== before[key])) {
+    throw new SetupStop(`${repo} changed while the prompt was open (variable ${current.variable}, secret ${current.secret}), so nothing was saved.`, 'run this again to see what is there now. Nothing changed.');
+  }
   const variable = writes.includes('variable') ? ghRun(['variable', 'set', app.APP.variable, '--repo', repo, '--body', clientId], { spawn }) : { ok: true };
   const secret = variable.ok && writes.includes('secret') ? ghRun(['secret', 'set', app.APP.secret, '--repo', repo], { spawn, input: pem }) : { ok: variable.ok };
   const after = app.presence(repo, read);

@@ -28,6 +28,7 @@ const { legacyTaskAnswersPresent } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
+const updateMarker = require('./toolkit-update-marker.cjs');
 const {
   wizardChoice, resolvedQuestion, choiceValues, selectedChoice, spreadsheetChoiceReference,
   questionBankApprovalPayload, questionBankSemanticIdentity, withPresentationMetadata, ensurePresentationMetadata,
@@ -2800,11 +2801,15 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   let lines = rawStdin === null ? null : rawStdin.split(/\r?\n/);
   let approvedBankAnswer = null;
   let rl = null;
+  // Set whenever a question interface opens on this terminal. The RAM Enter prompt closes it (rl becomes
+  // null) before it asks, so the summary reads this flag rather than rl.
+  let promptedAtTerminal = false;
 
   if (isTTY && missing.length && initialMissingCount === answerable(initialSpecs).length) {
     rl = options.createReadlineInterface
       ? options.createReadlineInterface()
       : readline.createInterface({ input: process.stdin, output: process.stdout });
+    promptedAtTerminal = true;
     const conciseAnswer = await promptForTTYCommand(specs, rl);
     if (conciseAnswer) {
       assertQuestionBankAnswerBinding(conciseAnswer, specs);
@@ -2885,6 +2890,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     rl = options.createReadlineInterface
       ? options.createReadlineInterface()
       : readline.createInterface({ input: process.stdin, output: process.stdout });
+    promptedAtTerminal = true;
   }
   try {
     for (const [position, spec] of missing.entries()) {
@@ -2909,7 +2915,10 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       await requireHighHelperCapacityApproval(args, lines, options.confirm);
     }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
-      if (!lines && !rl) rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
+      if (!lines && !rl) {
+        rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
+        promptedAtTerminal = true;
+      }
       args.repoRoot = await promptForCustomPath(lines, rl);
       args.repoRootExplicit = true;
     }
@@ -2956,7 +2965,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     appeared: true,
     answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
-    answers_prompted_interactively: Boolean(rl),
+    answers_prompted_interactively: promptedAtTerminal,
     stopped_for_answers: false,
     answer_source: answerSource || 'none',
     remaining_input: lines ? lines.filter((line) => String(line).trim()) : [],
@@ -3125,6 +3134,17 @@ function cloneManagedCheckoutIfMissing(args) {
   return true;
 }
 
+// Runs fn, which moves the managed checkout's files (git switch, git merge), while holding the
+// bridge's update.tree-moving marker beside the hub snapshot (toolkit-update-marker.cjs), so a
+// session-start hook reading Toolkit in place waits instead of loading half-moved modules. A reader
+// that still holds after the wait stops setup with nothing moved.
+function whileManagedTreeMoves(args, fn, options = {}) {
+  const controlRoot = args.hub ? path.dirname(path.resolve(args.hub)) : updateMarker.defaultControlRoot();
+  const moved = updateMarker.whileTreeMoves(controlRoot, () => ({ value: fn() }), options);
+  if (!moved) throw new Error("another session start was still reading Toolkit's files after 15 seconds, so setup did not move them; run setup again");
+  return moved.value;
+}
+
 function verifyAndUpdateTrustedRepo(args, validationResults) {
   validateManagedSourcePath(args);
   const cloned = cloneManagedCheckoutIfMissing(args);
@@ -3137,7 +3157,7 @@ function verifyAndUpdateTrustedRepo(args, validationResults) {
     throw new Error(`Unexpected origin remote for managed Toolkit source checkout: ${remote}`);
   }
 
-  runCommand(`git switch ${args.repoBranch}`, 'git', ['switch', args.repoBranch], { cwd: args.repoRoot, timeout: 60000 });
+  whileManagedTreeMoves(args, () => runCommand(`git switch ${args.repoBranch}`, 'git', ['switch', args.repoBranch], { cwd: args.repoRoot, timeout: 60000 }));
   const branch = runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current');
   if (branch !== args.repoBranch) throw new Error(`Expected managed source branch ${args.repoBranch}, found ${branch || '<detached>'}`);
 
@@ -3162,7 +3182,7 @@ function verifyAndUpdateTrustedRepo(args, validationResults) {
     allowFailure: true
   });
   if (ancestor.status !== 0) throw new Error(`Managed source checkout cannot fast-forward from ${headBefore} to ${fetchedCommit}`);
-  runCommand('git merge --ff-only FETCH_HEAD', 'git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: args.repoRoot, timeout: 120000 });
+  whileManagedTreeMoves(args, () => runCommand('git merge --ff-only FETCH_HEAD', 'git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: args.repoRoot, timeout: 120000 }));
   runManagedHookLightValidation(args, validationResults);
   const headAfter = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
   return {
@@ -3966,6 +3986,8 @@ module.exports = {
   applyAntigravitySkills,
   antigravityState,
   fastForwardLocalClone,
+  whileManagedTreeMoves,
+  verifyAndUpdateTrustedRepo,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,

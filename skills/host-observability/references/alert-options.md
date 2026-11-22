@@ -26,7 +26,7 @@ The pulse pings `HEARTBEAT_URL` on every run. The heartbeat service alarms when 
 
 | Option | Notes |
 | --- | --- |
-| Hosted dead-man's-switch service (for example Healthchecks.io, Better Stack heartbeats or Cronitor) | Set the expected period to one hour and a grace time of about 15 minutes. Healthchecks-style services also accept a `/fail` ping; put that in `HEARTBEAT_FAIL_URL` to alarm sooner on emergency or degraded pulses. |
+| Hosted dead-man's-switch service (for example Healthchecks.io, Better Stack heartbeats or Cronitor) | Set the expected period to one hour and a grace time of about 15 minutes. Healthchecks-style services also accept a `/fail` ping; put that in `HEARTBEAT_FAIL_URL` to alarm sooner on emergency or degraded pulses. A Healthchecks.io alarm sent to Telegram comes from Healthchecks.io's own Telegram bot, which you add in its integration settings, not from the bot your pulse alerts use. |
 | Self-hosted Healthchecks | Same as the hosted one, run on a different machine. |
 | Self-hosted push monitor (for example an Uptime Kuma push monitor) | Run it on a different machine; a monitor on the same host goes down with it. Use the push URL its settings show. |
 

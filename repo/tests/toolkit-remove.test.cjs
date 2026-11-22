@@ -398,7 +398,9 @@ function fullHome(t) {
   assert.ok(n8n.install().copied.length > 0);
   fs.mkdirSync(path.join(home, '.claude', 'skills', 'my-skill'), { recursive: true });
   const folder = path.join(home, '.ai-agent-toolkit');
-  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'antigravity-refresh/source.json', 'antigravity-refresh/update.lock', 'notes/mine.txt']) {
+  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'antigravity-refresh/source.json', 'antigravity-refresh/update.lock', 'notes/mine.txt',
+    // The update records the bridge keeps beside its hub snapshot.
+    'remote-check.json', 'agent-rules-notices.json', 'hook-skips.json', 'update.readers/123-abc']) {
     fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x');
   }
   const installed = { 'claude-code': true, codex: false };
@@ -431,6 +433,7 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.match(text, /~\/\.ai-agent-toolkit\/env: kept, the list of your keys/);
   assert.match(text, /~\/\.ai-agent-toolkit\/antigravity-refresh: removed/, 'the Antigravity refresh stamp and lock are Toolkit files');
   assert.match(text, /~\/\.ai-agent-toolkit\/notes: kept, not a Toolkit file/);
+  for (const name of ['remote-check.json', 'agent-rules-notices.json', 'hook-skips.json', 'update.readers']) assert.match(text, new RegExp(`~/\\.ai-agent-toolkit/${name.replace('.', '\\.')}: removed`), name);
   assert.match(text, /Plugins to uninstall[^\n]*\n- Claude Code: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`\n- Claude Code: `claude plugin marketplace remove ai-agent-toolkit-local`/);
   assert.doesNotMatch(text, /codex plugin remove/);
   // The plugin state is not in the code: the agent uninstalls between plan and apply.

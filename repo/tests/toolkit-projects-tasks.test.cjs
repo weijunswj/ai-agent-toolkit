@@ -262,7 +262,7 @@ test('a legacy prompt migrates only with params and moved project text; custom n
   assert.throws(() => tasks().refresh('hourly-nudge', legacy));
   // A hand-made Toolkit task's own steps go word for word into project-additions.md; the ping takes none.
   assert.throws(() => tasks().refresh('hourly-nudge', legacy, { params: params('hourly-nudge'), projectText: '- Kept project step, word for word.' }));
-  const migrated = tasks().refresh('hourly-nudge', legacy, { params: params('hourly-nudge') });
+  const migrated = tasks().refresh('hourly-nudge', legacy, { params: params('hourly-nudge'), additions: '- Kept project step, word for word.' });
   assert.equal(tasks().check('hourly-nudge', migrated).state, 'current');
   const customMigrated = tasks().refresh('custom', legacy, { params: params('custom'), projectText: '- Kept project step, word for word.' });
   assert.equal(tasks().check('custom', customMigrated).state, 'current');
@@ -271,7 +271,7 @@ test('a legacy prompt migrates only with params and moved project text; custom n
   assert.throws(() => tasks().render('custom', params('custom')), 'custom has no default section');
   assert.throws(() => tasks().render('daily-check-in', params('daily-check-in'), rendered('hourly-nudge')), 'no markers in project text');
   const paramsFile = file(t, 'p.json', JSON.stringify(PARAMS['hourly-nudge']));
-  const result = run(['--refresh', 'hourly-nudge', file(t, 'legacy.md', legacy), '--params', paramsFile, '--session', 'bound']);
+  const result = run(['--refresh', 'hourly-nudge', file(t, 'legacy.md', legacy), '--params', paramsFile, '--session', 'bound', '--additions-saved', file(t, 'additions.md', '- Kept project step, word for word.\n')]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(tasks().check('hourly-nudge', result.stdout).state, 'current');
 });
@@ -1434,9 +1434,53 @@ test('ping swap: project additions are printed, must be saved word for word, and
   // and custom tasks keep their text in their own prompt.
   assert.throws(() => tasks().render('hourly-nudge', promptParams, 'Project step.'), /TASK_PROJECT_TEXT/);
   assert.throws(() => tasks().refresh('hourly-nudge', 'HAND-MADE\n', { params: promptParams, projectText: 'x' }));
-  assert.equal(tasks().refresh('hourly-nudge', 'HAND-MADE\n', { params: promptParams, session: 'bound' }), pingOf('hourly-nudge'));
+  assert.equal(tasks().refresh('hourly-nudge', 'HAND-MADE\n', { params: promptParams, session: 'bound', additions: '- Hand-made step, saved first.' }), pingOf('hourly-nudge'));
   assert.throws(() => tasks().additions('custom', pointer('custom')));
   assert.throws(() => tasks().refresh('custom', pointer('custom'), { additions: 'x' }));
+});
+
+test('a hand-made Toolkit task refresh needs its project lines saved first: no or blank --additions-saved is refused', t => {
+  // A hand-made prompt has no project section the script can read back, so the saved file must at least be non-empty.
+  const hand = 'HOURLY PING\n1. Stamp.\n2. Post one line.\n';
+  const promptParams = params('hourly-nudge');
+  for (const additions of [undefined, '', ' \n\n']) {
+    assert.throws(() => tasks().refresh('hourly-nudge', hand, { params: promptParams, session: 'bound', additions }), /TASK_ADDITIONS_UNSAVED/, `additions ${JSON.stringify(additions)}`);
+  }
+  assert.equal(tasks().refresh('hourly-nudge', hand, { params: promptParams, session: 'bound', additions: '- Hand-made step.' }), pingOf('hourly-nudge'));
+  const paramsFile = file(t, 'params.json', JSON.stringify(PARAMS['hourly-nudge']));
+  const target = file(t, 'hand.md', hand);
+  const refreshCli = extra => run(['--refresh', 'hourly-nudge', target, '--params', paramsFile, '--session', 'bound', ...extra]);
+  const none = refreshCli([]);
+  assert.equal(none.status, 2, 'no --additions-saved');
+  assert.equal(none.stdout, '');
+  assert.equal(refreshCli(['--additions-saved', file(t, 'blank.md', ' \n')]).status, 2, 'a blank saved file');
+  const saved = refreshCli(['--additions-saved', file(t, 'additions.md', '- Hand-made step.\n')]);
+  assert.equal(saved.status, 0, saved.stderr);
+  assert.equal(saved.stdout, pingOf('hourly-nudge'));
+});
+
+test('a refused refresh names its task and the rule it broke on stderr; any other failure keeps the generic line only', t => {
+  const generic = 'Task prompt could not be processed (PROJECT_TASKS_INVALID).\n';
+  const hand = file(t, 'hand.md', 'HOURLY PING\n1. Stamp.\n');
+  const paramsFile = file(t, 'params.json', JSON.stringify(PARAMS['hourly-nudge']));
+  const withoutProject = { ...PARAMS['hourly-nudge'] };
+  delete withoutProject.project;
+  const noProject = file(t, 'no-project.json', JSON.stringify(withoutProject));
+  const additions = file(t, 'additions.md', '- Step.\n');
+  const cases = [
+    [['--refresh', 'daily-check-in', hand], `${generic}Refresh of daily-check-in refused (TASK_ARGUMENTS): a Toolkit task refresh needs --session bound or fresh, the session its replacement runs in.\n`],
+    [['--refresh', 'hourly-nudge', hand, '--params', noProject, '--session', 'bound', '--additions-saved', additions], `${generic}Refresh of hourly-nudge refused (TASK_PARAMS): a required param is missing: project.\n`],
+    [['--refresh', 'hourly-nudge', hand, '--params', paramsFile, '--session', 'bound'], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty.\n`],
+    // Options may come before the task kind; the refusal once read the kind only from the first argument after --refresh.
+    [['--refresh', '--session', 'bound', '--params', paramsFile, 'hourly-nudge', hand], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty.\n`],
+    [['--refresh', 'nope', hand, '--session', 'bound'], generic]
+  ];
+  for (const [args, stderr] of cases) {
+    const result = run(args);
+    assert.equal(result.status, 2, args.join(' '));
+    assert.equal(result.stdout, '', args.join(' '));
+    assert.equal(result.stderr, stderr, args.join(' '));
+  }
 });
 
 test('ping transition: an unswapped pointer loads the ping, which asks for its own swap', t => {

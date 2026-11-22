@@ -97,3 +97,44 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target|--disable-target/);
 });
+
+// A fake terminal for the question bank: each readline question is answered from `answers`, and the RAM
+// Enter prompt is answered by `confirm`. Returns the bank result with what was asked at each prompt.
+async function bankAtTerminal(flags, { answers = [], confirm = async () => true } = {}) {
+  const args = core.parseArgs(['--execute', '--host', 'codex', '--yes-recommended', ...flags]);
+  const questions = [];
+  const asked = [];
+  const result = await core.answerSetupQuestionBank(args, core.documentationFixtureState(), {
+    isTTY: true,
+    write() { return true; },
+    createReadlineInterface() {
+      return {
+        async question(prompt) {
+          questions.push(prompt);
+          if (!answers.length) throw new Error(`terminal fixture exhausted at prompt: ${prompt}`);
+          return answers.shift();
+        },
+        close() {},
+      };
+    },
+    confirm: async effect => { asked.push(effect); return confirm(effect); },
+  });
+  return { args, questions, asked, result };
+}
+
+// The summary's "prompted interactively" reads the question interface, which the RAM Enter prompt closes
+// before it asks. A helper count typed at the terminal is still a prompted answer.
+test('a helper count typed at the terminal is reported as prompted interactively, even though the RAM Enter prompt follows', async () => {
+  const run = await bankAtTerminal(['--codex-helper-capacity', 'custom'], { answers: ['2'] });
+  assert.equal(run.args.codexHelperCount, 2);
+  assert.deepEqual(run.questions, ['How many helper agents may Codex use? Enter a non-negative integer: ']);
+  assert.deepEqual(run.asked, ['accept the RAM risk of 2 helpers']);
+  assert.equal(run.result.answers_prompted_interactively, true);
+});
+
+test('a RAM Enter that is the only terminal prompt is reported as prompted interactively', async () => {
+  const run = await bankAtTerminal(['--codex-helper-count', '2']);
+  assert.deepEqual(run.questions, []);
+  assert.deepEqual(run.asked, ['accept the RAM risk of 2 helpers']);
+  assert.equal(run.result.answers_prompted_interactively, true);
+});
