@@ -442,7 +442,8 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
       }
       continue;
     }
-    const stalled = keptOpenStall(finding, child, now);
+    // Any of the child's findings may be the kept-open stall: a READY_TO_CLOSE taken first never hides it.
+    const stalled = doneFindings.filter(other => other.issue === finding.issue).map(other => keptOpenStall(other, child, now)).find(Boolean);
     if (stalled) { rows.push(stalled); continue; }
     const why = heldBecause(finding, child);
     if (why) held.push(`#${finding.issue} ${why}`);

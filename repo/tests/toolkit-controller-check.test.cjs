@@ -548,11 +548,18 @@ const KEPT_STALE_MATRIX = [
   ['lapsed hold on a kept-open child: held with its note', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 46, ...LAPSED, promised: 'Plan slice 2' }, issue(46, { body: page(46, ALL_TICKED, { keptAt: '2026-11-12T08:00:00.000Z' }) }), { held: '#46 hold lapsed at 2026-11-21T08:00:00Z (Plan slice 2)' }],
   ['closed kept-open child: held', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 47 }, issue(47, { state: 'closed', body: page(47, ALL_TICKED, { keptAt: '2026-11-12T08:00:00.000Z' }) }), { held: '#47 already closed' }],
   ['not kept open, every row ticked: JUDGE? (control)', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 48 }, issue(48, { body: page(48, ALL_TICKED) }), { row: 'JUDGE? #48 PR merged: check its DONE WHEN, then close it yourself or keep it open (TASK_MERGED_OPEN)' }],
+  // Two findings on one child: a READY_TO_CLOSE in any state never hides the kept-open stall beside it.
+  ['new READY_TO_CLOSE beside a new kept-open TASK_MERGED_OPEN: a row', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['acknowledged READY_TO_CLOSE beside a new kept-open TASK_MERGED_OPEN: a row', [{ state: 'acknowledged', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['lapsed READY_TO_CLOSE beside a new kept-open TASK_MERGED_OPEN: a row', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49, ...LAPSED, promised: 'Close after slice 2' }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['new kept-open TASK_MERGED_OPEN listed before a new READY_TO_CLOSE: a row', [{ state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['new READY_TO_CLOSE beside a new TASK_MERGED_OPEN, kept open 3 hours ago: held', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-14T09:00:00.000Z' }) }), { held: '#49 Kept open line' }],
+  ['new READY_TO_CLOSE beside an acknowledged TASK_MERGED_OPEN, kept open: held', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'acknowledged', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { held: '#49 Kept open line' }],
 ];
 
 test('red: a kept-open child the sweep queues as stalled is a KEPT OPEN? row, never held for ever (closure matrix)', () => {
   for (const [name, finding, child, want] of KEPT_STALE_MATRIX) {
-    const { check } = sweep({ findings: [finding], children: [child] });
+    const { check } = sweep({ findings: [].concat(finding), children: [child] });
     const rows = check.lines.slice(1).filter(line => !line.startsWith('held'));
     const held = check.lines.find(line => /held, not proposed: /.test(line)) || '';
     if (want.row) assert.deepEqual(rows, [want.row], name);

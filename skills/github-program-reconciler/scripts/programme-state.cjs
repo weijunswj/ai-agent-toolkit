@@ -5793,12 +5793,14 @@ class Reconciler {
       const kept = merged && keptOpen(doc);
       if (kept && now - latest < KEPT_OPEN_IDLE_HOURS * HOUR_MS) continue;
       const since = new Date(latest).toISOString().slice(0, 16);
-      const keptNote = kept ? `; kept open on purpose${keptSince(doc)}, but no lane has worked it for over ${KEPT_OPEN_IDLE_HOURS} hours` : '';
+      // A kept-open stall waited the kept-open window, so its detail names that, once.
+      const waited = kept ? KEPT_OPEN_IDLE_HOURS : hours;
+      const keptNote = kept ? `; kept open on purpose${keptSince(doc)}` : '';
       const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
       const blocked = blocker ? `; blocked by #${blocker} (moving), but unchanged for over ${BLOCKED_SKIP_DAYS} days`
         : listed ? `; its state lists a blocker, but it has not changed for over ${BLOCKED_SKIP_DAYS} days` : '';
       findings.push(merged
-        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})${keptNote}${blocked}` }
+        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${waited} hour${waited === 1 ? '' : 's'})${keptNote}${blocked}` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}${blocked}` });
     }
   }

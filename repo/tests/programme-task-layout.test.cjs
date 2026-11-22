@@ -776,7 +776,8 @@ test('a merged task kept open on purpose is skipped only while something worked 
   for (const [name, options, codes] of KEPT_OPEN_MATRIX) assert.deepEqual(idle(options).map(finding => finding.code), codes, name);
   assert.equal(state.KEPT_OPEN_IDLE_HOURS, 6, 'the idle window: no lane and no change for six hours');
   const [found] = idle({ ...KEPT_MERGED, hours: 30 });
-  assert.match(found.detail, /every PR merged or closed and nothing working it since .*; kept open on purpose \(since \d{4}-\d\d-\d\d \d\d:\d\dZ\), but no lane has worked it for over 6 hours/);
+  // One wait, the kept-open window: never `over 1 hour` beside `over 6 hours`.
+  assert.match(found.detail, /every PR merged or closed and nothing working it since \S+Z \(over 6 hours\); kept open on purpose \(since \d{4}-\d\d-\d\d \d\d:\d\dZ\)$/);
 });
 
 test('a kept-open stall is raised, resolves when the task changes, comes back after six more quiet hours and holds a dispose while still', () => {
