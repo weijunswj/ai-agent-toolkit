@@ -479,6 +479,11 @@ const MAX_RELAYS_PER_PASS = 10;
 const TASK_IDLE_HOURS = 6;
 // A task whose PRs have all merged or closed needs its next step sooner: this long after the last change.
 const TASK_MERGED_OPEN_HOURS = 1;
+// A merged task the controller keeps open on purpose comes back to the work queue once nothing has worked
+// it for this long. The mark says why the task is not closed, not why nothing works it: with no lane it
+// is an idle task, so it gets the idle window. A longer planned wait is a dispose with a reason, which
+// holds while the task stays still.
+const KEPT_OPEN_IDLE_HOURS = TASK_IDLE_HOURS;
 // The batch tail guard: a NOW task still for this long, waiting on something other than the owner,
 // stops holding the next batch (it stays NOW and keeps its own work-queue finding).
 const BATCH_TAIL_HOURS = 24;
@@ -3088,11 +3093,13 @@ function requireVersionToken(sha, docPath) {
 
 class StateStore {
   // `installationWrite` is true only for the cloud sweep, whose store token is a GitHub App
-  // installation token the workflow minted with Contents write for this one store.
-  constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null, installationWrite = false }) {
+  // installation token the workflow minted with Contents write for this one store. `cloudSession` is
+  // true in a Claude Code cloud session, whose GitHub link may not reach the store at all.
+  constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null, installationWrite = false, cloudSession = false }) {
     this.transport = transport;
     this.store = store;
     this.installationWrite = installationWrite === true;
+    this.cloudSession = cloudSession === true;
     this.now = now;
     this.toolkitVersion = toolkitVersion;
     this.writes = 0;
@@ -3125,6 +3132,11 @@ class StateStore {
   // one store, and the sweep lease's write, which comes before any state is saved, proves it.
   verify() {
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
+    // In a cloud session a refused or hidden store is most often one not attached to the session, not
+    // a wrong store, so the advice is to wait for the owner's computer, never to pick another store.
+    if (this.cloudSession && [401, 403, 404].includes(repo.status)) {
+      throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store ${this.store.repository} is not reachable from this cloud session (${repo.status}), so nothing was read or written. The check waits for the owner's computer: the next session start there reads the store.`);
+    }
     const writable = this.installationWrite || repo.json?.permissions?.push === true;
     const reason = repo.status !== 200 ? `it could not be read (${repo.status})`
       : repo.json.private !== true ? 'it is not private'
@@ -4267,9 +4279,9 @@ const STATE_BACKENDS = Object.freeze({ branch: BranchStateStore });
 
 // The store a merged binding names: the public state branch with the private store beside it when
 // the binding has `state`, else the private store alone. A disabled binding never reaches here.
-function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null, installationWrite = false }) {
+function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null, installationWrite = false, cloudSession = false }) {
   if (binding.state) return new STATE_BACKENDS[binding.state.kind]({ transport, binding, now, toolkitVersion, localCheckpoint });
-  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite });
+  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite, cloudSession });
 }
 
 // One rollup node as a check context: a check run carries the app that set it and when it completed.
@@ -5743,8 +5755,10 @@ class Reconciler {
   // BLOCKED_SKIP_DAYS after the task last changed, so a blocker that cleared but is still listed cannot
   // hide it for ever; then it is raised and the detail says why it was skipped. The skips sit here, not
   // in stillness, so the batch tail guard still counts the task as still and a queued blocker still counts
-  // as stalled for the tasks behind it. A pass that could not read every open PR raises none, since an
-  // unread open PR could be moving the task.
+  // as stalled for the tasks behind it. A merged task kept open on purpose (keptOpen) is skipped only
+  // until nothing has worked it for KEPT_OPEN_IDLE_HOURS; then it is TASK_MERGED_OPEN and the detail
+  // says it was kept open. A pass that could not read every open PR raises none, since an unread open PR
+  // could be moving the task.
   diffIdle(parent, docs, observed, only, findings) {
     if (observed.prGraph?.openComplete === false) return;
     const now = Date.parse(this.now());
@@ -5773,14 +5787,17 @@ class Reconciler {
       const listed = Boolean(doc.blockers?.length);
       const blocker = (observed.blockedBy.get(outcome.issue) || []).find(moving);
       if ((listed || blocker) && now - latest < BLOCKED_SKIP_DAYS * 24 * HOUR_MS) continue;
-      // Kept open on purpose by the controller: the mark on its page says why, so it is not queued.
-      if (merged && keptOpen(doc)) continue;
+      // Kept open on purpose by the controller: the mark on its page says why it is not closed, so it is
+      // not queued until nothing has worked it for KEPT_OPEN_IDLE_HOURS; then it is, never skipped for ever.
+      const kept = merged && keptOpen(doc);
+      if (kept && now - latest < KEPT_OPEN_IDLE_HOURS * HOUR_MS) continue;
       const since = new Date(latest).toISOString().slice(0, 16);
+      const keptNote = kept ? `; kept open on purpose${keptSince(doc)}, but no lane has worked it for over ${KEPT_OPEN_IDLE_HOURS} hours` : '';
       const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
       const blocked = blocker ? `; blocked by #${blocker} (moving), but unchanged for over ${BLOCKED_SKIP_DAYS} days`
         : listed ? `; its state lists a blocker, but it has not changed for over ${BLOCKED_SKIP_DAYS} days` : '';
       findings.push(merged
-        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})${blocked}` }
+        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})${keptNote}${blocked}` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}${blocked}` });
     }
   }
@@ -8067,7 +8084,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });
