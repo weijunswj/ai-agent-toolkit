@@ -67,6 +67,67 @@ test('the managed checkout itself and folders that are not Toolkit clones are le
   assert.equal(core.fastForwardLocalClone(f.args, os.tmpdir()), null);
 });
 
+// A managed checkout on another branch, one commit behind its local origin's main, with git hooks that log
+// whether the bridge's moving marker is held while git switches (post-checkout) and fast-forwards
+// (post-merge) its files. The files are the ones setup checks before it moves anything.
+function managedFixture(t) {
+  const marker = require('../scripts/toolkit-update-marker.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-setup-managed-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const origin = path.join(root, 'origin.git');
+  git(root, 'init', '--bare', '-b', 'main', origin);
+  const seed = path.join(root, 'seed');
+  git(root, 'clone', origin, seed);
+  const files = ['AGENTS.md', 'repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs', 'repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/validate-toolkit.cjs'];
+  for (const file of files) { fs.mkdirSync(path.dirname(path.join(seed, file)), { recursive: true }); fs.writeFileSync(path.join(seed, file), '// fixture\n'); }
+  fs.mkdirSync(path.join(seed, 'repo', 'tests'), { recursive: true });
+  fs.writeFileSync(path.join(seed, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs'), "require('node:test')('fixture', () => {});\n");
+  git(seed, 'add', '-A');
+  git(seed, 'commit', '-m', 'one');
+  git(seed, 'push', 'origin', 'HEAD:main');
+  const managed = path.join(root, 'managed');
+  git(root, 'clone', origin, managed);
+  git(managed, 'switch', '-c', 'other');
+  fs.writeFileSync(path.join(seed, 'two.txt'), 'two\n');
+  git(seed, 'add', '-A');
+  git(seed, 'commit', '-m', 'two');
+  git(seed, 'push', 'origin', 'HEAD:main');
+  const control = path.join(root, 'control');
+  const moving = marker.markerPath(control).replace(/\\/g, '/');
+  const log = path.join(root, 'moves.log').replace(/\\/g, '/');
+  const hooks = path.join(root, 'hooks');
+  fs.mkdirSync(hooks);
+  for (const [hook, move] of [['post-checkout', 'switch'], ['post-merge', 'merge']]) {
+    fs.writeFileSync(path.join(hooks, hook), `#!/bin/sh\nif [ -e "${moving}" ]; then echo "${move} held" >> "${log}"; else echo "${move} free" >> "${log}"; fi\n`, { mode: 0o755 });
+  }
+  git(managed, 'config', 'core.hooksPath', hooks.replace(/\\/g, '/'));
+  const args = { repoRoot: managed, repoRemote: origin, repoBranch: 'main', repoRootExplicit: true, hub: path.join(control, 'current') };
+  const moves = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : []);
+  return { marker, managed, control, args, moves, ahead: git(seed, 'rev-parse', 'HEAD') };
+}
+
+// Setup once switched and fast-forwarded the managed checkout unguarded; the review found the guard was
+// tested only through its helper, so unwrapping both moves left every setup test green. This runs the
+// real setup step.
+test('setup switches and fast-forwards the managed checkout holding the moving marker, and moves nothing while a reader reads', (t) => {
+  const f = managedFixture(t);
+  const before = git(f.managed, 'rev-parse', 'HEAD');
+  fs.mkdirSync(f.marker.readersPath(f.control), { recursive: true });
+  const reader = path.join(f.marker.readersPath(f.control), 'reader');
+  fs.writeFileSync(reader, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+  assert.throws(() => core.verifyAndUpdateTrustedRepo(f.args, []), /still reading Toolkit's files after 15 seconds, so setup did not move them; run setup again/);
+  assert.equal(git(f.managed, 'rev-parse', 'HEAD'), before, 'HEAD unchanged');
+  assert.equal(git(f.managed, 'branch', '--show-current'), 'other', 'branch unchanged');
+  assert.deepEqual(f.moves(), [], 'git moved nothing');
+  fs.rmSync(reader);
+  const result = core.verifyAndUpdateTrustedRepo(f.args, []);
+  assert.equal(result.update_action, 'fast-forwarded');
+  assert.equal(git(f.managed, 'rev-parse', 'HEAD'), f.ahead);
+  assert.equal(git(f.managed, 'branch', '--show-current'), 'main');
+  assert.deepEqual(f.moves(), ['switch held', 'merge held'], 'each move ran while the marker was held');
+  assert.equal(fs.existsSync(f.marker.markerPath(f.control)), false, 'no marker left');
+});
+
 // Setup moves the managed checkout's files (switch, fast-forward) under the bridge's moving marker, so a
 // session-start hook reading Toolkit in place never loads half-moved modules; it once moved them unguarded.
 test('setup moves the managed checkout only under the moving marker, and never while a reader holds on', (t) => {

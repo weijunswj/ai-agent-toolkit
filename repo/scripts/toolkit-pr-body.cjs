@@ -186,7 +186,9 @@ function readBody(file, cwd, stdin) {
 
 const USAGE = 'Usage: node repo/scripts/toolkit-pr-body.cjs --body-file <file|-> --title <text> --out <file> [--json]\n'
   + 'Removes AI footers, session links and attribution lines, writes the cleaned body to --out, then checks it\n'
-  + 'with the personal-data guard, the UAT line rule and (in the Toolkit repository) the one-Bump-line rule.\n';
+  + 'with the personal-data guard, the UAT line rule, (in the Toolkit repository) the one-Bump-line rule and (in a\n'
+  + 'governed repository) the 3,000-character pull request page budget. In the Toolkit repository it also notes\n'
+  + 'Bump: patch beside a changelog fragment with an Added section; a note never fails the body.\n';
 
 function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, stdin, guard: guardScript = GUARD } = {}) {
   const value = (name) => { const at = argv.indexOf(name); return at >= 0 && at + 1 < argv.length ? argv[at + 1] : undefined; };
@@ -217,7 +219,7 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
     if (guard.config === 'default') lines.push(`This repository has no ${REPO_CONFIG.split(path.sep).join('/')}, so the guard ran with the pre-flight's default (pull request text and AI attribution on).`);
     if (removed.length) lines.push(`Removed ${removed.length} line(s): ${removed.map(entry => `line ${entry.line} (${entry.rule})`).join(', ')}.`);
     lines.push(ok
-      ? `Body ready: ${out} passes the personal-data guard, the UAT line rule and the Bump line rule. Write it with a route that adds no footer, then read it back.`
+      ? `Body ready: ${out} passes the personal-data guard, the UAT line rule, the Bump line rule and the page budget. Write it with a route that adds no footer, then read it back.`
       : `Body not ready (${out} holds the cleaned body); fix by hand:\n${problems.map(problem => `- ${problem}`).join('\n')}`);
     for (const note of notes) lines.push(`Note: ${note}.`);
     stdout.write(`${lines.join('\n')}\n`);

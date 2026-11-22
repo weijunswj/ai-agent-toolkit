@@ -1471,6 +1471,8 @@ test('a refused refresh names its task and the rule it broke on stderr; any othe
     [['--refresh', 'daily-check-in', hand], `${generic}Refresh of daily-check-in refused (TASK_ARGUMENTS): a Toolkit task refresh needs --session bound or fresh, the session its replacement runs in.\n`],
     [['--refresh', 'hourly-nudge', hand, '--params', noProject, '--session', 'bound', '--additions-saved', additions], `${generic}Refresh of hourly-nudge refused (TASK_PARAMS): a required param is missing: project.\n`],
     [['--refresh', 'hourly-nudge', hand, '--params', paramsFile, '--session', 'bound'], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty.\n`],
+    // Options may come before the task kind; the refusal once read the kind only from the first argument after --refresh.
+    [['--refresh', '--session', 'bound', '--params', paramsFile, 'hourly-nudge', hand], `${generic}Refresh of hourly-nudge refused (TASK_ADDITIONS_UNSAVED): a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty.\n`],
     [['--refresh', 'nope', hand, '--session', 'bound'], generic]
   ];
   for (const [args, stderr] of cases) {

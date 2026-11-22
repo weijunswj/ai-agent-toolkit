@@ -3987,6 +3987,7 @@ module.exports = {
   antigravityState,
   fastForwardLocalClone,
   whileManagedTreeMoves,
+  verifyAndUpdateTrustedRepo,
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,

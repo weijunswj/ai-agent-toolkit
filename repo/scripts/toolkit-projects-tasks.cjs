@@ -512,8 +512,18 @@ const GENERIC_REFUSAL = 'Task prompt could not be processed (PROJECT_TASKS_INVAL
 
 // A refused refresh also names its task (the kind, when it is a known one) and the rule it broke.
 // Every other failure prints the generic line only.
+// The task kind of a --refresh: its first positional argument, past any options and their values.
+function refreshKind(args) {
+  if (args[0] !== '--refresh') return undefined;
+  for (let index = 1; index < args.length; index += 1) {
+    if (!String(args[index]).startsWith('--')) return args[index];
+    index += 1;
+  }
+  return undefined;
+}
+
 function refusal(args, error) {
-  const kind = args[0] === '--refresh' ? args[1] : undefined;
+  const kind = refreshKind(args);
   if (!(error instanceof TaskInputError) || !error.rule || !Object.hasOwn(KINDS, kind)) return GENERIC_REFUSAL;
   return `${GENERIC_REFUSAL}Refresh of ${kind} refused (${error.message}): ${error.rule}.\n`;
 }

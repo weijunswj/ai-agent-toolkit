@@ -90,9 +90,36 @@ test('Bump: patch beside a changelog fragment with an Added section is a note, n
   assert.deepEqual(rest, []);
   assert.match(note, /^Bump: patch, but the changelog fragment claude-feature\.md has an Added section; the changelog rule says minor/);
   assert.deepEqual(prBody.bumpNotes(GOOD.replace('Bump: patch', 'Bump: minor'), root), [], 'minor already');
-  const result = run(GOOD);
-  assert.equal(result.code, 0, 'a note never blocks');
-  assert.ok(Array.isArray(result.report.notes));
+});
+
+// The pre-flight itself prints the note, in the Toolkit repository only, and still exits 0; the first
+// test of it only checked that the report had a notes list.
+test('the pre-flight prints the Bump note in the Toolkit repository and still passes the body', () => {
+  const dir = freshRepo();
+  try {
+    const fragments = path.join(dir, 'repo', 'docs', 'changelog.d');
+    fs.mkdirSync(fragments, { recursive: true });
+    fs.writeFileSync(path.join(fragments, 'claude-feature.md'), '### Added\n\n- a new command\n');
+    const out = path.join(dir, 'clean.md');
+    const lines = [];
+    const quiet = { cwd: dir, stdin: GOOD, stdout: { write: (text) => lines.push(text) }, stderr: { write() {} } };
+    const args = ['--body-file', '-', '--title', 'Fix a thing', '--out', out];
+    assert.equal(prBody.main([...args, '--json'], quiet), 0, lines.join(''));
+    assert.deepEqual(JSON.parse(lines.join('')).notes, [], 'not the Toolkit repository: no note');
+    fs.mkdirSync(path.join(dir, 'repo', 'contracts', 'agent-rules'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), '# Rules\n');
+    lines.length = 0;
+    assert.equal(prBody.main([...args, '--json'], quiet), 0, 'a note never blocks');
+    const report = JSON.parse(lines.join(''));
+    assert.equal(report.ok, true);
+    assert.equal(report.notes.length, 1);
+    assert.match(report.notes[0], /^Bump: patch, but the changelog fragment claude-feature\.md has an Added section/);
+    lines.length = 0;
+    assert.equal(prBody.main(args, quiet), 0);
+    assert.match(lines.join(''), /^Body ready: [^\n]*\nNote: Bump: patch, but the changelog fragment claude-feature\.md has an Added section; [^\n]*\.\n$/m);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('an owner UAT ask needs one visible Agent UAT: PASSED line with evidence first', () => {
