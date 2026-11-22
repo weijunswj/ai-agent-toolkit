@@ -1153,7 +1153,8 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
     assert.doesNotMatch(text, staleSweepText, name);
   }
   // The first line is what changed or is stuck; a run with nothing to report posts no first line.
-  const firstLine = daily.split('\n').find(line => line.startsWith('- First line: '));
+  // Split on CRLF too: a Windows checkout ends each line with a carriage return.
+  const firstLine = daily.split(/\r?\n/).find(line => line.startsWith('- First line: '));
   assert.ok(firstLine.startsWith('- First line: what changed or is stuck, starting with any prefixes in this fixed order: CONTEXT RESET DUE, '), firstLine);
   assert.ok(firstLine.endsWith('NEEDS SETUP. A run with nothing changed or stuck posts no first line to the owner.'), firstLine);
   assert.doesNotMatch(daily, /Fold check:/);

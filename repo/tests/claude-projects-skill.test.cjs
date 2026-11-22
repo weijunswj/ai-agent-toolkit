@@ -505,7 +505,9 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /confirm the account copy using a fresh session's observation against main today; an old session's pinned report cannot confirm the release reached the account/);
   assert.doesNotMatch(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`/);
   assert.match(text, /Only the plugin \(two clicks\) and the saved skill card \(one Save\) need the owner: no agent can update them, so you guide the owner with the exact step\./);
-  assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
+  // A quiet run posts nothing: the hourly nudge's CHECK-IN NOT ARMED and RUN MISSED catch a missing run.
+  assert.match(text, /Post to the owner only what changed, is stuck or needs them: a quiet run posts nothing/);
+  assert.doesNotMatch(text, /"nothing changed" included/);
   assert.ok(text.includes('Relay each hourly nudge run too (**Communication**).'));
   assert.doesNotMatch(text, /one line when nothing needs the owner/);
   // The owner-post rule lives on the principles page; new asks still notify at once.
