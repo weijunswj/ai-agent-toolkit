@@ -225,6 +225,8 @@ test('the owner-post rule has one home: the principles page, read before every o
     'Leave out the working detail of gates, helpers and other spawned work (probes, test counts, round-by-round findings, file lists) unless asked: it stays in their full reports and the evidence store',
     "This binds the controller's own posts to the owner, relays included",
     "Asked with the native question method, a card holds only the short question and short options, the pick marked; the context, items and each pick's reason go above it as formatted text",
+    // A one-line status cannot lead with three lines, so only asks, plans and explanations do.
+    'Asks, plans and explanations lead with problem, fix and skip',
   ]) assert.ok(line.includes(phrase), phrase);
   // Every controller type binds the core, which re-reads the page before it posts to the owner.
   assert.ok(read('repo/CONTROLLER.md').includes('before every plan, review, merge decision or owner post'));
@@ -250,6 +252,6 @@ test('the owner-post rule has one home: the principles page, read before every o
   }
   // Ask cards carry only the question and options; the context sits above them.
   for (const rel of [...projects, 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md']) {
-    assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen/i, rel);
+    assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen|three lines below|(?<!above )the card names|native change the card named|copy of the card and (?:the owner's )?answer/i, rel);
   }
 });
