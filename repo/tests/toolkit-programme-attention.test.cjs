@@ -1029,7 +1029,7 @@ test('attention lists every task waiting on the owner, read from the children at
   write(427, doc => { doc.lifecycle = 'WAITING_OWNER'; Object.assign(doc.pr, { number: 902, state: 'MERGED', head: SHA_B }); Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_B }); });
   const json = fx.run(['attention']);
   assert.equal(json.error, null);
-  // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the MERGED · awaiting proof band after it.
+  // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the NOW · CLOSE CHECK band after it.
   assert.deepEqual(json.result.owner_waits, [
     { issue: 425, ask: 'UAT on PR #901', after: 'G2', agent_uat: 'PASSED', uat_head: SHA_B, pr_state: 'OPEN', gate_live: true, pr: 901, head: SHA_B },
     { issue: 423, ask: 'UAT on PR #900', after: null, agent_uat: 'PASSED', uat_head: SHA_A, pr_state: 'MERGED', gate_live: false, pr: 900, head: SHA_A },

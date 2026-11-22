@@ -5,6 +5,9 @@
 
 ### Changed
 
+- The task status `MERGED · awaiting proof` is now `NOW · CLOSE CHECK`, so the board says the controller's close check is next (judge DONE WHEN against what merged, then close the task, plan its next slice or queue it again). It keeps its place in the NOW band and its one-hour `TASK_MERGED_OPEN` alarm, and CURRENT reads `merged, close check`. `NOW · AGENT UAT` still marks a recorded test the agent owes.
+- The full bridge test suite is split by area into `toolkit-local-bridge.test.cjs`, `toolkit-local-bridge-repo-update.test.cjs` and `toolkit-local-bridge-hook-update.test.cjs`, so each file runs well inside the per-file time budget.
+
 - A merged child kept open on purpose (`Kept open:`) is no longer skipped for ever: once no lane, holder, write or comment has touched it for six hours, the sweep raises `TASK_MERGED_OPEN` again, saying it was kept open, and the stale check shows it as a `KEPT OPEN?` row. A longer planned wait is a dispose with a reason, which holds while the child stays still.
 - In a cloud session, an evidence store that answers 401, 403 or 404 now says it is not reachable from that session and that the check waits for the owner's computer, instead of advising a different store.
 

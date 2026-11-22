@@ -1908,16 +1908,17 @@ function revisionLine(parent, children) {
 
 // A row's Status is worked out, never stored. A task in progress (an open or draft PR, or active,
 // waiting on the owner or held) is NOW: `NOW · IN PROGRESS`, or `NOW · QUEUED` while its state lists
-// a blocker, since it cannot move until that clears, or `MERGED · awaiting proof` once its task PR
-// merged while the issue stays open (awaitingProof), or `NOW · AGENT UAT` before that while the
+// a blocker, since it cannot move until that clears, or `NOW · CLOSE CHECK` once its task PR
+// merged while the issue stays open (closeCheckDue), so the controller's close check is next, or
+// `NOW · AGENT UAT` before that while the
 // agent still owes its UAT (agentUatDue). Every other open task, optional ones too, is
 // `LATER`; a finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is
 // COMPLETED or RETIRED. A planned release names where the work merges; it does not change the
 // status. Waiting on names what an active task waits for; PRs, review and UAT are on its own page,
 // which lists every PR. Rows sort by these open bands, then COMPLETED, then RETIRED (graphOrder).
-const MERGED_AWAITING_PROOF = 'MERGED · awaiting proof';
+const NOW_CLOSE_CHECK = 'NOW · CLOSE CHECK';
 const NOW_AGENT_UAT = 'NOW · AGENT UAT';
-const GRAPH_BANDS = Object.freeze(['NOW · IN PROGRESS', NOW_AGENT_UAT, MERGED_AWAITING_PROOF, 'NOW · QUEUED', 'LATER']);
+const GRAPH_BANDS = Object.freeze(['NOW · IN PROGRESS', NOW_AGENT_UAT, NOW_CLOSE_CHECK, 'NOW · QUEUED', 'LATER']);
 const GRAPH_HEADER = ['| Task | Child # | Status | Waiting on | Last Updated (SGT) |', '|---|---|---|---|---|'];
 // The parent keeps this many COMPLETED rows, the most recent; older ones and every RETIRED row sit
 // in archive comments behind one link line.
@@ -1992,8 +1993,8 @@ function lastUpdated(outcome, child, issue, comments) {
   return Number.isFinite(newest) ? new Date(newest + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '-';
 }
 
-// Active rows by status band (GRAPH_BANDS: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting
-// proof, NOW · QUEUED, LATER), so moving work
+// Active rows by status band (GRAPH_BANDS: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK,
+// NOW · QUEUED, LATER), so moving work
 // leads parked work. Inside a band: rows pinned last (`last`) after the rest, so tasks added later
 // still sort before them; optional tasks after the rest of LATER; then priority (`order`, lowest
 // first) and child issue number, so the top LATER row starts next. Then every finished row, oldest
@@ -2035,7 +2036,7 @@ function orderTies(parent, children) {
     .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
 }
 
-// The Status cell (see above): NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW ·
+// The Status cell (see above): NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW ·
 // QUEUED, LATER, COMPLETED or RETIRED. A live gate outranks a listed blocker; once it returns, the
 // blocker queues the task again, merged or not.
 function statusCell(outcome, child) {
@@ -2043,15 +2044,15 @@ function statusCell(outcome, child) {
   if (cls === '-') return statusText(outcome, child);
   if (cls !== 'NOW') return 'LATER';
   if (child?.blockers?.length && !gateLive(child)) return 'NOW · QUEUED';
-  if (!awaitingProof(outcome, child)) return 'NOW · IN PROGRESS';
-  return agentUatDue(outcome, child) ? NOW_AGENT_UAT : MERGED_AWAITING_PROOF;
+  if (!closeCheckDue(outcome, child)) return 'NOW · IN PROGRESS';
+  return agentUatDue(outcome, child) ? NOW_AGENT_UAT : NOW_CLOSE_CHECK;
 }
 
-// True when a merged task's only proof left starts with the agent's UAT (awaitingProof, and the
+// True when a merged task's only proof left starts with the agent's UAT (closeCheckDue, and the
 // agent owes the owed UAT: uatOwer). Once the agent's UAT passes, or is found owner-only, the row
-// reads MERGED · awaiting proof with the owner's UAT.
+// reads NOW · CLOSE CHECK with the owner's UAT.
 function agentUatDue(outcome, child) {
-  return awaitingProof(outcome, child) && uatOwer(child) === 'agent';
+  return closeCheckDue(outcome, child) && uatOwer(child) === 'agent';
 }
 
 // The head of a landed task's owed agent UAT that has not started, or null: the agent owes it
@@ -2085,9 +2086,9 @@ function agentUatProgress(outcome, child) {
 // True when a task in progress has only proof left: its tracked task PR merged, no task PR is open
 // or draft, no blocker is listed and no gate is still at it (none, or its gate RETIRED; an assigned,
 // active, submitted, owner-waiting or interrupted gate keeps the task in progress). The issue stays
-// open until its proof (an owed UAT, a closing check) lands, so the row reads MERGED · awaiting
-// proof, not a gate that has already returned.
-function awaitingProof(outcome, child) {
+// open until its proof (an owed UAT, a closing check) lands, so the row reads NOW · CLOSE
+// CHECK, not a gate that has already returned.
+function closeCheckDue(outcome, child) {
   return graphClass(outcome, child) === 'NOW' && child.pr?.state === 'MERGED' && !child.blockers?.length
     && (!child.gate?.role || child.gate.state === 'RETIRED')
     && ![child.pr, ...(child.prs || [])].some(pr => ['OPEN', 'DRAFT'].includes(pr?.state));
@@ -2200,7 +2201,7 @@ function waitingCell(outcome, child) {
   const agent = agentStep(outcome, child);
   if (agent) return `${agent.after ? `${agent.after}, then ` : ''}Agent: ${agent.ask}`;
   if (child.blockers?.length) return `${gateLive(child) ? `${publicText(child.gate.role)}, then ` : ''}Blocked: ${child.blockers.map(publicText).join('; ')}`;
-  return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role && !awaitingProof(outcome, child) ? publicText(child.gate.role) : '-';
+  return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role && !closeCheckDue(outcome, child) ? publicText(child.gate.role) : '-';
 }
 
 // The issue number a graph row names: its Child # cell.
@@ -2233,7 +2234,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW · IN PROGRESS, ${NOW_AGENT_UAT}, ${MERGED_AWAITING_PROOF}, NOW · QUEUED, LATER, each by priority (optional tasks last in LATER${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? '; pinned tasks end their band' : ''}), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: NOW · IN PROGRESS, ${NOW_AGENT_UAT}, ${NOW_CLOSE_CHECK}, NOW · QUEUED, LATER, each by priority (optional tasks last in LATER${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? '; pinned tasks end their band' : ''}), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2264,7 +2265,7 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
 }
 
 // The generated CURRENT summary, kept slim: the board line, the tasks in progress in Programme Graph
-// order (each with its PR, gate or `merged, awaiting proof`, and any wait on the owner), then one line with the attention counts
+// order (each with its PR, gate or `merged, close check`, and any wait on the owner), then one line with the attention counts
 // and the holds (tasks blocked or on hold), then any open PASS_STOPPED finding in full, since a
 // stopped pass means the page itself may be behind. What starts next is the graph's order; every
 // other finding is in `programme.cjs attention`.
@@ -2279,7 +2280,7 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
     const whose = owner ? 'your' : 'agent';
     const blocked = !step && row.child.blockers.length ? `blocked: ${row.child.blockers.map(publicText).join('; ')}` : null;
     return `- ${[`#${row.outcome.issue} ${taskName(row.outcome, issues.get(row.outcome.issue))}`, row.child.pr.number ? `PR #${row.child.pr.number}` : null,
-      awaitingProof(row.outcome, row.child) ? 'merged, awaiting proof' : row.child.gate.role ? publicText(row.child.gate.role) : null,
+      closeCheckDue(row.outcome, row.child) ? 'merged, close check' : row.child.gate.role ? publicText(row.child.gate.role) : null,
       step && !step.after ? (owner ? `waiting on you: your ${step.ask}` : `agent ${step.ask}`) : blocked,
       step?.after ? `then ${whose} ${step.ask}` : null].filter(Boolean).join(' · ')}`;
   });

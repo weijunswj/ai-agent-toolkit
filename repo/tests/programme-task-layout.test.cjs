@@ -1153,13 +1153,13 @@ test('QUEUED_BUT_MOVING refuses ack, holds a dispose while it stands, and clears
   assert.deepEqual(f.store.read('child', 806).doc.blockers, []);
 });
 
-test('the parent page counts the work queue and the graph row is the task, its number and MERGED · awaiting proof', () => {
+test('the parent page counts the work queue and the graph row is the task, its number and NOW · CLOSE CHECK', () => {
   const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   f.reconciler().run({ apply: true });
   const body = f.github.issues.get(421).body;
   assert.match(body, /Attention: \d+ new, 0 acknowledged, 1 in the work queue/);
   assert.doesNotMatch(body, /\*\*Work queue\*\*/, 'CURRENT counts the work queue; the attention command lists it');
-  assert.match(body, /^\|Issue 806\|#806\|MERGED · awaiting proof\|-\|/m, 'a merged task kept open reads merged, not in progress');
+  assert.match(body, /^\|Issue 806\|#806\|NOW · CLOSE CHECK\|-\|/m, 'a merged task kept open reads merged, not in progress');
 });
 
 // The batch rule: BATCH_NEXT, on the parent, says no NOW task needs a gate lane while LATER has work.
