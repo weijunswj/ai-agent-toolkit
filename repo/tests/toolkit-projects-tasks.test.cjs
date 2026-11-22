@@ -1518,3 +1518,26 @@ test('ping rules: each invariant and matrix row is pinned in the file that state
   ];
   for (const [label, rel, phrase] of rows) assert.ok(at(rel).includes(phrase), `${label}: ${rel}`);
 });
+
+// Owner rule: the handoff refresh never runs in a scheduled task. No host marks a session as
+// scheduled, so every Toolkit task prompt's first tool call creates the file the after-tool handoff
+// hook checks first (it runs after each call, so that first call is covered), and whoever runs a
+// ping run's tool steps does the same. The file name is the one the hook reads.
+test('every Toolkit scheduled task keeps the handoff refresh out of its session with its first tool call', () => {
+  const step = '- Your very first tool call, before the first check: run `touch ~/.toolkit-handoff-off` in a shell. The empty file turns Toolkit\'s handoff hook off for this scheduled session.';
+  for (const kind of Object.keys(PARAMS)) {
+    for (const session of ['bound', 'fresh']) {
+      const promptParams = validateParams(kind, { ...PARAMS[kind], session });
+      const stored = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
+      const [block] = findBlocks(stored).blocks;
+      assert.equal(block.body.split('\n')[1], step, `${kind} ${session}: the stored prompt's first step`);
+      const loaded = tasks().expand(kind, promptParams);
+      if (block.name === 'TASK-PING') assert.ok(loaded.includes(step), `${kind} ${session}: an unswapped pointer's run gets it too`);
+    }
+  }
+  for (const file of ['ping-run.md', 'hourly-nudge.md', 'daily-check-in.md']) {
+    assert.ok(fs.readFileSync(path.join(TASKS, file), 'utf8').includes('first runs `touch ~/.toolkit-handoff-off`'), `${file}: tool steps set it first`);
+  }
+  const hook = fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-handoff-hook.cjs'), 'utf8');
+  assert.ok(hook.includes("'.toolkit-handoff-off'"), 'the hook reads the file the prompts create');
+});

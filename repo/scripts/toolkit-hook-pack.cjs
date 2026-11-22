@@ -49,6 +49,7 @@ const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'unset', 'legacy-on', 'v1']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
+const POSTCONDITIONS = Object.freeze(['no-local-decision-write', 'no-handoff-write', 'handoff-write']);
 const HOST_SESSIONS = Object.freeze(['matching', 'mismatching', 'empty']);
 const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'issue', 'note', 'steps', 'host_session', 'postcondition']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
@@ -107,7 +108,7 @@ function rowErrors(row) {
     if (typeof row.note !== 'string' || !row.note.trim()) errors.push('a row whose hosts decide differently needs a note saying why');
   }
   if (!STATUSES.includes(row.status)) errors.push(`status must be ${STATUSES.join(' or ')}`);
-  if (row.postcondition !== undefined && row.postcondition !== 'no-local-decision-write') errors.push('unknown postcondition');
+  if (row.postcondition !== undefined && !POSTCONDITIONS.includes(row.postcondition)) errors.push('unknown postcondition');
   if (row.status === 'known-bad') {
     if (typeof row.lane !== 'string' || !row.lane.trim()) errors.push('a known-bad row names the lane that fixes it');
     if (typeof row.added !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.added)) errors.push('a known-bad row gives the date it was added (YYYY-MM-DD)');
@@ -151,7 +152,8 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff_off'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -404,6 +406,9 @@ class Fixture {
     if (!spec.repo && !spec.evidence_merge) this.env.GH_REPO = 'toolkit-test-fixture/fixture';
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
+    // A scheduled session's handoff signal: from its launcher, or the file its first tool step makes.
+    if (spec.handoff_off === 'env') this.env.TOOLKIT_HANDOFF_HOOK = 'off';
+    if (spec.handoff_off === 'file') fs.writeFileSync(path.join(this.home, '.toolkit-handoff-off'), '');
     if (spec.repo) this.#repo(spec.repo);
     if (spec.repo?.legacy_answer) {
       const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
@@ -789,6 +794,10 @@ async function runOnHost(row, host, fixture, roots) {
   if (row.host_session !== undefined) env.TOOLKIT_HOST_SESSION = row.host_session === 'matching' ? payload.session_id : row.host_session === 'empty' ? '' : 'different-fixture-session';
   const decisionFile = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   const oldDecision = fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null;
+  // The handoff hook's session files: their names and times, before and after the event.
+  const handoffSessions = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'handoff-sessions');
+  const handoffWrites = () => (fs.existsSync(handoffSessions) ? fs.readdirSync(handoffSessions).map(name => `${name}:${fs.statSync(path.join(handoffSessions, name)).mtimeMs}`).sort().join('|') : '');
+  const oldHandoff = handoffWrites();
   const before = fixture.snapshot();
   const decisions = [];
   const contexts = [];
@@ -801,6 +810,8 @@ async function runOnHost(row, host, fixture, roots) {
   }
   const problems = [];
   if (row.postcondition === 'no-local-decision-write' && (fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null) !== oldDecision) problems.push('a local governance decision was written');
+  if (row.postcondition === 'no-handoff-write' && handoffWrites() !== oldHandoff) problems.push('the handoff hook wrote its session file');
+  if (row.postcondition === 'handoff-write' && handoffWrites() === oldHandoff) problems.push('the handoff hook wrote no session file');
   const after = fixture.snapshot();
   const changedFiles = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(file => before[file] !== after[file]);
   if (changedFiles.length) problems.push(`a fixture file changed: ${changedFiles.join(', ')}`);

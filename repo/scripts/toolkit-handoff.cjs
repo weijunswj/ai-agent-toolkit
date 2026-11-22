@@ -5,13 +5,28 @@
 // the controller health check (`toolkit-controller-check.cjs`, check `handoff`) compares it read-only.
 //
 // Layout, under a store checkout or any folder: evidence/handoff/<owner>/<repo>/
-//   manifest.json  the current file set (path, sha256, source) and the stamp (taken_at, toolkit
+//   manifest.json  the current file set (path, sha256, source, modified) and the stamp (taken_at, toolkit
 //                  version, the repository's default-branch commit); the stamp is outside the compare
 //   README.md      what the folder is (fixed text)
 //   MEMORY.md      the memory folder's index; memory/ its other files
 //   files/         the saved instructions (instructions.<ext>) and each named working file
 // A file not listed in manifest.json is an older copy: nothing here deletes a file.
 // Every source is secret-scanned before anything is written; one finding refuses the whole run.
+//
+// Every run decides file by file, so a session holding an older copy (a memory folder synced when it
+// started) never overwrites or drops what another session wrote later:
+//   - a file the snapshot lacks is added;
+//   - a file whose content differs is written only when this copy of that file is newer than its row
+//     (an equal time keeps the row; a row with no time is given a fixed one, see pick);
+//   - a row whose file is missing here stays: missing means unknown, not deleted. It is dropped only
+//     when the session baseline (the files this session held, from the after-tool hook) shows this
+//     session held that file and deleted it, and its source is reachable here;
+//   - a source whose modified times are not real (most of its files saved within one minute: a plain
+//     copy) is judged once, from the baseline when there is one; then a differing file is written only
+//     when this session changed it since its baseline.
+// Ordering trusts each machine's clock, so clock skew between machines can misorder saves made within
+// the skew. A file deleted in one session comes back when a later session still holds an older copy
+// of it (the earlier full-copy refresh did the same).
 
 const crypto = require('node:crypto');
 const nodeFs = require('node:fs');
@@ -22,6 +37,8 @@ const SCHEMA = 'toolkit.handoff-snapshot.v1';
 const ROOT = 'evidence/handoff';
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 2000;
+// Files whose modified times fall within this span were saved at one moment.
+const COPY_SPAN_MS = 60 * 1000;
 // ignoreBOM keeps a byte-order mark in the copy, so the copy's sha256 is the one its manifest row records.
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const NAME = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
@@ -88,13 +105,15 @@ function fileNames(files) {
 
 function readText(fs, file) {
   let bytes;
+  let modified;
   try {
     const stat = fs.lstatSync(file);
     if (!stat.isFile()) return null;
     if (stat.size > MAX_FILE_BYTES) throw new HandoffError(`${file} is over 5 MB.`, 'leave it out of the snapshot.');
     bytes = fs.readFileSync(file);
+    modified = Number.isFinite(stat.mtimeMs) ? new Date(stat.mtimeMs).toISOString() : null;
   } catch (error) { if (error instanceof HandoffError) throw error; return null; }
-  try { return { text: UTF8.decode(bytes), sha256: sha256(bytes) }; } catch { throw new HandoffError(`${file} is not UTF-8 text.`, 'leave it out of the snapshot.'); }
+  try { return { text: UTF8.decode(bytes), sha256: sha256(bytes), modified }; } catch { throw new HandoffError(`${file} is not UTF-8 text.`, 'leave it out of the snapshot.'); }
 }
 
 // Every plain file under a memory folder (links and dot-names skipped), as paths relative to it.
@@ -116,7 +135,7 @@ function memoryFiles(fs, dir) {
 // Reads and scans every reachable source. A source that is not reachable here (missing, or a path
 // that is not a full path on this computer) is returned in `kept`, unread, so the last copy and its
 // manifest rows stay as they were.
-function readSources(sources, { fs = nodeFs, platform = process.platform } = {}) {
+function readSources(sources, { fs = nodeFs, platform = process.platform, scan = true } = {}) {
   const entries = [];
   const kept = [];
   const add = (dest, source, read) => entries.push({ path: dest, source, ...read });
@@ -137,7 +156,7 @@ function readSources(sources, { fs = nodeFs, platform = process.platform } = {})
     const read = fullPathHere(file, platform) ? readText(fs, file) : null;
     if (read) add(dest, file, read); else kept.push(file);
   }
-  const findings = entries.flatMap(entry => scanText(entry.text).map(found => `${entry.source === sources.memory ? path.join(sources.memory, entry.path.replace(/^memory\//, '')) : entry.source}:${found.line} (${found.rule})`));
+  const findings = !scan ? [] : entries.flatMap(entry => scanText(entry.text).map(found => `${entry.source === sources.memory ? path.join(sources.memory, entry.path.replace(/^memory\//, '')) : entry.source}:${found.line} (${found.rule})`));
   if (findings.length) throw new HandoffError(`secret scan found ${findings.length} match(es): ${findings.slice(0, 5).join(', ')}. Nothing was written.`, 'remove the value from the source, then run handoff again.');
   return { entries, kept };
 }
@@ -151,26 +170,83 @@ function readManifest(base, folder, { fs = nodeFs } = {}) {
 
 // The file set a run would record: every reachable source as read now, plus the last manifest's rows
 // for sources not reachable here. Sorted by path, so the compare is stable.
-function fileSet({ entries, kept }, previous) {
-  const rows = entries.map(({ path: dest, sha256: hash, source }) => ({ path: dest, sha256: hash, source }));
-  const carried = (previous?.files || []).filter(row => kept.includes(row.source) && !rows.some(item => item.path === row.path));
-  return [...rows, ...carried].sort((a, b) => a.path.localeCompare(b.path));
+const rowOf = ({ path: dest, sha256: hash, source, modified }) => ({ path: dest, sha256: hash, source, ...(modified ? { modified } : {}) });
+const seenOf = entries => entries.map(({ path: dest, sha256: hash, source, modified }) => ({ path: dest, sha256: hash, source, ...(modified ? { modified } : {}) }));
+const byPath = (a, b) => a.path.localeCompare(b.path);
+
+// Whether a source's modified times are real: false when more than half of two or more files were
+// saved within one minute of each other (a plain copy, or a clone, gives every file one time).
+function realTimes(times) {
+  const sorted = times.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length !== times.length) return false;
+  if (sorted.length < 2) return true;
+  let most = 0;
+  for (let start = 0, end = 0; end < sorted.length; end += 1) {
+    while (sorted[end] - sorted[start] > COPY_SPAN_MS) start += 1;
+    most = Math.max(most, end - start + 1);
+  }
+  return most * 2 <= sorted.length;
+}
+
+// Each source's realness from a set of rows ({ source, modified }).
+function realBySource(rows) {
+  const times = new Map();
+  for (const row of rows) times.set(row.source, [...(times.get(row.source) || []), Date.parse(row.modified || '')]);
+  return Object.fromEntries([...times].map(([source, list]) => [source, realTimes(list)]));
+}
+
+// The file set a run records (see the top of this file). `session` is the hook's session file:
+// { rows: the files this session held when last seen, real: each source's realness when it started },
+// or null for a run with no session (no deletions, realness judged from the files here now).
+function pick({ entries, kept }, previous, session = null) {
+  const prev = new Map((previous?.files || []).map(row => [row.path, row]));
+  const baseline = Array.isArray(session?.rows) ? session.rows.filter(row => row && typeof row.path === 'string') : null;
+  const seen = baseline ? new Map(baseline.map(row => [row.path, row.sha256])) : null;
+  const real = session?.real && typeof session.real === 'object' ? session.real : realBySource(baseline || entries);
+  // A row with no time (written before rows carried one) gets a fixed time the first time a run
+  // keeps it: this copy's own time when its content matches (and its source's times are real), else
+  // the time of the snapshot that wrote it. It then never moves with later snapshots.
+  const takenAt = typeof previous?.stamp?.taken_at === 'string' && !Number.isNaN(Date.parse(previous.stamp.taken_at)) ? new Date(previous.stamp.taken_at).toISOString() : null;
+  const timed = (row, entry = null) => {
+    if (row.modified) return row;
+    const own = entry && entry.sha256 === row.sha256 && real[entry.source] !== false ? entry.modified : null;
+    return own || takenAt ? { ...row, modified: own || takenAt } : row;
+  };
+  const rowTime = row => { const time = Date.parse(row.modified || ''); return Number.isNaN(time) ? -Infinity : time; };
+  const out = [];
+  const writes = [];
+  for (const entry of entries) {
+    const row = prev.get(entry.path) ? timed(prev.get(entry.path), entry) : null;
+    let take;
+    if (!row) take = true;
+    else if (row.sha256 === entry.sha256) take = false;
+    else if (real[entry.source] !== false) take = Date.parse(entry.modified || '') > rowTime(row);
+    else take = Boolean(seen) && seen.get(entry.path) !== entry.sha256;
+    if (take) { out.push(rowOf(entry)); writes.push(entry); } else out.push(row);
+  }
+  // A row whose file is missing here stays, unless this session held that file and deleted it while
+  // its source was reachable.
+  const here = new Set(entries.map(entry => entry.path));
+  for (const row of prev.values()) {
+    if (!here.has(row.path) && !(seen && seen.has(row.path) && !(kept || []).includes(row.source))) out.push(timed(row));
+  }
+  return { files: out.sort(byPath), writes, real };
 }
 
 const sameFiles = (a, b) => JSON.stringify((a || []).map(row => [row.path, row.sha256])) === JSON.stringify((b || []).map(row => [row.path, row.sha256]));
 
 // Works out one run: the folder, the new manifest, what to write, and whether anything changed.
-function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform }) {
+function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform, session = null, scan = true }) {
   const folder = snapshotFolder(repository);
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'run it from a checkout of the controlled repository, or name one with --repo-root.');
   const previous = readManifest(base, folder, { fs });
   const chosen = chooseSources(sources, previous);
   if (!hasSources(chosen)) throw new HandoffError('no sources were named and no earlier snapshot remembers any.', 'name --memory <folder>, --instructions <file> or --file <path> once; later runs remember them.');
-  const read = readSources(chosen, { fs, platform });
-  const files = fileSet(read, previous);
-  const unchanged = Boolean(previous) && sameFiles(previous.files, files);
-  const manifest = { schema: SCHEMA, stamp, sources: chosen, files };
-  return { folder, previous, manifest, unchanged, kept: read.kept, writes: read.entries };
+  const read = readSources(chosen, { fs, platform, scan });
+  const picked = pick(read, previous, session);
+  const unchanged = Boolean(previous) && sameFiles(previous.files, picked.files);
+  const manifest = { schema: SCHEMA, stamp, sources: chosen, files: picked.files };
+  return { folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, seen: seenOf(read.entries), real: picked.real };
 }
 
 // Writes the snapshot and returns an undo that puts every file it touched back as it was (a file it
@@ -198,7 +274,13 @@ function write(base, { folder, manifest, writes }, repository, { fs = nodeFs } =
   return undo;
 }
 
-// Read-only: is the snapshot current with its live sources? STALE names what changed; a source not
+// The session baseline: each reachable source file's snapshot path, sha256, source and modified time
+// as this session holds it now. Read-only, no secret scan (nothing is written from it).
+function sessionRows(sources, { fs = nodeFs, platform = process.platform } = {}) {
+  return seenOf(readSources(sources, { fs, platform, scan: false }).entries);
+}
+
+// Read-only: would a run change the snapshot? STALE names what it would change; a source not
 // reachable here is not counted as a change.
 function check({ base, repository, sources = null, now = new Date(), fs = nodeFs, platform = process.platform }) {
   const folder = snapshotFolder(repository);
@@ -207,7 +289,7 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   if (!previous) return { state: 'MISSING', folder };
   const chosen = chooseSources(sources, previous);
   const read = readSources(chosen, { fs, platform });
-  const files = fileSet(read, previous);
+  const { files } = pick(read, previous);
   const before = new Map(previous.files.map(row => [row.path, row.sha256]));
   const after = new Map(files.map(row => [row.path, row.sha256]));
   const changed = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key)).sort();
@@ -216,4 +298,4 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   return { state: changed.length ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, kept: read.kept };
 }
 
-module.exports = Object.freeze({ SCHEMA, ROOT, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, plan, write, check });
+module.exports = Object.freeze({ SCHEMA, ROOT, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, plan, write, check, sessionRows, realBySource });
