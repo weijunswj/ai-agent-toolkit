@@ -567,7 +567,8 @@ cp.spawnSync = (command, args = [], options) => {
   return real(command, args, options);
 };`);
   const script = `require(${JSON.stringify(require.resolve('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs'))}).startStaleSweep(${JSON.stringify(checkout)}, { refreshDir: ${JSON.stringify(dir)} });`;
-  const env = { ...process.env, HOME: home, USERPROFILE: home, NODE_OPTIONS: `--require ${JSON.stringify(preload)}` };
+  // Append to NODE_OPTIONS: a test runner's own preloads (the clock-ahead run's date offset) must reach the started run too.
+  const env = { ...process.env, HOME: home, USERPROFILE: home, NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require ${JSON.stringify(preload)}`].filter(Boolean).join(' ') };
   const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000, env });
   assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', '']);
   const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
