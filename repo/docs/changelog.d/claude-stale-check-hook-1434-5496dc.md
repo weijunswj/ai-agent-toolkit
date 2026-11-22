@@ -7,3 +7,4 @@ Title: stale check from the session-start hook
 - A child whose gate is still live (at work on a task waiting on the owner, or blocked) is never offered to the owner to close: programme owner waits now carry `gate_live`, and only a wait with no live gate becomes an `OWNER OK?` row.
 - A cloud session never reads the programme store at session start. Inside a governed repository it shows the attention and stale-check lines from its own cache, or else says plainly that both run at the next session start on the owner's computer.
 - The Projects daily check-in no longer runs the stale sweep, and no longer posts a "nothing changed" line to the owner: a quiet run posts nothing, and the hourly nudge still catches a missed run.
+- The stale check's `--stale-stamp` option is gone: each repository now keeps its own stamp. A Projects daily check-in armed before this change stops with "unknown argument" until it is armed again.
