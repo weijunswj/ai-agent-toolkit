@@ -891,6 +891,63 @@ test('the CI duration check reads the downloaded shard summaries and never passe
   assert.equal(main(['--ci'], { out: sink(), err: sink(), env: { RUNNER_TEMP: temp } }), 1);
 });
 
+// A failed-only rerun skips a passing shard, so the duration check in the new attempt re-reads that
+// shard's older summary. The failure line then says so, since only a full rerun measures it again.
+function rerunCheck(t) {
+  const { main } = require('../scripts/check-test-durations.cjs');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'durations-rerun-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const dir = path.join(temp, 'test-summaries');
+  fs.mkdirSync(dir);
+  const sink = () => { let text = ''; return { write: (chunk) => { text += chunk; }, text: () => text }; };
+  const summary = (number, seconds) => ({ schema: shards.SUMMARY_SCHEMA, system: 'windows', exit_code: 0, node: 'v22', shard: 'windows-1', run_attempt: number, files: [{ file: 'repo/tests/a.test.cjs', seconds }], missing: [] });
+  return {
+    write: (number, seconds) => fs.writeFileSync(path.join(dir, `test-summary-windows-1-attempt-${number}.json`), JSON.stringify(summary(number, seconds))),
+    run: (runAttempt) => {
+      const out = sink();
+      const err = sink();
+      const env = { RUNNER_TEMP: temp };
+      if (runAttempt !== undefined) env.GITHUB_RUN_ATTEMPT = runAttempt;
+      return { code: main(['--ci'], { out, err, env }), out: out.text(), err: err.text() };
+    },
+  };
+}
+const OVER_BUDGET_LINE = /^- windows: repo\/tests\/a\.test\.cjs took 100000 s, over its \d+ s budget$/m;
+
+test('the CI duration check says a failed-only rerun re-read a passing shard time and asks for a full rerun', (t) => {
+  const check = rerunCheck(t);
+  check.write(1, 100000);
+  const result = check.run('2');
+  assert.equal(result.code, 1);
+  assert.match(result.err, /^- windows: repo\/tests\/a\.test\.cjs took 100000 s, over its \d+ s budget; measured in attempt 1 of shard windows-1, which passed and was not run again: a failed-only rerun reads this same time; rerun all jobs$/m);
+});
+
+test('the CI duration check keeps the plain line when the slow time is from this attempt', (t) => {
+  const check = rerunCheck(t);
+  check.write(1, 100000);
+  // The summary is from this run attempt, or no usable run attempt is known.
+  for (const runAttempt of ['1', undefined, '', 'abc', '0', '1.5']) {
+    const result = check.run(runAttempt);
+    assert.equal(result.code, 1, String(runAttempt));
+    assert.match(result.err, OVER_BUDGET_LINE, String(runAttempt));
+  }
+  // A newer attempt of that shard ran again and is still over its budget.
+  check.write(2, 100000);
+  const result = check.run('2');
+  assert.equal(result.code, 1);
+  assert.match(result.err, OVER_BUDGET_LINE);
+});
+
+test('the CI duration check passes in a rerun attempt when every newest time is under budget', (t) => {
+  const check = rerunCheck(t);
+  check.write(1, 100000);
+  check.write(2, 1);
+  const result = check.run('2');
+  assert.equal(result.code, 0);
+  assert.match(result.out, /Test duration check passed\./);
+  assert.equal(result.err, '');
+});
+
 test('this repository declares a valid per-file budget for every system', () => {
   // The CI duration check enforces it on each run's own times; recorded times can be from a slower run.
   const { checkDurations } = require('../scripts/check-test-durations.cjs');

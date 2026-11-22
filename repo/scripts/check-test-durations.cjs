@@ -8,7 +8,9 @@
 //
 // Each report is a run-tests.cjs --summary or --report-durations file. --ci reads every shard summary
 // the validate job downloaded to $RUNNER_TEMP/test-summaries (the same folder run-tests.cjs
-// --verify-ci checks), so CI fails a file over its budget. The budget lives in the
+// --verify-ci checks), so CI fails a file over its budget. When that file's newest time is from an
+// earlier attempt than GITHUB_RUN_ATTEMPT, the failure says a failed-only rerun read the same time
+// again and asks for a rerun of all jobs. The budget lives in the
 // shard manifest (repo/contracts/ci/test-shards.json) under `budgets`:
 //
 //   "budgets": {
@@ -72,8 +74,16 @@ function budgetErrors(budgets) {
   return errors;
 }
 
+// A failed-only rerun does not run a shard that passed, so the check in the new attempt reads that
+// shard's older summary again. Saying so points to the rerun that measures it again.
+function rerunNote(report, runAttempt) {
+  if (!Number.isInteger(runAttempt) || report.shard === undefined || report.run_attempt === undefined || report.run_attempt >= runAttempt) return '';
+  return `; measured in attempt ${report.run_attempt} of shard ${report.shard}, which passed and was not run again: a failed-only rerun reads this same time; rerun all jobs`;
+}
+
 // The check over parsed reports. Returns { errors, lines } and never touches the file system.
-function checkDurations(reports, budgets = {}) {
+// runAttempt is the CI run attempt the check runs in, when known.
+function checkDurations(reports, budgets = {}, { runAttempt } = {}) {
   const errors = budgetErrors(budgets);
   const lines = [];
   const perFile = (budgets && budgets.seconds_per_file) || {};
@@ -88,7 +98,7 @@ function checkDurations(reports, budgets = {}) {
     for (const [file, seconds] of sorted) {
       const raise = raised[`${report.system}:${file}`];
       const allowed = raise ? raise.seconds : limit;
-      if (seconds > allowed) errors.push(`${report.system}: ${file} took ${seconds} s, over its ${allowed} s budget${raise ? ' (raised)' : ''}`);
+      if (seconds > allowed) errors.push(`${report.system}: ${file} took ${seconds} s, over its ${allowed} s budget${raise ? ' (raised)' : ''}${rerunNote(report, runAttempt)}`);
     }
     lines.push(`${report.system}: ${sorted.length} file(s) checked against ${limit} s per file`);
   }
@@ -110,15 +120,17 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     return 2;
   }
   let files = argv;
+  let runAttempt;
   if (argv[0] === CI_ARGUMENT) {
     try { files = ciReportFiles(env); }
     catch (error) {
       err.write(`Test duration check could not run: ${error.message}\n`);
       return 2;
     }
+    if (/^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT || '')) runAttempt = Number(env.GITHUB_RUN_ATTEMPT);
   }
   const reports = files.map((file) => readReport(JSON.parse(fs.readFileSync(file, 'utf8'))));
-  const { errors, lines } = checkDurations(newestAttempts(reports), shards.loadManifest(root).budgets);
+  const { errors, lines } = checkDurations(newestAttempts(reports), shards.loadManifest(root).budgets, { runAttempt });
   for (const line of lines) out.write(`${line}\n`);
   if (errors.length) {
     err.write(`Test duration check failed:\n- ${errors.join('\n- ')}\n`);
