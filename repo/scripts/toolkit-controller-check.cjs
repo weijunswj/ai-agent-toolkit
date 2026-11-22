@@ -13,13 +13,14 @@
 //                                            chat updates Toolkit and rereads its rules on its own
 //   guidebook, instructions, memory, tasks   Claude Projects only
 //   programme, traces, stale                 only where the checkout's programme binding says
-//                                            governance is enabled; stale is the daily stale sweep:
-//                                            at most once per local date per repository (a stamp file
-//                                            in the Toolkit user-state folder, local bookkeeping only,
-//                                            never GitHub or repository state), it lists children to
-//                                            close, fold or move and a full polish child, as one
-//                                            owner-approve list; obsolete children need judgement, so
-//                                            the controller adds them to that list itself
+//                                            governance is enabled; stale is the stale check, which the
+//                                            governance session-start hook starts in the background and
+//                                            a controller may run on demand: at most once per local date
+//                                            per repository (a stamp file in the Toolkit user-state
+//                                            folder, local bookkeeping only, never GitHub or repository
+//                                            state), it lists rows for the controller: children to judge
+//                                            and close, closes that need the owner's OK, duplicates to
+//                                            fold, closed children to detach and a full polish child
 //   ci, footer, refs                         any controller (refs checks this Toolkit copy: no
 //                                            permission row or document names a retired or missing
 //                                            script)
@@ -35,7 +36,7 @@
 //
 // Usage: node repo/scripts/toolkit-controller-check.cjs [--host projects|chat] [--checkout <dir>]
 //          [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>]
-//          [--task <kind>=<prompt file>]... [--since <ISO time>] [--stale-stamp <file>] [--skip <name,...>]
+//          [--task <kind>=<prompt file>]... [--since <ISO time>] [--skip <name,...>]
 //          [--handoff <folder>] [--expand] [--json]
 //   --checkout       a checkout of the controlled repository (CI check-up and the programme binding)
 //   --repo           the GitHub repository for the footer scan (default: the binding's repository)
@@ -45,8 +46,6 @@
 //   --memory         project memory (MEMORY.md), saved to a file
 //   --task           a stored task prompt and its kind (daily-check-in or hourly-nudge); repeatable
 //   --since          footer scan start (default: 26 hours ago)
-//   --stale-stamp    the stale sweep's date stamp (default: stale-sweep.json in the Toolkit user-state
-//                    folder)
 //   --skip           checks the caller already ran elsewhere
 //   --handoff        the store checkout (or other folder) that holds the controller handoff snapshot
 //   --expand         every line of every check, passed and skipped ones included (default: one
@@ -72,8 +71,8 @@ const COMPACT_LINES = 3;
 // child is done is the controller's judgement against its DONE WHEN, so they are JUDGE? rows, never CLOSE?.
 const POLISH_CAP = 8;
 const DONE_CODES = new Set(['READY_TO_CLOSE', 'TASK_MERGED_OPEN']);
-// Checks whose every detail line prints even in compact output: the stale list is the day's one
-// owner list, and a hidden row could not be recovered once the day is stamped.
+// Checks whose every detail line prints even in compact output: the stale rows are the day's one list
+// for the controller, and each row needs an answer.
 const UNCUT = new Set(['stale']);
 const DONE_WHEN = /^#{1,6} +DONE WHEN\b.*$/im;
 // The reconciler writes this line under a child's PR GRAPH while the controller keeps it open on purpose.
@@ -89,10 +88,10 @@ const SCRIPTS = {
   refs: 'repo/scripts/check-script-references.cjs',
   handoff: 'repo/scripts/toolkit-store.cjs',
 };
-const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--stale-stamp <file>] [--skip <name,...>] [--handoff <folder>] [--json]';
+const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--handoff <folder>] [--json]';
 
 function parseArgs(argv) {
-  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, staleStamp: null, handoff: null, skip: new Set(), json: false, expand: false };
+  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, handoff: null, skip: new Set(), json: false, expand: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -120,8 +119,7 @@ function parseArgs(argv) {
         if (!CHECKS.includes(name)) throw new Error(`--skip names unknown check ${name}`);
         options.skip.add(name);
       }
-    } else if (arg === '--stale-stamp') options.staleStamp = value();
-    else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff'].includes(arg)) options[arg.slice(2)] = value();
+    } else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff'].includes(arg)) options[arg.slice(2)] = value();
     else throw new Error(`unknown argument ${arg}`);
   }
   return options;
@@ -137,11 +135,13 @@ function defaultGh(args) {
   return { status: result.error ? null : result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), error: result.error ? result.error.message : null };
 }
 
-// The stale sweep's stamp: { "<owner/name>": { date, at } }. A missing or unreadable file is no stamp.
-const defaultStamp = file => ({
-  read() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } },
-  write(value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); },
-});
+// The stale check's stamp, one file per repository in the Toolkit user-state folder (the attention
+// cache module decides the path and writes it atomically). A missing or unreadable file is no stamp.
+// The session-start line reads the same file (toolkit-governance-gate.cjs).
+const defaultStamp = () => {
+  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+  return { read: repo => cache.readStaleStamp(repo), write: (repo, record) => cache.writeStaleStamp(repo, record) };
+};
 
 function defaultGit(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 30000, windowsHide: true });
@@ -289,65 +289,55 @@ function heldBecause(finding, child) {
   return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : null;
 }
 
-// The day's close list, ready to post to the owner as its own message: one row per owner-only hold,
-// and the empty line only when nothing is ready and the sweep has no rows at all (JUDGE?, FOLD?,
-// MOVE?, POLISH), so other asks never hide behind "nothing to close".
-function closeList(today, ready, rowCount) {
-  const empty = `CLOSE LIST ${today}: nothing to close today`;
-  if (!ready.length && !rowCount) return [empty];
-  return [`CLOSE LIST ${today} (${ready.length} ready): post to the owner as its own message`, ...ready,
-    ...(rowCount ? [`add each JUDGE? you judge done, and the run's other rows, as rows; if no row is left, post "${empty}"`] : [])];
-}
-
-// A stored close list shown again on a same-day run: the first line says so, so a second session
-// does not post it twice.
-const closeShownAgain = (close, at) => [`${close[0]} [shown again from the sweep at ${at}: post it only if it was not posted yet]`, ...close.slice(1)];
-
 // The local date (YYYY-MM-DD) of a time, which is the day the stamp counts in.
 const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`;
 
-// The daily stale sweep: children whose PRs merged, for the controller to judge done or not first
-// (JUDGE?), then for the owner's one approve list: new beside an open child with no reason (FOLD?),
-// closed while holding open work (MOVE?) and a full or over-cap polish child. A merged child whose only
-// step left is the owner's, after the agent's UAT PASSED (an owner-only hold), goes on the day's close
-// list, or is a JUDGE? row when an unchecked DONE WHEN row or an acknowledgement note says otherwise.
-// The close list is always returned, empty days included. Read only; it writes its date stamp, with
-// the day's list, only after every read succeeded, so a failed run retries and a same-day run shows
-// the list again.
+// The stale check, for the controller: children whose PRs merged, to judge done or not (JUDGE?) and
+// close yourself when done; a merged child whose only step left is the owner's, after the agent's UAT
+// PASSED and with no gate live on the task (OWNER OK?, for the controller's next ask to the owner, or a
+// JUDGE? row when an unchecked DONE WHEN row says otherwise); new beside an open child with no reason
+// (FOLD?, a duplicate the owner approves folding); closed while holding open work (MOVE?); and a full or
+// over-cap polish child. Read only on GitHub; it writes its date stamp, with the day's rows, only after
+// every read succeeded, so a same-day run shows them again with no read. A failed read records which
+// read failed (a fixed word, never gh output) and keeps the last date, so the next start retries and
+// the session-start line says the check is failing instead of staying silent.
 function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const today = localDate(now);
-  const readyLine = (count, when) => `${count} ready to close (${when}): post the close list to the owner`;
-  const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes; only children judged done go on the owner's one approve list, with the other rows and obsolete children`;
-  const stamps = stamp.read() || {};
-  const last = stamps[repo];
+  const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK? row, each FOLD? (a duplicate) and any child you judge obsolete in your next ask to the owner; MOVE? and POLISH rows are yours`;
+  const last = stamp.read(repo);
   if (last && last.date === today) {
+    // A stamp from before this change may also hold the day's owner close list: only its rows and held
+    // line count.
     const kept = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
     const heldAgain = typeof last.held === 'string' && last.held ? [last.held] : [];
-    // A stamp from before the close list existed has none: that day's sweep ran without one.
-    const closeAgain = Array.isArray(last.close) && last.close.length && last.close.every(line => typeof line === 'string') ? { close: closeShownAgain(last.close, last.at) } : {};
-    const readyAgain = closeAgain.close ? closeAgain.close.filter(line => line.startsWith('- #')).length : 0;
-    if (kept.length) return { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain], ...closeAgain };
-    return readyAgain ? { state: 'attention', lines: [readyLine(readyAgain, `${today}, swept at ${last.at}, shown again`), ...heldAgain], ...closeAgain } : { state: 'ok', lines: [`ran today (${today})`], ...closeAgain };
+    if (kept.length) return { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain] };
+    return { state: 'ok', lines: [`ran today (${today})${heldAgain.length ? `; ${heldAgain[0]}` : ''}`] };
   }
+  // Records which read failed, keeping the last good run's date and rows; a stamp that cannot be
+  // written loses only the record.
+  const failed = (check, line) => {
+    try { stamp.write(repo, { ...(last && typeof last === 'object' ? last : {}), failed: { at: now.toISOString(), check } }); } catch { /* the line below still says it */ }
+    return { state: 'failed', lines: [`${line}; no date stamped, so the next run checks again`] };
+  };
   const attention = run(SCRIPTS.programme, ['attention', '--json', '--repo-root', checkout], { cwd: checkout });
   let report = null;
   try { report = JSON.parse(attention.stdout); } catch { /* reported below */ }
-  if (!report || !Array.isArray(report.findings)) return { state: 'failed', lines: [`programme attention: ${report && report.line ? report.line : why(attention)}; no stamp written`] };
-  // A failed owner-wait read never makes an empty close list: the next run retries.
-  if (!Array.isArray(report.owner_waits)) return { state: 'failed', lines: [`owner waits unknown (${report.owner_waits_unknown || 'not in the attention report'}); no stamp written`] };
-  // Owner-only holds: the agent's UAT PASSED and no gate still works on the task (a wait `after` a
-  // gate is live work, which keeps the judged path).
-  const passed = new Map(report.owner_waits.filter(wait => wait && wait.agent_uat === 'PASSED' && !wait.after && Number.isInteger(wait.issue)).map(wait => [wait.issue, wait]));
+  if (!report || !Array.isArray(report.findings)) return failed('attention', `programme attention: ${report && report.line ? report.line : why(attention)}`);
+  // A failed owner-wait read never hides an owner-OK close: the next run retries.
+  if (!Array.isArray(report.owner_waits)) return failed('owner-waits', `owner waits unknown (${report.owner_waits_unknown || 'not in the attention report'})`);
+  // Owner-OK closes: the agent's UAT PASSED and no gate is live on the task. Only gate_live false
+  // admits one: a live gate (even blocked, or on a task waiting on the owner) or a report too old to
+  // say keeps the judged path.
+  const passed = new Map(report.owner_waits.filter(wait => wait && wait.agent_uat === 'PASSED' && !wait.after && wait.gate_live === false && Number.isInteger(wait.issue)).map(wait => [wait.issue, wait]));
   const children = [];
   for (const parent of parents) {
     const read = gh(['api', '--paginate', `repos/${repo}/issues/${parent.issue}/sub_issues?per_page=100`, '--jq', '.[] | {number, title, state, body, created_at, sub_issues_summary}']);
-    if (read.status !== 0) return { state: 'failed', lines: [`#${parent.issue} sub-issues: ${why(read)}; no stamp written`] };
-    try { for (const line of linesOf(read.stdout)) children.push({ parent: parent.issue, ...JSON.parse(line) }); } catch { return { state: 'failed', lines: [`#${parent.issue} sub-issues: unreadable gh output; no stamp written`] }; }
+    if (read.status !== 0) return failed('sub-issues', `#${parent.issue} sub-issues: ${why(read)}`);
+    try { for (const line of linesOf(read.stdout)) children.push({ parent: parent.issue, ...JSON.parse(line) }); } catch { return failed('sub-issues', `#${parent.issue} sub-issues: unreadable gh output`); }
   }
   const since = last && !Number.isNaN(Date.parse(last.at)) ? new Date(last.at) : new Date(now.getTime() - 26 * 3600000);
   const rows = [];
   const held = [];
-  const ready = [];
   const done = new Set();
   // READY_TO_CLOSE first: of the two findings on one child, it is the stronger evidence.
   const doneFindings = report.findings.filter(finding => DONE_CODES.has(finding.code) && Number.isInteger(finding.issue));
@@ -358,19 +348,19 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     const wait = passed.get(finding.issue);
     if (wait && !childHold(child)) {
       const doubt = ownerOnlyDoubt(child);
-      if (doubt) rows.push(`JUDGE? #${finding.issue} owner-only hold: agent UAT PASSED, but ${doubt}; judge it done before it goes on the close list (${finding.code})`);
+      if (doubt) rows.push(`JUDGE? #${finding.issue} owner-only hold: agent UAT PASSED, but ${doubt}; judge it done before you ask the owner (${finding.code})`);
       else {
         // The row names the head the agent's UAT ran at (the owner's OK is recorded there), and shows
         // the controller's acknowledgement note so the owner reads it before saying ok.
         const pr = wait.pr ? `PR #${wait.pr}${wait.pr_state === 'MERGED' ? ' merged' : ''}, ` : '';
         const at = typeof wait.uat_head === 'string' && wait.uat_head ? ` at ${wait.uat_head.slice(0, 7)}` : '';
-        ready.push(`- #${finding.issue} ${child.title}: ${pr}agent UAT PASSED${at}${finding.promised ? `; controller note: ${finding.promised}` : ''}; reply ok to close`);
+        rows.push(`OWNER OK? #${finding.issue} ${child.title}: ${pr}agent UAT PASSED${at}${finding.promised ? `; controller note: ${finding.promised}` : ''}; put "reply ok to close" in your next ask to the owner`);
       }
       continue;
     }
     const why = heldBecause(finding, child);
     if (why) held.push(`#${finding.issue} ${why}`);
-    else rows.push(`JUDGE? #${finding.issue} PR merged: check its DONE WHEN before it goes to the owner (${finding.code})`);
+    else rows.push(`JUDGE? #${finding.issue} PR merged: check its DONE WHEN, then close it yourself or keep it open (${finding.code})`);
   }
   const open = children.filter(child => child.state === 'open');
   for (const child of open) {
@@ -388,13 +378,11 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
   }
   const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
-  const close = closeList(today, ready, rows.length);
-  try { stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}), close } }); } catch (error) {
-    return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])], close };
+  try { stamp.write(repo, { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) }); } catch (error) {
+    return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
   }
-  if (!rows.length && !ready.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`], close };
-  if (!rows.length) return { state: 'attention', lines: [readyLine(ready.length, today), ...(heldLine ? [heldLine] : [])], close };
-  return { state: 'attention', lines: [head(rows.length, today), ...rows, ...(heldLine ? [heldLine] : [])], close };
+  if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
+  return { state: 'attention', lines: [head(rows.length, today), ...rows, ...(heldLine ? [heldLine] : [])] };
 }
 
 function checkCi(run, checkout) {
@@ -456,7 +444,7 @@ function controllerCheck(options, deps = {}) {
       if (!governed) { skip(name, 'governance off'); continue; }
       if (name !== 'programme' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
       if (name === 'stale') {
-        const stamp = deps.stamp || defaultStamp(options.staleStamp || path.join(require('./toolkit-user-state.cjs').userStateDirectory(), 'stale-sweep.json'));
+        const stamp = deps.stamp || defaultStamp();
         outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo, parents, now });
       } else outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
     } else if (name === 'ci') {
@@ -498,8 +486,6 @@ function format(report, { expand = false } = {}) {
       if (shown.length < detail.length) lines.push(`  ... ${detail.length - shown.length} more (--expand, or ${check.command || 'the check itself'})`);
     }
   }
-  // A close list prints last, whatever its check's state, so an empty day still says so.
-  for (const check of report.checks.filter(item => Array.isArray(item.close))) lines.push('', ...check.close);
   return `${lines.join('\n')}\n`;
 }
 
@@ -514,5 +500,9 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return report.attention || report.failed || !ranForController(report) ? 1 : 0;
 }
 
-module.exports = { parseArgs, controllerCheck, format, main, polishRows, CHECKS, SCRIPTS };
+// The --skip value that leaves only the stale check, for the session-start hook's background run and
+// the command its line names.
+const staleOnlySkip = CHECKS.filter(name => name !== 'stale').join(',');
+
+module.exports = { parseArgs, controllerCheck, format, main, polishRows, localDate, CHECKS, SCRIPTS, staleOnlySkip };
 if (require.main === module) process.exitCode = main();

@@ -273,7 +273,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Polish child:**",
-      "covers": "The controller check's daily stale sweep flags a polish child at 8 rows (POLISH FULL), above 8 rows or with two open (POLISH OVER CAP). Filing a Low as a row, and fixing a one-line Low in the PR, stay judgement.",
+      "covers": "The stale check flags a polish child at 8 rows (POLISH FULL), above 8 rows or with two open (POLISH OVER CAP). Filing a Low as a row, and fixing a one-line Low in the PR, stay judgement.",
       "enforced_by": [
         {
           "kind": "script",
@@ -284,13 +284,18 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Daily stale sweep:**",
-      "covers": "The controller check's stale check runs once per local date per repository and lists done, unexplained new, closed-with-open-work and full polish children. Obsolete and duplicate children, and sending the owner the list, stay judgement.",
+      "rule": "**Stale check:**",
+      "covers": "The governance session-start hook shows the stale check's rows and starts it in the background once per local date per repository, only with governance on; the check lists children to judge, owner-OK closes, unexplained new, closed-with-open-work and full polish children. Judging done, obsolete children and folding the owner's OK into the next ask stay judgement.",
       "enforced_by": [
         {
           "kind": "script",
           "path": "repo/scripts/toolkit-controller-check.cjs",
           "test": "repo/tests/toolkit-controller-check.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-governance-gate.cjs",
+          "test": "repo/tests/toolkit-programme-attention.test.cjs"
         }
       ]
     },

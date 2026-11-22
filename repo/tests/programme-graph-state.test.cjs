@@ -761,6 +761,24 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
   assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat]),[[2,'OWNER_ONLY']]);
 });
 
+// The stale check offers the owner a close only when no gate is live on the task. ownerStep's `after`
+// misses two live gates (a gate at work on a task waiting on the owner, and a blocked gate), so every
+// owner wait carries gate_live: a gate assigned or active, blocked or not.
+test('owner waits carry gate_live for a gate at work on a task waiting on the owner, a blocked gate, and none',()=>{
+  const cases = [
+    ['gate at work, task waiting on the owner', 'WAITING_OWNER', {role:'G2',state:'ACTIVE'}, [], true],
+    ['blocked live gate', 'ACTIVE', {role:'G1',state:'ACTIVE'}, ['Laptop offline'], true],
+    ['no gate', 'ACTIVE', null, [], false],
+  ];
+  for (const [name, lifecycle, gate, blockers, live] of cases) {
+    const f=fixture(); pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD}));
+    owing(f, doc=>({pr:{...doc.pr,number:22},lifecycle,uat:{state:'PENDING',at_head:UAT_HEAD},...(gate ? {gate:{...doc.gate,...gate}} : {}),blockers,private:{...doc.private,agent_uat:agentRecord('PASSED')}}));
+    f.run();
+    const waits=state.ownerWaits(f.parent(),new Map([[2,f.child(2)]]));
+    assert.deepEqual(waits.map(entry=>[entry.issue,entry.agent_uat,entry.gate_live]),[[2,'PASSED',live]],name);
+  }
+});
+
 test('agent UAT first: a listed blocker still queues a merged task and shows in place of the agent step',()=>{
   const f=fixture(); pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD}));
   owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD},blockers:['Laptop offline']}));

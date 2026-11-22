@@ -165,6 +165,54 @@ test('a cloud session at the scan limit stays within the host limit and keeps th
   for (const name of names) assert.ok(text.includes(`- ${name}: `), `${name} still has a state line`);
 });
 
+// The stale check at a cloud session start: the same attention and stale-check lines as on a computer,
+// only from caches already in the session, never a programme store read or a background start (a cloud
+// session's GitHub link may not reach the store). With neither cache it says plainly that both wait for
+// the owner's computer.
+function cloudProgrammeWorld(t) {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'governed', { remote: 'https://github.com/example-owner/governed.git' });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: ctx.options });
+  const home = path.join(ctx.root, 'programme-home');
+  fs.mkdirSync(home, { recursive: true });
+  const started = { refresh: [], stale: [] };
+  const programmeDeps = { home, attentionDir: path.join(home, 'attention'), sessionsDir: path.join(home, 'sessions'),
+    startRefresh: folder => started.refresh.push(folder), startStaleSweep: folder => started.stale.push(folder), now: () => '2026-11-22T10:00:00.000Z' };
+  const start = (cwd, environment = { CLAUDE_CODE_REMOTE: 'true' }) => claudeHook.respond('SessionStart', { cwd, session_id: 'cloud-stale', source: 'startup' }, { registryOptions: ctx.options, environment, refreshBinding: () => {}, programmeDeps }).hookSpecificOutput?.additionalContext || '';
+  return { ctx, repo, programmeDeps, started, start };
+}
+
+test('red: a cloud session inside an ENABLED repository with no programme cache says the attention and stale check wait for the owner\'s computer, and reads or starts nothing', t => {
+  const world = cloudProgrammeWorld(t);
+  assert.equal(governance.governanceState(world.repo, world.ctx.options).programme_records_bind, true, 'fixture binds programme records');
+  const text = world.start(world.repo);
+  assert.ok(text.startsWith(`${claudeHook.CLOUD_LINE}\n\n`), text);
+  const repoLine = text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
+  assert.match(repoLine, /\n {2}Attention and stale check: not read in this cloud session \(a cloud session does not read the programme store\); both run at the next session start on the owner's computer\. Controller: check them from a session on the owner's computer before closing or planning children\./);
+  assert.doesNotMatch(text, /could not run|add_repo|Choose a private repository/);
+  assert.deepEqual(world.started, { refresh: [], stale: [] }, 'no background job from a cloud session');
+  // A session started above its clones (a Projects thread) is not inside the repository: no programme lines.
+  assert.doesNotMatch(world.start(world.ctx.root), /Attention and stale check|Stale check|Attention: /);
+  assert.deepEqual(world.started, { refresh: [], stale: [] });
+});
+
+test('red: a cloud session with the session\'s own attention cache and today\'s stale rows shows both lines with their Controller: actions', t => {
+  const world = cloudProgrammeWorld(t);
+  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+  const now = new Date('2026-11-22T10:00:00.000Z');
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  cache.writeCache('example-owner/governed', { line: 'Attention: 1 new, 0 acknowledged', counts: { new: 1, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => now.toISOString() });
+  cache.writeStaleStamp('example-owner/governed', { date: today, at: now.toISOString(), rows: ['FOLD? #20 new under #1 with no Nearest child: line'] }, world.programmeDeps);
+  const text = world.start(world.repo);
+  const repoLine = text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
+  assert.match(repoLine, /\n {2}Attention: 1 new, 0 acknowledged\. Run node "[^"]*programme\.cjs" attention for the list\. Controller: answer each new or overdue finding this turn/);
+  assert.match(repoLine, new RegExp(`\\n {2}Stale check ${today}: 1 row to answer \\(FOLD\\? 1\\)\\. Run node "[^"]*toolkit-controller-check\\.cjs" [^\\n]*?Controller: answer each this turn: `));
+  assert.doesNotMatch(text, /Attention and stale check: not read/);
+  assert.deepEqual(world.started, { refresh: [], stale: [] });
+  // On a computer (no CLAUDE_CODE_REMOTE) the same repository shows the stale line in its session line.
+  assert.match(world.start(world.repo, {}), new RegExp(`Stale check ${today}: 1 row to answer`));
+});
+
 test('a cloud session with no repository at or under its start folder gets no governance text', (t) => {
   const ctx = scratch(t);
   fs.mkdirSync(path.join(ctx.root, 'empty'));

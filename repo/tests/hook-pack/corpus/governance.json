@@ -95,6 +95,50 @@
       "status": "pass"
     },
     {
+      "id": "GOV.stale-check-line-enabled",
+      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"stale_rows":["JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)"]},
+      "expect": {"decision":"allow","context_contains":["1 row to answer (JUDGE? 1)","Controller: answer each this turn: close each child you judge done yourself"],"context_excludes":["CLOSE LIST"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.stale-check-silent-disabled",
+      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"disabled"},"stale_rows":["JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)"]},
+      "expect": {"decision":"allow","context_excludes":["row to answer","Stale check"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.stale-check-cloud-waits",
+      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance (cloud session)","Attention and stale check: not read in this cloud session (a cloud session does not read the programme store); both run at the next session start on the owner's computer."],"context_excludes":["row to answer"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.stale-check-cloud-stamp",
+      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"stale_rows":["FOLD? #20 new under #1 with no Nearest child: line"]},
+      "expect": {"decision":"allow","context_contains":["1 row to answer (FOLD? 1)"],"context_excludes":["Attention and stale check: not read"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.rules-cloud-disabled-child-none",
       "source": "plug-and-play S1: a cloud session above a disabled repository gets no governed rules",
       "kind": "benign",
