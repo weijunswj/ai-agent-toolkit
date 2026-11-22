@@ -824,3 +824,125 @@ for (const [name, setup] of [
     assert.throws(() => git(w.dir, 'symbolic-ref', '-q', 'HEAD'), 'HEAD stays detached');
   });
 }
+
+// ---- PR 1436 delta G2 findings: unknown order, the first check, emptied and renamed folders -------
+
+// As a snapshot written before rows carried a time.
+const stripTimes = out => {
+  const file = path.join(out, FOLDER, 'manifest.json');
+  const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+  m.files = m.files.map(({ modified, ...rest }) => rest);
+  fs.writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+};
+
+test('a save the last untimed snapshot missed is named unsure by --check and lands with --reseed (G2 delta M, Q5)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  // The 18:07 snapshot came from a copy synced at 17:00; its rows carry no time.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- queue v0 (17:00)\n', '2026-11-21T17:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v0\n', '2026-11-21T16:00:00Z');
+  assert.equal(run(['--memory', s.memory], () => new Date('2026-11-21T18:07:08Z')).result.handoff, 'WRITTEN');
+  stripTimes(out);
+  // The coordinator had saved v1 at 18:05, which that copy did not hold; this copy holds it.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- queue v1 (coordinator 18:05)\n', '2026-11-21T18:05:00Z');
+  // A hook-started run never decides an unknown order by itself.
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 'a.json'))]).result.handoff, 'UNCHANGED');
+  // The check says so instead of CURRENT, naming the file.
+  const checked = run(['--check']);
+  assert.equal(checked.code, 1, JSON.stringify(checked.result));
+  assert.equal(checked.result.handoff, 'STALE');
+  assert.equal(checked.result.unsure, 'MEMORY.md');
+  assert.equal(checked.result.changed, undefined, 'a plain run would change nothing');
+  // A run from the newest copy that says so takes this copy, with its real time.
+  assert.equal(run(['--reseed'], () => new Date('2026-11-21T18:41:00Z')).result.handoff, 'WRITTEN');
+  assert.match(v.copy('MEMORY.md'), /queue v1/);
+  assert.deepEqual([v.row('MEMORY.md').modified, v.row('MEMORY.md').modified_from], ['2026-11-21T18:05:00.000Z', undefined]);
+  assert.equal(run(['--check']).result.handoff, 'CURRENT');
+});
+
+test('a row whose time came from its snapshot stays marked after later writes, so the order stays unsure', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- snapshot copy\n', '2026-11-21T17:00:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v0\n', '2026-11-21T16:00:00Z');
+  assert.equal(run(['--memory', s.memory], () => new Date('2026-11-21T18:07:00Z')).result.handoff, 'WRITTEN');
+  stripTimes(out);
+  // A session holding another MEMORY.md (order unknown) writes its own owner-rules.md save.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- other copy\n', '2026-11-21T16:30:00Z');
+  putAt(s, 'memory/owner-rules.md', 'rules v1\n', '2026-11-21T18:30:00Z');
+  assert.equal(run(['--baseline', baselineOf(s, path.join(s.base, 'a.json'))], () => new Date('2026-11-21T18:31:00Z')).result.handoff, 'WRITTEN');
+  assert.deepEqual([v.row('MEMORY.md').modified, v.row('MEMORY.md').modified_from], ['2026-11-21T18:07:00.000Z', 'snapshot']);
+  assert.equal(v.row('memory/owner-rules.md').modified_from, undefined, 'a written row has its real time');
+  assert.equal(run(['--check']).result.unsure, 'MEMORY.md');
+  // A row whose matching copy fixed its time has a real one, so nothing is unsure about it.
+  putAt(s, 'memory/MEMORY.md', '# Memory\n- snapshot copy\n', '2026-11-21T17:00:00Z');
+  assert.equal(run(['--check']).result.handoff, 'CURRENT');
+  // --reseed is a manual run only.
+  for (const extra of [['--check'], ['--baseline', path.join(s.base, 'a.json')]]) {
+    assert.equal(store.main(['handoff', '--out', out, '--repo-root', s.repo, '--reseed', ...extra], { handoffState: s.state, stdout: () => {}, stderr: () => {} }), 2, extra.join(' '));
+  }
+});
+
+test('a session\'s first check only takes the baseline; the next check a minute later starts the run (G2 delta owner card)', t => {
+  const s = sources(t);
+  aged(s);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory]).code, 0);
+  // The snapshot is already behind when the session starts: a newer save is here.
+  s.put('memory/MEMORY.md', '# Memory\n- queue: #9\n');
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T12:59:00Z');
+  const h = hookHarness(s);
+  // A scheduled task's first call (a checklist update) before the one that turns the hook off.
+  assert.equal(h.fire({ tool_name: 'mcp__checklist__update', tool_input: { item: 1 } }), 0);
+  assert.equal(h.started.length, 0, 'no run on the first check');
+  assert.ok(fs.existsSync(path.join(h.dir, 'handoff-sessions')), 'the baseline is recorded');
+  // An ordinary session's next check, a minute later, starts it.
+  h.later(1);
+  assert.equal(h.fire(), 0);
+  assert.equal(h.started.length, 1);
+});
+
+test('a hook-started run keeps the memory rows when the memory folder is there but empty (G2 delta L1, Q1c)', t => {
+  const s = sources(t);
+  aged(s);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  const baseline = baselineOf(s, path.join(s.base, 'session.json'));
+  // A re-sync that clears the folder first, or an empty mount point.
+  fs.renameSync(s.memory, `${s.memory}.away`);
+  fs.mkdirSync(s.memory);
+  const result = run(['--baseline', baseline]).result;
+  assert.equal(result.handoff, 'UNCHANGED', JSON.stringify(result));
+  assert.equal(result.kept, s.memory, 'the empty folder counts as unreachable');
+  for (const name of ['MEMORY.md', 'memory/owner-rules.md']) assert.ok(v.row(name), name);
+});
+
+test('a hook-started run keeps memory rows first written under an older folder path when the folder is unreachable (G2 delta L2, Q1d)', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  const v = view(out);
+  const old = path.join(s.base, 'old-memory');
+  fs.renameSync(s.memory, old);
+  touch(path.join(old, 'MEMORY.md'), '2026-11-21T08:00:00Z');
+  touch(path.join(old, 'owner-rules.md'), '2026-11-21T09:00:00Z');
+  assert.equal(run(['--memory', old]).result.handoff, 'WRITTEN');
+  // The folder is named again under a new path in a run that also writes a newer file: the unchanged
+  // MEMORY.md row keeps the old path as its source.
+  fs.renameSync(old, s.memory);
+  putAt(s, 'memory/owner-rules.md', 'rules v2\n', '2026-11-21T10:20:00Z');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  assert.equal(v.row('MEMORY.md').source, old);
+  const baseline = baselineOf(s, path.join(s.base, 'session.json'));
+  fs.renameSync(s.memory, `${s.memory}.away`);
+  const result = run(['--baseline', baseline]).result;
+  assert.equal(result.handoff, 'UNCHANGED', JSON.stringify(result));
+  assert.equal(result.kept, s.memory);
+  for (const name of ['MEMORY.md', 'memory/owner-rules.md']) assert.ok(v.row(name), name);
+});

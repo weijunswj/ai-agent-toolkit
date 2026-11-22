@@ -11,7 +11,7 @@
 //   node repo/scripts/toolkit-store.cjs merge-branch         --store <folder> --branch <name> --message <text> [--repo-root <checkout>] [--json]
 //   node repo/scripts/toolkit-store.cjs delete-merged-branch --store <folder> --branch <name> [--repo-root <checkout>] [--json]
 //   node repo/scripts/toolkit-store.cjs handoff              --store <folder> | --out <folder> [--memory <folder>] [--instructions <file>]
-//                                                            [--file <path>]... [--check] [--repo-root <checkout>] [--json]
+//                                                            [--file <path>]... [--check | --reseed] [--repo-root <checkout>] [--json]
 //                                                            [--baseline <file>] (the after-tool hook's session file)
 //
 // Every subcommand first runs the same pre-flight and writes nothing when any part fails:
@@ -52,7 +52,10 @@
 //          writes a differing file only when this copy is newer than its row, and never drops a row
 //          for a file missing here, so an older copy never overwrites or drops newer memory. The sources are remembered in its manifest, so later runs need none. --out writes
 //          the same folder under a folder that is not a bound store (governance off), with no checks
-//          and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what changed.
+//          and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what changed and
+//          unsure=<files>: files this copy holds differently from a row written before rows carried a
+//          time, whose order is unknown, so a run keeps the snapshot's copy. --reseed, run only from the
+//          newest copy, takes this copy for those files.
 //          A successful run records its store and sources in the Toolkit user-state folder, where the
 //          after-tool hook (toolkit-handoff-hook.cjs) reads them. The hook starts runs with
 //          --baseline <its session file>: such a run also drops rows for files that session deleted,
@@ -680,12 +683,13 @@ const USAGE = `Usage: node repo/scripts/toolkit-store.cjs <${COMMANDS.join('|')}
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!COMMANDS.includes(command)) throw new StoreError(`unknown command ${JSON.stringify(command || '')}.`, 'see the usage line.', 2);
-  const options = { command, json: false, paths: [], files: [], check: false };
+  const options = { command, json: false, paths: [], files: [], check: false, reseed: false };
   const names = { '--store': 'store', '--repo-root': 'repoRoot', '--path': 'paths', '--message': 'message', '--from': 'from', '--to': 'to', '--branch': 'branch', '--out': 'out', '--memory': 'memory', '--instructions': 'instructions', '--baseline': 'baseline' };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === '--json') { options.json = true; continue; }
     if (arg === '--check' && command === 'handoff') { options.check = true; continue; }
+    if (arg === '--reseed' && command === 'handoff') { options.reseed = true; continue; }
     const value = rest[index += 1];
     if (!VALUE_FLAGS[command].includes(arg) || value === undefined || value.startsWith('--')) throw new StoreError(`unknown or incomplete argument ${JSON.stringify(arg)} for ${command}.`, 'see the usage line.', 2);
     if (arg === '--path') options.paths.push(value);
@@ -698,6 +702,7 @@ function parseArgs(argv) {
   if (command === 'move' && (!options.from || !options.to)) throw new StoreError('move needs --from and --to.', 'add both.', 2);
   if (['merge-branch', 'delete-merged-branch'].includes(command) && !options.branch) throw new StoreError(`${command} needs --branch.`, 'add --branch <store branch>.', 2);
   if (command === 'handoff' && Boolean(options.store) === Boolean(options.out)) throw new StoreError('handoff needs one of --store (a bound store checkout) or --out (any other folder).', 'add one of them.', 2);
+  if (options.reseed && (options.check || options.baseline)) throw new StoreError('--reseed is a manual run: it takes neither --check nor --baseline.', 'drop one of them.', 2);
   return options;
 }
 
@@ -749,7 +754,7 @@ function runHandoff(options, deps) {
   const wrap = action => { try { return action(); } catch (error) { if (error instanceof handoff.HandoffError) throw new StoreError(error.stopped, error.next); throw error; } };
   if (options.check) {
     const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs, platform }));
-    return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...(found.changed?.length ? { changed: found.changed.join(',') } : {}), ...(found.kept?.length ? { kept: found.kept.join(',') } : {}) };
+    return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...(found.changed?.length ? { changed: found.changed.join(',') } : {}), ...(found.unsure?.length ? { unsure: found.unsure.join(',') } : {}), ...(found.kept?.length ? { kept: found.kept.join(',') } : {}) };
   }
   const stamp = { taken_at: (deps.now ? deps.now() : new Date()).toISOString(), toolkit_version: require('./toolkit-version.cjs').readToolkitVersion(), repository_commit: commit };
   // A hook-started run names the hook's session file: the files that session held (so a file it
@@ -767,7 +772,7 @@ function runHandoff(options, deps) {
   };
   const kept = planned => (planned.kept.length ? { kept: planned.kept.join(',') } : {});
   if (options.out) {
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session }));
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session, reseed: options.reseed }));
     if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
     remember(planned);
     return planned.unchanged
@@ -779,7 +784,7 @@ function runHandoff(options, deps) {
     store.open({ store: options.store, repoRoot: options.repoRoot, prepare: Boolean(sessionFile) });
     // Sync first, so the compare reads the snapshot the store already holds (another writer's too).
     const synced = store.sync();
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session }));
+    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session, reseed: options.reseed }));
     // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
     // save sends them now rather than calling them unchanged.
     if (planned.unchanged && !store.pending(planned.folder)) { remember(planned); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }

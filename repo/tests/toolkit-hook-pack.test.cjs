@@ -149,6 +149,25 @@ test('a row with a wrong shape is refused with the reason', () => {
   assert.match(parsed.errors.join('\n'), /family must be "push"/);
 });
 
+test('handoff fixtures are two known shapes on an enabled repository, run on claude alone, and their postconditions need one', () => {
+  const enabled = { repo: { governance: 'enabled' } };
+  const shape = { session: 'checked', memory: 'moved' };
+  assert.deepEqual(pack.rowErrors(row({ fixture: { ...enabled, handoff: shape }, postcondition: 'handoff-refresh' })), []);
+  assert.deepEqual(pack.rowErrors(row({ fixture: { ...enabled, handoff: { session: 'new', memory: 'unchanged' } }, postcondition: 'no-handoff-refresh' })), []);
+  for (const fixture of [
+    { handoff: shape },
+    { repo: { governance: 'undecided' }, handoff: shape },
+    { ...enabled, handoff: { session: 'stale', memory: 'moved' } },
+    { ...enabled, handoff: { session: 'new', memory: 'deleted' } },
+    { ...enabled, handoff: { session: 'new' } },
+    { ...enabled, handoff: { ...shape, extra: true } },
+    { ...enabled, handoff: null },
+    { ...enabled, handoff: [] },
+  ]) assert.match(pack.rowErrors(row({ fixture })).join('\n'), /fixture\.handoff needs an enabled repository/, JSON.stringify(fixture));
+  assert.match(pack.rowErrors(row({ hosts: ['claude', 'codex'], fixture: { ...enabled, handoff: shape } })).join('\n'), /runs on claude alone/);
+  assert.match(pack.rowErrors(row({ postcondition: 'no-handoff-refresh' })).join('\n'), /no-handoff-refresh needs a handoff fixture/);
+});
+
 test('matchers read as the hosts read them: none matches all, a plain list exactly, anything else as a pattern', () => {
   assert.equal(pack.matches(undefined, 'Bash'), true);
   assert.equal(pack.matches('*', 'Bash'), true);
