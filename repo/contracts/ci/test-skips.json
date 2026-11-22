@@ -973,6 +973,14 @@
     },
     {
       "file": "repo/tests/host-observability.test.cjs",
+      "test": "email alerts start with the server monitor title, with an optional prefix",
+      "systems": [
+        "windows"
+      ],
+      "reason": "The host pulse scripts target Linux servers only; the test runs on the Linux leg"
+    },
+    {
+      "file": "repo/tests/host-observability.test.cjs",
       "test": "test commands name a missing curl",
       "systems": [
         "windows"
