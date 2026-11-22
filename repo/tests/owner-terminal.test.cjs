@@ -164,7 +164,9 @@ test('an agent shell or a missing terminal is refused before the prompt', async 
 const PROMPT_SITES = Object.freeze({
   'repo/scripts/toolkit-env.cjs': 1, // the hidden secret value
   'repo/scripts/toolkit-governance.cjs': 1, // the governance bank answer (moves to chat next)
-  'repo/scripts/setup-toolkit-core.cjs': 5, // two setup bank answers (moving to chat next), a path, a helper count, retention days
+  // three setup bank answers (Codex's command and one-at-a-time answers, Claude Code's yes, no or changes;
+  // moving to chat next), a path, a helper count, retention days
+  'repo/scripts/setup-toolkit-core.cjs': 6,
 });
 
 function scripts() {
