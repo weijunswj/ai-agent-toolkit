@@ -1507,16 +1507,22 @@ function verdictLine(verdict, registryOptions, programmeDeps, refresh = null) {
   if (verdict.open) {
     return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
   }
-  const { lines, checkpoints } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
+  const { lines, checkpoints, stale } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [], stale: null };
   // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
   const finish = state.programme_records_bind === true ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.
   const rules = state.state === 'ENABLED' ? `\n\n${governedRules()}` : '';
-  // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
-  return fitLines(checkpoints, (kept, leftOut) => {
-    const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
-    return `${[decidedLine(state, refresh), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
+  // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted. The
+  // stale-check line goes first in the fitted list: it shrinks to its short form, and is kept, while
+  // Checkpoint lines are left out from the end.
+  const fitted = stale ? [stale, ...checkpoints] : checkpoints;
+  return fitLines(fitted, (kept, leftOut) => {
+    const staleKept = stale && kept.length ? [kept[0]] : [];
+    const shown = stale ? kept.slice(1) : kept;
+    const left = stale && !kept.length ? leftOut - 1 : leftOut;
+    const more = left ? [`Checkpoint: ${left} more session${left === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
+    return `${[decidedLine(state, refresh), ...finish, ...lines, ...staleKept, ...shown, ...more].join(' ')}${rules}`;
   });
 }
 
@@ -1557,9 +1563,10 @@ function fitLines(lines, render, limit = SESSION_TEXT_LIMIT) {
 // and a Checkpoint line for each session here whose last turn-end record failed. Each line that
 // reports a problem ends with who acts and when (FINDING_ACTIONS), so it is never left as a bare
 // warning. Reads local files and runs local git for the stale-pin check (no gh or network call); a
-// missing or old cache starts `programme.cjs refresh` in the background. Any failure only
-// drops these lines. Returns { lines, checkpoints }: the Checkpoint lines apart, since the session line
-// may have to count some of them instead of listing them.
+// missing or old cache starts `programme.cjs refresh` in the background. It also gives the stale-check
+// line (staleLine), which starts today's stale check in the background when it has not run. Any failure
+// only drops these lines. Returns { lines, checkpoints, stale }: the Checkpoint lines and the stale-check
+// line ({ full, short } or null) apart, since the session line fits them to the host's limit.
 const FINDING_ACTIONS = Object.freeze({
   attention: 'Controller: answer each new or overdue finding this turn (fix it, ack it with --next and a due time, or dispose of it with a reason).',
   // Work-queue findings cannot be acknowledged (QUEUE_FINDING_NEEDS_ACTION), so a line with only those
@@ -1576,27 +1583,99 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
   // commit) reaches the repository only through a refresh pull request. Local reads only: git on the
   // Toolkit checkout and the repository (about ten short processes), no gh or network call.
   lines.push(...staleCopyLines(state, registryOptions, deps));
+  // Background starts are not made where governance reads are switched off (a test run,
+  // TOOLKIT_GOVERNANCE_OFFLINE=1, a test registry) unless a starter is injected, and at most one start
+  // per 15 minutes per repository and job on this computer.
+  const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
+  let repository = null;
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
-    if (!binding || !binding.repository) return { lines, checkpoints };
+    if (!binding || !binding.repository) return { lines, checkpoints, stale: null };
+    repository = binding.repository;
     const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
     const attention = cache.sessionAttention(binding.repository, deps);
-    // Not where governance reads are switched off (a test run, TOOLKIT_GOVERNANCE_OFFLINE=1, a test
-    // registry), and at most one start per 15 minutes per repository on this computer.
-    const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
     let started = false;
     if (attention.refresh && (deps.startRefresh || !offline) && cache.claimBackgroundStart(binding.repository, deps)) {
       try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
     if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.${attention.open ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`);
   } catch { /* no attention line */ }
+  let stale = null;
+  if (repository) {
+    try { stale = staleLine(repository, state.root, deps, { start: Boolean(deps.startStaleSweep) || !offline }); } catch { /* no stale-check line */ }
+  }
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
     for (const session of checkpoint.localSessionsFor(state.root, deps)) {
       if (session.errors.pending) checkpoints.push(`Checkpoint: last turn's record failed (${session.errors.pending.code}); see ${programmeCommand('show --session <that session\'s id>', { userHome: deps.home })} (session ${session.hash.slice(0, 8)}). ${FINDING_ACTIONS.checkpoint}`);
     }
   } catch { /* no checkpoint line */ }
-  return { lines, checkpoints };
+  return { lines, checkpoints, stale };
+}
+
+// The stale check at session start (a silent safety net for a missed close or a duplicate child): the
+// line from this computer's stamp ({ full, short }), or null. The background run
+// (programme-refresh-trigger.cjs startStaleSweep) writes the stamp at most once per local date per
+// repository; this reads one local file and, when today's run is missing, starts it (at most one start
+// per 15 minutes per repository, and only when `start` allows). No gh, git or network call. Today's
+// rows give one line; a day with no rows gives none; a recorded failure gives a line naming which read
+// failed and how to retry, so a check that keeps failing is never silent.
+const STALE_KINDS = Object.freeze(['JUDGE?', 'OWNER OK?', 'FOLD?', 'MOVE?', 'POLISH']);
+const STALE_FAILED = Object.freeze({
+  attention: 'the programme attention list (the programme store)',
+  'owner-waits': 'the owner waits in the programme store',
+  'sub-issues': "the parents' sub-issues on GitHub",
+});
+// The local date the stale check stamps (the check's own helper, so both count the same day).
+const staleLocalDate = time => require('./toolkit-controller-check.cjs').localDate(time);
+function staleStampFor(repository, deps) {
+  const trigger = require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs');
+  let stamps = {};
+  try { stamps = JSON.parse(fs.readFileSync(trigger.staleStampFile(deps), 'utf8')) || {}; } catch { return null; }
+  const key = Object.keys(stamps).find(name => name.toLowerCase() === String(repository).toLowerCase());
+  const entry = key ? stamps[key] : null;
+  return entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : null;
+}
+function staleCommand(root, deps) {
+  const { staleOnlySkip } = require('./toolkit-controller-check.cjs');
+  const script = require('./toolkit-user-state.cjs').managedScript('toolkit-controller-check.cjs', { userHome: deps.home });
+  return `node "${script}" --checkout "${String(root).replace(/\\/g, '/')}" --skip ${staleOnlySkip}`;
+}
+// The line from a stamp entry alone, with no start: today's rows, or a recorded failure.
+function staleStampLine(last, root, deps) {
+  if (!last) return null;
+  const now = new Date(Date.parse((deps.now || (() => new Date().toISOString()))()));
+  const today = staleLocalDate(now);
+  const command = staleCommand(root, deps);
+  if (last.date === today) {
+    const rows = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
+    if (!rows.length) return null;
+    const counts = STALE_KINDS.map(kind => [kind, rows.filter(row => row.startsWith(kind)).length]).filter(([, n]) => n);
+    const what = `${rows.length} row${rows.length === 1 ? '' : 's'} to answer`;
+    return {
+      full: `Stale check ${today}: ${what} (${counts.map(([kind, n]) => `${kind} ${n}`).join(', ')}). Run ${command} for the rows (it reads nothing again today). Controller: answer each this turn: close each child you judge done yourself, and put each OWNER OK? row, a FOLD? (a duplicate) or a child you judge obsolete in your next ask to the owner.`,
+      short: `Stale check ${today}: ${what}; run ${command}. Controller: answer each this turn.`,
+    };
+  }
+  const failed = last.failed && typeof last.failed === 'object' ? last.failed : null;
+  if (!failed || !Object.hasOwn(STALE_FAILED, failed.check) || Number.isNaN(Date.parse(failed.at))) return null;
+  const at = new Date(Date.parse(failed.at)).toISOString().slice(0, 16).replace('T', ' ');
+  return {
+    full: `Stale check: could not read ${STALE_FAILED[failed.check]} at ${at}Z, so it has not run since ${/^\d{4}-\d{2}-\d{2}$/.test(String(last.date)) ? last.date : 'it was set up'}. Controller: check this computer's gh sign-in (gh auth status), then run ${command} and read its error; it retries at the next session start.`,
+    short: `Stale check: could not read ${STALE_FAILED[failed.check]}; run ${command}. Controller: fix it this turn.`,
+  };
+}
+function staleLine(repository, root, deps = {}, { start = true } = {}) {
+  const last = staleStampFor(repository, deps);
+  const line = staleStampLine(last, root, deps);
+  const today = staleLocalDate(new Date(Date.parse((deps.now || (() => new Date().toISOString()))())));
+  if (start && (!last || last.date !== today)) {
+    const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+    if (cache.claimBackgroundStart(repository, deps, 'stale')) {
+      try { (deps.startStaleSweep || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startStaleSweep)(root, deps); } catch { /* retried at a later start */ }
+    }
+  }
+  return line;
 }
 
 // The stale-copy line for one repository, or none (also when the copies cannot be checked).
@@ -1701,8 +1780,9 @@ function cloudRepositories(cwd) {
 // The governed rules are given once, naming the repositories they bind. The whole text stays within
 // `limit` (the hook passes what its own cloud line leaves of the host's limit): from the last
 // repository up, a state line first shrinks to its short form, so the rules and every repository
-// they bind are always seen in full.
-function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT, staleCopies = null, refresh = null, refreshWorker = undefined } = {}) {
+// they bind are always seen in full. The repository the session is inside, when ENABLED with programme
+// records bound, also gets the attention and stale-check lines (cloudProgrammeLines).
+function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, deadline = Date.now() + 6000, limit = SESSION_TEXT_LIMIT, staleCopies = null, refresh = null, refreshWorker = undefined, programmeDeps = {} } = {}) {
   const { roots, inside } = cloudRepositories(cwd);
   if (!roots.length) return null;
   let refreshed = new Map(inside ? [[roots[0], refresh]] : []);
@@ -1726,7 +1806,11 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
     const stale = state.state === 'ENABLED' && Date.now() < deadline ? (staleCopies || (target => staleCopyLines(target, registryOptions, clone ? { toolkitRoot: clone } : {})))({ ...state, root }) : [];
     const own = refreshed.get(root) || null;
     const text = state.state === 'UNDECIDED' ? CLOUD_UNDECIDED : state.state === 'UNAVAILABLE' ? unavailableText(causeOf(state, own)) : decidedLine(state, own);
-    lines.push({ full: `- ${name}: ${text}${stale.map(line => `\n  ${line}`).join('')}`, short: `- ${name}: ${shortState(state, own)}` });
+    const programme = inside && state.state === 'ENABLED' && state.programme_records_bind === true ? cloudProgrammeLines({ ...state, root }, registryOptions, programmeDeps) : [];
+    lines.push({
+      full: `- ${name}: ${text}${[...stale, ...programme.map(line => line.full)].map(line => `\n  ${line}`).join('')}`,
+      short: `- ${name}: ${shortState(state, own)}${programme.filter(line => line.short).map(line => `\n  ${line.short}`).join('')}`,
+    });
   }
   const rules = enabled.length ? `\n\nThe Toolkit-governed rules below bind only ${enabled.join(', ')}.\n\n${governedRules()}` : '';
   return fitLines(lines, (kept, leftOut) => {
@@ -1734,6 +1818,35 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
     const note = shortened ? `\n(Shortened to keep this text within the host's session-start limit${leftOut ? `; ${leftOut} more repositor${leftOut === 1 ? 'y' : 'ies'} left out` : ''}. Run toolkit-governance.cjs status in a repository for its full state${enabled.length ? '; the rules below bind every repository they name' : ''}.)` : '';
     return `Repositories in this session:\n${kept.join('\n')}${note}${rules}`;
   }, limit);
+}
+
+// A cloud session never reads the programme store and starts no background job: its GitHub link may
+// not reach the store, and its VM is thrown away. It shows the same attention and stale-check lines as a
+// computer only from caches already in this session (the same helpers, so the same Controller:
+// sentence). With neither, it says plainly that both wait for the owner's computer, where the next
+// session start reads the store and runs the stale check. Local reads only; any failure drops only
+// these lines. Each line is { full, short }.
+const CLOUD_PROGRAMME_WAITS = Object.freeze({
+  full: "Attention and stale check: not read in this cloud session (a cloud session does not read the programme store); both run at the next session start on the owner's computer. Controller: check them from a session on the owner's computer before closing or planning children.",
+  short: "Attention and stale check: wait for the owner's computer.",
+});
+function cloudProgrammeLines(state, registryOptions = {}, deps = {}) {
+  try {
+    const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
+    if (!binding || !binding.repository) return [];
+    const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+    const cached = cache.readCache(binding.repository, deps);
+    const lines = [];
+    if (cached) {
+      const attention = cache.sessionAttention(binding.repository, deps);
+      if (attention.line) lines.push({ full: `${attention.line}.${attention.open ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`, short: null });
+    }
+    const stale = staleStampLine(staleStampFor(binding.repository, deps), state.root, deps);
+    if (stale) lines.push(stale);
+    // No attention cache and no stale line to show: say where the check runs, never stay silent.
+    if (!cached && !stale) lines.push(CLOUD_PROGRAMME_WAITS);
+    return lines;
+  } catch { return []; }
 }
 
 // One repository's state in a few words, for a cloud line that had to shrink.

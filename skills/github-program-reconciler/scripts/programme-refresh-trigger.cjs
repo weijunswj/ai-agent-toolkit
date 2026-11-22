@@ -3,8 +3,10 @@
 // Write-triggered programme refresh. The plugins' after-tool (`PostToolUse`) hook marks a session that
 // made a GitHub write; its turn-end (`Stop`) hook then starts `programme.cjs refresh` in the background
 // for a governed checkout and clears the mark. No token is involved: the pass runs as the computer's
-// own `gh` sign-in. Where `gh` is not signed in (cloud containers), the pass fails, the failure is kept
-// in the checkout's last-run file, and the hourly sweep brings the pages up to date instead.
+// own `gh` sign-in. Where `gh` cannot write the programme store (a cloud session's `gh` goes through the
+// session's GitHub proxy, which reaches only the repositories attached to the session), the pass fails,
+// the failure is kept in the checkout's last-run file, and the hourly sweep brings the pages up to date
+// instead.
 //
 // Marking reads only the hook input and writes one small local file: no git, gh or network call. Both
 // paths never throw, never print and never block a turn.
@@ -236,4 +238,31 @@ function startRefresh(root, deps = {}) {
   }
 }
 
-module.exports = Object.freeze({ WRITE_TOOLS, githubWrite, markWrite, onStop, startRefresh, governedRoot, refreshDir, markFile, lastRunFile, pruneMarks, MARK_MAX_AGE_MS });
+// The stale check's date stamp on this computer: the background run writes it and the session-start
+// line reads it, so both name the same file.
+const staleStampFile = (deps = {}) => deps.staleStampFile || path.join(deps.home || os.homedir(), '.ai-agent-toolkit', 'user-state', 'stale-sweep.json');
+
+// Starts the stale check (`toolkit-controller-check.cjs` with every other check skipped) detached, for
+// the governance session-start hook, with its output in the checkout's last-run file. Its own
+// `programme.cjs attention` read also refreshes this computer's attention cache. It reads GitHub only
+// and writes the stamp; a spawn that fails later is retried at a later start (the stamp stays undated).
+function startStaleSweep(root, deps = {}) {
+  const controllerCheck = path.join(__dirname, '..', '..', '..', 'repo', 'scripts', 'toolkit-controller-check.cjs');
+  const { staleOnlySkip } = require(controllerCheck);
+  const log = lastRunFile(deps, root);
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  try { if (fs.statSync(log).size > LOG_LIMIT) fs.unlinkSync(log); } catch { /* no log yet */ }
+  const fd = fs.openSync(log, 'a', 0o600);
+  try {
+    fs.writeSync(fd, `${new Date().toISOString()} stale check ${root}\n`);
+    const child = spawn(process.execPath, [controllerCheck, '--host', 'chat', '--checkout', root, '--skip', staleOnlySkip, '--stale-stamp', staleStampFile(deps), '--json'], {
+      cwd: root, detached: true, stdio: ['ignore', fd, fd], windowsHide: true,
+    });
+    child.on('error', () => {});
+    child.unref();
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+module.exports = Object.freeze({ WRITE_TOOLS, githubWrite, markWrite, onStop, startRefresh, startStaleSweep, staleStampFile, governedRoot, refreshDir, markFile, lastRunFile, pruneMarks, MARK_MAX_AGE_MS });

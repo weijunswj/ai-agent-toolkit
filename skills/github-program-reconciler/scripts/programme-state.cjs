@@ -2162,7 +2162,9 @@ function agentStep(outcome, child) {
 // that is the owner's UAT also says why it is the owner's: `agent_uat` PASSED (the owner's look, or
 // close OK, is all that is left) or OWNER_ONLY (the owner must still test), with `uat_head`, the head
 // the UAT is owed and the agent's result was recorded at (a train merge, say, not the PR head), and
-// `pr_state`. Decisions carry none.
+// `pr_state`. Decisions carry none. Every wait says whether a gate is live on the task (`gate_live`:
+// assigned or active, blocked or not), which `after` does not show for a gate on a task waiting on the
+// owner or a blocked gate; the stale check never offers the owner a close while one is.
 function ownerWaits(parent, children) {
   return graphOrder(parent, children, new Map()).flatMap(outcome => {
     const child = children.get(outcome.issue);
@@ -2170,7 +2172,7 @@ function ownerWaits(parent, children) {
     if (!step) return [];
     const agentUat = step.ask !== 'decision' && uatOwer(child) === 'owner'
       ? { agent_uat: agentUatAt(child, child.uat.at_head), uat_head: child.uat.at_head, pr_state: child.pr?.state || null } : {};
-    return [{ issue: outcome.issue, ...step, ...agentUat, pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }];
+    return [{ issue: outcome.issue, ...step, ...agentUat, gate_live: gateLive(child), pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }];
   });
 }
 

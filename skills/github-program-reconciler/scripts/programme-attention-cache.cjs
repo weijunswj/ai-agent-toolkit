@@ -120,14 +120,15 @@ function sessionAttention(repository, deps = {}) {
   return queueOnly ? { ...shown, queueOnly: true } : shown;
 }
 
-// Background refreshes from session start are at most one per START_GAP_MS per repository on this
-// computer, so a refresh that keeps failing (no holder, gh signed out) is not started at every start.
+// Background jobs from session start (the attention refresh, and the stale check as kind 'stale') are
+// at most one per START_GAP_MS per repository and kind on this computer, so a job that keeps failing
+// (no holder, gh signed out) is not started at every start.
 const START_GAP_MS = 15 * 60 * 1000;
-const startFile = (repository, deps) => { const file = cacheFile(repository, deps); return file ? `${file}.started` : null; };
+const startFile = (repository, deps, kind) => { const file = cacheFile(repository, deps); return file ? `${file}.${kind === 'refresh' ? '' : `${kind}-`}started` : null; };
 
 // Records a start and returns true when the last one is older than START_GAP_MS (or there is none).
-function claimBackgroundStart(repository, deps = {}) {
-  const file = startFile(repository, deps);
+function claimBackgroundStart(repository, deps = {}, kind = 'refresh') {
+  const file = startFile(repository, deps, kind);
   if (!file) return false;
   const nowMs = Date.parse((deps.now || (() => new Date().toISOString()))());
   try {

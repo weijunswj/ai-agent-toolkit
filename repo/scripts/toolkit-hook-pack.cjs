@@ -152,7 +152,7 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff_off'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff_off', 'stale_rows'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
@@ -160,6 +160,8 @@ function fixtureErrors(fixture) {
   if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title', 'train-members', 'train-sibling', 'train-sibling-row'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
+  if (fixture.stale_rows !== undefined && (!fixture.repo || !['enabled', 'disabled'].includes(fixture.repo.governance)
+    || !Array.isArray(fixture.stale_rows) || !fixture.stale_rows.length || fixture.stale_rows.some(row => typeof row !== 'string' || !row.trim()))) errors.push('fixture.stale_rows needs an enabled or disabled repository and nonempty row strings');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -425,6 +427,15 @@ class Fixture {
         id: `fixture-${index}`, job, host: 'windows', folder: 'FIXTURE', repository, name: job, schedule: 'hourly',
         purpose: 'Hook pack fixture', created: this.#now().toISOString(), created_by: 'fixture', model: null, effort: null,
       })));
+    }
+    // Today's stale-check stamp in the fixture home, as the background run writes it after a good run.
+    if (spec.stale_rows) {
+      const now = this.#now();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
+      const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'stale-sweep.json');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ [repository]: { date: today, at: now.toISOString(), rows: spec.stale_rows } }));
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
