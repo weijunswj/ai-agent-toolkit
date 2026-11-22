@@ -213,3 +213,43 @@ test('lean children: one capped polish child, a daily stale sweep and automate-f
   assert.doesNotMatch(global, /\*\*Checks over judgement:\*\*/);
   assert.match(global, /^- \*\*Written, not remembered:\*\* progress and decisions live in the branch, PR and records\.$/m);
 });
+
+test('the owner-post rule has one home: the principles page, read before every owner post', () => {
+  const read = rel => fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8').replace(/\r\n/g, '\n');
+  const page = read('repo/controller/principles.md');
+  const line = page.split('\n').find(text => text.startsWith('- **Plain owner posts:** ')) || '';
+  for (const phrase of [
+    'owner posts carry what the owner needs, not the working detail',
+    'Beyond answering the owner, tell them their steps (tap, approve, test, typed OK, decide), real problems and outcomes worth knowing (landed, merged, failed, blocked, a decision or scope change)',
+    'one point per task, or one line for a single task, each led by a bold task label, never a line saying nothing needs them',
+    'Leave out the working detail of gates, helpers and other spawned work (probes, test counts, round-by-round findings, file lists) unless asked: it stays in their full reports and the evidence store',
+    "This binds the controller's own posts to the owner, relays included",
+    "Asked with the native question method, a card holds only the short question and short options, the pick marked; the context, items and each pick's reason go above it as formatted text",
+  ]) assert.ok(line.includes(phrase), phrase);
+  // Every controller type binds the core, which re-reads the page before it posts to the owner.
+  assert.ok(read('repo/CONTROLLER.md').includes('before every plan, review, merge decision or owner post'));
+
+  const projectsDir = path.join(ROOT, 'repo', 'contracts', 'claude-projects');
+  const projects = [];
+  const walk = dir => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.md')) projects.push(path.relative(ROOT, full).split(path.sep).join('/'));
+    }
+  };
+  walk(projectsDir);
+  assert.ok(projects.length > 5, 'the Projects files are found');
+  // No other controller file or Projects file restates when to message the owner.
+  for (const rel of [...controllerFiles(), ...projects]) {
+    assert.doesNotMatch(read(rel), /only when (?:the owner must act|it needs the owner)|unless the owner must act|one line when nothing needs the owner|\*\*Notify only when/i, rel);
+  }
+  // Information-only Projects notices fold into the next status instead of their own owner message.
+  for (const rel of projects) {
+    assert.doesNotMatch(read(rel), /tell the owner in one line what changed|tell the owner once which|and tell the owner; never|tell the owner once what waits|line, and tell the owner once\./i, rel);
+  }
+  // Ask cards carry only the question and options; the context sits above them.
+  for (const rel of [...projects, 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md']) {
+    assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen/i, rel);
+  }
+});

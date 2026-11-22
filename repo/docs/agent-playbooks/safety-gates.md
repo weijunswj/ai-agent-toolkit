@@ -59,7 +59,7 @@ A matching active `standing` entry is the fresh approval the approval rule above
 
 ### The card
 
-One plain-English card, one screen, with the recommended option marked. In Claude Projects use a decision card; elsewhere ask in the conversation.
+Write the three lines below as plain-English formatted text, then ask with one card holding only the short question and its options (just this once, from now on, no), the recommended one marked. In Claude Projects use a decision card; elsewhere ask in the conversation.
 
 - **Stopped on:** the step in plain words.
 - **Why it stopped:** one line, for example "your computer's safety check blocks changing scripts it didn't write".

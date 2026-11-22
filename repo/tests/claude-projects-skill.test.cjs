@@ -262,7 +262,7 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
   assert.ok(playbook.indexOf('before takeover writes') < playbook.indexOf('## Journey'));
   const skill = read(SKILL_REL);
   assert.ok(skill.includes('Follow for the whole session'));
-  assert.ok(controllerText().includes('Routines/executors ask the owner only when the owner must act'));
+  assert.ok(controllerText().includes('Routines/executors send findings and owner asks to the controller'));
   assert.doesNotMatch(surfaces.controller + surfaces.skill, /`start_thread`\/`read_project_chat`/);
   assert.doesNotMatch(surfaces.guide, /tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`/);
 });
@@ -506,7 +506,12 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.doesNotMatch(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`/);
   assert.match(text, /Only the plugin \(two clicks\) and the saved skill card \(one Save\) need the owner: no agent can update them, so you guide the owner with the exact step\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
-  assert.ok(text.includes('Relay each hourly nudge run too, one line when nothing needs the owner (**Communication**).'));
+  assert.ok(text.includes('Relay each hourly nudge run too (**Communication**).'));
+  assert.doesNotMatch(text, /one line when nothing needs the owner/);
+  // The owner-post rule lives on the principles page; new asks still notify at once.
+  assert.ok(text.includes('post it in top-level project chat with notify on'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md').includes('new asks use **Call-to-action pings**: same turn, notify on'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md').includes('**Run notices.** A run you defer or pause gets one notified owner line the same turn'));
   assert.doesNotMatch(text, /stays silent/);
   // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
   assert.match(text, /post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under \*\*Plugin:\*\*, copied as written\./);
@@ -562,7 +567,7 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   assert.ok(text.includes('`BINDING: <owner/repo> <branch> commit <full SHA> CONTROLLER.md blob <full blob SHA> toolkit <x.y.z> skill <Version> bound <UTC date>`'));
   // Coordinator before a launch: stale rebinds first, commit-only moves are quiet, a failed read holds.
   assert.match(text, /\*\*Re-check before every launch\.\*\* Before each launch or authority transition, compare the default branch's `CONTROLLER\.md` blob with the bound blob/);
-  assert.match(text, /update the binding line and tell the owner in one line what changed, all before the launch/);
+  assert.match(text, /update the binding line and put what changed in your next status, all before the launch/);
   assert.match(text, /If only the commit moved, update the commit quietly/);
   assert.match(text, /If the read fails, hold the launch until it succeeds/);
   assert.match(text, /Every brief names the bound commit and blob/);
@@ -636,7 +641,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('with a **Waiting on you** item or relay that names its thread, file or artifact without its link, or that links a PR anywhere but a merge ask for a merge-ready PR;'));
   // Devices by their recorded name, every periodic report relayed, owed decision records kept as promises.
   assert.ok(text.includes('Name a device by the name the project instructions record for it, never a generic word'));
-  assert.ok(text.includes('Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or one line when nothing is due.'));
+  assert.ok(text.includes('Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or a short status when nothing is due (controller principles page).'));
   assert.ok(text.includes('**Owed records are promises.** With GitHub governance ENABLED, each owner decision or plan OK owes its decision-trace record the same turn'));
   assert.ok(text.includes('the nudge lists it under **Overdue promise:** until then.'));
   // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
@@ -691,7 +696,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('In a running post the **Now:** line stays first: put them under it, or under the question they belong to.'));
   assert.ok(text.includes('Every brief tells the thread to do the same, and a G0 brief to open its plan with them.'));
   assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
-  assert.ok(text.includes('for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines'));
+  assert.ok(text.includes('for every approval or choice the coordinator acts on itself, its problem, fix and skip lines above it'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'the skill names the &nbsp; spacer only to forbid it');
   assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never write its choices as bullets.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);

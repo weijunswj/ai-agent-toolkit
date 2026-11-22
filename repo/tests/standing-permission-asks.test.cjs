@@ -100,7 +100,7 @@ test('the Projects skill uses a decision card, the same ledger and the playbook 
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /read `reference\/permission-asks\.md` beside this skill before you ask\. Never offer or honour a hard stop\./);
   const skill = read('repo/contracts/claude-projects/web-controller-projects/reference/permission-asks.md');
   assert.ok(skill.includes('`standing-permissions/ledger.json` in the transport store'));
-  assert.ok(skill.includes('if nothing covers the step, posts one decision card: just this once, from now on for this exact scope, or no'));
+  assert.ok(skill.includes('then one decision card: just this once, from now on for this exact scope, or no'));
   assert.match(skill, /Never offer or honour a hard stop \(the Toolkit safety-gates playbook list\)/);
   assert.match(skill, /never as the default or the recommended option/);
   assert.match(skill, /Only the user's own answer creates an entry/);
