@@ -125,10 +125,10 @@ test('owner waits: one owner step per task feeds the board and the list, so the 
   });
   assert.deepEqual(state.ownerWaits(f.parent, f.children), [
     { issue: 601, ask: 'decision', after: null, pr: null, head: null },
-    { issue: 602, ask: 'UAT on PR #2602', after: null, pr: 2602, head },
+    { issue: 602, ask: 'UAT on PR #2602', after: null, agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', pr: 2602, head },
     { issue: 603, ask: 'decision', after: null, pr: null, head: null },
-    { issue: 604, ask: 'UAT on PR #2604', after: null, pr: 2604, head },
-    { issue: 605, ask: 'UAT on PR #2605', after: 'G2', pr: 2605, head },
+    { issue: 604, ask: 'UAT on PR #2604', after: null, agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', pr: 2604, head },
+    { issue: 605, ask: 'UAT on PR #2605', after: 'G2', agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', pr: 2605, head },
   ], 'blocked, finished and queued tasks, and UATs the agent still owes, wait on nobody');
   const listed = new Set(state.ownerWaits(f.parent, f.children).map(entry => entry.issue));
   for (const issue of f.children.keys()) {

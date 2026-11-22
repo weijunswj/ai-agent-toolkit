@@ -2158,12 +2158,19 @@ function agentStep(outcome, child) {
   return { ask, after: gateAtWork(child) ? publicText(child.gate.role) : null };
 }
 
-// The tasks waiting on the owner, in Programme Graph order, each with its step, PR and head.
+// The tasks waiting on the owner, in Programme Graph order, each with its step, PR and head. A step
+// that is the owner's UAT also says why it is the owner's: `agent_uat` PASSED (the owner's look, or
+// close OK, is all that is left) or OWNER_ONLY (the owner must still test), with `uat_head`, the head
+// the UAT is owed and the agent's result was recorded at (a train merge, say, not the PR head), and
+// `pr_state`. Decisions carry none.
 function ownerWaits(parent, children) {
   return graphOrder(parent, children, new Map()).flatMap(outcome => {
     const child = children.get(outcome.issue);
     const step = ownerStep(outcome, child);
-    return step ? [{ issue: outcome.issue, ...step, pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }] : [];
+    if (!step) return [];
+    const agentUat = step.ask !== 'decision' && uatOwer(child) === 'owner'
+      ? { agent_uat: agentUatAt(child, child.uat.at_head), uat_head: child.uat.at_head, pr_state: child.pr?.state || null } : {};
+    return [{ issue: outcome.issue, ...step, ...agentUat, pr: child.pr?.number || null, head: isSha(child.pr?.head) ? child.pr.head : null }];
   });
 }
 
