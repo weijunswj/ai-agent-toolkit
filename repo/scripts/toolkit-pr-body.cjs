@@ -24,9 +24,10 @@
 //     exactly one visible `Agent UAT: PASSED (<evidence>)` line (agent UAT runs every step a tool
 //     reaches before the owner is asked; the merge check does not read this line), and, in the
 //     Toolkit repository, exactly one `Bump: patch|minor|major|none` line (the merge train finder's
-//     rule), and, where the repository is governed (it has .github/toolkit-programme.json), a body
-//     under the programme board's pull request page budget (PR_PAGE_BUDGET characters; the board
-//     raises BODY_OVER_BUDGET on a page at or over it, after adding its own blocks).
+//     rule), and, where the repository is governed (its .github/toolkit-programme.json turns governance
+//     on, read as the programme sweep reads it), a body under the programme board's pull request page
+//     budget (PR_PAGE_BUDGET characters; the board raises BODY_OVER_BUDGET on a page at or over it,
+//     after adding its own blocks). The success line names only the checks that ran.
 // In the Toolkit repository it also prints a note, never a problem, when the body says `Bump: patch`
 // while one of the branch's changelog fragments has an `### Added` section: the changelog rule says
 // `minor` for a feature, a skill, a command or a new rule, and a wrong level is corrected at merge.
@@ -46,6 +47,7 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { detectPrText } = require('../../skills/secure-ci-cd/scripts/personal-data-guard.cjs');
 const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
+const { validateBinding, bindingEnabled } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const GUARD = path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
 const ATTRIBUTION = Object.freeze(['PDG-AI-FOOTER', 'PDG-AI-SESSION-LINK', 'PDG-AI-MARKER']);
@@ -150,6 +152,21 @@ function gitRoot(cwd) {
   return run.status === 0 ? run.stdout.trim() : null;
 }
 
+// Whether the programme file turns governance on, read as the programme sweep reads it (validateBinding,
+// then bindingEnabled, as loadBinding does). A missing, unreadable, invalid or switched-off file is not
+// governed, so the page budget applies only where the board checks it.
+function programmeGoverned(root) {
+  const file = path.join(root, PROGRAMME_FILE);
+  if (!fs.existsSync(file)) return false;
+  try {
+    const text = fs.readFileSync(file, 'utf8');
+    return bindingEnabled(validateBinding(JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text)));
+  } catch { return false; }
+}
+
+// Words as a plain list: "a", "a and b", "a, b and c".
+const joinWords = words => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words.join(''));
+
 // The personal-data guard's `pr` mode on the title and body, with the repository's own guard
 // config, or DEFAULT_CONFIG where it has none: { code, findings: [lines], unread, config }. A block
 // whose finding lines cannot be read is `unread`, never a pass.
@@ -205,13 +222,16 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
   try { fs.writeFileSync(path.resolve(cwd, out), body); } catch (error) { stderr.write(`The cleaned body could not be written to ${out}: ${error.code || error.message}\n`); return 2; }
   const guard = guardFindings(root, title, body, guardScript);
   if (guard.code === 2) { stderr.write('The personal-data guard could not scan the title and body, so the body is not known to pass. Run it from the repository folder with a readable guard config.\n'); return 2; }
+  const toolkit = fs.existsSync(path.join(root, TOOLKIT_MARKER));
+  const governed = programmeGoverned(root);
   const problems = [
-    ...lineProblems(body, { toolkit: fs.existsSync(path.join(root, TOOLKIT_MARKER)), governed: fs.existsSync(path.join(root, PROGRAMME_FILE)) }),
+    ...lineProblems(body, { toolkit, governed }),
     ...guard.findings.map(finding => `the personal-data guard blocks ${finding} (place, class, rule): edit that line`),
     ...(guard.unread ? ['the personal-data guard blocked the title or body, but its report could not be read: run its pr mode directly to see why'] : []),
   ];
   const ok = problems.length === 0;
-  const notes = fs.existsSync(path.join(root, TOOLKIT_MARKER)) ? bumpNotes(body, root) : [];
+  const notes = toolkit ? bumpNotes(body, root) : [];
+  const checked = ['the personal-data guard', 'the UAT line rule', ...(toolkit ? ['the Bump line rule'] : []), ...(governed ? ['the page budget'] : [])];
   if (json) {
     stdout.write(`${JSON.stringify({ ok, out, removed, problems, notes, guard_config: guard.config }, null, 2)}\n`);
   } else {
@@ -219,7 +239,7 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
     if (guard.config === 'default') lines.push(`This repository has no ${REPO_CONFIG.split(path.sep).join('/')}, so the guard ran with the pre-flight's default (pull request text and AI attribution on).`);
     if (removed.length) lines.push(`Removed ${removed.length} line(s): ${removed.map(entry => `line ${entry.line} (${entry.rule})`).join(', ')}.`);
     lines.push(ok
-      ? `Body ready: ${out} passes the personal-data guard, the UAT line rule, the Bump line rule and the page budget. Write it with a route that adds no footer, then read it back.`
+      ? `Body ready: ${out} passes ${joinWords(checked)}. Write it with a route that adds no footer, then read it back.`
       : `Body not ready (${out} holds the cleaned body); fix by hand:\n${problems.map(problem => `- ${problem}`).join('\n')}`);
     for (const note of notes) lines.push(`Note: ${note}.`);
     stdout.write(`${lines.join('\n')}\n`);

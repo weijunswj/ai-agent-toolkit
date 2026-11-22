@@ -127,6 +127,13 @@ test('each checker maps its own exit codes and output to attention or could-not-
   assert.equal(unreadable.checks.find(check => check.name === 'footer').state, 'failed');
 });
 
+test('a handoff check that stops says why on its row', () => {
+  const stopped = 'Stopped: the snapshot folder could not be read. Next: check the store checkout, then run this again.';
+  const { code, text } = run(ALL, { results: { [SCRIPTS.handoff]: { status: 1, stdout: '', stderr: `${stopped}\n` } } });
+  assert.equal(code, 1);
+  assert.ok(text.includes(`ATTENTION handoff: ${stopped}`), text);
+});
+
 test('every child runs in its read-only mode with the inputs given', () => {
   const { calls } = run([...ALL, '--repo', 'acme/other', '--since', '2026-11-13T00:00:00Z']);
   const args = Object.fromEntries(calls.map(call => [`${call.script} ${call.args[0]}`, call.args]));

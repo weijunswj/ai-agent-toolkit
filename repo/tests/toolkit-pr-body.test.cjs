@@ -32,6 +32,25 @@ function run(body, { title = 'Fix a thing', json = true } = {}) {
   }
 }
 
+// The body GOOD, padded with x's to exactly `length` characters.
+const pad = (length) => GOOD.replace('Does a thing.', `Does a thing. ${'x'.repeat(length - GOOD.length - 1)}`);
+
+// A repository's programme file (a version 2 binding) that turns governance on or off.
+function writeProgramme(dir, governance) {
+  const file = path.join(dir, '.github', 'toolkit-programme.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({
+    schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance,
+    parents: [{ issue: 7, record_prefix: 'INT-ER7-' }], store: { kind: 'github', repository: 'example-owner/TRANSPORT-example-repo', branch: 'main', path: 'state/example-owner/example-repo/' }, required_checks: ['validate'],
+  }, null, 2)}\n`);
+}
+
+// The Toolkit repository's marker file, which makes the pre-flight check the Bump line.
+function markToolkit(dir) {
+  fs.mkdirSync(path.join(dir, 'repo', 'contracts', 'agent-rules'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), '# Rules\n');
+}
+
 test('a body with every footer, link and marker comes out clean and passes', () => {
   const result = run(`${MARKER}${GOOD}${AGENT_FOOTER}${CLOUD_FOOTER}`);
   assert.equal(result.code, 0, JSON.stringify(result.report));
@@ -66,13 +85,60 @@ test('a missing UAT line, an invalid one and a missing or doubled Bump line each
 test('a body at or over the pull request page budget blocks in a governed repository', () => {
   const { PAGE_BUDGETS } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
   assert.equal(prBody.PR_PAGE_BUDGET, PAGE_BUDGETS.pr, 'one budget with the board');
-  const pad = (length) => GOOD.replace('Does a thing.', `Does a thing. ${'x'.repeat(length - GOOD.length - 1)}`);
   const over = run(pad(prBody.PR_PAGE_BUDGET));
   assert.equal(over.report.problems.length >= 1 && over.code, 1);
   assert.ok(over.report.problems.some(line => /^the body is 3000 characters, at or over the 3000-character pull request page budget/.test(line)), over.report.problems.join('\n'));
   const under = run(pad(prBody.PR_PAGE_BUDGET - 1));
   assert.equal(under.code, 0, under.report.problems.join('\n'));
   assert.deepEqual(prBody.lineProblems(pad(prBody.PR_PAGE_BUDGET), { toolkit: true }), [], 'an ungoverned repository has no page budget');
+});
+
+// The page budget applies only where the programme file turns governance on, read as the programme sweep
+// reads it: a file that turns governance off leaves the body ungoverned, the same file turned on blocks it.
+test('a programme file that turns governance off does not apply the page budget', (t) => {
+  const dir = freshRepo();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const check = () => {
+    const lines = [];
+    const code = prBody.main(['--body-file', '-', '--title', 'Fix a thing', '--out', path.join(dir, 'clean.md'), '--json'], {
+      cwd: dir, stdin: pad(prBody.PR_PAGE_BUDGET), stdout: { write: (text) => lines.push(text) }, stderr: { write() {} },
+    });
+    return { code, report: JSON.parse(lines.join('')) };
+  };
+  writeProgramme(dir, 'disabled');
+  const off = check();
+  assert.equal(off.code, 0, off.report.problems.join('\n'));
+  assert.deepEqual(off.report.problems, []);
+  writeProgramme(dir, 'enabled');
+  const on = check();
+  assert.equal(on.code, 1);
+  assert.ok(on.report.problems.some((line) => /^the body is 3000 characters, at or over the 3000-character pull request page budget/.test(line)), on.report.problems.join('\n'));
+  // A programme file saved with a leading byte order mark is read as the sweep reads it: still enabled.
+  const file = path.join(dir, '.github', 'toolkit-programme.json');
+  fs.writeFileSync(file, `${String.fromCharCode(0xfeff)}${fs.readFileSync(file, 'utf8')}`);
+  const bom = check();
+  assert.equal(bom.code, 1, bom.report.problems.join('\n'));
+});
+
+// The success line names only the checks that ran in this repository: the Bump line rule in the Toolkit
+// repository, the page budget in a governed one.
+test('the success line names only the checks that ran in this repository', (t) => {
+  const cases = [
+    [{}, 'the personal-data guard and the UAT line rule'],
+    [{ toolkit: true }, 'the personal-data guard, the UAT line rule and the Bump line rule'],
+    [{ governed: true }, 'the personal-data guard, the UAT line rule and the page budget'],
+    [{ toolkit: true, governed: true }, 'the personal-data guard, the UAT line rule, the Bump line rule and the page budget'],
+  ];
+  for (const [setup, checks] of cases) {
+    const dir = freshRepo();
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    if (setup.toolkit) markToolkit(dir);
+    if (setup.governed) writeProgramme(dir, 'enabled');
+    const out = path.join(dir, 'clean.md');
+    const lines = [];
+    assert.equal(prBody.main(['--body-file', '-', '--title', 'Fix a thing', '--out', out], { cwd: dir, stdin: GOOD, stdout: { write: (text) => lines.push(text) }, stderr: { write() {} } }), 0, lines.join(''));
+    assert.ok(lines.join('').includes(`Body ready: ${out} passes ${checks}. Write it with a route that adds no footer, then read it back.\n`), `${JSON.stringify(setup)}\n${lines.join('')}`);
+  }
 });
 
 // A feature once shipped as `Bump: patch`, though the changelog rule says minor, and was only caught at

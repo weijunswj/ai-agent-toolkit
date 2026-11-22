@@ -180,7 +180,11 @@ async function saveValues(options, { read, spawn, say, confirm, look }) {
   if (await confirm(`${verb} ${writes.length === 2 ? 'both' : 'it'} on ${repo}`) !== true) throw new SetupStop('Enter was not pressed.', 'run it again when you are ready. Nothing changed.');
   // The names above were read before the prompt. A name that was set or removed while the prompt was open
   // is not the one the owner was shown, so nothing is written; --replace covers only the names shown.
+  // A name that cannot be read back is not known to be unchanged, so that stops with its own reason.
   const current = app.presence(repo, read);
+  if (current.variable === 'unverified' || current.secret === 'unverified') {
+    throw new SetupStop(`the variable and secret names on ${repo} could not be read back after Enter, so nothing was saved.`, 'check gh is signed in as an account that administers it, then run this again. Nothing changed.');
+  }
   if (writes.some(key => current[key] !== before[key])) {
     throw new SetupStop(`${repo} changed while the prompt was open (variable ${current.variable}, secret ${current.secret}), so nothing was saved.`, 'run this again to see what is there now. Nothing changed.');
   }

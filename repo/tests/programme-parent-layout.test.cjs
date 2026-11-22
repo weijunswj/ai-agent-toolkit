@@ -124,7 +124,7 @@ test('owner waits: one owner step per task feeds the board and the list, so the 
     610: child => { uat(child, 2610, false); },
   });
   assert.deepEqual(state.ownerWaits(f.parent, f.children), [
-    { issue: 601, ask: 'decision', after: null, gate_live: false, pr: null, head: null },
+    { issue: 601, ask: 'decision', after: null, gate_live: true, pr: null, head: null },
     { issue: 602, ask: 'UAT on PR #2602', after: null, agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', gate_live: false, pr: 2602, head },
     { issue: 603, ask: 'decision', after: null, gate_live: false, pr: null, head: null },
     { issue: 604, ask: 'UAT on PR #2604', after: null, agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', gate_live: false, pr: 2604, head },
