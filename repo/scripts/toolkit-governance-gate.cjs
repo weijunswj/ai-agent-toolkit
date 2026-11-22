@@ -1628,14 +1628,8 @@ const STALE_FAILED = Object.freeze({
 });
 // The local date the stale check stamps (the check's own helper, so both count the same day).
 const staleLocalDate = time => require('./toolkit-controller-check.cjs').localDate(time);
-function staleStampFor(repository, deps) {
-  const trigger = require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs');
-  let stamps = {};
-  try { stamps = JSON.parse(fs.readFileSync(trigger.staleStampFile(deps), 'utf8')) || {}; } catch { return null; }
-  const key = Object.keys(stamps).find(name => name.toLowerCase() === String(repository).toLowerCase());
-  const entry = key ? stamps[key] : null;
-  return entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : null;
-}
+// This repository's stamp, from the file the check writes (one file per repository).
+const staleStampFor = (repository, deps) => require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs').readStaleStamp(repository, deps);
 function staleCommand(root, deps) {
   const { staleOnlySkip } = require('./toolkit-controller-check.cjs');
   const script = require('./toolkit-user-state.cjs').managedScript('toolkit-controller-check.cjs', { userHome: deps.home });

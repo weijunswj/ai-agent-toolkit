@@ -433,9 +433,8 @@ class Fixture {
       const now = this.#now();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
-      const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'stale-sweep.json');
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify({ [repository]: { date: today, at: now.toISOString(), rows: spec.stale_rows } }));
+      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
+      cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));

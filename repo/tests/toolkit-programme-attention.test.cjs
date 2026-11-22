@@ -460,11 +460,11 @@ const STALE_ROWS = [
 function staleWorld({ stamp = undefined, now = STALE_NOW, environment = {}, inject = true } = {}) {
   const root = tmp();
   const home = tmp();
-  const staleStampFile = path.join(home, 'stale-sweep.json');
-  if (stamp !== undefined) fs.writeFileSync(staleStampFile, JSON.stringify(stamp));
+  // Stamps are given keyed by repository; each goes to that repository's own stamp file.
+  for (const [repository, record] of Object.entries(stamp || {})) cache.writeStaleStamp(repository, record, { home });
   const started = { refresh: [], stale: [] };
   let clock = now;
-  const deps = { attentionDir: tmp(), sessionsDir: tmp(), home, staleStampFile, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.refresh.push(folder), now: () => clock, environment,
+  const deps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.refresh.push(folder), now: () => clock, environment,
     ...(inject ? { startStaleSweep: folder => started.stale.push(folder) } : {}) };
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
   const evaluate = (value = enabled, registryOptions = {}) => gate.sessionLine(root, { stateReader: () => value, programmeDeps: deps, registryOptions });
@@ -480,7 +480,7 @@ test('red: an ENABLED repository with stale rows today gets one stale-check line
   assert.match(line, /close each child you judge done yourself/);
   assert.doesNotMatch(text, /CLOSE LIST|post (?:it )?to the owner/);
   assert.deepEqual(world.started.stale, [], 'today\'s run already happened');
-  // The stamp's repository key is matched without case.
+  // The stamp file is found without case.
   assert.match(staleWorld({ stamp: { 'Acme/App': { date: staleToday(), at: STALE_NOW, rows: STALE_ROWS.slice(0, 1) } } }).evaluate(), /Stale check [^:]+: 1 row to answer \(JUDGE\? 1\)/);
 });
 

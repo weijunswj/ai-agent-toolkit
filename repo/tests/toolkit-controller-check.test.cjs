@@ -1,8 +1,11 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
-const { parseArgs, controllerCheck, format, main, polishRows, SCRIPTS } = require('../scripts/toolkit-controller-check.cjs');
+const { parseArgs, controllerCheck, format, main, polishRows, SCRIPTS, staleOnlySkip } = require('../scripts/toolkit-controller-check.cjs');
 
 const GOVERNED = { repository: 'acme/app', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'INT-7-' }] };
 const CLEAN = {
@@ -34,7 +37,8 @@ function world({ results = {}, binding = GOVERNED, library = true, hub = null, g
     readHubState: () => hub,
     git(cwd, args) { calls.push({ git: args, cwd }); return { stderr: '', error: null, ...(git ? git(args) : { status: 1, stdout: '' }) }; },
     gh(args) { calls.push({ gh: args }); return { stderr: '', error: null, ...(gh ? gh(args) : { status: 4, stdout: '', stderr: 'gh not stubbed' }) }; },
-    stamp: { read: () => structuredClone(stamps), write: value => written.push(value) },
+    // The stamp is per repository: read and write name it; tests keep them keyed by repository.
+    stamp: { read: repo => structuredClone(stamps)[repo] ?? null, write: (repo, record) => written.push({ [repo]: record }) },
     now: () => NOW,
   };
   return { deps, calls, written };
@@ -309,7 +313,7 @@ test('compact output prints every stale row, and a same-day run shows the day\'s
   const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }) } };
   const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: children.map(child => JSON.stringify(child)).join('\n') }) });
   let kept = {};
-  setup.deps.stamp = { read: () => structuredClone(kept), write: value => { kept = value; } };
+  setup.deps.stamp = { read: repo => structuredClone(kept)[repo] ?? null, write: (repo, record) => { kept = { ...kept, [repo]: record }; } };
   const argv = ['--host', 'chat', '--checkout', '/repo', '--skip', 'toolkit,programme,traces,ci,footer,refs'];
   const first = format(controllerCheck(parseArgs(argv), setup.deps));
   const rows = children.map(child => `  FOLD? #${child.number} new under #7 with no Nearest child: line`);
@@ -326,7 +330,7 @@ test('compact output prints every stale row, and a same-day run shows the day\'s
 test('a stamp that cannot be written fails the stale line only, keeping its rows', () => {
   const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }) } };
   const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: JSON.stringify(issue(60, { body: 'none', created_at: '2026-11-14T02:00:00Z' })) }) });
-  setup.deps.stamp = { read: () => ({}), write: () => { throw new Error('EACCES: permission denied'); } };
+  setup.deps.stamp = { read: () => null, write: () => { throw new Error('EACCES: permission denied'); } };
   const report = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), setup.deps);
   assert.deepEqual(report.checks.find(check => check.name === 'stale'), { name: 'stale', state: 'failed', lines: ['stamp not written (EACCES: permission denied); the next run sweeps again', 'FOLD? #60 new under #7 with no Nearest child: line'] });
   assert.equal(report.checks.find(check => check.name === 'ci').state, 'ok');
@@ -382,6 +386,42 @@ test('red: a stale check that cannot read attention, owner waits or the sub-issu
   assert.deepEqual(good.written, [{ 'acme/app': { date: TODAY, at: NOW.toISOString(), rows: [] } }]);
 });
 
+// Two governed repositories on one computer: a run reads its stamp before its GitHub reads and writes it
+// after them, so with one shared file the run that finished second dropped the other repository's day.
+// Real stamp files in a scratch home: each repository keeps its own day, and a second run reads nothing.
+test('red: two repositories whose stale checks overlap each keep their own stamp', t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'stale-overlap-'));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  const attention = JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] });
+  const child = JSON.stringify(issue(60, { body: 'none', created_at: '2026-11-14T02:00:00Z' }));
+  // `during` runs inside the sub-issue read, between this run's stamp read and its stamp write.
+  const runFor = (repository, during = () => {}) => {
+    const deps = {
+      run: () => ({ status: 0, stdout: attention, stderr: '', error: null }),
+      exists: () => true,
+      readBinding: () => ({ repository, governance: 'enabled', parents: [{ issue: 7 }] }),
+      readHubState: () => null,
+      gh: () => { during(); return { status: 0, stdout: child, stderr: '', error: null }; },
+      now: () => NOW,
+    };
+    return controllerCheck(parseArgs(['--host', 'chat', '--checkout', `/${repository}`, '--skip', staleOnlySkip]), deps).checks.find(check => check.name === 'stale');
+  };
+  const alpha = runFor('acme/alpha', () => assert.equal(runFor('acme/beta').state, 'attention', 'beta ran inside alpha\'s run'));
+  assert.equal(alpha.state, 'attention');
+  for (const repository of ['acme/alpha', 'acme/beta']) {
+    let read = false;
+    const again = runFor(repository, () => { read = true; });
+    assert.equal(read, false, `${repository} kept its stamp, so it reads nothing again today`);
+    assert.match(again.lines[0], /^1 row \(\d{4}-\d{2}-\d{2}, swept at [^)]+, shown again\)/, repository);
+  }
+});
+
 test('the stale check runs only with governance on and a repository, and --skip stale leaves it out', () => {
   const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
   assert.deepEqual(off.checks.find(check => check.name === 'stale').lines, ['governance off']);
@@ -389,7 +429,6 @@ test('the stale check runs only with governance on and a repository, and --skip 
   assert.deepEqual(norepo.checks.find(check => check.name === 'stale').lines, ['pass --repo <owner/name>']);
   const skipped = run(['--host', 'chat', '--checkout', '/repo', '--skip', 'stale']);
   assert.equal(skipped.calls.some(call => call.gh), false);
-  assert.equal(parseArgs(['--stale-stamp', '/tmp/s.json']).staleStamp, '/tmp/s.json');
 });
 
 // Owner-OK closes: a merged PR whose only owed step is the owner's UAT after the agent's UAT PASSED
@@ -469,7 +508,7 @@ test('red: an empty day is a clear stale check with no line for the owner, and a
   const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }) } };
   const setup = world({ results, stamps: {}, gh: () => ({ status: 0, stdout: JSON.stringify(issue(70)) }) });
   let kept = {};
-  setup.deps.stamp = { read: () => structuredClone(kept), write: value => { kept = value; } };
+  setup.deps.stamp = { read: repo => structuredClone(kept)[repo] ?? null, write: (repo, record) => { kept = { ...kept, [repo]: record }; } };
   const argv = ['--host', 'chat', '--checkout', '/repo', '--skip', 'toolkit,programme,traces,ci,footer,refs'];
   const report = controllerCheck(parseArgs(argv), setup.deps);
   const check = report.checks.find(item => item.name === 'stale');

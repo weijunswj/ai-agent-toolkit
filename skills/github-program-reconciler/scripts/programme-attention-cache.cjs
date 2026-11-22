@@ -45,6 +45,34 @@ function writeAtomically(file, value) {
   fs.renameSync(temp, file);
 }
 
+// The stale check's date stamp for one repository on this computer: { date, at, rows, held?, failed? }.
+// One file per repository, written atomically, so two repositories' runs never overwrite each other and
+// a reader never sees a half-written file. The background run and an on-demand run of
+// toolkit-controller-check.cjs write it; the session-start line (toolkit-governance-gate.cjs) reads it.
+// This is the one place its path is decided.
+function staleStampFile(repository, deps = {}) {
+  if (!REPO.test(String(repository || ''))) return null;
+  const [owner, name] = String(repository).toLowerCase().split('/');
+  return path.join(deps.home || os.homedir(), '.ai-agent-toolkit', 'user-state', 'stale-check', `${owner}--${name}.json`);
+}
+
+// The repository's stamp, or null when there is none or it cannot be read.
+function readStaleStamp(repository, deps = {}) {
+  const file = staleStampFile(repository, deps);
+  if (!file) return null;
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch { return null; }
+}
+
+// Throws when the stamp cannot be written, so the check can say so.
+function writeStaleStamp(repository, record, deps = {}) {
+  const file = staleStampFile(repository, deps);
+  if (!file) throw new Error('the repository is not owner/name');
+  writeAtomically(file, record);
+}
+
 // Records what a run on this computer read: { line, counts, digest, complete, queue }. Keeps the digest
 // last shown at session start. Never throws: a cache that cannot be written only means session start
 // says it has not checked yet.
@@ -144,4 +172,4 @@ function claimBackgroundStart(repository, deps = {}, kind = 'refresh') {
   return true;
 }
 
-module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText, queueText });
+module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText, queueText, staleStampFile, readStaleStamp, writeStaleStamp });

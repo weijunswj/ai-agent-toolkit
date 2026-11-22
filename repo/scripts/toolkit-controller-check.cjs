@@ -36,7 +36,7 @@
 //
 // Usage: node repo/scripts/toolkit-controller-check.cjs [--host projects|chat] [--checkout <dir>]
 //          [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>]
-//          [--task <kind>=<prompt file>]... [--since <ISO time>] [--stale-stamp <file>] [--skip <name,...>]
+//          [--task <kind>=<prompt file>]... [--since <ISO time>] [--skip <name,...>]
 //          [--handoff <folder>] [--expand] [--json]
 //   --checkout       a checkout of the controlled repository (CI check-up and the programme binding)
 //   --repo           the GitHub repository for the footer scan (default: the binding's repository)
@@ -46,8 +46,6 @@
 //   --memory         project memory (MEMORY.md), saved to a file
 //   --task           a stored task prompt and its kind (daily-check-in or hourly-nudge); repeatable
 //   --since          footer scan start (default: 26 hours ago)
-//   --stale-stamp    the stale check's date stamp (default: stale-sweep.json in the Toolkit user-state
-//                    folder; the session-start line reads it)
 //   --skip           checks the caller already ran elsewhere
 //   --handoff        the store checkout (or other folder) that holds the controller handoff snapshot
 //   --expand         every line of every check, passed and skipped ones included (default: one
@@ -90,10 +88,10 @@ const SCRIPTS = {
   refs: 'repo/scripts/check-script-references.cjs',
   handoff: 'repo/scripts/toolkit-store.cjs',
 };
-const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--stale-stamp <file>] [--skip <name,...>] [--handoff <folder>] [--json]';
+const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--handoff <folder>] [--json]';
 
 function parseArgs(argv) {
-  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, staleStamp: null, handoff: null, skip: new Set(), json: false, expand: false };
+  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, handoff: null, skip: new Set(), json: false, expand: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -121,8 +119,7 @@ function parseArgs(argv) {
         if (!CHECKS.includes(name)) throw new Error(`--skip names unknown check ${name}`);
         options.skip.add(name);
       }
-    } else if (arg === '--stale-stamp') options.staleStamp = value();
-    else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff'].includes(arg)) options[arg.slice(2)] = value();
+    } else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff'].includes(arg)) options[arg.slice(2)] = value();
     else throw new Error(`unknown argument ${arg}`);
   }
   return options;
@@ -138,12 +135,13 @@ function defaultGh(args) {
   return { status: result.error ? null : result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), error: result.error ? result.error.message : null };
 }
 
-// The stale check's stamp: { "<owner/name>": { date, at, rows, held?, failed? } }. A missing or
-// unreadable file is no stamp. The session-start line reads it (toolkit-governance-gate.cjs).
-const defaultStamp = file => ({
-  read() { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } },
-  write(value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); },
-});
+// The stale check's stamp, one file per repository in the Toolkit user-state folder (the attention
+// cache module decides the path and writes it atomically). A missing or unreadable file is no stamp.
+// The session-start line reads the same file (toolkit-governance-gate.cjs).
+const defaultStamp = () => {
+  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+  return { read: repo => cache.readStaleStamp(repo), write: (repo, record) => cache.writeStaleStamp(repo, record) };
+};
 
 function defaultGit(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 30000, windowsHide: true });
@@ -306,8 +304,7 @@ const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).p
 function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const today = localDate(now);
   const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK? row, each FOLD? (a duplicate) and any child you judge obsolete in your next ask to the owner; MOVE? and POLISH rows are yours`;
-  const stamps = stamp.read() || {};
-  const last = stamps[repo];
+  const last = stamp.read(repo);
   if (last && last.date === today) {
     // A stamp from before this change may also hold the day's owner close list: only its rows and held
     // line count.
@@ -319,7 +316,7 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   // Records which read failed, keeping the last good run's date and rows; a stamp that cannot be
   // written loses only the record.
   const failed = (check, line) => {
-    try { stamp.write({ ...stamps, [repo]: { ...(last && typeof last === 'object' ? last : {}), failed: { at: now.toISOString(), check } } }); } catch { /* the line below still says it */ }
+    try { stamp.write(repo, { ...(last && typeof last === 'object' ? last : {}), failed: { at: now.toISOString(), check } }); } catch { /* the line below still says it */ }
     return { state: 'failed', lines: [`${line}; no date stamped, so the next run checks again`] };
   };
   const attention = run(SCRIPTS.programme, ['attention', '--json', '--repo-root', checkout], { cwd: checkout });
@@ -381,7 +378,7 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
   }
   const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
-  try { stamp.write({ ...stamps, [repo]: { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) } }); } catch (error) {
+  try { stamp.write(repo, { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) }); } catch (error) {
     return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
   }
   if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
@@ -447,7 +444,7 @@ function controllerCheck(options, deps = {}) {
       if (!governed) { skip(name, 'governance off'); continue; }
       if (name !== 'programme' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
       if (name === 'stale') {
-        const stamp = deps.stamp || defaultStamp(options.staleStamp || path.join(require('./toolkit-user-state.cjs').userStateDirectory(), 'stale-sweep.json'));
+        const stamp = deps.stamp || defaultStamp();
         outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo, parents, now });
       } else outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
     } else if (name === 'ci') {

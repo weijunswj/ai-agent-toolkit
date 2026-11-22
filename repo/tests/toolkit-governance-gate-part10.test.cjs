@@ -176,7 +176,7 @@ function cloudProgrammeWorld(t) {
   const home = path.join(ctx.root, 'programme-home');
   fs.mkdirSync(home, { recursive: true });
   const started = { refresh: [], stale: [] };
-  const programmeDeps = { home, attentionDir: path.join(home, 'attention'), sessionsDir: path.join(home, 'sessions'), staleStampFile: path.join(home, 'stale-sweep.json'),
+  const programmeDeps = { home, attentionDir: path.join(home, 'attention'), sessionsDir: path.join(home, 'sessions'),
     startRefresh: folder => started.refresh.push(folder), startStaleSweep: folder => started.stale.push(folder), now: () => '2026-11-22T10:00:00.000Z' };
   const start = (cwd, environment = { CLAUDE_CODE_REMOTE: 'true' }) => claudeHook.respond('SessionStart', { cwd, session_id: 'cloud-stale', source: 'startup' }, { registryOptions: ctx.options, environment, refreshBinding: () => {}, programmeDeps }).hookSpecificOutput?.additionalContext || '';
   return { ctx, repo, programmeDeps, started, start };
@@ -202,7 +202,7 @@ test('red: a cloud session with the session\'s own attention cache and today\'s 
   const now = new Date('2026-11-22T10:00:00.000Z');
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   cache.writeCache('example-owner/governed', { line: 'Attention: 1 new, 0 acknowledged', counts: { new: 1, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => now.toISOString() });
-  fs.writeFileSync(world.programmeDeps.staleStampFile, JSON.stringify({ 'example-owner/governed': { date: today, at: now.toISOString(), rows: ['FOLD? #20 new under #1 with no Nearest child: line'] } }));
+  cache.writeStaleStamp('example-owner/governed', { date: today, at: now.toISOString(), rows: ['FOLD? #20 new under #1 with no Nearest child: line'] }, world.programmeDeps);
   const text = world.start(world.repo);
   const repoLine = text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
   assert.match(repoLine, /\n {2}Attention: 1 new, 0 acknowledged\. Run node "[^"]*programme\.cjs" attention for the list\. Controller: answer each new or overdue finding this turn/);

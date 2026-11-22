@@ -238,12 +238,9 @@ function startRefresh(root, deps = {}) {
   }
 }
 
-// The stale check's date stamp on this computer: the background run writes it and the session-start
-// line reads it, so both name the same file.
-const staleStampFile = (deps = {}) => deps.staleStampFile || path.join(deps.home || os.homedir(), '.ai-agent-toolkit', 'user-state', 'stale-sweep.json');
-
 // Starts the stale check (`toolkit-controller-check.cjs` with every other check skipped) detached, for
-// the governance session-start hook, with its output in the checkout's last-run file. Its own
+// the governance session-start hook, with its output in the checkout's last-run file. The check writes
+// its stamp where the session-start line reads it (programme-attention-cache.cjs staleStampFile). Its own
 // `programme.cjs attention` read also refreshes this computer's attention cache. It reads GitHub only
 // and writes the stamp; a spawn that fails later is retried at a later start (the stamp stays undated).
 function startStaleSweep(root, deps = {}) {
@@ -255,7 +252,7 @@ function startStaleSweep(root, deps = {}) {
   const fd = fs.openSync(log, 'a', 0o600);
   try {
     fs.writeSync(fd, `${new Date().toISOString()} stale check ${root}\n`);
-    const child = spawn(process.execPath, [controllerCheck, '--host', 'chat', '--checkout', root, '--skip', staleOnlySkip, '--stale-stamp', staleStampFile(deps), '--json'], {
+    const child = spawn(process.execPath, [controllerCheck, '--host', 'chat', '--checkout', root, '--skip', staleOnlySkip, '--json'], {
       cwd: root, detached: true, stdio: ['ignore', fd, fd], windowsHide: true,
     });
     child.on('error', () => {});
@@ -265,4 +262,4 @@ function startStaleSweep(root, deps = {}) {
   }
 }
 
-module.exports = Object.freeze({ WRITE_TOOLS, githubWrite, markWrite, onStop, startRefresh, startStaleSweep, staleStampFile, governedRoot, refreshDir, markFile, lastRunFile, pruneMarks, MARK_MAX_AGE_MS });
+module.exports = Object.freeze({ WRITE_TOOLS, githubWrite, markWrite, onStop, startRefresh, startStaleSweep, governedRoot, refreshDir, markFile, lastRunFile, pruneMarks, MARK_MAX_AGE_MS });
