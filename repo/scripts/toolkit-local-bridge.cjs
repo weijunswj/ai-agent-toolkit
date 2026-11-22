@@ -557,8 +557,14 @@ function controlRootOf(args = {}) {
   return path.dirname(path.resolve(args.hub || defaultHubPath()));
 }
 
-// A move that another session start's reader held off for the whole wait; the update runs at the next start.
-const READERS_BUSY = Object.freeze({ ok: false, status: 1, stdout: '', stderr: "another session start was still reading Toolkit's files after 15 seconds; the update runs at the next session start" });
+// A move that another session start's reader held off for the whole wait; the update runs at the next
+// start, so it is one plain line and no update report, never a failure the owner must act on.
+const READERS_BUSY_ERROR = 'readers busy';
+const READERS_BUSY_MESSAGE = "another session start was still reading Toolkit's files after 15 seconds; the update runs at the next session start";
+function throwIfReadersBusy(moved, details) {
+  if (!moved) throw repoUpdateError('skipped', READERS_BUSY_MESSAGE, { ...details, error: READERS_BUSY_ERROR });
+  return moved;
+}
 
 // A session start whose managed checkout already matches the remote does no fetch, validation or
 // copy. It costs one state read, one local git call and at most one `git ls-remote`, and none
@@ -637,7 +643,7 @@ function validateAndUpdateRepo(state, args = {}) {
   }
   let branchSwitchedFrom = '';
   if (currentBranch !== branch) {
-    const switchResult = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['switch', branch], { timeout: 120000 })) || READERS_BUSY;
+    const switchResult = throwIfReadersBusy(whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['switch', branch], { timeout: 120000 })), {});
     if (!switchResult.ok) {
       throw repoUpdateError('skipped', `git switch ${branch} failed: ${commandOutput(switchResult)}`, {
         error: 'branch switch failed'
@@ -672,7 +678,7 @@ function validateAndUpdateRepo(state, args = {}) {
       });
     }
     if (fromCommit !== fetchedCommit) {
-      const merge = whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 })) || READERS_BUSY;
+      const merge = throwIfReadersBusy(whileTreeMoves(controlRootOf(args), () => gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 })), { fromCommit, toCommit: fetchedCommit, branchSwitchedFrom });
       if (!merge.ok) {
         throw repoUpdateError('skipped', `git merge --ff-only ${fetchedCommit} failed: ${commandOutput(merge)}`, {
           fromCommit,
@@ -1678,7 +1684,7 @@ function classifyUpdateReport(context) {
   const actionable = installStatus === 'action-required'
     || repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
-    || (repoStatus === 'skipped' && Boolean(context.repo?.error))
+    || (repoStatus === 'skipped' && Boolean(context.repo?.error) && context.repo.error !== READERS_BUSY_ERROR)
     || ['stale', 'refresh-failed'].includes(cacheStatus)
     || Boolean(context.warning);
   const successfulActivity = Boolean(context.repo?.branchSwitchedFrom)
@@ -3064,7 +3070,7 @@ function handOffToCheckout(args, accountRoot, checkout) {
     return { lines: [`Toolkit: this PC's Toolkit folder ${slash(checkout)} has no bridge script, so session-start maintenance did not run. Run \`setup toolkit\`.`] };
   }
   if (!source.includes(HANDOFF_ENV)) {
-    return { lines: [], owner: `Toolkit: this PC's Toolkit folder ${slash(checkout)} is older than the Claude app's Toolkit and cannot take its session-start maintenance, so it is not updating. Say \`refresh toolkit\` once; after that it updates itself at each session start.` };
+    return { lines: [], owner: `Toolkit: this PC's Toolkit folder ${slash(checkout)} is older than the Claude app's Toolkit, so this Claude app chat cannot hand it session-start maintenance (sessions that run it directly may still keep it current). Say \`refresh toolkit\` once; after that this chat runs it at each session start too.` };
   }
   const result = runCommand(process.execPath, [script, ...args.argv], {
     cwd: process.cwd(), timeout: 300000, env: { CLAUDE_PLUGIN_ROOT: checkout, [HANDOFF_ENV]: accountRoot }

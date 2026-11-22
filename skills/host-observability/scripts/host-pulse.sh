@@ -493,8 +493,8 @@ if [ "$MODE" = test-alert ] || [ "$MODE" = test-heartbeat ]; then
   fi
   if ! problem="$(alert_config_problem)"; then printf 'Alerting not set up: %s\n' "$problem"; exit 1; fi
   body="$(mktemp "$STATE_DIR/.test-alert.XXXXXX")"
-  printf 'Test alert from host-observability on %s. If you can read this, alerts reach you.\n' "$HOST_LABEL" > "$body"
-  outcome="$(send_alert "host-observability $HOST_LABEL: test alert" "$body")"; result=$?
+  printf 'Test alert from the server monitor on %s. If you can read this, alerts reach you.\n' "$HOST_LABEL" > "$body"
+  outcome="$(send_alert "Server monitor $HOST_LABEL: test alert" "$body")"; result=$?
   rm -f "$body"
   printf 'Test alert: %s\n' "$outcome"
   exit "$result"
@@ -558,7 +558,7 @@ if [ "$ALERTING_READY" -ne 1 ]; then
 elif [ "$PRE_STATE" = EMERGENCY_PRESSURE ] || [ "$SIGNATURE" != "$LAST_SENT" ] || [ "${PENDING:-0}" = 1 ] || [ "${#NOTICES[@]}" -gt 0 ] || [ "$REMIND" = 1 ]; then
   BODY="$(mktemp "$STATE_DIR/.alert.XXXXXX")"
   alert_body "$PRE_STATE" "$SERVICES" > "$BODY"
-  SUBJECT="host-observability $HOST_LABEL: $PRE_STATE"
+  SUBJECT="Server monitor $HOST_LABEL: $PRE_STATE"
   [ "$SERVICES" = OK ] || SUBJECT="$SUBJECT, services $SERVICES"
   [ "$REMIND" != 1 ] || SUBJECT="$SUBJECT (reminder, unchanged for $SINCE_ALERT pulses)"
   if outcome="$(send_alert "$SUBJECT" "$BODY")"; then

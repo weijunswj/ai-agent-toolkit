@@ -202,3 +202,29 @@ test('row 8: the board and the task page tell a started agent UAT from one not s
   fresh.sweep();
   assert.deepEqual(cells(fresh), ['NOW · AGENT UAT', 'Agent: UAT failed on PR #22', 'MERGED · Agent UAT owed']);
 });
+
+// The agent's record names the owed UAT's head (uatOwer reads only that head). A write that records a
+// result at another head is refused, so the UAT is not left silently the agent's.
+test('a started record at another head than the owed UAT is refused on write, naming both short heads, and nothing is written', () => {
+  const fx = fixture();
+  fx.sweep();
+  const before = JSON.stringify(fx.child(LANDED));
+  const run = fx.run(['update', '--issue', String(LANDED), '--patch', fx.patch({ private: { agent_uat: record('STARTED', OLDER) } })]);
+  assert.ok(run.error, 'a record at a head other than the owed UAT\'s is refused');
+  assert.equal(run.error.code, 'AGENT_UAT_HEAD_MISMATCH');
+  assert.match(run.error.message, new RegExp(`${OLDER.slice(0, 7)}.*${HEAD.slice(0, 7)}`));
+  assert.equal(JSON.stringify(fx.child(LANDED)), before, 'nothing written');
+});
+
+// The other side: a write that only moves the owed UAT to a new head keeps the older record as it is (the
+// record is not written, so the head rule does not apply), and the UAT is the agent's again.
+test('a write that only moves the owed UAT keeps an older agent record, and the UAT is the agent\'s again', () => {
+  const fx = fixture();
+  fx.sweep();
+  fx.recordAgent('STARTED');
+  const moved = fx.run(['update', '--issue', String(LANDED), '--patch', fx.patch({ uat: { state: 'PENDING', at_head: OLDER } })]);
+  assert.equal(moved.error, null, moved.error?.message);
+  const child = fx.child(LANDED);
+  assert.deepEqual([child.uat.at_head, child.private.agent_uat.at_head], [OLDER, HEAD]);
+  assert.equal(state.uatOwer(child), 'agent', 'a UAT owed at a new head is the agent\'s again');
+});

@@ -16,7 +16,8 @@
 // own time, given only on its own task's entry and never as a stamp: it covers only the fire it
 // answers (the newest at or before it), so the checking task still sees its own earlier missed fires.
 // `receipts` maps each <run UTC> that has a .relayed or .done file in the folder to
-// { "relayed"?: <its text>, "done"?: <its text> } (a key left out: no such file).
+// { "relayed"?: <its text>, "done"?: <its text> } (a key left out: no such file). Receipt keys are stamp
+// names; an ISO <run UTC> is matched by the stamp name of its whole UTC second, the name its files carry.
 //
 // Each fire time of the cron after the newer of the task's newest stamp and its creation, at most
 // 48 hours back, that is more than 20 minutes past and not the fire `own_run` answers is a missed
@@ -52,6 +53,13 @@ function time(value, what) {
   }
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(value) || Number.isNaN(Date.parse(value))) fail(what);
   return Date.parse(value);
+}
+
+// A run UTC as the stamp name its files carry. An ISO time is cut to its whole UTC second, the second a
+// stamp file is named by; a stamp name is kept as it is.
+function stampName(value) {
+  if (STAMP.test(value)) return value;
+  return new Date(time(value, 'stamps')).toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
 }
 
 // One cron field as the set of values it matches.
@@ -97,11 +105,12 @@ function fires(cron, ms) {
   return day || weekday;
 }
 
-// The fire times (UTC milliseconds, each on a whole minute) after `from` up to and including `to`.
-function fireTimes(expression, from, to) {
+// The fire times (UTC milliseconds, each on a whole minute) after `from` up to and including `to`, at most
+// `limit` of them. The scan stops once the limit is reached, so a limit of 1 reads only up to the first fire.
+function fireTimes(expression, from, to, limit = Infinity) {
   const cron = typeof expression === 'string' ? parseCron(expression) : expression;
   const times = [];
-  for (let ms = Math.floor(from / MINUTE) * MINUTE + MINUTE; ms <= to; ms += MINUTE) if (fires(cron, ms)) times.push(ms);
+  for (let ms = Math.floor(from / MINUTE) * MINUTE + MINUTE; ms <= to && times.length < limit; ms += MINUTE) if (fires(cron, ms)) times.push(ms);
   return times;
 }
 
@@ -118,7 +127,7 @@ function readTask(raw) {
     stopped: raw.stopped === true,
     stamps: raw.stamps.map(stamp => time(stamp, 'stamps')),
     ownRun: raw.own_run === null || raw.own_run === undefined ? null : time(raw.own_run, 'own_run'),
-    stampNames: raw.stamps.map(String),
+    stampNames: raw.stamps.map(stampName),
     receipts: raw.receipts === undefined ? null : readReceipts(raw.receipts),
   };
 }
@@ -148,7 +157,8 @@ function receiptStates(task, now) {
     for (const kind of ['relayed', 'done']) if (files[kind] !== undefined && !files[kind].trim()) found.push({ state: 'RECEIPT BROKEN', run, why: `empty .${kind}` });
     if (files.relayed === undefined && files.done === undefined && now - at > RELAY_MINUTES * MINUTE) found.push({ state: 'RUN PENDING', run, why: `not relayed, ${age(now - at)}` });
     else if (files.done === undefined && files.relayed !== undefined) {
-      const next = fireTimes(task.cron, at, now)[0];
+      // Only whether a fire has passed matters, so the scan stops at the first one.
+      const next = fireTimes(task.cron, at, now, 1)[0];
       if (next !== undefined) found.push({ state: 'RUN PENDING', run, why: `not done, ${age(now - at)}` });
     }
   }

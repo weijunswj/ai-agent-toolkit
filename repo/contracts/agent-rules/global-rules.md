@@ -94,7 +94,7 @@ All development aims at these; repository rules may add, never relax:
 - **Automate first:** enforce clear-cut rules in code (hooks, scripts, CI), else in writing, memory last; controllers still decide judgement calls; checks prove results, not self-grading.
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
-- **Fix the root cause, upstream:** reuse first, then the smallest real fix; where it matters, make it in the shared source that copies, prompts and later runs inherit; any fallback narrow, visible, tested.
+- **Fix the root cause, upstream:** reuse first, then the smallest real fix; where it matters, make it at the shared source every copy, prompt and later run inherits; any fallback narrow, visible, tested.
 - **Ship, then improve:** basics, ship, observe, improve.
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
@@ -140,4 +140,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, explanation first and "(my pick)" on the best option; where none works, one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, explanation first and "(my pick)" on the best option. Failing that, ask in one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.

@@ -101,6 +101,49 @@ test('(d) Ctrl+C, Ctrl+D or the end of input stops, restores the terminal, and t
   }
 });
 
+// A bracketed paste marker is six characters and can arrive split across reads at any byte boundary.
+// Every split of each marker is tried: the reads are kept a tick apart so they are never joined.
+const everySplit = marker => {
+  const splits = [];
+  for (let cut = 1; cut < marker.length; cut += 1) splits.push([marker.slice(0, cut), marker.slice(cut)]);
+  splits.push([...marker]);
+  return splits;
+};
+const readsApart = async (term, pieces) => {
+  for (const piece of pieces) { term.input.write(piece); await later(QUIET / 4); }
+};
+
+test('(e) a paste end marker split across reads still closes the paste, so a later lone Enter confirms', async () => {
+  for (const split of everySplit(terminal.PASTE_END)) {
+    const term = fakeTerminal();
+    const asked = prompt(term);
+    await readsApart(term, [`${terminal.PASTE_START}line one`, ...split]);
+    await later(QUIET * 2);
+    term.input.write('\r');
+    await later(QUIET / 4);
+    const confirmed = asked.state.value === true;
+    term.input.write('\x03');
+    assert.equal(confirmed, true, `end marker split as ${JSON.stringify(split)}: the paste never closed, so the Enter did not confirm`);
+  }
+});
+
+test('(f) a paste start marker split across reads still opens the paste, so an Enter inside it never confirms', async () => {
+  for (const split of everySplit(terminal.PASTE_START)) {
+    const term = fakeTerminal();
+    const asked = prompt(term);
+    await readsApart(term, [...split, 'line one']);
+    await later(QUIET * 2);
+    term.input.write('\r');
+    await later(QUIET * 2);
+    assert.equal(asked.state.done, false, `start marker split as ${JSON.stringify(split)}: an Enter inside the paste confirmed`);
+    await readsApart(term, [terminal.PASTE_END]);
+    await later(QUIET * 2);
+    term.input.write('\r');
+    await later(QUIET / 4);
+    assert.equal(asked.state.value, true, `start marker split as ${JSON.stringify(split)}: the paste did not end, so the Enter after it did not confirm`);
+  }
+});
+
 test('an agent shell or a missing terminal is refused before the prompt', async () => {
   for (const marker of terminal.AGENT_MARKERS) {
     const term = fakeTerminal();

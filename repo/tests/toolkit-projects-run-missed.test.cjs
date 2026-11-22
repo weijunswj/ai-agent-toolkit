@@ -153,3 +153,42 @@ test('receipt ledger: input without receipts gives the same output as before, an
     assert.throws(() => check({ now: '2026-11-20T11:36:00Z', tasks: [task({ receipts })] }), /receipts/, JSON.stringify(receipts));
   }
 });
+
+test('receipt ledger: ISO run times match the receipts of the stamp they name, so finished runs are neither orphans nor pending', () => {
+  // The same two runs as stamp names, written as ISO times (UTC, and +08:00 for 01:10 UTC); their receipts are keyed by stamp name.
+  const receipts = { '20261120T111000Z': { relayed: 'r', done: 'd' }, '20261120T011000Z': { relayed: 'r', done: 'd' } };
+  const iso = ledger(receipts, { stamps: ['2026-11-20T11:10:00Z', '2026-11-20T09:10:00+08:00'] });
+  assert.deepEqual(lines('2026-11-20T11:36:00Z', [iso]), [], 'finished ISO runs are read as done');
+  assert.equal(report(check({ now: '2026-11-20T11:36:00Z', tasks: [iso] })).split('\n')[0], 'RUN CHECK: tasks 1, checked 1, missed 0, pending 0, broken 0, orphan 0');
+  // An ISO run with no receipt is pending under its stamp name, as a stamp name would be.
+  const unrelayed = ledger({}, { stamps: ['2026-11-20T11:10:00Z'] });
+  assert.deepEqual(lines('2026-11-20T11:36:00Z', [unrelayed]), ['RUN PENDING: Hourly nudge 20261120T111000Z (not relayed, 26 min)']);
+});
+
+test('receipt ledger: each first-fire lookup stops at the next fire, and 60 unfinished runs over 90 days are counted in full', () => {
+  // 60 runs relayed but not done, one every 36 hours, the newest at 11:10 UTC on the 20th. The cron fires
+  // at most 8 hours apart (23:10 to 07:10 Singapore), so one lookup reads at most 480 minutes.
+  const newest = Date.parse('2026-11-20T11:10:00Z');
+  const receipts = {};
+  for (let i = 0; i < 60; i += 1) receipts[new Date(newest - (59 - i) * 36 * 3600000).toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z'] = { relayed: 'relayed x' };
+  // Every minute the check reads goes through this method, so counting calls counts the minutes scanned.
+  const probe = Intl.DateTimeFormat.prototype.formatToParts;
+  let calls = 0;
+  Intl.DateTimeFormat.prototype.formatToParts = function countedFormatToParts(...args) {
+    calls += 1;
+    return probe.apply(this, args);
+  };
+  let result;
+  try {
+    result = check({ now: '2026-11-20T13:11:00Z', tasks: [ledger(receipts)] });
+  } finally {
+    Intl.DateTimeFormat.prototype.formatToParts = probe;
+  }
+  const out = report(result).trim().split('\n');
+  assert.equal(out[0], 'RUN CHECK: tasks 1, checked 1, missed 0, pending 60, broken 0, orphan 0');
+  assert.equal(out.length, 7, out.join('\n'));
+  assert.equal(out[6], 'RUN PENDING: Hourly nudge and 55 more');
+  // The missed-run scan reads only the minutes after the newest stamp, and each lookup reads only up to its
+  // next fire; a scan that reads every minute from each stamp to now is far over this bound.
+  assert.ok(calls <= 60 * 480 + 200, `minute reads (formatToParts calls): ${calls}`);
+});

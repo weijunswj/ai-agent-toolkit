@@ -1728,12 +1728,21 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
 }
 
 // Agent UAT first. The agent's UAT record is the controller's, like `uat`: any other writer that
-// would add, change or remove it is refused. And a write that newly records the owner's UAT PASSED
+// would add, change or remove it is refused. A record that a write sets must name the owed UAT's
+// head, since uatOwer reads only that head. And a write that newly records the owner's UAT PASSED
 // at a head needs the agent's PASSED or OWNER_ONLY at that same head, in this write or an earlier
 // one. A PASS already on record is left as it is.
 function guardAgentUat(previous, next, holder) {
-  if (!holder && JSON.stringify(previous.private?.agent_uat ?? null) !== JSON.stringify(next.private?.agent_uat ?? null)) {
+  const recordBefore = JSON.stringify(previous.private?.agent_uat ?? null);
+  const recordAfter = JSON.stringify(next.private?.agent_uat ?? null);
+  if (!holder && recordBefore !== recordAfter) {
     throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) records private.agent_uat.');
+  }
+  // Only a write that sets the record is checked: an older record stays as it is when a write only
+  // moves the owed UAT to a new head. A malformed record is left to validation, which refuses it.
+  const record = next.private?.agent_uat;
+  if (recordBefore !== recordAfter && isObject(record) && isSha(record.at_head) && isSha(next.uat?.at_head) && record.at_head !== next.uat.at_head) {
+    throw new ProgrammeError('AGENT_UAT_HEAD_MISMATCH', `private.agent_uat is at ${shortSha(record.at_head)}, but the owed UAT is at ${shortSha(next.uat.at_head)}: record the agent's result at the owed UAT's head.`);
   }
   // A PASS with no head is left to validation, which refuses it (a PASS speaks for one head).
   if (next.uat?.state !== 'PASSED' || !isSha(next.uat.at_head) || (previous.uat?.state === 'PASSED' && previous.uat.at_head === next.uat.at_head)) return;
@@ -2088,7 +2097,7 @@ function uatPr(child) {
   return (child.private?.pr_heads || []).find(entry => entry.head === at)?.pr || null;
 }
 
-// The owner's test a task still owes, or null: `UAT on PR #n` for the PR it was recorded on (uatPr),
+// The UAT a task still owes, whoever owes it, or null: `UAT on PR #n` for the PR it was recorded on (uatPr),
 // or `UAT at <short head>` when no known PR has its head. A UAT with no recorded head names the
 // tracked PR, or no PR.
 function owedUat(child) {
@@ -2176,8 +2185,9 @@ function ownerWaits(parent, children) {
   });
 }
 
-// The Waiting on cell of an active row: the owner's step, a blocker (after a live gate), else the
-// gate a task in progress is in; `-` for queued, merged (awaitingProof) and finished rows.
+// The Waiting on cell of an active row: the owner's step (`Owner: ...`), else the agent's UAT step
+// (`Agent: ...`), else a blocker (after a live gate), else the gate a task in progress is in; `-` when
+// none of these applies.
 function waitingCell(outcome, child) {
   if (!child || isFinished(outcome, child)) return '-';
   const step = ownerStep(outcome, child);
@@ -2300,7 +2310,7 @@ function renderPrNavBlockBody(chains, pr) {
   return ['# PATH', '<!-- programme-nav -->', ...chains.map(chain => `${chains.length > 1 ? '- ' : ''}${chain.map(number => `#${number}`).join(' > ')} > PR #${pr}`)].join('\n');
 }
 
-// The UAT states that leave the owner's test still owed.
+// The UAT states that leave a UAT still owed, whoever owes it.
 const OWED_UAT_STATES = Object.freeze(['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED']);
 
 // The PR GRAPH of a task page: every open PR, then the latest finished ones, older ones on one line.

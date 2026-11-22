@@ -391,3 +391,30 @@ test('refresh PR: current copies need no pull request; the command line wires --
   assert.equal(command.stdout, 'No refresh pull request: its governance is off, and only governed repositories carry Toolkit copies.\n');
   assert.equal(command.stderr, '');
 });
+
+// The command once had no test past the commit check without an injected commit (a change that handed
+// the raw option to the file step went unseen), and none that a refused refresh goes to stderr with exit 2.
+test('refresh PR: the command finds its own Toolkit commit, and a refusal goes to stderr with exit 2', t => {
+  // A Toolkit checkout whose HEAD is on its origin/main and holds COMMIT, so the copies' own commit is reachable.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-refresh-onmain-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  git(root, ['init', '--quiet', '-b', 'main']);
+  fs.writeFileSync(path.join(root, '.git', 'objects', 'info', 'alternates'), `${path.resolve(ROOT, git(ROOT, ['rev-parse', '--git-path', 'objects']))}\n`);
+  const head = git(root, ['commit-tree', git(ROOT, ['rev-parse', 'HEAD^{tree}']), '-p', COMMIT, '-m', 'on main']);
+  git(root, ['update-ref', 'refs/heads/main', head]);
+  git(root, ['update-ref', 'refs/remotes/origin/main', head]);
+  git(root, ['remote', 'add', 'origin', 'https://github.com/weijunswj/ai-agent-toolkit.git']);
+  const out = [], err = [];
+  const io = { out: { write: text => out.push(text) }, err: { write: text => err.push(text) } };
+  const dir = governedCheckout(t);
+  const github = new FakeGitHub(dir);
+  assert.equal(workflows.main(['--repo', dir, '--refresh-pr'], { ...io, root, refresh: () => {}, governance: ENABLED, github: github.api() }), 0, err.join(''));
+  assert.match(out.join(''), /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(4 files: /);
+  assert.match(github.pulls[0].body, new RegExp(`from Toolkit ${head.slice(0, 7)}\\.`), 'rendered at the checkout\'s own commit');
+  assert.deepEqual(err, []);
+  out.length = 0;
+  const held = () => ({ ...ENABLED(), governed_effects_hold: true });
+  assert.equal(workflows.main(['--repo', dir, '--refresh-pr'], { ...io, root, refresh: () => {}, governance: held, github: new FakeGitHub(dir).api() }), 2);
+  assert.deepEqual(out, [], 'nothing on stdout');
+  assert.equal(err.join(''), 'No refresh pull request: the merged programme binding could not be read in the last 24 hours; run refresh governance online first.\n');
+});

@@ -216,6 +216,25 @@ test('a reader holds a move off for its whole run; a dead or stale reader does n
   assert.deepEqual(fs.readdirSync(marker.readersPath(root)), [], 'readers clean up after themselves');
 });
 
+// A move held off by a reader runs at the next session start; it once read as a failure that opened an
+// action-needed update report.
+test('a move a reader holds off past the wait is one plain line, not an action-needed report', (t) => {
+  const root = tmpRoot(t);
+  const { origin, managed } = staleManagedCheckout(root);
+  installToolkit(root, managed);
+  const hub = recordCheckout(root, managed, origin, { update_report_enabled: true });
+  const head = git(managed, ['rev-parse', 'HEAD']);
+  const readers = marker.readersPath(path.dirname(hub));
+  fs.mkdirSync(readers, { recursive: true });
+  fs.writeFileSync(path.join(readers, 'live'), JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+  const result = hook(root, hub, managed, { bridge: path.join(managed, 'repo', 'scripts', 'toolkit-local-bridge.cjs') });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(git(managed, ['rev-parse', 'HEAD']), head, 'nothing moved');
+  assert.match(result.stdout, /^Toolkit local bridge hook skipped: another session start was still reading Toolkit's files after 15 seconds; the update runs at the next session start$/m);
+  assert.doesNotMatch(result.stdout, /action needed|git merge|git switch/);
+  assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_error, 'readers busy');
+});
+
 test('the governance hook holds a move off while it reads the governance state', (t) => {
   const root = tmpRoot(t);
   const { respond } = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-governance-hook.cjs'));
