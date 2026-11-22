@@ -114,8 +114,8 @@
     },
     {
       "file": "repo/CONTROLLER.md",
-      "rule": "Routines/executors ask the owner only when the owner must act",
-      "instruction_only": "Whether the owner must act is a judgement per message."
+      "rule": "Routines/executors send findings and owner asks to the controller",
+      "instruction_only": "Where a routine or executor sends a finding or owner ask is a judgement per message; the owner-post rule lives on the principles page."
     },
     {
       "file": "repo/CONTROLLER.md",
@@ -317,7 +317,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Plain owner posts:**",
-      "instruction_only": "Wording and recommendations are judged per post; no check can tell the best option."
+      "instruction_only": "What the owner needs, what counts as working detail and the wording of each post and card are judged per post; no check reads posts."
     },
     {
       "file": "repo/controller/principles.md",

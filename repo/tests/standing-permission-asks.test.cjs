@@ -79,7 +79,10 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
     'tell the owner which change to undo and in which file',
-    'save a copy of the card and the owner\'s answer, word for word with its id and time, at `standing-permissions/answers/<id>.md` beside the ledger. The copy is a record only: the original wins whenever it can be opened, and if the two differ beyond the label swaps the entry covers nothing and the owner is told.',
+    'Write the lines below, apart from Options, as plain-English formatted text, then ask with one card holding only the short question and its options (just this once, from now on, no), the recommended one marked.',
+    'Where the host still blocks a granted step, the text above the card names the exact native change.',
+    '`native_rule` (the native change shown above the card, with its file,',
+    'save a copy of the card, the text shown above it and the owner\'s answer, word for word with its id and time, at `standing-permissions/answers/<id>.md` beside the ledger. The copy is a record only: the original wins whenever it can be opened, and if the two differ beyond the label swaps the entry covers nothing and the owner is told.',
     'A session that can open only the copy (such as one on the owner\'s computer reading a Projects card) asks the owner one line that restates the entry, as at review, and acts only on their yes. Each answer backs one entry.',
     'The ledger and its answer copies hold no secrets or personal data',
     'apart from the label swaps, the copy is word for word',
@@ -100,14 +103,14 @@ test('the Projects skill uses a decision card, the same ledger and the playbook 
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /read `reference\/permission-asks\.md` beside this skill before you ask\. Never offer or honour a hard stop\./);
   const skill = read('repo/contracts/claude-projects/web-controller-projects/reference/permission-asks.md');
   assert.ok(skill.includes('`standing-permissions/ledger.json` in the transport store'));
-  assert.ok(skill.includes('if nothing covers the step, posts one decision card: just this once, from now on for this exact scope, or no'));
+  assert.ok(skill.includes('if nothing covers the step, posts what is checked first, what the user is told after and what is not covered, then one decision card: just this once, from now on for this exact scope, or no.'));
   assert.match(skill, /Never offer or honour a hard stop \(the Toolkit safety-gates playbook list\)/);
   assert.match(skill, /never as the default or the recommended option/);
   assert.match(skill, /Only the user's own answer creates an entry/);
   assert.match(skill, /90-day review date/);
   assert.match(skill, /never retry another way/);
   assert.match(skill, /the entry records it in `native_rule`/);
-  assert.match(skill, /save a copy of the card and answer beside the ledger as a record only \(a session that can read only the copy asks the user one restating line first\)/);
+  assert.match(skill, /save a copy of the card, the text above it and the answer beside the ledger as a record only \(a session that can read only the copy asks the user one restating line first\)/);
 });
 
 test('the sample ledger uses the documented fields, unique ids, fake data and 90-day reviews', () => {
