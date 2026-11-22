@@ -254,7 +254,7 @@ test('the owner-post rule has one home: the principles page, read before every o
   for (const rel of projects) {
     assert.doesNotMatch(read(rel), /tell the owner in one line what changed|tell the owner once which|and tell the owner; never|tell the owner once what waits|line, and tell the owner once\./i, rel);
   }
-  // Ask cards carry only the question and options; the context sits above them.
+  // Ask cards carry only a short question and options that make sense alone; any longer context goes in the written message, never inside the card.
   for (const rel of [...projects, 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md']) {
     assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen|three lines below|(?<!above )the card names|native change the card named|copy of the card and (?:the owner's )?answer/i, rel);
   }
