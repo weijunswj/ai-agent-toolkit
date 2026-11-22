@@ -3,7 +3,7 @@ const test = require('node:test');
 const core = require('../scripts/setup-toolkit-core.cjs');
 const {
   assert, fs, path, script, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit,
-  createFakeManagedSetupScript, createGitBackedRealSetupRepo, runWithUnclosedStdin, codexConfig,
+  createFakeManagedSetupScript, createGitBackedRealSetupRepo, runWithUnclosedStdin, codexConfig, displayedBankReference,
 } = require('./toolkit-setup-test-support.cjs');
 function markerCount(text, marker) {
   return String(text || '').split(marker).length - 1;
@@ -127,18 +127,22 @@ test('delegated stdin transport preserves bounded input bytes exactly', () => {
 
 test('real partial piped answers still show one complete effective bank before pausing', () => {
   const fixture = realManagedFixture();
-  // One flag-resolved visible question puts the bank in line-by-line mode with a Selected row.
+  // One flag-resolved row shows the flag's choice; a piped line that is not yes, no or changes is no answer.
   const result = runRealManaged(fixture, ['--enable-update-reports'], 'default\n');
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.match(result.stdout, /Update source[\s\S]*Selected:/);
+  assert.match(result.stdout, /\| 1\.2 \| Update reports \|[^\n]*\(set by your setup flag\) \| - \|/);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
 });
 
 test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
   const fixture = realManagedFixture();
-  const input = ['default', 'enable', 'default', 'root-only', 'instructions', 'keep', 'keep', 'keep', 'keep', ''].join('\n');
+  // The bank is shown first; the piped answer then names its reference: yes, with the plugin on instructions
+  // and every Claude Code setting kept.
+  const shown = runRealManaged(fixture, [], '');
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  const input = `${displayedBankReference(shown.stdout)}: yes, 3.1=instructions, 3.2=keep, 3.3=keep, 3.4=keep, 3.5=keep\n`;
   const result = runRealManaged(fixture, [], input);
   assertCompletedWithoutClaudePlugin(result.status, result);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);

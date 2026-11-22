@@ -4,7 +4,8 @@
 // with the columns #, Question, Current, Recommended and Other choices; lettered choices with Keep
 // current first (the choice that changes nothing folds into it); a bank reference bound to exactly
 // what is shown; and one reading of the reply (`all recommended`, or only the changes such as
-// `1.2=B`). Callers build their own rows and decide what an answer does; nothing here writes.
+// `1.2=B`). A bank of strong-default rows (below) asks one approval question instead. Callers build
+// their own rows and decide what an answer does; nothing here writes.
 
 const crypto = require('node:crypto');
 
@@ -161,6 +162,7 @@ function questionBankApprovalPayload(specs) {
         section_title: spec.section,
         title: spec.title,
         ...(spec.report_only ? { report_only: true } : {}),
+        ...(spec.strong_default ? { strong_default: { state: spec.default_state, applies_default: spec.applies_default } } : {}),
         what_this_controls: spec.whatThisControls,
         current: {
           effective_behavior: spec.currentState?.effectiveBehavior || spec.current,
@@ -601,8 +603,172 @@ function assertQuestionBankAnswerBinding(parsed, specs, label = 'Setup') {
   }
 }
 
+// Strong-default rows. Each row keeps its number, choices and full text, but setup asks no question of its own
+// for it: the bank asks one approval question, "Apply these defaults?". The row's state says what a yes does.
+// UNSET takes the row's Toolkit default; every other state keeps what is there: a value Toolkit set
+// (TOOLKIT_DEFAULT), the owner's own value (OWNER_VALUE), the owner's earlier off (OWNER_OFF, so a default is
+// never put back), or a setting setup could not read (UNREADABLE, nothing written). The owner overrides one row
+// with its number and a choice letter, value or word (`3.5=off`); a row the reply leaves out keeps its current
+// value unless the reply also says yes. No reply, or no, writes nothing.
+const STRONG_DEFAULT_STATES = Object.freeze({ UNSET: 'unset', TOOLKIT_DEFAULT: 'toolkit-default', OWNER_VALUE: 'owner-value', OWNER_OFF: 'owner-off', UNREADABLE: 'unreadable' });
+const KEPT_REASONS = Object.freeze({
+  unset: 'Toolkit leaves this as it is by default.',
+  'toolkit-default': 'The Toolkit default is already in place.',
+  'owner-value': 'This is your own value, so setup keeps it.',
+  'owner-off': 'You turned this off, so setup keeps it off.',
+  unreadable: 'Setup could not read this setting, so it writes nothing.',
+});
+const APPROVAL_QUESTION = 'Apply these defaults?';
+
+// definition: a resolvedQuestion definition plus defaultState, defaultChoice (the value a yes applies while the
+// row is UNSET; 'keep' for a row whose default is to leave it), defaultOutcome and defaultReason, and optionally
+// keptValue (what keeping means for this row, such as install for a plugin kept current) and aliases (extra
+// words for choices, such as { on: 'enable', off: 'disable' }).
+function strongDefaultRow(definition) {
+  const { defaultState, defaultChoice, defaultOutcome, defaultReason, keptValue = 'keep', aliases = {} } = definition;
+  if (!Object.values(STRONG_DEFAULT_STATES).includes(defaultState)) throw new Error(`Setup row ${definition.id} has no strong-default state.`);
+  const applies = defaultState === STRONG_DEFAULT_STATES.UNSET && defaultChoice !== 'keep';
+  const recommendation = applies
+    ? { value: defaultChoice, outcome: defaultOutcome, reason: defaultReason }
+    : { value: keptValue, outcome: 'Keep it as it is.', reason: KEPT_REASONS[defaultState] };
+  return {
+    ...resolvedQuestion({ ...definition, recommendation }),
+    strong_default: true, default_state: defaultState, default_choice: defaultChoice, applies_default: applies, aliases: { ...aliases },
+  };
+}
+
+// A row a setup flag already answered is not pending: the flag's choice applies.
+const pendingDefaults = (specs) => answerable(specs).filter((spec) => spec.applies_default && !spec.selected);
+
+// The bank of strong-default rows: the one question, then one table per section with every column, then the
+// one reply line. The Setup applies column shows what a yes does for each row; a row a setup flag answered
+// shows the flag's choice, which the reply cannot change.
+function renderStrongDefaultBank(specs, { markdown = true } = {}) {
+  specs = ensurePresentationMetadata(specs);
+  const applies = (spec) => {
+    if (spec.selected) return `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)} (set by your setup flag)`;
+    const label = choiceLabel(spec, spec.recommended);
+    const effect = spec.applies_default && spec.recommended_outcome !== label ? `: ${spec.recommended_outcome}` : '';
+    return `${spec.presentation.recommended_choice_ref}. ${label}${effect}${spec.applies_default ? ' (Toolkit default)' : ''}`;
+  };
+  const others = (spec) => (spec.selected ? [] : spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`));
+  const pending = pendingDefaults(specs).length;
+  const rows = answerable(specs);
+  const flagged = rows.filter((spec) => spec.selected).length;
+  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting' : `1 question: ${APPROVAL_QUESTION}`;
+  const summary = flagged === rows.length ? 'Your setup flags answer every setting, so setup asks nothing and applies them as shown.'
+    : [pending ? `Setup applies the Toolkit default to ${pending} setting${pending === 1 ? '' : 's'} not set yet and keeps every other setting as it is.`
+      : 'Every setting already has a value, so a yes keeps them all as they are.',
+    ...(flagged ? [`${flagged} setting${flagged === 1 ? ' is' : 's are'} set by your setup flags, and the reply cannot change ${flagged === 1 ? 'it' : 'them'}.`] : [])].join(' ');
+  const lines = [
+    markdown ? `# Toolkit setup - ${title}` : `Toolkit setup - ${title}`,
+    '',
+    `Bank reference: ${specs[0]?.presentation.bank_reference || ''}`,
+    '',
+    summary,
+  ];
+  let section = '';
+  for (const spec of specs) {
+    if (spec.section !== section) {
+      section = spec.section;
+      const heading = `${spec.presentation.section_index}. ${section}`;
+      lines.push('', ...(markdown ? [`## ${heading}`, '', '| # | Setting | Current | Setup applies | Other choices |', '|---|---|---|---|---|'] : [heading, '='.repeat(heading.length)]));
+    }
+    if (spec.report_only) { lines.push(markdown ? `| - | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(spec.recommended_text)} | - |` : `${statusLine(spec)}`); continue; }
+    if (markdown) lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(applies(spec))} | ${others(spec).map(tableCell).join('<br>') || '-'} |`);
+    else {
+      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Current: ${spec.current_short || spec.current}`, `  Setup applies: ${applies(spec)}`);
+      const rest = others(spec);
+      if (rest.length) lines.push('  Other choices:', ...rest.map((choice) => `    ${choice}`));
+    }
+  }
+  return lines;
+}
+
+const STRONG_DEFAULT_REPLY = `${APPROVAL_QUESTION} Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.`;
+
+const YES_WORDS = new Set(['yes', 'y', 'all-recommended']);
+const STRONG_DEFAULT_ITEM = /^(\d+\.\d+)=([A-Za-z][A-Za-z-]{0,23})$/;
+const looksLikeStrongDefaultAnswer = (value) => /^(?:yes|no|y|n|all[\s_-]*recommended)\b|^\d+\.\d+\s*=/i.test(String(value || '').trim());
+
+function strongDefaultChoice(spec, word) {
+  const lower = word.toLowerCase();
+  const byLetter = word.length <= 2 ? choiceByPresentationReference(spec, word) : null;
+  const value = byLetter?.value || spec.choices.find((choice) => choice.value.toLowerCase() === lower)?.value
+    || (spec.aliases?.[lower] && selectedChoice(spec, spec.aliases[lower]) ? spec.aliases[lower] : '')
+    || (spec.folded_value === lower ? spec.folded_into : '');
+  return value ? selectedChoice(spec, value) : null;
+}
+
+// Reads a reply to the one approval question. Returns null when the text is not such a reply. mode is
+// apply-defaults (yes, with any changes), changes-only (changes alone: other rows keep their current value) or
+// declined (no: nothing is written).
+function parseStrongDefaultAnswer(input, specs, options = {}) {
+  const label = options.label || 'Setup';
+  const text = String(input || '').trim();
+  if (!text) return null;
+  const expectedReference = specs[0]?.presentation.bank_reference || '';
+  const requireBankReference = options.requireBankReference !== false;
+  let suppliedReference = expectedReference;
+  let answerText = text;
+  const envelope = splitConciseEnvelope(text);
+  if (envelope && looksLikeStrongDefaultAnswer(envelope.payload)) {
+    suppliedReference = normalizeBankReference(envelope.reference);
+    if (!suppliedReference) throw new Error(`${label} question bank reference is malformed or truncated; copy the complete displayed reference and retry before any setup write.`);
+    if (suppliedReference !== expectedReference) throw new Error(`${label} question bank reference is stale or belongs to a different rendered bank; review the current bank and answer with its displayed reference.`);
+    answerText = envelope.payload;
+  } else if (requireBankReference) {
+    if (looksLikeStrongDefaultAnswer(text.split(/\r?\n/, 1)[0])) {
+      throw new Error(`Setup answers require the displayed bank reference. Reply with ${expectedReference}: followed by yes, no or the changes.`);
+    }
+    return null;
+  } else if (!looksLikeStrongDefaultAnswer(text)) return null;
+  const identity = specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs);
+  specs = answerable(specs);
+  const tokens = answerText.replace(/all[\s_-]*recommended/ig, 'all-recommended').replace(/\s+/g, ' ').replace(/ ?= ?/g, '=')
+    .replace(/\.$/, '').split(/ ?[,;] ?| /).filter(Boolean);
+  const base = { binding_mode: requireBankReference ? 'displayed-reference' : 'same-process', bank_reference: suppliedReference, bank_identity: identity };
+  if (tokens.length === 1 && ['no', 'n'].includes(tokens[0].toLowerCase())) return { ...base, mode: 'declined', selections: [], overrides: [] };
+  let yes = false;
+  const byReference = new Map(specs.map((spec) => [spec.presentation.question_ref, spec]));
+  const overrides = new Map();
+  for (const token of tokens) {
+    if (YES_WORDS.has(token.toLowerCase())) {
+      if (yes) throw new Error(`${label} question bank answer says yes twice.`);
+      yes = true;
+      continue;
+    }
+    const item = STRONG_DEFAULT_ITEM.exec(token);
+    if (!item) throw new Error(`${label} question bank answer has a part it cannot read: ${token}. Reply yes, no, or changes such as 3.5=B.`);
+    const [, questionRef, word] = item;
+    if (overrides.has(questionRef)) throw new Error(`${label} question bank answer repeats question reference ${questionRef}.`);
+    const spec = byReference.get(questionRef);
+    if (!spec) throw Object.assign(new Error(`${label} question bank answer references unavailable question ${questionRef}.`), { code: 'QUESTION_BANK_UNKNOWN_ROW', question_ref: questionRef });
+    if (options.fixed?.(spec)) throw new Error(`${label} question bank row ${questionRef} is already set by a setup flag; leave it out of the reply.`);
+    const choice = strongDefaultChoice(spec, word);
+    if (!choice) throw new Error(`${label} question bank answer references unavailable choice ${word} for ${questionRef}.`);
+    overrides.set(questionRef, choice);
+  }
+  // A row left out keeps its current value (its Keep current choice), or with a yes takes what the bank showed.
+  // A row with no Keep current choice has nothing to keep, so it takes what the bank showed either way.
+  const leftOut = (spec) => (yes || spec.choices[0]?.label !== 'Keep current' ? spec.recommended : spec.choices[0].value);
+  const selections = specs.map((spec) => {
+    const choice = overrides.get(spec.presentation.question_ref) || selectedChoice(spec, spec.selected || leftOut(spec));
+    return { question_id: spec.id, question_ref: spec.presentation.question_ref, choice_ref: choice.presentation_ref, canonical_value: choice.value };
+  });
+  return { ...base, mode: yes ? 'apply-defaults' : 'changes-only', selections, overrides: [...overrides.keys()] };
+}
+
 module.exports = Object.freeze({
   BANK_REFERENCE_PATTERN,
+  STRONG_DEFAULT_STATES,
+  STRONG_DEFAULT_REPLY,
+  APPROVAL_QUESTION,
+  strongDefaultRow,
+  pendingDefaults,
+  renderStrongDefaultBank,
+  parseStrongDefaultAnswer,
+  looksLikeStrongDefaultAnswer,
   wizardChoice,
   resolvedQuestion,
   choiceValues,

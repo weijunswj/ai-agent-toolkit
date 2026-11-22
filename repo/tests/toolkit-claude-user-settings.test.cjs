@@ -24,6 +24,8 @@ const byId = (results) => Object.fromEntries(results.map((result) => [result.id,
 // The three settings whose Turn off removes the line; the model-switch setting writes false instead.
 const REMOVABLE = ['attribution', 'cross-session-inbound', 'agents-md'];
 const removable = (choice) => Object.fromEntries(REMOVABLE.map((id) => [id, choice]));
+// The settings an off the owner chose is recorded for, so a later setup keeps them off.
+const ownerOffCount = (recordPath) => Object.values(JSON.parse(fs.readFileSync(recordPath, 'utf8')).entries).filter((entry) => entry.owner_off === true).length;
 
 test('the four selected Toolkit settings keep their projection shapes; host validity still needs UAT', () => {
   assert.deepEqual(SETTINGS.map((spec) => [spec.keyPath.join('.'), spec.value, spec.offValue]), [
@@ -79,9 +81,10 @@ test('enable writes every absent setting, keeps other keys, and disable removes 
   assert.deepEqual(owner.inspect().map((state) => state.state), [STATES.TOOLKIT, STATES.TOOLKIT, STATES.DEFAULT, STATES.TOOLKIT]);
 
   const off = owner.apply(removable('disable'));
-  assert.ok(off.filter((result) => REMOVABLE.includes(result.id)).every((result) => result.status === 'claude-default'));
+  assert.ok(off.filter((result) => REMOVABLE.includes(result.id)).every((result) => result.status === 'owner-off'));
   assert.deepEqual(read(), { permissions: { defaultMode: 'auto' }, pluginConfigs: { other: { options: { a: 1 } } } });
-  assert.equal(fs.existsSync(recordPath), false, 'no empty record is left behind');
+  assert.equal(ownerOffCount(recordPath), 3, 'the record now holds only the three offs the owner chose');
+  assert.deepEqual(owner.inspect().map((state) => state.state), [STATES.OWNER_OFF, STATES.OWNER_OFF, STATES.DEFAULT, STATES.OWNER_OFF]);
   assert.ok(fs.existsSync(settingsPath));
 });
 
@@ -100,7 +103,7 @@ test('keep never changes an owner value; enable leaves an equal one alone', (t) 
 test('disable removes an owner value whoever set it, equal or different, and only that key', (t) => {
   const { owner, read } = fixture(t, { theme: 'dark', crossSessionInbound: 'accept', attribution: true });
   const equal = byId(owner.apply({ 'cross-session-inbound': 'disable' }));
-  assert.equal(equal['cross-session-inbound'].status, 'claude-default');
+  assert.equal(equal['cross-session-inbound'].status, 'owner-off');
   assert.equal(equal['cross-session-inbound'].changed, true);
   assert.deepEqual(read(), { theme: 'dark', attribution: true });
   const different = byId(owner.apply({ attribution: 'disable' }));
@@ -196,10 +199,10 @@ test('per-setting choices touch only the named settings; a setting left out is k
 
   owner.apply({ attribution: 'enable', 'cross-session-inbound': 'enable' });
   const removed = byId(owner.apply({ attribution: 'disable' }));
-  assert.equal(removed.attribution.status, 'claude-default');
+  assert.equal(removed.attribution.status, 'owner-off');
   assert.equal(removed.attribution.changed, true);
   assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, crossSessionInbound: 'accept' });
-  assert.deepEqual(owner.inspect().map((state) => state.state), [STATES.DEFAULT, STATES.TOOLKIT, STATES.OFF, STATES.DEFAULT]);
+  assert.deepEqual(owner.inspect().map((state) => state.state), [STATES.OWNER_OFF, STATES.TOOLKIT, STATES.OFF, STATES.DEFAULT]);
 
   assert.throws(() => owner.apply({ 'not-a-setting': 'enable' }), /Unknown Claude setting: not-a-setting/);
   assert.throws(() => owner.apply({ attribution: 'maybe' }), /Unsupported Claude settings choice: maybe/);
@@ -218,7 +221,7 @@ test('an owner edit after Toolkit wrote a value is removed on disable, keeping p
   assert.equal(results['cross-session-inbound'].changed, true);
   // The edited value is the owner's now, so the parents Toolkit once created stay and so does the file.
   assert.deepEqual(read(), { pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: {} } } });
-  assert.equal(fs.existsSync(recordPath), false);
+  assert.equal(ownerOffCount(recordPath), 3, 'only the offs the owner chose stay recorded');
 });
 
 test('a file Toolkit created is removed again when nothing else is left', (t) => {
