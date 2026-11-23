@@ -39,7 +39,7 @@ Model names change often: confirm the current names in the host before using the
 | OpenCode and other multi-vendor harnesses | the vendor's small, mid and top models | the agent's `model` (`provider/model`) | the model variant where the vendor offers one (`provider/model#variant`) |
 | n8n nodes, CI steps and other workflow model calls | the vendor's small, mid and top models | the node or step setting | the node or step setting; the reason for a raise goes in its notes or a comment beside it |
 
-In Claude Code, Toolkit's agent hook refuses a subagent launch outside a gate run that would run on the session's own model (a built-in such as `general-purpose`, `Explore`, `Plan` or a fork, or an agent file with no `model` or `model: inherit`, with no `model` on the call) and names the fix: `toolkit-g0-helper` or `toolkit-g1-helper`, or a `model` on the call such as `model: "haiku"`.
+A subagent launched with no model on the call, whose agent file sets none or says `inherit`, runs on the session's own model, often the top tier. Set the model on the call, or use an agent file that pins one. Where a hook refuses such a launch, follow the fix it names.
 
 A task that fires into a thread or session it is bound to runs on that thread's model and effort, not on what a task panel shows as its default. Start that thread on the task's tier, and check the served model in the run's own record.
 

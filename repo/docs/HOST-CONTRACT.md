@@ -95,7 +95,7 @@ Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helpe
 | Trust step | None: Claude Code has no separate trust step for plugin hooks. Setup checks that no setting turns hooks off and that the agent hook in the folder Claude Code runs refuses a test launch |
 | Helper definitions | Markdown agent files rendered from the pinned stack, looked up as Claude Code loads them: managed folder, project folders up to the repository root, user folder (a matrix row covers the order) |
 | Depth | Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` plus the hook's refusal of any launch from a helper (a matrix row) |
-| Model outside gate runs | The hook refuses a main-session launch that would run on the session's own model (no `model` on the call, and a built-in or agent file that inherits it, or a fork) and names the Toolkit helpers or a cheaper `model` instead (`toolkit-claude-inherited-model.cjs`; matrix rows A18 and A27) |
+| Model outside gate runs | The hook refuses a main-session launch that would run on the session's own model (no `model` on the call, and a built-in or agent file that inherits it, or a fork) and names the Toolkit helpers or a cheaper `model` instead (`toolkit-claude-inherited-model.cjs`; the outside-gate-run rows of the launch matrix) |
 | Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (the matrix's live rows) |
 | Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (a matrix row); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
 
