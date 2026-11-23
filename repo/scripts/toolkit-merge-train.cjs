@@ -10,7 +10,7 @@
 // exact head the merging agent may merge, by the repository's normal merge route.
 //
 //   node repo/scripts/toolkit-merge-train.cjs find   --out <file> [--live <file>] [--json]   (toolkit-merge-train-finder.cjs)
-//   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref>] [--out <file>] [--json]
+//   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref> | --separate <reason>] [--live <file>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs catchup --manifest <file> [--main <ref>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs body   --manifest <file> [--json]
@@ -25,7 +25,8 @@
 //                    "tier": "LIGHT|NORMAL|RISKY", "bump": "patch|minor|major|none",
 //                    "uat": "UAT: NOT_REQUIRED (...)", "links": ["Closes #34"],
 //                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>",
-//                    "pack_changes": ["<row id>: <why>", ...]   (optional: the member's own "Pack changes" lines) } ] }
+//                    "pack_changes": ["<row id>: <why>", ...]   (optional: the member's own "Pack changes" lines) } ],
+//     "onto": { "pr": 40, "branch": "<train branch>", "head": "<40-hex train head>" } }   (optional: written by find)
 // build takes at most six members; body copies every member's pack_changes under one "## Pack changes".
 // With no bump_command, a repository holding repo/scripts/bump-version.cjs uses the line above and
 // any other repository takes no bump commit; "none" turns the bump off. The command runs without a
@@ -36,10 +37,15 @@
 // --main, default origin/main), merges each member head, ejects one that conflicts or is already on
 // main, then runs the bump command and commits the result. --onto another train's head combines new
 // members while that train waits on CI: such a stacked train takes no bump and cannot land until
-// the earlier train has merged. Then catchup, run in a clean checkout of the stacked train, merges
+// the earlier train has merged. Trains stack by default: build takes the manifest's "onto" (find
+// writes it while a train pull request is open) as --onto, at the exact head find saw, and prints the
+// pull request base and the retarget line. A build on main reads the open train pull requests first
+// (gh api, or --live in find's format) and refuses while any is open, other than this branch's own
+// train and trains stacked on it, naming the train to stack onto; --separate "<reason>" builds on main
+// beside it on purpose and records the reason in the manifest. Then catchup, run in a clean checkout of the stacked train, merges
 // main in as one merge commit (no rebuild and no force-push) and adds the one bump; a main that does
 // not merge cleanly is refused, never hand-fixed. A stacked train that ejected a member (its head is
-// a recorded eject revert) still catches up; catchup drops the manifest's "stacked" mark. catchup
+// a recorded eject revert) still catches up; catchup drops the manifest's "stacked" and "onto". catchup
 // refuses, leaving the train as it was, when the result would not equal a fresh build (below). --out writes the boarded manifest, with the
 // ejected members and their reasons under "ejected", for catchup, verify, body and land.
 //
@@ -94,7 +100,10 @@
 // toolkit-auto-merge-eligible.cjs at the train head and no member is RISKY; else `owner` (a merge
 // card), with the reasons. --live reads those pull request facts from a JSON file
 // ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
-// (REST); a member entry with no body is refused, never read as NOT_REQUIRED.
+// (REST); a member entry with no body is refused, never read as NOT_REQUIRED. A ready land also
+// lists the steps after the merge: the closing stories for the train and each member, the sessions to
+// archive (keeping those whose owner test is owed) and, for each worktree at the train or a member
+// head, the `git worktree remove` and `git branch -d` lines (worktrees a host made are left to it).
 //
 // Exit 0: done or ready. Exit 1: refused, with every reason. Exit 2: bad arguments or unreadable input.
 
@@ -105,6 +114,7 @@ const { spawnSync } = require('node:child_process');
 const governance = require('./toolkit-governance-state.cjs');
 const autoMerge = require('./toolkit-auto-merge-eligible.cjs');
 const finder = require('./toolkit-merge-train-finder.cjs');
+const residue = require('./workspace-residue-report.cjs');
 
 const SHA = /^[0-9a-f]{40}$/;
 const LEVELS = Object.freeze(['patch', 'minor', 'major']);
@@ -205,6 +215,15 @@ function checkManifest(value) {
     }
   }
   if (value.stacked !== undefined && typeof value.stacked !== 'boolean') throw new TrainError('"stacked" must be true or false');
+  if (value.onto !== undefined) {
+    const onto = value.onto;
+    if (!onto || !Number.isInteger(onto.pr) || onto.pr <= 0 || !SHA.test(onto.head || '') || typeof onto.branch !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(onto.branch) || onto.branch.includes('..')) {
+      throw new TrainError('"onto" must name the open train to stack onto: { "pr": <number>, "branch": "<plain ref>", "head": "<full SHA>" }');
+    }
+  }
+  if (value.separate !== undefined && (typeof value.separate !== 'string' || !value.separate.trim() || value.separate.includes('\n'))) {
+    throw new TrainError('"separate" must be the one-line reason the train was built beside an open train');
+  }
   checkEjected(value, seenPr);
   return value;
 }
@@ -306,9 +325,20 @@ function build(cwd, manifest, options) {
   if (elsewhere) throw new TrainError(`${branch} is checked out in another worktree (${elsewhere.tree}); pick another branch or free that checkout first`);
   if (git(cwd, ['status', '--porcelain']).stdout) throw new TrainError('build needs a clean checkout of its own; use a fresh worktree');
   const main = resolve(cwd, options.main, '--main');
-  const onto = resolve(cwd, options.onto || options.main, '--onto');
+  const separate = options.separate === undefined ? null : String(options.separate).trim();
+  if (options.separate !== undefined && (!separate || separate.includes('\n'))) throw new TrainError('--separate must say in one line why this train builds on main beside an open train');
+  if (separate && options.onto) throw new TrainError('--separate builds on main beside the open trains; drop --onto');
+  const { onto, train: under } = ontoOf(cwd, manifest, main, options, separate);
   if (!isAncestor(cwd, main, onto)) throw new TrainError('--onto must contain main; rebuild the earlier train on main first');
   const stacked = onto !== main;
+  if (!stacked && !separate) {
+    const beside = trainsBeside(cwd, manifest, branch, options);
+    if (beside.length) return { ok: false, branch, main, onto, stacked, boarded: [], ejected: [], problems: beside };
+  }
+  // A train built on main drops a stale "onto"; the reason a train runs beside an open one stays with it.
+  manifest = { ...manifest };
+  if (!stacked) delete manifest.onto;
+  if (separate) manifest.separate = separate;
   git(cwd, ['switch', '--quiet', '--force-create', branch, onto]);
   const boarded = [];
   const ejected = [];
@@ -354,7 +384,52 @@ function build(cwd, manifest, options) {
   const head = git(cwd, ['rev-parse', 'HEAD']).stdout;
   const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })), stacked: stacked || undefined };
   if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
-  return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected, next: ejectedNext(out.ejected) };
+  return {
+    ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected,
+    ...(separate ? { separate } : {}), next: ejectedNext(out.ejected), steps: under && boarded.length ? stackSteps(under, branch, options) : [],
+  };
+}
+
+// The commit a build starts from: --onto, else the manifest's "onto" train head (find wrote it),
+// else main. --separate always builds on main. { onto, train } where train is the manifest's entry.
+function ontoOf(cwd, manifest, main, options, separate) {
+  if (separate || !manifest.onto) return { onto: resolve(cwd, options.onto || options.main, '--onto'), train: null };
+  const train = manifest.onto;
+  const here = git(cwd, ['rev-parse', '--verify', '--quiet', `${train.head}^{commit}`], { allowFail: true });
+  if (here.status !== 0) throw new TrainError(`train #${train.pr}'s head ${train.head.slice(0, 12)} is not here: git fetch origin ${train.branch}, then build again`);
+  if (options.onto && resolve(cwd, options.onto, '--onto') !== train.head) {
+    throw new TrainError(`--onto and the manifest's onto (train #${train.pr} at ${train.head.slice(0, 12)}) disagree: drop one`);
+  }
+  if (!isAncestor(cwd, main, train.head)) {
+    throw new TrainError(`train #${train.pr} at ${train.head.slice(0, 12)} does not contain main: it landed or main moved under it; run find again`, 1);
+  }
+  return { onto: train.head, train };
+}
+
+// Why a build on main would run beside an open train, or none. This branch's own train and trains
+// stacked on it do not count: rebuilding a train on main after main moved is how it catches up.
+function trainsBeside(cwd, manifest, branch, options) {
+  let trains;
+  try {
+    trains = finder.readOpenTrains(cwd, manifest.repository, options.live);
+  } catch (error) {
+    return [`could not check for open trains (${error.message}): build again online, or pass --separate "<reason>" to build on main beside any open train on purpose`];
+  }
+  const own = new Set([branch, ...finder.stackedOn(trains, branch).map(entry => entry.branch)]);
+  const beside = trains.filter(entry => !own.has(entry.branch));
+  if (!beside.length) return [];
+  const { tip } = finder.stackTip(beside);
+  const named = beside.map(entry => `#${entry.pr}`).join(', ');
+  return [`train ${named} ${beside.length > 1 ? 'are' : 'is'} open, so this train would run beside it and take a bump, a CI run and an owner ask of its own: stack onto #${tip.pr} instead (run find again, which writes onto, or git fetch origin ${tip.branch} and build with --onto ${tip.head}), or pass --separate "<reason>" to build beside it on purpose`];
+}
+
+// What to do with a train stacked on an open train: its pull request base, then the retarget.
+function stackSteps(train, branch, options) {
+  const manifest = options.out || options.manifest;
+  return [
+    `open this train's pull request against train #${train.pr}'s branch, not main: gh pr create --head ${branch} --base ${train.branch} (with the body from body)`,
+    `once train #${train.pr} lands: gh pr edit ${branch} --base main, then node repo/scripts/toolkit-merge-train.cjs catchup --manifest ${manifest} in a clean checkout of ${branch}`,
+  ];
 }
 
 function catchup(cwd, manifest, options) {
@@ -403,8 +478,9 @@ function catchup(cwd, manifest, options) {
     return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, problems: ['nothing was caught up', ...unequal] };
   }
   // Caught up on main with its bump, the train is no longer stacked, so land no longer refuses it.
-  if (manifest.stacked && (options.out || options.manifest)) {
-    const { stacked, ...rest } = manifest;
+  // The train it stacked onto has landed, so "onto" goes too: a later rebuild starts from main.
+  if ((manifest.stacked || manifest.onto) && (options.out || options.manifest)) {
+    const { stacked, onto, ...rest } = manifest;
     fs.writeFileSync(options.out || options.manifest, `${JSON.stringify(rest, null, 2)}\n`);
   }
   return { ok: true, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, bump };
@@ -799,7 +875,46 @@ function land(cwd, manifest, options) {
     members: checked.members,
     problems,
     merge: problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit', ...landRoute(cwd, manifest, checked.main, options) },
+    steps: problems.length ? [] : afterLanding(cwd, manifest, options),
   };
+}
+
+// The owed steps once the train has merged, so stories and clean-up are not forgotten: the closing
+// story on the train and each member, the sessions to archive, and the worktrees and branches left
+// at the train or a member head. It only prints lines; it removes nothing.
+function afterLanding(cwd, manifest, options) {
+  const all = manifest.members.map(member => `#${member.pr}`);
+  const owed = manifest.members.filter(member => /^UAT: OWNER_TEST_NEEDED\b/.test(member.uat.trim())).map(member => `#${member.pr}`);
+  const done = all.filter(pr => !owed.includes(pr));
+  const programme = path.join(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs');
+  const shown = path.relative(cwd, programme);
+  const command = (shown && !shown.startsWith('..') && !path.isAbsolute(shown) ? shown : programme).replace(/\\/g, '/');
+  const steps = [
+    `closing stories, once GitHub shows the merge: on train #${options.pr} and on each member (${all.join(', ')}), node ${command} closing-comment --pr <n> --body-file <story file> --dry-run, then the same without --dry-run (closing-comments playbook)`,
+    owed.length
+      ? `sessions: archive this train's lane${done.length ? ` and the finished gate sessions of ${done.join(', ')}` : ''}; keep ${owed.join(', ')}'s until the owner test passes`
+      : `sessions: archive this train's lane and the finished gate sessions of ${all.join(', ')}`,
+  ];
+  return [...steps, ...worktreeSteps(cwd, new Set([options.head, ...manifest.members.map(member => member.head)]))];
+}
+
+// The remove lines for each linked worktree whose commit is the train or a member head. Run from the
+// primary checkout once the merge is in; `git worktree remove` and `git branch -d` refuse unsaved or
+// unmerged work by themselves. Worktrees a host made are left to the host.
+function worktreeSteps(cwd, heads) {
+  const listed = git(cwd, ['worktree', 'list', '--porcelain'], { allowFail: true });
+  if (listed.status !== 0) return ['worktrees: could not list them here; check the lane worktrees by hand'];
+  const [primary, ...linked] = residue.parseWorktrees(listed.stdout);
+  if (!primary) return [];
+  const lines = [];
+  for (const entry of linked) {
+    if (!heads.has(entry.head)) continue;
+    const place = residue.placeOf(entry.path, primary.path);
+    if (place === 'Claude Code' || place === 'Codex') { lines.push(`worktree ${entry.path}: made by ${place}, left to its own clean-up`); continue; }
+    lines.push(`worktree: git -C "${primary.path}" worktree remove "${entry.path}"`);
+    if (entry.branch && !['main', 'master'].includes(entry.branch)) lines.push(`branch: git -C "${primary.path}" branch -d ${entry.branch}`);
+  }
+  return lines;
 }
 
 // How the named head may merge: `auto` on the repository's task auto-merge switch, or `owner` (a
@@ -834,7 +949,7 @@ function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!COMMANDS.includes(command)) throw new TrainError(`usage: toolkit-merge-train.cjs <${COMMANDS.join('|')}> --manifest <file> ...`);
   const options = { command, main: 'origin/main', json: false };
-  const takes = new Set(['--manifest', '--branch', '--main', '--onto', '--out', '--head', '--out-prefix', '--pr', '--live', '--reason']);
+  const takes = new Set(['--manifest', '--branch', '--main', '--onto', '--out', '--head', '--out-prefix', '--pr', '--live', '--reason', '--separate']);
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === '--json') { options.json = true; continue; }
@@ -872,11 +987,12 @@ function print(result, json) {
   if (result.body) { process.stdout.write(result.body); return; }
   const lines = [result.ok ? 'OK' : 'REFUSED'];
   for (const [key, value] of Object.entries(result)) {
-    if (key === 'ok' || key === 'problems' || key === 'next' || value === undefined) continue;
+    if (key === 'ok' || key === 'problems' || key === 'next' || key === 'steps' || value === undefined) continue;
     lines.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
   }
   for (const problem of result.problems || []) lines.push(`- ${problem}`);
-  if ((result.next || []).length) lines.push('Ejected, still owed:', ...result.next.map(line => `- ${line}`));
+  if ((result.next || []).length) lines.push('written' in result ? 'Next:' : 'Ejected, still owed:', ...result.next.map(line => `- ${line}`));
+  if ((result.steps || []).length) lines.push(result.merge ? 'After the merge:' : 'Next steps:', ...result.steps.map(line => `- ${line}`));
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 

@@ -174,4 +174,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ collect, main, parseArgs, parseWorktrees, render });
+module.exports = Object.freeze({ collect, main, parseArgs, parseWorktrees, placeOf, render });

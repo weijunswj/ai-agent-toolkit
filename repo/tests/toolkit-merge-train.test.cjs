@@ -163,7 +163,7 @@ test('a train with no bump command takes no plain commit at all', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'none' }), '--branch', 'toolkit-train/nb', '--main', 'main', '--out', out], f.repo, f.opts);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'none' }), '--branch', 'toolkit-train/nb', '--main', 'main', '--live', f.noTrains, '--out', out], f.repo, f.opts);
   assert.equal(result.bump, null);
   assert.equal(f.git('show', `${result.head}:VERSION`), '1.0.0');
   assert.equal(train.run(['verify', '--manifest', out, '--head', result.head, '--main', 'main'], f.repo, f.opts).ok, true);
@@ -390,7 +390,7 @@ test('a failed bump stops the build with a clean tree and names the cause', t =>
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'node scripts/missing-bump.cjs {level}' }), '--branch', 'toolkit-train/fail', '--main', 'main', '--out', out], f.repo, f.opts);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'node scripts/missing-bump.cjs {level}' }), '--branch', 'toolkit-train/fail', '--main', 'main', '--live', f.noTrains, '--out', out], f.repo, f.opts);
   assert.equal(result.ok, false);
   assert.equal(result.bump, null);
   assert.match(result.problems[0], /the bump command failed: .*must hold main's version before it boards/s);
@@ -412,6 +412,9 @@ test('the controller, the changelog guide and the repo map describe the train th
   for (const command of ['build', 'verify', 'body', 'land', 'eject']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
   assert.match(guide, /\*\*Eject after boarding:\*\* .*It never rewrites the branch/);
   assert.match(guide, /\*\*Batches:\*\* several merge-ready pull requests land as one merge train that bumps once/);
+  // Stacking is the script's default, and land lists what is owed after the merge.
+  assert.match(guide, /A build on main reads the open train pull requests first .* and refuses while one is open, .*`--separate "<reason>"` builds beside it on purpose/);
+  assert.match(guide, /A ready `land` also lists what is owed once the merge is in: the closing story on the train and each member, the sessions to archive/);
   assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`find` via `toolkit-merge-train-finder\.cjs`, `build`, `catchup`, `verify`, `body`, `split`, `land`, `eject`; never merges/);
   // Every controller type learns the train is its own default: CONTROLLER.md routes the merge step
   // to the page that holds it, the Projects skill puts it ahead of the one-PR bump route, and the
@@ -451,6 +454,6 @@ test('build refuses a branch checked out in another worktree and changes nothing
   assert.equal(f.git('rev-parse', 'toolkit-train/busy'), before);
   assert.equal(f.git('rev-parse', 'HEAD'), f.main);
   assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: other, encoding: 'utf8' }).stdout, '');
-  const own = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/free', '--main', 'main'], f.repo, f.opts);
+  const own = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/free', '--main', 'main', '--live', f.noTrains], f.repo, f.opts);
   assert.equal(own.ok, true, 'a branch no other worktree holds still builds');
 });
