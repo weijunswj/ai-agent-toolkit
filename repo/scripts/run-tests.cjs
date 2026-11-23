@@ -318,6 +318,12 @@ function testedCommit(env = process.env) {
   return env.GITHUB_ACTIONS === 'true' && /^[0-9a-f]{40}$/.test(env.GITHUB_SHA || '') ? env.GITHUB_SHA : null;
 }
 
+// The GitHub Actions run that measured a shard, or null outside one. A light run's gate reads another
+// run's summaries, and the duration check tells them from its own run's by this.
+function measuringRun(env = process.env) {
+  return env.GITHUB_ACTIONS === 'true' && /^[1-9]\d*$/.test(env.GITHUB_RUN_ID || '') ? env.GITHUB_RUN_ID : null;
+}
+
 // The commit --verify-ci requires the summaries to name: TESTED_COMMIT when the workflow passes the
 // legs step's choice, else the run's own.
 function verifyCommit(env = process.env) {
@@ -422,6 +428,8 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
       // GitHub Actions numbers each run attempt; the CI check keeps the newest summary of a shard.
       const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
       if (selection.shard && Number.isInteger(attempt) && attempt > 0) summary.run_attempt = attempt;
+      const runId = measuringRun();
+      if (selection.shard && runId) summary.run_id = runId;
       // The commit the run tested, so a later run can reuse this summary only for the same code.
       const commit = testedCommit();
       if (selection.shard && commit) summary.commit = commit;
@@ -448,4 +456,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });
 
-module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError, testedCommit, verifyCommit });
+module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError, measuringRun, testedCommit, verifyCommit });

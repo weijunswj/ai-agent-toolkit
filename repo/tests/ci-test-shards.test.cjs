@@ -233,6 +233,13 @@ test('in GitHub Actions a shard summary records the tested commit and --legs pic
   assert.throws(() => runner.parseArgs(['--all', '--legs', 'gate']), /--legs goes with --verify-ci/);
 });
 
+test('in GitHub Actions a shard summary records the run that measured it', () => {
+  // The duration check compares it with its own run, so a light run's reused times get no rerun advice.
+  assert.equal(runner.measuringRun({ GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: '45059271334' }), '45059271334');
+  assert.equal(runner.measuringRun({ GITHUB_RUN_ID: '45059271334' }), null, 'only inside GitHub Actions');
+  for (const id of [undefined, '', 'abc', '0', '9.5', '-1']) assert.equal(runner.measuringRun({ GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: id }), null, String(id));
+});
+
 test('Windows hook pack groups cover every corpus host case exactly once', () => {
   const pack = require('../scripts/toolkit-hook-pack.cjs');
   const corpus = pack.loadCorpus(ROOT);
@@ -893,6 +900,8 @@ test('the CI duration check reads the downloaded shard summaries and never passe
 
 // A failed-only rerun skips a passing shard, so the duration check in the new attempt re-reads that
 // shard's older summary. The failure line then says so, since only a full rerun measures it again.
+// The summaries name the run that measured them (run 700 here unless a case says otherwise).
+const MEASURING_RUN = '700';
 function rerunCheck(t) {
   const { main } = require('../scripts/check-test-durations.cjs');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'durations-rerun-'));
@@ -900,14 +909,15 @@ function rerunCheck(t) {
   const dir = path.join(temp, 'test-summaries');
   fs.mkdirSync(dir);
   const sink = () => { let text = ''; return { write: (chunk) => { text += chunk; }, text: () => text }; };
-  const summary = (number, seconds) => ({ schema: shards.SUMMARY_SCHEMA, system: 'windows', exit_code: 0, node: 'v22', shard: 'windows-1', run_attempt: number, files: [{ file: 'repo/tests/a.test.cjs', seconds }], missing: [] });
+  const summary = (number, seconds, extra) => ({ schema: shards.SUMMARY_SCHEMA, system: 'windows', exit_code: 0, node: 'v22', shard: 'windows-1', run_attempt: number, run_id: MEASURING_RUN, files: [{ file: 'repo/tests/a.test.cjs', seconds }], missing: [], ...extra });
   return {
-    write: (number, seconds) => fs.writeFileSync(path.join(dir, `test-summary-windows-1-attempt-${number}.json`), JSON.stringify(summary(number, seconds))),
-    run: (runAttempt) => {
+    write: (number, seconds, extra = {}) => fs.writeFileSync(path.join(dir, `test-summary-windows-1-attempt-${number}.json`), JSON.stringify(summary(number, seconds, extra))),
+    run: (runAttempt, runId = MEASURING_RUN) => {
       const out = sink();
       const err = sink();
       const env = { RUNNER_TEMP: temp };
       if (runAttempt !== undefined) env.GITHUB_RUN_ATTEMPT = runAttempt;
+      if (runId !== null) env.GITHUB_RUN_ID = runId;
       return { code: main(['--ci'], { out, err, env }), out: out.text(), err: err.text() };
     },
   };
@@ -933,6 +943,37 @@ test('the CI duration check keeps the plain line when the slow time is from this
   }
   // A newer attempt of that shard ran again and is still over its budget.
   check.write(2, 100000);
+  const result = check.run('2');
+  assert.equal(result.code, 1);
+  assert.match(result.err, OVER_BUDGET_LINE);
+});
+
+test('the CI duration check gives no rerun advice for times a light run reused from another run', (t) => {
+  // A light run's gate reads an earlier run's summaries; rerunning the light run, failed jobs or all,
+  // reuses that run again, so "rerun all jobs" would not measure anything again.
+  const check = rerunCheck(t);
+  check.write(1, 100000);
+  for (const runAttempt of ['2', '3']) {
+    const result = check.run(runAttempt, '900');
+    assert.equal(result.code, 1, runAttempt);
+    assert.match(result.err, OVER_BUDGET_LINE, runAttempt);
+  }
+  // A summary that names no run, or a check that knows no run of its own, keeps the plain line too.
+  for (const runId of [null, '', 'abc']) {
+    const result = check.run('2', runId);
+    assert.equal(result.code, 1, String(runId));
+    assert.match(result.err, OVER_BUDGET_LINE, String(runId));
+  }
+  check.write(1, 100000, { run_id: undefined });
+  const result = check.run('2');
+  assert.equal(result.code, 1);
+  assert.match(result.err, OVER_BUDGET_LINE);
+});
+
+test('the CI duration check never calls a failed shard summary passed', (t) => {
+  // A shard whose rerun was cancelled before it uploaded leaves its failed summary as the newest.
+  const check = rerunCheck(t);
+  check.write(1, 100000, { exit_code: 1 });
   const result = check.run('2');
   assert.equal(result.code, 1);
   assert.match(result.err, OVER_BUDGET_LINE);

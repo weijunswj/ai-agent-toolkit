@@ -8,9 +8,10 @@
 //
 // Each report is a run-tests.cjs --summary or --report-durations file. --ci reads every shard summary
 // the validate job downloaded to $RUNNER_TEMP/test-summaries (the same folder run-tests.cjs
-// --verify-ci checks), so CI fails a file over its budget. When that file's newest time is from an
-// earlier attempt than GITHUB_RUN_ATTEMPT, the failure says a failed-only rerun read the same time
-// again and asks for a rerun of all jobs. The budget lives in the
+// --verify-ci checks), so CI fails a file over its budget. When that file's newest time is from a
+// passing shard of this same run (GITHUB_RUN_ID) at an earlier attempt than GITHUB_RUN_ATTEMPT, the
+// failure says a failed-only rerun read the same time again and asks for a rerun of all jobs. A light
+// run's times come from another run, so they get no such advice. The budget lives in the
 // shard manifest (repo/contracts/ci/test-shards.json) under `budgets`:
 //
 //   "budgets": {
@@ -32,13 +33,15 @@ const CI_COMMAND = `node repo/scripts/check-test-durations.cjs ${CI_ARGUMENT}`;
 const REPORT_SCHEMAS = new Set(['toolkit-test-durations/v1', shards.SUMMARY_SCHEMA]);
 
 // { system, files: { file: seconds } } from either report shape. A shard summary also keeps its
-// shard and run attempt, so a re-run can replace the older attempt.
+// shard and run attempt, so a re-run can replace the older attempt, and its run and exit code.
 function readReport(value) {
   if (!value || !REPORT_SCHEMAS.has(value.schema) || !shards.SYSTEMS.includes(value.system)) throw new Error('not a run-tests.cjs summary or duration report');
   if (value.schema === shards.SUMMARY_SCHEMA) {
     const report = { system: value.system, files: Object.fromEntries(value.files.map((entry) => [entry.file, entry.seconds])) };
     if (value.shard !== undefined) report.shard = value.shard;
     if (Number.isInteger(value.run_attempt)) report.run_attempt = value.run_attempt;
+    if (typeof value.run_id === 'string') report.run_id = value.run_id;
+    if (Number.isInteger(value.exit_code)) report.exit_code = value.exit_code;
     return report;
   }
   return { system: value.system, files: { ...value.files } };
@@ -75,15 +78,18 @@ function budgetErrors(budgets) {
 }
 
 // A failed-only rerun does not run a shard that passed, so the check in the new attempt reads that
-// shard's older summary again. Saying so points to the rerun that measures it again.
-function rerunNote(report, runAttempt) {
-  if (!Number.isInteger(runAttempt) || report.shard === undefined || report.run_attempt === undefined || report.run_attempt >= runAttempt) return '';
+// shard's older summary again. Saying so points to the rerun that measures it again. Only a passing
+// summary this same run measured qualifies: a light run's reused summaries are another run's, and a
+// rerun of the light run would reuse them again.
+function rerunNote(report, { runAttempt, runId } = {}) {
+  if (!Number.isInteger(runAttempt) || !runId || report.run_id !== runId || report.exit_code !== 0) return '';
+  if (report.shard === undefined || report.run_attempt === undefined || report.run_attempt >= runAttempt) return '';
   return `; measured in attempt ${report.run_attempt} of shard ${report.shard}, which passed and was not run again: a failed-only rerun reads this same time; rerun all jobs`;
 }
 
 // The check over parsed reports. Returns { errors, lines } and never touches the file system.
-// runAttempt is the CI run attempt the check runs in, when known.
-function checkDurations(reports, budgets = {}, { runAttempt } = {}) {
+// run is { runAttempt, runId }: the CI run and attempt the check runs in, when known.
+function checkDurations(reports, budgets = {}, run = {}) {
   const errors = budgetErrors(budgets);
   const lines = [];
   const perFile = (budgets && budgets.seconds_per_file) || {};
@@ -98,7 +104,7 @@ function checkDurations(reports, budgets = {}, { runAttempt } = {}) {
     for (const [file, seconds] of sorted) {
       const raise = raised[`${report.system}:${file}`];
       const allowed = raise ? raise.seconds : limit;
-      if (seconds > allowed) errors.push(`${report.system}: ${file} took ${seconds} s, over its ${allowed} s budget${raise ? ' (raised)' : ''}${rerunNote(report, runAttempt)}`);
+      if (seconds > allowed) errors.push(`${report.system}: ${file} took ${seconds} s, over its ${allowed} s budget${raise ? ' (raised)' : ''}${rerunNote(report, run)}`);
     }
     lines.push(`${report.system}: ${sorted.length} file(s) checked against ${limit} s per file`);
   }
@@ -120,17 +126,18 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     return 2;
   }
   let files = argv;
-  let runAttempt;
+  const run = {};
   if (argv[0] === CI_ARGUMENT) {
     try { files = ciReportFiles(env); }
     catch (error) {
       err.write(`Test duration check could not run: ${error.message}\n`);
       return 2;
     }
-    if (/^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT || '')) runAttempt = Number(env.GITHUB_RUN_ATTEMPT);
+    if (/^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT || '')) run.runAttempt = Number(env.GITHUB_RUN_ATTEMPT);
+    if (/^[1-9]\d*$/.test(env.GITHUB_RUN_ID || '')) run.runId = env.GITHUB_RUN_ID;
   }
   const reports = files.map((file) => readReport(JSON.parse(fs.readFileSync(file, 'utf8'))));
-  const { errors, lines } = checkDurations(newestAttempts(reports), shards.loadManifest(root).budgets, { runAttempt });
+  const { errors, lines } = checkDurations(newestAttempts(reports), shards.loadManifest(root).budgets, run);
   for (const line of lines) out.write(`${line}\n`);
   if (errors.length) {
     err.write(`Test duration check failed:\n- ${errors.join('\n- ')}\n`);
