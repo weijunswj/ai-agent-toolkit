@@ -82,8 +82,9 @@ function bindingV1() {
     store: { kind: 'github', repository: 'owner/evidence', branch: 'main', path: 'state/' }, required_checks: [] };
 }
 
-function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
-  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [], tags = [], noticeTags = [];
+// `clock`, when given, is the run's own time, moved only by its sleeps, so a run that waits for the lease takes no real time.
+function runAction(mode, { env = {}, file = binding(), refresh = null, clock = null } = {}) {
+  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [], tags = [], noticeTags = [], sleeps = [];
   const runner = new (action().ProgrammeSweepAction)({
     env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REF: 'refs/heads/main', DEFAULT_BRANCH: 'main', ...env }, root: ROOT,
     readFile: () => { if (file === null) throw Object.assign(new Error('absent'), { code: 'ENOENT' }); return Buffer.from(typeof file === 'string' ? file : JSON.stringify(file)); },
@@ -91,9 +92,10 @@ function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
     refresh: input => { refreshes.push(input); return refresh ? refresh(input) : { status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }; },
     notice: (message, tag) => { notices.push(message); noticeTags.push(tag || null); }, failure: message => failures.push(message), output: (name, value) => outputs.push([name, value]), summary: line => summaries.push(line),
     warning: (message, tag) => { warnings.push(message); tags.push(tag || null); },
+    nowMs: () => (clock ? clock.now : Date.now()), sleep: ms => { sleeps.push(ms); if (clock) clock.now += ms; },
   });
   const code = mode === 'store' ? runner.store() : runner.run();
-  return { code, notices, failures, outputs, summaries, refreshes, warnings, tags, noticeTags };
+  return { code, notices, failures, outputs, summaries, refreshes, warnings, tags, noticeTags, sleeps };
 }
 // Record 808: every skip is a visible warning that names the repository, the reason and the fix.
 function assertSkipWarning(result, reason) {
@@ -214,10 +216,6 @@ test('action: a healthy run writes the metrics line; a held pass is resumable; a
   assert.deepEqual(ok.tags, [], 'a clean pass has no held warning');
   assert.equal(action().holdCodes({ holds: [{ code: 'B_CODE' }, { code: 'A_CODE' }, { code: 'B_CODE' }, { code: 'not a code' }] }), 'A_CODE, B_CODE');
   assert.equal(action().holdCodes({ holds: [{}] }), 'unnamed');
-  const queued = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running' } }) });
-  assert.deepEqual(queued.summaries, [action().NOTICES.queued]);
-  // L3 (G2 of slice 4): a run that made no pass carries a titled notice the gate passes over.
-  assert.deepEqual(queued.noticeTags, [{ title: action().NO_PASS_TITLE, code: 'queued' }]);
   assert.equal(action().NO_PASS_TITLE, gateScript().TITLES.noPass);
   const moved = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'MAIN_MOVED', report: null }) });
   assert.equal(moved.code, 0);
@@ -228,6 +226,79 @@ test('action: a healthy run writes the metrics line; a held pass is resumable; a
   const leaking = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { metrics: `Sweep: ${fakeToken}`, holds: [] } }) });
   assert.equal(leaking.code, 1);
   assert.deepEqual(leaking.summaries, [], 'a line that carries a token is never written');
+});
+
+// After train PR 1468 merged, the sweep for the push and two by hand each met a lease left live by an
+// earlier pass, logged "queued" and ended green, so the board never refreshed for the merge.
+const QUEUED = expires => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running', holder: { host: 'cloud', started_at: '2026-11-23T11:48:12.235Z', expires_at: expires } } });
+test('action: a run that meets another sweep waits for its lease and then refreshes', () => {
+  const clock = { now: Date.parse('2026-11-23T12:00:29Z') };
+  let tries = 0;
+  const run = runAction('run', { env: minted, clock, refresh: () => (++tries <= 3 ? QUEUED('2026-11-23T12:09:51.161Z') : { status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }) });
+  assert.equal(run.code, 0);
+  assert.equal(run.refreshes.length, 4, 'it tried again until it took the lease');
+  assert.ok(run.sleeps.every(ms => ms > 0 && ms <= action().QUEUED_POLL_MS), 'it checks again within a minute');
+  assert.deepEqual(run.summaries, ['Programme Sweep: Sweep: requests=40, tasks read=3, queue left=0']);
+  assert.ok(run.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'), 'the pass after the wait counts as the refresh');
+  assert.deepEqual(run.noticeTags.filter(Boolean), [], 'a run that refreshed carries no no-pass notice');
+  assert.match(run.notices[0], /^Programme Sweep waiting: another sweep holds the lease on the cloud runner, started 2026-11-23T11:48:12.235Z, lease until 2026-11-23T12:09:51.161Z; this run checks again every minute for up to 30 minutes\.$/);
+  // A retry after a wait gets the pass budget that is left, so the job still ends before its timeout.
+  assert.equal(run.refreshes[0].budgetMs, undefined, 'the first try keeps the full scheduled budget');
+  const waited = clock.now - Date.parse('2026-11-23T12:00:29Z');
+  assert.equal(run.refreshes[3].budgetMs, state.PASS_BUDGETS.scheduled.budgetMs - waited);
+});
+
+test('action: a run that never gets the lease fails visibly and starts one more run', () => {
+  const clock = { now: Date.parse('2026-11-23T12:00:29Z') };
+  const start = clock.now;
+  // A live holder that keeps renewing: its lease always ends ten minutes from now.
+  const run = runAction('run', { env: minted, clock, refresh: () => QUEUED(new Date(clock.now + 10 * 60 * 1000).toISOString()) });
+  assert.equal(run.code, 1, 'not a green success');
+  assert.ok(clock.now - start >= action().QUEUED_WAIT_MS && clock.now - start < action().QUEUED_WAIT_MS + action().QUEUED_POLL_MS);
+  assert.deepEqual(run.failures, [action().NOTICES.not_refreshed]);
+  assert.match(action().NOTICES.not_refreshed, /^Programme Sweep did not refresh: another sweep held the lease for 30 minutes/);
+  assert.deepEqual(run.outputs.filter(([name]) => name === 'refreshed'), [], 'footer cleaning skips');
+  assert.deepEqual(run.outputs.filter(([name]) => name === 'follow_up_at'), [['follow_up_at', String(clock.now)]], 'the follow-up starts one more run at once');
+  // The pass budget a long wait leaves never falls under the after-write pass.
+  assert.ok(Math.min(...run.refreshes.slice(1).map(input => input.budgetMs)) >= state.PASS_BUDGETS['after-write'].budgetMs);
+});
+
+test('action: the wait plus the pass it leaves ends before the job is stopped', () => {
+  const jobMinutes = Number(/timeout-minutes: (\d+)/.exec(workflow())[1]);
+  const pass = state.PASS_BUDGETS.scheduled.budgetMs - action().QUEUED_WAIT_MS;
+  assert.ok(pass >= state.PASS_BUDGETS['after-write'].budgetMs);
+  assert.ok(action().QUEUED_WAIT_MS + action().QUEUED_POLL_MS + pass + state.PASS_BUDGETS.scheduled.killMs - state.PASS_BUDGETS.scheduled.budgetMs < jobMinutes * 60 * 1000);
+  const seen = [];
+  const spawn = (file, args, options) => { seen.push({ args, options }); return { status: 0, stdout: '{}', stderr: '' }; };
+  action().runRefresh({ root: ROOT, env: minted, spawn, budgetMs: pass });
+  assert.deepEqual(seen[0].args.slice(-5), ['refresh', '--scheduled', '--json', '--budget-ms', String(pass)]);
+  assert.equal(seen[0].options.timeout, pass + state.PASS_BUDGETS.scheduled.killMs - state.PASS_BUDGETS.scheduled.budgetMs);
+});
+
+// G2 round 1 (F1): the lease's fixed "Sweep lease:" line goes to stderr before the pass's own error,
+// so the stop code must come from the line that carries one, and a dropped release must reach the
+// cloud run's log as a warning instead of ending green with nothing said.
+test('action: a dropped lease release keeps the stop code and warns in the run log', () => {
+  const unreleased = 'Sweep lease: the release did not land after 3 tries, so the lease ends on its own at 2026-11-23T12:09:51.161Z; the next sweep waits for it and reports this pass as stopped.';
+  const failing = () => ({ status: 2, stdout: '', stderr: `${unreleased}\nGH_FAILED: Writing state/x/sweep-lease.json failed (502): Bad gateway\n` });
+  const parsed = action().runRefresh({ root: ROOT, env: minted, spawn: failing });
+  assert.deepEqual([parsed.code, parsed.http, parsed.unreleased], ['GH_FAILED', '502', true]);
+  assert.equal(action().failureLine(parsed), 'Programme Sweep failed (GH_FAILED, HTTP 502). Open this workflow run and toolkit governance check for the cause.');
+  const signIn = action().runRefresh({ root: ROOT, env: minted, spawn: () => ({ status: 2, stdout: '', stderr: `${unreleased}\nGH_AUTH: gh is not signed in\n` }) });
+  assert.equal(signIn.code, 'GH_AUTH', 'a sign-in failure still reads as one');
+  const clean = action().runRefresh({ root: ROOT, env: minted, spawn: () => ({ status: 0, stdout: '{\n  "metrics": "Sweep: requests=1"\n}\n', stderr: '' }) });
+  assert.equal(clean.unreleased, false);
+  // A pass that refreshed but could not release: still refreshed, with one titled warning.
+  const run = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, unreleased: true, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }) });
+  assert.equal(run.code, 0);
+  assert.ok(run.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'));
+  assert.deepEqual(run.warnings, [action().NOTICES.unreleased]);
+  assert.deepEqual(run.tags, [{ title: action().HELD_TITLE, code: 'LEASE_UNRELEASED' }], 'three in a row turn the hourly gate red');
+  // A failed pass whose release also failed: red, named by its own code, and the warning too.
+  const failed = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'GH_FAILED', http: '502', unreleased: true, report: null }) });
+  assert.equal(failed.code, 1);
+  assert.deepEqual(failed.failures, ['Programme Sweep failed (GH_FAILED, HTTP 502). Open this workflow run and toolkit governance check for the cause.']);
+  assert.deepEqual(failed.warnings, [action().NOTICES.unreleased]);
 });
 
 test('action: a failed pass names its stop code and HTTP status, never GitHub text or a token', () => {
@@ -1090,7 +1161,7 @@ test('refreshed: only a pass that ran says so; every skip and failure leaves foo
     ['no store', { ...minted, STORE_REPOSITORY: '' }, null],
     ['no App', { ...minted, APP_CLIENT_ID_SET: 'false' }, null],
     ['mint failed', { ...minted, MINT_OUTCOME: 'failure/success' }, null]]) {
-    const result = runAction('run', { env, refresh });
+    const result = runAction('run', { env, refresh, clock: { now: Date.parse('2026-11-23T12:00:29Z') } });
     assert.equal(result.outputs.some(([name]) => name === 'refreshed'), false, label);
   }
 });
