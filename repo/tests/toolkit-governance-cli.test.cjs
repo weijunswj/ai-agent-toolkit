@@ -211,8 +211,11 @@ test('interactive no publishes the off proposal without a laptop decision, decli
   const bank = await run(ctx, repo, ['enable', '--json']);
   assert.equal(bank.code, 0, bank.stderr);
   const shown = JSON.parse(bank.stdout);
-  assert.equal(shown.questions[0].id, 'governance');
-  assert.equal(shown.questions[0].recommendation.value, 'on');
+  // The answer itself turns governance on: its row says so, and task auto-merge is the question.
+  const row = shown.questions.find(question => question.id === 'governance');
+  assert.equal(row.report_only, true);
+  assert.equal(row.turns_on, true);
+  assert.equal(shown.questions.filter(question => !question.report_only).map(question => question.id).join(), 'task-auto-merge');
   assert.ok(shown.bank_reference);
   assert.equal(bank.asked.length, 0, 'the bank is shown, not a yes/no prompt');
   assert.equal(fs.existsSync(ctx.registryPath), false);

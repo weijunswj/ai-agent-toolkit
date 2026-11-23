@@ -5,9 +5,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { ClaudeUserSettings, SETTINGS, STATES } = require('../scripts/toolkit-claude-user-settings.cjs');
+const { ClaudeUserSettings, SETTINGS, STATES, claudeCodeVersion } = require('../scripts/toolkit-claude-user-settings.cjs');
 
-function fixture(t, initial) {
+// claudeVersion is pinned (2.1.330 unless a test says otherwise) so each test reads the same AGENTS.md id on every computer.
+function fixture(t, initial, claudeVersion = '2.1.330') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-claude-user-settings-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const configDir = path.join(root, '.claude');
@@ -16,10 +17,14 @@ function fixture(t, initial) {
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(settingsPath, typeof initial === 'string' ? initial : `${JSON.stringify(initial, null, 2)}\n`);
   }
-  const owner = new ClaudeUserSettings({ environment: { CLAUDE_CONFIG_DIR: configDir }, controlRoot: path.join(root, 'control') });
+  const ownerFor = (version) => new ClaudeUserSettings({ environment: { CLAUDE_CONFIG_DIR: configDir }, controlRoot: path.join(root, 'control'), claudeVersion: version });
+  const owner = ownerFor(claudeVersion);
   const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8').replace(/^﻿/, ''));
-  return { owner, settingsPath, read, recordPath: path.join(root, 'control', 'claude-user-settings.json') };
+  return { owner, ownerFor, settingsPath, read, recordPath: path.join(root, 'control', 'claude-user-settings.json') };
 }
+const NEW_ID = 'cc-plugin-agents-md@builtin';
+const OLD_ID = 'agents-md@builtin';
+const agentsMdOf = (settings, id) => settings.pluginConfigs?.[id]?.options?.instructionFiles;
 const byId = (results) => Object.fromEntries(results.map((result) => [result.id, result]));
 // The three settings whose Turn off removes the line; the model-switch setting writes false instead.
 const REMOVABLE = ['attribution', 'cross-session-inbound', 'agents-md'];
@@ -263,4 +268,58 @@ test('a concurrent edit between read and write is refused and leaves no Toolkit 
   assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { theme: 'light' });
   const record = fs.existsSync(recordPath) ? JSON.parse(fs.readFileSync(recordPath, 'utf8')) : {};
   assert.equal(JSON.stringify(record).includes('attribution'), false, JSON.stringify(record));
+});
+
+test('the AGENTS.md entry goes under the id the running Claude Code reads: the new id from 2.1.285, the old id from 2.1.277 to 2.1.284 and when the version is unknown', (t) => {
+  for (const [version, id] of [['2.1.330', NEW_ID], ['2.1.285', NEW_ID], ['2.1.284', OLD_ID], ['2.1.277', OLD_ID], ['', OLD_ID]]) {
+    const { owner, read } = fixture(t, {}, version);
+    assert.equal(byId(owner.apply({ 'agents-md': 'enable' }))['agents-md'].status, 'set', version || 'unknown');
+    assert.equal(agentsMdOf(read(), id), 'claude-md-and-agents-md', version || 'unknown');
+    assert.equal(agentsMdOf(read(), id === NEW_ID ? OLD_ID : NEW_ID), undefined, `${version || 'unknown'}: no competing entry`);
+  }
+  const older = fixture(t, {}, '2.1.276');
+  const [held] = older.owner.apply({ 'agents-md': 'enable' }).filter((entry) => entry.id === 'agents-md');
+  assert.equal(held.status, 'held');
+  assert.deepEqual(older.read(), {}, 'no AGENTS.md setting before 2.1.277, so nothing is written');
+});
+
+test('an AGENTS.md entry under the other id is your value: a yes keeps it and writes nothing', (t) => {
+  const { owner, settingsPath } = fixture(t, { pluginConfigs: { [OLD_ID]: { options: { instructionFiles: 'claude-md-and-agents-md' } } } }, '2.1.330');
+  const state = byId(owner.inspect())['agents-md'];
+  assert.deepEqual([state.state, state.matches], [STATES.OWNER, true]);
+  const before = fs.readFileSync(settingsPath, 'utf8');
+  assert.equal(byId(owner.apply({ 'agents-md': 'enable' }))['agents-md'].changed, false);
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), before, 'no competing entry under the new id');
+
+  const different = fixture(t, { pluginConfigs: { [OLD_ID]: { options: { instructionFiles: 'claude-md' } } } }, '2.1.330');
+  const kept = byId(different.owner.apply({ 'agents-md': 'enable' }))['agents-md'];
+  assert.deepEqual([kept.status, kept.changed, kept.state], ['kept', false, STATES.OWNER]);
+  assert.deepEqual(different.read(), { pluginConfigs: { [OLD_ID]: { options: { instructionFiles: 'claude-md' } } } });
+});
+
+test('an AGENTS.md entry Toolkit wrote under the other id is Toolkit\'s value, and off removes it and the file Toolkit created', (t) => {
+  const { ownerFor, settingsPath } = fixture(t, undefined, '2.1.280');
+  ownerFor('2.1.280').apply({ 'agents-md': 'enable' });
+  const later = ownerFor('2.1.330');
+  assert.equal(byId(later.inspect())['agents-md'].state, STATES.TOOLKIT);
+  assert.equal(byId(later.apply({ 'agents-md': 'enable' }))['agents-md'].changed, false);
+  later.apply({ 'agents-md': 'disable' });
+  assert.equal(fs.existsSync(settingsPath), false);
+});
+
+test('off removes an AGENTS.md entry under either id, so the setting is off wherever Claude Code reads it', (t) => {
+  const both = { [NEW_ID]: { options: { instructionFiles: 'claude-md-and-agents-md' } }, [OLD_ID]: { options: { instructionFiles: 'claude-md-and-agents-md' } } };
+  const { owner, read } = fixture(t, { pluginConfigs: both }, '2.1.330');
+  assert.equal(byId(owner.apply({ 'agents-md': 'disable' }))['agents-md'].changed, true);
+  assert.deepEqual(read(), { pluginConfigs: { [NEW_ID]: { options: {} }, [OLD_ID]: { options: {} } } });
+  assert.equal(byId(owner.inspect())['agents-md'].state, STATES.OWNER_OFF);
+});
+
+test('the Claude Code version comes only from a folder right after claude-code, or after versions inside claude', () => {
+  const at = (execPath) => claudeCodeVersion({ CLAUDE_CODE_EXECPATH: execPath });
+  assert.equal(at('C:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.330\\build\\claude.exe'), '2.1.330');
+  assert.equal(at('/home/me/.local/share/claude/versions/2.1.330'), '2.1.330');
+  assert.equal(at('C:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.330\\bin\\1.0.0\\claude.exe'), '2.1.330', 'a deeper folder named like a version is not read');
+  assert.equal(at('C:\\Users\\me\\Downloads\\3.0.1\\claude.exe'), '', 'a version-like folder with no Claude Code folder before it is not read');
+  assert.equal(claudeCodeVersion({}), '');
 });

@@ -156,6 +156,103 @@ test('reopen, resubmit and accept work under one assignment; return IDs are idem
   assert.throws(() => state.consumeReturn(fenced, { returnId: 'old', verdict: 'ACCEPT', ...decide }), { code: 'STALE_RETURN' });
 });
 
+// Gate path ends (matrix B of the gate-records plan): every consume is logged with its time, a return
+// waiting on the owner takes the owner's answer once, and a G2 needs its verdict and closes older returns.
+const PASS_A = { verdict: 'PASS', head: SHA_A, link: 'https://github.com/acme/app/pull/540#issuecomment-1' };
+const FAIL_A = { verdict: 'FAIL', head: SHA_A, link: 'https://github.com/acme/app/pull/540#issuecomment-2' };
+
+test('a return consumed WAITING_OWNER takes the owner\'s answer once, as ACCEPT or REOPEN, on the newest return at the same epoch', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const waiting = (role = 'G0') => state.consumeReturn(state.recordReturn(state.assignGate(child(), { assignment: 'a1', role }), { returnId: 'r1', assignment: 'a1' }),
+    { returnId: 'r1', verdict: 'WAITING_OWNER', ...decide, now: '2026-11-23T01:00:00.000Z' });
+  const doc = waiting();
+  assert.equal(doc.gate.state, 'WAITING_OWNER');
+  assert.equal(state.consumeReturn(doc, { returnId: 'r1', verdict: 'WAITING_OWNER', ...decide }), null, 'the same verdict again is a no-op');
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', ...decide }), { code: 'USAGE' }, 'the owner\'s answer needs --reason');
+  const accepted = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', reason: 'the owner picked option a', ...decide, now: '2026-11-23T02:00:00.000Z' });
+  assert.deepEqual([accepted.gate.state, accepted.gate.returns[0].consumed, accepted.gate.returns[0].verdict], ['RETIRED', true, 'ACCEPT']);
+  assert.deepEqual(accepted.private.gate_history, [
+    { assignment: 'a1', role: 'G0', ended: 'CONSUMED', return_id: 'r1', verdict: 'WAITING_OWNER', at: '2026-11-23T01:00:00.000Z' },
+    { assignment: 'a1', role: 'G0', ended: 'OWNER_ANSWERED', return_id: 'r1', verdict: 'ACCEPT', reason: 'the owner picked option a', at: '2026-11-23T02:00:00.000Z' }]);
+  assert.deepEqual(state.validateChild(accepted), []);
+  assert.throws(() => state.consumeReturn(accepted, { returnId: 'r1', verdict: 'REOPEN', reason: 'x', ...decide }), { code: 'RETURN_CONFLICT' }, 'an answered return is final');
+  const sentBack = state.consumeReturn(waiting(), { returnId: 'r1', verdict: 'REOPEN', reason: 'the owner wants another option', ...decide });
+  assert.deepEqual([sentBack.gate.state, sentBack.gate.returns[0].verdict, sentBack.private.gate_history.at(-1).ended], ['ACTIVE', 'REOPEN', 'OWNER_ANSWERED']);
+  assert.throws(() => state.consumeReturn(state.claimDocument(waiting(), other, {}), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide }), { code: 'STALE_RETURN' }, 'epoch moved');
+  assert.throws(() => state.consumeReturn(state.reopenGate(waiting(), { reason: 'continued by hand' }), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide }), { code: 'GATE_STATE' }, 'the gate no longer waits');
+  assert.throws(() => state.consumeReturn(waiting('G1'), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide, liveHead: SHA_A }), { code: 'EVIDENCE_STALE' }, 'a G1 answer still needs a G2 PASS at the live head');
+  assert.throws(() => state.consumeReturn(waiting('G2'), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide, review: null }), { code: 'EVIDENCE_MISSING' }, 'a G2 answer still needs its verdict');
+  // A first ACCEPT is logged with its time too: the acceptance time a later check reads.
+  const first = state.consumeReturn(state.recordReturn(state.assignGate(child(), { assignment: 'a2', role: 'G0' }), { returnId: 'r2', assignment: 'a2' }),
+    { returnId: 'r2', verdict: 'ACCEPT', ...decide, now: '2026-11-23T03:00:00.000Z' });
+  assert.deepEqual(first.private.gate_history, [{ assignment: 'a2', role: 'G0', ended: 'CONSUMED', return_id: 'r2', verdict: 'ACCEPT', at: '2026-11-23T03:00:00.000Z' }]);
+});
+
+test('a G2 return is accepted only with a trusted PASS at its head, recorded in review; a FAIL there only sends it back', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const submitted = () => state.recordReturn(state.assignGate(child(), { assignment: 'g2-a1', role: 'G2' }), { returnId: 'g2-r1', assignment: 'g2-a1', atHead: SHA_A });
+  for (const [label, review] of [['no verdict', null], ['no verdict read', undefined], ['a PASS at an older head', { ...PASS_A, head: SHA_B }]]) {
+    assert.throws(() => state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review }), { code: 'EVIDENCE_MISSING' }, label);
+  }
+  assert.throws(() => state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: FAIL_A }), { code: 'REVIEW_FAILED' });
+  const failed = state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'REOPEN', ...decide, review: FAIL_A });
+  assert.deepEqual([failed.gate.state, failed.review], ['ACTIVE', { state: 'NOT_PASSED', verdicts: [{ reviewer: 'g2-a1', head: SHA_A, verdict: 'NOT_PASSED' }] }]);
+  const plain = state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'REOPEN', ...decide, review: null });
+  assert.deepEqual([plain.gate.state, plain.review.verdicts], ['ACTIVE', []], 'a send-back with no verdict records none');
+  const passed = state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A });
+  assert.deepEqual([passed.gate.state, passed.review], ['RETIRED', { state: 'PASSED', verdicts: [{ reviewer: 'g2-a1', head: SHA_A, verdict: 'PASSED' }] }]);
+  assert.deepEqual(state.validateChild(passed), []);
+  // A PASS after a FAIL at the same head replaces it, as the newest verdict decides on the PR.
+  const recheck = state.recordReturn(failed, { returnId: 'g2-r2', assignment: 'g2-a1', atHead: SHA_A });
+  assert.deepEqual(state.consumeReturn(recheck, { returnId: 'g2-r2', verdict: 'ACCEPT', ...decide, review: PASS_A }).review.verdicts, [{ reviewer: 'g2-a1', head: SHA_A, verdict: 'PASSED' }]);
+  assert.equal(state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'WAITING_OWNER', ...decide }).gate.state, 'WAITING_OWNER', 'a question needs no verdict');
+});
+
+test('a G2 ACCEPT closes every older builder return: a G1 return at the passed head as ACCEPT, any other as REOPEN', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const reviewed = g1Head => {
+    let doc = state.recordReturn(state.assignGate(child(), { assignment: 'g1-a1', role: 'G1' }), { returnId: 'g1-r1', assignment: 'g1-a1', atHead: g1Head });
+    doc = state.assignGate(doc, { assignment: 'g2-a1', role: 'G2', supersede: true, reason: 'G2 follows G1' });
+    return state.recordReturn(doc, { returnId: 'g2-r1', assignment: 'g2-a1', atHead: SHA_A });
+  };
+  assert.throws(() => state.consumeReturn(reviewed(SHA_A), { returnId: 'g1-r1', verdict: 'ACCEPT', ...decide }), { code: 'STALE_ASSIGNMENT' }, 'a superseded return is not consumed by itself (unchanged)');
+  const accepted = state.consumeReturn(reviewed(SHA_A), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A, now: '2026-11-23T04:00:00.000Z' });
+  assert.deepEqual(accepted.gate.returns.map(entry => [entry.return_id, entry.consumed, entry.verdict]), [['g1-r1', true, 'ACCEPT'], ['g2-r1', true, 'ACCEPT']]);
+  assert.deepEqual(accepted.private.gate_history.filter(entry => entry.ended === 'CLOSED_BY_G2'),
+    [{ assignment: 'g1-a1', role: 'G1', ended: 'CLOSED_BY_G2', return_id: 'g1-r1', verdict: 'ACCEPT', at: '2026-11-23T04:00:00.000Z' }]);
+  assert.deepEqual(state.validateChild(accepted), []);
+  const other = state.consumeReturn(reviewed(SHA_B), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A });
+  assert.deepEqual(other.gate.returns.map(entry => [entry.return_id, entry.consumed, entry.verdict]), [['g1-r1', true, 'REOPEN'], ['g2-r1', true, 'ACCEPT']], 'a G1 return at another head is sent back');
+  const sentBack = state.consumeReturn(reviewed(SHA_A), { returnId: 'g2-r1', verdict: 'REOPEN', ...decide, review: null });
+  assert.equal(sentBack.gate.returns[0].consumed, false, 'only an ACCEPT closes older returns');
+});
+
+test('only a blocker starting `Queued in NOW:` is a lane wait: a gate start keeps `Queued 1 - after Alpha2` and every other blocker', () => {
+  const WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  const REAL = ['Queued 1 - after Alpha2', 'Queued 1 — after Alpha2', 'Queued, not idle: waits for PR 1098', 'waits for PR 1098'];
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const started = state.assignGate(child({ blockers: [WAIT, ...REAL] }), { assignment: 'g1-a1', role: 'G1' });
+  assert.deepEqual(started.blockers, REAL, 'assign drops the lane wait only');
+  let doc = state.recordReturn(started, { returnId: 'r1', assignment: 'g1-a1' });
+  doc.blockers = [WAIT, ...REAL];
+  assert.deepEqual(state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN', ...decide }).blockers, REAL, 'a consume REOPEN too');
+  doc = state.consumeReturn(state.recordReturn(state.assignGate(child(), { assignment: 'g0-a1', role: 'G0' }), { returnId: 'g0-r1', assignment: 'g0-a1' }), { returnId: 'g0-r1', verdict: 'ACCEPT', ...decide });
+  doc.blockers = [WAIT, ...REAL];
+  assert.deepEqual(state.reopenGate(doc, { reason: 'a second G0', assignment: 'g0-a2' }).blockers, REAL, 'and reopen');
+});
+
+test('after a G1 fix round a G2 recheck is a supersede, not a reopen: the reopen is refused', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  let doc = state.recordReturn(state.assignGate(child(), { assignment: 'g2-a1', role: 'G2' }), { returnId: 'g2-r1', assignment: 'g2-a1', atHead: SHA_A });
+  doc = state.consumeReturn(doc, { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A });
+  doc = state.recordReturn(state.assignGate(doc, { assignment: 'g1-fix', role: 'G1' }), { returnId: 'g1-fix.r1', assignment: 'g1-fix', atHead: SHA_B });
+  assert.throws(() => state.reopenGate(doc, { reason: 'G2 recheck', assignment: 'g2-a2' }), { code: 'GATE_STATE' }, 'reopen --assignment works only on an accepted gate, and the G1 fix round is live');
+  const recheck = state.assignGate(doc, { assignment: 'g2-a2', role: 'G2', supersede: true, reason: 'G2 recheck follows the G1 fix round' });
+  assert.deepEqual([recheck.gate.role, recheck.gate.state, recheck.gate.assignment.id], ['G2', 'ASSIGNED', 'g2-a2']);
+  const skill = fs.readFileSync(path.join(ROOT, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8').split('\n').find(line => line.startsWith('**Gates.**'));
+  assert.ok(skill.includes('(a second G0, a delta G2 or a G2 recheck with no G1 round between)'), 'the reconciler Gates line carries the qualifier');
+});
+
 test('claims and takeovers move the fence; stale writers are refused', () => {
   const claimed = state.claimDocument(child(), writer, {});
   assert.deepEqual(claimed.fence, { epoch: 1, holder_prefix: 'INT-TK421-', holder_session: 'session-one' });
