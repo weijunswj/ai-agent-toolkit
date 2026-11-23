@@ -1,5 +1,39 @@
 # Toolkit Changelog
 
+## 3.168.0 (Governance asks two questions; Gate endings that can always be recorded)
+
+### Changed
+
+- The governance question bank now asks at most two questions: GitHub governance (on or off) and task auto-merge. Everything else is a Toolkit default shown as a status line under the table, which any answer applies: parallel CI shards when the last green CI run took 10 minutes or more (none for faster or unknown CI, and none where CI already runs its tests in parallel), the governance App and Toolkit permissions commands when they are needed, and the instruction copies cleanup while governance stays on. Merge trains are no longer asked; turning governance on writes them off, and a governed repository keeps its stored value.
+- Where governance is not decided yet, the answer itself turns it on, so the governance row is a status line and only task auto-merge is asked. Reply `no store` to keep governance off: nothing is written and Toolkit asks again next session.
+- Add `shards=yes`, `shards=not-now` or `shards=never` to a reply to change the shards default, and `store=<owner/name>` to use another private repository of yours as the evidence store.
+- Turning governance on uses this repository's own private `TRANSPORT-<repository name>` store, found or created, and never another repository's store unless you name it. The session-start question and the turn-on result name the store.
+- `toolkit governance migrate` asks one Enter for all of its GitHub changes (the no-force-push ruleset, the programme-state ruleset and default-branch protection) instead of one each, and a no writes none of them.
+- An answer to a bank whose status lines changed since it was shown is refused, so an answer never applies a default you did not see.
+- Question cards: a host may show only the card while it is open, not the text written above it, so a card's question and options now make sense on their own, and a question that needs explaining ends the closing message as written text instead of sitting below a hidden explanation (global rules, controller principles, takeover playbook). Standing permission asks follow suit: outside Claude Projects the whole ask, its scope lines and then the question, goes as written text at the end of the closing message (safety-gates playbook).
+- A lane wait is now only a blocker starting `Queued in NOW:`. Other blockers that start with `Queued`, such as a queue label `Queued 1 - after Alpha2`, are real blocks that `assign`, `reopen` and a consume send-back keep. Older lane waits in another form are not matched: rewrite each to the new form or keep it as a real blocker.
+- The reconciler's Gates rule now says a G2 recheck is a `reopen` only with no G1 round between; after a G1 round it is `assign --supersede`.
+
+### Fixed
+
+- A finish mark whose governance turn-on pull request was closed without merging is cleared instead of waiting for ever.
+- The bank heading says "1 question across 1 section" instead of "1 questions across 1 sections".
+- The Claude Code setup question says how many settings a yes would set, so it reads on its own on a question card.
+- A piped setup reply with a second non-empty line is refused before anything is written.
+- A no to the Claude Code setup question says when setup had already updated the Toolkit checkout before asking.
+- Setup reads the AGENTS.md memory setting under either plugin name, writes the older name when it cannot tell the Claude Code version, and keeps a value you set under the other name.
+- **Projects ping transition:** a task still on an old pointer now posts a line that tells the coordinator to refresh a guidebook copy from before pings first and to take that run's project additions from the stored prompt until the swap; its TASKS OUTDATED prefix comes after any COORDINATOR BEHIND prefix. Swapped pings are unchanged.
+- **Projects checklist wording:** the hourly nudge clones Toolkit in step 4a, where it is first used; tool threads are read-only apart from the guidebook copy refresh and the programme sweep; a fresh-fallback task's tool steps go to a thread that has the tools; the daily check-in's setup step reads the coordinator's own model and effort; and the recurring-tasks reference no longer calls Toolkit tasks pointers.
+- **Projects tier-gap check:** when a task's tool steps run in another thread, the daily check-in lists its model and effort as unverified and names that thread, instead of leaving it unverified with no reason.
+- A G2 return is accepted only when the task PR carries a `Toolkit-G2: PASS` verdict for the return's head from an account that can write to the repository, read with the merge train finder's own parser and trust rule. The accept records that PASS in the task's review in the same write; a FAIL at that head allows only a send-back, which records it as not passed. Before, a G2 could be accepted with no verdict at all.
+- A G2 accept closes the builder's older return in the same write (accepted when it was at the passed head, sent back otherwise), so it no longer stays open for good after the G2's supersede.
+
+### Added
+
+- **Global rules, open a given link yourself:** the accuracy principle now says to open and inspect a link you are given directly (for a PR: metadata, files, diff, checks, comments and review threads) and to say what you did not inspect. It joins the existing line, so the installed rules gain no line; the global block cap rises to 22,014 bytes for it.
+- After the owner answers a gate question, the controller records the answer on the same return: `return --consume <id> --verdict ACCEPT|REOPEN --reason <the answer>` works once on the newest return consumed `WAITING_OWNER`, while the gate still waits at the same epoch and assignment. Before, the only way out was a reopen and a new return ID. A holder order's `return` write takes the same `reason`.
+- Every consumed return is logged with its time in the task's gate trail (`private.gate_history`), so a later check can tell when a plan was accepted.
+
 ## 3.167.1
 
 ### Fixed
