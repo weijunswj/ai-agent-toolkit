@@ -481,9 +481,9 @@ test('every approval surface carries the evidence-store exception and none still
   assert.match(skill, /Transport stores are the exception: agents manage them fully, merges and deletions included/);
   assert.match(skill, /\*\*Before every merge\*\* outside a transport store/);
   assert.match(skill, /Transport-store work needs no further grant/);
-  assert.match(playbook, /Evidence custody follows the managed `AGENTS\.md` evidence-store line/);
+  assert.match(playbook, /Evidence custody follows the evidence-store line of the Toolkit-governed rules/);
   for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `skills/toolkit-playbooks/safety-gates.md`]) {
-    assert.match(readText(file), /The evidence-store line in the managed `AGENTS\.md` is the standing approval for that store/, file);
+    assert.match(readText(file), /The evidence-store line of the Toolkit-governed rules is the standing approval for that store/, file);
   }
   for (const text of [governed, playbook]) assert.doesNotMatch(text, /within owner authority that names the repository|exact owner authority/);
   assert.doesNotMatch(skill, /Transport-store uploads[^\n]*when the user grants standing approval/);

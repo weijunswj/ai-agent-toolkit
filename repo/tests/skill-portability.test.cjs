@@ -405,3 +405,31 @@ test('skill classes: a DIFF_BASE that is not a commit fails', () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /DIFF_BASE not-a-commit is not a commit in this checkout/);
 });
+
+// Plug and play serves the governed rules and the playbooks from the installed Toolkit, so a skill
+// that still names the old in-repository copy as a live source sends an agent looking for a block
+// or folder that is gone. Sentences that call those copies leftovers are allowed.
+test('no skill file names an old in-repository Toolkit copy as a live source', () => {
+  const stale = [
+    /managed `AGENTS\.md`/,
+    /Toolkit block in `AGENTS\.md`/,
+    /governed block's/,
+    /(?<![\w/.-])docs\/agent-playbooks\//
+  ];
+  const leftover = /leftover|older setup|old cop/i;
+  const hits = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      const lines = fs.readFileSync(full, 'utf8').split(/\r?\n/);
+      lines.forEach((line, index) => {
+        if (stale.some((pattern) => pattern.test(line)) && !leftover.test(line)) {
+          hits.push(`${path.relative(repoRoot, full).replace(/\\/g, '/')}:${index + 1}`);
+        }
+      });
+    }
+  };
+  walk(path.join(repoRoot, 'skills'));
+  assert.deepEqual(hits, []);
+});
