@@ -50,10 +50,15 @@ test('H-09: a damaged legacy file and a leftover in the retired held-messages pl
   const environment = {};
   assert.equal(claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go' }, { gate: broken, environment }).decision, 'block');
   assert.equal(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash' }, { gate: broken, environment }).hookSpecificOutput.permissionDecision, 'deny');
-  assert.deepEqual(claudeHook.respond('SessionStart', { cwd: repo }, { gate: broken, environment }), {});
+  // Session start cannot block, so inside a repository it says the check failed and names the rules file.
+  const started = claudeHook.respond('SessionStart', { cwd: repo }, { gate: broken, environment }).hookSpecificOutput.additionalContext;
+  assert.match(started, /^Toolkit couldn't load the governance check at this session start \(\w+\)\./);
+  assert.match(started, /toolkit-governed-rules\.md/);
+  assert.doesNotMatch(started, /boom/);
   const outside = path.join(ctx.root, 'outside');
   fs.mkdirSync(outside);
   assert.deepEqual(claudeHook.respond('UserPromptSubmit', { cwd: outside, prompt: 'go' }, { gate: broken, environment }), {});
+  assert.deepEqual(claudeHook.respond('SessionStart', { cwd: outside }, { gate: broken, environment }), {});
 });
 
 test('H-15: prompts are never stored or echoed, and what Toolkit keeps never carries the raw remote', (t) => {

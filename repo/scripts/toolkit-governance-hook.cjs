@@ -19,7 +19,9 @@
 //                     (toolkit-repo-catchup.cjs) when it moved or could not move, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
-//                     mark, so a later process that resumes the session cannot answer.
+//                     mark, so a later process that resumes the session cannot answer. When the
+//                     check crashes, it still blocks nothing but gives one line inside a repository
+//                     naming the governed rules file (toolkit-governance-unavailable.cjs).
 // The gate module loads inside the guarded path, so a missing or broken module still holds in a
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
@@ -148,10 +150,10 @@ function respondSteady(event, input, options) {
       text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh })].filter(Boolean).join('\n');
     }
     return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
-  } catch {
+  } catch (error) {
     // A failed governance check outside a repository may still allow a merge there. Consume its
     // approval only if that failure path actually allows the call.
-    const failure = failed(event, input, gate);
+    const failure = failed(event, input, gate, error);
     if (event === 'PreToolUse' && !failure.hookSpecificOutput) {
       const merge = mergeDecision(input, options);
       if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
@@ -228,9 +230,20 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 // onFailure: "block" only on this list, so a hook that cannot even start holds only these too.
 const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$/;
 
-function failed(event, input, gate) {
+// The session-start context after a crashed check: one plain line inside a repository, nothing
+// elsewhere, and nothing when even the notice module cannot load.
+function sessionStartFailure(input, error) {
+  let text = '';
+  try { text = require('./toolkit-governance-unavailable.cjs').sessionStartLine(input && input.cwd, error); } catch { text = ''; }
+  return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
+}
+
+function failed(event, input, gate, error) {
+  // A failed session start blocks nothing, but says so: the governed rules arrive only through this
+  // check, so it names their file inside a repository (toolkit-governance-unavailable.cjs).
+  if (event === 'SessionStart') return sessionStartFailure(input, error);
   // A failed PostToolUse records nothing, which leaves the repository waiting.
-  if (event === 'SessionStart' || event === 'PostToolUse') return {};
+  if (event === 'PostToolUse') return {};
   if (event === 'PreToolUse' && !STATE_CHANGING_TOOLS.test(String(input && input.tool_name || ''))) return {};
   let inside = true;
   try { inside = (gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = true; }

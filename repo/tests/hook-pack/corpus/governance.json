@@ -1727,6 +1727,62 @@
       "expect": {"decision":"allow","context_contains":["couldn't check governance ("]},
       "status": "pass",
       "note": "The pack turns session-start refresh off, so the cause read here is the offline or not-recorded phrase; the cloud side-by-side read and read-timed-out are covered by toolkit-governance-cause.test.cjs and a live probe."
+    },
+    {
+      "id": "GOV.session-start-error-notice",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a crash in that check must say so and name the rules file instead of printing nothing",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "fault": {"type":"throw-module","file":"repo/scripts/toolkit-governance-gate.cjs"},
+      "expect": {"decision":"allow","context_contains":["Toolkit couldn't load the governance check at this session start","toolkit-governed-rules.md"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-resume",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a resumed session gets them again",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"resume"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-compact",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; compaction drops earlier context, so the compact start gives them again",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"compact"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-subfolder",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a session started in a subfolder still gets them",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{work}/docs"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n","docs/README.md":"# Docs\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-linked-worktree",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a session started in a linked worktree still gets them",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{trees}/lane"},
+      "fixture": {"repo":{"governance":"enabled","worktrees":["lane"]},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
     }
   ]
 }
