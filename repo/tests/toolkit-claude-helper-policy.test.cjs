@@ -79,15 +79,22 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   assert.equal(governedRepo(ROOT, {}).governed, false, 'the Toolkit checkout is asked like any other repository');
 });
 
-test('outside a gate run every main-session agent launch is left to Claude Code, in a governed repository too', t => {
+const INHERITED = /names no model, so it would run on this session's model/;
+
+test('outside a gate run a main-session launch that names a model is left to Claude Code, in a governed repository too; one that would run on the session model is refused', t => {
   const f = fixture(t);
   for (const cwd of [f.plain, f.dir, f.repo]) {
-    for (const tool_input of [{ subagent_type: 'general-purpose' }, {}, { subagent_type: 'Explore', model: 'opus' }]) {
+    for (const tool_input of [{ subagent_type: 'general-purpose', model: 'haiku' }, { model: 'sonnet' }, { subagent_type: 'Explore', model: 'opus' }, { subagent_type: 'toolkit-g0-helper' }]) {
       assert.deepEqual(f.decide({ cwd, tool_input }, f.open), {}, `${cwd} ${JSON.stringify(tool_input)}`);
       assert.deepEqual(f.decide({ cwd, tool_name: 'Task', tool_input }, f.open), {}, `${cwd} Task ${JSON.stringify(tool_input)}`);
     }
+    for (const tool_input of [{ subagent_type: 'general-purpose' }, {}, { subagent_type: 'Explore' }]) {
+      assert.match(reason(f.decide({ cwd, tool_input }, f.open)), INHERITED, `${cwd} ${JSON.stringify(tool_input)}`);
+      assert.match(reason(f.decide({ cwd, tool_name: 'Task', tool_input }, f.open)), INHERITED, `${cwd} Task ${JSON.stringify(tool_input)}`);
+    }
     // A main session started with --agent carries agent_type but no agent_id; it is still the main session.
-    assert.deepEqual(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }, f.open), {}, `${cwd} --agent main session`);
+    assert.deepEqual(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore', model: 'haiku' } }, f.open), {}, `${cwd} --agent main session`);
+    assert.match(reason(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }, f.open)), INHERITED, `${cwd} --agent main session, no model`);
   }
   // The same launch in a gate run there gets the named-helper policy.
   assert.match(reason(f.decide({ tool_input: { subagent_type: 'Explore' } })), /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: Explore\)/);
@@ -131,7 +138,8 @@ test('broader native behaviour lifts the normal-folder refusal; a missing or unr
   }
   assert.equal(reason(nested(f.repo)), ONE_LAYER_REASON, 'a governed repository keeps one layer');
   assert.equal(reason(f.decide({ tool_name: 'Task', agent_id: 'a2', tool_input: {} }, f.open)), ONE_LAYER_REASON, 'Task keeps one layer too');
-  assert.deepEqual(f.decide({ tool_input: { subagent_type: 'general-purpose' } }, f.open), {}, 'the main session may launch any agent');
+  assert.deepEqual(f.decide({ tool_input: { subagent_type: 'general-purpose', model: 'haiku' } }, f.open), {}, 'the main session may launch any agent with a model');
+  assert.match(reason(f.decide({ tool_input: { subagent_type: 'general-purpose' } }, f.open)), INHERITED, 'but not one on the session model');
   // A gate run under broader native without a launcher binding gets the named-helper policy:
   // a subagent caller is refused, the lead may launch a current Toolkit helper, and nothing else.
   assert.match(reason(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })), /a helper cannot launch another agent/);

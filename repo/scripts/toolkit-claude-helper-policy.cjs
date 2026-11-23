@@ -174,4 +174,4 @@ function changedSinceSessionStart(file, input) {
   } catch { return false; }
 }
 
-module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart, managedAgentsDirectory, managedSettingsDirectory });
+module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, OFF_VALUES, changedSinceSessionStart, managedAgentsDirectory, managedSettingsDirectory });

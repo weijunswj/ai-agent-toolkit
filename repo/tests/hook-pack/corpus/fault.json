@@ -293,6 +293,7 @@
       "expect": {"decision": "allow"},
       "postcondition": "no-handoff-refresh",
       "status": "pass"
-    }
+    },
+    {"id":"F.inherited-model-throw","source":"Inherited-model G0 (owner decision 23 Nov 2026): a general-purpose launch with no model ran on the session's Opus instead of a Haiku helper; the check fails open when its module breaks","kind":"fault","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose"}},"fixture":{"repo":{"governance":"none","branch":"feature"}},"fault":{"type":"throw-module","file":"repo/scripts/toolkit-claude-inherited-model.cjs"},"expect":{"decision":"allow"},"status":"pass","note":"Outside a gate run the inherited-model check is advisory, so a broken module lets the launch through."}
   ]
 }

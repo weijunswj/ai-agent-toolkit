@@ -8,6 +8,7 @@ const control = () => require('./toolkit-agent-control.cjs');
 const nativeAdapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 const governedRepo = () => require('./toolkit-governed-repo.cjs');
 const helperPolicy = () => require('./toolkit-claude-helper-policy.cjs');
+const inheritedModel = () => require('./toolkit-claude-inherited-model.cjs');
 
 // Normal-folder refusal for an agent launched by a subagent. It lives here, not in a decision
 // module, so the module-failure path can give the same plain reason.
@@ -54,16 +55,17 @@ function decision(input, options = {}) {
     }, authority_pins: authorityPins, context_observation: context,
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
-  // Outside a Toolkit gate run only one layer applies, in a governed repository too: the main
-  // session launches any agent with no decision, and a subagent never launches another unless the
-  // owner chose broader native behaviour outside governed repositories. A missing or unreadable
-  // profile reads as root-only, so the refusal stays. `agent_id` marks a subagent or teammate caller;
+  // Outside a Toolkit gate run only one layer applies, in a governed repository too: a subagent never
+  // launches another unless the owner chose broader native behaviour outside governed repositories,
+  // and the main session launches any agent except one that would run on the session's own model
+  // (toolkit-claude-inherited-model.cjs). A missing or unreadable profile reads as root-only, so
+  // the refusal stays. `agent_id` marks a subagent or teammate caller;
   // `agent_type` alone also appears in a main session started with --agent.
   const environment = options.environment || process.env;
   const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
   const { readProfile, TOPOLOGIES } = control();
   if (!governance.governed || !gateRun(environment)) {
-    if (!input.agent_id) return {};
+    if (!input.agent_id) return inheritedModel().inheritedModelDecision(input, { environment, ...options.inherited_model });
     return !governance.governed && readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
   }
   // The pinned binding path applies only when a launcher bound this session to a helper route
@@ -89,7 +91,8 @@ const CHECK_FAILED_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ 
 
 // After a decision failure, refuse only what a working hook could refuse: an Agent/Task call, or
 // one whose tool name is unreadable, in a gate run; elsewhere a subagent's call gets the plain
-// one-layer reason, since the profile that could lift it was not read.
+// one-layer reason, since the profile that could lift it was not read, and a main-session call
+// passes (the inherited-model check is advisory, so it fails open).
 function outputAfterFailure(input) {
   const toolName = String(input?.tool_name || input?.toolName || '');
   if (toolName && !/^(Agent|Task)$/.test(toolName)) return {};

@@ -1,0 +1,3 @@
+### Added
+
+- Claude Code: outside a Toolkit gate run, the agent hook now refuses a main-session subagent launch that would run on the session's own model (`general-purpose`, `Explore`, `Plan`, `claude` or a launch with no `subagent_type` and no `model`, an agent file with no `model` or `model: inherit`, and any fork), in every folder where Toolkit's hooks load. The refusal names the fix: `toolkit-g0-helper` or `toolkit-g1-helper`, or a cheaper `model` on the call such as `model: "haiku"`. Launches with a `model`, the Toolkit helpers and agent files that pin a model pass. The check fails open when it cannot read a definition or its module breaks.

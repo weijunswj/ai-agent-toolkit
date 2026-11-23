@@ -1,6 +1,6 @@
 'use strict';
 
-// The Claude Code launch matrix (rows A1-A26): one table for the in-process test
+// The Claude Code launch matrix (rows A1-A27): one table for the in-process test
 // (repo/tests/toolkit-claude-helper-matrix.test.cjs) and the native qualification run
 // (repo/tests/qualification/claude-helper-matrix.live.cjs). Row IDs are stable so a review can
 // tick them. Each row says how it is proved:
@@ -72,6 +72,8 @@ class ClaudeMatrixContext {
 
   // Puts the rendered helpers back and removes anything a row added.
   reset() {
+    const rendered = new Set(Object.values(this.definitions).map(({ file }) => file));
+    for (const file of fs.readdirSync(this.agentsDir)) if (!rendered.has(file)) fs.rmSync(path.join(this.agentsDir, file), { recursive: true, force: true });
     for (const { file, text } of Object.values(this.definitions)) fs.writeFileSync(path.join(this.agentsDir, file), text);
     fs.rmSync(path.join(this.repo, '.claude'), { recursive: true, force: true });
     fs.rmSync(path.join(this.repo, 'packages'), { recursive: true, force: true });
@@ -113,6 +115,16 @@ const projectCopy = (folder, name, change) => c => {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.md`), change(fs.readFileSync(c.definitionFile(name), 'utf8')));
 };
+// A definition with this front-matter name and model line (none when model is null), in the user folder or a project folder.
+const userAgent = (name, model) => c => fs.writeFileSync(path.join(c.agentsDir, `${name}.md`), agentText(name, model));
+const projectAgent = (name, model) => c => {
+  const dir = path.join(c.repo, '.claude', 'agents');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.md`), agentText(name, model));
+};
+const agentText = (name, model) => `---\nname: ${name}\ndescription: Matrix agent.\n${model ? `model: ${model}\n` : ''}---\n\nReply OK.\n`;
+const INHERITED = /names no model, so it would run on this session's model/;
+const FORK = /a fork always runs on this session's model/;
 const configureTopology = topology => c => require(path.join(SCRIPTS, 'toolkit-agent-control.cjs'))
   .configureProfile('claude-code', { topology, capacity_mode: 'root-only' }, { root: c.controlRoot });
 
@@ -151,21 +163,35 @@ const HOOK_CASES = [
   ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /requested: the default agent/],
   ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED,
     { setup: configureTopology('broader-native') }],
-  ['A18', 'ungoverned folder, lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.plain, environment: NO_GATE }],
+  ['A18', 'ungoverned folder, lead launches any agent with a model', launch('general-purpose', { model: 'haiku' }), 'pass', null, { cwd: c => c.plain, environment: NO_GATE }],
+  ['A18', 'ungoverned folder, lead launches an agent with no model', launch('general-purpose'), 'deny', INHERITED, { cwd: c => c.plain, environment: NO_GATE }],
   ['A18', 'ungoverned folder, a subagent launches another agent', { agent_id: 'sub-1', ...launch('general-purpose') }, 'deny', /one layer only/, { cwd: c => c.plain, environment: NO_GATE }],
   ['A18', 'ungoverned folder, broader native behaviour chosen', { agent_id: 'sub-1', ...launch('general-purpose') }, 'pass', null,
     { cwd: c => c.plain, setup: configureTopology('broader-native'), environment: NO_GATE }],
-  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent', launch('Explore'), 'pass', null, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent with a model', launch('Explore', { model: 'haiku' }), 'pass', null, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent with no model', launch('Explore'), 'deny', INHERITED, { environment: NO_GATE }],
   ['A18', 'ENABLED repository outside a gate run, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/, { environment: NO_GATE }],
   ['A18', 'ENABLED repository outside a gate run, broader native chosen, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/,
     { environment: NO_GATE, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
   ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined, environment: NO_GATE }],
+  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent with a model', launch('general-purpose', { model: 'haiku' }), 'pass', null, { cwd: c => c.declined, environment: NO_GATE }],
   ['A22', 'UNDECIDED repository counts as off: the governance gate lets the launch through', launch(G0), 'pass', null,
     { cwd: c => c.undecided, gate: true }],
   ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],
+  ['A27', 'outside a gate run, general-purpose with no model and CLAUDE_CODE_SUBAGENT_MODEL set', launch('general-purpose'), 'pass', null,
+    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
+  ['A27', 'outside a gate run, Explore with no model and only CLAUDE_CODE_SUBAGENT_MODEL set', launch('Explore'), 'deny', INHERITED,
+    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
+  ['A27', 'outside a gate run, Explore with no model and the model variable forced', launch('Explore'), 'pass', null,
+    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
+  ['A27', 'outside a gate run, a fork with the model variable forced', launch('fork'), 'deny', FORK,
+    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
+  ['A27', 'outside a gate run, a user agent that pins sonnet', launch('matrix-reader'), 'pass', null, { environment: NO_GATE, setup: userAgent('matrix-reader', 'sonnet') }],
+  ['A27', 'outside a gate run, a user agent with model inherit', launch('matrix-reader'), 'deny', INHERITED, { environment: NO_GATE, setup: userAgent('matrix-reader', 'inherit') }],
+  ['A27', 'outside a gate run, a project agent with no model outranks a user agent that pins sonnet', launch('matrix-reader'), 'deny', INHERITED,
+    { environment: NO_GATE, setup: c => { userAgent('matrix-reader', 'sonnet')(c); projectAgent('matrix-reader', null)(c); } }],
 ];
 
 // How every other row is proved. Hook rows above are listed by the test, not here.
@@ -182,7 +208,7 @@ const OTHER_ROWS = Object.freeze({
 });
 // Rows whose hook case exists but whose full proof also needs a live run.
 const LIVE_TOO = Object.freeze(['A1', 'A2', 'A6', 'A7', 'A14']);
-const ROW_IDS = Object.freeze(Array.from({ length: 26 }, (_, i) => `A${i + 1}`));
+const ROW_IDS = Object.freeze(Array.from({ length: 27 }, (_, i) => `A${i + 1}`));
 
 // Runs one hook case in `context` and returns its verdict; the context is reset afterwards. `hook`
 // is the hook command file to run, such as the copy an installed plugin uses.
