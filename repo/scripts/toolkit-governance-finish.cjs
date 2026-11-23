@@ -93,6 +93,11 @@ function touch(registryOptions, repositoryId, { now = new Date() } = {}) {
   return update(registryOptions, repositoryId, entry => entry && ({ ...entry, finished_at: now.toISOString() }));
 }
 
+// Drops the finish mark without a result: its turn-on pull request closed without merging.
+function clear(registryOptions, repositoryId) {
+  return update(registryOptions, repositoryId, () => null);
+}
+
 // One finish at a time per repository on this computer: two sessions starting together start it
 // once. A lock older than FINISH_GAP_MS is from a finish that died and is taken over.
 function claim(registryOptions, repositoryId, { now = new Date() } = {}) {
@@ -148,4 +153,4 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
   } catch { return []; }
 }
 
-module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, entryFor, markPending, record, sessionLines, startFinish, touch });
+module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, clear, entryFor, markPending, record, sessionLines, startFinish, touch });

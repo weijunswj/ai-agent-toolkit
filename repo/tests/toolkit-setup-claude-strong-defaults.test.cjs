@@ -86,7 +86,7 @@ const stateOf = (id) => new ClaudeUserSettings().inspect().find((entry) => entry
 test('a fresh Claude Code shows one question, and yes writes and records every Toolkit default', async (t) => {
   const home = claudeHome(t);
   const run = await answer(['yes']);
-  assert.match(run.written, /1 question: Apply these defaults\?/);
+  assert.match(run.written, /1 question: Apply Toolkit's defaults to the 4 Claude Code settings that have no value yet\? Your own values and offs stay\./);
   assert.doesNotMatch(run.written, /\d+ questions across/);
   assert.equal(run.prompts.length, 1, 'one prompt');
   assert.equal(run.result.answer_source, 'user-approved defaults');
