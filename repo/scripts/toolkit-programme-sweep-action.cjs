@@ -23,8 +23,13 @@
 // The pass first runs the holder orders the controller queued in the evidence store (the reconciler's
 // programme-order-queue.cjs); the summary gets one counts line, and a refused order also warns.
 //
+// A refresh that finds another sweep holding the lease (QUEUED) is tried again: every minute, or just
+// after that lease ends when sooner, for up to QUEUED_WAIT_MS, each retry with the pass budget the
+// wait left. A run that still cannot take the lease fails with NOTICES.not_refreshed and asks the
+// follow-up job for one more run at once, so a push to main never ends green without a refresh.
+//
 // `refreshed` tells the footer step the pass ran on this commit and saved its work, read back as
-// written; any skip, failure, run queued behind another sweep, pass that wrote nothing
+// written; any skip, failure, run that never got the lease, pass that wrote nothing
 // (`sweep.noWrite`), pass whose state commit did not read back as written (a STATE_READBACK_MISMATCH
 // hold: the commit may stand but cannot be trusted), held pass whose save never landed (no state write
 // counted), pass held because a newer Toolkit drew the board (BLOCK_NEWER_TOOLKIT: this worker left
@@ -55,6 +60,16 @@ const BINDING_LIMIT = 64 * 1024;
 const { RESET_WAIT_MS, NO_PARENT_STATE, INIT_PARENT } = require('./toolkit-programme-sweep-gate.cjs');
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const RUN_TIMEOUT_MS = programmeState.PASS_BUDGETS.scheduled.killMs;
+const KILL_SLACK_MS = programmeState.PASS_BUDGETS.scheduled.killMs - programmeState.PASS_BUDGETS.scheduled.budgetMs;
+// A run that meets another sweep's lease checks again every QUEUED_POLL_MS (sooner when that lease
+// ends first) for up to QUEUED_WAIT_MS, then runs its pass with the budget that is left. The lease runs
+// out within twenty minutes of its holder's last renewal, so only a live sweep outlasts the wait;
+// the wait, the pass it leaves and the pass's kill slack still end before the job is stopped.
+const QUEUED_POLL_MS = 60 * 1000;
+const QUEUED_WAIT_MS = 30 * 60 * 1000;
+const QUEUED_GRACE_MS = 5 * 1000;
+const SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
+const sleepFor = ms => { Atomics.wait(SLEEP_CELL, 0, 0, ms); };
 // A version 1 binding has no governance key and reads as enabled, as everywhere else.
 const { bindingEnabled } = programmeState;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -108,7 +123,7 @@ function heldWarning(report) {
 }
 const NOTICES = Object.freeze({
   main_moved: 'Programme Sweep skipped: the default branch moved while this run was starting; the next run picks it up.',
-  queued: 'Programme Sweep queued: another sweep is running; the next hourly run will retry.',
+  not_refreshed: 'Programme Sweep did not refresh: another sweep held the lease for 30 minutes, so this run wrote nothing. It starts one more run now; if this repeats, check which sweep keeps the lease (the evidence store\'s sweep-lease.json names its host).',
   private_wait: 'Programme Sweep follow-up left to the hourly gate: this repository is private, so no runner waits for GitHub\'s hourly App limit to reset; the gate resumes the saved place after the reset.',
   paused: 'Programme Sweep paused: GitHub\'s hourly App limit for this repository is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.',
   unsaved: 'Programme Sweep held: this pass saved nothing, so the board was not refreshed and footer cleaning is skipped; the next run retries.',
@@ -156,13 +171,16 @@ function lastReport(output) {
 
 // Runs the CLI without a shell. Only the two tokens, the App's login and the store reach it; the
 // built-in token, the private key and any other token variable are removed.
-function runRefresh({ root, env, toolkitRoot = TOOLKIT_ROOT, spawn = spawnSync }) {
+// `budgetMs` is the pass budget left after a wait for another sweep's lease; without it the pass gets
+// the full scheduled budget.
+function runRefresh({ root, env, budgetMs, toolkitRoot = TOOLKIT_ROOT, spawn = spawnSync }) {
   const child = { ...env, TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1', GITHUB_ACTIONS: 'true' };
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', PRIVATE_KEY_SECRET, 'TOOLKIT_GOVERNANCE_TOKEN']) delete child[name];
   let result;
   try {
-    result = spawn(process.execPath, [path.join(toolkitRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'), 'refresh', '--scheduled', '--json'],
-      { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
+    const budget = Number.isSafeInteger(budgetMs) && budgetMs > 0 ? ['--budget-ms', String(budgetMs)] : [];
+    result = spawn(process.execPath, [path.join(toolkitRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'), 'refresh', '--scheduled', '--json', ...budget],
+      { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: budget.length ? budgetMs + KILL_SLACK_MS : RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
   } catch { return { code: 'EXEC_FAILED', report: null, status: 1 }; }
   if (!result || result.error) return { code: 'EXEC_FAILED', report: null, status: 1 };
   const first = String(result.stderr || '').trimStart().split('\n')[0];
@@ -181,8 +199,25 @@ function failureLine(result) {
   return GENERAL_FAILURE.replace('Programme Sweep failed.', `Programme Sweep failed (${code}${http}).`);
 }
 
+// The notice a run gives when it starts to wait for another sweep's lease: which host holds it, since
+// when and until when, from the CLI's own fields (times only, never free text).
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+function waitingLine(holder) {
+  const where = holder?.host === 'computer' ? ' on a computer' : holder?.host === 'cloud' ? ' on the cloud runner' : '';
+  const since = ISO.test(holder?.started_at || '') ? `, started ${holder.started_at}` : '';
+  const until = ISO.test(holder?.expires_at || '') ? `, lease until ${holder.expires_at}` : '';
+  return `Programme Sweep waiting: another sweep holds the lease${where}${since}${until}; this run checks again every minute for up to ${QUEUED_WAIT_MS / 60000} minutes.`;
+}
+
+// How long to sleep before the next try: a minute, or until just after the holder's lease ends when
+// that is sooner, never past the end of the wait.
+function waitBeforeRetry(holder, now, waitEnds) {
+  const expires = Date.parse(holder?.expires_at || '');
+  const untilExpiry = Number.isFinite(expires) ? Math.max(QUEUED_GRACE_MS, expires - now + QUEUED_GRACE_MS) : QUEUED_POLL_MS;
+  return Math.max(1, Math.min(QUEUED_POLL_MS, untilExpiry, waitEnds - now));
+}
+
 function summaryLine(report) {
-  if (report?.outcome === 'QUEUED') return NOTICES.queued;
   if (report?.outcome === 'PAUSED') return NOTICES.paused;
   if (!report || typeof report.metrics !== 'string' || !METRICS.test(report.metrics)) return null;
   const held = Array.isArray(report.holds) && report.holds.length ? '; this pass held, the next run retries' : '';
@@ -283,8 +318,8 @@ class ProgrammeSweepAction {
     refresh = input => runRefresh(input), notice = (message, tag) => process.stdout.write(tag ? `::notice title=${tag.title}::(${tag.code}) ${message}\n` : `::notice::${message}\n`),
     failure = message => process.stderr.write(`${message}\n`), output = (name, value) => fs.appendFileSync(env.GITHUB_OUTPUT, `${name}=${value}\n`),
     summary = line => fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`), footers = input => runFooterSweep(input),
-    warning = (message, tag) => process.stdout.write(tag ? `::warning title=${tag.title}::(${tag.code}) ${message}\n` : `::warning::${message}\n`), nowMs = Date.now } = {}) {
-    Object.assign(this, { env, root, readFile, validateBinding, refresh, notice, failure, output, summary, footers, warning, nowMs });
+    warning = (message, tag) => process.stdout.write(tag ? `::warning title=${tag.title}::(${tag.code}) ${message}\n` : `::warning::${message}\n`), nowMs = Date.now, sleep = sleepFor } = {}) {
+    Object.assign(this, { env, root, readFile, validateBinding, refresh, notice, failure, output, summary, footers, warning, nowMs, sleep });
   }
 
   // Step three: clean the owner's footed posts in this repository and its store.
@@ -342,9 +377,28 @@ class ProgrammeSweepAction {
     if (env.MINT_OUTCOME !== 'success/success' || !env.GOVERNED_TOKEN || !env.STORE_TOKEN || !BOT_LOGIN.test(env.SWEEP_LOGIN || '')) {
       this.failure(SIGN_IN_FAILURE); return 1;
     }
-    const started = this.nowMs();
+    const first = this.nowMs();
+    let started = first;
     let result;
     try { result = this.refresh({ root: this.root, env }); } catch { this.failure(GENERAL_FAILURE); return 1; }
+    // Another sweep holds the lease (a live pass, or one whose release never landed, until its lease
+    // runs out): wait for it and try again, so the push that started this run still refreshes the
+    // board within minutes. A run that still cannot take the lease fails and starts one more run.
+    const waitEnds = first + QUEUED_WAIT_MS;
+    let waiting = false;
+    while (result.status === 0 && result.report?.outcome === 'QUEUED') {
+      const now = this.nowMs();
+      if (now >= waitEnds) {
+        this.failure(NOTICES.not_refreshed);
+        try { this.output('follow_up_at', String(now)); } catch { /* the hourly gate starts the next run */ }
+        return 1;
+      }
+      if (!waiting) { waiting = true; this.notice(waitingLine(result.report.holder)); }
+      this.sleep(waitBeforeRetry(result.report.holder, now, waitEnds));
+      started = this.nowMs();
+      const budgetMs = Math.max(programmeState.PASS_BUDGETS['after-write'].budgetMs, programmeState.PASS_BUDGETS.scheduled.budgetMs - (started - first));
+      try { result = this.refresh({ root: this.root, env, budgetMs }); } catch { this.failure(GENERAL_FAILURE); return 1; }
+    }
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
     if (result.code === 'MAIN_MOVED') { this.notice(NOTICES.main_moved, { title: NO_PASS_TITLE, code: 'main_moved' }); return 0; }
     if (result.code === 'CLOUD_PUBLIC_STATE') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'public_state'), { title: SKIP_TITLE, code: 'public_state' }); return 0; }
@@ -362,16 +416,12 @@ class ProgrammeSweepAction {
       if (orders.refused) this.warning(ORDERS_REFUSED);
       if (orders.retrying || orders.unreadable) this.warning(ORDERS_RETRYING);
     }
-    const outcome = result.report?.outcome;
-    if (outcome === 'QUEUED' || outcome === 'PAUSED') this.notice(outcome === 'QUEUED' ? NOTICES.queued : NOTICES.paused, { title: NO_PASS_TITLE, code: outcome.toLowerCase() });
+    if (result.report?.outcome === 'PAUSED') this.notice(NOTICES.paused, { title: NO_PASS_TITLE, code: 'paused' });
     // A held pass is green (the next run retries) but titled, so the hourly gate can count a streak.
     // A pass that saved nothing (PAUSED stays calm: it read nothing and the follow-up resumes it) is
     // held too, so the gate counts it toward its streak.
-    const unsaved = result.report?.outcome !== 'PAUSED' && result.report?.outcome !== 'QUEUED' && wroteNothing(result.report);
+    const unsaved = result.report?.outcome !== 'PAUSED' && wroteNothing(result.report);
     if (held || unsaved) this.warning(held ? heldWarning(result.report) : NOTICES.unsaved, { title: HELD_TITLE, code: held ? holdCodes(result.report) : 'NO_WRITE' });
-    // A run queued behind another sweep did not run a pass and holds no lease: footer cleaning skips
-    // it, and the sweep that is running needs no follow-up from it.
-    if (result.report?.outcome === 'QUEUED') return 0;
     const limited = atAppLimit(result.report);
     // The pass ran on this commit and saved its work, read back as written, below the App limit: only
     // then may the footer step edit posts. A pass that saved nothing, whose save did not read back,
@@ -401,4 +451,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, ordersLine, ORDERS_REFUSED, ORDERS_RETRYING, atAppLimit, wroteNothing, saveUnverified, refreshLanded, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ QUEUED_POLL_MS, QUEUED_WAIT_MS, waitingLine, waitBeforeRetry, HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, ordersLine, ORDERS_REFUSED, ORDERS_RETRYING, atAppLimit, wroteNothing, saveUnverified, refreshLanded, followUpAt, ProgrammeSweepAction });

@@ -458,6 +458,41 @@ test('lease: a cloud pass that ends with an error records its stop in the lease'
   assert.equal(f.record().unreported, null);
 });
 
+// After train PR 1468 merged, a cloud pass's release met a 409 (its own state commit and another
+// writer had just moved the store branch), the release was dropped without a word, and the lease
+// stayed live for twenty minutes: every sweep started for the merge wrote nothing.
+test('lease: a release that meets a branch race tries again and frees the lease', t => {
+  const f = fixture(t);
+  secondPass(f);
+  let refused = 0;
+  f.github.intercept(call => {
+    if (call.method === 'PUT' && call.path.endsWith('/sweep-lease.json') && call.body?.message === 'programme sweep: release the lease' && refused < 2) {
+      refused += 1;
+      return { status: 409, json: { message: 'is at another commit' } };
+    }
+    return undefined;
+  });
+  assert.equal(f.run({ cloud: true }).code, 0);
+  assert.equal(refused, 2, 'the release met the race twice');
+  assert.equal(f.record().holder, null, 'the lease is free for the next sweep at once');
+  assert.ok(f.record().last_complete_at, 'the release carried the finished pass');
+});
+
+test('lease: a release that never lands says so, and the next sweep reports the stop once the lease ends', t => {
+  const f = fixture(t);
+  secondPass(f);
+  let errors = '';
+  f.github.intercept(call => (call.method === 'PUT' && call.path.endsWith('/sweep-lease.json') && call.body?.message === 'programme sweep: release the lease'
+    ? { status: 409, json: { message: 'is at another commit' } } : undefined));
+  assert.equal(f.run({ cloud: true, stderr: { write: text => { errors += text; } } }).code, 0);
+  f.github.hooks = [];
+  assert.ok(f.record().holder, 'the lease is still held');
+  assert.match(errors, /^Sweep lease: the release did not land after 3 tries, so the lease ends on its own at \S+Z; the next sweep waits for it and reports this pass as stopped\.$/m);
+  f.advance(TTL_MS + 1000);
+  assert.equal(f.run({ cloud: true }).code, 0);
+  assert.equal(f.stop().diagnostics.cause, 'interrupted', 'the unreleased pass is a programme finding');
+});
+
 test('lease: on the computer an error stop is in the note only', t => {
   // Row L14: the local note records it, so the lease carries no second copy.
   const f = fixture(t);
