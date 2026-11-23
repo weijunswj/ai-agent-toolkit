@@ -89,7 +89,7 @@ test('a task waiting on the owner with a UAT still owed waits on that UAT, in th
   Object.assign(child.uat, { state: 'PENDING', at_head: 'c'.repeat(40) });
   agentPassed(child);
   assert.equal(row(504), 'Owner: UAT on PR #2017');
-  assert.match(current(), /^- #504 [^\n]* · PR #2017 · merged, awaiting proof · waiting on you: your UAT on PR #2017$/m);
+  assert.match(current(), /^- #504 [^\n]* · PR #2017 · merged, close check · waiting on you: your UAT on PR #2017$/m);
   Object.assign(child.gate, { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'a-504-g2', role: 'G2' } });
   assert.equal(row(504), 'Owner: decision', 'the gate asked the owner something');
   assert.match(current(), /^- #504 [^\n]* · PR #2017 · G2 · waiting on you: your decision$/m);
@@ -124,7 +124,7 @@ test('owner waits: one owner step per task feeds the board and the list, so the 
     610: child => { uat(child, 2610, false); },
   });
   assert.deepEqual(state.ownerWaits(f.parent, f.children), [
-    { issue: 601, ask: 'decision', after: null, gate_live: false, pr: null, head: null },
+    { issue: 601, ask: 'decision', after: null, gate_live: true, pr: null, head: null },
     { issue: 602, ask: 'UAT on PR #2602', after: null, agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', gate_live: false, pr: 2602, head },
     { issue: 603, ask: 'decision', after: null, gate_live: false, pr: null, head: null },
     { issue: 604, ask: 'UAT on PR #2604', after: null, agent_uat: 'PASSED', uat_head: head, pr_state: 'OPEN', gate_live: false, pr: 2604, head },
@@ -302,10 +302,10 @@ test('CURRENT lists tasks in progress before queued ones, whatever their priorit
   assert.deepEqual(listed, [3, 2]);
 });
 
-// A task whose tracked task PR merged while its issue stays open reads `MERGED · awaiting proof`,
+// A task whose tracked task PR merged while its issue stays open reads `NOW · CLOSE CHECK`,
 // never the gate that already returned. The fixture copies the shape the sweep recorded after two
 // real merges: PR MERGED, lifecycle ACTIVE and an accepted G2 left RETIRED with its role still set.
-const MERGED = 'MERGED · awaiting proof';
+const MERGED = 'NOW · CLOSE CHECK';
 const MERGED_HEAD = 'c'.repeat(40);
 function mergedFixture() {
   const f = renderScaleFixture(state);
@@ -324,7 +324,7 @@ function mergedFixture() {
   return { f, graph, row, board, order, current, merge };
 }
 
-test('merged task, issue open, gate returned: MERGED · awaiting proof with no stale gate, active or held', () => {
+test('merged task, issue open, gate returned: NOW · CLOSE CHECK with no stale gate, active or held', () => {
   for (const lifecycle of ['ACTIVE', 'HOLD']) {
     const t = mergedFixture();
     t.merge(500, { lifecycle });
@@ -354,15 +354,15 @@ test('merged rows sort after NOW · IN PROGRESS and before NOW · QUEUED, and th
   assert.ok(firstMerged > 0, 'a merged row is drawn after the rows in progress');
   assert.ok(order.slice(0, firstMerged).every(issue => statusOf(issue) === 'NOW · IN PROGRESS'), 'rows in progress lead');
   assert.equal(statusOf(order[firstMerged + 1]), 'NOW · QUEUED', 'queued rows follow the merged band');
-  assert.match(t.graph(), /Order: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW · QUEUED, LATER/);
+  assert.match(t.graph(), /Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW · QUEUED, LATER/);
 });
 
-test('CURRENT agrees with the graph: a merged task reads merged, awaiting proof, not its returned gate', () => {
+test('CURRENT agrees with the graph: a merged task reads merged, close check, not its returned gate', () => {
   const t = mergedFixture();
   t.merge(500);
   const line = t.current().split('\n').find(text => text.startsWith('- #500 '));
   assert.ok(line, 'the merged task is still listed in progress');
-  assert.match(line, /PR #3500 · merged, awaiting proof$/);
+  assert.match(line, /PR #3500 · merged, close check$/);
   assert.doesNotMatch(line, /· G2/);
 });
 
@@ -371,7 +371,7 @@ test('a listed blocker still queues a merged task, so lane waits on multi-slice 
   const wait = 'Queued in NOW: one child at a time; starts when the gate lane frees';
   t.merge(502, { blockers: [wait] });
   assert.equal(t.board(502), `NOW · QUEUED | Blocked: ${wait}`);
-  assert.doesNotMatch(t.current().split('\n').find(text => text.startsWith('- #502 ')), /merged, awaiting proof/);
+  assert.doesNotMatch(t.current().split('\n').find(text => text.startsWith('- #502 ')), /merged, close check/);
 });
 
 test('a closed issue is COMPLETED and a task set back to planned is LATER, merged or not', () => {

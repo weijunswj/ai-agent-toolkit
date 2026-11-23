@@ -341,6 +341,14 @@ test('E2: the parent schema accepts the attention list the code writes', () => {
   assert.equal(state.ATTENTION_LIMIT + state.ATTENTION_KEEP, schema.properties.attention.maxItems);
 });
 
+test('E2: the parent schema enum lists every finding code the runtime table can emit', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'programme-state', 'parent-state-v1.schema.json'), 'utf8'));
+  const enumerated = schema.properties.attention.items.properties.code.enum;
+  const emitted = Object.keys(state.FINDING_CODES);
+  assert.deepEqual(emitted.filter(code => !enumerated.includes(code)), [], 'runtime codes missing from the schema enum');
+  assert.deepEqual(enumerated.filter(code => !emitted.includes(code)), [], 'schema codes the runtime table does not emit');
+});
+
 test('E2: validation refuses a finding with an unknown code, field, state or a forged id', () => {
   const good = { id: state.findingId('reconcile', 'CHECKS_RED', 423, SHA_A), source: 'reconcile', code: 'CHECKS_RED', issue: 423, head: SHA_A, state: 'new', first_seen: '2026-10-28T00:00:00Z', changed_at: '2026-10-28T00:00:00Z' };
   const parent = attention => ({ ...state.newParent({ repository: 'acme/app', parentIssue: 421 }), attention });
@@ -1029,7 +1037,7 @@ test('attention lists every task waiting on the owner, read from the children at
   write(427, doc => { doc.lifecycle = 'WAITING_OWNER'; Object.assign(doc.pr, { number: 902, state: 'MERGED', head: SHA_B }); Object.assign(doc.uat, { state: 'PENDING', at_head: SHA_B }); });
   const json = fx.run(['attention']);
   assert.equal(json.error, null);
-  // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the MERGED · awaiting proof band after it.
+  // Graph order: 425 is in progress; 423's task PR merged, so it sorts in the NOW · CLOSE CHECK band after it.
   assert.deepEqual(json.result.owner_waits, [
     { issue: 425, ask: 'UAT on PR #901', after: 'G2', agent_uat: 'PASSED', uat_head: SHA_B, pr_state: 'OPEN', gate_live: true, pr: 901, head: SHA_B },
     { issue: 423, ask: 'UAT on PR #900', after: null, agent_uat: 'PASSED', uat_head: SHA_A, pr_state: 'MERGED', gate_live: false, pr: 900, head: SHA_A },
@@ -1101,4 +1109,79 @@ test('every programme.cjs hint a session on this computer reads is built by the 
   assert.ok(kept > 0, 'the scan reads the scripts');
   const handover = fs.readFileSync(path.join(TOOLKIT_ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-handover.cjs'), 'utf8');
   assert.match(handover, /answer attention \(\\`node <Toolkit>\/\$\{[^}]*PROGRAMME_SCRIPT\} attention\\`\)/, 'the stored handover names the script from the Toolkit root');
+});
+
+// A cloud session whose GitHub link cannot reach the evidence store: the advice is to wait for the
+// owner's computer, never to pick another store; on a computer the store check keeps its advice.
+test('red: in a cloud session a store that answers 403 or 404 says the check waits for the computer, not to choose another store', () => {
+  for (const status of [401, 403, 404]) {
+    const fx = fixture({ parents: [421] });
+    const refused = Object.assign(Object.create(fx.github), {
+      request: (method, endpoint, ...rest) => (method === 'GET' && endpoint === 'repos/acme/state-store' ? { status, json: { message: 'Resource not accessible by integration' } } : fx.github.request(method, endpoint, ...rest)),
+    });
+    const cloud = fx.run(['attention'], { transport: refused, environment: { CLAUDE_CODE_REMOTE: 'true' } }, { json: false });
+    assert.equal(cloud.code, 1, `${status}: unknown, never clear`);
+    assert.match(cloud.result, new RegExp(`^Attention: unknown \\(STATE_STORE_UNVERIFIED: The state store acme/state-store is not reachable from this cloud session \\(${status}\\), so nothing was read or written\\. The check waits for the owner's computer: the next session start there reads the store\\.\\)\\n$`), status);
+    assert.doesNotMatch(cloud.result, /Choose a private repository/);
+    const computer = fx.run(['attention'], { transport: refused, environment: {} }, { json: false });
+    assert.match(computer.result, new RegExp(`could not be read \\(${status}\\)\\. Choose a private repository you can write to`), `${status}: a computer keeps the store advice`);
+  }
+  // A cloud session that reaches a public store is still refused with the store advice.
+  const fx = fixture({ parents: [421] });
+  const open = Object.assign(Object.create(fx.github), {
+    request: (method, endpoint, ...rest) => (method === 'GET' && endpoint === 'repos/acme/state-store' ? { status: 200, json: { private: false, permissions: { push: true } } } : fx.github.request(method, endpoint, ...rest)),
+  });
+  assert.match(fx.run(['attention'], { transport: open, environment: { CLAUDE_CODE_REMOTE: 'true' } }, { json: false }).result, /because it is not private\. Choose a private repository/);
+});
+
+// The stale-check stamp is written to a temporary file and renamed over the stamp, so a reader never
+// sees a half-written file; a write straight to the stamp fails this test.
+test('red: the stale-check stamp is written to a temporary file in its folder, then renamed over the stamp', t => {
+  const home = tmp();
+  const file = cache.staleStampFile('acme/app', { home });
+  cache.writeStaleStamp('acme/app', { date: '2026-11-21', at: '2026-11-21T01:00:00Z', rows: [] }, { home });
+  const writes = [];
+  const renames = [];
+  const write = fs.writeFileSync;
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'writeFileSync', (target, ...rest) => { writes.push(String(target)); return write(target, ...rest); });
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    renames.push([String(from), String(to)]);
+    assert.equal(JSON.parse(fs.readFileSync(to, 'utf8')).date, '2026-11-21', 'until the rename, a reader still sees the last whole stamp');
+    return rename(from, to);
+  });
+  cache.writeStaleStamp('acme/app', { date: '2026-11-22', at: '2026-11-22T01:00:00Z', rows: ['FOLD? #20 new under #7 with no Nearest child: line'] }, { home });
+  assert.equal(writes.length, 1);
+  assert.notEqual(writes[0], file, 'never written straight to the stamp');
+  assert.equal(path.dirname(writes[0]), path.dirname(file), 'the temporary file sits beside the stamp, so the rename stays on one disk');
+  assert.deepEqual(renames, [[writes[0], file]]);
+  assert.equal(fs.existsSync(writes[0]), false);
+  assert.equal(cache.readStaleStamp('acme/app', { home }).date, '2026-11-22');
+});
+
+// The one shared stamp from before stamps were per repository is removed by the first stamp write;
+// nothing else in the user-state folder is touched.
+test('red: the first stale-check stamp write removes the old shared stale-sweep.json and nothing else', () => {
+  const home = tmp();
+  const userState = path.join(home, '.ai-agent-toolkit', 'user-state');
+  fs.mkdirSync(userState, { recursive: true });
+  fs.writeFileSync(path.join(userState, 'stale-sweep.json'), JSON.stringify({ date: '2026-11-20', rows: [] }));
+  fs.writeFileSync(path.join(userState, 'stale-sweep.json.keep'), 'not the old stamp');
+  cache.writeStaleStamp('acme/app', { date: '2026-11-22', at: '2026-11-22T01:00:00Z', rows: [] }, { home });
+  assert.equal(fs.existsSync(path.join(userState, 'stale-sweep.json')), false);
+  assert.equal(fs.existsSync(path.join(userState, 'stale-sweep.json.keep')), true);
+  assert.equal(cache.readStaleStamp('acme/app', { home }).date, '2026-11-22');
+  // Already gone: the next write still succeeds.
+  cache.writeStaleStamp('acme/other', { date: '2026-11-22', at: '2026-11-22T01:00:00Z', rows: [] }, { home });
+  assert.equal(cache.readStaleStamp('acme/other', { home }).date, '2026-11-22');
+});
+
+test('red: the session-start stale-check line counts KEPT OPEN? and UNTICKED? rows by kind', () => {
+  const rows = [
+    'KEPT OPEN? #12 kept open since 2026-11-22 12:33Z with every PR merged, and no lane has worked it for over 6 hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)',
+    'UNTICKED? #13 PR #900 merged, but none of its 4 DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)',
+    'JUDGE? #14 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)',
+  ];
+  const world = staleWorld({ stamp: { 'acme/app': { date: staleToday(), at: STALE_NOW, rows } } });
+  assert.match(world.evaluate(), new RegExp(`Stale check ${staleToday()}: 3 rows to answer \\(JUDGE\\? 1, KEPT OPEN\\? 1, UNTICKED\\? 1\\)\\.`));
 });

@@ -21,7 +21,10 @@
 // `~/.toolkit-handoff-off` in the home folder (outside Toolkit's user-state folder, which only Toolkit
 // itself changes). The hook runs after each tool call, so that first step is covered. With either set, the
 // hook exits before it reads, discovers or writes anything. The file holds for every session of that
-// user on that machine or container until removed; a cloud task's container is its own.
+// user on that machine or container until removed; a cloud task's container is its own. A session's
+// first check only takes its baseline and never starts a run (the next check is at least a minute
+// later), so a task that makes the file within its first minute starts nothing, even when an earlier
+// tool call (a checklist update, a first listing) ran the hook first.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -159,6 +162,9 @@ function main(deps = {}) {
       session.rows = handoff.sessionRows({ memory: saved.memory || null, instructions: saved.instructions || null, files: Array.isArray(saved.files) ? saved.files : [] }, { platform });
       session.real = handoff.realBySource(session.rows);
       writeJson(sessionFile, session);
+      // The session's first check only takes the baseline; the next one, at least a minute later,
+      // decides (see the top of this file).
+      return 0;
     }
     const planned = handoff.plan({ base, repository: record.repository, sources: null, stamp: null, platform, session: { rows: session.rows, real: session.real || null }, scan: false });
     if (planned.unchanged) return 0;

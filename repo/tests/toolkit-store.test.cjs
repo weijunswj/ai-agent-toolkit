@@ -251,7 +251,7 @@ test('the command line refuses unknown commands, flags and messages, and the fla
   });
   const flags = [...fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
   assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--name-only', '--verify', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--unshallow', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
-    ['--baseline', '--branch', '--check', '--file', '--from', '--instructions', '--json', '--memory', '--message', '--out', '--path', '--repo-root', '--store', '--to'], 'every caller flag is in the pinned table');
+    ['--baseline', '--branch', '--check', '--file', '--from', '--instructions', '--json', '--memory', '--message', '--out', '--path', '--repo-root', '--reseed', '--store', '--to'], 'every caller flag is in the pinned table');
   assert.equal(store.mergedStoreBinding(os.tmpdir()).ok, false);
 });
 

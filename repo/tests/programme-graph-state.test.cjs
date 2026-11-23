@@ -742,14 +742,14 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
   owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD}}));
   f.run();
   assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT on PR #22, not started']);
-  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · merged, awaiting proof · agent UAT on PR #22, not started');
+  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · merged, close check · agent UAT on PR #22, not started');
   assert.doesNotMatch(f.github.issues.get(1).body,/waiting on you/);
   assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])),[]);
   // The agent's FAILED result keeps it the agent's; its PASS hands the UAT to the owner.
   f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('FAILED')}})}); f.run();
   assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · AGENT UAT','Agent: UAT failed on PR #22']);
   f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,private:{...doc.private,agent_uat:agentRecord('PASSED')}})}); f.run();
-  assert.deepEqual([statusOf(f),owedOn(f).waiting],['MERGED · awaiting proof','Owner: UAT on PR #22']);
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · CLOSE CHECK','Owner: UAT on PR #22']);
   const waitOf = () => state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat,entry.uat_head,entry.pr_state,entry.head]);
   assert.deepEqual(waitOf(),[[2,'PASSED',UAT_HEAD,'MERGED',UAT_HEAD]]);
   // A UAT owed at a train merge names that head, not the PR head: the owner's OK is recorded there.
@@ -763,11 +763,15 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
 
 // The stale check offers the owner a close only when no gate is live on the task. ownerStep's `after`
 // misses two live gates (a gate at work on a task waiting on the owner, and a blocked gate), so every
-// owner wait carries gate_live: a gate assigned or active, blocked or not.
-test('owner waits carry gate_live for a gate at work on a task waiting on the owner, a blocked gate, and none',()=>{
+// owner wait carries gate_live: any gate state but RETIRED (assigned, active, submitted, interrupted or
+// waiting on the owner), blocked or not.
+test('owner waits carry gate_live for a non-final gate on the task, blocked or not, and none for a retired or no gate',()=>{
   const cases = [
     ['gate at work, task waiting on the owner', 'WAITING_OWNER', {role:'G2',state:'ACTIVE'}, [], true],
     ['blocked live gate', 'ACTIVE', {role:'G1',state:'ACTIVE'}, ['Laptop offline'], true],
+    ['submitted gate, agent UAT passed', 'ACTIVE', {role:'G1',state:'SUBMITTED'}, [], true],
+    ['interrupted gate, agent UAT passed', 'ACTIVE', {role:'G1',state:'INTERRUPTED'}, [], true],
+    ['retired gate, agent UAT passed', 'ACTIVE', {role:'G1',state:'RETIRED'}, [], false],
     ['no gate', 'ACTIVE', null, [], false],
   ];
   for (const [name, lifecycle, gate, blockers, live] of cases) {
@@ -787,7 +791,7 @@ test('agent UAT first: a listed blocker still queues a merged task and shows in 
   assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · blocked: Laptop offline');
 });
 
-test('agent UAT first: NOW · AGENT UAT rows sort after work in progress and before merged rows awaiting proof',()=>{
+test('agent UAT first: NOW · AGENT UAT rows sort after work in progress and before NOW · CLOSE CHECK rows',()=>{
   const f=fixture([2,3,4]);
   pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD})); pr(f,33,{head:NEW,body:'Refs #3'}); pr(f,44,merged('2026-11-07T00:00:00Z','Refs #4',{head:OTHER_HEAD}));
   owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD}}));
@@ -795,8 +799,8 @@ test('agent UAT first: NOW · AGENT UAT rows sort after work in progress and bef
   f.store.mutate('child',4,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,pr:{...doc.pr,number:44}})});
   f.run();
   const rows=f.github.issues.get(1).body.split('\n').filter(line=>/^\|[^|]*\|#\d+\|/.test(line)).map(line=>line.split('|').slice(2,4).join(' '));
-  assert.deepEqual(rows,['#3 NOW · IN PROGRESS','#2 NOW · AGENT UAT','#4 MERGED · awaiting proof']);
-  assert.match(f.github.issues.get(1).body,/Order: NOW · IN PROGRESS, NOW · AGENT UAT, MERGED · awaiting proof, NOW · QUEUED, LATER/);
+  assert.deepEqual(rows,['#3 NOW · IN PROGRESS','#2 NOW · AGENT UAT','#4 NOW · CLOSE CHECK']);
+  assert.match(f.github.issues.get(1).body,/Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW · QUEUED, LATER/);
 });
 
 const OWNER_PASS = {uat:{state:'PASSED',at_head:UAT_HEAD}};
