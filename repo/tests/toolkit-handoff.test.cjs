@@ -1026,3 +1026,12 @@ test('the snapshot README gives a successor its reading order: MEMORY.md first, 
   assert.match(steps[1], /`files\/instructions\.md`/);
   assert.match(steps[2], /`files\/daily-additions\.md`, `files\/hourly-additions\.md`/);
 });
+
+test('a snapshot with no memory folder gives no MEMORY.md reading step', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--file', s.hourly]).code, 0);
+  const readme = fs.readFileSync(path.join(out, FOLDER, 'README.md'), 'utf8');
+  const steps = readme.slice(readme.indexOf('## Read in this order')).split('\n').filter(line => /^\d+\. /.test(line));
+  assert.deepEqual(steps, ['1. The named working files: `files/additions.md`.'], readme);
+});

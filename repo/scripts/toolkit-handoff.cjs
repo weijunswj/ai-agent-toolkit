@@ -53,7 +53,7 @@ function README(repository, files = []) {
   const saved = files.map(row => row.path).filter(name => name.startsWith('files/')).sort();
   const instructions = saved.filter(name => name.startsWith('files/instructions.'));
   const working = saved.filter(name => !instructions.includes(name));
-  const order = ['`MEMORY.md`, the memory index, then the `memory/` topic files it names.',
+  const order = [...(files.some(row => row.path === 'MEMORY.md') ? ['`MEMORY.md`, the memory index, then the `memory/` topic files it names.'] : []),
     ...instructions.map(name => `\`${name}\`, the saved instructions.`),
     ...(working.length ? [`The named working files: ${working.map(name => `\`${name}\``).join(', ')}.`] : [])];
   return `# Controller handoff snapshot: ${repository}\n\n`
