@@ -1824,6 +1824,11 @@ const CLOUD_PROGRAMME_WAITS = Object.freeze({
   full: "Attention and stale check: not read in this cloud session (a cloud session does not read the programme store); both run at the next session start on the owner's computer. Controller: check them from a session on the owner's computer before closing or planning children.",
   short: "Attention and stale check: wait for the owner's computer.",
 });
+// With the attention cache but no stamp for today, the stale check alone waits.
+const CLOUD_STALE_WAITS = Object.freeze({
+  full: "Stale check: not run in this cloud session; it runs at the next session start on the owner's computer. Controller: check it from a session on the owner's computer before closing or planning children.",
+  short: "Stale check: waits for the owner's computer.",
+});
 function cloudProgrammeLines(state, registryOptions = {}, deps = {}) {
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
@@ -1835,10 +1840,13 @@ function cloudProgrammeLines(state, registryOptions = {}, deps = {}) {
       const attention = cache.sessionAttention(binding.repository, deps);
       if (attention.line) lines.push({ full: `${attention.line}.${attention.open ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`, short: null });
     }
-    const stale = staleStampLine(staleStampFor(binding.repository, deps), state.root, deps);
+    const stamp = staleStampFor(binding.repository, deps);
+    const stale = staleStampLine(stamp, state.root, deps);
     if (stale) lines.push(stale);
-    // No attention cache and no stale line to show: say where the check runs, never stay silent.
+    // No attention cache and no stale line to show: say where the check runs, never stay silent. With
+    // the cache but no stamp for today, say so for the stale check alone (today's empty stamp is clear).
     if (!cached && !stale) lines.push(CLOUD_PROGRAMME_WAITS);
+    else if (!stale && stamp?.date !== staleLocalDate(new Date(Date.parse((deps.now || (() => new Date().toISOString()))())))) lines.push(CLOUD_STALE_WAITS);
     return lines;
   } catch { return []; }
 }
