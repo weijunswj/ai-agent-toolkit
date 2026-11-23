@@ -106,7 +106,8 @@ function mergeDecision(input, options = {}) {
 function decidePrompt(input, environment = process.env) {
   let approvalNote = '';
   try {
-    const count = require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment });
+    // The host is this entry point's own (Codex), never a payload field; Codex reconnects record nothing.
+    const count = require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment, host: 'codex' });
     if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s).`;
   } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
