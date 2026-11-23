@@ -92,6 +92,23 @@ test('the launch check and the started session\'s route check read the same brie
   assert.equal(route.parseBrief(G1_BRIEF).assignment, '1265-g1-s4-20261123');
 });
 
+test('hostile line breaks and large briefs never split the launch check from the session check', () => {
+  const hostile = require('./support/hostile-inputs.cjs');
+  // The started session declares a gate from its first prompt only with both lines (outside a relay),
+  // so a brief whose Route line it would refuse must be refused at launch, whatever the line breaks.
+  for (const text of ['Gate: G1\nRoute: Opus 5.5 high\nAssignment: x1', 'Gate: G2\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: x1']) {
+    for (const variant of hostile.variants(text)) {
+      const session = route.evaluate({ input: {}, environment: {}, registry, transcript: { brief: variant.text, model: null, effort: null } });
+      const launched = reason(pre(start({ title: 'Side work', prompt: variant.text })));
+      if (session.deny) assert.equal(launched, session.deny.replace('Toolkit gate route check: ', 'Toolkit gate launch check: '), variant.id);
+      else assert.equal(session.gate, null, `${variant.id}: a session gate the launch check let through`);
+    }
+  }
+  // Reading the brief stays linear in its size.
+  const timed = hostile.timing(text => pre(start({ prompt: text })), size => `${G1_BRIEF}\n${'x '.repeat(size / 2)}\n`);
+  assert.ok(timed.ok, timed.message);
+});
+
 test('after a start it prints the effort raise and the record steps', () => {
   const post = (toolInput, text, level = 'high') => launch.postToolUse({ tool_name: TOOL, tool_input: toolInput, tool_response: [{ type: 'text', text }], effort: { level } }, { environment: {}, registry });
   const context = output => output && output.hookSpecificOutput ? output.hookSpecificOutput.additionalContext : '';
