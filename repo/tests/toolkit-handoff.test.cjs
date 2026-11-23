@@ -937,9 +937,10 @@ test('a hook-started run keeps memory rows first written under an older folder p
   touch(path.join(old, 'MEMORY.md'), '2026-11-21T08:00:00Z');
   touch(path.join(old, 'owner-rules.md'), '2026-11-21T09:00:00Z');
   assert.equal(run(['--memory', old]).result.handoff, 'WRITTEN');
-  // The folder is named again under a new path in a run that also writes a newer file: the unchanged
-  // MEMORY.md row keeps the old path as its source.
+  // The folder is named again under a new path (a first run there records it), then a run writes a
+  // newer file: the unchanged MEMORY.md row keeps the old path as its source.
   fs.renameSync(old, s.memory);
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'UNCHANGED');
   putAt(s, 'memory/owner-rules.md', 'rules v2\n', '2026-11-21T10:20:00Z');
   assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
   assert.equal(v.row('MEMORY.md').source, old);

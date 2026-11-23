@@ -49,7 +49,9 @@
 //          folder, instructions and working files into evidence/handoff/<owner>/<repo>/ after a secret
 //          scan, and saves them as above only when the snapshot changes (HANDOFF UNCHANGED sends
 //          nothing). It decides file by file (toolkit-handoff.cjs): it adds a file the snapshot lacks,
-//          writes a differing file only when this copy is newer than its row, and mirrors deletions of
+//          writes a differing file only when this copy is newer than its row (a memory file also only
+//          when this computer's folder record or the session baseline held exactly the row's content;
+//          else the row stays, diverged=<files>), and mirrors deletions of
 //          the memory folder: a memory file missing here is removed (a removed row, and its copy deleted
 //          from the store) only when this computer's folder record or the session baseline held exactly
 //          the snapshot's content, so an older or partial copy never overwrites, drops or brings back
@@ -58,8 +60,8 @@
 //          checks and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what
 //          changed (removed=<files> among it), unsure=<files> (files this copy holds differently from a
 //          row written before rows carried a time, whose order is unknown, so a run keeps the snapshot's
-//          copy), held_removals=<n>, clock=behind and removed_here=<files>. --reseed, run only from the
-//          newest copy, takes this copy for the unsure files. A run that would remove more than
+//          copy), held_removals=<n>, clock=behind, removed_here=<files> and diverged=<files>. --reseed,
+//          run only from the newest copy, takes this copy for the unsure and diverged files. A run that would remove more than
 //          max(10, a fifth of the memory rows) holds them; --confirm-removals applies them.
 //          --replace-memory with --memory <folder> makes that folder the whole memory set: every memory
 //          row it lacks is removed. Both are manual only (never with --check or --baseline).
@@ -803,8 +805,9 @@ function runHandoff(options, deps) {
   const records = path.join(path.dirname(handoffStateFile(deps)), handoff.FOLDER_RECORDS);
   const list = (key, value) => (value?.length ? { [key]: value.join(',') } : {});
   // What a run or check says about removals: removed now, held over the limit, a clock behind the
-  // snapshot, and removed files this copy holds with different content.
-  const removals = found => ({ ...list('removed', found.removed), ...(found.held ? { held_removals: found.held } : {}), ...(found.clockBehind ? { clock: 'behind' } : {}), ...list('removed_here', found.removedHere) });
+  // snapshot, removed files this copy holds with different content, and memory rows kept because this
+  // computer never held them at that content (diverged).
+  const removals = found => ({ ...list('removed', found.removed), ...(found.held ? { held_removals: found.held } : {}), ...(found.clockBehind ? { clock: 'behind' } : {}), ...list('removed_here', found.removedHere), ...list('diverged', found.diverged) });
   if (options.check) {
     const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs, platform, records }));
     return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...list('changed', found.changed), ...list('unsure', found.unsure), ...list('kept', found.kept), ...removals(found) };

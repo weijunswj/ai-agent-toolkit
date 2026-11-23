@@ -19,7 +19,11 @@
 // started) never overwrites, drops or brings back what another session decided later:
 //   - a file the snapshot lacks is added;
 //   - a file whose content differs is written only when this copy of that file is newer than its row
-//     (an equal time keeps the row; a row with no time is given a fixed one, see pick);
+//     (an equal time keeps the row; a row with no time is given a fixed one, see pick), and a memory
+//     row only when this computer also held exactly that row's content (its folder record or this
+//     session's baseline, as for removals below); otherwise the row stays and is reported as diverged
+//     (another computer saved it and this copy may not have synced it), until a manual `reseed` run
+//     takes this copy, so a computer that never held a file can add it but never replace or remove it;
 //   - a memory row whose file is missing here is removed (a removed row with a time, and its copy
 //     deleted) only when this computer held exactly that content in this folder: its folder record
 //     (the folder as this computer's last saved run read it) or this session's baseline (the files
@@ -268,14 +272,15 @@ function realBySource(rows) {
 // { rows: the files this session held when last seen, real: each source's realness when it started },
 // or null for a run with no session (realness judged from the files here now).
 // Options: `reseed` (a manual run that says this copy is the newest) takes this copy for every unsure
-// file; `record` is this computer's folder record for the memory folder named now; `now` (ms) the run's
+// and diverged file; `record` is this computer's folder record for the memory folder named now; `now` (ms) the run's
 // time; `confirm` applies removals over the limit; `replace` removes every memory row the folder lacks;
 // `onDisk` lists the snapshot's memory-area copies ({ path, sha256 }); `folderTime(path)` the modified
 // time (ms) of the folder that held a removed file, or null.
 // Returns the rows, the writes, the removed rows, the copies to delete and what `check` reports:
 // `unsure` (this copy differs from a kept row with no real time), `removedNow`, `held` (removals over
 // the limit), `clockBehind` and `removedHere` (this copy holds different content for a removed file
-// that does not come back).
+// that does not come back) and `diverged` (this copy differs from a memory row this computer never
+// held at that content, so the row stays).
 function pick({ entries, kept, memory = null, places = {} }, previous, session = null, options = {}) {
   const { reseed = false, record = null, now = Date.now(), confirm = false, replace = false, onDisk = [], folderTime = () => null } = options;
   const prev = new Map((previous?.files || []).map(row => [row.path, row]));
@@ -306,7 +311,12 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
   const writes = [];
   const unsure = [];
   const removedHere = [];
+  const diverged = [];
   const removed = new Map(removedBefore);
+  // Whether this computer held exactly a row's content in the folder named now: its folder record, or
+  // the session baseline, which speaks for the folder it was taken from (the one the snapshot remembers).
+  const baselineFolder = !previous?.sources?.memory || previous.sources.memory === memory;
+  const held = row => (record?.files.get(row.path) === row.sha256) || (baselineFolder && seen?.get(row.path) === row.sha256);
   for (const entry of entries) {
     const gone = removed.get(entry.path);
     if (gone) {
@@ -319,7 +329,12 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
     let take;
     if (!row) take = true;
     else if (row.sha256 === entry.sha256) take = false;
-    else if (real[entry.source] !== false) take = Date.parse(entry.modified || '') > rowTime(row);
+    else if (isMemoryPath(entry.path) && !replaces(entry) && !held(row)) {
+      // A memory row this computer never held at that content: another computer saved it, and this copy
+      // may not have synced it yet. Only a manual reseed replaces it.
+      if (reseed) { out.push(rowOf(entry)); writes.push(entry); } else { diverged.push(entry.path); out.push(row); }
+      continue;
+    } else if (real[entry.source] !== false) take = Date.parse(entry.modified || '') > rowTime(row);
     else take = Boolean(seen) && seen.get(entry.path) !== entry.sha256;
     if (!take && row && row.sha256 !== entry.sha256 && replaces(entry)) take = true;
     if (!take && row && row.sha256 !== entry.sha256 && noRealTime(row)) { if (reseed) take = true; else unsure.push(entry.path); }
@@ -333,9 +348,6 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
   const here = new Set(entries.map(entry => entry.path));
   const sourceNow = row => (memory && isMemoryPath(row.path) ? memory : places[row.path] || row.source);
   const memoryReachable = Boolean(memory) && !(kept || []).includes(memory);
-  // The session baseline speaks for the folder it was taken from: the one the snapshot remembers.
-  const baselineFolder = !previous?.sources?.memory || previous.sources.memory === memory;
-  const held = row => (record?.files.get(row.path) === row.sha256) || (baselineFolder && seen?.get(row.path) === row.sha256);
   const candidates = [];
   for (const row of prev.values()) {
     if (here.has(row.path)) continue;
@@ -372,7 +384,7 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
   }
   return {
     files: out.sort(byPath), writes, real, unsure: unsure.sort(), removed: [...removed.values()].sort(byPath), deletes: deletes.sort(),
-    removedNow: removedNow.sort(), held: apply ? 0 : candidates.length, clockBehind, removedHere: removedHere.sort(),
+    removedNow: removedNow.sort(), held: apply ? 0 : candidates.length, clockBehind, removedHere: removedHere.sort(), diverged: diverged.sort(),
     // Removals this run did not apply keep this computer's evidence for a later one.
     unapplied: apply ? [] : candidates.filter(candidate => candidate.row).map(candidate => candidate.row),
   };
@@ -425,24 +437,32 @@ function decide({ base, repository, sources, fs = nodeFs, platform = process.pla
   const record = read.memory ? readFolderRecord(records, read.memory, { fs }) : null;
   const time = now instanceof Date ? now.getTime() : Number(now);
   const picked = pick(read, previous, session, { reseed, record, now: time, confirm, replace, onDisk: previous ? memoryCopies(fs, base, folder) : [], folderTime: folderTimer(fs, read.memory) });
-  return { folder, previous, chosen, read, picked, time };
+  return { folder, previous, chosen, read, picked, time, record };
 }
 
 // Works out one run: the folder, the new manifest, what to write and delete, whether anything changed,
 // and the folder record to keep once the save is read back. `records` is the folder-record folder.
 function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform, session = null, scan = true, reseed = false, records = null, now = new Date(), confirm = false, replace = false }) {
-  const { folder, previous, chosen, read, picked, time } = decide({ base, repository, sources, fs, platform, session, scan, reseed, records, now, confirm, replace });
+  const { folder, previous, chosen, read, picked, time, record: before } = decide({ base, repository, sources, fs, platform, session, scan, reseed, records, now, confirm, replace });
   // A v1 manifest is written as v2 by the first run that changes it (it has no removed rows before).
   const unchanged = Boolean(previous) && sameFiles(previous.files, picked.files) && sameRemoved(previous.removed, picked.removed) && !picked.deletes.length;
   const manifest = { schema: SCHEMA, stamp, sources: chosen, files: picked.files, removed: picked.removed };
-  // The memory folder as this run read it, plus the evidence for removals it held, for this computer's record.
+  // This computer's record: each memory file as this run read it where the snapshot now holds that
+  // content; where the snapshot kept a different row (diverged, unsure or older here), what the record
+  // held before, so this copy's own unsaved content never counts as held. Plus the evidence for
+  // removals it held.
   const memoryRead = read.memory && !read.kept.includes(read.memory);
-  const recordRows = memoryRead ? [...read.entries.filter(entry => entry.source === read.memory).map(({ path: dest, sha256: hash, modified }) => ({ path: dest, sha256: hash, ...(modified ? { modified } : {}) })),
+  const rows = new Map(picked.files.map(row => [row.path, row.sha256]));
+  const recorded = ({ path: dest, sha256: hash, modified }) => {
+    if (rows.get(dest) === hash) return { path: dest, sha256: hash, ...(modified ? { modified } : {}) };
+    return before?.files.has(dest) ? { path: dest, sha256: before.files.get(dest) } : null;
+  };
+  const recordRows = memoryRead ? [...read.entries.filter(entry => entry.source === read.memory).map(recorded).filter(Boolean),
     ...picked.unapplied.map(({ path: dest, sha256: hash }) => ({ path: dest, sha256: hash }))].sort(byPath) : null;
   const record = recordRows ? { folder: read.memory, at: new Date(time).toISOString(), files: recordRows } : null;
   return {
     folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, deletes: picked.deletes, seen: seenOf(read.entries), real: picked.real, unsure: picked.unsure,
-    removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, record,
+    removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, diverged: picked.diverged, record,
   };
 }
 
@@ -488,7 +508,8 @@ function sessionRows(sources, { fs = nodeFs, platform = process.platform } = {})
 // Read-only: would a run change the snapshot? STALE names what it would change (`removed` among it),
 // the unsure files (this copy differs from a row with no real time, so a run keeps the row; `reseed`
 // takes this copy), removals held over the limit, a clock behind the snapshot, and removed files this
-// copy holds with different content; a source not reachable here is not counted as a change.
+// copy holds with different content, and diverged files (memory rows this computer never held at that
+// content, so a run keeps them; `reseed` takes this copy); a source not reachable here is not counted as a change.
 function check({ base, repository, sources = null, now = new Date(), fs = nodeFs, platform = process.platform, records = null }) {
   const folder = snapshotFolder(repository);
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'name the controlled repository\'s checkout with --repo-root.');
@@ -501,8 +522,8 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   const takenAt = previous.stamp?.taken_at || null;
   const time = now instanceof Date ? now.getTime() : Number(now);
   const hours = takenAt && !Number.isNaN(Date.parse(takenAt)) ? Math.max(0, Math.round((time - Date.parse(takenAt)) / 360000) / 10) : null;
-  const stale = changed.length || picked.unsure.length || picked.held || picked.clockBehind || picked.removedHere.length;
-  return { state: stale ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, unsure: picked.unsure, kept: read.kept, removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere };
+  const stale = changed.length || picked.unsure.length || picked.held || picked.clockBehind || picked.removedHere.length || picked.diverged.length;
+  return { state: stale ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, unsure: picked.unsure, kept: read.kept, removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, diverged: picked.diverged };
 }
 
 module.exports = Object.freeze({ SCHEMA, READ_SCHEMAS, ROOT, FOLDER_RECORDS, MARGIN_MS, HOLD_MIN, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, readFolderRecord, writeFolderRecord, isMemoryPath, plan, write, check, sessionRows, realBySource });

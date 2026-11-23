@@ -3,7 +3,8 @@
 // The handoff snapshot mirrors the memory folder, deletes included (a b c, then c deleted, leaves a b),
 // without letting a stale, partial or other computer's copy delete or bring back what a newer session
 // decided. Each test below is one row of the mirror closure matrix: a removal needs this computer's
-// folder record or the session baseline to have held exactly the snapshot's content; a removed file
+// folder record or the session baseline to have held exactly the snapshot's content, and so does an
+// update of a memory row (else the row stays and is named diverged); a removed file
 // comes back only from different content saved more than 5 minutes after the removal; a clock behind
 // the snapshot removes and brings back nothing; a mass removal is held until a manual run confirms it;
 // and the store accepts a deletion only as the handoff snapshot's own. Real Git against a local bare
@@ -141,7 +142,8 @@ test('a newer save made elsewhere is never removed by this copy: the row changed
   const m = mirror(t);
   assert.equal(m.run(['--memory', m.memory]).result.handoff, 'WRITTEN');
   const session = m.baseline('session');
-  // Computer B saves c v2 later; its run writes that row.
+  // Computer B, synced with c v1 (its first run records that), saves c v2 later; its run writes that row.
+  assert.equal(m.run([], { on: 'computer-b' }).result.handoff, 'UNCHANGED');
   m.put('c.md', 'c v2 (computer B)\n', '2026-11-21T12:00:00Z');
   assert.equal(m.run([], { on: 'computer-b' }).result.handoff, 'WRITTEN');
   assert.equal(m.row('memory/c.md').sha256, sha('c v2 (computer B)\n'));
@@ -151,6 +153,73 @@ test('a newer save made elsewhere is never removed by this copy: the row changed
   assert.equal(m.run(['--baseline', session]).result.handoff, 'UNCHANGED');
   assert.equal(m.row('memory/c.md').sha256, sha('c v2 (computer B)\n'));
   assert.ok(fs.existsSync(m.copy('memory/c.md')));
+});
+
+// ---- an update needs the same evidence as a removal ---------------------------------------------
+
+test('a second computer that never held a memory file adds files but never replaces one: the row stays, diverged, until a manual --reseed', t => {
+  const m = mirror(t);
+  // Computer A writes the snapshot and records the folder.
+  assert.equal(m.run(['--memory', m.memory]).result.handoff, 'WRITTEN');
+  const stored = m.row('MEMORY.md').sha256;
+  // Computer B has no folder record and holds a newer, different MEMORY.md (not synced), plus a new file.
+  m.put('MEMORY.md', '# Memory\n- computer B, not synced\n', '2026-11-21T12:00:00Z');
+  m.put('d.md', 'd v1 (computer B)\n', '2026-11-21T12:05:00Z');
+  const ran = m.run([], { on: 'computer-b' }).result;
+  assert.equal(ran.handoff, 'WRITTEN', JSON.stringify(ran));
+  assert.equal(ran.diverged, 'MEMORY.md');
+  assert.equal(m.row('MEMORY.md').sha256, stored, 'the row computer A saved stays');
+  assert.equal(m.row('memory/d.md').sha256, sha('d v1 (computer B)\n'), 'a new file is still added');
+  // B's own runs never come to count its unsaved copy as held: its next run and a hook-started run keep the row.
+  for (const argv of [[], ['--baseline', m.baseline('b-session')]]) {
+    const again = m.run(argv, { on: 'computer-b' }).result;
+    assert.deepEqual([again.handoff, again.diverged], ['UNCHANGED', 'MEMORY.md'], argv.join(' '));
+  }
+  assert.equal(m.row('MEMORY.md').sha256, stored);
+  const checked = m.run(['--check'], { on: 'computer-b' });
+  assert.equal(checked.code, 1);
+  assert.deepEqual([checked.result.handoff, checked.result.diverged, checked.result.changed], ['STALE', 'MEMORY.md', undefined]);
+  // A manual --reseed from B takes B's copy; then B holds it.
+  assert.equal(m.run(['--reseed'], { on: 'computer-b' }).result.handoff, 'WRITTEN');
+  assert.equal(m.row('MEMORY.md').sha256, sha('# Memory\n- computer B, not synced\n'));
+  assert.equal(m.run(['--check'], { on: 'computer-b' }).result.handoff, 'CURRENT');
+});
+
+test('the computer that saved a memory file updates it: its folder record, or its session baseline, held the row', t => {
+  const m = mirror(t);
+  assert.equal(m.run(['--memory', m.memory]).result.handoff, 'WRITTEN');
+  // Through the folder record: a manual run after an edit made between sessions.
+  m.put('a.md', 'a v2\n', '2026-11-21T11:00:00Z');
+  const ran = m.run([]).result;
+  assert.deepEqual([ran.handoff, ran.diverged], ['WRITTEN', undefined], JSON.stringify(ran));
+  assert.equal(m.row('memory/a.md').sha256, sha('a v2\n'));
+  // Through the session baseline alone: a computer with no folder record whose session started
+  // holding the stored content, then edited it.
+  const session = m.baseline('c-session');
+  m.put('b.md', 'b v2\n', '2026-11-21T11:30:00Z');
+  const hooked = m.run(['--baseline', session], { on: 'computer-c' }).result;
+  assert.deepEqual([hooked.handoff, hooked.diverged], ['WRITTEN', undefined], JSON.stringify(hooked));
+  assert.equal(m.row('memory/b.md').sha256, sha('b v2\n'));
+  assert.equal(m.run(['--check']).result.handoff, 'CURRENT');
+});
+
+test('a diverged file clears only by a manual run: the hook never passes --reseed or starts a run for it, and --replace-memory takes the named folder', t => {
+  for (const record of [{ store: 'store', repo_root: 'repo', repository: 'acme/widget' }, { out: 'out', repo_root: 'repo', repository: 'acme/widget' }]) {
+    const args = hookModule.runArgs(record, 'session.json');
+    for (const flag of ['--reseed', '--replace-memory', '--confirm-removals']) assert.ok(!args.includes(flag), flag);
+  }
+  const m = mirror(t);
+  assert.equal(m.run(['--memory', m.memory]).result.handoff, 'WRITTEN');
+  m.put('MEMORY.md', '# Memory\n- computer B\n', '2026-11-21T12:00:00Z');
+  assert.equal(m.run([], { on: 'computer-b' }).result.diverged, 'MEMORY.md');
+  // Computer B's hook sees nothing it may change, so it starts no run, however often it checks.
+  const h = hookHarness(m, 'computer-b');
+  for (let index = 0; index < 3; index += 1) { assert.equal(h.fire(), 0); h.later(11); }
+  assert.equal(h.started.length, 0);
+  // --replace-memory (manual) makes B's folder the whole memory set, its content included.
+  const replaced = m.run(['--memory', m.memory, '--replace-memory'], { on: 'computer-b' }).result;
+  assert.deepEqual([replaced.handoff, replaced.diverged], ['WRITTEN', undefined]);
+  assert.equal(m.row('MEMORY.md').sha256, sha('# Memory\n- computer B\n'));
 });
 
 test('a run whose clock is behind the snapshot removes and brings back nothing and says clock=behind', t => {
@@ -311,13 +380,13 @@ test('a v1 snapshot is read and rewritten as v2 by its first change; an older co
 
 // ---- the after-tool hook -----------------------------------------------------------------------
 
-function hookHarness(m) {
-  const dir = path.join(m.base, 'state');
+function hookHarness(m, on = 'state') {
+  const dir = path.join(m.base, on);
   const started = [];
   const clock = { now: Date.parse('2026-11-21T13:00:00Z') };
   const fire = () => hookModule.main({
     stdin: JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 'session-a', cwd: m.base, tool_name: 'Bash', tool_input: { command: 'true' } }),
-    stateDirectory: dir, home: path.join(m.base, 'home'), handoffRecord: m.computer('state'), now: () => clock.now,
+    stateDirectory: dir, home: path.join(m.base, 'home'), handoffRecord: m.computer(on), now: () => clock.now,
     spawn: (command, args, options) => { started.push({ command, args, options }); return { unref() {} }; },
   });
   return { started, fire, later: minutes => { clock.now += minutes * MINUTE; } };
