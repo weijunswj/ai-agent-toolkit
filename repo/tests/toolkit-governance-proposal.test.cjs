@@ -418,8 +418,8 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   const MINE = '.github/workflows/mine.yml';
   // GitHub also shows the earlier head for one read after the branch moves; the read-back waits for it.
   fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...github.read(), lag: 1, files: { ...github.read().files, [MINE]: 'name: mine\n' } }));
-  // Rows left out stay as they are, so a new answer names Turn on again.
-  answers.push('1.1=B, 1.2=B');
+  // Any answer to this bank turns governance on; this one also sets task auto-merge on.
+  answers.push('1.1=B');
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
   const published = github.read();
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1, 'still one pull request');
@@ -435,7 +435,7 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   assert.match(stdout.join(''), /updated the open governance turn-on pull request with these answers: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
   // A branch that also holds a file Toolkit did not put there is not ours to change.
   fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...published, foreign: 'product.txt' }));
-  answers.push('1.1=B, 1.2=A');
+  answers.push('1.1=A');
   assert.equal(await cli.main(['setup']), 2);
   assert.equal(github.read().commits, 2, 'nothing was pushed to a changed branch');
 });

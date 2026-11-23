@@ -6,8 +6,9 @@
 //   crossSessionInbound: "accept"           messages from your other sessions (a Projects coordinator) wake this one
 //   switchModelsOnFlag: true / false        on (Claude Code's default) switches models without asking when a
 //                                           request is flagged; off pauses and asks first
-//   pluginConfigs["cc-plugin-agents-md@builtin"].options.instructionFiles: "claude-md-and-agents-md"
-//                                           read AGENTS.md as well as CLAUDE.md
+//   pluginConfigs[<AGENTS.md plugin id>].options.instructionFiles: "claude-md-and-agents-md"
+//                                           read AGENTS.md as well as CLAUDE.md; the id depends on the Claude Code
+//                                           version (see the host limits below)
 // Toolkit records, per setting and per settings file, that it wrote the value. A value the owner set by hand
 // (any value Toolkit did not record) is reported, with whether it matches the on value. Turning a setting on
 // sets its on value, replacing a different one; turning it off removes that one key whoever set it, or, for a
@@ -18,10 +19,12 @@
 // Host limits, as the Claude Code docs state them:
 // - attribution: settings doc (code.claude.com/docs/en/settings, "attribution"); 2.1.281 or later reads false.
 // - crossSessionInbound: no published source found; Toolkit relies on the measured behaviour only.
-// - AGENTS.md (memory doc, code.claude.com/docs/en/memory): read from 2.1.277 under the plugin id
-//   agents-md@builtin; from 2.1.285 the id is cc-plugin-agents-md@builtin and the old id is ignored. Read only
-//   from user, --settings or managed settings, so Toolkit writes the user settings file. Below 2.1.277 there is
-//   no such setting, so setup writes nothing and says why.
+// - AGENTS.md (memory doc, code.claude.com/docs/en/memory, "Choose which instruction files load"): before
+//   2.1.285 the plugin id is agents-md@builtin and the new id cc-plugin-agents-md@builtin is ignored; 2.1.285
+//   and later read an entry under either id. Below 2.1.277 there is no such setting, so setup writes nothing
+//   and says why. Read only from user, --settings or managed settings, so Toolkit writes the user settings file.
+//   Setup writes the id the running version reads: cc-plugin-agents-md@builtin from 2.1.285, agents-md@builtin
+//   from 2.1.277 to 2.1.284, and agents-md@builtin when the version is unknown (every version from 2.1.277 reads it).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -32,6 +35,13 @@ const { canonicalPath } = require('./toolkit-canonical-path.cjs');
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+// The plugin ids Claude Code reads the AGENTS.md setting under (see the host limits above).
+const AGENTS_MD_NEW_ID = 'cc-plugin-agents-md@builtin';
+const AGENTS_MD_OLD_ID = 'agents-md@builtin';
+const AGENTS_MD_FIRST = [2, 1, 277];
+const AGENTS_MD_NEW_ID_FROM = [2, 1, 285];
+const agentsMdPath = (id) => ['pluginConfigs', id, 'options', 'instructionFiles'];
 
 // Claude Code also takes attribution as an object; empty commit and pr strings with sessionUrl false hide
 // everything false hides, so that full form counts as Toolkit's pick. A partial object still adds something.
@@ -47,15 +57,11 @@ const SETTINGS = Object.freeze([
   Object.freeze({ id: 'attribution', keyPath: ['attribution'], value: false, equivalent: hidesAllAttribution, label: 'No AI attribution in commits and pull requests' }),
   Object.freeze({ id: 'cross-session-inbound', keyPath: ['crossSessionInbound'], value: 'accept', label: 'Messages from your other Claude sessions wake this one' }),
   Object.freeze({ id: 'switch-models-on-flag', keyPath: ['switchModelsOnFlag'], value: true, offValue: false, defaultOn: true, label: 'Switch models without asking when a request is flagged' }),
-  Object.freeze({ id: 'agents-md', keyPath: ['pluginConfigs', 'cc-plugin-agents-md@builtin', 'options', 'instructionFiles'], value: 'claude-md-and-agents-md', label: 'Read AGENTS.md as well as CLAUDE.md' })
+  Object.freeze({ id: 'agents-md', keyPath: agentsMdPath(AGENTS_MD_NEW_ID), value: 'claude-md-and-agents-md', label: 'Read AGENTS.md as well as CLAUDE.md' })
 ]);
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-user-settings.v1';
 const STATES = Object.freeze({ TOOLKIT: 'toolkit-value', OWNER: 'owner-value', OFF: 'off-value', OWNER_OFF: 'owner-off', DEFAULT: 'claude-default', UNSUPPORTED: 'unsupported', UNREADABLE: 'unreadable' });
 
-// The plugin id Claude Code reads the AGENTS.md setting under, by version (see the host limits above).
-const AGENTS_MD_FIRST = [2, 1, 277];
-const AGENTS_MD_NEW_ID_FROM = [2, 1, 285];
-const AGENTS_MD_OLD_ID = 'agents-md@builtin';
 const parseVersion = (text) => (/^(\d+)\.(\d+)\.(\d+)$/.exec(String(text || '')) || []).slice(1).map(Number);
 const below = (version, limit) => {
   for (let index = 0; index < 3; index += 1) if (version[index] !== limit[index]) return version[index] < limit[index];
@@ -63,23 +69,34 @@ const below = (version, limit) => {
 };
 
 // The running Claude Code version, read without starting Claude: the app sets CLAUDE_CODE_EXECPATH to its own
-// binary, which sits in a folder named for its version (for example .../claude-code/2.1.330/<build>/claude.exe
-// or .../versions/2.1.330). Returns '' when no such folder is in the path.
+// binary, which sits right after a claude-code folder (.../claude-code/2.1.330/<build>/claude.exe) or inside a
+// claude folder's versions folder (.../claude/versions/2.1.330). Any other version-like folder is not read.
+// Returns '' when no such folder is in the path, as in the desktop app's PowerShell tool.
 function claudeCodeVersion(environment = process.env) {
   const parts = String(environment.CLAUDE_CODE_EXECPATH || '').split(/[\\/]+/);
-  return parts.reverse().find((part) => parseVersion(part).length === 3) || '';
+  for (let index = parts.length - 1; index >= 1; index -= 1) {
+    if (parseVersion(parts[index]).length !== 3) continue;
+    const folder = parts[index - 1].toLowerCase();
+    const parent = (parts[index - 2] || '').toLowerCase();
+    if (folder === 'claude-code' || (folder === 'versions' && parent === 'claude')) return parts[index];
+  }
+  return '';
 }
 
-// The setting list for one Claude Code version: the AGENTS.md row moves to the old id below 2.1.285 and is
-// unsupported below 2.1.277. An unknown version keeps the current id, and says so.
+// The setting list for one Claude Code version. keyPath is the AGENTS.md id setup writes; altKeyPath, when present,
+// is the other id, also read so an entry there counts as the owner's and a yes never adds a competing one. From
+// 2.1.285 the new id is written and the old one read. From 2.1.277 to 2.1.284 only the old id is read, since
+// the new one is ignored there. An unknown version writes the old id and reads the new one too. Below 2.1.277
+// the row is unsupported.
 function settingsForVersion(version) {
   const parsed = parseVersion(version);
   return SETTINGS.map((spec) => {
     if (spec.id !== 'agents-md') return spec;
-    if (parsed.length !== 3) return { ...spec, versionNote: 'Claude Code version not known here, so setup uses the setting name Claude Code 2.1.285 and later read' };
+    const oldPath = agentsMdPath(AGENTS_MD_OLD_ID);
+    if (parsed.length !== 3) return { ...spec, keyPath: oldPath, altKeyPath: spec.keyPath, versionNote: 'Claude Code version not known here, so setup uses the setting name every version from 2.1.277 reads' };
     if (below(parsed, AGENTS_MD_FIRST)) return { ...spec, unsupported: `Claude Code ${version} has no AGENTS.md setting (it needs 2.1.277 or later), so setup leaves it alone` };
-    if (below(parsed, AGENTS_MD_NEW_ID_FROM)) return { ...spec, keyPath: ['pluginConfigs', AGENTS_MD_OLD_ID, 'options', 'instructionFiles'] };
-    return spec;
+    if (below(parsed, AGENTS_MD_NEW_ID_FROM)) return { ...spec, keyPath: oldPath };
+    return { ...spec, altKeyPath: oldPath };
   });
 }
 
@@ -94,6 +111,18 @@ function lookup(settings, keyPath) {
   }
   const leaf = keyPath[keyPath.length - 1];
   return Object.hasOwn(node, leaf) ? { found: true, value: node[leaf] } : { found: false };
+}
+
+// The first key path holding the setting, its write path first, with its value; { blocked } when a parent on
+// either path is not an object.
+function locate(settings, spec) {
+  let found = null;
+  for (const keyPath of [spec.keyPath, spec.altKeyPath].filter(Boolean)) {
+    const hit = lookup(settings, keyPath);
+    if (hit.blocked) return { blocked: true };
+    if (hit.found && !found) found = { keyPath, value: hit.value };
+  }
+  return found ? { found: true, ...found } : { found: false };
 }
 
 // Returns a copy with the value set, plus the parent keys this write created (outermost first).
@@ -190,7 +219,7 @@ class ClaudeUserSettings {
   #stateOf(read, spec, entry) {
     if (spec.unsupported) return { id: spec.id, label: spec.label, state: STATES.UNSUPPORTED, detail: spec.unsupported };
     if (read.error) return { id: spec.id, label: spec.label, state: STATES.UNREADABLE, detail: read.error };
-    const found = lookup(read.settings, spec.keyPath);
+    const found = locate(read.settings, spec);
     if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, matches: false, blocked: true, detail: 'a parent entry is not an object' };
     // A missing key the owner turned off through setup stays off: setup never turns it back on by default.
     if (!found.found) return { id: spec.id, label: spec.label, state: entry?.owner_off === true ? STATES.OWNER_OFF : STATES.DEFAULT, ...(spec.versionNote ? { note: spec.versionNote } : {}) };
@@ -256,6 +285,11 @@ class ClaudeUserSettings {
         forget();
         return { status: 'set', changed: false, ...before };
       }
+      // An owner value under the other AGENTS.md id is kept: writing this id too would leave two competing entries.
+      if (before.state === STATES.OWNER && locate(read.settings, spec).keyPath !== spec.keyPath) {
+        forget();
+        return { status: 'kept', changed: false, ...before };
+      }
       write(spec.value);
       return { status: 'set', changed: true, id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: spec.value };
     }
@@ -272,9 +306,14 @@ class ClaudeUserSettings {
       return { status: 'owner-off', changed, id: spec.id, label: spec.label, state: STATES.OWNER_OFF };
     };
     if (before.state === STATES.DEFAULT || before.state === STATES.OWNER_OFF) return offResult(false);
-    // Off removes the key whoever set it; only a live Toolkit value's record names parents Toolkit created.
+    // Off removes the key whoever set it, at each path the setting is held at; only a live Toolkit value's record
+    // names parents Toolkit created.
     const entry = before.state === STATES.TOOLKIT ? entries[key] : null;
-    const settings = withoutValue(read.settings, spec.keyPath, Array.isArray(entry?.created_parents) ? entry.created_parents : []);
+    const createdParents = Array.isArray(entry?.created_parents) ? entry.created_parents : [];
+    let settings = read.settings;
+    for (const keyPath of [spec.keyPath, spec.altKeyPath].filter(Boolean)) {
+      if (lookup(settings, keyPath).found) settings = withoutValue(settings, keyPath, createdParents);
+    }
     this.#writeSettings(read, fileCreated && Object.keys(settings).length === 0 ? null : settings);
     return offResult(true);
   }
