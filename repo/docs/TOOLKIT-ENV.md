@@ -23,10 +23,10 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | You want to | Command | What happens |
 |---|---|---|
 | See your keys | `status` | Names, which app entries use each, present or missing. Never a value, length or prefix. |
-| See, change, add or remove keys | `edit`, then `apply` | A private file with your keys as `NAME=value` lines, like a `.env` file, opens in the app your computer uses for `.env` files. Each save applies changes and additions within a few seconds; a deleted line is removed at "done", after your yes: see [Your keys in your editor](#your-keys-in-your-editor). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
+| See, change, add or remove keys | `edit`, then `apply` | A private file with your keys as `NAME=value` lines, like a `.env` file, opens in the app your computer uses for `.env` files. Each save is applied exactly within a few seconds: changed values replaced, new lines added, and a deleted line's key removed. See [Your keys in your editor](#your-keys-in-your-editor). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it yourself in PowerShell, as shown above. |
 | See one value | `show NAME` or `show NAME --copy` | Shows the value once, or copies it to the clipboard, in a PowerShell window you opened yourself. See [Seeing a value](#seeing-a-value). |
-| Remove a key | `remove NAME` | Asks a yes/no that names the key first: your agent asks you in chat, or, run in your own terminal, it waits for a fresh Enter. |
+| Remove a key | `edit` | Delete the key's line and save: the key is removed on that save. The edit file is the only way Toolkit removes a key; no command does, and nothing else in Toolkit (setup, refresh, `remove toolkit`) ever deletes one. You can still delete a key by hand in Windows Credential Manager (entries named `ai-agent-toolkit/env/NAME`). |
 | Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and the usual commands that print the whole environment (such as `env`, `printenv`, `set` or `Get-ChildItem env:`); it cannot catch every way a program can print a variable. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
 
 ## Your keys in your editor
@@ -35,15 +35,15 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 
 - Change a value or add a `NAME=value` line. Type values without quotes; spaces at either end are dropped.
 - Save. A small helper started with the file applies changes and additions once the file has stopped changing for about a second and a half. It watches only that file, prints nothing and writes no log.
-- Delete a line to remove that key. The helper only marks it: the `# Status:` line says "Will remove on "done", after your yes", and `status` lists it. Put the line back before "done" to keep the key.
-- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, asks one yes/no that names every marked key (and any app entry that uses one), removes them only on yes, deletes the file and lists what changed, by name only. A no, no answer, a new edit or the 30-minute end keeps the keys and says so.
+- Delete a line to remove that key. The helper removes it on that save, with no question, and the `# Status:` line says "Removed: NAME". Type the line back and save to add the key again.
+- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, deletes the file and lists what changed, added and removed, by name only, with any app entry that used a removed key.
 
 A save is applied whole or not at all. Nothing is saved, and the `# Status:` line at the top of the file says why, when:
 
 - a line is not `NAME=value`, has no value, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
 - the file was saved as UTF-16 (save it as UTF-8);
-- the save would remove every key;
-- a key changed elsewhere (`set`, `remove`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+- the save would remove every key (keep at least one key line; delete the last keys by hand in Windows Credential Manager);
+- a key changed elsewhere (`set`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
 
 When Toolkit writes the status line, your editor may reload the file or say it changed; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
 

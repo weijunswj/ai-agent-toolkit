@@ -5,7 +5,8 @@
 // credential API from the built-in Windows PowerShell. Toolkit supports Windows computers only, so there
 // is no other store and no fallback. Values travel only on stdin and stdout, never in arguments, and no
 // store method logs or reports a value. The store's methods: backend, list(), readAll(names), read(name),
-// writeAll(entries), remove(name).
+// writeAll(entries), removeForEditSave(name). The one delete is named for its one caller: a deleted line in
+// a saved `toolkit env edit` file. Nothing else in Toolkit deletes a key.
 
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -159,6 +160,16 @@ public static class ToolkitEnvCredentials {
 const WIN32_NOT_FOUND = 1168;
 const WIN32_TOO_LONG = 1783;
 
+// Set in a test run: node --test sets NODE_TEST_CONTEXT in each test process, and run-tests.cjs sets
+// TOOLKIT_TEST_REAL_TEMP in every child it starts. Either one, in this process or the environment the
+// store was given, keeps the store off the real keys.
+function testRun(...environments) {
+  return environments.some((environment) => Boolean(environment?.NODE_TEST_CONTEXT || environment?.TOOLKIT_TEST_REAL_TEMP));
+}
+
+// Credential Manager target names ignore case, so the real prefix is matched the same way.
+function realPrefix(prefix) { return String(prefix).trim().replace(/\/+$/, '').toLowerCase() === STORE_PREFIX; }
+
 class WindowsCredentialStore {
   #powershell; #prefix; #user; #spawn; #environment;
 
@@ -177,6 +188,9 @@ class WindowsCredentialStore {
   #target(name) { return `${this.#prefix}/${name}`; }
 
   #run(ops) {
+    if (realPrefix(this.#prefix) && testRun(process.env, this.#environment)) {
+      throw new EnvStoreError('Toolkit env does not use your real key store during a test run; tests give the store their own prefix.', 'test-run');
+    }
     const encoded = Buffer.from(WINDOWS_SCRIPT, 'utf16le').toString('base64');
     const result = this.#spawn(this.#powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
       input: JSON.stringify({ ops }),
@@ -229,8 +243,8 @@ class WindowsCredentialStore {
     });
   }
 
-  // true when the key existed.
-  remove(name) {
+  // true when the key existed. Called only by the save of a toolkit env edit file.
+  removeForEditSave(name) {
     const [answer] = this.#run([{ op: 'delete', target: this.#target(assertName(name)) }]);
     if (answer.code === WIN32_NOT_FOUND) return false;
     if (answer.code !== 0) throw new EnvStoreError(`Windows Credential Manager could not remove ${name} (error ${answer.code}).`, 'backend-failed');
@@ -261,7 +275,7 @@ class PlatformStore {
   readAll(names) { return this.#get().readAll(names); }
   read(name) { return this.#get().read(name); }
   writeAll(entries) { return this.#get().writeAll(entries); }
-  remove(name) { return this.#get().remove(name); }
+  removeForEditSave(name) { return this.#get().removeForEditSave(name); }
 }
 
 // A short reference that ties a printed error to nothing private.
