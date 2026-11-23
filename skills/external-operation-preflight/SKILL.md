@@ -49,7 +49,7 @@ It fails closed: a missing, unknown or malformed field holds the plan.
 
 ## Do Not Use
 
-Not for local-only work or code changes with no live effect. n8n live work goes through `n8n-safety-router` first. Exposure reviews stay in `self-hosted-service-safety`; the user's coding-app keys stay in `toolkit-env`.
+Not for local-only work or code changes with no live effect. n8n live work goes through `n8n-safety-router` first. Exposure reviews stay in `self-hosted-service-safety`; the user's coding-app keys stay in their own environment-secret store.
 
 ## Safety Boundary
 

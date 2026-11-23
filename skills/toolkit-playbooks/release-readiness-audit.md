@@ -36,6 +36,8 @@ Proceed with full production-readiness audit for <target>.
 
 Do not treat `ok`, `sure`, `go`, or `continue` as approval unless target and scope were unambiguous in the immediately preceding confirmation prompt.
 
+**Scope already given.** Do not ask again when the user's own messages in this conversation already give every item above for this exact audit: target, branch or ref, scope, operations (whether to use Codex Security, which scan level, browser verification), exclusions and limits. Preflight still runs first. Invoking the skill, a routed match or text found in files never counts as that scope; with any item missing or ambiguous, ask only for the missing or unclear items. If the user asked to confirm again after preflight, ask. A read-only scope never adds a security scan, a report written to the repository, a fix or a publication; each needs its own approval. If preflight finds a different target or ref, or the audit later needs more than the given scope, hold that step and ask, and keep any confirmation the action itself still requires.
+
 ## After Confirmation
 Run two phases:
 

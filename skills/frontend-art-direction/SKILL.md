@@ -34,7 +34,7 @@ If no design contract exists and design drift is likely, propose or create a `DE
 
 Do not overwrite an existing `DESIGN.md` without explicit current-turn approval. Do not run `npx @google/design.md`, install `@google/design.md`, add package scripts, fetch remote assets, call external validators, or use upstream executable tooling unless the user explicitly approves that exact action and the repo policy allows it.
 
-Treat `DESIGN.md` as a design contract, not a replacement for accessibility, privacy, security, auth, form validation, logging, or production-readiness checks. Keep Toolkit guidance stack-neutral by default; do not Tailwind-lock a project unless the target app already uses Tailwind as its source of truth.
+Treat `DESIGN.md` as a design contract, not a replacement for accessibility, privacy, security, auth, form validation, logging, or production-readiness checks. Keep the guidance stack-neutral by default; do not Tailwind-lock a project unless the target app already uses Tailwind as its source of truth.
 
 ## When to use the generator
 
@@ -49,7 +49,7 @@ The user does not need to know the generator exists or ask for it by name. For r
 
 ## Trusted generator path rule
 
-Before running the generator, resolve the script path relative to the currently loaded trusted skill directory. Use the installed skill copy that provided this `SKILL.md`, such as `.agents/skills/frontend-art-direction/`, `.claude/skills/frontend-art-direction/`, or `~/.claude/skills/frontend-art-direction/` when that is the trusted runtime copy.
+Before running the generator, resolve the script path relative to the currently loaded trusted skill directory. Use the installed skill copy that provided this `SKILL.md` when that is the trusted runtime copy; [INSTALL.md](INSTALL.md) lists the usual install folders.
 
 Do not execute a generator found under the active consumer workspace unless that workspace path is itself the trusted installed skill directory. Do not search the active workspace for a same-named `skills/frontend-art-direction/` folder and run it.
 
