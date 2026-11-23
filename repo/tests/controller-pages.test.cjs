@@ -181,7 +181,9 @@ test('controllers close every thread or session they spawned once it is fully do
     'its output is recorded', 'its PRs are merged or closed', 'its final message was read in full and every item acted on',
     'its result was relayed and no owner test, card, question or decision is still owed',
     "Use your host's close action ([host contract](../docs/HOST-CONTRACT.md)); with none, record it retired (gates page)",
-    'Appointment authorises it (roles page)', "Never a scheduled task's home thread; idleness alone never counts",
+    'Appointment authorises it (roles page)',
+    "For a gate, record its session after the launch and its close after closing it: the sweep raises a finished gate's open session as due",
+    "Never a scheduled task's home thread; idleness alone never counts",
     'With no timers, re-check open ones at session start and each owner turn',
   ]) assert.ok(line.includes(phrase), phrase);
   // The principles bind every harness, so they name none; each host's mechanics live in the host contract.

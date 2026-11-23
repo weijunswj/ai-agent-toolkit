@@ -89,10 +89,10 @@ const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = r
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session'];
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -166,6 +166,9 @@ function parseArgs(argv) {
     needs(args.issue !== undefined && args.role && args.assignment, 'assign needs --issue <n>, --role G0|G1|G2 and --assignment <id>.');
     needs(!args.reason || args.supersede, '--reason goes with --supersede on assign.');
   }
+  if (command === 'gate-session') {
+    needs(args.issue !== undefined && args.assignment && (Boolean(args.host) !== Boolean(args.closed)), 'gate-session needs --issue <n>, --assignment <id> and either --host <host> [--host-session <id>] (after the launch) or --closed (after the close).');
+  } else needs(!args.closed && !args.replace && args.host === undefined && args['host-session'] === undefined, '--host, --host-session, --closed and --replace go with gate-session.');
   if (command === 'reopen' || command === 'interrupt') needs(args.issue !== undefined && args.reason, `${command} needs --issue <n> and --reason <text>.`);
   if (command === 'return') {
     needs(args.issue !== undefined && Boolean(args.record) !== Boolean(args.consume), 'return needs --issue <n> and either --record <id> --assignment <id> or --consume <id> --verdict ACCEPT|REOPEN|WAITING_OWNER.');
@@ -194,7 +197,7 @@ function parseArgs(argv) {
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent' || args.command === 'migrate-state') return Boolean(args.apply);
-  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive'].includes(args.command);
+  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive', 'gate-session'].includes(args.command);
 }
 
 function toolkitVersion(file = VERSION_FILE) {
@@ -431,6 +434,14 @@ function refuseUnstartedAgentUat(context, parentDoc, role) {
   const named = waiting.map(entry => `#${entry.issue} at ${entry.head.slice(0, 7)}`).join(', ');
   throw new ProgrammeError('AGENT_UAT_UNSTARTED', `${role} not assigned: the agent UAT of ${named} has not started. Controller: start it now in its own lane, in parallel with the gate lane, and record its start (update --issue <n> --patch with private.agent_uat state STARTED, at_head <the full head> and where it runs), then assign again; or dispose --finding ${waiting.map(entry => entry.id).join(' / ')} --reason <why>. A started agent UAT never blocks.`);
 }
+
+// The gate session entries an assign or reopen pushed out past the list's limit.
+function gateSessionDrops(before, after) {
+  if (!after) return [];
+  const kept = new Set((after.private?.gate_sessions || []).map(entry => entry.assignment));
+  return (before?.private?.gate_sessions || []).map(entry => entry.assignment).filter(id => !kept.has(id));
+}
+const gateDropsResult = dropped => (dropped.length ? { dropped_gate_sessions: dropped, gate_sessions_note: `The gate session list keeps the newest ${state.GATE_SESSIONS_LIMIT}: ${dropped.join(', ')} left it, and their CLOSE_DUE findings resolve. Archive any of their sessions still open.` } : {});
 
 function outcomeFor(parentDoc, issue) {
   const outcome = parentDoc.outcomes.find(entry => entry.issue === issue);
@@ -815,7 +826,11 @@ const commands = {
     cacheAttention(context, parentDoc, true, deps);
     // Work-queue findings lead, longest-stalled first; the rest stay newest first.
     const listed = [...state.workQueue(parentDoc.attention), ...state.openFindings(parentDoc.attention).filter(entry => !state.WORK_QUEUE_CODES.has(entry.code))];
+    const closeDue = parentDoc.private?.close_due || {};
     const open = listed.map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
+      ...(entry.kind ? { kind: entry.kind } : {}),
+      // A close-due finding names its gate's host session, from the parent's private part only.
+      ...(entry.code === 'CLOSE_DUE' ? { host: closeDue[entry.id]?.host ?? null, session: closeDue[entry.id]?.session ?? null } : {}),
       first_seen: entry.first_seen, changed_at: entry.changed_at, next_action: state.FINDING_CODES[entry.code].next_action,
       ...(entry.due ? { due: entry.due, overdue: state.ackOverdue(entry, Date.parse(nowText(deps))) } : {}),
       ...(entry.due && parentDoc.private?.attention_notes?.[entry.id] ? { promised: parentDoc.private.attention_notes[entry.id] } : {}),
@@ -1036,18 +1051,20 @@ const commands = {
     if (current?.gate?.assignment?.id !== args.assignment) refuseUnstartedAgentUat(context, parentDoc, args.role);
     const files = context.store.listJournals(args.issue);
     let dropped = [];
+    let sessionsDropped = [];
     const result = context.store.mutate('child', args.issue, {
       writer, parentDoc, create: () => state.newChild({ repository: context.repository, outcome }),
       change: doc => {
-        const next = state.assignGate(doc, { assignment: args.assignment, role: args.role, supersede: Boolean(args.supersede), reason: args.reason || null });
+        const next = state.assignGate(doc, { assignment: args.assignment, role: args.role, supersede: Boolean(args.supersede), reason: args.reason || null, now: nowText(deps) });
         dropped = laneWaitDrops(doc, next);
+        sessionsDropped = gateSessionDrops(doc, next);
         return next && markJournalsSeen(next, files);
       },
     });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), attention };
+    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...gateDropsResult(sessionsDropped), attention };
   },
 
-  reopen(args, context) {
+  reopen(args, context, deps = {}) {
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
     // Reopening an accepted gate opens a new assignment of its role; sending a return back does not.
@@ -1055,12 +1072,28 @@ const commands = {
     if (gate?.state === 'RETIRED') refuseUnstartedAgentUat(context, parentDoc, gate.role);
     const files = context.store.listJournals(args.issue);
     let dropped = [];
+    let sessionsDropped = [];
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => {
-      const next = state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null });
+      const next = state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null, now: nowText(deps) });
       dropped = laneWaitDrops(doc, next);
+      sessionsDropped = gateSessionDrops(doc, next);
       return markJournalsSeen(next, files);
     } });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped) };
+    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...gateDropsResult(sessionsDropped) };
+  },
+
+  // The controller records a gate's host session after the launch, or its close after archiving it.
+  // Same writers as assign: the parent's holder, or the lane holding this child.
+  'gate-session'(args, context, deps = {}) {
+    const parentDoc = readParent(context);
+    const outcome = outcomeFor(parentDoc, args.issue);
+    const writer = requireGateWriter(context, parentDoc, context.store.read('child', args.issue).doc, outcome);
+    const controllerSessions = [parentDoc.fence?.holder_session, writer.session, ...(Array.isArray(parentDoc.private?.retired_holders) ? parentDoc.private.retired_holders : [])];
+    const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.recordGateSession(doc, {
+      assignment: args.assignment, host: args.host || null, session: args['host-session'] || null, closed: Boolean(args.closed),
+      replace: Boolean(args.replace), reason: args.reason || null, now: nowText(deps), controllerSessions }) });
+    return { ...writeResult('child', args.issue, result, writer),
+      next_action: args.closed ? 'Controller: the next pass resolves its CLOSE_DUE finding' : 'Controller: once the gate is finished and its report stored, archive its session and run gate-session --closed' };
   },
 
   interrupt(args, context) {
@@ -1167,7 +1200,7 @@ function formatReport(report) {
     `Repository ${report.repository}, parent #${report.parent_issue}; state store ${report.store.repository} ${report.store.branch} ${report.store.path} (parent revision ${report.parent_revision ?? 'none'})`,
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
-  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${finding.kind ? ` ${finding.kind === 'pr' ? 'PR' : 'issue'}` : ''} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
+  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${state.kindText(finding)} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
   if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
@@ -1291,7 +1324,8 @@ function formatAttention(result) {
     wait.pr ? `PR #${wait.pr}` : null, wait.head ? wait.head.slice(0, 7) : null].filter(Boolean).join(' · ')}`), '');
   else if (result.owner_waits_unknown) lines.push(...(queue.length ? [] : ['']), `Owner waits: unknown (${result.owner_waits_unknown})`, '');
   for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
-    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${state.kindText(entry)}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    if (entry.code === 'CLOSE_DUE') lines.push(`  Session: ${entry.session ? `${entry.host} ${entry.session}` : `${entry.host || 'host not recorded'}, no session ID recorded: find it by the assignment ID or title`}`);
     if (entry.due) lines.push(`  ${entry.overdue ? 'OVERDUE: the step promised by' : 'Promised by'} ${entry.due}${entry.promised ? `: ${entry.promised}` : ''}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));
   }
