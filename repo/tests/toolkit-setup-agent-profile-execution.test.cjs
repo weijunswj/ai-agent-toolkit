@@ -4,8 +4,9 @@ const test = require('node:test');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const {
   assert, fs, path, tmpRoot, isolatedHomeEnv, writeFile, run,
-  createGitBackedSetupRepo, codexConfig,
+  createGitBackedSetupRepo, codexConfig, displayedBankReference,
 } = require('./toolkit-setup-test-support.cjs');
+
 
 // Records every Claude invocation, so a test can prove setup launched no session.
 function recordingClaude(root) {
@@ -40,9 +41,8 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-settings', 'keep',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  // The recommendation's effect would only repeat its label, so the cell shows the label once.
-  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.<br>Selected: /);
-  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\./);
+  // The default's effect would only repeat its label, so the cell shows the label once, marked as the Toolkit default.
+  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\. \(Toolkit default\) \|/);
   assert.doesNotMatch(result.stdout, /Direct Toolkit-managed|toolkit-direct|agent capacity choice|Manual maximum|Capacity mode/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Selected topology: root-only/);
@@ -106,11 +106,12 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   assert.equal(off.status, 0, off.stderr || off.stdout);
   assert.deepEqual(read(), { switchModelsOnFlag: false });
   clearLogs(setupRepo);
-  // All recommended from there: every row is off, so each recommends Turn on, and model switching becomes true.
-  const allOn = run(base, { env, timeout: 300000 });
-  assert.equal(allOn.status, 0, allOn.stderr || allOn.stdout);
-  assert.match(allOn.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| B\. Turn on[^|]*\| A\. Keep current \|/);
-  assert.deepEqual(read(), { switchModelsOnFlag: true, attribution: false, crossSessionInbound: 'accept', pluginConfigs: agentsMd });
+  // All recommended from there: every row is an off you chose, so each keeps it off and nothing is written.
+  const allKept = run(base, { env, timeout: 300000 });
+  assert.equal(allKept.status, 0, allKept.stderr || allKept.stdout);
+  assert.match(allKept.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| A\. Keep current \| B\. Turn on \|/);
+  assert.match(allKept.stdout, /\| Claude Code setting: Read AGENTS\.md too\? \| Off \(you turned it off\) \| A\. Keep current \| B\. Turn on \|/);
+  assert.deepEqual(read(), { switchModelsOnFlag: false });
 });
 
 test('All recommended applies each Claude Code setting row on its own, and an unreadable settings file is left alone', () => {
@@ -122,11 +123,11 @@ test('All recommended applies each Claude Code setting row on its own, and an un
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
   const settingsPath = path.join(root, '.claude', 'settings.json');
   const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  // Three rows set and model switching off: only the model-switch row recommends a change, so it alone is written.
+  // Your own values, your false for model switching included, are kept; only the AGENTS.md row has no value, so it alone is written.
   writeFile(settingsPath, `${JSON.stringify({ attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: false }, null, 2)}\n`);
   const missingOne = run(base, { env, timeout: 300000 });
   assert.equal(missingOne.status, 0, missingOne.stderr || missingOne.stdout);
-  assert.deepEqual(read(), { attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: true,
+  assert.deepEqual(read(), { attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: false,
     pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } } });
   clearLogs(setupRepo);
   // Keep current on 3.4 with the others on All recommended leaves model switching as it is.
@@ -142,7 +143,7 @@ test('All recommended applies each Claude Code setting row on its own, and an un
   fs.writeFileSync(settingsPath, broken);
   const unreadable = run(base, { env, timeout: 300000 });
   assert.equal(unreadable.status, 24, unreadable.stderr || unreadable.stdout);
-  assert.match(unreadable.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Could not read \| A\. Keep current<br>Selected: A\. Keep current \|/);
+  assert.match(unreadable.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Could not read \| A\. Keep current \|/);
   assert.match(unreadable.stdout, /Fix the Claude Code user settings file, then run `setup toolkit` again\./);
   assert.equal(fs.readFileSync(settingsPath, 'utf8'), broken);
 });
@@ -206,11 +207,12 @@ test('a piped toolkit-direct answer is not a topology choice and writes nothing'
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const result = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--claude-cli', fake.command,
-  ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'default', 'enable', 'toolkit-direct', 'instructions', 'keep', ''].join('\n') });
+  const argv = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--claude-cli', fake.command];
+  const shown = run(argv, { env: isolatedHomeEnv(root), timeout: 300000, input: '' });
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  const result = run(argv, { env: isolatedHomeEnv(root), timeout: 300000, input: `${displayedBankReference(shown.stdout)}: yes, 2.1=toolkit-direct\n` });
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: keep, root-only, broader-native/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /unavailable choice toolkit-direct for 2\.1/);
   assert.equal(fs.existsSync(control.profilePath('claude-code', { root: profileRootOf(root) })), false);
   assert.equal(sessions(fake).length, 0);
 });
@@ -235,7 +237,7 @@ test('keep current resolves a stored direct profile to root-only without probing
   assert.equal(kept.status, 24, kept.stderr || kept.stdout);
   assert.match(kept.stdout, /Install check: action required\n/);
   assert.match(kept.stdout, /Claude Code depth setting: Root-only is selected, but CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings\./);
-  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Keep current/);
+  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*\| A\. Keep current \(set by your setup flag\) \| - \|/);
   assert.match(kept.stdout, /Selected topology: root-only/);
   assert.equal(sessions(fake).some((entry) => entry.args.includes('--print')), false);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.ROOT_ONLY);
@@ -284,10 +286,13 @@ test('kept broader-native survives flag and piped execution without probes', () 
   assert.match(flagged.stdout, /Selected topology: broader-native/);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.BROADER_NATIVE);
   clearLogs(setupRepo);
-  const piped = run([
-    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions',
-  ], { env, timeout: 300000, input: Array(16).fill('').join('\n') });
+  // Piped: the bank is shown first, then answered yes with its displayed reference.
+  const pipedArgv = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions'];
+  const shown = run(pipedArgv, { env, timeout: 300000, input: '' });
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  clearLogs(setupRepo);
+  const piped = run(pipedArgv, { env, timeout: 300000, input: `${displayedBankReference(shown.stdout)}: yes\n` });
   assert.equal(piped.status, 0, piped.stderr || piped.stdout);
   assert.match(piped.stdout, /Selected topology: broader-native/);
   const preserved = control.readProfile('claude-code', { root: profileRootOf(root) });

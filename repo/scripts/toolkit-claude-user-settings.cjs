@@ -11,8 +11,17 @@
 // Toolkit records, per setting and per settings file, that it wrote the value. A value the owner set by hand
 // (any value Toolkit did not record) is reported, with whether it matches the on value. Turning a setting on
 // sets its on value, replacing a different one; turning it off removes that one key whoever set it, or, for a
-// setting with an offValue, writes that value. Parent objects and the file itself are removed only when they
-// end up empty and Toolkit's record says Toolkit created them.
+// setting with an offValue, writes that value. Turning off also records that the owner chose off, so setup
+// never turns it back on by default (owner-off); turning it on again clears that. Parent objects and the file
+// itself are removed only when they end up empty and Toolkit's record says Toolkit created them.
+//
+// Host limits, as the Claude Code docs state them:
+// - attribution: settings doc (code.claude.com/docs/en/settings, "attribution"); 2.1.281 or later reads false.
+// - crossSessionInbound: no published source found; Toolkit relies on the measured behaviour only.
+// - AGENTS.md (memory doc, code.claude.com/docs/en/memory): read from 2.1.277 under the plugin id
+//   agents-md@builtin; from 2.1.285 the id is cc-plugin-agents-md@builtin and the old id is ignored. Read only
+//   from user, --settings or managed settings, so Toolkit writes the user settings file. Below 2.1.277 there is
+//   no such setting, so setup writes nothing and says why.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -41,7 +50,38 @@ const SETTINGS = Object.freeze([
   Object.freeze({ id: 'agents-md', keyPath: ['pluginConfigs', 'cc-plugin-agents-md@builtin', 'options', 'instructionFiles'], value: 'claude-md-and-agents-md', label: 'Read AGENTS.md as well as CLAUDE.md' })
 ]);
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-user-settings.v1';
-const STATES = Object.freeze({ TOOLKIT: 'toolkit-value', OWNER: 'owner-value', OFF: 'off-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
+const STATES = Object.freeze({ TOOLKIT: 'toolkit-value', OWNER: 'owner-value', OFF: 'off-value', OWNER_OFF: 'owner-off', DEFAULT: 'claude-default', UNSUPPORTED: 'unsupported', UNREADABLE: 'unreadable' });
+
+// The plugin id Claude Code reads the AGENTS.md setting under, by version (see the host limits above).
+const AGENTS_MD_FIRST = [2, 1, 277];
+const AGENTS_MD_NEW_ID_FROM = [2, 1, 285];
+const AGENTS_MD_OLD_ID = 'agents-md@builtin';
+const parseVersion = (text) => (/^(\d+)\.(\d+)\.(\d+)$/.exec(String(text || '')) || []).slice(1).map(Number);
+const below = (version, limit) => {
+  for (let index = 0; index < 3; index += 1) if (version[index] !== limit[index]) return version[index] < limit[index];
+  return false;
+};
+
+// The running Claude Code version, read without starting Claude: the app sets CLAUDE_CODE_EXECPATH to its own
+// binary, which sits in a folder named for its version (for example .../claude-code/2.1.330/<build>/claude.exe
+// or .../versions/2.1.330). Returns '' when no such folder is in the path.
+function claudeCodeVersion(environment = process.env) {
+  const parts = String(environment.CLAUDE_CODE_EXECPATH || '').split(/[\\/]+/);
+  return parts.reverse().find((part) => parseVersion(part).length === 3) || '';
+}
+
+// The setting list for one Claude Code version: the AGENTS.md row moves to the old id below 2.1.285 and is
+// unsupported below 2.1.277. An unknown version keeps the current id, and says so.
+function settingsForVersion(version) {
+  const parsed = parseVersion(version);
+  return SETTINGS.map((spec) => {
+    if (spec.id !== 'agents-md') return spec;
+    if (parsed.length !== 3) return { ...spec, versionNote: 'Claude Code version not known here, so setup uses the setting name Claude Code 2.1.285 and later read' };
+    if (below(parsed, AGENTS_MD_FIRST)) return { ...spec, unsupported: `Claude Code ${version} has no AGENTS.md setting (it needs 2.1.277 or later), so setup leaves it alone` };
+    if (below(parsed, AGENTS_MD_NEW_ID_FROM)) return { ...spec, keyPath: ['pluginConfigs', AGENTS_MD_OLD_ID, 'options', 'instructionFiles'] };
+    return spec;
+  });
+}
 
 
 // Walks keyPath; returns { found, value } or { blocked } when a parent is not an object.
@@ -85,9 +125,11 @@ function withoutValue(settings, keyPath, createdParents) {
 }
 
 class ClaudeUserSettings {
-  #settingsPath; #recordPath; #settingsWriter;
+  #settingsPath; #recordPath; #settingsWriter; #specs;
 
-  constructor({ environment = process.env, controlRoot, settingsWriteOptions } = {}) {
+  // claudeVersion is the running Claude Code version ('' when unknown); it picks the AGENTS.md setting name.
+  constructor({ environment = process.env, controlRoot, settingsWriteOptions, claudeVersion = claudeCodeVersion(environment) } = {}) {
+    this.#specs = settingsForVersion(claudeVersion);
     const configDir = environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
     const root = controlRoot || environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control');
     this.#settingsPath = path.resolve(configDir, 'settings.json');
@@ -146,10 +188,12 @@ class ClaudeUserSettings {
   #entryKey(spec) { return `${spec.id}|${canonicalPath(this.#settingsPath)}`; }
 
   #stateOf(read, spec, entry) {
+    if (spec.unsupported) return { id: spec.id, label: spec.label, state: STATES.UNSUPPORTED, detail: spec.unsupported };
     if (read.error) return { id: spec.id, label: spec.label, state: STATES.UNREADABLE, detail: read.error };
     const found = lookup(read.settings, spec.keyPath);
     if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, matches: false, blocked: true, detail: 'a parent entry is not an object' };
-    if (!found.found) return { id: spec.id, label: spec.label, state: STATES.DEFAULT };
+    // A missing key the owner turned off through setup stays off: setup never turns it back on by default.
+    if (!found.found) return { id: spec.id, label: spec.label, state: entry?.owner_off === true ? STATES.OWNER_OFF : STATES.DEFAULT, ...(spec.versionNote ? { note: spec.versionNote } : {}) };
     // toolkit says whether setup wrote the off value; either way it is off.
     if (Object.hasOwn(spec, 'offValue') && same(found.value, spec.offValue)) return { id: spec.id, label: spec.label, state: STATES.OFF, value: found.value, toolkit: Boolean(entry) && same(entry.value, found.value) };
     if (entry && same(entry.value, found.value) && same(found.value, spec.value)) return { id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: found.value };
@@ -160,7 +204,7 @@ class ClaudeUserSettings {
   inspect() {
     const read = this.#readSettings();
     const entries = this.#readRecord();
-    return SETTINGS.map((spec) => this.#stateOf(read, spec, entries[this.#entryKey(spec)]));
+    return this.#specs.map((spec) => this.#stateOf(read, spec, entries[this.#entryKey(spec)]));
   }
 
   // choices: enable | disable | keep for every managed setting, or { <setting id>: enable | disable | keep }
@@ -173,7 +217,7 @@ class ClaudeUserSettings {
       if (!SETTINGS.some((spec) => spec.id === id)) throw new Error(`Unknown Claude setting: ${id}`);
       if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported Claude settings choice: ${choice}`);
     }
-    return SETTINGS.map((spec) => this.#applyOne(spec, byId[spec.id] || 'keep'));
+    return this.#specs.map((spec) => this.#applyOne(spec, byId[spec.id] || 'keep'));
   }
 
   #applyOne(spec, choice) {
@@ -183,9 +227,9 @@ class ClaudeUserSettings {
     const before = this.#stateOf(read, spec, entries[key]);
     // Re-reads the record, so an entry saved earlier in this call is removed too.
     const forget = () => { const now = this.#readRecord(); if (Object.hasOwn(now, key)) { delete now[key]; this.#saveRecord(now); } };
-    if (before.state === STATES.UNREADABLE) return { status: 'held', changed: false, ...before };
+    if (before.state === STATES.UNREADABLE || before.state === STATES.UNSUPPORTED) return { status: 'held', changed: false, ...before };
     if (choice === 'keep') {
-      if (before.state !== STATES.TOOLKIT && !before.toolkit) forget();
+      if (before.state !== STATES.TOOLKIT && before.state !== STATES.OWNER_OFF && !before.toolkit) forget();
       return { status: 'kept', changed: false, ...before };
     }
     // Replacing or removing under a parent that is not an object would discard more than this one setting.
@@ -221,14 +265,19 @@ class ClaudeUserSettings {
       write(spec.offValue);
       return { status: 'off', changed: true, id: spec.id, label: spec.label, state: STATES.OFF, value: spec.offValue, toolkit: true };
     }
-    if (before.state === STATES.DEFAULT) { forget(); return { status: 'claude-default', changed: false, ...before }; }
+    // Records that the owner chose off, replacing any Toolkit value record for this setting.
+    const offResult = (changed) => {
+      const now = this.#readRecord();
+      this.#saveRecord({ ...now, [key]: { settings_path: this.#settingsPath, owner_off: true } });
+      return { status: 'owner-off', changed, id: spec.id, label: spec.label, state: STATES.OWNER_OFF };
+    };
+    if (before.state === STATES.DEFAULT || before.state === STATES.OWNER_OFF) return offResult(false);
     // Off removes the key whoever set it; only a live Toolkit value's record names parents Toolkit created.
     const entry = before.state === STATES.TOOLKIT ? entries[key] : null;
     const settings = withoutValue(read.settings, spec.keyPath, Array.isArray(entry?.created_parents) ? entry.created_parents : []);
     this.#writeSettings(read, fileCreated && Object.keys(settings).length === 0 ? null : settings);
-    forget();
-    return { status: 'claude-default', changed: true, id: spec.id, label: spec.label, state: STATES.DEFAULT };
+    return offResult(true);
   }
 }
 
-module.exports = Object.freeze({ ClaudeUserSettings, SETTINGS, STATES });
+module.exports = Object.freeze({ ClaudeUserSettings, SETTINGS, STATES, claudeCodeVersion, settingsForVersion });

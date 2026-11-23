@@ -158,8 +158,10 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
   assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
-  assert.match(result.stdout, /All visible setup questions are already resolved by explicit inputs/);
-  assert.doesNotMatch(result.stdout, /Reply with either:|Reply with one line for each unresolved question/);
+  // Claude Code's bank shows each flag's choice and asks nothing.
+  assert.match(result.stdout, /Your setup flags answer every setting, so setup asks nothing and applies them as shown\./);
+  assert.match(result.stdout, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \|[^\n]*\| [A-C]\. Show instructions only \(set by your setup flag\) \| - \|/);
+  assert.doesNotMatch(result.stdout, /Reply yes to apply|Reply with either:|Reply with one line for each unresolved question/);
 });
 
 test('managed partial explicit flags preserve one bank and truthful child guidance', async () => {
@@ -176,10 +178,10 @@ test('managed partial explicit flags preserve one bank and truthful child guidan
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
   assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
-  assert.match(result.stdout, /Some visible questions are already resolved by explicit setup flags/);
-  assert.match(result.stdout, /Reply with one line for each unresolved question in this exact order/);
-  assert.equal((result.stdout.match(/After those question-answer lines, append detail lines in this exact canonical order/g) || []).length, 1);
-  assert.match(result.stdout, /1\. 1\.1 Update source: custom managed-checkout path[\s\S]*2\. 1\.3 Report retention: positive report-retention duration/);
-  assert.doesNotMatch(result.stdout, /Reply with either:/);
+  // Claude Code's one question: the flagged row shows the flag's choice, and the reply line covers the rest.
+  assert.match(result.stdout, /1 setting is set by your setup flags, and the reply cannot change it\./);
+  assert.match(result.stdout, /\| 1\.2 \| Update reports \|[^\n]*\(set by your setup flag\) \| - \|/);
+  assert.equal((result.stdout.match(/^Apply these defaults\? Reply yes to apply the Setup applies column/gm) || []).length, 1);
+  assert.doesNotMatch(result.stdout, /Reply with either:|Reply with one line for each unresolved question/);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
 });

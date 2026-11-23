@@ -168,7 +168,8 @@ function statusCheck(run, script, args, command) {
   const result = run(script, args);
   const lines = linesOf(result.stdout);
   if (result.status === 0) return { state: 'ok', lines: lines.length ? lines : ['current'] };
-  if (result.status === 1) return { state: 'attention', lines, command };
+  // A check that stops (exit 1, nothing on stdout) still says why: its Stopped line from stderr.
+  if (result.status === 1) return { state: 'attention', lines: lines.length ? lines : [why(result)], command };
   return { state: 'failed', lines: [why(result)] };
 }
 
@@ -289,6 +290,89 @@ function heldBecause(finding, child) {
   return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : null;
 }
 
+// A kept-open child's stall, as a row, or null. The sweep queues a merged task kept open on purpose
+// (TASK_MERGED_OPEN) once nothing has worked it for KEPT_OPEN_IDLE_HOURS, so a new finding on a child
+// whose page still shows its `Kept open:` line is that stall. A mark set since the finding was raised
+// (its `since` time is under that window ago) is settled by the next sweep pass, so it stays held. A
+// since time that cannot be read never holds the row.
+function keptOpenStall(finding, child, now) {
+  if (finding.code !== 'TASK_MERGED_OPEN' || finding.state !== 'new' || finding.promised || !child || child.state !== 'open') return null;
+  const line = /^Kept open: .*$/m.exec(String(child.body || '').replace(/\r\n?/g, '\n'));
+  if (!line) return null;
+  const { KEPT_OPEN_IDLE_HOURS: hours } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const since = /\(since (\d{4}-\d\d-\d\d) (\d\d:\d\d)Z\)$/.exec(line[0]);
+  const at = since ? Date.parse(`${since[1]}T${since[2]}:00Z`) : NaN;
+  if (Number.isFinite(at) && now.getTime() - at < hours * 3600000) return null;
+  return `KEPT OPEN? #${finding.issue} kept open${since ? ` since ${since[1]} ${since[2]}Z` : ''} with every PR merged, and no lane has worked it for over ${hours} hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)`;
+}
+
+// What the stale check reads of a child page to see a merged PR whose rows stay unticked. A
+// default-deny reader over this subset of GitHub's Markdown, and nothing else:
+//   - lines split on LF only (CRLF counts as LF); no other character starts a line;
+//   - a row is `- [ ] ` or `- [x] ` (`*` or `+` for `-`, X in either case) with 0 to 3 spaces before
+//     it, under an ATX heading whose text starts `DONE WHEN` or `ROWS`, up to the next heading of the
+//     same or a higher level; fenced code (``` or ~~~, to its closing fence or the end) and an HTML
+//     comment block (a line starting `<!--`, to the line holding `-->`) hold no rows or headings;
+//   - a merged PR is a row of the one STATE block the sweep draws (one BEGIN STATE line, then one END
+//     STATE line) whose status cell starts MERGED and whose Merged SHA cell links a full commit.
+// Only a row in that subset counts as ticked, and only such a STATE row as merged: a tab or deeper
+// indent, a quote, another marker or check character, or any other shape is never read as either.
+const ROWS_HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t#]*$/;
+const CHECKBOX = /^ {0,3}[-*+] \[([ xX])\] /;
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const STATE_BEGIN = /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v\d+ .*-->$/;
+const STATE_END = /^<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->$/;
+const MERGED_ROW = /^\|.*\|#(\d+)\|MERGED(?: · [^|]*)?\|\[[0-9a-f]{7,40}\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/commit\/[0-9a-f]{40}\)\|$/;
+function rowTicks(body) {
+  const lines = String(body || '').replace(/\r\n/g, '\n').split('\n');
+  let fence = null, comment = false, section = 0, ticked = 0, unticked = 0;
+  const begins = [], ends = [];
+  lines.forEach((line, index) => {
+    if (fence) {
+      if (new RegExp(`^ {0,3}\\${fence[0]}{${fence.length},}[ \\t]*$`).test(line)) fence = null;
+      return;
+    }
+    if (comment) {
+      if (line.includes('-->')) comment = false;
+      return;
+    }
+    if (STATE_BEGIN.test(line)) begins.push(index);
+    if (STATE_END.test(line)) ends.push(index);
+    const open = FENCE_OPEN.exec(line);
+    if (open) { fence = open[1]; return; }
+    if (/^ {0,3}<!--/.test(line)) {
+      comment = !line.slice(line.indexOf('<!--') + 4).includes('-->');
+      return;
+    }
+    const heading = ROWS_HEADING.exec(line);
+    if (heading) {
+      if (section && heading[1].length <= section) section = 0;
+      if (/^(DONE WHEN|ROWS)\b/i.test(heading[2])) section = heading[1].length;
+      return;
+    }
+    const row = section ? CHECKBOX.exec(line) : null;
+    if (row && row[1] === ' ') unticked += 1;
+    else if (row) ticked += 1;
+  });
+  const merged = begins.length === 1 && ends.length === 1 && begins[0] < ends[0]
+    ? lines.slice(begins[0] + 1, ends[0]).map(line => MERGED_ROW.exec(line)).filter(Boolean).map(match => Number(match[1]))
+    : [];
+  return { ticked, unticked, merged: [...new Set(merged)].sort((a, b) => a - b) };
+}
+
+// The stamp's memory of unticked children it has already flagged: { "<issue>": { prs, flagged } }. An
+// entry that is not that exact shape counts as none, so the child is flagged again.
+function untickedMemory(last) {
+  const kept = {};
+  const memory = last && typeof last.unticked === 'object' && !Array.isArray(last.unticked) ? last.unticked : {};
+  for (const [issue, entry] of Object.entries(memory)) {
+    if (!/^[1-9]\d*$/.test(issue) || !entry || !Array.isArray(entry.prs) || !entry.prs.every(pr => Number.isInteger(pr) && pr > 0)) continue;
+    if (!/^\d{4}-\d\d-\d\d$/.test(String(entry.flagged))) continue;
+    kept[issue] = { prs: entry.prs, flagged: entry.flagged };
+  }
+  return kept;
+}
+
 // The local date (YYYY-MM-DD) of a time, which is the day the stamp counts in.
 const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`;
 
@@ -296,18 +380,19 @@ const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).p
 // close yourself when done; a merged child whose only step left is the owner's, after the agent's UAT
 // PASSED and with no gate live on the task (OWNER OK?, for the controller's next ask to the owner, or a
 // JUDGE? row when an unchecked DONE WHEN row says otherwise); new beside an open child with no reason
-// (FOLD?, a duplicate the owner approves folding); closed while holding open work (MOVE?); and a full or
-// over-cap polish child. Read only on GitHub; it writes its date stamp, with the day's rows, only after
+// (FOLD?, a duplicate the owner approves folding); closed while holding open work (MOVE?); kept open on
+// purpose but stalled (KEPT OPEN?, see keptOpenStall); a merged PR on its page while none of its DONE WHEN
+// or ROWS checkboxes is ticked (UNTICKED?, see rowTicks: a row once per new merged PR, then named on the
+// held line until a row is ticked); and a full or over-cap polish child. Read only on GitHub; it writes
+// its date stamp, with the day's rows and the unticked children it flagged, only after
 // every read succeeded, so a same-day run shows them again with no read. A failed read records which
 // read failed (a fixed word, never gh output) and keeps the last date, so the next start retries and
 // the session-start line says the check is failing instead of staying silent.
 function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const today = localDate(now);
-  const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK? row, each FOLD? (a duplicate) and any child you judge obsolete in your next ask to the owner; MOVE? and POLISH rows are yours`;
+  const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK? row, each FOLD? (a duplicate) and any child you judge obsolete in your next ask to the owner; MOVE?, KEPT OPEN?, UNTICKED? and POLISH rows are yours`;
   const last = stamp.read(repo);
   if (last && last.date === today) {
-    // A stamp from before this change may also hold the day's owner close list: only its rows and held
-    // line count.
     const kept = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
     const heldAgain = typeof last.held === 'string' && last.held ? [last.held] : [];
     if (kept.length) return { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain] };
@@ -358,6 +443,9 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
       }
       continue;
     }
+    // Any of the child's findings may be the kept-open stall: a READY_TO_CLOSE taken first never hides it.
+    const stalled = doneFindings.filter(other => other.issue === finding.issue).map(other => keptOpenStall(other, child, now)).find(Boolean);
+    if (stalled) { rows.push(stalled); continue; }
     const why = heldBecause(finding, child);
     if (why) held.push(`#${finding.issue} ${why}`);
     else rows.push(`JUDGE? #${finding.issue} PR merged: check its DONE WHEN, then close it yourself or keep it open (${finding.code})`);
@@ -365,6 +453,23 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const open = children.filter(child => child.state === 'open');
   for (const child of open) {
     if (Date.parse(child.created_at) > since.getTime() && !/Nearest child:/.test(child.body || '')) rows.push(`FOLD? #${child.number} new under #${child.parent} with no Nearest child: line`);
+  }
+  // Merged PRs with every row still unticked: a row the first time, and again when another PR merges;
+  // in between the child is named on the held line, so it is never silent.
+  const flagged = untickedMemory(last);
+  const unticked = {};
+  for (const child of open) {
+    const read = rowTicks(child.body);
+    if (!read.merged.length || read.ticked || !read.unticked) continue;
+    const before = flagged[String(child.number)];
+    const prs = read.merged.map(pr => `#${pr}`).join(', ');
+    if (before && read.merged.every(pr => before.prs.includes(pr))) {
+      unticked[child.number] = before;
+      held.push(`#${child.number} ${read.unticked} row(s) unticked after PR ${prs} merged (flagged ${before.flagged})`);
+      continue;
+    }
+    unticked[child.number] = { prs: read.merged, flagged: today };
+    rows.push(`UNTICKED? #${child.number} PR ${prs} merged, but none of its ${read.unticked} DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)`);
   }
   for (const child of children.filter(item => item.state === 'closed')) {
     const summary = child.sub_issues_summary;
@@ -378,7 +483,7 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
   }
   const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
-  try { stamp.write(repo, { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}) }); } catch (error) {
+  try { stamp.write(repo, { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}), ...(Object.keys(unticked).length ? { unticked } : {}) }); } catch (error) {
     return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
   }
   if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
@@ -504,5 +609,5 @@ function main(argv = process.argv.slice(2), deps = {}) {
 // the command its line names.
 const staleOnlySkip = CHECKS.filter(name => name !== 'stale').join(',');
 
-module.exports = { parseArgs, controllerCheck, format, main, polishRows, localDate, CHECKS, SCRIPTS, staleOnlySkip };
+module.exports = { parseArgs, controllerCheck, format, main, polishRows, rowTicks, localDate, CHECKS, SCRIPTS, staleOnlySkip };
 if (require.main === module) process.exitCode = main();

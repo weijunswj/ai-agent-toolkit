@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { parseArgs, controllerCheck, format, main, polishRows, SCRIPTS, staleOnlySkip } = require('../scripts/toolkit-controller-check.cjs');
+const { parseArgs, controllerCheck, format, main, polishRows, rowTicks, SCRIPTS, staleOnlySkip } = require('../scripts/toolkit-controller-check.cjs');
 
 const GOVERNED = { repository: 'acme/app', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'INT-7-' }] };
 const CLEAN = {
@@ -125,6 +125,13 @@ test('each checker maps its own exit codes and output to attention or could-not-
   const unreadable = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ results: { [SCRIPTS.traces]: { status: 2, stdout: '', stderr: 'FAIL: gh api failed\n' }, [SCRIPTS.footer]: { status: 1, stdout: 'FAILED scan acme/app: HTTP 403\n' } } }).deps);
   assert.deepEqual(unreadable.checks.find(check => check.name === 'traces').lines, ['#7: could not run: FAIL: gh api failed']);
   assert.equal(unreadable.checks.find(check => check.name === 'footer').state, 'failed');
+});
+
+test('a handoff check that stops says why on its row', () => {
+  const stopped = 'Stopped: the snapshot folder could not be read. Next: check the store checkout, then run this again.';
+  const { code, text } = run(ALL, { results: { [SCRIPTS.handoff]: { status: 1, stdout: '', stderr: `${stopped}\n` } } });
+  assert.equal(code, 1);
+  assert.ok(text.includes(`ATTENTION handoff: ${stopped}`), text);
 });
 
 test('every child runs in its read-only mode with the inputs given', () => {
@@ -289,7 +296,7 @@ test('red: a live-shaped child kept open or under a lapsed hold is never put to 
     'JUDGE? #901 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)',
     'held, not proposed: #886 Kept open line, #827 Kept open line, #1030 hold lapsed at 2026-11-21T08:00:00Z (Not closing: slice 2 unbuilt), #893 Kept open line, #473 Kept open line, #759 hold lapsed at 2026-11-21T08:00:00Z (Plan the 4.0 slices)',
   ]);
-  assert.match(check.lines[0], /^1 row \(\d{4}-\d{2}-\d{2}\): judge each JUDGE\? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK\? row, each FOLD\? \(a duplicate\) and any child you judge obsolete in your next ask to the owner; MOVE\? and POLISH rows are yours$/);
+  assert.match(check.lines[0], /^1 row \(\d{4}-\d{2}-\d{2}\): judge each JUDGE\? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK\? row, each FOLD\? \(a duplicate\) and any child you judge obsolete in your next ask to the owner; MOVE\?, KEPT OPEN\?, UNTICKED\? and POLISH rows are yours$/);
 });
 
 test('red: a Kept open line only counts at the start of a line', () => {
@@ -490,17 +497,13 @@ for (const [name, extra] of [
   assert.doesNotMatch(check.lines.slice(1).join('\n'), /OWNER OK\?|reply ok to close/);
 });
 
-test('red: a same-day stamp from before this change shows its rows and held line and never its stored close list', () => {
-  const old = { 'acme/app': { date: TODAY, at: '2026-11-14T01:00:00Z', rows: [JUDGED(48)], held: 'held, not proposed: #49 acknowledged',
-    close: [`CLOSE LIST ${TODAY} (1 ready): post to the owner as its own message`, '- #50 Task 50: PR #950 merged, agent UAT PASSED; reply ok to close'] } };
-  const { check, calls, written } = sweep({ stamps: old });
+test('a same-day stamp shows its held line again, after its rows or on the ok line, and reads nothing', () => {
+  const stamped = { 'acme/app': { date: TODAY, at: '2026-11-14T01:00:00Z', rows: [JUDGED(48)], held: 'held, not proposed: #49 acknowledged' } };
+  const { check, calls, written } = sweep({ stamps: stamped });
   assert.deepEqual(check.lines.slice(1), [JUDGED(48), 'held, not proposed: #49 acknowledged']);
-  assert.equal('close' in check, false);
-  assert.doesNotMatch(format({ checks: [check], attention: 1, failed: 0, skipped: 0 }), /CLOSE LIST|reply ok to close|shown again from the sweep/);
   assert.equal(calls.some(call => call.gh), false);
   assert.deepEqual(written, []);
-  // With no rows, the held line still shows on the ok line.
-  const quiet = sweep({ stamps: { 'acme/app': { date: TODAY, at: '2026-11-14T01:00:00Z', rows: [], held: 'held, not proposed: #49 acknowledged', close: [`CLOSE LIST ${TODAY}: nothing to close today`] } } }).check;
+  const quiet = sweep({ stamps: { 'acme/app': { date: TODAY, at: '2026-11-14T01:00:00Z', rows: [], held: 'held, not proposed: #49 acknowledged' } } }).check;
   assert.deepEqual(quiet, { name: 'stale', state: 'ok', lines: [`ran today (${TODAY}); held, not proposed: #49 acknowledged`] });
 });
 
@@ -518,4 +521,176 @@ test('red: an empty day is a clear stale check with no line for the owner, and a
   // A failed owner-wait read never reads as an empty day.
   const unknown = sweep({ attention: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: null, owner_waits_unknown: 'STATE_INVALID' }) }, children: [issue(70)] });
   assert.deepEqual(unknown.check, { name: 'stale', state: 'failed', lines: ['owner waits unknown (STATE_INVALID); no date stamped, so the next run checks again'] });
+});
+
+// A kept-open child that stalls, and a merged PR whose rows stay unticked. Pages are drawn with the
+// sweep's own renderer, so the reader is tested against the STATE block and Kept open line it writes.
+const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+const hostile = require('./support/hostile-inputs.cjs');
+const COMMIT = 'c'.repeat(40);
+function statePage(issueNumber, { prs = [{ number: 900, state: 'MERGED', merge_sha: COMMIT }], keptAt = null, keptReason = 'Slice 2 still to come' } = {}) {
+  const finished = prs.filter(pr => ['MERGED', 'CLOSED'].includes(pr.state)).map(pr => pr.number);
+  const child = { issue: issueNumber, revision: 3, repository: 'acme/app', lifecycle: 'ACTIVE', pr: prs[0] || null, prs, gate: null, uat: null,
+    private: keptAt ? { keep_open: { reason: keptReason, at: keptAt, covers: finished } } : {} };
+  return programmeState.renderBlock(programmeState.renderChildBlockBody(child, { issue: issueNumber, class: 'COMMITTED', order: 1 }), '3.165.0');
+}
+const page = (issueNumber, rows, options) => `# TASK\n\n## DONE WHEN\n\n${rows}\n\n# PLAN\n\nNow.\n\n${statePage(issueNumber, options)}\n`;
+const ALL_TICKED = '- [x] Slice 1 lands.';
+const KEPT_ROW = (n, since) => `KEPT OPEN? #${n} kept open${since ? ` since ${since}` : ''} with every PR merged, and no lane has worked it for over 6 hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)`;
+
+test('the sweep draws the Kept open line the stale check reads, with its since time', () => {
+  assert.match(page(40, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }), /^Kept open: Slice 2 still to come \(since 2026-11-13 08:00Z\)$/m);
+  assert.equal(programmeState.KEPT_OPEN_IDLE_HOURS, 6);
+});
+
+// The kept-open closure matrix on the stale check side: a new TASK_MERGED_OPEN on a child whose page
+// still shows its Kept open line is the sweep's kept-open stall, a row; anything else keeps the old path.
+const KEPT_STALE_MATRIX = [
+  ['new TASK_MERGED_OPEN, kept open a day ago: a row', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 40 }, issue(40, { body: page(40, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(40, '2026-11-13 08:00Z') }],
+  ['new TASK_MERGED_OPEN, kept open 3 hours ago (the sweep settles it next pass): held', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 41 }, issue(41, { body: page(41, ALL_TICKED, { keptAt: '2026-11-14T09:00:00.000Z' }) }), { held: '#41 Kept open line' }],
+  ['new TASK_MERGED_OPEN, Kept open line with no readable since: a row', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 42 }, issue(42, { body: `${page(42, ALL_TICKED)}\nKept open: written by hand\n` }), { row: KEPT_ROW(42, null) }],
+  ['new TASK_MERGED_OPEN, kept open with unchecked rows (its next slice): still a row', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 43 }, issue(43, { body: page(43, '- [x] Slice 1 lands.\n- [ ] Slice 2 lands.', { keptAt: '2026-11-12T08:00:00.000Z' }) }), { row: KEPT_ROW(43, '2026-11-12 08:00Z') }],
+  ['new READY_TO_CLOSE on a kept-open child: held (not a stall code)', { state: 'new', code: 'READY_TO_CLOSE', issue: 44 }, issue(44, { body: page(44, ALL_TICKED, { keptAt: '2026-11-12T08:00:00.000Z' }) }), { held: '#44 Kept open line' }],
+  ['acknowledged TASK_MERGED_OPEN on a kept-open child: held', { state: 'acknowledged', code: 'TASK_MERGED_OPEN', issue: 45 }, issue(45, { body: page(45, ALL_TICKED, { keptAt: '2026-11-12T08:00:00.000Z' }) }), { held: '#45 acknowledged' }],
+  ['lapsed hold on a kept-open child: held with its note', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 46, ...LAPSED, promised: 'Plan slice 2' }, issue(46, { body: page(46, ALL_TICKED, { keptAt: '2026-11-12T08:00:00.000Z' }) }), { held: '#46 hold lapsed at 2026-11-21T08:00:00Z (Plan slice 2)' }],
+  ['closed kept-open child: held', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 47 }, issue(47, { state: 'closed', body: page(47, ALL_TICKED, { keptAt: '2026-11-12T08:00:00.000Z' }) }), { held: '#47 already closed' }],
+  ['not kept open, every row ticked: JUDGE? (control)', { state: 'new', code: 'TASK_MERGED_OPEN', issue: 48 }, issue(48, { body: page(48, ALL_TICKED) }), { row: 'JUDGE? #48 PR merged: check its DONE WHEN, then close it yourself or keep it open (TASK_MERGED_OPEN)' }],
+  // Two findings on one child: a READY_TO_CLOSE in any state never hides the kept-open stall beside it.
+  ['new READY_TO_CLOSE beside a new kept-open TASK_MERGED_OPEN: a row', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['acknowledged READY_TO_CLOSE beside a new kept-open TASK_MERGED_OPEN: a row', [{ state: 'acknowledged', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['lapsed READY_TO_CLOSE beside a new kept-open TASK_MERGED_OPEN: a row', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49, ...LAPSED, promised: 'Close after slice 2' }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['new kept-open TASK_MERGED_OPEN listed before a new READY_TO_CLOSE: a row', [{ state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }, { state: 'new', code: 'READY_TO_CLOSE', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { row: KEPT_ROW(49, '2026-11-13 08:00Z') }],
+  ['new READY_TO_CLOSE beside a new TASK_MERGED_OPEN, kept open 3 hours ago: held', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'new', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-14T09:00:00.000Z' }) }), { held: '#49 Kept open line' }],
+  ['new READY_TO_CLOSE beside an acknowledged TASK_MERGED_OPEN, kept open: held', [{ state: 'new', code: 'READY_TO_CLOSE', issue: 49 }, { state: 'acknowledged', code: 'TASK_MERGED_OPEN', issue: 49 }], issue(49, { body: page(49, ALL_TICKED, { keptAt: '2026-11-13T08:00:00.000Z' }) }), { held: '#49 Kept open line' }],
+];
+
+test('red: a kept-open child the sweep queues as stalled is a KEPT OPEN? row, never held for ever (closure matrix)', () => {
+  for (const [name, finding, child, want] of KEPT_STALE_MATRIX) {
+    const { check } = sweep({ findings: [].concat(finding), children: [child] });
+    const rows = check.lines.slice(1).filter(line => !line.startsWith('held'));
+    const held = check.lines.find(line => /held, not proposed: /.test(line)) || '';
+    if (want.row) assert.deepEqual(rows, [want.row], name);
+    else { assert.deepEqual(rows, [], name); assert.ok(held.includes(want.held), `${name}: ${held}`); }
+  }
+  const { check } = sweep({ findings: [KEPT_STALE_MATRIX[0][1]], children: [KEPT_STALE_MATRIX[0][2]] });
+  assert.match(check.lines[0], /MOVE\?, KEPT OPEN\?, UNTICKED\? and POLISH rows are yours$/);
+});
+
+// The unticked closure matrix: an open child whose page shows a merged PR while none of its DONE WHEN or
+// ROWS checkboxes is ticked is a row; every other state is quiet.
+const UNTICKED_ROW = (n, prs, count) => `UNTICKED? #${n} PR ${prs} merged, but none of its ${count} DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)`;
+const TWO_UNTICKED = '- [ ] Slice 1 lands.\n- [ ] Changelog fragment.';
+const UNTICKED_MATRIX = [
+  ['merged PR, every DONE WHEN row unticked: a row', issue(50, { body: page(50, TWO_UNTICKED) }), UNTICKED_ROW(50, '#900', 2)],
+  ['merged PR, rows under ROWS only, all unticked: a row', issue(51, { body: `# TASK\n\n### ROWS\n\n- [ ] **P1** a\n- [ ] **P2** b\n- [ ] **P3** c\n\n${statePage(51)}\n` }), UNTICKED_ROW(51, '#900', 3)],
+  ['two merged PRs and an open one: a row naming the merged ones', issue(52, { body: page(52, TWO_UNTICKED, { prs: [{ number: 902, state: 'OPEN', merge_sha: null }, { number: 901, state: 'MERGED', merge_sha: COMMIT }, { number: 900, state: 'MERGED', merge_sha: COMMIT }] }) }), UNTICKED_ROW(52, '#900, #901', 2)],
+  ['CRLF line ends read as LF: a row', issue(53, { body: page(53, TWO_UNTICKED).replace(/\n/g, '\r\n') }), UNTICKED_ROW(53, '#900', 2)],
+  ['one row ticked: quiet', issue(54, { body: page(54, '- [x] Slice 1 lands.\n- [ ] Changelog fragment.') }), null],
+  ['a nested ticked row (two spaces): quiet', issue(55, { body: page(55, '- [ ] Slice 1\n  - [x] part A lands.') }), null],
+  ['no merged PR, only an open one: quiet', issue(56, { body: page(56, TWO_UNTICKED, { prs: [{ number: 900, state: 'OPEN', merge_sha: null }] }) }), null],
+  ['a closed PR only: quiet', issue(57, { body: page(57, TWO_UNTICKED, { prs: [{ number: 900, state: 'CLOSED', merge_sha: null }] }) }), null],
+  ['plain DONE WHEN bullets (nothing to tick): quiet', issue(58, { body: page(58, '- Slice 1 lands.') }), null],
+  ['closed child: quiet', issue(59, { state: 'closed', body: page(59, TWO_UNTICKED) }), null],
+  ['no STATE block, a hand-written MERGED row: quiet', issue(60, { body: `## DONE WHEN\n\n${TWO_UNTICKED}\n\n|x|#900|MERGED|[ccccccc](https://github.com/acme/app/commit/${COMMIT})|\n` }), null],
+  ['two STATE blocks: quiet (the managed-block finding covers a broken page)', issue(61, { body: `${page(61, TWO_UNTICKED)}\n${statePage(61)}\n` }), null],
+];
+
+test('red: a merged PR whose rows all stay unticked is an UNTICKED? row once, then named on the held line until a row is ticked (closure matrix)', () => {
+  for (const [name, child, row] of UNTICKED_MATRIX) {
+    const { check, written } = sweep({ children: [child] });
+    assert.deepEqual(check.lines.slice(1).filter(line => !line.startsWith('held')), row ? [row] : [], name);
+    const memory = written[0]['acme/app'].unticked;
+    if (row) assert.deepEqual(memory, { [child.number]: { prs: rowTicks(child.body).merged, flagged: TODAY } }, `${name}: the stamp remembers the flag`);
+    else assert.equal(memory, undefined, `${name}: nothing remembered`);
+  }
+  const child = UNTICKED_MATRIX[0][1];
+  const yesterday = memory => ({ 'acme/app': { date: '2026-11-13', at: '2026-11-13T01:00:00Z', rows: [], unticked: memory } });
+  // The next day, the same merged PRs: named on the held line, not a row, and still remembered.
+  const again = sweep({ children: [child], stamps: yesterday({ 50: { prs: [900], flagged: '2026-11-13' } }) });
+  assert.equal(again.check.state, 'ok');
+  assert.match(again.check.lines[0], /held, not proposed: #50 2 row\(s\) unticked after PR #900 merged \(flagged 2026-11-13\)$/);
+  assert.deepEqual(again.written[0]['acme/app'].unticked, { 50: { prs: [900], flagged: '2026-11-13' } });
+  // Another PR merges: a row again.
+  const more = issue(50, { body: page(50, TWO_UNTICKED, { prs: [{ number: 901, state: 'MERGED', merge_sha: COMMIT }, { number: 900, state: 'MERGED', merge_sha: COMMIT }] }) });
+  assert.deepEqual(sweep({ children: [more], stamps: yesterday({ 50: { prs: [900], flagged: '2026-11-13' } }) }).check.lines.slice(1), [UNTICKED_ROW(50, '#900, #901', 2)]);
+  // A memory entry in any other shape counts as none: a row again.
+  for (const bad of [{ prs: '900', flagged: '2026-11-13' }, { prs: [900], flagged: 'yesterday' }, { prs: [0], flagged: '2026-11-13' }, null]) {
+    assert.deepEqual(sweep({ children: [child], stamps: yesterday({ 50: bad }) }).check.lines.slice(1), [UNTICKED_ROW(50, '#900', 2)], JSON.stringify(bad));
+  }
+  // A row ticked: quiet, and the memory goes.
+  const ticked = sweep({ children: [issue(50, { body: page(50, '- [x] Slice 1 lands.\n- [ ] Changelog fragment.') })], stamps: yesterday({ 50: { prs: [900], flagged: '2026-11-13' } }) });
+  assert.deepEqual(ticked.check.lines, [`no stale children (${TODAY}, 1 children read)`]);
+  assert.equal(ticked.written[0]['acme/app'].unticked, undefined);
+});
+
+// Default-deny: no shape outside the reader's subset is ever read as a ticked row or a merged PR.
+const DONE_WHEN_BASE = impostor => `# TASK\n\n## DONE WHEN\n\n- [ ] a real row\n${impostor}\n\n# PLAN\n\nNow.\n\n${statePage(70)}\n`;
+const PLAN_BASE = impostor => `# TASK\n\n## DONE WHEN\n\n- [ ] a real row\n\n## PLAN\n\n${impostor}\n\n${statePage(70)}\n`;
+const point = code => String.fromCodePoint(code);
+const TICKED_IMPOSTORS = [
+  ...[
+    ['backtick-fence', '```\n- [x] fake\n```'],
+    ['tilde-fence', '~~~\n- [x] fake\n~~~'],
+    ['unclosed-fence', '```\n- [x] fake'],
+    ['longer-fence-closed-short', '````\n```\n- [x] fake\n````'],
+    ['html-comment-block', '<!--\n- [x] fake\n-->'],
+    ['four-space-indent', '\n    - [x] fake'],
+    ['tab-indent', '\t- [x] fake'],
+    ['quoted', '> - [x] fake'],
+    ['no-space-after-marker', '-[x] fake'],
+    ['no-space-after-box', '- [x]fake'],
+    ['check-mark', `- [${point(0x2713)}] fake`],
+    ['cyrillic-x', `- [${point(0x0445)}] fake`],
+    ['zero-width-in-box', `- [${point(0x200b)}x] fake`],
+    ['nbsp-after-marker', `-${point(0xa0)}[x] fake`],
+    ['fullwidth-box', `- ${point(0xff3b)}x${point(0xff3d)} fake`],
+    ...['cr', 'nel', 'ls', 'ps'].map(name => [`joined-by-${name}`, `a note${hostile.BREAKS[name]}- [x] fake`]),
+  ].map(([id, text]) => ({ id, text: DONE_WHEN_BASE(text) })),
+  ...[
+    ['heading-in-fence', '```\n## DONE WHEN\n- [x] fake\n```'],
+    ['heading-in-comment', '<!--\n## DONE WHEN\n- [x] fake\n-->'],
+    ['heading-without-space', '#DONE WHEN\n- [x] fake'],
+    ['heading-four-space-indent', '    ## DONE WHEN\n- [x] fake'],
+    ['heading-other-words', '## NOT DONE WHEN\n- [x] fake'],
+    ['heading-with-bom', `${point(0xfeff)}## DONE WHEN\n- [x] fake`],
+  ].map(([id, text]) => ({ id: `plan-${id}`, text: PLAN_BASE(text) })),
+];
+
+test('red: the row reader never reads a shape outside its subset as a ticked row (hostile inputs)', () => {
+  const quiet = text => rowTicks(text).ticked > 0;
+  assert.equal(quiet(DONE_WHEN_BASE('- [x] a real ticked row')), true, 'control: a real ticked row counts');
+  assert.equal(quiet(DONE_WHEN_BASE('- [X] a real ticked row')), true, 'control: X in either case');
+  assert.equal(quiet(PLAN_BASE('### ROWS\n\n* [x] a real ticked row')), true, 'control: a ROWS heading and a star marker');
+  hostile.expectDefaultDeny(assert, quiet, TICKED_IMPOSTORS);
+  // Every line-break shape of a real page: CRLF reads the same as LF; the rest join lines, so nothing is
+  // read as ticked; a leading byte order mark and tab indents leave the page's rows as they are.
+  const real = DONE_WHEN_BASE('- [x] a real ticked row');
+  hostile.expectDefaultDeny(assert, quiet, hostile.variants(real), { allow: ['crlf', 'bom', 'tabs'] });
+  const large = hostile.timing(rowTicks, size => DONE_WHEN_BASE('- [ ] row\n'.repeat(Math.ceil(size / 10))));
+  assert.ok(large.ok, large.message);
+});
+
+test('red: the row reader reads a merged PR only from a row of the one STATE block the sweep draws (hostile inputs)', () => {
+  const merged = text => rowTicks(text).merged.length > 0;
+  assert.deepEqual(rowTicks(page(71, TWO_UNTICKED)).merged, [900], 'control: the drawn block');
+  const block = statePage(71);
+  const [begin, ...rest] = block.split('\n');
+  const end = rest.pop();
+  const row = rest.find(line => line.includes('|#900|'));
+  const without = rest.filter(line => line !== row).join('\n');
+  const impostors = [
+    ['row-outside-block', `${row}\n\n${begin}\n${without}\n${end}`],
+    ['begin-only', `${begin}\n${rest.join('\n')}`],
+    ['end-before-begin', `${end}\n${rest.join('\n')}\n${begin}`],
+    ['two-blocks', `${block}\n\n${block}`],
+    ['lowercase-status', block.replace('|MERGED|', '|merged|')],
+    ['status-not-merged', block.replace('|MERGED|', '|NOT MERGED|')],
+    ['status-merged-question', block.replace('|MERGED|', '|MERGED?|')],
+    ['no-merge-sha', block.replace(/\|\[c{7}\]\([^)]*\)\|$/m, '|-|')],
+    ['sha-not-a-commit-link', block.replace(/\(https:[^)]*\)/, '(x)')],
+    ['short-commit-in-link', block.replace(`/commit/${COMMIT}`, '/commit/ccccccc')],
+    ['row-joined-by-ls', block.replace(row, `|x|#899|OPEN|-|${hostile.BREAKS.ls}${row}`)],
+    ['block-in-fence', `\`\`\`\n${block}\n\`\`\``],
+  ].map(([id, text]) => ({ id, text: `## DONE WHEN\n\n${TWO_UNTICKED}\n\n${text}\n` }));
+  hostile.expectDefaultDeny(assert, merged, impostors);
 });

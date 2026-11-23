@@ -30,7 +30,7 @@ A gate works in the primary checkout unless it needs its own worktree, then uses
 ## UAT
 
 - G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding.
-- Agent UAT starts as each PR lands, in parallel with the gate lane: it never waits behind a build, and a long one never holds the lane. It passes each step a tool reaches before owner UAT gets the rest; on a delta, rerun only the affected rows.
+- A landed PR's owed agent UAT starts at once, in parallel with the gate lane: it never waits behind a build, and a long one never holds the lane. An `OWNER_TEST_NEEDED` PR still needs its `Agent UAT: PASSED` line before merge. It passes each step a tool reaches before owner UAT gets the rest; on a delta, rerun only the affected rows.
 - **Owner test after merge:** owner UAT never holds a merge. An `OWNER_TEST_NEEDED` PR merges on G2 PASS and green CI; the controller records UAT PENDING on each `Refs` task at merge, open until the owner's OK on the installed build; a failure gets a fix-forward or revert PR.
 - **One real-host round per release:** CI's Linux and Windows runs cover each PR; the qualification matrix and real-host smoke run once per release batch, after its merges, on the installed build, before the owner tests. On a delta, run the rows whose code changed plus one smoke row per mode.
 - A new SHA alone does not invalidate UAT: supply impact evidence and record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED.
