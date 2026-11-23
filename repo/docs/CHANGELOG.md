@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- **The test duration check says when a failed-only rerun cannot help.** When CI fails a test file over its time budget and that file's newest time comes from a shard of the same run that passed in an earlier attempt, the failure line now adds which attempt and shard measured it, that the shard was not run again, and that a failed-only rerun reads the same time, so rerun all jobs. A light run, which reuses an earlier run's test results, and a failed shard's time keep the plain line, since rerunning all jobs would not measure them again. Each CI shard summary now records the run that measured it for this. Exit codes and checks are unchanged.
+- **The test duration check says when a failed-only rerun cannot help.** When CI fails a test file over its time budget and that file's newest time comes from a shard of the same run that passed in an earlier attempt, the failure line now adds which attempt and shard measured it, that the shard was not run again, and that a failed-only rerun reads the same time, so rerun all jobs. A light run's time keeps the plain line, since a light run reuses an earlier run's test results and rerunning it reuses them again. A failed shard's time keeps it too, since any rerun, failed-only included, runs that shard and measures it again. Each CI shard summary now records the run that measured it for this. Exit codes and checks are unchanged.
 
 ## 3.167.0 (One approval question for Claude Code setup)
 
