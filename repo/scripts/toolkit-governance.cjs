@@ -430,12 +430,6 @@ class ToolkitGovernanceCli {
     return { value: answer.answered ? answer.auto_merge : 'unset', answer, removed, lines };
   }
 
-  // The repository's merge-train switch, as merged and read back on this computer.
-  #trainSwitch(root) {
-    const train = governance.mergeTrain(root, this.#registryOptions);
-    return { value: train.on ? 'on' : 'off', fresh: train.fresh };
-  }
-
   // One binding pull request that changes only the named task_prs members ({ auto_merge,
   // merge_train }), built from the exact merged text.
   #prepareSwitch(root, changes) {
@@ -486,8 +480,14 @@ class ToolkitGovernanceCli {
     // The open governance pull requests are read again first, so one closed outside Toolkit no longer
     // reads as pending (it would hold the turn-on with a misleading "not ready" line).
     if (state.state === 'UNDECIDED' && this.#proposalsLive) this.#proposals.refresh(this.#cwd);
-    const merged = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions) : null;
-    const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
+    // Every row that shows what the merged binding sets comes from this one read: other sessions
+    // refresh the same cache, and a read of theirs that fails marks it stale between two reads of ours
+    // (that once showed merge trains Off for a binding that has them on). The bank says when it is stale.
+    const read = state.state === 'ENABLED' && state.root ? governance.mergedBindingRead(state.root, this.#registryOptions) : null;
+    const merged = read ? read.binding : null;
+    const switches = governance.mergedSwitches(merged);
+    // #taskSwitch also retires the old per-app answers once the switch reads back fresh.
+    const task = read ? { ...this.#taskSwitch(state.root), value: merged ? switches.task : 'off' } : null;
     let permissions = { checked: false, missing: 0 };
     try { permissions = this.#permissionsChecker(state.root) || permissions; } catch { /* shown as not checked */ }
     // A repository that is not on and not prepared: what turning on would make (store, parent, checks).
@@ -510,11 +510,10 @@ class ToolkitGovernanceCli {
     if (offered) { try { existing = ciOffer.existingShards(state.root); } catch { existing = null; } }
     const ciShards = offered ? { measured: estimate, open, existing } : null;
     this.#lastCiEstimate = estimate;
-    const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
     // The App row reads its variable and secret only where governance is on or can be turned on here.
     const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
     const reference = governanceBank.bankReference(specs);
     if (explain) {
       this.#print(false, {}, this.#explainShown(state, specs, reference, explain));

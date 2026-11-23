@@ -1,0 +1,7 @@
+### Fixed
+
+- **Governance bank shows the real merged values:** every row of `toolkit governance` that shows what the merged programme file sets now comes from one read of this computer's copy of it. Before, another session's failed read of GitHub could mark that copy stale between two reads, and the bank then showed "Merge trains: Off. Bound in the merged programme file" for a file that has them on; task auto-merge could show Off the same way. When the read the bank uses is stale, the line now says GitHub could not be read just now, why, and that these are the values this computer last read. With no programme file read at all, the bank shows no values and says so.
+
+### Changed
+
+- **Shorter "Nothing to answer here" list:** what the merged programme file sets is one line (for example "Set in .github/toolkit-programme.json: evidence store owner/TRANSPORT-name, parent #421, required check validate, merge trains on"), with how to change it said once. The other rows are one short line each: parallel CI shards already in your CI name the workflow, up-to-date permissions say only "Up to date", and a set-up governance App says to type "explain 1.1", which now holds the steps to stop using it.

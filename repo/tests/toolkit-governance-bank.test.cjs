@@ -90,7 +90,7 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   assert.doesNotMatch(table, /GitHub governance|\| 1\.2 \|/);
   const shown = bank.renderGovernanceBank(undecided);
   assert.match(shown, /^- GitHub governance: Not decided\. Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it\. Reply no store to keep it off\.$/m);
-  assert.match(shown, /^- Toolkit permissions \(Codex\): Up to date\. Codex's Toolkit permission lines are current\.$/m);
+  assert.match(shown, /^- Toolkit permissions \(Codex\): Up to date\.$/m);
   // The answer also covers the settings Toolkit adds on its own after the merge, so the bank names them before it.
   assert.ok(shown.includes(after), shown);
   assert.equal(shown.split(after).length, 2, 'named once');

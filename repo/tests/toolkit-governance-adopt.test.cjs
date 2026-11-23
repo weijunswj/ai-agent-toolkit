@@ -308,7 +308,7 @@ test('parallel CI shards are a Toolkit default by CI time, not a question: slow 
   fs.mkdirSync(path.join(sharded.repo, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(sharded.repo, '.github', 'workflows', 'validate.yml'), 'name: validate\non: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n      - run: npm test -- --shard=${{ matrix.shard }}/3\n');
   const already = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(already.out, /^- Parallel CI shards: Already in your CI\. \.github\/workflows\/validate\.yml already runs your tests in parallel, so Toolkit adds no shard list\.$/m);
+  assert.match(already.out, /^- Parallel CI shards: Already in your CI \(\.github\/workflows\/validate\.yml\)\.$/m);
   const kept = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: slow });
   assert.equal(kept.code, 0, kept.err + kept.out);
   assert.equal(kept.published[0].binding.ci_shards, undefined);
