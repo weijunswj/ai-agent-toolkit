@@ -226,7 +226,9 @@ test('the owner-post rule has one home: the principles page, read before every o
     'one point per task, or one line for a single task, each led by a bold task label, never a line saying nothing needs them',
     'Leave out the working detail of gates, helpers and other spawned work (probes, test counts, round-by-round findings, file lists) unless asked: it stays in their full reports and the evidence store',
     "This binds the controller's own posts to the owner, relays included",
-    "Asked with the native question method, a card holds only the short question and short options, the pick marked; the context, items and each pick's reason go above it as formatted text",
+    // The owner sees only an open card, not the text above it, so the card must stand alone (owner, 23 November).
+    'a card of the native question method holds a short question and short options that make sense with nothing else on screen',
+    'A question that needs context, items or each pick\'s reason goes as written text at the end of the closing message instead',
     // A one-line status cannot lead with three lines, so only asks, plans and explanations do.
     'Asks, plans and explanations lead with problem, fix and skip',
   ]) assert.ok(line.includes(phrase), phrase);
@@ -252,7 +254,7 @@ test('the owner-post rule has one home: the principles page, read before every o
   for (const rel of projects) {
     assert.doesNotMatch(read(rel), /tell the owner in one line what changed|tell the owner once which|and tell the owner; never|tell the owner once what waits|line, and tell the owner once\./i, rel);
   }
-  // Ask cards carry only the question and options; the context sits above them.
+  // Ask cards carry only a short question and options that make sense alone; any longer context goes in the written message, never inside the card.
   for (const rel of [...projects, 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md']) {
     assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen|three lines below|(?<!above )the card names|native change the card named|copy of the card and (?:the owner's )?answer/i, rel);
   }
