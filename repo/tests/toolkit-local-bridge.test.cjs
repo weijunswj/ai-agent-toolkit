@@ -3397,10 +3397,12 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.match(claudeHooks.hooks.UserPromptSubmit[0].hooks[0].command, /toolkit-governance-hook\.cjs" --event UserPromptSubmit$/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
-  // The only turn-end hook is the programme checkpoint: one command, a 30-second timeout and no matcher.
-  for (const [hooks, root] of [[codexHooks, 'PLUGIN_ROOT'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT']]) {
-    assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
-  }
+  // The turn-end hooks: the programme checkpoint (30-second timeout, no matcher) on both hosts, then on
+  // Claude Code only the owed check, which may stop a controller's turn.
+  const checkpointStop = root => ({ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 });
+  assert.deepEqual(codexHooks.hooks.Stop, [{ hooks: [checkpointStop('PLUGIN_ROOT')] }]);
+  assert.deepEqual(claudeHooks.hooks.Stop, [{ hooks: [checkpointStop('CLAUDE_PLUGIN_ROOT'),
+    { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-owed-check-hook.cjs"', timeout: 30 }] }]);
   // The after-tool checkpoint hook runs the same script, only to mark a GitHub write for the turn-end
   // programme refresh. Claude Code also reads the answer tapped on the governance card after the tool runs.
   for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {

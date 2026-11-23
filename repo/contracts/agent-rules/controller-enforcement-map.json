@@ -337,12 +337,17 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
-      "covers": "Gate assignments only: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. Other sessions, and whether the final message was read in full and acted on, stay instruction text.",
+      "covers": "Gate assignments: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. In Claude Code the turn-end owed check stops the controller's turn once for each new CLOSE_DUE, each finished side session the desktop app shows unarchived, and each gate launch or archive with no gate-session record. Sessions on other hosts, and whether the final message was read in full and acted on, stay instruction text.",
       "enforced_by": [
         {
           "kind": "script",
           "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
           "test": "repo/tests/programme-close-due.test.cjs"
+        },
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-owed-check-hook.cjs",
+          "test": "repo/tests/toolkit-owed-check-hook.test.cjs"
         }
       ]
     },

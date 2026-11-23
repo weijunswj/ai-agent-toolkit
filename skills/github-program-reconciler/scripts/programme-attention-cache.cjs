@@ -4,8 +4,9 @@
 // git, gh or network call. `programme.cjs refresh` and `programme.cjs attention` write it after
 // reading the parent document; the session-start line reads it and records which set it last
 // showed. It lives in Toolkit's own user-state, never the repository, and holds no free text: the
-// line, the counts, a digest of the open findings and the longest-stalled work-queue task (its
-// number, code, when it was flagged and the Toolkit's fixed next step for that code).
+// line, the counts, a digest of the open findings, the longest-stalled work-queue task (its
+// number, code, when it was flagged and the Toolkit's fixed next step for that code) and the open
+// net findings (ID, code, task, kind, state and times), which the turn-end owed check reads.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -78,17 +79,17 @@ function writeStaleStamp(repository, record, deps = {}) {
   try { fs.rmSync(path.join(path.dirname(path.dirname(file)), OLD_SHARED_STAMP), { force: true }); } catch { /* housekeeping only */ }
 }
 
-// Records what a run on this computer read: { line, counts, digest, complete, queue }. Keeps the digest
+// Records what a run on this computer read: { line, counts, digest, complete, queue, net }. Keeps the digest
 // last shown at session start. Never throws: a cache that cannot be written only means session start
 // says it has not checked yet.
-function writeCache(repository, { line, counts, digest, complete, queue = null }, deps = {}) {
+function writeCache(repository, { line, counts, digest, complete, queue = null, net = null }, deps = {}) {
   const file = cacheFile(repository, deps);
   if (!file) return false;
   const previous = readCache(repository, deps);
   try {
     writeAtomically(file, {
       schema: CACHE_SCHEMA, repository: String(repository).toLowerCase(),
-      as_of: (deps.now || (() => new Date().toISOString()))(), complete: complete !== false, counts, line, digest, queue: queueOf(queue),
+      as_of: (deps.now || (() => new Date().toISOString()))(), complete: complete !== false, counts, line, digest, queue: queueOf(queue), net: netOf(net),
       shown_digest: previous ? previous.shown_digest || null : null,
     });
     return true;
@@ -102,6 +103,23 @@ function queueOf(value) {
   if (!/^[A-Z][A-Z_]{0,39}$/.test(String(oldest.code)) || Number.isNaN(Date.parse(oldest.since))) return null;
   if (typeof oldest.next !== 'string' || !oldest.next || oldest.next.length > 300 || /[\r\n]/.test(oldest.next)) return null;
   return { count: value.count, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.since, next: oldest.next } };
+}
+
+// The open net findings the cache keeps, when every entry is well formed, else null (an older cache
+// has none, and a reader then says it could not check). At most NET_LIMIT entries.
+const NET_LIMIT = 200;
+const ISO = value => typeof value === 'string' && !Number.isNaN(Date.parse(value));
+function netOf(value) {
+  if (!Array.isArray(value) || value.length > NET_LIMIT) return null;
+  const out = [];
+  for (const entry of value) {
+    if (!entry || !/^[0-9a-f]{12}$/.test(String(entry.id)) || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code))) return null;
+    if (!(entry.issue === null || (Number.isInteger(entry.issue) && entry.issue > 0))) return null;
+    if (!(entry.kind === null || /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/.test(String(entry.kind)))) return null;
+    if (!['new', 'acknowledged'].includes(entry.state) || !ISO(entry.changed_at) || !(entry.due === null || ISO(entry.due))) return null;
+    out.push({ id: entry.id, code: entry.code, issue: entry.issue, kind: entry.kind, state: entry.state, changed_at: entry.changed_at, due: entry.due });
+  }
+  return out;
 }
 
 // `Longest stalled on the work queue: #<n> (<code> flagged <time>Z); next step: <step>`, or null. The time is when the finding was flagged.
@@ -177,4 +195,4 @@ function claimBackgroundStart(repository, deps = {}, kind = 'refresh') {
   return true;
 }
 
-module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText, queueText, staleStampFile, readStaleStamp, writeStaleStamp });
+module.exports = Object.freeze({ CACHE_SCHEMA, NET_LIMIT, netOf, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText, queueText, staleStampFile, readStaleStamp, writeStaleStamp });

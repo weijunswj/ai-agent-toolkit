@@ -1014,6 +1014,25 @@ test('E3: attention writes the longest-stalled work-queue task into this compute
   assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge/);
 });
 
+test('E4: attention writes the open net findings into the cache for the turn-end owed check, oldest first, IDs and times only', () => {
+  const fx = fixture();
+  fx.run(['refresh']);
+  const older = '2026-11-12T00:00:00.000Z';
+  const newer = '2026-11-13T00:03:00.000Z';
+  const merged = { id: state.findingId('reconcile', 'TASK_MERGED_OPEN', 423, ''), source: 'reconcile', code: 'TASK_MERGED_OPEN', issue: 423, head: null, state: 'new', first_seen: newer, changed_at: newer };
+  const close = { id: state.findingId('reconcile', 'CLOSE_DUE', 423, '', 'g1-423-a1'), source: 'reconcile', code: 'CLOSE_DUE', issue: 423, head: null, kind: 'g1-423-a1', state: 'acknowledged', first_seen: older, changed_at: older, due: newer };
+  const notNet = { id: state.findingId('inventory', 'INVENTORY_INCOMPLETE', null, ''), source: 'inventory', code: 'INVENTORY_INCOMPLETE', issue: null, head: null, state: 'new', first_seen: older, changed_at: older };
+  assert.equal(state.NET_CODES.has(notNet.code), false);
+  fx.store.mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, attention: [...(doc.attention || []), merged, close, notNet] }) });
+  fx.run(['attention']);
+  const written = cache.readCache('acme/app', { attentionDir: fx.attentionDir });
+  const mine = written.net.filter(entry => [merged.id, close.id, notNet.id].includes(entry.id));
+  assert.deepEqual(mine, [
+    { id: close.id, code: 'CLOSE_DUE', issue: 423, kind: 'g1-423-a1', state: 'acknowledged', changed_at: older, due: newer },
+    { id: merged.id, code: 'TASK_MERGED_OPEN', issue: 423, kind: null, state: 'new', changed_at: newer, due: null },
+  ]);
+});
+
 // ---- Owner waits --------------------------------------------------------------------------------
 
 test('attention lists every task waiting on the owner, read from the children at read time, and says unknown when a child cannot be read', () => {

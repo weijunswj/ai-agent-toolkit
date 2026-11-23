@@ -40,7 +40,10 @@ const CORPUS_REL = 'repo/tests/hook-pack/corpus';
 const SCHEMA = 'toolkit-hook-pack/v1';
 const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
-const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
+const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']);
+// The fixture's Claude desktop session (fixture.desktop_sessions): this session's own file and the
+// host-session variable the app sets.
+const DESKTOP_SELF = 'local_00000000-0000-4000-8000-000000000001';
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
@@ -159,7 +162,11 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_net', 'desktop_sessions'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.attention_net !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.attention_net)
+    || fixture.attention_net.some(entry => !entry || typeof entry !== 'object' || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code)) || !['new', 'acknowledged'].includes(entry.state)
+      || typeof entry.age_hours !== 'number' || entry.age_hours < 0 || Object.keys(entry).some(key => !['code', 'state', 'age_hours', 'issue', 'kind'].includes(key))))) errors.push('fixture.attention_net needs an enabled repository and entries { code, state, age_hours, issue?, kind? }');
+  if (fixture.desktop_sessions !== undefined && (!Array.isArray(fixture.desktop_sessions) || fixture.desktop_sessions.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry)))) errors.push('fixture.desktop_sessions must list session file objects');
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
     || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged'].includes(fixture.handoff.memory))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }');
@@ -444,6 +451,26 @@ class Fixture {
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
       cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
+    }
+    // Open net findings in this computer's attention cache, as `programme.cjs attention` writes it.
+    if (spec.attention_net) {
+      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
+      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
+      const net = spec.attention_net.map((entry, index) => ({ id: crypto.createHash('sha256').update(`${index}|${entry.code}`).digest('hex').slice(0, 12), code: entry.code,
+        issue: entry.issue ?? null, kind: entry.kind ?? null, state: entry.state, changed_at: this.#now(entry.age_hours * 3600000).toISOString(), due: null }));
+      cache.writeCache(repository, { line: `Attention: ${net.length} new`, counts: { new: net.length, acknowledged: 0 }, digest: 'fixture', complete: true, net }, { home: this.home });
+    }
+    // The Claude desktop app's session files: this session's own, and each listed one it started
+    // (spawnedFrom names this session unless the entry sets its own).
+    if (spec.desktop_sessions) {
+      const folder = path.join(this.home, 'AppData', 'Local', 'Claude-Data', 'claude_fixture', 'claude-code-sessions', 'a', 'b');
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime() }));
+      spec.desktop_sessions.forEach((entry, index) => {
+        const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
+        fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
+      });
+      this.env.CLAUDE_CODE_HOST_SESSION_ID = DESKTOP_SELF;
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
