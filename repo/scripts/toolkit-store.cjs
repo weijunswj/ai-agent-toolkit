@@ -11,8 +11,8 @@
 //   node repo/scripts/toolkit-store.cjs merge-branch         --store <folder> --branch <name> --message <text> [--repo-root <checkout>] [--json]
 //   node repo/scripts/toolkit-store.cjs delete-merged-branch --store <folder> --branch <name> [--repo-root <checkout>] [--json]
 //   node repo/scripts/toolkit-store.cjs handoff              --store <folder> | --out <folder> [--memory <folder>] [--instructions <file>]
-//                                                            [--file <path>]... [--check | --reseed] [--repo-root <checkout>] [--json]
-//                                                            [--baseline <file>] (the after-tool hook's session file)
+//                                                            [--file <path>]... [--check | --reseed] [--confirm-removals] [--replace-memory]
+//                                                            [--repo-root <checkout>] [--json] [--baseline <file>] (the after-tool hook's session file)
 //
 // Every subcommand first runs the same pre-flight and writes nothing when any part fails:
 //   - the governed repository (--repo-root, default the current folder) has a fresh, enabled merged
@@ -49,15 +49,23 @@
 //          folder, instructions and working files into evidence/handoff/<owner>/<repo>/ after a secret
 //          scan, and saves them as above only when the snapshot changes (HANDOFF UNCHANGED sends
 //          nothing). It decides file by file (toolkit-handoff.cjs): it adds a file the snapshot lacks,
-//          writes a differing file only when this copy is newer than its row, and never drops a row
-//          for a file missing here, so an older copy never overwrites or drops newer memory. The sources are remembered in its manifest, so later runs need none. --out writes
-//          the same folder under a folder that is not a bound store (governance off), with no checks
-//          and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what changed and
-//          unsure=<files>: files this copy holds differently from a row written before rows carried a
-//          time, whose order is unknown, so a run keeps the snapshot's copy. --reseed, run only from the
-//          newest copy, takes this copy for those files.
+//          writes a differing file only when this copy is newer than its row, and mirrors deletions of
+//          the memory folder: a memory file missing here is removed (a removed row, and its copy deleted
+//          from the store) only when this computer's folder record or the session baseline held exactly
+//          the snapshot's content, so an older or partial copy never overwrites, drops or brings back
+//          newer memory. The sources are remembered in its manifest, so later runs need none. --out
+//          writes the same folder under a folder that is not a bound store (governance off), with no
+//          checks and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what
+//          changed (removed=<files> among it), unsure=<files> (files this copy holds differently from a
+//          row written before rows carried a time, whose order is unknown, so a run keeps the snapshot's
+//          copy), held_removals=<n>, clock=behind and removed_here=<files>. --reseed, run only from the
+//          newest copy, takes this copy for the unsure files. A run that would remove more than
+//          max(10, a fifth of the memory rows) holds them; --confirm-removals applies them.
+//          --replace-memory with --memory <folder> makes that folder the whole memory set: every memory
+//          row it lacks is removed. Both are manual only (never with --check or --baseline).
 //          A successful run records its store and sources in the Toolkit user-state folder, where the
-//          after-tool hook (toolkit-handoff-hook.cjs) reads them. The hook starts runs with
+//          after-tool hook (toolkit-handoff-hook.cjs) reads them, and, once its save is read back, the
+//          memory folder as it read it (handoff-folders/ there). The hook starts runs with
 //          --baseline <its session file>: such a run also drops rows for files that session deleted,
 //          first readies a fresh cloud clone of the store (unshallows it, and puts a clean detached
 //          HEAD onto the bound branch only as a fast-forward of both), and moves the session baseline.
@@ -71,8 +79,11 @@
 // half-done merge; sync cancels one an older run left.
 //
 // It never force-pushes, mirrors, rebases or resets anything on the remote, never pushes a branch but
-// the bound one (except the checked branch delete), never deletes a file, never touches another
-// repository and never runs a program the caller names. A secret finding names file, line and rule
+// the bound one (except the checked branch delete), never touches another repository and never runs a
+// program the caller names. It never deletes a file, with one exception: handoff deletes the files its
+// plan removes from its own snapshot's memory area (evidence/handoff/<owner>/<repo>/MEMORY.md and
+// .../memory/), each listed as removed in the manifest of the same commit; every other deletion, by any
+// subcommand or in any commit checked before a push, is refused. Git history keeps every removed file. A secret finding names file, line and rule
 // only, never the text.
 //
 // Exit codes: 0 done, 1 stopped (nothing pushed unless the line says so), 2 usage.
@@ -86,6 +97,7 @@ const governanceState = require('./toolkit-governance-state.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const { scanText } = require('../../skills/secure-ci-cd/scripts/secret-patterns.cjs');
 const { resolveGit } = require('../../skills/secure-ci-cd/scripts/local-security-scan.cjs');
+const { SCHEMA: HANDOFF_SCHEMA } = require('./toolkit-handoff.cjs');
 
 class StoreError extends Error {
   constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; this.stopped = stopped; this.next = next; }
@@ -403,16 +415,17 @@ class EvidenceStore {
       const parents = (split === -1 ? raw : raw.slice(0, split)).split('\n').filter(line => line.startsWith('parent ')).map(line => line.slice(7));
       for (const hit of scanText(split === -1 ? '' : raw.slice(split + 2))) findings.push(`commit ${sha.slice(0, 7)} message:${hit.line} (${hit.rule})`);
       if (!parents.length) throw new StoreError(`commit ${sha.slice(0, 7)} has no parent, so it does not continue the store's history.`, KEPT_REFUSED);
-      if (parents.length === 1) this.#checkChange(['diff-tree', '-r', ...RAW_DIFF, parents[0], sha], `commit ${sha.slice(0, 7)}`);
+      // A deletion passes only as the handoff snapshot's own: its manifest in that commit lists it removed.
+      if (parents.length === 1) this.#checkChange(['diff-tree', '-r', ...RAW_DIFF, parents[0], sha], `commit ${sha.slice(0, 7)}`, file => this.#handoffRemoval(file, sha));
     }
-    this.#checkChange(['diff-tree', '-r', ...RAW_DIFF, this.#tracking, 'HEAD'], `the change since the store tip ${this.#must(['rev-parse', this.#tracking], 'the store tip could not be read.', 'retry.').trim().slice(0, 7)}`);
+    this.#checkChange(['diff-tree', '-r', ...RAW_DIFF, this.#tracking, 'HEAD'], `the change since the store tip ${this.#must(['rev-parse', this.#tracking], 'the store tip could not be read.', 'retry.').trim().slice(0, 7)}`, file => this.#handoffRemoval(file, 'HEAD'));
     const scan = this.#scanHistory(range, { findings, next: KEPT_REFUSED });
     if (scan) throw scan;
   }
 
-  #checkChange(args, label) {
+  #checkChange(args, label, removals = null) {
     const entries = this.#rawEntries(this.#must(args, `${label} could not be read.`, 'retry.'));
-    try { this.#check(entries, { scan: false, empty: true }); } catch (error) {
+    try { this.#check(entries, { scan: false, empty: true, removals }); } catch (error) {
       if (!(error instanceof StoreError)) throw error;
       throw new StoreError(`${label}: ${error.stopped}`, KEPT_REFUSED);
     }
@@ -438,12 +451,27 @@ class EvidenceStore {
     return entries;
   }
 
-  // Refuses links, submodules and deletions; scans each new or changed blob as staged.
-  #check(entries, { prefixes = true, scan = true, empty = false } = {}) {
+  // Whether a deleted path is the handoff snapshot's own removal: a file in a snapshot folder's memory
+  // area (MEMORY.md, memory/...) that the folder's manifest at `rev` (a commit, or '' for the staged
+  // copy) lists as removed and not as a current file.
+  #handoffRemoval(file, rev) {
+    const match = /^(evidence\/handoff\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(MEMORY\.md|memory\/.+)$/.exec(file);
+    if (!match) return false;
+    const shown = this.#git(['show', `${rev}:${match[1]}/manifest.json`]);
+    let manifest = null;
+    try { manifest = shown.ok ? JSON.parse(shown.out) : null; } catch { manifest = null; }
+    const lists = key => Array.isArray(manifest?.[key]) && manifest[key].some(row => row && row.path === match[2]);
+    return manifest?.schema === HANDOFF_SCHEMA && lists('removed') && !lists('files');
+  }
+
+  // Refuses links, submodules and deletions (except a deletion `removals` accepts, the handoff
+  // snapshot's own); scans each new or changed blob as staged.
+  #check(entries, { prefixes = true, scan = true, empty = false, removals = null } = {}) {
     if (!entries.length && !empty) throw new StoreError('nothing would change in the store.', 'name a path with new or changed files.');
     const findings = [];
     const unread = [];
     for (const entry of entries) {
+      if (entry.status === 'D' && removals && removals(entry.file)) continue;
       if (entry.status === 'D' || (entry.status === 'R' && entry.score !== 100)) throw new StoreError(`${entry.from || entry.file} would be deleted or changed away; the store never loses a file this way.`, 'leave it in place.');
       if (!/^(?:A|M|R|C)$/.test(entry.status)) throw new StoreError(`${entry.file} has a change of type ${entry.status} the store command does not make.`, 'save a plain added or changed file instead.');
       if (!/^1006(?:44|55)$/.test(entry.mode)) throw new StoreError(`${entry.file} is a link or a nested repository, which the store command never commits.`, 'copy the real file in instead.');
@@ -576,7 +604,19 @@ class EvidenceStore {
     return { store: this.#store, branch: this.#branch, commit: this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim(), ...(ahead > 0 ? { pending: ahead } : {}), ...(cancelled ? { cancelled_merge: true } : {}) };
   }
 
-  save({ paths, message }) {
+  save({ paths, message }) { return this.#save(paths, message, []); }
+
+  // The handoff snapshot's save: as save for its folder, and it also stages exactly the deletions its
+  // plan lists (files already gone from the checkout), each passing only when the staged manifest lists
+  // it as removed from the snapshot's memory area.
+  saveHandoff({ folder, deletions = [], message }) {
+    const removing = deletions.map(rel => storePath(`${folder}/${rel}`));
+    if (removing.some(file => !file)) throw new StoreError('a handoff removal is not a plain path inside the snapshot folder.', 'run handoff again.');
+    for (const file of removing) if (this.#exists(file)) throw new StoreError(`${file} is still in the store checkout, so its removal was not made.`, 'run handoff again.');
+    return this.#save([folder], message, removing);
+  }
+
+  #save(paths, message, removing) {
     const files = paths.map(storePath);
     if (!files.length || files.some(file => !file)) throw new StoreError('a --path is not a plain path inside the store.', 'name each path relative to the store top, with no .. or .git part.', 2);
     for (const file of files) {
@@ -588,11 +628,13 @@ class EvidenceStore {
     this.#fetch();
     this.#ready();
     this.#must(['add', '--ignore-removal', '--', ...files], 'git add refused the paths (an ignored or missing file?).', 'check the paths, then retry.');
+    if (removing.length) this.#must(['rm', '--cached', '--quiet', '--ignore-unmatch', '--', ...removing], 'git rm refused the handoff removals.', 'run handoff again.');
     const entries = this.#staged();
     // The same save run again after a failed push: the files are already in the kept commit.
     if (!entries.length && this.#position().ahead > 0) return this.#finish(this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim(), { files: files.length });
+    const named = new Set(removing);
     let scan;
-    try { scan = this.#check(entries).stop; } catch (error) { this.#git(['reset', '--quiet']); throw error; }
+    try { scan = this.#check(entries, { removals: file => named.has(file) && this.#handoffRemoval(file, '') }).stop; } catch (error) { this.#git(['reset', '--quiet']); throw error; }
     if (scan) { this.#git(['reset', '--quiet']); throw scan; }
     const commit = this.#commit(message);
     return this.#finish(commit, { files: files.length });
@@ -683,13 +725,15 @@ const USAGE = `Usage: node repo/scripts/toolkit-store.cjs <${COMMANDS.join('|')}
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!COMMANDS.includes(command)) throw new StoreError(`unknown command ${JSON.stringify(command || '')}.`, 'see the usage line.', 2);
-  const options = { command, json: false, paths: [], files: [], check: false, reseed: false };
+  const options = { command, json: false, paths: [], files: [], check: false, reseed: false, confirmRemovals: false, replaceMemory: false };
   const names = { '--store': 'store', '--repo-root': 'repoRoot', '--path': 'paths', '--message': 'message', '--from': 'from', '--to': 'to', '--branch': 'branch', '--out': 'out', '--memory': 'memory', '--instructions': 'instructions', '--baseline': 'baseline' };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === '--json') { options.json = true; continue; }
     if (arg === '--check' && command === 'handoff') { options.check = true; continue; }
     if (arg === '--reseed' && command === 'handoff') { options.reseed = true; continue; }
+    if (arg === '--confirm-removals' && command === 'handoff') { options.confirmRemovals = true; continue; }
+    if (arg === '--replace-memory' && command === 'handoff') { options.replaceMemory = true; continue; }
     const value = rest[index += 1];
     if (!VALUE_FLAGS[command].includes(arg) || value === undefined || value.startsWith('--')) throw new StoreError(`unknown or incomplete argument ${JSON.stringify(arg)} for ${command}.`, 'see the usage line.', 2);
     if (arg === '--path') options.paths.push(value);
@@ -702,7 +746,10 @@ function parseArgs(argv) {
   if (command === 'move' && (!options.from || !options.to)) throw new StoreError('move needs --from and --to.', 'add both.', 2);
   if (['merge-branch', 'delete-merged-branch'].includes(command) && !options.branch) throw new StoreError(`${command} needs --branch.`, 'add --branch <store branch>.', 2);
   if (command === 'handoff' && Boolean(options.store) === Boolean(options.out)) throw new StoreError('handoff needs one of --store (a bound store checkout) or --out (any other folder).', 'add one of them.', 2);
-  if (options.reseed && (options.check || options.baseline)) throw new StoreError('--reseed is a manual run: it takes neither --check nor --baseline.', 'drop one of them.', 2);
+  for (const [flag, on] of [['--reseed', options.reseed], ['--confirm-removals', options.confirmRemovals], ['--replace-memory', options.replaceMemory]]) {
+    if (on && (options.check || options.baseline)) throw new StoreError(`${flag} is a manual run: it takes neither --check nor --baseline.`, 'drop one of them.', 2);
+  }
+  if (options.replaceMemory && !options.memory) throw new StoreError('--replace-memory needs --memory <folder>: the folder the snapshot mirrors from now on.', 'add --memory <folder>.', 2);
   return options;
 }
 
@@ -752,27 +799,38 @@ function runHandoff(options, deps) {
   const sources = handoff.normaliseSources({ memory: options.memory, instructions: options.instructions, files: options.files }, cwd);
   const platform = deps.platform || process.platform;
   const wrap = action => { try { return action(); } catch (error) { if (error instanceof handoff.HandoffError) throw new StoreError(error.stopped, error.next); throw error; } };
+  // This computer's folder records (what it last saved from each memory folder) sit beside the run record.
+  const records = path.join(path.dirname(handoffStateFile(deps)), handoff.FOLDER_RECORDS);
+  const list = (key, value) => (value?.length ? { [key]: value.join(',') } : {});
+  // What a run or check says about removals: removed now, held over the limit, a clock behind the
+  // snapshot, and removed files this copy holds with different content.
+  const removals = found => ({ ...list('removed', found.removed), ...(found.held ? { held_removals: found.held } : {}), ...(found.clockBehind ? { clock: 'behind' } : {}), ...list('removed_here', found.removedHere) });
   if (options.check) {
-    const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs, platform }));
-    return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...(found.changed?.length ? { changed: found.changed.join(',') } : {}), ...(found.unsure?.length ? { unsure: found.unsure.join(',') } : {}), ...(found.kept?.length ? { kept: found.kept.join(',') } : {}) };
+    const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs, platform, records }));
+    return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...list('changed', found.changed), ...list('unsure', found.unsure), ...list('kept', found.kept), ...removals(found) };
   }
-  const stamp = { taken_at: (deps.now ? deps.now() : new Date()).toISOString(), toolkit_version: require('./toolkit-version.cjs').readToolkitVersion(), repository_commit: commit };
+  const now = deps.now ? deps.now() : new Date();
+  const stamp = { taken_at: now.toISOString(), toolkit_version: require('./toolkit-version.cjs').readToolkitVersion(), repository_commit: commit };
   // A hook-started run names the hook's session file: the files that session held (so a file it
   // deleted leaves the snapshot) and each source's realness as judged when it started. Afterwards the
   // held files move to what this run saw; the realness stays as first judged.
   const sessionFile = options.baseline ? path.resolve(cwd, options.baseline) : null;
   const held = sessionFile ? readJsonFile(fs, sessionFile) : null;
   const session = sessionFile ? { rows: Array.isArray(held?.rows) ? held.rows : null, real: held?.real && typeof held.real === 'object' ? held.real : null } : null;
+  // Called only once the run's save is read back (or nothing needed saving), so the folder record is
+  // what this computer has saved.
   const remember = planned => {
     rememberHandoff(deps, { [options.store ? 'store' : 'out']: base, repo_root: repoRoot, repository, at: stamp.taken_at });
+    handoff.writeFolderRecord(records, planned.record, { fs });
     if (sessionFile && planned) {
       const now = readJsonFile(fs, sessionFile) || {};
       try { fs.writeFileSync(sessionFile, `${JSON.stringify({ ...now, rows: planned.seen, real: now.real && typeof now.real === 'object' ? now.real : planned.real }, null, 2)}\n`, { mode: 0o600 }); } catch { /* the next run compares again */ }
     }
   };
-  const kept = planned => (planned.kept.length ? { kept: planned.kept.join(',') } : {});
+  const kept = planned => ({ ...list('kept', planned.kept), ...removals(planned) });
+  const decide = () => wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session, reseed: options.reseed, records, now, confirm: options.confirmRemovals, replace: options.replaceMemory }));
   if (options.out) {
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session, reseed: options.reseed }));
+    const planned = decide();
     if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
     remember(planned);
     return planned.unchanged
@@ -784,13 +842,13 @@ function runHandoff(options, deps) {
     store.open({ store: options.store, repoRoot: options.repoRoot, prepare: Boolean(sessionFile) });
     // Sync first, so the compare reads the snapshot the store already holds (another writer's too).
     const synced = store.sync();
-    const planned = wrap(() => handoff.plan({ base, repository, sources, stamp, fs, platform, session, reseed: options.reseed }));
+    const planned = decide();
     // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
     // save sends them now rather than calling them unchanged.
     if (planned.unchanged && !store.pending(planned.folder)) { remember(planned); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }
     const undo = planned.unchanged ? null : handoff.write(base, planned, repository, { fs });
     let saved;
-    try { saved = store.save({ paths: [planned.folder], message: `Refresh controller handoff snapshot for ${repository}` }); } catch (error) {
+    try { saved = store.saveHandoff({ folder: planned.folder, deletions: planned.unchanged ? [] : planned.deletes, message: `Refresh controller handoff snapshot for ${repository}` }); } catch (error) {
       // Stopped before a commit (a dropped fetch, a refused scan): put the snapshot folder back as it
       // was, so the checkout can still fast-forward and the next save is not blocked. A kept commit
       // stays for the next run to send.
