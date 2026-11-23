@@ -1615,10 +1615,10 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
 
 // The stale check at session start (a silent safety net for a missed close or a duplicate child): the
 // line from this computer's stamp ({ full, short }), or null. The background run
-// (programme-refresh-trigger.cjs startStaleSweep) writes the stamp at most once per local date per
-// repository; this reads one local file and, when today's run is missing, starts it (at most one start
-// per 15 minutes per repository, and only when `start` allows). No gh, git or network call. Today's
-// rows give one line; a day with no rows gives none; a recorded failure gives a line naming which read
+// (programme-refresh-trigger.cjs startStaleSweep) writes the stamp; this reads one local file and, when
+// the stamp no longer stands (another local date, a day old, or older than this computer's last
+// programme read: stampCurrent), starts it (at most one start per 15 minutes per repository, and only
+// when `start` allows). No gh, git or network call. The rows of a stamp that stands give one line; a day with no rows gives none; a recorded failure gives a line naming which read
 // failed and how to retry, so a check that keeps failing is never silent.
 const STALE_KINDS = Object.freeze(['JUDGE?', 'OWNER OK?', 'FOLD?', 'MOVE?', 'KEPT OPEN?', 'UNTICKED?', 'POLISH']);
 const STALE_FAILED = Object.freeze({
@@ -1635,19 +1635,26 @@ function staleCommand(root, deps) {
   const script = require('./toolkit-user-state.cjs').managedScript('toolkit-controller-check.cjs', { userHome: deps.home });
   return `node "${script}" --checkout "${String(root).replace(/\\/g, '/')}" --skip ${staleOnlySkip}`;
 }
-// The line from a stamp entry alone, with no start: today's rows, or a recorded failure.
-function staleStampLine(last, root, deps) {
+// Whether the stamp's rows still stand: the check's own rule (stampCurrent), against this computer's
+// last programme read for the repository, so a sweep since the stamp never shows its rows again.
+function staleStampCurrent(repository, last, deps) {
+  const check = require('./toolkit-controller-check.cjs');
+  return check.stampCurrent(last, new Date(Date.parse((deps.now || (() => new Date().toISOString()))())), check.staleSweptAt(repository, deps));
+}
+// The line from a stamp entry alone, with no start: the rows of a stamp that still stands, or a
+// recorded failure.
+function staleStampLine(repository, last, root, deps) {
   if (!last) return null;
   const now = new Date(Date.parse((deps.now || (() => new Date().toISOString()))()));
   const today = staleLocalDate(now);
   const command = staleCommand(root, deps);
-  if (last.date === today) {
+  if (staleStampCurrent(repository, last, deps)) {
     const rows = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
     if (!rows.length) return null;
     const counts = STALE_KINDS.map(kind => [kind, rows.filter(row => row.startsWith(kind)).length]).filter(([, n]) => n);
     const what = `${rows.length} row${rows.length === 1 ? '' : 's'} to answer`;
     return {
-      full: `Stale check ${today}: ${what} (${counts.map(([kind, n]) => `${kind} ${n}`).join(', ')}). Run ${command} for the rows (it reads nothing again today). Controller: answer each this turn: close each child you judge done yourself, and put each OWNER OK? row, a FOLD? (a duplicate) or a child you judge obsolete in your next ask to the owner.`,
+      full: `Stale check ${today}: ${what} (${counts.map(([kind, n]) => `${kind} ${n}`).join(', ')}). Run ${command} for the rows (it reads nothing again while they stand). Controller: answer each this turn: close each child you judge done yourself, and put each OWNER OK? row, a FOLD? (a duplicate) or a child you judge obsolete in your next ask to the owner.`,
       short: `Stale check ${today}: ${what}; run ${command}. Controller: answer each this turn.`,
     };
   }
@@ -1661,9 +1668,8 @@ function staleStampLine(last, root, deps) {
 }
 function staleLine(repository, root, deps = {}, { start = true } = {}) {
   const last = staleStampFor(repository, deps);
-  const line = staleStampLine(last, root, deps);
-  const today = staleLocalDate(new Date(Date.parse((deps.now || (() => new Date().toISOString()))())));
-  if (start && (!last || last.date !== today)) {
+  const line = staleStampLine(repository, last, root, deps);
+  if (start && !staleStampCurrent(repository, last, deps)) {
     const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
     if (cache.claimBackgroundStart(repository, deps, 'stale')) {
       try { (deps.startStaleSweep || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startStaleSweep)(root, deps); } catch { /* retried at a later start */ }
@@ -1835,7 +1841,7 @@ function cloudProgrammeLines(state, registryOptions = {}, deps = {}) {
       const attention = cache.sessionAttention(binding.repository, deps);
       if (attention.line) lines.push({ full: `${attention.line}.${attention.open ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`, short: null });
     }
-    const stale = staleStampLine(staleStampFor(binding.repository, deps), state.root, deps);
+    const stale = staleStampLine(binding.repository, staleStampFor(binding.repository, deps), state.root, deps);
     if (stale) lines.push(stale);
     // No attention cache and no stale line to show: say where the check runs, never stay silent.
     if (!cached && !stale) lines.push(CLOUD_PROGRAMME_WAITS);

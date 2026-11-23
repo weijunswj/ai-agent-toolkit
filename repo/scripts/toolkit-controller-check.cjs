@@ -140,7 +140,7 @@ function defaultGh(args) {
 // The session-start line reads the same file (toolkit-governance-gate.cjs).
 const defaultStamp = () => {
   const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
-  return { read: repo => cache.readStaleStamp(repo), write: (repo, record) => cache.writeStaleStamp(repo, record) };
+  return { read: repo => cache.readStaleStamp(repo), write: (repo, record) => cache.writeStaleStamp(repo, record), sweptAt: repo => staleSweptAt(repo) };
 };
 
 function defaultGit(cwd, args) {
@@ -375,6 +375,28 @@ function untickedMemory(last) {
 
 // The local date (YYYY-MM-DD) of a time, which is the day the stamp counts in.
 const localDate = time => `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`;
+const STAMP_DAY_MS = 24 * 60 * 60 * 1000;
+
+// When this computer last read the programme state for a repository (the attention cache's time: a
+// refresh, an attention list or an answered finding writes it), or null when it has none.
+function staleSweptAt(repository, deps = {}) {
+  try { return require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs').readCache(repository, deps)?.as_of || null; } catch { return null; }
+}
+
+// Whether a stamp's rows still stand at `now`, for the check and the session-start line alike: it names
+// this local date, it is under a day old by its own instant (so a stamp a writer in another time zone
+// dated today still ends), and no programme read on this computer (`sweptAt`) is newer than the one it
+// was made from (its swept_at, else its own time). A sweep since the stamp may have closed the children
+// it lists, so its rows are read again rather than replayed.
+function stampCurrent(last, now, sweptAt = null) {
+  if (!last || typeof last !== 'object' || last.date !== localDate(now)) return false;
+  const at = Date.parse(last.at);
+  if (!Number.isFinite(at) || now.getTime() - at >= STAMP_DAY_MS) return false;
+  const swept = Date.parse(sweptAt || '');
+  if (!Number.isFinite(swept)) return true;
+  const own = Date.parse(last.swept_at || last.at);
+  return Number.isFinite(own) && swept <= own;
+}
 
 // The stale check, for the controller: children whose PRs merged, to judge done or not (JUDGE?) and
 // close yourself when done; a merged child whose only step left is the owner's, after the agent's UAT
@@ -392,7 +414,8 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
   const today = localDate(now);
   const head = (count, when) => `${count} row${count === 1 ? '' : 's'} (${when}): judge each JUDGE? against its child's DONE WHEN, PR GRAPH and notes, and close each child you judge done yourself with a closing comment; put each OWNER OK? row, each FOLD? (a duplicate) and any child you judge obsolete in your next ask to the owner; MOVE?, KEPT OPEN?, UNTICKED? and POLISH rows are yours`;
   const last = stamp.read(repo);
-  if (last && last.date === today) {
+  const sweptAt = () => { try { return typeof stamp.sweptAt === 'function' ? stamp.sweptAt(repo) : null; } catch { return null; } };
+  if (stampCurrent(last, now, sweptAt())) {
     const kept = Array.isArray(last.rows) ? last.rows.filter(row => typeof row === 'string') : [];
     const heldAgain = typeof last.held === 'string' && last.held ? [last.held] : [];
     if (kept.length) return { state: 'attention', lines: [head(kept.length, `${today}, swept at ${last.at}, shown again`), ...kept, ...heldAgain] };
@@ -483,7 +506,9 @@ function checkStale({ run, gh, stamp, checkout, repo, parents, now }) {
     else if (count === POLISH_CAP) rows.push(`POLISH FULL #${child.number}: ${count} rows (${under}): ship it as one PR, then open a fresh one`);
   }
   const heldLine = held.length ? `held, not proposed: ${held.join(', ')}` : '';
-  try { stamp.write(repo, { date: today, at: now.toISOString(), rows, ...(heldLine ? { held: heldLine } : {}), ...(Object.keys(unticked).length ? { unticked } : {}) }); } catch (error) {
+  // The programme read this run saw (its own attention list writes it), so a later read ends the stamp.
+  const swept = sweptAt();
+  try { stamp.write(repo, { date: today, at: now.toISOString(), ...(swept ? { swept_at: swept } : {}), rows, ...(heldLine ? { held: heldLine } : {}), ...(Object.keys(unticked).length ? { unticked } : {}) }); } catch (error) {
     return { state: 'failed', lines: [`stamp not written (${error.message}); the next run sweeps again`, ...rows, ...(heldLine ? [heldLine] : [])] };
   }
   if (!rows.length) return { state: 'ok', lines: [`no stale children (${today}, ${children.length} children read)${heldLine ? `; ${heldLine}` : ''}`] };
@@ -609,5 +634,5 @@ function main(argv = process.argv.slice(2), deps = {}) {
 // the command its line names.
 const staleOnlySkip = CHECKS.filter(name => name !== 'stale').join(',');
 
-module.exports = { parseArgs, controllerCheck, format, main, polishRows, rowTicks, localDate, CHECKS, SCRIPTS, staleOnlySkip };
+module.exports = { parseArgs, controllerCheck, format, main, polishRows, rowTicks, localDate, stampCurrent, staleSweptAt, CHECKS, SCRIPTS, staleOnlySkip };
 if (require.main === module) process.exitCode = main();

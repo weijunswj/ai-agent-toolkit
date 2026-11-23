@@ -213,6 +213,23 @@ test('red: a cloud session with the session\'s own attention cache and today\'s 
   assert.match(world.start(world.repo, {}), new RegExp(`Stale check ${today}: 1 row to answer`));
 });
 
+// The session-start line follows the check's own rule: a stamp older than this computer's last
+// programme read shows no rows (they may list children closed since) and starts the check again.
+test('red: session start shows no stale rows from a stamp older than the last programme read, and starts the check again', t => {
+  const world = cloudProgrammeWorld(t);
+  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+  const now = new Date('2026-11-22T10:00:00.000Z');
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  cache.writeStaleStamp('example-owner/governed', { date: today, at: '2026-11-22T09:00:00.000Z', rows: ['POLISH OVER CAP #20: 9 rows (ROWS), cap 8'] }, world.programmeDeps);
+  cache.writeCache('example-owner/governed', { line: 'Attention: clear', counts: { new: 0, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => '2026-11-22T09:30:00.000Z' });
+  const text = world.start(world.repo, {});
+  assert.doesNotMatch(text, /Stale check/, 'the rows are not replayed');
+  assert.equal(world.started.stale.length, 1, 'the check starts again in the background');
+  // The same stamp with no newer programme read still stands.
+  cache.writeCache('example-owner/governed', { line: 'Attention: clear', counts: { new: 0, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => '2026-11-22T08:30:00.000Z' });
+  assert.match(world.start(world.repo, {}), new RegExp(`Stale check ${today}: 1 row to answer \\(POLISH 1\\)\\. Run node "[^"]*" [^\\n]*?\\(it reads nothing again while they stand\\)`));
+});
+
 test('a cloud session with no repository at or under its start folder gets no governance text', (t) => {
   const ctx = scratch(t);
   fs.mkdirSync(path.join(ctx.root, 'empty'));

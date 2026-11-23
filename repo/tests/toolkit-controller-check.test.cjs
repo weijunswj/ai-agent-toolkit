@@ -315,6 +315,53 @@ test('a second run on the same day says so and reads nothing', () => {
   assert.equal(sweep({ stamps: { 'acme/app': { date: '2026-11-13', at: '2026-11-13T01:00:00Z' } } }).written.length, 1);
 });
 
+// 23 Nov 2026: the stale check stamped its rows at 16:55Z on 22 Nov, which is 00:55 on 23 Nov in
+// Singapore, so every run on 23 Nov replayed them without a read, polish children closed since
+// included, while the programme was read again all day. A same-day stamp stands only while it is
+// under a day old by its own instant and no programme read on this computer is newer than its own.
+test('red: a stamp older than the latest programme read, or a day old by its own time, is read again, never replayed', t => {
+  const zone = process.env.TZ;
+  process.env.TZ = 'Asia/Singapore';
+  t.after(() => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });
+  const { localDate, stampCurrent } = require('../scripts/toolkit-controller-check.cjs');
+  const stampedAt = '2026-11-22T16:55:00.000Z';
+  const now = new Date('2026-11-23T06:00:00Z');
+  assert.equal(localDate(new Date(stampedAt)), '2026-11-23', 'the 16:55Z stamp counts as 23 Nov in Singapore');
+  assert.equal(localDate(now), '2026-11-23');
+  const stamp = { date: '2026-11-23', at: stampedAt, swept_at: stampedAt, rows: ['POLISH OVER CAP #1404: 9 rows (ROWS), cap 8'] };
+  const check = ({ stamped = stamp, sweptAt = null } = {}) => {
+    const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }) } };
+    const setup = world({ results, stamps: { 'acme/app': stamped }, gh: () => ({ status: 0, stdout: '' }) });
+    setup.deps.now = () => now;
+    const reads = [];
+    setup.deps.stamp.sweptAt = repo => { reads.push(repo); return sweptAt; };
+    const outcome = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), setup.deps).checks.find(item => item.name === 'stale');
+    return { outcome, reads: setup.calls.filter(call => call.gh).length, written: setup.written.map(entry => entry['acme/app']) };
+  };
+  // The programme was read at 05:00Z, after the stamp: its rows are read again and stamped afresh.
+  const after = check({ sweptAt: '2026-11-23T05:00:00.000Z' });
+  assert.equal(after.reads, 1, 'the sub-issues are read again');
+  assert.equal(after.outcome.state, 'ok', 'the closed polish child is gone');
+  assert.equal(after.written.length, 1);
+  assert.equal(after.written[0].swept_at, '2026-11-23T05:00:00.000Z', 'the new stamp records the programme read it saw');
+  // No newer programme read: the same-day stamp stands, with no read.
+  assert.equal(check({ sweptAt: stampedAt }).reads, 0);
+  assert.equal(check().reads, 0, 'no attention cache on this computer: the stamp stands');
+  assert.equal(stampCurrent(stamp, now, '2026-11-23T05:00:00.000Z'), false);
+  assert.equal(stampCurrent(stamp, now, stampedAt), true);
+  // A stamp without swept_at (written before this change) is measured from its own time.
+  assert.equal(stampCurrent({ date: '2026-11-23', at: stampedAt }, now, '2026-11-23T05:00:00.000Z'), false);
+  assert.equal(stampCurrent({ date: '2026-11-23', at: stampedAt }, now, stampedAt), true);
+  // A day old by its own instant, whatever date it names (a writer in another time zone), is read again.
+  const old = { date: '2026-11-23', at: '2026-11-22T05:00:00.000Z', swept_at: '2026-11-22T05:00:00.000Z' };
+  assert.equal(stampCurrent(old, now, null), false);
+  assert.equal(check({ stamped: old }).reads, 1);
+  // A stamp from another local date, or with no readable time, never stands.
+  assert.equal(stampCurrent({ ...stamp, date: '2026-11-22' }, now, null), false);
+  assert.equal(stampCurrent({ ...stamp, at: 'soon' }, now, null), false);
+  assert.equal(stampCurrent(null, now, null), false);
+});
+
 test('compact output prints every stale row, and a same-day run shows the day\'s rows again', () => {
   const children = Array.from({ length: 6 }, (_, i) => issue(50 + i, { body: 'No reason given', created_at: '2026-11-14T02:00:00Z' }));
   const results = { [SCRIPTS.programme]: { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }) } };
