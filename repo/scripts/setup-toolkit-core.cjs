@@ -33,7 +33,7 @@ const {
   questionBankApprovalPayload, questionBankSemanticIdentity, withPresentationMetadata, ensurePresentationMetadata,
   choiceByPresentationReference, answerable, renderQuestionRows, renderCompactQuestionTable, renderQuestionBankHeader,
   changedOnlyExample, isAllRecommendedAnswer, looksLikeConciseSubmission, parseConciseQuestionBankAnswer,
-  strongDefaultRow, STRONG_DEFAULT_STATES, pendingDefaults, renderStrongDefaultBank, parseStrongDefaultAnswer, STRONG_DEFAULT_REPLY,
+  strongDefaultRow, STRONG_DEFAULT_STATES, pendingDefaults, renderStrongDefaultBank, parseStrongDefaultAnswer, strongDefaultReply, approvalQuestion,
   assertQuestionBankAnswerBinding,
 } = require('./toolkit-question-bank.cjs');
 
@@ -2330,7 +2330,7 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
 const isStrongDefaultBank = (specs) => specs.some((spec) => spec.strong_default);
 function renderStrongDefaultSetupBank(specs, markdown) {
   // With every setting answered by a flag there is nothing to reply, so the reply line is left out.
-  const reply = answerable(specs).every((spec) => spec.selected) ? [] : [STRONG_DEFAULT_REPLY, ''];
+  const reply = answerable(specs).every((spec) => spec.selected) ? [] : [strongDefaultReply(pendingDefaults(specs).length), ''];
   return [QUESTION_BANK_BEGIN, ...renderStrongDefaultBank(specs, { markdown }), '', EXPLAIN_HINT, '', ...reply, QUESTION_BANK_COMPLETE, ''].join('\n');
 }
 
@@ -2439,7 +2439,7 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
     // The bank as a run with no setup flags shows it; the planned specs below carry the plan's selections.
     ...renderStrongDefaultBank(claudeSpecs.map((spec) => ({ ...spec, selected: '' })), { markdown: true }).map((line) => line.replace(/^(#+) /, '$1# ')),
     '',
-    STRONG_DEFAULT_REPLY,
+    strongDefaultReply(pendingDefaults(claudeSpecs.map((spec) => ({ ...spec, selected: '' }))).length),
     '',
     '## Claude Code rows in full',
     '',
@@ -2824,7 +2824,6 @@ function keepCurrentAnswers(args, current, specs, decision, options = {}) {
     'To change an answer, say setup toolkit.',
     '',
   ].join('\n'), kept, options);
-  if (args.host === 'claude-code') resolveClaudeTopology(args, current);
   const confirmedSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
   const before = answerable(specs).map((spec) => `${spec.id}:${refreshRowShape(spec)}`).join('|');
@@ -2878,11 +2877,12 @@ function printConfirmedChoices(args, current, confirmedSpecs, heading) {
   }
 }
 
-const STRONG_DEFAULT_PROMPT = 'Apply these defaults? Enter yes, no, or changes such as 3.5=off: ';
+// The terminal prompt: the same approval question as the bank, for the same count of pending settings.
+const strongDefaultPrompt = (specs) => `${approvalQuestion(pendingDefaults(specs).length)} Enter yes, no, or changes such as 3.5=off: `;
 
 async function promptForStrongDefaultAnswer(specs, rl, fixed) {
   for (;;) {
-    const reply = await rl.question(STRONG_DEFAULT_PROMPT);
+    const reply = await rl.question(strongDefaultPrompt(specs));
     // An empty reply is not a yes; stop rather than ask again forever (a closed terminal keeps answering empty).
     if (!String(reply ?? '').trim()) throw new Error('Setup question bank requires an answer: enter yes, no, or changes such as 3.5=off.');
     try {
@@ -2942,7 +2942,10 @@ async function answerStrongDefaultBank(args, current, options = {}) {
       try { answer = await promptForStrongDefaultAnswer(specs, rl, fixed); } finally { rl.close(); }
     } else {
       fromStdin = true;
-      answer = parseStrongDefaultAnswer(await readNonInteractiveStdin(), specs, { fixed });
+      const piped = await readNonInteractiveStdin();
+      // The reply is one line: a second non-empty line is refused before any write, as the base rule did.
+      if (piped.split(/\r?\n/).filter((line) => line.trim()).length > 1) throw new Error('Setup question bank received unexpected extra non-empty input.');
+      answer = parseStrongDefaultAnswer(piped, specs, { fixed });
       if (!answer) throw new Error('Setup question bank requires an answer: reply yes, no or changes such as 3.5=off, after the bank reference.');
     }
     answerSource = { 'apply-defaults': 'user-approved defaults', 'changes-only': 'user-approved listed changes only', declined: 'user declined' }[answer.mode];
@@ -3155,7 +3158,6 @@ async function answerSetupQuestionBank(args, current, options = {}) {
 
   if (lines) completeStdinConsumed = true;
 
-  if (args.host === 'claude-code') resolveClaudeTopology(args, current);
   const confirmedSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
   if (approvedBankAnswer) assertQuestionBankAnswerBinding(approvedBankAnswer, displayedSpecs);
@@ -4008,7 +4010,11 @@ class ToolkitSetupExecution {
     }
     await this.#collectAndAnswer();
     if (this.#questionBank.declined) {
-      console.log('Nothing changed: you answered no, so setup wrote nothing. Say setup toolkit again to apply the defaults or change a setting.');
+      if (early?.managed.update_action === 'fast-forwarded') {
+        console.log(`Setup changed none of your settings: you answered no. Before the question, setup fast-forwarded the Toolkit checkout from ${early.managed.commit_before.slice(0, 7)} to ${early.managed.commit_after.slice(0, 7)}. Say setup toolkit again to apply the defaults or change a setting.`);
+      } else {
+        console.log('Nothing changed: you answered no, so setup changed none of your settings. Say setup toolkit again to apply the defaults or change a setting.');
+      }
       return 0;
     }
     this.#announcePlan();

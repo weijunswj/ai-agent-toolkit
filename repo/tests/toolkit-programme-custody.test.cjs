@@ -189,8 +189,11 @@ const TABLE = [
   ['return --issue 423 --record r2 --assignment g1-a1', [SA, S('SUBMITTED'), S('SUBMITTED'), GS, GS, SA, SA]],
   ['return --issue 423 --record r1 --assignment g1-a1', [SA, S('SUBMITTED'), RC, NOOP, RC, SA, SA]],
   ['return --issue 423 --record r2 --assignment g1-old', [SA, SA, SA, SA, SA, SA, SA]],
-  ['return --issue 423 --consume r1 --verdict ACCEPT', [RU, RU, RC, S('RETIRED'), RC, RU, NOOP]],
-  ['return --issue 423 --consume r1 --verdict REOPEN', [RU, RU, NOOP, S('ACTIVE'), RC, RU, RC]],
+  // A return consumed WAITING_OWNER takes the owner's answer once, with its reason (USAGE without one).
+  ['return --issue 423 --consume r1 --verdict ACCEPT', [RU, RU, RC, S('RETIRED'), E('USAGE'), RU, NOOP]],
+  ['return --issue 423 --consume r1 --verdict ACCEPT --reason owner-answered', [RU, RU, RC, S('RETIRED'), S('RETIRED'), RU, NOOP]],
+  ['return --issue 423 --consume r1 --verdict REOPEN', [RU, RU, NOOP, S('ACTIVE'), E('USAGE'), RU, RC]],
+  ['return --issue 423 --consume r1 --verdict REOPEN --reason owner-answered', [RU, RU, NOOP, S('ACTIVE'), S('ACTIVE'), RU, RC]],
   ['return --issue 423 --consume r1 --verdict WAITING_OWNER', [RU, RU, RC, S('WAITING_OWNER'), NOOP, RU, RC]],
 ];
 

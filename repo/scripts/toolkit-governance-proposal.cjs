@@ -372,6 +372,14 @@ class GitHubProposalTransport {
     if (!['open', 'closed'].includes(state)) fail('PROPOSAL_GITHUB_UNAVAILABLE');
     return state;
   }
+  // Whether a pull request is open, merged or closed without merging (the post-merge finish reads it).
+  outcome(repository, number) {
+    const value = this.#run(['api', `repos/${repository}/pulls/${number}`, '--jq', '.state + " " + (.merged | tostring)']).trim();
+    if (value === 'open false') return 'open';
+    if (value === 'closed true') return 'merged';
+    if (value === 'closed false') return 'closed';
+    return fail('PROPOSAL_GITHUB_UNAVAILABLE');
+  }
   // Walk only the root and .github trees, retaining the regular-file check without enumerating the repository.
   #bindingEntry(repository, treeSha) {
     const tree = sha => {
@@ -498,7 +506,7 @@ class GitHubProposalTransport {
     const switched = words ? ` It also sets ${Object.keys(changes).map(name => `\`task_prs.${name}\``).join(' and ')}.` : '';
     const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).map(line => `\n\n${line}`).join('');
     const retired = retiredDropped(mergedText, text);
-    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, the owner's answer to the parallel CI shards question.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''}${retired ? ` It also deletes ${retired}.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, this repository's parallel CI shards answer.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''}${retired ? ` It also deletes ${retired}.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
