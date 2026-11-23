@@ -26,7 +26,7 @@ Ask action-blocking questions as the global rules' Communication section says.
 Works for any git host, local git repositories and plain folders.
 
 1. Use the open target or the explicit target path; if neither exists, stop and ask for a target path.
-2. Expected files: for Claude Code where the repository has its own `AGENTS.md`, a `CLAUDE.md` that loads it; where governance is ENABLED, the plain-text check (`.github/plain-text.json`). Codex and Antigravity read `AGENTS.md` themselves, so they need no shim and there is no `GEMINI.md` shim.
+2. Expected files: where governance is ENABLED, the plain-text check (`.github/plain-text.json`). A `CLAUDE.md` that loads `AGENTS.md` is expected only when Claude Code would otherwise miss it: the repository has its own `AGENTS.md` and its own `CLAUDE.md` (or `.claude/CLAUDE.md` or `CLAUDE.local.md`), and Claude Code's "Read AGENTS.md as well as CLAUDE.md" setting is off. Claude Code reads `AGENTS.md` itself when the repository has no `CLAUDE.md`, and reads both while that setting is on (setup turns it on). Codex and Antigravity read `AGENTS.md` themselves, so they need no shim and there is no `GEMINI.md` shim.
 3. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. Note any leftovers (above).
 4. If every expected file is current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
@@ -44,12 +44,12 @@ Every Toolkit insert uses versioned, hashed markers:
 
 For an explicit request, compare the Toolkit files with the current templates instead of stopping at the cheap check:
 
-- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only, where the repository has its own `AGENTS.md`). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
+- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only, where step 2 of the cheap check expects it, or the user asks for it). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/toolkit-programme.template.json` -> `.github/toolkit-programme.json`, only for a merged enabled repository or its accepted pending yes adoption proposal. Fill in the repository, parent issue, record prefixes and the separate private evidence store from the user's answers, with one entry in `parents` only (a second parent waits for the reconciler's cross-programme rule); the binding lands through a pull request, never a push to the default branch.
 
 Rules:
 
-- A missing `CLAUDE.md` is created from its template; an existing one keeps all its content.
+- A missing `CLAUDE.md` is created from its template only when the user asks for one (Claude Code reads `AGENTS.md` itself where there is none); an existing one keeps all its content.
 - Broken, duplicate, unmatched, nested or out-of-order markers in a file this skill writes are repaired before any unrelated edit. If unmarked content cannot be separated safely, write a clean file and report the backup.
 - Never delete duplicate, conflicting or obsolete unmarked content automatically; keep it, or keep it in the backup, and report it. Never create shims for platforms out of scope.
 - A refresh removes the retired `GEMINI.md` shim: back it up, then remove a `GEMINI.md` that holds only the old Toolkit `GEMINI.SHIM` block, or remove just that block when the file has other text. Never touch a `GEMINI.md` without that block.
