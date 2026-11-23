@@ -129,5 +129,6 @@ test('a ready land lists the closing stories, the sessions to archive and the wo
   assert.deepEqual(JSON.parse(cli.stdout).steps, landing.steps);
   // A refused land owes nothing yet, so it lists no steps.
   fs.writeFileSync(live, JSON.stringify({ 50: { state: 'OPEN', head: 'e'.repeat(40), body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
-  assert.deepEqual(train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo, f.opts).steps, []);
+  const refused = train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo, f.opts);
+  assert.deepEqual([refused.steps, refused.merge_step], [[], undefined], 'a refused land names no merge step');
 });

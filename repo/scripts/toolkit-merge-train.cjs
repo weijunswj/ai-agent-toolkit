@@ -100,7 +100,10 @@
 // toolkit-auto-merge-eligible.cjs at the train head and no member is RISKY; else `owner` (a merge
 // card), with the reasons. --live reads those pull request facts from a JSON file
 // ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
-// (REST); a member entry with no body is refused, never read as NOT_REQUIRED. A ready land also
+// (REST); a member entry with no body is refused, never read as NOT_REQUIRED. A ready land says the
+// merge step plainly (merge_step): route owner asks the owner "Merge PR N?" with the external
+// effects and, on the yes, the agent runs the named merge so the merge guard shows its card, never
+// sending the owner to click Merge on GitHub unless the guard cannot record the answer. It also
 // lists the steps after the merge: the closing stories for the train and each member, the sessions to
 // archive (keeping those whose owner test is owed) and, for each worktree at the train or a member
 // head, the `git worktree remove` and `git branch -d` lines (worktrees a host made are left to it).
@@ -868,15 +871,26 @@ function land(cwd, manifest, options) {
       problems.push(`ejected #${entry.pr} is still open at ${facts.head.slice(0, 12)}, which the train carries: GitHub would mark it merged; push its next commit or close it first`);
     }
   }
+  const merge = problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit', ...landRoute(cwd, manifest, checked.main, options) };
   return {
     ok: problems.length === 0,
     pr: options.pr,
     head: options.head,
     members: checked.members,
     problems,
-    merge: problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit', ...landRoute(cwd, manifest, checked.main, options) },
+    merge,
+    ...(merge ? { merge_step: mergeStep(merge) } : {}),
     steps: problems.length ? [] : afterLanding(cwd, manifest, options),
   };
+}
+
+// The merge itself, said plainly. Route owner: the agent asks, then runs the exact merge on the
+// owner's yes, so the merge guard shows its card and records the answer; the owner is never sent to
+// click Merge on GitHub, except where the guard cannot record the answer, and then the agent says why.
+function mergeStep(merge) {
+  const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;
+  if (merge.route === 'auto') return `post the effects notice, then run ${command}; no ask`;
+  return `ask the owner "Merge PR ${merge.pr}?" with its external effects; on their yes, run ${command} yourself, so the merge guard shows its card and records the answer. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${merge.head.slice(0, 12)}`;
 }
 
 // The owed steps once the train has merged, so stories and clean-up are not forgotten: the closing
@@ -987,9 +1001,10 @@ function print(result, json) {
   if (result.body) { process.stdout.write(result.body); return; }
   const lines = [result.ok ? 'OK' : 'REFUSED'];
   for (const [key, value] of Object.entries(result)) {
-    if (key === 'ok' || key === 'problems' || key === 'next' || key === 'steps' || value === undefined) continue;
+    if (key === 'ok' || key === 'problems' || key === 'next' || key === 'steps' || key === 'merge_step' || value === undefined) continue;
     lines.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
   }
+  if (result.merge_step) lines.push(`Merge step: ${result.merge_step}`);
   for (const problem of result.problems || []) lines.push(`- ${problem}`);
   if ((result.next || []).length) lines.push('written' in result ? 'Next:' : 'Ejected, still owed:', ...result.next.map(line => `- ${line}`));
   if ((result.steps || []).length) lines.push(result.merge ? 'After the merge:' : 'Next steps:', ...result.steps.map(line => `- ${line}`));
