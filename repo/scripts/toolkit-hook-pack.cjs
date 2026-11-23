@@ -159,7 +159,7 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
     || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged'].includes(fixture.handoff.memory))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }');
@@ -171,6 +171,7 @@ function fixtureErrors(fixture) {
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.stale_rows !== undefined && (!fixture.repo || !['enabled', 'disabled'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.stale_rows) || !fixture.stale_rows.length || fixture.stale_rows.some(row => typeof row !== 'string' || !row.trim()))) errors.push('fixture.stale_rows needs an enabled or disabled repository and nonempty row strings');
+  if (fixture.attention_line !== undefined && (fixture.repo?.governance !== 'enabled' || typeof fixture.attention_line !== 'string' || !/^Attention: /.test(fixture.attention_line))) errors.push('fixture.attention_line needs an enabled repository and a line starting Attention: ');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -444,6 +445,12 @@ class Fixture {
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
       cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
+    }
+    // The programme attention cache in the fixture home, as the session-start refresh leaves it.
+    if (spec.attention_line) {
+      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
+      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
+      cache.writeCache(repository, { line: spec.attention_line, counts: { new: 0, acknowledged: 0 }, digest: 'hook-pack', complete: true }, { home: this.home });
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));

@@ -150,6 +150,17 @@
       "status": "pass"
     },
     {
+      "id": "GOV.stale-check-cloud-cache-no-stamp",
+      "source": "PR 1442 G2 L6: a cloud session with the attention cache but no stale-check stamp for today said nothing about the stale check",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"attention_line":"Attention: 1 new, 0 acknowledged"},
+      "expect": {"decision":"allow","context_contains":["Attention: 1 new, 0 acknowledged","Stale check: not run in this cloud session; it runs at the next session start on the owner's computer."],"context_excludes":["Attention and stale check: not read"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.rules-cloud-disabled-child-none",
       "source": "plug-and-play S1: a cloud session above a disabled repository gets no governed rules",
       "kind": "benign",
