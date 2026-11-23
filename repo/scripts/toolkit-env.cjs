@@ -837,6 +837,7 @@ class ToolkitEnv {
       lines.push(`Closed your env edit 30 minutes after its last save${kept ? '; its last save was not applied, so the tab is kept as an older tab' : ''}.`);
     }
     const older = this.#edit.olderTabs();
+    const recorded = JSON.stringify(older);
     const present = new Set();
     let earlier = 0;
     let earlierOpen = false;
@@ -884,7 +885,8 @@ class ToolkitEnv {
       }
     }
     for (const id of Object.keys(older)) if (!present.has(id)) delete older[id];
-    this.#edit.writeOlderTabs(older);
+    // Only a change is written: the helper runs this every half second.
+    if (JSON.stringify(older) !== recorded) this.#edit.writeOlderTabs(older);
     if (earlier) lines.push(`Deleted ${earlier} edit file${earlier === 1 ? '' : 's'} from an earlier Toolkit version; nothing in ${earlier === 1 ? 'it was' : 'them was'} saved.`);
     // The earlier version's helper may already have applied saves from the open edit's file; they are
     // reported with the edit's other saves.
