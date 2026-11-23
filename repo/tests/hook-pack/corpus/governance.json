@@ -1727,6 +1727,147 @@
       "expect": {"decision":"allow","context_contains":["couldn't check governance ("]},
       "status": "pass",
       "note": "The pack turns session-start refresh off, so the cause read here is the offline or not-recorded phrase; the cloud side-by-side read and read-timed-out are covered by toolkit-governance-cause.test.cjs and a live probe."
+    },
+    {
+      "id": "GATE-LAUNCH.g2-title-no-gate-line",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G2 PR 1452","model":"claude-opus-5-5","effort":"high","prompt":"Review PR 1452 against the plan.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny","reason":"toolkit-claude-gate-launch-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.gate-line-no-route",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G2 PRs 1453 + 1450","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G2\nAssignment: 1453-g2\nReview both PRs.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny","reason":"toolkit-claude-gate-launch-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.member-typo",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G1 #1265 S4: gate launch check","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G1\nRoute: owner-claude BUILD opus-5.5/high\nAssignment: 1265-g1","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny","reason":"toolkit-claude-gate-launch-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.no-assignment",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G1 #1265 S4: gate launch check","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny","reason":"toolkit-claude-gate-launch-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.model-not-pinned",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G1 #1265 S4: gate launch check","effort":"high","prompt":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: 1265-g1-s4-20261123\n\nBuild slice S4.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny","reason":"toolkit-claude-gate-launch-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.fork-gate",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G1 #1265 S4: gate launch check","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: 1265-g1-s4-20261123\n\nBuild slice S4.","context":"fork"}},
+      "fixture": {"repo":{"governance":"none"}},
+      "expect": {"decision":"deny","reason":"toolkit-claude-gate-launch-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.full-g1-launch",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G1 #1265 S4: gate launch check","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: 1265-g1-s4-20261123\n\nBuild slice S4.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.capped-g2-launch",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G2 PR 1480","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G2\nRoute: owner-claude opus opus-5.5/xhigh\nAssignment: 1265-g2-pr1480\n\nReview PR 1480.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.side-session-enabled",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"Polish batch 3","prompt":"Fix the typos in the README.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.side-session-disabled",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"Polish batch 3","prompt":"Fix the typos in the README.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"disabled"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.side-session-plain-folder",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G2 runner lane","effort":"high","prompt":"Gate: none\nRun the merge train.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.proposal-id-start",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","tool_input":{"proposal_id":"task_b0c327da"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.post-capped-g2-steps",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G2 PR 1480","model":"claude-opus-5-5","effort":"high","prompt":"Gate: G2\nRoute: owner-claude opus opus-5.5/xhigh\nAssignment: 1265-g2-pr1480\n\nReview PR 1480.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."},"tool_response":[{"type":"text","text":"Started session \"G2 PR 1480\" (session_id: local_1234abcd-0000-4000-8000-000000000001, name: g2-1480). It runs on its own."}]},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["set_session_effort with session_id local_1234abcd-0000-4000-8000-000000000001 and effort xhigh"]},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.post-side-session-quiet",
+      "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"Polish batch 3","model":"claude-opus-5-5","effort":"high","prompt":"Fix the typos.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."},"tool_response":[{"type":"text","text":"Started session \"G2 PR 1480\" (session_id: local_1234abcd-0000-4000-8000-000000000001, name: g2-1480). It runs on its own."}]},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow","context_excludes":["set_session_effort","Toolkit gate launch"]},
+      "status": "pass"
     }
   ]
 }
