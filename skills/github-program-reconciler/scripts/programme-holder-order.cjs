@@ -29,7 +29,7 @@ const OPS = Object.freeze({
   reopen: { required: ['issue', 'reason'], optional: ['assignment'] },
   interrupt: { required: ['issue', 'reason'], optional: [] },
   assign: { required: ['issue', 'role', 'assignment'], optional: ['supersede', 'reason'] },
-  return: { required: ['issue'], optional: ['record', 'assignment', 'at-head', 'consume', 'verdict'] },
+  return: { required: ['issue'], optional: ['record', 'assignment', 'at-head', 'consume', 'verdict', 'reason'] },
   'mark-archive': { required: ['issue'], optional: ['before', 'remove'] },
 });
 // A `mark-archive` write names whole lines of the page: the line to put `## Archive` above, or the
@@ -82,6 +82,7 @@ function checkOp(op, at) {
   }
   if (op.command === 'return' && Boolean(op.record) === Boolean(op.consume)) throw refuse(`write ${at + 1} (return) needs exactly one of record or consume`);
   if (op.command === 'return' && op.consume && !op.verdict) throw refuse(`write ${at + 1} (return consume) needs a verdict`);
+  if (op.command === 'return' && op.reason !== undefined && !op.consume) throw refuse(`write ${at + 1} (return) takes a reason only with consume`);
   return op;
 }
 

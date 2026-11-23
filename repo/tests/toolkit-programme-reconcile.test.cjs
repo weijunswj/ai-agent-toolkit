@@ -1690,7 +1690,8 @@ test('G0-only acceptance is named but cannot count as merged implementation comp
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const report = reconciler().run();
     const accepted = gate !== 'G0';
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: false, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
+    // A G1 acceptance needs a recorded G2 PASS, and a G2 acceptance records its PASS in the same write.
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: false, uat: null, review: gate === 'G0' ? null : 'PASSED' }]);
     const finding = report.findings.find(entry => entry.code === 'READY_TO_CLOSE');
     assert.equal(finding.gate, gate);
     assert.equal(finding.accepted, accepted);
