@@ -5,8 +5,9 @@
 // It triggers on content, not tool names: after any tool call that is not a known read-only one (a
 // host memory tool, a shell edit, a patch, an MCP writer, a tool it has never heard of), at most once
 // a minute per session, it compares the snapshot's remembered sources (its manifest) with what this
-// session holds, by the same file-by-file rule the refresh writes with (toolkit-handoff.cjs). When that
-// refresh would write something, it starts one `toolkit-store.cjs handoff --baseline <session file>`
+// session holds, by the same file-by-file rule the refresh writes with (toolkit-handoff.cjs), this
+// computer's folder records included, so a memory file deleted between sessions counts too. When that
+// refresh would write or remove something, it starts one `toolkit-store.cjs handoff --baseline <session file>`
 // run in the background, at most once per 10 minutes (a lock file's time); a change inside that window
 // is seen by the next call after it.
 // The store and repository come from the last good run's record or, in a session with none (a fresh
@@ -145,7 +146,8 @@ function main(deps = {}) {
     if (Number.isFinite(session.checked_at) && now >= session.checked_at && now - session.checked_at < CHECK_MS) return 0;
     if (!Number.isFinite(session.started_at)) { session.started_at = now; prune(sessions, sessionFile, now); }
     session.checked_at = now;
-    let record = usable(readJson(deps.handoffRecord || path.join(dir, 'handoff-refresh.json')));
+    const recordFile = deps.handoffRecord || path.join(dir, 'handoff-refresh.json');
+    let record = usable(readJson(recordFile));
     if (!record) {
       if (session.found === undefined) session.found = discover(input.cwd) || false;
       record = usable(session.found);
@@ -166,7 +168,10 @@ function main(deps = {}) {
       // decides (see the top of this file).
       return 0;
     }
-    const planned = handoff.plan({ base, repository: record.repository, sources: null, stamp: null, platform, session: { rows: session.rows, real: session.real || null }, scan: false });
+    // This computer's folder records sit beside the run record, so a file deleted between sessions
+    // (which no session baseline holds) still starts the run that removes it.
+    const planned = handoff.plan({ base, repository: record.repository, sources: null, stamp: null, platform, session: { rows: session.rows, real: session.real || null }, scan: false,
+      records: path.join(path.dirname(recordFile), handoff.FOLDER_RECORDS), now: new Date(now) });
     if (planned.unchanged) return 0;
     const lock = path.join(dir, 'handoff-refresh.lock');
     try { if (now - fs.statSync(lock).mtimeMs < DEBOUNCE_MS) return 0; } catch { /* no lock yet */ }
