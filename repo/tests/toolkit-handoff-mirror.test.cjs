@@ -308,16 +308,44 @@ test('a run that would remove more than the limit removes none and says held_rem
   assert.equal(m.run([]).result.removed, 'memory/a.md,memory/b.md');
 });
 
-test('a snapshot copy no row lists (left by an older Toolkit copy) is deleted with a removed row (R6)', t => {
+test('a snapshot copy no row lists is removed only when this computer held that content, or by --replace-memory; else it stays, named unlisted (R6)', t => {
   const m = mirror(t);
   assert.equal(m.run(['--memory', m.memory]).result.handoff, 'WRITTEN');
+  const dropRow = name => {
+    const manifest = m.manifest();
+    manifest.files = manifest.files.filter(row => row.path !== name);
+    fs.writeFileSync(m.manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  };
+  // A copy this computer never held (an older Toolkit copy, a hand edit, another computer's file whose
+  // row a race dropped) stays, in a manual and a hook-started run, and is named.
   fs.writeFileSync(m.copy('memory/orphan.md'), 'an older copy\n');
   const checked = m.run(['--check']).result;
-  assert.deepEqual([checked.handoff, checked.changed], ['STALE', 'memory/orphan.md']);
-  const result = m.run(['--baseline', m.baseline('session')]).result;
-  assert.deepEqual([result.handoff, result.removed], ['WRITTEN', 'memory/orphan.md']);
+  assert.deepEqual([checked.handoff, checked.changed, checked.unlisted], ['STALE', undefined, 'memory/orphan.md']);
+  for (const argv of [[], ['--baseline', m.baseline('session')]]) {
+    const result = m.run(argv).result;
+    assert.deepEqual([result.handoff, result.removed, result.unlisted], ['UNCHANGED', undefined, 'memory/orphan.md'], argv.join(' '));
+    assert.ok(fs.existsSync(m.copy('memory/orphan.md')));
+  }
+  // A copy this computer held: its file was saved here, then deleted, and an older copy dropped the
+  // row but left the copy. Its CRLF twin (a Git checkout with core.autocrlf) counts as the same content.
+  m.put('held.md', 'held v1\n', '2026-11-21T09:30:00Z');
+  m.put('crlf.md', 'line one\nline two\n', '2026-11-21T09:40:00Z');
+  assert.equal(m.run([]).result.handoff, 'WRITTEN');
+  m.drop('held.md');
+  m.drop('crlf.md');
+  dropRow('memory/held.md');
+  dropRow('memory/crlf.md');
+  fs.writeFileSync(m.copy('memory/crlf.md'), 'line one\r\nline two\r\n');
+  const result = m.run([]).result;
+  assert.deepEqual([result.handoff, result.removed, result.unlisted], ['WRITTEN', 'memory/crlf.md,memory/held.md', 'memory/orphan.md']);
+  for (const name of ['memory/held.md', 'memory/crlf.md']) assert.equal(fs.existsSync(m.copy(name)), false, name);
+  assert.equal(m.removed('memory/held.md').sha256, sha('held v1\n'));
+  assert.equal(m.removed('memory/crlf.md').sha256, sha('line one\nline two\n'), 'the removed row keeps the content this computer held');
+  // --replace-memory makes the named folder the whole memory set: the orphan goes too.
+  const replaced = m.run(['--memory', m.memory, '--replace-memory']).result;
+  assert.deepEqual([replaced.handoff, replaced.removed, replaced.unlisted], ['WRITTEN', 'memory/orphan.md', undefined]);
   assert.equal(fs.existsSync(m.copy('memory/orphan.md')), false);
-  assert.equal(m.removed('memory/orphan.md').sha256, sha('an older copy\n'));
+  assert.equal(m.run(['--check']).result.handoff, 'CURRENT');
   // A copy outside the memory area is left alone.
   fs.mkdirSync(path.dirname(m.copy('files/loose.md')), { recursive: true });
   fs.writeFileSync(m.copy('files/loose.md'), 'loose\n');

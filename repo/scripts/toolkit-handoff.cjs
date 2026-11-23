@@ -35,10 +35,11 @@
 //     minutes after the removal, from a source whose times are real; the same bytes never come back;
 //   - a run that would remove more than max(10, a fifth of the memory rows) removes none and reports
 //     them as held; only a manual run with `confirm` applies them;
-//   - a copy under the snapshot's memory area that no row lists (left by an older Toolkit copy) is
-//     deleted with a removed row, under the same limit;
+//   - a copy under the snapshot's memory area that no row lists (left by an older Toolkit copy or a
+//     hand edit) is deleted with a removed row, under the same limit, only when this computer held
+//     exactly that content (as for a row) or with `replaceMemory`; else it stays, named unlisted;
 //   - `replaceMemory` (manual only) makes the folder it names the whole memory set: every memory row
-//     that folder lacks is removed, and its copy of every other memory file wins;
+//     and copy that folder lacks is removed, and its copy of every other memory file wins;
 //   - a run whose clock is more than 5 minutes behind the snapshot's latest memory time removes and brings
 //     back nothing (`clock=behind`);
 //   - a non-memory row whose file is missing here stays, unless the session baseline shows this
@@ -82,7 +83,7 @@ const README = repository => `# Controller handoff snapshot: ${repository}\n\n`
   + '- `manifest.json`: the current file set, each with its sha256 and source; the removed memory files, each with when it was removed (`removed_at`); and the stamp: when it was taken (`taken_at`), the Toolkit version and the repository\'s default-branch commit.\n'
   + '- `MEMORY.md` and `memory/`: a mirror of the controller\'s memory folder: a memory file deleted there is deleted here.\n'
   + '- `files/`: the saved instructions and the named working files.\n\n'
-  + 'A removed file stays in the store\'s Git history. `git log --diff-filter=D -- <this folder>/memory/` lists the removals, and `git show <commit>^:<path>` prints the last copy.\n\n'
+  + 'In an evidence store, a removed file stays in the store\'s Git history: `git log --diff-filter=D -- <this folder>/memory/` lists the removals, and `git show <commit>^:<path>` prints the last copy. In a folder written with `--out` (no Git), a removal is final.\n\n'
   + 'Evidence, not authority: where it differs from current state, current state wins.\n';
 
 class HandoffError extends Error {
@@ -304,7 +305,7 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
   // compare with): nothing is removed or brought back.
   const latest = [...prev.values()].filter(row => isMemoryPath(row.path)).map(row => timeOf(row.modified)).concat([...removedBefore.values()].map(row => timeOf(row.removed_at))).filter(time => time !== null);
   const clockBehind = latest.some(time => time > now + MARGIN_MS);
-  if (clockBehind && replace) throw new HandoffError('this computer\'s clock is behind the snapshot\'s latest time, so --replace-memory would misdate its removals.', 'set this computer\'s clock right, then run it again.');
+  if (clockBehind && replace) throw new HandoffError(`this computer's clock is behind the snapshot's latest memory time (${new Date(Math.max(...latest)).toISOString()}), so --replace-memory would misdate its removals.`, 'if this clock is wrong, set it right and run it again; if it is right, a memory file was saved with a time in the future: run it again after that time.');
   // With replace, the memory folder named now is the whole memory set: its content wins.
   const replaces = entry => replace && isMemoryPath(entry.path) && entry.source === memory;
   const out = [];
@@ -357,11 +358,20 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
     }
     if (!(seen && seen.has(row.path) && !(kept || []).includes(sourceNow(row)))) out.push(timed(row));
   }
-  // Copies under the memory area that no row lists (an older Toolkit copy never deleted a file).
+  // Copies under the memory area that no row lists (an older Toolkit copy never deleted a file, or a
+  // hand edit). A copy of a path the manifest lists as removed is deleted. Any other is removed only
+  // under the same rule as a row: this computer held exactly that content (either hash, see
+  // memoryCopies), or replace; else it stays and is named unlisted.
   const listed = new Set([...out.map(row => row.path), ...writes.map(entry => entry.path), ...candidates.map(candidate => candidate.row.path)]);
   const leftovers = onDisk.filter(file => isMemoryPath(file.path) && !listed.has(file.path));
   const deletes = leftovers.filter(file => removed.has(file.path)).map(file => file.path);
-  for (const file of leftovers) if (!removed.has(file.path)) candidates.push({ leftover: file });
+  const heldCopy = file => [file.sha256, file.lf].find(hash => hash && (record?.files.get(file.path) === hash || (baselineFolder && seen?.get(file.path) === hash)));
+  const unlisted = [];
+  for (const file of leftovers) {
+    if (removed.has(file.path)) continue;
+    const hash = memoryReachable ? (replace ? file.sha256 : heldCopy(file)) : null;
+    if (hash) candidates.push({ leftover: { path: file.path, sha256: hash } }); else unlisted.push(file.path);
+  }
   const memoryRows = [...prev.keys()].filter(isMemoryPath).length;
   const limit = Math.max(HOLD_MIN, Math.floor(memoryRows / 5));
   const apply = !clockBehind && (replace || confirm || candidates.length <= limit);
@@ -384,27 +394,32 @@ function pick({ entries, kept, memory = null, places = {} }, previous, session =
   }
   return {
     files: out.sort(byPath), writes, real, unsure: unsure.sort(), removed: [...removed.values()].sort(byPath), deletes: deletes.sort(),
-    removedNow: removedNow.sort(), held: apply ? 0 : candidates.length, clockBehind, removedHere: removedHere.sort(), diverged: diverged.sort(),
+    removedNow: removedNow.sort(), held: apply ? 0 : candidates.length, clockBehind, removedHere: removedHere.sort(), diverged: diverged.sort(), unlisted: unlisted.sort(),
     // Removals this run did not apply keep this computer's evidence for a later one.
-    unapplied: apply ? [] : candidates.filter(candidate => candidate.row).map(candidate => candidate.row),
+    unapplied: apply ? [] : candidates.map(candidate => candidate.row || candidate.leftover),
   };
 }
 
 const sameFiles = (a, b) => JSON.stringify((a || []).map(row => [row.path, row.sha256])) === JSON.stringify((b || []).map(row => [row.path, row.sha256]));
 const sameRemoved = (a, b) => JSON.stringify((a || []).map(row => [row.path, row.sha256, row.removed_at])) === JSON.stringify((b || []).map(row => [row.path, row.sha256, row.removed_at]));
 
-// The snapshot's memory-area copies on disk ({ path, sha256 }), sorted.
+// The snapshot's memory-area copies on disk ({ path, sha256, lf }), sorted. `lf` is the hash with CRLF
+// line ends turned into LF (or null): a Git checkout with core.autocrlf writes stored LF text with CRLF ends.
 function memoryCopies(fs, base, folder) {
   const top = path.join(base, folder);
   const out = [];
-  try { const bytes = fs.readFileSync(path.join(top, 'MEMORY.md')); out.push({ path: 'MEMORY.md', sha256: sha256(bytes) }); } catch { /* none */ }
+  const copyOf = (rel, bytes) => {
+    const text = bytes.toString('latin1');
+    return { path: rel, sha256: sha256(bytes), lf: text.includes('\r\n') ? sha256(Buffer.from(text.replace(/\r\n/g, '\n'), 'latin1')) : null };
+  };
+  try { out.push(copyOf('MEMORY.md', fs.readFileSync(path.join(top, 'MEMORY.md')))); } catch { /* none */ }
   const walk = rel => {
     let list = [];
     try { list = fs.readdirSync(path.join(top, ...rel.split('/')), { withFileTypes: true }); } catch { return; }
     for (const entry of list) {
       const child = `${rel}/${entry.name}`;
       if (entry.isDirectory()) walk(child);
-      else if (entry.isFile()) { try { out.push({ path: child, sha256: sha256(fs.readFileSync(path.join(top, ...child.split('/')))) }); } catch { /* unreadable: left alone */ } }
+      else if (entry.isFile()) { try { out.push(copyOf(child, fs.readFileSync(path.join(top, ...child.split('/'))))); } catch { /* unreadable: left alone */ } }
     }
   };
   walk('memory');
@@ -447,23 +462,50 @@ function plan({ base, repository, sources, stamp, fs = nodeFs, platform = proces
   // A v1 manifest is written as v2 by the first run that changes it (it has no removed rows before).
   const unchanged = Boolean(previous) && sameFiles(previous.files, picked.files) && sameRemoved(previous.removed, picked.removed) && !picked.deletes.length;
   const manifest = { schema: SCHEMA, stamp, sources: chosen, files: picked.files, removed: picked.removed };
-  // This computer's record: each memory file as this run read it where the snapshot now holds that
-  // content; where the snapshot kept a different row (diverged, unsure or older here), what the record
-  // held before, so this copy's own unsaved content never counts as held. Plus the evidence for
-  // removals it held.
   const memoryRead = read.memory && !read.kept.includes(read.memory);
-  const rows = new Map(picked.files.map(row => [row.path, row.sha256]));
-  const recorded = ({ path: dest, sha256: hash, modified }) => {
-    if (rows.get(dest) === hash) return { path: dest, sha256: hash, ...(modified ? { modified } : {}) };
-    return before?.files.has(dest) ? { path: dest, sha256: before.files.get(dest) } : null;
-  };
-  const recordRows = memoryRead ? [...read.entries.filter(entry => entry.source === read.memory).map(recorded).filter(Boolean),
-    ...picked.unapplied.map(({ path: dest, sha256: hash }) => ({ path: dest, sha256: hash }))].sort(byPath) : null;
-  const record = recordRows ? { folder: read.memory, at: new Date(time).toISOString(), files: recordRows } : null;
+  const basis = memoryRead ? { folder: read.memory, at: new Date(time).toISOString(), entries: read.entries.filter(entry => entry.source === read.memory), before, unapplied: picked.unapplied } : null;
   return {
     folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, deletes: picked.deletes, seen: seenOf(read.entries), real: picked.real, unsure: picked.unsure,
-    removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, diverged: picked.diverged, record,
+    removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, diverged: picked.diverged, unlisted: picked.unlisted,
+    record: recordFor(basis, picked.files), basis,
   };
+}
+
+// This computer's folder record after a run, from the memory rows that landed (`files`): each memory
+// file as the run read it where the landed snapshot holds that content; where it holds a different row
+// (diverged, unsure, older here, or another computer's save that won a race), what the record held
+// before. A file missing here keeps its earlier entry while the landed snapshot still lists it at that
+// content (a removal that did not land), and the evidence for removals the run held stays. So this
+// copy's own unsaved content never counts as held, and held evidence is never lost to a lost race.
+function recordFor(basis, files) {
+  if (!basis) return null;
+  const { folder, at, entries, before, unapplied } = basis;
+  const rows = new Map((files || []).map(row => [row.path, row.sha256]));
+  const out = new Map();
+  for (const { path: dest, sha256: hash, modified } of entries) {
+    if (rows.get(dest) === hash) out.set(dest, { path: dest, sha256: hash, ...(modified ? { modified } : {}) });
+    else if (before?.files.has(dest)) out.set(dest, { path: dest, sha256: before.files.get(dest) });
+  }
+  for (const [dest, hash] of before?.files || []) if (!out.has(dest) && !entries.some(entry => entry.path === dest) && rows.get(dest) === hash) out.set(dest, { path: dest, sha256: hash });
+  for (const { path: dest, sha256: hash } of unapplied) if (!out.has(dest)) out.set(dest, { path: dest, sha256: hash });
+  return { folder, at, files: [...out.values()].sort(byPath) };
+}
+
+// The record and session rows to keep once a store save is read back, from the manifest that landed
+// (after a race the store's snapshot can win over this run's plan). `previousRows` is the session's
+// baseline before the run: a memory row the landed snapshot does not hold at this copy's content keeps
+// its earlier baseline row (or none), like the record.
+function landed(planned, manifest, previousRows = null) {
+  const files = manifest?.files || [];
+  const rows = new Map(files.map(row => [row.path, row.sha256]));
+  const earlier = new Map((previousRows || []).filter(row => row && typeof row.path === 'string').map(row => [row.path, row]));
+  const seen = [];
+  for (const row of planned.seen) {
+    if (!isMemoryPath(row.path) || rows.get(row.path) === row.sha256) seen.push(row);
+    else if (earlier.has(row.path)) seen.push(earlier.get(row.path));
+  }
+  for (const [dest, row] of earlier) if (isMemoryPath(dest) && !planned.seen.some(item => item.path === dest) && rows.get(dest) === row.sha256) seen.push(row);
+  return { record: recordFor(planned.basis, files), seen: seen.sort(byPath) };
 }
 
 // Writes the snapshot (and deletes the copies the plan removes) and returns an undo that puts every
@@ -522,8 +564,8 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   const takenAt = previous.stamp?.taken_at || null;
   const time = now instanceof Date ? now.getTime() : Number(now);
   const hours = takenAt && !Number.isNaN(Date.parse(takenAt)) ? Math.max(0, Math.round((time - Date.parse(takenAt)) / 360000) / 10) : null;
-  const stale = changed.length || picked.unsure.length || picked.held || picked.clockBehind || picked.removedHere.length || picked.diverged.length;
-  return { state: stale ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, unsure: picked.unsure, kept: read.kept, removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, diverged: picked.diverged };
+  const stale = changed.length || picked.unsure.length || picked.held || picked.clockBehind || picked.removedHere.length || picked.diverged.length || picked.unlisted.length;
+  return { state: stale ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, unsure: picked.unsure, kept: read.kept, removed: picked.removedNow, held: picked.held, clockBehind: picked.clockBehind, removedHere: picked.removedHere, diverged: picked.diverged, unlisted: picked.unlisted };
 }
 
-module.exports = Object.freeze({ SCHEMA, READ_SCHEMAS, ROOT, FOLDER_RECORDS, MARGIN_MS, HOLD_MIN, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, readFolderRecord, writeFolderRecord, isMemoryPath, plan, write, check, sessionRows, realBySource });
+module.exports = Object.freeze({ SCHEMA, READ_SCHEMAS, ROOT, FOLDER_RECORDS, MARGIN_MS, HOLD_MIN, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, readFolderRecord, writeFolderRecord, isMemoryPath, plan, landed, write, check, sessionRows, realBySource });

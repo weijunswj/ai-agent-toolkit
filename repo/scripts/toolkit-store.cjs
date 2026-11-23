@@ -60,14 +60,18 @@
 //          checks and nothing sent. --check is read-only: HANDOFF CURRENT, or STALE (exit 1) with what
 //          changed (removed=<files> among it), unsure=<files> (files this copy holds differently from a
 //          row written before rows carried a time, whose order is unknown, so a run keeps the snapshot's
-//          copy), held_removals=<n>, clock=behind, removed_here=<files> and diverged=<files>. --reseed,
-//          run only from the newest copy, takes this copy for the unsure and diverged files. A run that would remove more than
-//          max(10, a fifth of the memory rows) holds them; --confirm-removals applies them.
-//          --replace-memory with --memory <folder> makes that folder the whole memory set: every memory
-//          row it lacks is removed. Both are manual only (never with --check or --baseline).
+//          copy), held_removals=<n>, clock=behind, removed_here=<files>, diverged=<files> and
+//          unlisted=<files> (snapshot copies no row lists that this computer never held; they stay).
+//          --reseed, run only from the newest copy, takes this copy for the unsure and diverged files.
+//          A run that would remove more than max(10, a fifth of the memory rows) holds them;
+//          --confirm-removals applies them. --replace-memory with --memory <folder> makes that folder
+//          the whole memory set: every memory row and copy it lacks is removed. Both are manual only
+//          (never with --check or --baseline). A run syncs and catches up before it plans; when its
+//          push meets a store that another computer's handoff save moved, the race merge keeps the
+//          store's snapshot folder whole (took_store=<folder>) and the run plans once more from it.
 //          A successful run records its store and sources in the Toolkit user-state folder, where the
 //          after-tool hook (toolkit-handoff-hook.cjs) reads them, and, once its save is read back, the
-//          memory folder as it read it (handoff-folders/ there). The hook starts runs with
+//          memory folder as the landed snapshot holds it (handoff-folders/ there). The hook starts runs with
 //          --baseline <its session file>: such a run also drops rows for files that session deleted,
 //          first readies a fresh cloud clone of the store (unshallows it, and puts a clean detached
 //          HEAD onto the bound branch only as a fast-forward of both), and moves the session baseline.
@@ -77,8 +81,9 @@
 // changes or renames plain files inside the same folders. A push is tried up to 4 times, with waits
 // of 2, 4 and 8 seconds; before each retry the store is read first, so a push that landed is never
 // sent again, and a store that moved is merged with a merge commit. When that merge conflicts, the
-// store's copy stays in place and ours is kept under evidence/store-conflicts/. No step leaves a
-// half-done merge; sync cancels one an older run left.
+// store's copy stays in place and ours is kept under evidence/store-conflicts/; a handoff snapshot
+// folder both sides changed keeps the store's copy whole instead (ours stays in our commit). No step
+// leaves a half-done merge; sync cancels one an older run left.
 //
 // It never force-pushes, mirrors, rebases or resets anything on the remote, never pushes a branch but
 // the bound one (except the checked branch delete), never touches another repository and never runs a
@@ -140,6 +145,9 @@ const PUSH_ATTEMPTS = 4;
 const RETRY_WAITS_MS = Object.freeze([2000, 4000, 8000]);
 // Where a conflicting race merge keeps our version, beside the store's.
 const CONFLICTS = 'evidence/store-conflicts';
+// The handoff snapshots (toolkit-handoff.cjs): one folder per controlled repository.
+const HANDOFF_ROOT = 'evidence/handoff';
+const SNAPSHOT_FOLDER = /^(evidence\/handoff\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\//;
 // The one Next line for a kept commit the checks refuse: no store step will ever push it.
 const KEPT_REFUSED = 'the store command never pushes that commit; copy your new files out of the store checkout, then save them from a fresh clone of the store.';
 const RAW_DIFF = ['--raw', '-z', '--no-abbrev', '-M100%'];
@@ -180,7 +188,7 @@ function defaultReadGitHub(apiPath, { environment = process.env, cwd = process.c
 class EvidenceStore {
   #fs; #run; #environment; #cwd; #readBinding; #readGitHub; #tmpdir; #platform; #findGit; #sleep;
   #dir = null; #hooks = null; #gitPath = null; #repository = null; #store = null; #branch = null; #allowed = [];
-  #resumed = 0; #kept = [];
+  #resumed = 0; #kept = []; #tookStore = [];
 
   constructor({ fs = nodeFs, run = spawnSync, environment = process.env, cwd = process.cwd(), readBinding = mergedStoreBinding, readGitHub = defaultReadGitHub, tmpdir = os.tmpdir(), platform = process.platform, findGit = resolveGit, sleep = waitSync } = {}) {
     this.#fs = fs; this.#run = run; this.#environment = environment; this.#cwd = cwd;
@@ -334,19 +342,35 @@ class EvidenceStore {
   }
 
   // Brings the checkout up to the fetched remote: a fast-forward when only behind, else one merge
-  // commit. When that merge conflicts it is always cancelled first, then made again keeping both.
+  // commit. When that merge conflicts, or both sides changed the same handoff snapshot folder, it is
+  // cancelled first, then made again keeping both (a snapshot folder keeps the store's copy whole).
+  // A local change in the way is marked `moved`, so a handoff run can put its files back and plan again.
   #catchUp() {
     const { ahead, behind } = this.#position();
     if (!(behind > 0)) return;
+    const moved = (stopped, next) => Object.assign(new StoreError(stopped, next), { moved: true });
     if (ahead === 0) {
-      this.#must(['merge', '--ff-only', '--quiet', this.#tracking], 'the store checkout could not fast-forward to the remote (a local change is in the way).', 'move the conflicting local files aside, run sync, then retry.');
+      if (!this.#git(['merge', '--ff-only', '--quiet', this.#tracking]).ok) throw moved('the store checkout could not fast-forward to the remote (a local change is in the way).', 'move the conflicting local files aside, run sync, then retry.');
       return;
     }
-    if (this.#git(['merge', '--no-ff', '--no-edit', '--quiet', this.#tracking]).ok) return;
+    const snapshots = this.#sharedSnapshots();
+    const tried = this.#git(['merge', '--no-ff', '--no-edit', ...(snapshots.length ? ['--no-commit'] : []), '--quiet', this.#tracking]);
+    if (tried.ok && !snapshots.length) return;
     const conflicted = this.#git(['diff', '--name-only', '-z', '--diff-filter=U']).out.split('\0').filter(Boolean);
     this.#git(['merge', '--abort']);
-    if (!conflicted.length || this.#merging()) throw new StoreError('the store moved and merging it failed (a local file is in the way); your commits are kept, nothing was pushed.', 'move the local files that are not saved aside, then run the same store command again.');
-    this.#keepBoth(conflicted);
+    if (this.#merging() || (!tried.ok && !conflicted.length)) throw moved('the store moved and merging it failed (a local file is in the way); your commits are kept, nothing was pushed.', 'move the local files that are not saved aside, then run the same store command again.');
+    this.#keepBoth(conflicted.filter(file => !snapshots.some(folder => file.startsWith(`${folder}/`))), snapshots);
+  }
+
+  // The handoff snapshot folders (evidence/handoff/<owner>/<repo>) that both this checkout's commits
+  // and the store's changed since they parted. Each is one manifest and the files it lists, so merging
+  // them file by file would pair one side's manifest with the other side's files.
+  #sharedSnapshots() {
+    const base = this.#git(['merge-base', 'HEAD', this.#tracking]).out.trim();
+    if (!base) return [];
+    const folders = to => new Set(this.#git(['diff', '--name-only', '-z', base, to, '--', HANDOFF_ROOT]).out.split('\0').map(file => SNAPSHOT_FOLDER.exec(file)?.[1]).filter(Boolean));
+    const theirs = folders(this.#tracking);
+    return [...folders('HEAD')].filter(folder => theirs.has(folder)).sort();
   }
 
   // One tree entry ({ mode, sha }) of a commit, or null when the commit lacks that path.
@@ -358,8 +382,10 @@ class EvidenceStore {
 
   // The race merge for conflicting paths: the store's copy stays where it is, and ours is written
   // beside it under evidence/store-conflicts/<time>-<our commit>/<path>. A path the store lacks
-  // keeps ours in place. Any failure cancels the merge and removes only what this run wrote.
-  #keepBoth(files) {
+  // keeps ours in place. A handoff snapshot folder both sides changed takes the store's copy whole
+  // (ours stays in our commit, and the next handoff run plans again from it). Any failure cancels the
+  // merge and removes only what this run wrote.
+  #keepBoth(files, snapshots = []) {
     const ours = this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim();
     const folder = `${CONFLICTS}/${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${ours.slice(0, 7)}`;
     const written = [];
@@ -367,6 +393,10 @@ class EvidenceStore {
     try {
       this.#git(['merge', '--no-ff', '--no-commit', '--quiet', this.#tracking]);
       if (!this.#merging()) throw new StoreError('the store moved and the conflicting merge could not be made again; your commits are kept, nothing was pushed.', 'run the same store command again.');
+      for (const folder of snapshots) {
+        this.#must(['rm', '-r', '-q', '-f', '--ignore-unmatch', '--', folder], `our copy of ${folder} could not be set aside.`, 'run the same store command again.');
+        if (this.#entry(this.#tracking, folder)) this.#must(['checkout', this.#tracking, '--', folder], `the store's copy of ${folder} could not be kept.`, 'run the same store command again.');
+      }
       for (const file of files) {
         if (!this.#entry(this.#tracking, file)) { this.#must(['add', '--', file], `${file} could not be kept.`, 'run the same store command again.'); continue; }
         this.#must(['checkout', this.#tracking, '--', file], `the store's copy of ${file} could not be kept.`, 'run the same store command again.');
@@ -382,13 +412,15 @@ class EvidenceStore {
         this.#must(['add', '--', target], `our copy of ${file} could not be kept.`, 'run the same store command again.');
         kept.push({ file, ours: target });
       }
-      this.#must(['commit', '--quiet', '-m', `Merge the store's ${this.#branch}, keeping both versions of ${files.length} file(s)`], 'the keep-both merge commit failed.', 'run the same store command again.');
+      const message = [files.length ? `keeping both versions of ${files.length} file(s)` : '', snapshots.length ? `keeping the store's handoff snapshot ${snapshots.join(', ')}` : ''].filter(Boolean).join('; ');
+      this.#must(['commit', '--quiet', '-m', `Merge the store's ${this.#branch}, ${message}`], 'the keep-both merge commit failed.', 'run the same store command again.');
     } catch (error) {
       if (this.#merging()) this.#git(['merge', '--abort']);
       for (const file of written) { try { this.#fs.rmSync(path.join(this.#dir, ...file.split('/')), { force: true }); } catch { /* written by this run */ } }
       throw error;
     }
     this.#kept.push(...kept);
+    this.#tookStore.push(...snapshots);
   }
 
   // Creates a target's folders inside the checkout; a link on the way is refused.
@@ -564,7 +596,8 @@ class EvidenceStore {
     const head = this.#must(['rev-parse', 'HEAD'], 'the pushed commit could not be read.', 'run status.').trim();
     this.#readBack(head, before);
     const kept = this.#kept.length ? { conflicts: this.#kept.map(entry => entry.file), kept_ours: this.#kept.map(entry => entry.ours) } : {};
-    return { store: this.#store, branch: this.#branch, commit: head, ...(head !== commit ? { merged_remote: true } : {}), read_back: true, ...(this.#resumed ? { resumed: this.#resumed } : {}), ...kept, ...extra };
+    const took = this.#tookStore.length ? { took_store: [...new Set(this.#tookStore)] } : {};
+    return { store: this.#store, branch: this.#branch, commit: head, ...(head !== commit ? { merged_remote: true } : {}), read_back: true, ...(this.#resumed ? { resumed: this.#resumed } : {}), ...kept, ...took, ...extra };
   }
 
   // The --message text is scanned before anything is committed, so a commit never carries a secret.
@@ -606,6 +639,15 @@ class EvidenceStore {
     return { store: this.#store, branch: this.#branch, commit: this.#must(['rev-parse', 'HEAD'], 'HEAD could not be read.', 'retry.').trim(), ...(ahead > 0 ? { pending: ahead } : {}), ...(cancelled ? { cancelled_merge: true } : {}) };
   }
 
+  // Brings the checkout up to the store before a handoff run plans, so it plans from the store's
+  // snapshot: a fast-forward, or (with unsent commits) the merge a save would make, unsent commits
+  // checked as before a push. Nothing is pushed. Returns the snapshot folders the store's copy won.
+  catchUp() {
+    this.#tookStore = [];
+    this.#ready();
+    return [...this.#tookStore];
+  }
+
   save({ paths, message }) { return this.#save(paths, message, []); }
 
   // The handoff snapshot's save: as save for its folder, and it also stages exactly the deletions its
@@ -627,6 +669,7 @@ class EvidenceStore {
       if (!real) throw new StoreError(`${file} does not exist in the store checkout or leads out of it through a link.`, 'write the file inside the store checkout first.');
     }
     this.#checkMessage(message);
+    this.#tookStore = [];
     this.#fetch();
     this.#ready();
     this.#must(['add', '--ignore-removal', '--', ...files], 'git add refused the paths (an ignored or missing file?).', 'check the paths, then retry.');
@@ -790,6 +833,10 @@ function rememberHandoff(deps, record) {
   } catch { /* the stale check is the backstop */ }
 }
 
+// A handoff run plans at most this many times when the store moves under it: once, then once again
+// from the store's snapshot after a lost race; a later run picks up anything still not landed.
+const HANDOFF_PASSES = 2;
+
 function runHandoff(options, deps) {
   const handoff = require('./toolkit-handoff.cjs');
   const fs = deps.fs || nodeFs;
@@ -806,8 +853,8 @@ function runHandoff(options, deps) {
   const list = (key, value) => (value?.length ? { [key]: value.join(',') } : {});
   // What a run or check says about removals: removed now, held over the limit, a clock behind the
   // snapshot, removed files this copy holds with different content, and memory rows kept because this
-  // computer never held them at that content (diverged).
-  const removals = found => ({ ...list('removed', found.removed), ...(found.held ? { held_removals: found.held } : {}), ...(found.clockBehind ? { clock: 'behind' } : {}), ...list('removed_here', found.removedHere), ...list('diverged', found.diverged) });
+  // computer never held them at that content (diverged), and copies no row lists that it never held (unlisted).
+  const removals = found => ({ ...list('removed', found.removed), ...(found.held ? { held_removals: found.held } : {}), ...(found.clockBehind ? { clock: 'behind' } : {}), ...list('removed_here', found.removedHere), ...list('diverged', found.diverged), ...list('unlisted', found.unlisted) });
   if (options.check) {
     const found = wrap(() => handoff.check({ base, repository, sources, now: deps.now ? deps.now() : new Date(), fs, platform, records }));
     return { handoff: found.state, folder: found.folder, ...(found.taken_at ? { taken_at: found.taken_at, age_hours: found.age_hours } : {}), ...list('changed', found.changed), ...list('unsure', found.unsure), ...list('kept', found.kept), ...removals(found) };
@@ -820,14 +867,15 @@ function runHandoff(options, deps) {
   const sessionFile = options.baseline ? path.resolve(cwd, options.baseline) : null;
   const held = sessionFile ? readJsonFile(fs, sessionFile) : null;
   const session = sessionFile ? { rows: Array.isArray(held?.rows) ? held.rows : null, real: held?.real && typeof held.real === 'object' ? held.real : null } : null;
-  // Called only once the run's save is read back (or nothing needed saving), so the folder record is
-  // what this computer has saved.
-  const remember = planned => {
+  // Called only once the run's save is read back (or nothing needed saving), with the manifest that
+  // landed, so the folder record and the session's rows hold only what this computer has saved.
+  const remember = (planned, manifest) => {
     rememberHandoff(deps, { [options.store ? 'store' : 'out']: base, repo_root: repoRoot, repository, at: stamp.taken_at });
-    handoff.writeFolderRecord(records, planned.record, { fs });
+    const after = handoff.landed(planned, manifest, session?.rows);
+    handoff.writeFolderRecord(records, after.record, { fs });
     if (sessionFile && planned) {
       const now = readJsonFile(fs, sessionFile) || {};
-      try { fs.writeFileSync(sessionFile, `${JSON.stringify({ ...now, rows: planned.seen, real: now.real && typeof now.real === 'object' ? now.real : planned.real }, null, 2)}\n`, { mode: 0o600 }); } catch { /* the next run compares again */ }
+      try { fs.writeFileSync(sessionFile, `${JSON.stringify({ ...now, rows: after.seen, real: now.real && typeof now.real === 'object' ? now.real : planned.real }, null, 2)}\n`, { mode: 0o600 }); } catch { /* the next run compares again */ }
     }
   };
   const kept = planned => ({ ...list('kept', planned.kept), ...removals(planned) });
@@ -835,7 +883,7 @@ function runHandoff(options, deps) {
   if (options.out) {
     const planned = decide();
     if (!planned.unchanged) handoff.write(base, planned, repository, { fs });
-    remember(planned);
+    remember(planned, planned.unchanged ? planned.previous : planned.manifest);
     return planned.unchanged
       ? { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, sent: 'nothing', ...kept(planned) }
       : { handoff: 'WRITTEN', folder: path.join(base, planned.folder), taken_at: stamp.taken_at, sent: 'nothing', ...kept(planned) };
@@ -843,25 +891,40 @@ function runHandoff(options, deps) {
   const store = new EvidenceStore(deps);
   try {
     store.open({ store: options.store, repoRoot: options.repoRoot, prepare: Boolean(sessionFile) });
-    // Sync first, so the compare reads the snapshot the store already holds (another writer's too).
-    const synced = store.sync();
-    const planned = decide();
-    // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
-    // save sends them now rather than calling them unchanged.
-    if (planned.unchanged && !store.pending(planned.folder)) { remember(planned); return { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) }; }
-    const undo = planned.unchanged ? null : handoff.write(base, planned, repository, { fs });
-    let saved;
-    try { saved = store.saveHandoff({ folder: planned.folder, deletions: planned.unchanged ? [] : planned.deletes, message: `Refresh controller handoff snapshot for ${repository}` }); } catch (error) {
-      // Stopped before a commit (a dropped fetch, a refused scan): put the snapshot folder back as it
-      // was, so the checkout can still fast-forward and the next save is not blocked. A kept commit
-      // stays for the next run to send.
-      let head = null;
-      try { head = store.head(); } catch { head = null; }
-      if (undo && head === synced.commit) undo();
-      throw error;
+    let last = null;
+    for (let pass = 1; ; pass += 1) {
+      // Sync and catch up first, so the run plans from the snapshot the store holds now (another
+      // writer's too, and the store's copy after a race merge of unsent commits).
+      store.sync();
+      store.catchUp();
+      const before = store.head();
+      const planned = decide();
+      // Unchanged against the checkout, but an earlier run's files or commit never reached the store:
+      // save sends them now rather than calling them unchanged.
+      if (planned.unchanged && !store.pending(planned.folder)) {
+        remember(planned, planned.previous);
+        return last ? { handoff: 'SAVED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...last, ...kept(planned) } : { handoff: 'UNCHANGED', folder: planned.folder, taken_at: planned.previous.stamp?.taken_at || null, ...kept(planned) };
+      }
+      const undo = planned.unchanged ? null : handoff.write(base, planned, repository, { fs });
+      let saved;
+      try { saved = store.saveHandoff({ folder: planned.folder, deletions: planned.unchanged ? [] : planned.deletes, message: `Refresh controller handoff snapshot for ${repository}` }); } catch (error) {
+        // Stopped before a commit (a dropped fetch, a refused scan, a store that moved under the
+        // written files): put the snapshot folder back as it was, so the checkout can still catch up
+        // and the next save is not blocked. A store that moved is planned again; a kept commit stays
+        // for the next run to send.
+        let head = null;
+        try { head = store.head(); } catch { head = null; }
+        if (undo && head === before) undo();
+        if (error.moved && head === before && pass < HANDOFF_PASSES) continue;
+        throw error;
+      }
+      last = saved;
+      // Another computer's save won the race merge: the store's snapshot was kept whole and this plan
+      // did not land, so plan again from what landed (each pass reads this computer's files again).
+      if ((saved.took_store || []).includes(planned.folder) && pass < HANDOFF_PASSES) continue;
+      remember(planned, handoff.readManifest(base, planned.folder, { fs }));
+      return { handoff: 'SAVED', folder: planned.folder, taken_at: planned.unchanged ? planned.previous.stamp?.taken_at || null : stamp.taken_at, ...saved, ...kept(planned) };
     }
-    remember(planned);
-    return { handoff: 'SAVED', folder: planned.folder, taken_at: planned.unchanged ? planned.previous.stamp?.taken_at || null : stamp.taken_at, ...saved, ...kept(planned) };
   } finally { store.close(); }
 }
 
