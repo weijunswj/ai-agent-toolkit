@@ -140,7 +140,7 @@ function respondSteady(event, input, options) {
       // thread starts in /home/user); the governed rules come once for the ENABLED ones.
       // The whole text, this cloud line included, stays within the host's session-start limit.
       const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`${CLOUD_LINE}\n\n`, 'utf8');
-      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit, refresh: fresh, programmeDeps: options.programmeDeps });
+      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit, refresh: fresh });
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else {
       // The catch-up moves the checkout first, so the governance line reads the moved tree.

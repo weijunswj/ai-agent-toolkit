@@ -35,7 +35,7 @@ function fixture(t, { governed = true } = {}) {
   const transcript = path.join(dir, 'transcript.jsonl');
   const fx = {
     dir, home, work, sessions, transcript, repository: 'toolkit-test-fixture/owed',
-    deps: { home, nowMs: NOW, localAppData: path.join(dir, 'local'), governanceState: () => (governed ? { state: 'ENABLED', programme_records_bind: true } : { state: 'DISABLED' }),
+    deps: { home, nowMs: NOW, localAppData: path.join(dir, 'local'), startRefresh: () => {}, governanceState: () => (governed ? { state: 'ENABLED', programme_records_bind: true } : { state: 'DISABLED' }),
       env: { CLAUDE_CODE_HOST_SESSION_ID: SELF } },
     rows: [],
     // Transcript rows, in order; each call is { name, input, at (hours ago), result, error }.
@@ -55,8 +55,8 @@ function fixture(t, { governed = true } = {}) {
     controller() { return fx.shell('node programme.cjs ack --finding abcdefabcdef --next "x" --session ctl --controller'); },
     writeTranscript() { fs.writeFileSync(transcript, fx.rows.map(row => JSON.stringify(row)).join('\n') + '\n'); return fx; },
     net(entries) {
-      cache.writeCache(fx.repository, { line: 'Attention: fixture', counts: { new: entries.length, acknowledged: 0 }, digest: 'd', complete: true,
-        net: entries.map((entry, index) => ({ id: entry.id || `00000000000${index}`.slice(-12), issue: 7, kind: null, due: null, ...entry })) }, { home });
+      cache.writeCache(fx.repository, { complete: true,
+        net: entries.map((entry, index) => ({ id: entry.id || `00000000000${index}`.slice(-12), issue: 7, kind: null, due: null, ...entry })) }, { home, now: () => iso(NOW) });
       return fx;
     },
     desktop(own = {}, children = []) {
@@ -241,18 +241,19 @@ test('O-11 the per-session memory holds hashes only: no session IDs, titles, fin
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['keys', 'notes', 'schema']);
 });
 
-test('O-12 the attention cache keeps well-formed net entries and drops a malformed list whole', t => {
+test('O-12 the attention cache keeps well-formed net entries and refuses a malformed list whole', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'owed-cache-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const good = { id: 'abcdefabcdef', code: 'CLOSE_DUE', issue: 4, kind: 'g1-4-a1', state: 'new', changed_at: iso(NOW), due: null };
-  cache.writeCache('acme/app', { line: 'Attention: x', counts: {}, digest: 'd', complete: true, net: [good] }, { home: dir });
+  assert.equal(cache.writeCache('acme/app', { complete: true, net: [good] }, { home: dir }), true);
   assert.deepEqual(cache.readCache('acme/app', { home: dir }).net, [good]);
   for (const bad of [[{ ...good, id: 'short' }], [{ ...good, kind: 'has space' }], [{ ...good, state: 'resolved' }], [{ ...good, issue: 0 }], [{ ...good, changed_at: 'nope' }],
-    Array.from({ length: cache.NET_LIMIT + 1 }, () => good), 'x']) {
-    cache.writeCache('acme/app', { line: 'Attention: x', counts: {}, digest: 'd', complete: true, net: bad }, { home: dir });
-    assert.equal(cache.readCache('acme/app', { home: dir }).net, null);
+    Array.from({ length: cache.NET_LIMIT + 1 }, () => good), 'x', undefined]) {
+    assert.equal(cache.writeCache('acme/app', { complete: true, net: bad }, { home: dir }), false, JSON.stringify(bad)?.slice(0, 80));
+    assert.deepEqual(cache.readCache('acme/app', { home: dir }).net, [good], 'the last good cache stays');
   }
   // Extra fields are not carried into the cache.
-  cache.writeCache('acme/app', { line: 'Attention: x', counts: {}, digest: 'd', complete: true, net: [{ ...good, detail: 'free text' }] }, { home: dir });
+  cache.writeCache('acme/app', { complete: true, net: [{ ...good, detail: 'free text' }] }, { home: dir });
   assert.deepEqual(cache.readCache('acme/app', { home: dir }).net, [good]);
+  assert.equal(fs.readFileSync(cache.cacheFile('acme/app', { home: dir }), 'utf8').includes('free text'), false);
 });

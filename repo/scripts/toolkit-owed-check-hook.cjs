@@ -181,7 +181,24 @@ function finishedSideSessions(self, env, deps) {
 
 // ---- the owed list ---------------------------------------------------------------------------------
 
-function owedList({ repository, transcript, cache, self, env, deps }) {
+// A controller's turn end keeps this computer's attention cache fresh: with no cache, or one over an
+// hour old, it starts `programme.cjs refresh` in the background, at most once per 15 minutes per
+// repository. Never in a cloud session (its GitHub link may not reach the programme store, and its
+// machine is thrown away), and never where governance reads are switched off (a test run) unless a
+// starter is given. True when a refresh started.
+function startRefresh({ root, repository, cache, cacheModule, env, deps }) {
+  const nowMs = deps.nowMs ?? Date.now();
+  if (cache && nowMs - Date.parse(cache.as_of) <= cacheModule.STALE_MS) return false;
+  if (env.CLAUDE_CODE_REMOTE === 'true') return false;
+  if (!deps.startRefresh && env.TOOLKIT_GOVERNANCE_OFFLINE === '1') return false;
+  if (!cacheModule.claimBackgroundStart(repository, { ...deps, now: () => new Date(nowMs).toISOString() })) return false;
+  try {
+    (deps.startRefresh || require(path.join(SCRIPTS, 'programme-refresh-trigger.cjs')).startRefresh)(root, deps);
+    return true;
+  } catch { return false; }
+}
+
+function owedList({ repository, transcript, cache, refreshing = false, self, env, deps }) {
   const state = require(path.join(SCRIPTS, 'programme-state.cjs'));
   const command = args => require('./toolkit-user-state.cjs').programmeCommand(args, { userHome: deps.home });
   const attention = command('attention');
@@ -189,7 +206,7 @@ function owedList({ repository, transcript, cache, self, env, deps }) {
   const items = [];
   const notes = [];
   if (!cache || !Array.isArray(cache.net)) {
-    notes.push(`the attention cache for ${repository} is missing or older than this check, so findings due were not checked (run ${attention} to refresh it)`);
+    notes.push(`the attention cache for ${repository} is missing or older than this check, so findings due were not checked (${refreshing ? 'a refresh has started in the background' : `run ${attention} to refresh it`})`);
   } else {
     const callout = state.netCallout(cache.net.filter(entry => entry.code !== 'CLOSE_DUE'), nowMs);
     for (const entry of callout.entries) {
@@ -313,8 +330,10 @@ function check(input, deps = {}) {
   if (transcript && !transcript.controller) return { outcome: 'NOT_CONTROLLER', output: null };
   const hostSession = String(env.CLAUDE_CODE_HOST_SESSION_ID || '');
   const self = CLAUDE_SESSION.test(hostSession) ? hostSession : null;
-  const cache = require(path.join(SCRIPTS, 'programme-attention-cache.cjs')).readCache(repository, deps);
-  const owed = transcript ? owedList({ repository, transcript, cache, self, env, deps }) : { items: [], notes: [], command: null };
+  const cacheModule = require(path.join(SCRIPTS, 'programme-attention-cache.cjs'));
+  const cache = cacheModule.readCache(repository, deps);
+  const refreshing = startRefresh({ root, repository, cache, cacheModule, env, deps });
+  const owed = transcript ? owedList({ repository, transcript, cache, refreshing, self, env, deps }) : { items: [], notes: [], command: null };
   owed.notes.unshift(...notes);
   const file = stateFile(sessionId, deps);
   const previous = readState(file);

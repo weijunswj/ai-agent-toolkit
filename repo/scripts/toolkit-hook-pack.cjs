@@ -162,7 +162,7 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_net', 'desktop_sessions'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'attention_net', 'desktop_sessions'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.attention_net !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.attention_net)
     || fixture.attention_net.some(entry => !entry || typeof entry !== 'object' || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code)) || !['new', 'acknowledged'].includes(entry.state)
       || typeof entry.age_hours !== 'number' || entry.age_hours < 0 || Object.keys(entry).some(key => !['code', 'state', 'age_hours', 'issue', 'kind'].includes(key))))) errors.push('fixture.attention_net needs an enabled repository and entries { code, state, age_hours, issue?, kind? }');
@@ -176,8 +176,6 @@ function fixtureErrors(fixture) {
   if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title', 'train-members', 'train-sibling', 'train-sibling-row'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
-  if (fixture.stale_rows !== undefined && (!fixture.repo || !['enabled', 'disabled'].includes(fixture.repo.governance)
-    || !Array.isArray(fixture.stale_rows) || !fixture.stale_rows.length || fixture.stale_rows.some(row => typeof row !== 'string' || !row.trim()))) errors.push('fixture.stale_rows needs an enabled or disabled repository and nonempty row strings');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -444,21 +442,13 @@ class Fixture {
         purpose: 'Hook pack fixture', created: this.#now().toISOString(), created_by: 'fixture', model: null, effort: null,
       })));
     }
-    // Today's stale-check stamp in the fixture home, as the background run writes it after a good run.
-    if (spec.stale_rows) {
-      const now = this.#now();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
-      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
-      cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
-    }
     // Open net findings in this computer's attention cache, as `programme.cjs attention` writes it.
     if (spec.attention_net) {
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
       const net = spec.attention_net.map((entry, index) => ({ id: crypto.createHash('sha256').update(`${index}|${entry.code}`).digest('hex').slice(0, 12), code: entry.code,
         issue: entry.issue ?? null, kind: entry.kind ?? null, state: entry.state, changed_at: this.#now(entry.age_hours * 3600000).toISOString(), due: null }));
-      cache.writeCache(repository, { line: `Attention: ${net.length} new`, counts: { new: net.length, acknowledged: 0 }, digest: 'fixture', complete: true, net }, { home: this.home });
+      cache.writeCache(repository, { complete: true, net }, { home: this.home });
     }
     // The Claude desktop app's session files: this session's own, and each listed one it started
     // (spawnedFrom names this session unless the entry sets its own).
