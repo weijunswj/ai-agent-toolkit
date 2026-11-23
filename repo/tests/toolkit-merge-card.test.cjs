@@ -48,7 +48,12 @@ const SESSIONS = {
   'a chat the user started': ctx => { gate.startSession({ session_id: 'user', source: 'startup', cwd: ctx.repo }, { ...ctx.options, environment: {} }); return { id: 'user', environment: {} }; },
   'a session a launcher started': ctx => { const environment = { [gate.LAUNCHER_MARKERS[0]]: 'G1' }; gate.startSession({ session_id: 'lane', source: 'startup', cwd: ctx.repo }, { ...ctx.options, environment }); return { id: 'lane', environment }; },
   'a session another session started': ctx => { const environment = { [gate.HOST_SESSION_VARIABLE]: 'parent' }; gate.startSession({ session_id: 'child', source: 'startup', cwd: ctx.repo }, { ...ctx.options, environment }); return { id: 'child', environment }; },
+  // Marked by the Claude Code hook, which names its host: the chat the app reopened (#1233).
+  'a chat the user started, reopened by the app': ctx => { for (const source of ['startup', 'resume']) gate.startSession({ session_id: 'reopened', source, cwd: ctx.repo }, { ...ctx.options, environment: {}, host: 'claude-code' }); return { id: 'reopened', environment: {} }; },
+  // Marked with no host: a resume nothing attests stays refused.
   'a resumed session': ctx => { for (const source of ['startup', 'resume']) gate.startSession({ session_id: 'resumed', source, cwd: ctx.repo }, { ...ctx.options, environment: {} }); return { id: 'resumed', environment: {} }; },
+  'a resumed session another session revoked': ctx => { gate.startSession({ session_id: 'revoked', source: 'startup', cwd: ctx.repo }, { ...ctx.options, environment: {}, host: 'claude-code' }); gate.startSession({ session_id: 'revoked', source: 'resume', cwd: ctx.repo }, { ...ctx.options, environment: { [gate.HOST_SESSION_VARIABLE]: 'revoked' }, host: 'claude-code' }); return { id: 'revoked', environment: {} }; },
+  'a fork': ctx => { gate.startSession({ session_id: 'forked', source: 'fork', cwd: ctx.repo }, { ...ctx.options, environment: {}, host: 'claude-code' }); return { id: 'forked', environment: {} }; },
   'a session with no start mark': () => ({ id: 'unmarked', environment: {} }),
   'a call with no session id': () => ({ id: null, environment: {} }),
 };
@@ -62,7 +67,8 @@ const plain = value => Boolean(value) && typeof value === 'object' && !Array.isA
 // differ from what was shown; `back` and `extra` change what the host hands back and reports.
 function tap(ctx, session, input, label, { ask = true, response = input, toolUseId = `toolu_${calls += 1}`, answers, back, extra = {} } = {}) {
   const base = { cwd: ctx.repo, session_id: session.id, tool_name: 'AskUserQuestion', tool_use_id: toolUseId };
-  const options = { ...ctx.options, environment: session.environment };
+  // The Claude Code hook passes its own host, as the real entry point does.
+  const options = { ...ctx.options, environment: session.environment, host: 'claude' };
   const noted = ask ? hold.cardAsked({ ...base, tool_input: input }, options) : false;
   const question = response && Array.isArray(response.questions) && response.questions[0] ? response.questions[0].question : '';
   const given = answers === undefined ? { [question]: label } : answers;
@@ -77,12 +83,12 @@ const merge = (ctx, session, { pr = 618, sha = SHA, host = 'claude', repo = '' }
 const offeredIn = text => JSON.parse(/with exactly this input[^:]*: (\{.*?\}\]\}\]\})/.exec(text)[1]);
 const stored = ctx => { try { return JSON.parse(fs.readFileSync(ctx.file, 'utf8')).approvals; } catch { return []; } };
 
-test('who may approve a merge by card: only a fresh chat the user started', async t => {
+test('who may approve a merge by card: only a chat the user started, fresh or reopened by the app', async t => {
   for (const [name, start] of Object.entries(SESSIONS)) {
     await t.test(name, t => {
       const ctx = context(t);
       const session = start(ctx);
-      const counts = name === 'a chat the user started';
+      const counts = name === 'a chat the user started' || name === 'a chat the user started, reopened by the app';
       // The refusal offers the card only where its answer can count.
       const refusal = merge(ctx, session).deny;
       assert.match(refusal, /no unused approval/);
@@ -636,6 +642,39 @@ test('where task auto-merge would take the merge with no card, an agent\'s merge
   assert.equal(redirected.permissionDecision, 'deny');
   assert.match(redirected.permissionDecisionReason, /If the user has not asked, do not merge/);
   assert.match(claudeHook.respond('PreToolUse', merge(off), off.options).hookSpecificOutput.permissionDecisionReason, /^Toolkit: Toolkit's merge card is how the user approves this merge/);
+});
+
+// #1233: the owner's chat the app reopened (SessionStart resume, same id, no session variable),
+// through the real Claude Code hook entry, which names its own host: the merge refusal offers the
+// card, an agent's own merge question is pointed at it, and the tap counts. Payload fields naming
+// another host change nothing. A resume carrying the session variable keeps refusing all of it.
+test('the owner\'s chat reopened by the app gets the card, the redirect and a counted tap through the hook', t => {
+  const off = standingContext(t, 'off');
+  const { registryOptions } = off.options;
+  for (const source of ['startup', 'resume']) gate.startSession({ session_id: 'reopened', source, cwd: off.repo }, { registryOptions, environment: {}, host: 'claude-code' });
+  gate.startSession({ session_id: 'revoked', source: 'startup', cwd: off.repo }, { registryOptions, environment: {}, host: 'claude-code' });
+  gate.startSession({ session_id: 'revoked', source: 'resume', cwd: off.repo }, { registryOptions, environment: { [gate.HOST_SESSION_VARIABLE]: 'revoked' }, host: 'claude-code' });
+  const spoof = { host: 'codex', entrypoint: 'codex', hook_source: 'codex' };
+  const merge = id => ({ cwd: off.repo, session_id: id, tool_name: 'Bash', tool_input: { command: `gh pr merge 5 --repo owner/a --merge --match-head-commit ${off.head}` }, ...spoof });
+  const question = id => ({ cwd: off.repo, session_id: id, tool_name: 'AskUserQuestion', tool_use_id: `toolu_q_${id}`, tool_input: { questions: [{ question: 'Merge owner/a#5 now?', header: 'Merge', multiSelect: false, options: [{ label: 'Merge', description: 'Merge it.' }, { label: 'Wait', description: 'Wait.' }] }] }, ...spoof });
+  const exact = hold.mergeCard('owner/a', 5, off.head);
+  const shown = id => ({ cwd: off.repo, session_id: id, tool_name: 'AskUserQuestion', tool_use_id: `toolu_card_${id}`, tool_input: exact, ...spoof });
+  const answer = id => ({ ...shown(id), tool_input: { ...exact, answers: { [exact.questions[0].question]: 'Merge' }, annotations: {} }, tool_response: { questions: exact.questions, answers: { [exact.questions[0].question]: 'Merge' }, annotations: {} } });
+  const pre = input => claudeHook.respond('PreToolUse', input, off.options).hookSpecificOutput;
+  // Reopened owner chat.
+  assert.match(pre(merge('reopened')).permissionDecisionReason, /^Toolkit: Toolkit's merge card is how the user approves this merge/, 'the card is offered first');
+  assert.match(pre(question('reopened')).permissionDecisionReason, /only Toolkit's merge card can/, 'an agent\'s own merge question is pointed at the card');
+  assert.equal(pre(shown('reopened')), undefined, 'the exact card is shown');
+  assert.match(claudeHook.respond('PostToolUse', answer('reopened'), off.options).hookSpecificOutput.additionalContext, /recorded the user's tap on Merge as one approval for owner\/a#5/);
+  assert.deepEqual(claudeHook.respond('PreToolUse', merge('reopened'), off.options), {}, 'the tapped merge passes once');
+  // Revoked chat: no card, no redirect, no counted tap; the refusal says why and asks for no retype.
+  const refused = pre(merge('revoked')).permissionDecisionReason;
+  assert.match(refused, /this chat cannot record one: a resume carried the host-session variable/);
+  assert.doesNotMatch(refused, /merge card is how|Ask the user to type/);
+  assert.equal(pre(question('revoked')), undefined, 'no card can count, so the agent\'s question is left alone');
+  pre(shown('revoked'));
+  assert.match(claudeHook.respond('PostToolUse', answer('revoked'), off.options).hookSpecificOutput.additionalContext, /no merge approval was recorded/);
+  assert.match(pre(merge('revoked')).permissionDecisionReason, /this chat cannot record one/);
 });
 
 test('the tap receipt names Toolkit\'s merge card', t => {
