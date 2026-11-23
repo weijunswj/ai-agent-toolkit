@@ -181,7 +181,7 @@ test('managed partial explicit flags preserve one bank and truthful child guidan
   // Claude Code's one question: the flagged row shows the flag's choice, and the reply line covers the rest.
   assert.match(result.stdout, /1 setting is set by your setup flags, and the reply cannot change it\./);
   assert.match(result.stdout, /\| 1\.2 \| Update reports \|[^\n]*\(set by your setup flag\) \| - \|/);
-  assert.equal((result.stdout.match(/^Apply these defaults\? Reply yes to apply the Setup applies column/gm) || []).length, 1);
+  assert.equal((result.stdout.match(/^Apply Toolkit's defaults to the \d+ Claude Code settings that have no value yet\? Your own values and offs stay\. Reply yes to apply the Setup applies column/gm) || []).length, 1);
   assert.doesNotMatch(result.stdout, /Reply with either:|Reply with one line for each unresolved question/);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
 });

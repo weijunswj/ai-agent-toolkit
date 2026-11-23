@@ -117,8 +117,8 @@ function readVerdict(root, reader, verdict) {
 
 // The second ruleset, for a repository whose merged binding keeps its programme state on the public
 // state branch: nobody, Toolkit included, can delete that branch. Force pushes to it are already
-// blocked by the no-force-push ruleset above. Added only by `toolkit governance migrate`, after its
-// own Enter; never on a repository without the state branch in its binding.
+// blocked by the no-force-push ruleset above. Added only by `toolkit governance migrate`, within its
+// one Enter for all of its GitHub changes; never on a repository without the state branch in its binding.
 const STATE_BRANCH = 'DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED';
 const KEEP_STATE_RULESET_NAME = 'Toolkit: keep programme state';
 

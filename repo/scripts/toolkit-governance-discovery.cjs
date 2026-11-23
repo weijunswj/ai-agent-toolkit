@@ -14,7 +14,8 @@
 //        `state/`. A name or prefix alone selects nothing (A5).
 //   3. One strong candidate gives one recommendation to confirm, several give one recommendation with
 //      alternatives, none gives a create proposal with concrete defaults, and a failed search says
-//      what is unknown.
+//      what is unknown. For the evidence store only this repository's own TRANSPORT-<name> is ever
+//      recommended; another repository's store is listed and used only when the owner names it.
 //   4. The adoption proposal lists what is there and what Toolkit would reuse, add, repair, keep and
 //      defer (instructions, CI and checks, rulesets, schedules, deployment notes, monitoring and
 //      programme issues), with the version 2 binding draft for the one setup pull request.
@@ -189,7 +190,11 @@ class GovernanceDiscovery {
     for (const binding of otherBindings) if (binding.store.toLowerCase() !== slug.toLowerCase()) addStore(binding.store, `the store of ${binding.repository}'s binding`);
     const judged = [...storeEvidence.values()].map(entry => judgeStore(this.#gh, owner, entry.full, entry.evidence));
     const eligible = judged.filter(entry => entry.eligible).sort((a, b) => storeRank(b, name) - storeRank(a, name));
-    const stores = { ...choose(eligible, !repos.ok), rejected: judged.filter(entry => !entry.eligible) };
+    // Only this repository's own TRANSPORT-<name> is ever recommended: another repository's store is
+    // listed, never reused, unless the owner names it in their answer.
+    const own = eligible.find(entry => entry.repository.split('/')[1].toLowerCase() === `transport-${name.toLowerCase()}`) || null;
+    const stores = own ? { status: 'one', recommended: own, alternatives: eligible.filter(entry => entry !== own), rejected: judged.filter(entry => !entry.eligible) }
+      : { ...choose([], !repos.ok), alternatives: eligible, rejected: judged.filter(entry => !entry.eligible) };
 
     // Required checks from the default branch's protection, when readable.
     const repoInfo = this.#gh([`repos/${owner}/${name}`]);
@@ -297,6 +302,7 @@ function describeDiscovery(result) {
   };
   pick('Parent issue', result.parents, entry => `#${entry.issue} "${entry.title}" (${entry.evidence.join(', ')}${entry.note ? `; ${entry.note}` : ''})`);
   pick('Evidence store', result.stores, entry => `${entry.repository} (${entry.evidence.join('; ')})`);
+  if (result.stores.status !== 'several' && result.stores.alternatives?.length) lines.push(`- Other stores, used only when you name one: ${result.stores.alternatives.map(entry => entry.repository).join(', ')}.`);
   for (const entry of result.stores.rejected) lines.push(`- Not eligible: ${entry.repository}, because ${entry.rejected}.`);
   if (result.unknown.length) lines.push(`- Unknown: ${result.unknown.join('; ')}.`);
   lines.push('Adoption proposal (one yes covers it all, as one setup pull request):');

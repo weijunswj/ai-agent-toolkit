@@ -2578,11 +2578,11 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
         assert.match(message, /still carries Toolkit instruction copies \(AGENTS\.md\) from an older setup\. Governance is not on here/);
         assert.match(message, /toolkit-leftover-files\.cjs scan\) lists them, and removing them is the owner's choice; nothing is due in this task/);
         assert.doesNotMatch(message, /toolkit-governance-cleanup|before this task ends/);
-        // Where governance is on, the note names the owner's Clean up answer and still asks nothing of
-        // this task, matching the bank's Keep current recommendation.
+        // Where governance is on, the note names the owner's governance answer and still asks nothing of
+        // this task.
         const governed = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true }));
-        assert.match(governed, /\(AGENTS\.md\) that the installed Toolkit now delivers itself\. Removing them is the owner's choice: `refresh governance` asks about them/);
-        assert.match(governed, /only a Clean up answer opens the one cleanup pull request; nothing is due in this task/);
+        assert.match(governed, /\(AGENTS\.md\) that the installed Toolkit now delivers itself\. Removing them is the owner's choice: `refresh governance` shows them/);
+        assert.match(governed, /only the owner's answer to it removes them, for one cleanup pull request; nothing is due in this task/);
         // The fixture has no plain-text check, which a governed repository carries: that part is due.
         assert.match(governed, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from/);
         assert.doesNotMatch(governed, /broken Toolkit markers|toolkit-governance-cleanup/);
@@ -2634,10 +2634,10 @@ test('SessionStart notice: broken markers keep the checks part, and ERROR names 
   assert.match(tooOld, /Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\) than the running copy \(3\.0\.0\); next step: refresh Toolkit \(setup toolkit\) before this task ends\./);
   assert.doesNotMatch(tooOld, /repository-agent-rules|\(Toolkit instruction copies\)/);
   const unusable = preflight({ governanceStateAt: () => ({ state: 'ERROR', reason: 'merged-binding-invalid', minToolkit: null }) });
-  assert.match(unusable, /Removing them is the owner's choice: `refresh governance` asks about them once the programme file can be used\. Nothing is due in this task\./);
+  assert.match(unusable, /Removing them is the owner's choice: `refresh governance` shows them once the programme file can be used\. Nothing is due in this task\./);
   assert.match(unusable, /refresh them with repository-agent-rules before this task ends/);
   const enabled = preflight({ governanceStateAt: () => ({ state: 'ENABLED', reason: null, minToolkit: null }) });
-  assert.match(enabled, /`refresh governance` asks about them \(Toolkit instruction copies\), and only a Clean up answer opens the one cleanup pull request/);
+  assert.match(enabled, /`refresh governance` shows them \(Toolkit instruction copies\), and only the owner's answer to it removes them, for one cleanup pull request/);
   for (const message of [withChecks, tooOld, unusable, enabled]) assert.doesNotMatch(message, NEVER_HALTING);
 });
 
