@@ -162,7 +162,7 @@ function fixtureErrors(fixture) {
   for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
-    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged'].includes(fixture.handoff.memory))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }');
+    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'nul', 'unchanged'].includes(fixture.handoff.memory))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved, nul or unchanged }');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -709,7 +709,7 @@ cp.spawnSync = function(file, args, options) {
   // The controller handoff snapshot the after-tool hook keeps fresh (toolkit-handoff-hook.cjs): a memory
   // folder and its snapshot, taken 50 minutes ago, with the hook's record of it. For `checked`, the session
   // record of a first check two minutes ago, which held the memory as it was then. For `moved`, the memory
-  // is then saved, as the tool call under test just did. The folder sits beside work, outside the snapshot.
+  // is then saved, as the tool call under test just did; for `nul`, saved holding a NUL byte. The folder sits beside work, outside the snapshot.
   #handoff(spec) {
     const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
     const handoff = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
@@ -737,6 +737,7 @@ cp.spawnSync = function(file, args, options) {
       fs.writeFileSync(sessionFile, `${JSON.stringify({ started_at: checkedAt, checked_at: checkedAt, rows, real: handoff.realBySource(rows) }, null, 2)}\n`);
     }
     if (spec.handoff.memory === 'moved') save(memoryFile, '# Memory\n- queue: #7\n', 30 * 1000);
+    if (spec.handoff.memory === 'nul') save(memoryFile, '# Memory\n- queue: #7\0\n', 30 * 1000);
     this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex') };
   }
 
@@ -839,10 +840,14 @@ async function runRow(row, hosts, { roots, scratch }) {
 }
 
 // Whether a handoff refresh a hook started has landed: the snapshot is current, and this session's record
-// holds the saved memory (the run rewrites that record last).
+// holds the saved memory (the run rewrites that record last). A source the check refuses (a NUL byte)
+// never lands, so a refresh an older hook started for it is awaited in full and reported, not a crash.
 function handoffLanded({ handoff }) {
   const { store, repository, sessionFile, memoryHash } = handoff;
-  if (require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs')).check({ base: store, repository }).state !== 'CURRENT') return false;
+  const handoffModule = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
+  let state = null;
+  try { state = handoffModule.check({ base: store, repository }).state; } catch (error) { if (!(error instanceof handoffModule.HandoffError)) throw error; }
+  if (state !== 'CURRENT') return false;
   const session = readJsonFile(sessionFile);
   return Array.isArray(session?.rows) && session.rows.some(row => row.path === 'MEMORY.md' && row.sha256 === memoryHash);
 }

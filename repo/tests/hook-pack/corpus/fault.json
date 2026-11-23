@@ -303,6 +303,18 @@
       "expect": {"decision": "allow"},
       "postcondition": "no-handoff-refresh",
       "status": "pass"
+    },
+    {
+      "id": "HANDOFF.nul-memory-starts-no-refresh",
+      "source": "Polish 10 G2 F1: a memory file saved with a NUL byte starts no refresh, which the store's save would refuse and undo every ten minutes",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "update_memory", "tool_input": {"text": "queue: #7"}, "tool_response": "saved"},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "checked", "memory": "nul"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-handoff-refresh",
+      "status": "pass"
     }
   ]
 }
