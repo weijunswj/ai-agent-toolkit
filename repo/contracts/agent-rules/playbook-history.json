@@ -81,7 +81,8 @@
       "f084d93394123b5a",
       "fb48f76082156d37",
       "17a56821531fffa0",
-      "f56e18466cbfa3be"
+      "f56e18466cbfa3be",
+      "fca1d6548a438d69"
     ],
     "invariant-models.md": [
       "f87337e54146ebb5"
@@ -95,7 +96,8 @@
       "bec21fd697c74431"
     ],
     "model-safety-flags.md": [
-      "57cd80ec740a84dc"
+      "57cd80ec740a84dc",
+      "14a45c8e66cd3014"
     ],
     "n8n-workflows.md": [
       "7b0c4c2f70d00a22"
@@ -151,7 +153,8 @@
       "ed80ba553f5e068c",
       "f5406ad675a6d094",
       "42dcba06cb5f6f7f",
-      "bdd8b8e1b8cd190c"
+      "bdd8b8e1b8cd190c",
+      "1d01cf6a0f295d47"
     ],
     "windows-command-hygiene.md": [
       "82560ee1a6693611",
