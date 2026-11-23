@@ -293,7 +293,6 @@ n8n helper templates may write scoped local outputs after they are copied into a
 Use:
 
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional Codex n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
@@ -308,7 +307,6 @@ Use:
 
 - [Claude Code shim template](../../skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional Claude n8n adapter](../../skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
@@ -321,7 +319,6 @@ Claude Code n8n work uses the [official n8n Skills](https://github.com/n8n-io/sk
 Use:
 
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional OpenCode n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
@@ -334,7 +331,6 @@ OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is plat
 Use:
 
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional Antigravity 2 n8n adapter](../../skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)

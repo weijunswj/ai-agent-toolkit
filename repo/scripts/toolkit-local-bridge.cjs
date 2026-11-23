@@ -1287,7 +1287,8 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
 
 // The governed-rules copies older setups wrote into a repository (the governed block, its older
 // template block and the Antigravity bootstrap), and broken Toolkit markers in those files.
-const LEFTOVER_RULE_BLOCKS = Object.freeze({ 'AGENTS.md': ['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE'], '.agents/rules/00-agent-toolkit-bootstrap.md': ['ANTIGRAVITY.BOOTSTRAP'] });
+// The n8n adapter block older setups copied into AGENTS.md is a leftover too: the global rules carry the n8n rules.
+const LEFTOVER_RULE_BLOCKS = Object.freeze({ 'AGENTS.md': ['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE', 'N8N-AGENT-RULES-ADAPTER'], '.agents/rules/00-agent-toolkit-bootstrap.md': ['ANTIGRAVITY.BOOTSTRAP'] });
 function leftoverRuleCopies(targetRoot) {
   const findings = [];
   for (const [file, names] of Object.entries(LEFTOVER_RULE_BLOCKS)) {
@@ -1295,7 +1296,8 @@ function leftoverRuleCopies(targetRoot) {
     try { if (!fs.statSync(path.join(targetRoot, file)).isFile()) continue; text = fs.readFileSync(path.join(targetRoot, file), 'utf8'); } catch { continue; }
     const parsed = parseManagedMarkerBlocks(text);
     if (parsed.errors.length) { findings.push(...parsed.errors.map((error) => ({ file, kind: 'broken-marker', detail: error }))); continue; }
-    if ([...parsed.blocks.values()].some((block) => names.includes(block.label))) findings.push({ file, kind: 'leftover', detail: 'carries a governed-rules copy' });
+    const copies = [...parsed.blocks.values()].filter((block) => names.includes(block.label));
+    if (copies.length) findings.push({ file, kind: 'leftover', detail: copies.every((block) => block.label === 'N8N-AGENT-RULES-ADAPTER') ? 'carries an n8n rules copy' : 'carries a governed-rules copy' });
   }
   return findings;
 }

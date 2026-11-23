@@ -2338,6 +2338,30 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: nested, pluginRoot: repoRoot }).status, 'not-managed', 'a repository with only its own rules is quiet');
 });
 
+// The global rules carry the n8n rules, so the n8n block older setups copied into AGENTS.md is a
+// leftover of its own kind, named as such; with a governed-rules copy beside it the note stays general.
+test('agent-rules preflight names an older n8n block in AGENTS.md as an n8n rules copy', () => {
+  const source = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
+  const n8nBlock = [
+    `<!-- AI-AGENT-TOOLKIT:${source}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`,
+    '## n8n Safety Router',
+    'Load `n8n-safety-router` before n8n work.',
+    `<!-- AI-AGENT-TOOLKIT:${source}:END N8N-AGENT-RULES-ADAPTER -->`,
+  ].join('\n');
+  const rows = [
+    ['n8n block alone', ['# Project rules', '', n8nBlock, ''], 'carries an n8n rules copy'],
+    ['n8n block with a governed-rules copy', [managedAgentsTemplate(), '', n8nBlock, ''], 'carries a governed-rules copy'],
+  ];
+  for (const [label, lines, detail] of rows) {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    writeFile(path.join(root, 'AGENTS.md'), lines.join('\n'));
+    const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot });
+    assert.equal(result.status, 'needs-attention', label);
+    assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind, finding.detail]), [['AGENTS.md', 'leftover', detail]], label);
+  }
+});
+
 const NEVER_HALTING = /STOP|stop before repository work|ask the user/i;
 
 // The files a Toolkit source checkout is known by: none of them is an instruction template.
