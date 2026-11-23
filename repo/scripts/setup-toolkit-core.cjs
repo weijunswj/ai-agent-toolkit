@@ -34,6 +34,7 @@ const {
   questionBankApprovalPayload, questionBankSemanticIdentity, withPresentationMetadata, ensurePresentationMetadata,
   choiceByPresentationReference, answerable, renderQuestionRows, renderCompactQuestionTable, renderQuestionBankHeader,
   changedOnlyExample, isAllRecommendedAnswer, looksLikeConciseSubmission, parseConciseQuestionBankAnswer,
+  strongDefaultRow, STRONG_DEFAULT_STATES, pendingDefaults, renderStrongDefaultBank, parseStrongDefaultAnswer, STRONG_DEFAULT_REPLY,
   assertQuestionBankAnswerBinding,
 } = require('./toolkit-question-bank.cjs');
 
@@ -1285,7 +1286,7 @@ function collectCurrentState(args) {
     delegationMigrationPreview,
     agentProfile,
     ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
-    antigravity: antigravityState(args),
+    antigravity: { ...antigravityState(args), ...(args.host === 'claude-code' ? { ownerOff: new SetupOwnerOffRecord().has('antigravity-skills') } : {}) },
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
       : { status: 'verification-deferred', detail: 'Read from the Codex files; the Codex plugin commands run only after you choose Install or refresh.' },
@@ -1433,9 +1434,36 @@ function antigravitySkillsRecommendation(state) {
   return { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason };
 }
 
+// Remembers the setup rows the owner turned off, so a strong default never puts them back. Only rows whose
+// off leaves nothing on disk to read it from are kept here (Toolkit's skill copies in Antigravity); the Claude
+// Code settings keep their own off record. Holds row ids only, no paths or values.
+class SetupOwnerOffRecord {
+  #file;
+  constructor(file = path.join(userStateDirectory(), 'setup-owner-off.json')) { this.#file = file; }
+  #rows() {
+    try {
+      const record = JSON.parse(fs.readFileSync(this.#file, 'utf8'));
+      return record?.version === 1 && Array.isArray(record.off) ? record.off.filter((id) => typeof id === 'string') : [];
+    } catch { return []; }
+  }
+  has(id) { return this.#rows().includes(id); }
+  set(id, off) {
+    const rows = new Set(this.#rows());
+    if (rows.has(id) === off) return;
+    if (off) rows.add(id); else rows.delete(id);
+    if (!rows.size) { fs.rmSync(this.#file, { force: true }); return; }
+    fs.mkdirSync(path.dirname(this.#file), { recursive: true });
+    const temporary = `${this.#file}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, `${JSON.stringify({ version: 1, off: [...rows].sort() }, null, 2)}
+`);
+    fs.renameSync(temporary, this.#file);
+  }
+}
+
 function antigravitySkillsQuestion(args, current) {
   const outcome = antigravitySkillsOutcome(current.antigravity);
   const copies = current.antigravity?.copies;
+  if (args.host === 'claude-code') return antigravityStrongDefaultRow(args, current, outcome, copies);
   return resolvedQuestion({
     id: 'antigravity-skills',
     key: 'antigravitySkills',
@@ -1460,11 +1488,48 @@ function antigravitySkillsQuestion(args, current) {
   });
 }
 
-// Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing.
+// Claude Code setup copies Toolkit's skills into Antigravity by default once Antigravity is installed, unless the
+// owner turned the copy off before.
+function antigravityStrongDefaultRow(args, current, outcome, copies) {
+  const state = copies ? STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT
+    : current.antigravity?.ownerOff ? STRONG_DEFAULT_STATES.OWNER_OFF : STRONG_DEFAULT_STATES.UNSET;
+  return strongDefaultRow({
+    id: 'antigravity-skills',
+    key: 'antigravitySkills',
+    section: 'Toolkit in your coding apps',
+    title: "Copy Toolkit's skills into Antigravity?",
+    prompt: 'Antigravity skills choice',
+    whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills), where each session start and each setup keep them current. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
+    choices: [
+      wizardChoice('copy', 'Copy and keep updated', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
+      copies ? wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there, and remember that you do not want them, so setup does not copy them again.')
+        : wizardChoice('remove', 'Do not copy', 'Copy nothing and remember that you do not want the copies, so setup does not copy them by default.'),
+      wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
+    ],
+    ...(copies ? { currentChoice: 'copy', keepAs: 'Keep copying them and keeping them current: setup refreshes any out-of-date copies after you answer, and session start does the same after each Toolkit update.' }
+      : current.antigravity?.ownerOff ? { currentChoice: 'remove' } : {}),
+    defaultState: state,
+    defaultChoice: 'copy',
+    defaultOutcome: "Copy Toolkit's skills into Antigravity and keep them current.",
+    defaultReason: 'Antigravity is installed here, so Toolkit skills work there too.',
+    aliases: { on: 'copy', off: 'remove' },
+    selected: args.setupChoices.antigravitySkills,
+    current: current.antigravity?.ownerOff && !copies ? `${outcome} You chose not to copy them.` : outcome,
+    currentShort: copies ? (current.antigravity.outOfDate === null ? 'Copied, kept updated, could not check'
+      : current.antigravity.outOfDate ? `Copied, kept updated, ${current.antigravity.outOfDate} to refresh` : 'Copied, kept updated')
+      : current.antigravity?.ownerOff ? 'Not copied (you turned it off)' : 'Not copied',
+    currentVerification: 'state-derived',
+    afterApplying: 'Start a new Antigravity session to load changed skills.',
+  });
+}
+
+// Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing. Copy and remove also
+// record the choice, so Claude Code's default never copies again after a remove.
 function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot }),
-  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true }), notice = null) {
+  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true }), notice = null, offRecord = new SetupOwnerOffRecord()) {
   const choice = args.setupChoices.antigravitySkills || 'keep';
   try {
+    if (choice !== 'keep') offRecord.set('antigravity-skills', choice === 'remove');
     if (choice === 'copy') {
       const result = owner.install();
       notice?.addAntigravity(result.copied.length + (result.pruned?.length || 0));
@@ -1596,6 +1661,16 @@ function recommendedUpdateSource(current, args) {
 function claudeRootOnlyUnchanged(profile, depth) {
   return profile?.topology === agentControl.TOPOLOGIES.ROOT_ONLY
     && (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT || (depth?.state === SUBAGENT_DEPTH_STATES.OWNER && depth.value === '1'));
+}
+
+// The strong-default state of the Claude Code agents row: root-only with its depth setting is the Toolkit
+// default; broader native behaviour or a depth you set yourself is your own value; an unreadable depth setting
+// writes nothing.
+function claudeTopologyDefaultState(profile, depth) {
+  if (depth?.state === SUBAGENT_DEPTH_STATES.UNREADABLE) return STRONG_DEFAULT_STATES.UNREADABLE;
+  if (claudeRootOnlyUnchanged(profile, depth)) return STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT;
+  if ((profile?.supported === true && profile.topology === agentControl.TOPOLOGIES.BROADER_NATIVE) || depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return STRONG_DEFAULT_STATES.OWNER_VALUE;
+  return STRONG_DEFAULT_STATES.UNSET;
 }
 
 // What Claude Code's plugin registry and user settings say about Toolkit: installed, where it runs
@@ -1760,8 +1835,13 @@ function setupQuestionSpecs(args, current) {
     : `The saved retention duration could not be verified; the effective safe fallback is ${DEFAULT_UPDATE_REPORT_RETENTION_DAYS} days.`;
   const docLimit = codexDocLimitCells(current);
   const docLimitCurrent = `${currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit's record says keep Codex's instruction limit raised.", "Toolkit's record says leave Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone.")} Codex's config.toml: ${docLimit.short}.`;
+  // Claude Code setup shows every row as a strong default under one approval question; Codex keeps its
+  // questions as they are.
+  const claude = args.host === 'claude-code';
+  const row = (definition, strong) => (claude ? strongDefaultRow({ ...definition, ...strong }) : resolvedQuestion(definition));
+  const reportsEnabled = current.audit?.update_report_enabled;
   const specs = [
-    resolvedQuestion({
+    row({
       id: 'update-source',
       key: 'managedCheckout',
       section: 'Updates and reports',
@@ -1794,8 +1874,15 @@ function setupQuestionSpecs(args, current) {
           ? 'The current source is offered only because its configured path, Git state, cleanliness, branch, remote, and safe location all verify.'
           : 'Keep current is omitted because no configured source can be preserved safely; the default and custom choices remain available.',
       },
+    }, {
+      // A verified custom location is the owner's own choice and is kept.
+      defaultState: !canPreserveManagedCheckout(current, args) ? STRONG_DEFAULT_STATES.UNSET
+        : isStandardManagedCheckout(current) ? STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT : STRONG_DEFAULT_STATES.OWNER_VALUE,
+      defaultChoice: 'default',
+      defaultOutcome: 'Use the standard dedicated clean managed copy.',
+      defaultReason: 'Separating update operations from active branches and uncommitted project work makes fetch, verification, and safe activation predictable.',
     }),
-    resolvedQuestion({
+    row({
       id: 'update-reports',
       key: 'updateReports',
       section: 'Updates and reports',
@@ -1818,8 +1905,14 @@ function setupQuestionSpecs(args, current) {
       current: currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.'),
       currentVerification: typeof current.audit?.update_report_enabled === 'boolean' ? 'verified' : 'defaulted',
       afterApplying: 'This changes Toolkit report state only. It does not change native host configuration, and no restart is required.',
+    }, {
+      defaultState: reportsEnabled === true ? STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT : reportsEnabled === false ? STRONG_DEFAULT_STATES.OWNER_OFF : STRONG_DEFAULT_STATES.UNSET,
+      defaultChoice: 'enable',
+      defaultOutcome: 'Keep meaningful reports; open only reports that require action.',
+      defaultReason: 'A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.',
+      aliases: { on: 'enable', off: 'disable' },
     }),
-    resolvedQuestion({
+    row({
       id: 'report-retention',
       key: 'updateReportRetention',
       section: 'Updates and reports',
@@ -1844,6 +1937,12 @@ function setupQuestionSpecs(args, current) {
       currentShort: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? `${retentionRaw} days` : `Unknown (${DEFAULT_UPDATE_REPORT_RETENTION_DAYS} days)`,
       currentVerification: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? 'verified' : 'defaulted',
       afterApplying: 'The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.',
+    }, {
+      defaultState: retentionRaw === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT
+        : Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? STRONG_DEFAULT_STATES.OWNER_VALUE : STRONG_DEFAULT_STATES.UNSET,
+      defaultChoice: 'default',
+      defaultOutcome: 'Use a seven-day retention window.',
+      defaultReason: 'Seven days normally preserves enough troubleshooting context while limiting accumulation of maintenance-only reports.',
     }),
     resolvedQuestion({
       id: 'codex-instruction-limit',
@@ -1971,7 +2070,7 @@ function setupQuestionSpecs(args, current) {
   } else {
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
     const topologyCurrent = `Current topology: ${activeProfile.topology || 'root-only'}. ${claudeSubagentDepthOutcome(current.claudeSubagentDepth)} ${claudeHookNormalFolderOutcome(activeProfile.topology)}`;
-    specs.push(resolvedQuestion({
+    specs.push(strongDefaultRow({
       id: 'claude-agent-topology',
       key: 'claudeTopology',
       section: 'Computer performance',
@@ -1987,19 +2086,18 @@ function setupQuestionSpecs(args, current) {
       // answers anyway, so root-only is the one kept under the Keep current label.
       currentChoice: claudeRootOnlyUnchanged(activeProfile, current.claudeSubagentDepth) ? 'root-only' : '',
       keepAs: 'Keep root-only: Toolkit repos admit only the main session and the Toolkit planning and build helpers; elsewhere one layer of subagents. Both settings are already in place, so nothing changes.',
-      recommendation: {
-        value: recommendedChoice('claudeTopology', current, args),
-        outcome: 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.',
-        reason: 'Root-only is the verified default: outside Toolkit repos the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2.1.217 or later to one layer, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the Toolkit worker launcher pinned in the stack registry.',
-      },
       selected: args.setupChoices.claudeTopology,
       current: topologyCurrent,
       currentShort: shortClaudeTopology(activeProfile, current.claudeSubagentDepth),
       // Read from the stored profile and the Claude Code user settings; setup does not test the hook itself.
       currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'state-derived' : 'unverified',
       afterApplying: 'A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.',
+      defaultState: claudeTopologyDefaultState(activeProfile, current.claudeSubagentDepth),
+      defaultChoice: 'root-only',
+      defaultOutcome: 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.',
+      defaultReason: 'Root-only is the verified default: outside Toolkit repos the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2.1.217 or later to one layer, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the Toolkit worker launcher pinned in the stack registry.',
     }));
-    specs.push(resolvedQuestion({
+    specs.push(strongDefaultRow({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
       section: 'Toolkit in your coding apps',
@@ -2012,11 +2110,17 @@ function setupQuestionSpecs(args, current) {
       // would leave, so it is the one kept under the Keep current label.
       currentChoice: claudePluginUnchanged(current, args) ? 'install' : '',
       keepAs: 'Keep it installed. Setup checks it after you answer and changes something only if that check finds it disabled or out of date.',
-      recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
       current: claudePluginCurrent(current, args),
       currentShort: shortClaudePlugin(current),
       afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
+      // Installed and turned on is the Toolkit default; keeping it means keeping it current, so a copy left
+      // behind by an update is refreshed without asking.
+      defaultState: pluginKeptInstalled({ key: 'claudePluginBehavior' }, current) ? STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT : STRONG_DEFAULT_STATES.UNSET,
+      keptValue: claudePluginUnchanged(current, args) ? 'keep' : 'install',
+      defaultChoice: 'install',
+      defaultOutcome: 'Let Claude Code install or refresh its own Toolkit plugin.',
+      defaultReason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.',
     }));
     specs.push(...claudeSettingQuestions(args, current));
   }
@@ -2230,8 +2334,18 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
   ];
 }
 
+// Claude Code's bank: one approval question over strong-default rows, the same text in a terminal and in chat
+// apart from the table form.
+const isStrongDefaultBank = (specs) => specs.some((spec) => spec.strong_default);
+function renderStrongDefaultSetupBank(specs, markdown) {
+  // With every setting answered by a flag there is nothing to reply, so the reply line is left out.
+  const reply = answerable(specs).every((spec) => spec.selected) ? [] : [STRONG_DEFAULT_REPLY, ''];
+  return [QUESTION_BANK_BEGIN, ...renderStrongDefaultBank(specs, { markdown }), '', EXPLAIN_HINT, '', ...reply, QUESTION_BANK_COMPLETE, ''].join('\n');
+}
+
 function renderSetupQuestionBankTerminal(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
+  if (isStrongDefaultBank(specs)) return renderStrongDefaultSetupBank(specs, false);
   const lines = [
     QUESTION_BANK_BEGIN,
     ...renderQuestionBankHeader(specs, false, false),
@@ -2248,6 +2362,7 @@ function renderSetupQuestionBankTerminal(specs, options = {}) {
 
 function renderSetupQuestionBank(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
+  if (isStrongDefaultBank(specs)) return renderStrongDefaultSetupBank(specs, true);
   return [
     QUESTION_BANK_BEGIN,
     ...renderQuestionBankHeader(specs, true, false),
@@ -2328,9 +2443,14 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
     '',
     '# Claude Code setup questions',
     '',
-    'Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.',
+    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.',
     '',
-    ...renderQuestionBankHeader(claudeSpecs, false),
+    // The bank as a run with no setup flags shows it; the planned specs below carry the plan's selections.
+    ...renderStrongDefaultBank(claudeSpecs.map((spec) => ({ ...spec, selected: '' })), { markdown: true }).map((line) => line.replace(/^(#+) /, '$1# ')),
+    '',
+    STRONG_DEFAULT_REPLY,
+    '',
+    '## Claude Code rows in full',
     '',
     renderQuestionRows(claudeSpecs),
     '',
@@ -2741,7 +2861,123 @@ function keepCurrentAnswers(args, current, specs, decision, options = {}) {
   };
 }
 
+// The bank's rows exactly as shown, with the choices the answer selected, so a bank that changed between
+// showing and approving is refused.
+function assertBankUnchanged(rendered, displayedSpecs, confirmedSpecs, args) {
+  const displayedById = new Map(displayedSpecs.map((spec) => [spec.id, spec]));
+  const confirmedAsDisplayed = withPresentationMetadata(confirmedSpecs.map((spec) => {
+    const displayed = displayedById.get(spec.id);
+    return { ...spec, selected: displayed?.selected, empty_input: displayed?.empty_input, presentation: undefined };
+  }), displayedSpecs[0]?.presentation?.host || args.host);
+  if (rendered.bank_identity !== confirmedAsDisplayed[0]?.presentation.bank_identity) {
+    throw new Error('Setup question bank changed between rendering and approval.');
+  }
+}
+
+function printConfirmedChoices(args, current, confirmedSpecs, heading) {
+  console.log('');
+  console.log(heading);
+  for (const spec of answerable(confirmedSpecs)) {
+    const value = choiceForKey(args, spec.key);
+    const choice = selectedChoice(spec, value);
+    if (!choice || choice.value !== value) throw new Error(`Setup question bank canonical value is inconsistent for ${spec.id}.`);
+    const effective = effectiveChoiceSummary(args, current, spec, value);
+    console.log(`- ${spec.presentation.question_ref} ${spec.title}: ${choice.presentation_ref} - ${choice.label} (canonical: ${choice.value}; effective: ${effective}) - ${choice.consequence}`);
+    if (spec.afterApplying) console.log(`  After applying: ${spec.afterApplying}`);
+  }
+}
+
+const STRONG_DEFAULT_PROMPT = 'Apply these defaults? Enter yes, no, or changes such as 3.5=off: ';
+
+async function promptForStrongDefaultAnswer(specs, rl, fixed) {
+  for (;;) {
+    const reply = await rl.question(STRONG_DEFAULT_PROMPT);
+    // An empty reply is not a yes; stop rather than ask again forever (a closed terminal keeps answering empty).
+    if (!String(reply ?? '').trim()) throw new Error('Setup question bank requires an answer: enter yes, no, or changes such as 3.5=off.');
+    try {
+      const parsed = parseStrongDefaultAnswer(reply, specs, { requireBankReference: false, fixed });
+      if (parsed) return parsed;
+      console.log('Enter yes, no, or changes such as 3.5=off.');
+    } catch (error) {
+      console.log(`${error.message} Correct the answer and try again.`);
+    }
+  }
+}
+
+// Claude Code setup: one approval question over strong-default rows (toolkit-question-bank.cjs). A refresh asks
+// only when a row has no value yet; otherwise it keeps every row as it is, with no bank. A no writes nothing.
+// The rows' own states decide a refresh, so this path saves no question shapes.
+async function answerStrongDefaultBank(args, current, options = {}) {
+  const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
+  const specs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, specs);
+  const open = unanswered(specs, args);
+  const fixed = (spec) => !open.includes(spec);
+  const pending = pendingDefaults(open);
+  const base = { answers_initially_required: open.length > 0, stopped_for_answers: false, remaining_input: [] };
+  if (args.refresh && !pending.length) {
+    for (const spec of open) assignChoice(args, spec.key, spec.recommended);
+    emitRefreshKeptNotice(['', '## Refresh',
+      `No setting needs your approval, so refresh kept your current answers on all ${answerable(specs).length} settings, with no question.`,
+      'To change a setting, say setup toolkit.', ''].join('\n'), answerable(specs).length, options);
+    resolveClaudeTopology(args, current);
+    const confirmedSpecs = setupQuestionSpecs(args, current);
+    assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
+    applySetupChoices(args, current);
+    printConfirmedChoices(args, current, confirmedSpecs, 'Answers kept by refresh before writes:');
+    return { ...base, appeared: false, answers_supplied_by_complete_stdin: false, answers_prompted_interactively: false,
+      answer_source: 'refresh kept current answers', render_attempts: 0, refresh: 'kept-current' };
+  }
+  const rendered = emitCompleteQuestionBank(specs, {
+    render: (rows) => (isTTY ? renderSetupQuestionBankTerminal(rows) : renderSetupQuestionBank(rows)),
+    ...(options.write ? { write: options.write } : {}),
+  });
+  if (args.refresh) {
+    console.log(['', 'Refresh: setup asks because these settings have no value yet:',
+      ...pending.map((spec) => `- ${spec.presentation.question_ref} ${spec.title}`), 'Answer it as for setup toolkit.'].join('\n'));
+  }
+  let answer = null;
+  let answerSource = 'explicit flags';
+  let prompted = false;
+  let fromStdin = false;
+  if (args.yesRecommended) {
+    answerSource = 'user-approved yes-recommended';
+    for (const spec of open) assignChoice(args, spec.key, spec.recommended);
+    console.log('--yes-recommended selected; setup will apply the Setup applies column before writing.');
+  } else if (open.length) {
+    if (isTTY) {
+      const rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });
+      prompted = true;
+      try { answer = await promptForStrongDefaultAnswer(specs, rl, fixed); } finally { rl.close(); }
+    } else {
+      fromStdin = true;
+      answer = parseStrongDefaultAnswer(await readNonInteractiveStdin(), specs, { fixed });
+      if (!answer) throw new Error('Setup question bank requires an answer: reply yes, no or changes such as 3.5=off, after the bank reference.');
+    }
+    answerSource = { 'apply-defaults': 'user-approved defaults', 'changes-only': 'user-approved listed changes only', declined: 'user declined' }[answer.mode];
+  }
+  const result = { ...base, appeared: true, answers_supplied_by_complete_stdin: fromStdin, answers_prompted_interactively: prompted,
+    answer_source: answerSource, render_attempts: rendered.attempts, ...(args.refresh ? { refresh: 'bank-shown' } : {}) };
+  if (answer?.mode === 'declined') return { ...result, declined: true };
+  if (answer) {
+    assertQuestionBankAnswerBinding(answer, specs);
+    for (const selection of answer.selections) assignChoice(args, specs.find((spec) => spec.id === selection.question_id).key, selection.canonical_value);
+  }
+  for (const [flag, needed] of [['--repo-root <path>', args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit],
+    ['--update-report-retention-days <days>', args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit]]) {
+    if (needed) throw new Error(`That choice needs a value: run setup again with ${flag}.`);
+  }
+  resolveClaudeTopology(args, current);
+  const confirmedSpecs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
+  assertBankUnchanged(rendered, specs, confirmedSpecs, args);
+  applySetupChoices(args, current);
+  printConfirmedChoices(args, current, confirmedSpecs, 'Setup choices confirmed before writes:');
+  return result;
+}
+
 async function answerSetupQuestionBank(args, current, options = {}) {
+  if (args.host === 'claude-code') return answerStrongDefaultBank(args, current, options);
   const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const initialSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, initialSpecs);
@@ -2931,26 +3167,10 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   if (args.host === 'claude-code') resolveClaudeTopology(args, current);
   const confirmedSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
-  const displayedById = new Map(displayedSpecs.map((spec) => [spec.id, spec]));
-  const confirmedAsDisplayed = withPresentationMetadata(confirmedSpecs.map((spec) => {
-    const displayed = displayedById.get(spec.id);
-    return { ...spec, selected: displayed?.selected, empty_input: displayed?.empty_input, presentation: undefined };
-  }), displayedSpecs[0]?.presentation?.host || args.host);
   if (approvedBankAnswer) assertQuestionBankAnswerBinding(approvedBankAnswer, displayedSpecs);
-  if (rendered.bank_identity !== confirmedAsDisplayed[0]?.presentation.bank_identity) {
-    throw new Error('Setup question bank changed between rendering and approval.');
-  }
+  assertBankUnchanged(rendered, displayedSpecs, confirmedSpecs, args);
   applySetupChoices(args, current);
-  console.log('');
-  console.log('Setup choices confirmed before writes:');
-  for (const spec of answerable(confirmedSpecs)) {
-    const value = choiceForKey(args, spec.key);
-    const choice = selectedChoice(spec, value);
-    if (!choice || choice.value !== value) throw new Error(`Setup question bank canonical value is inconsistent for ${spec.id}.`);
-    const effective = effectiveChoiceSummary(args, current, spec, value);
-    console.log(`- ${spec.presentation.question_ref} ${spec.title}: ${choice.presentation_ref} - ${choice.label} (canonical: ${choice.value}; effective: ${effective}) - ${choice.consequence}`);
-    if (spec.afterApplying) console.log(`  After applying: ${spec.afterApplying}`);
-  }
+  printConfirmedChoices(args, current, confirmedSpecs, 'Setup choices confirmed before writes:');
   const approvedPlanDetails = nonTtyAnswerPlan?.details.filter((entry) => detailPlanEntrySelected(entry, args)) || [];
   for (const entry of approvedPlanDetails) {
     const owner = entry.question_ref ? `${entry.question_ref} ${entry.question_title}` : 'Advanced compatibility selection';
@@ -3767,8 +3987,8 @@ class ToolkitSetupExecution {
     args.codexRuntime = this.#current.runtime.runtime;
     this.#questionBank = await answerSetupQuestionBank(args, this.#current);
     if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
+    if (this.#questionBank.declined) return;
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
-    saveRefreshShapes(this.#questionBank.refresh_shapes, args.host);
   }
 
   #announcePlan() {
@@ -3796,6 +4016,10 @@ class ToolkitSetupExecution {
       return SETUP_ACTION_REQUIRED;
     }
     await this.#collectAndAnswer();
+    if (this.#questionBank.declined) {
+      console.log('Nothing changed: you answered no, so setup wrote nothing. Say setup toolkit again to apply the defaults or change a setting.');
+      return 0;
+    }
     this.#announcePlan();
     let managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
     const rerun = setupSelfUpdateRerun(args, managed);
@@ -3832,6 +4056,9 @@ class ToolkitSetupExecution {
     const antigravitySkills = applyAntigravitySkills(args, undefined, undefined, notice);
     const n8nSkills = installOfficialN8nSkills(args, undefined, undefined, notice);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
+    // Saved only once the answers are applied: a run that stops earlier (such as the self-update rerun) leaves
+    // the next refresh to ask again rather than keep answers that never took effect. Claude Code saves none.
+    if (this.#questionBank.refresh_shapes) saveRefreshShapes(this.#questionBank.refresh_shapes, args.host);
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     for (const line of [...leftoverTaskLines(), ...cloudSweepSkipLines()]) console.log(line);

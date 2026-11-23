@@ -236,7 +236,7 @@ Once the source is recorded, Codex and Claude Code Toolkit plugin SessionStart h
 
 ```powershell
 npm run validate:all
-node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs
+node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs repo/tests/toolkit-local-bridge-repo-update.test.cjs repo/tests/toolkit-local-bridge-hook-update.test.cjs
 ```
 
 Disable auto-sync:

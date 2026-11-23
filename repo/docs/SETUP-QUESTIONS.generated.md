@@ -254,25 +254,42 @@ Anything you do not list takes its recommendation.
 
 # Claude Code setup questions
 
-Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
+Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.
 
-Toolkit setup choices - 10 questions across 3 sections
+## Toolkit setup - 1 question: Apply these defaults?
 
-Bank reference: 8QDS-XDTD-8C8Y-7CWA
+Bank reference: 441G-WHVV-SX9W-SCKC
 
-Quick index
+Setup applies the Toolkit default to 6 settings not set yet and keeps every other setting as it is.
 
-1.1 Update source - Recommended: A - Keep current
-1.2 Update reports - Recommended: A - Keep current
-1.3 Report retention - Recommended: A - Keep current
-2.1 How should Claude Code use agents? - Recommended: B - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
-3.1 Keep Toolkit available in Claude Code? - Recommended: B - Install or refresh
-3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: B - Turn on
-3.3 Claude Code setting: Let other sessions wake this one? - Recommended: B - Turn on
-3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Keep current
-3.5 Claude Code setting: Read AGENTS.md too? - Recommended: B - Turn on
-3.6 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
+### 1. Updates and reports
 
+| # | Setting | Current | Setup applies | Other choices |
+|---|---|---|---|---|
+| 1.1 | Update source | Dedicated update copy | A. Keep current | B. Choose another location |
+| 1.2 | Update reports | On | A. Keep current | B. Do not keep reports |
+| 1.3 | Report retention | 7 days | A. Keep current | B. Choose another duration |
+
+### 2. Computer performance
+
+| # | Setting | Current | Setup applies | Other choices |
+|---|---|---|---|---|
+| 2.1 | How should Claude Code use agents? | Gates: Toolkit helpers only; elsewhere one subagent layer (Claude Code limit not set yet) | B. Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents. (Toolkit default) | A. Keep current<br>C. Broader native behaviour |
+
+### 3. Toolkit in your coding apps
+
+| # | Setting | Current | Setup applies | Other choices |
+|---|---|---|---|---|
+| 3.1 | Keep Toolkit available in Claude Code? | Current | B. Install or refresh: Let Claude Code install or refresh its own Toolkit plugin. (Toolkit default) | A. Keep current<br>C. Show instructions only |
+| 3.2 | Claude Code setting: Hide AI credit in commits/PRs? | Off (Claude Code default) | B. Turn on: Sets "attribution": false in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
+| 3.3 | Claude Code setting: Let other sessions wake this one? | Off (Claude Code default) | B. Turn on: Sets "crossSessionInbound": "accept" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
+| 3.4 | Claude Code setting: Switch models without asking on a flag? | On (Claude Code default) | A. Keep current | B. Turn off |
+| 3.5 | Claude Code setting: Read AGENTS.md too? | Off (Claude Code default) | B. Turn on: Sets "instructionFiles": "claude-md-and-agents-md" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
+| 3.6 | Copy Toolkit's skills into Antigravity? | Not copied | B. Copy and keep updated: Copy Toolkit's skills into Antigravity and keep them current. (Toolkit default) | A. Keep current<br>C. Do not copy |
+
+Apply these defaults? Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
+
+## Claude Code rows in full
 
 ## 1. Updates and reports
 
@@ -286,9 +303,9 @@ Quick index
 
 **Recommended:** A - Keep current
 
-**Recommended outcome:** Keep using the verified dedicated clean managed copy.
+**Recommended outcome:** Keep it as it is.
 
-**Why:** Separating update operations from active branches and uncommitted project work makes fetch, verification, and safe activation predictable.
+**Why:** The Toolkit default is already in place.
 
 **Choices:**
 
@@ -311,9 +328,9 @@ Quick index
 
 **Recommended:** A - Keep current
 
-**Recommended outcome:** Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+**Recommended outcome:** Keep it as it is.
 
-**Why:** A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.
+**Why:** The Toolkit default is already in place.
 
 **Choices:**
 
@@ -336,9 +353,9 @@ Quick index
 
 **Recommended:** A - Keep current
 
-**Recommended outcome:** Keep the effective seven-day retention window.
+**Recommended outcome:** Keep it as it is.
 
-**Why:** Seven days normally preserves enough troubleshooting context while limiting accumulation of maintenance-only reports.
+**Why:** The Toolkit default is already in place.
 
 **Choices:**
 
@@ -427,6 +444,7 @@ Quick index
 
 - **A. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
 - **B. Turn on** - Sets "attribution": false in settings.json.
+- **C. Turn off** - Removes "attribution" from settings.json, whoever added it, so Claude Code uses its default. Claude Code then adds its Co-Authored-By trailer, Generated with Claude Code line and session link to your commits and pull requests again.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -452,6 +470,7 @@ Quick index
 
 - **A. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
 - **B. Turn on** - Sets "crossSessionInbound": "accept" in settings.json.
+- **C. Turn off** - Removes "crossSessionInbound" from settings.json, whoever added it, so Claude Code uses its default.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -469,9 +488,9 @@ Quick index
 
 **Recommended:** A - Keep current
 
-**Recommended outcome:** Keep this setting as it is.
+**Recommended outcome:** Keep it as it is.
 
-**Why:** This setting is already on, so Keep current leaves it as it is.
+**Why:** Toolkit leaves this as it is by default.
 
 **Choices:**
 
@@ -486,7 +505,7 @@ Quick index
 
 ### 3.5 Claude Code setting: Read AGENTS.md too?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md (Claude Code 2.1.285 or later). Turn off removes this one setting whoever added it; the other settings are not touched.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin and 2.1.277 to 2.1.284 under agents-md@builtin; setup writes the one your version reads, and nothing on an older version. Turn off removes this one setting whoever added it; the other settings are not touched.
 
 **Current:** Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 
@@ -502,6 +521,7 @@ Quick index
 
 - **A. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 - **B. Turn on** - Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
+- **C. Turn off** - Removes "instructionFiles" from settings.json, whoever added it, so Claude Code uses its default.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -517,19 +537,20 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** A - Keep current
+**Recommended:** B - Copy and keep updated
 
-**Recommended outcome:** Leave Antigravity unchanged.
+**Recommended outcome:** Copy Toolkit's skills into Antigravity and keep them current.
 
-**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+**Why:** Antigravity is installed here, so Toolkit skills work there too.
 
 **Choices:**
 
 - **A. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 - **B. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **C. Do not copy** - Copy nothing and remember that you do not want the copies, so setup does not copy them by default.
 
 **After applying:** Start a new Antigravity session to load changed skills.
 
-**Selected:** A - Keep current
+**Selected:** B - Copy and keep updated
 
 ---

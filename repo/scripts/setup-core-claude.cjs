@@ -17,6 +17,7 @@ const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs'
 const { ToolkitInstallHealthCheck } = require('./toolkit-install-health.cjs');
 const { claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
+const { strongDefaultRow, STRONG_DEFAULT_STATES } = require('./toolkit-question-bank.cjs');
 
 // The setup-choice key of one managed Claude Code setting row, for example claudeSettingAgentsMd.
 const claudeSettingKey = (id) => `claudeSetting${id.replace(/(^|-)([a-z])/g, (match, dash, letter) => letter.toUpperCase())}`;
@@ -63,7 +64,9 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
   function claudeSettingOutcome(entry) {
     if (!entry) return 'The Claude Code user settings have not been read yet.';
     if (entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return `${entry.detail || 'The Claude Code user settings file could not be read.'} Toolkit will not change it.`;
+    if (entry.state === CLAUDE_SETTINGS_STATES.UNSUPPORTED) return `${entry.label}: ${entry.detail}.`;
     if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return `${entry.label}: on (added by setup).`;
+    if (entry.state === CLAUDE_SETTINGS_STATES.OWNER_OFF) return `${entry.label}: off (you turned it off; setup keeps it off).`;
     if (entry.blocked) return `${entry.label}: setup cannot change it because ${entry.detail}.`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OFF) return `${entry.label}: off (${offSource(entry)}).`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true) return `${entry.label}: on (already in your settings).`;
@@ -71,7 +74,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       const spec = specOf(entry);
       return `${entry.label}: different value in your settings: ${settingValue(entry.value)}${spec ? ` (Turn on sets ${settingValue(spec.value)})` : ''}.`;
     }
-    return `${entry.label}: ${defaultWord(entry).toLowerCase()} (Claude Code default).`;
+    return `${entry.label}: ${defaultWord(entry).toLowerCase()} (Claude Code default).${entry.note ? ` ${entry.note}.` : ''}`;
   }
 
   // Every setting, one sentence each, for the closing summary.
@@ -85,7 +88,9 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
   function claudeSettingShort(entry) {
     if (!entry) return 'Not read yet';
     if (entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return 'Could not read';
+    if (entry.state === CLAUDE_SETTINGS_STATES.UNSUPPORTED) return 'Not in this Claude Code version';
     if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return 'On (added by setup)';
+    if (entry.state === CLAUDE_SETTINGS_STATES.OWNER_OFF) return 'Off (you turned it off)';
     if (entry.blocked) return `Cannot change: ${entry.detail}`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OFF) return `Off (${offSource(entry)})`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true) return 'On (already in your settings)';
@@ -93,13 +98,23 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return `${defaultWord(entry)} (Claude Code default)`;
   }
 
-  // The choice that changes nothing for this setting: enable when it is on, disable when it is off.
+  // The choice that changes nothing for this setting: enable when it is on, disable when it is off. A missing
+  // key that reads as off is not folded: Turn off there records your off, so setup never turns it on by default.
   function claudeSettingCurrentChoice(entry) {
     if (!entry || entry.blocked) return '';
     if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true)) return 'enable';
-    if (entry.state === CLAUDE_SETTINGS_STATES.OFF) return 'disable';
-    if (entry.state === CLAUDE_SETTINGS_STATES.DEFAULT) return specOf(entry)?.defaultOn ? 'enable' : 'disable';
+    if (entry.state === CLAUDE_SETTINGS_STATES.OFF || entry.state === CLAUDE_SETTINGS_STATES.OWNER_OFF) return 'disable';
+    if (entry.state === CLAUDE_SETTINGS_STATES.DEFAULT && specOf(entry)?.defaultOn) return 'enable';
     return '';
+  }
+
+  // The strong-default state of one setting row (toolkit-question-bank.cjs).
+  function claudeSettingDefaultState(entry) {
+    if (!entry || [CLAUDE_SETTINGS_STATES.UNREADABLE, CLAUDE_SETTINGS_STATES.UNSUPPORTED].includes(entry.state)) return STRONG_DEFAULT_STATES.UNREADABLE;
+    if (entry.blocked || entry.state === CLAUDE_SETTINGS_STATES.OWNER) return STRONG_DEFAULT_STATES.OWNER_VALUE;
+    if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT;
+    if (entry.state === CLAUDE_SETTINGS_STATES.OFF || entry.state === CLAUDE_SETTINGS_STATES.OWNER_OFF) return STRONG_DEFAULT_STATES.OWNER_OFF;
+    return STRONG_DEFAULT_STATES.UNSET;
   }
 
   const settingKeyName = (spec) => `"${spec.keyPath[spec.keyPath.length - 1]}"`;
@@ -120,17 +135,6 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return `Removes ${settingKeyName(spec)} from settings.json, whoever added it, so Claude Code uses its default.${trailers}`;
   }
 
-  // Each row on its own, from its own inspected state: Turn on, unless it is already on, or setup
-  // cannot read or change it, in which case Keep current.
-  function claudeSettingRecommendation(spec, entry) {
-    const keep = (reason) => ({ value: 'keep', outcome: 'Keep this setting as it is.', reason });
-    if (!entry) return keep('The Claude Code user settings have not been read yet, so setup does not change them.');
-    if (entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return keep('Setup could not read the Claude Code user settings file, so it does not change it.');
-    if (entry.blocked) return keep('Setup cannot change this setting, so Keep current leaves it as it is.');
-    if (claudeSettingCurrentChoice(entry) === 'enable') return keep('This setting is already on, so Keep current leaves it as it is.');
-    return { value: 'enable', outcome: claudeSettingOnOutcome(spec, entry), reason: `It ${settingEffect(spec).benefit}.` };
-  }
-
   const CLAUDE_SETTING_EFFECTS = Object.freeze({
     attribution: {
       short: 'Hide AI credit in commits/PRs', benefit: 'keeps AI attribution out of your commits and pull requests',
@@ -147,21 +151,23 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     },
     'agents-md': {
       short: 'Read AGENTS.md too', benefit: "makes Claude Code read the repository's AGENTS.md",
-      controls: 'Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md (Claude Code 2.1.285 or later).',
+      controls: 'Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin and 2.1.277 to 2.1.284 under agents-md@builtin; setup writes the one your version reads, and nothing on an older version.',
     },
   });
   const settingEffect = (entry) => CLAUDE_SETTING_EFFECTS[entry.id] || { short: entry.label || entry.id, benefit: `sets ${entry.label || entry.id}`, controls: entry.label || entry.id };
   // A JSON value as it appears in settings.json, cut short so one table cell stays readable.
   const settingValue = (value) => { const text = JSON.stringify(value); return text.length > 40 ? `${text.slice(0, 37)}...` : text; };
 
-  // One setup row per managed Claude Code user setting, in SETTINGS order, so each is turned on, off or kept on its own.
+  // One strong-default row per managed Claude Code user setting, in SETTINGS order. A yes turns on each one
+  // not set yet, except the model switch, which Toolkit leaves to Claude Code's own default; an override turns
+  // one on or off on its own.
   function claudeSettingQuestions(args, current) {
     const entries = Array.isArray(current.claudeSettings) ? current.claudeSettings : [];
     return CLAUDE_SETTINGS.map((spec) => {
       const entry = entries.find((candidate) => candidate.id === spec.id);
       const effect = settingEffect(spec);
       const key = claudeSettingKey(spec.id);
-      return resolvedQuestion({
+      return strongDefaultRow({
         id: `claude-setting-${spec.id}`,
         key,
         section: 'Toolkit in your coding apps',
@@ -174,9 +180,14 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
           wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingOutcome(entry)}`),
         ],
         // A row already on hides Turn on, and one already off hides Turn off: Keep current does the same.
-        // A different value, a blocked parent or an unreadable file keeps all three.
+        // A row not set yet keeps Turn off, which records your off; a different value, a blocked parent or an
+        // unreadable file keeps all three.
         currentChoice: claudeSettingCurrentChoice(entry),
-        recommendation: claudeSettingRecommendation(spec, entry),
+        defaultState: claudeSettingDefaultState(entry),
+        defaultChoice: spec.defaultOn ? 'keep' : 'enable',
+        defaultOutcome: claudeSettingOnOutcome(spec, entry),
+        defaultReason: `It ${settingEffect(spec).benefit}.`,
+        aliases: { on: 'enable', off: 'disable' },
         selected: args.setupChoices[key],
         current: claudeSettingOutcome(entry),
         currentShort: claudeSettingShort(entry),

@@ -245,6 +245,54 @@
       "expect": {"decision": "allow"},
       "postcondition": "handoff-write",
       "status": "pass"
+    },
+    {
+      "id": "HANDOFF.first-check-starts-no-refresh",
+      "source": "Handoff refresh 1435: a session's first check only takes its baseline, so a memory save before that check starts no background run",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "update_memory", "tool_input": {"text": "queue: #7"}, "tool_response": "saved"},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "new", "memory": "moved"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-handoff-refresh",
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.memory-tool-save-starts-refresh",
+      "source": "Handoff refresh 1435: a later check of a session whose memory snapshot is older starts a refresh when a host memory tool saves the memory",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "update_memory", "tool_input": {"text": "queue: #7"}, "tool_response": "saved"},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "checked", "memory": "moved"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "handoff-refresh",
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.shell-write-starts-refresh",
+      "source": "Handoff refresh 1435: a later check of a session whose memory snapshot is older starts a refresh when a shell command saves the memory",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "sed -i s/#1/#7/ {dir}/handoff/memory/MEMORY.md"}, "tool_response": {"stdout": "", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "checked", "memory": "moved"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "handoff-refresh",
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.unrelated-write-starts-no-refresh",
+      "source": "Handoff refresh 1435: a write outside the memory folder starts no refresh when the memory is unchanged since the session's last check",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Write", "tool_input": {"file_path": "{work}/notes.md", "content": "x\n"}, "tool_response": {"filePath": "{work}/notes.md"}},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "checked", "memory": "unchanged"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-handoff-refresh",
+      "status": "pass"
     }
   ]
 }

@@ -336,7 +336,7 @@ class ProjectsTasks {
       if (pinged(kind) && projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS', NO_PROJECT_TEXT);
       // A hand-made prompt has no project section to read back, so its saved file is checked for presence only.
       if (pinged(kind) && (additions === undefined || !lfText(additions).trim())) {
-        throw new TaskInputError('TASK_ADDITIONS_UNSAVED', 'a hand-made Toolkit task needs its project lines saved to project-additions.md first; pass that file as --additions-saved, non-empty');
+        throw new TaskInputError('TASK_ADDITIONS_UNSAVED', 'a hand-made Toolkit task needs project-additions.md saved first: write its project lines in it word for word, or the line "- none" when it has none; then pass that file as --additions-saved');
       }
       return this.render(kind, withSession(override), projectText);
     }

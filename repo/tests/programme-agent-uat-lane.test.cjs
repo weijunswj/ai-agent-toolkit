@@ -42,7 +42,7 @@ function fixture({ agent = null, uat = { state: 'PENDING', at_head: HEAD } } = {
   Object.assign(landed, { lifecycle: 'ACTIVE', pr: { ...landed.pr, number: 22 }, uat, private: { ...landed.private, ...(agent ? { agent_uat: agent } : {}) } });
   store.write('child', LANDED, landed, { sha: null, previous: null });
   store.write('child', TASK, state.newChild({ repository, outcome: catalogue[1] }), { sha: null, previous: null });
-  const fx = { github, store, output: '' };
+  const fx = { github, store, binding, output: '' };
   fx.parent = () => store.read('parent', 421).doc;
   fx.child = n => store.read('child', n).doc;
   fx.run = argv => {
@@ -55,6 +55,9 @@ function fixture({ agent = null, uat = { state: 'PENDING', at_head: HEAD } } = {
     } catch (error) { return { result: null, error }; }
   };
   fx.sweep = () => { const run = fx.run(['reconcile', '--apply']); assert.equal(run.error, null, run.error?.message); return run.result; };
+  // A full pass with the open PR list read (refreshFacts), as a holder's refresh runs it.
+  fx.refreshPass = () => new state.Reconciler({ store, reader: new state.ProgrammeGraphReader({ transport: github, repository }), mutator: new state.GitHubMutator({ transport: github, repository }),
+    binding, writer: state.refreshWriter(fx.parent()), toolkitVersion: '3.9.0', refreshFacts: true, now: () => new Date(github.clock).toISOString() }).run({ apply: true });
   fx.finding = () => fx.parent().attention.find(entry => entry.code === 'AGENT_UAT_UNSTARTED' && entry.issue === LANDED) || null;
   fx.open = () => { const entry = fx.finding(); return Boolean(entry && ['new', 'acknowledged'].includes(entry.state)); };
   fx.patch = value => { const file = path.join(tmp(), 'patch.json'); fs.writeFileSync(file, JSON.stringify(value)); return file; };
@@ -227,4 +230,56 @@ test('a write that only moves the owed UAT keeps an older agent record, and the 
   const child = fx.child(LANDED);
   assert.deepEqual([child.uat.at_head, child.private.agent_uat.at_head], [OLDER, HEAD]);
   assert.equal(state.uatOwer(child), 'agent', 'a UAT owed at a new head is the agent\'s again');
+});
+
+// The lane check's own paths, each pinned by one test (each fails when its guard is removed).
+test('a reopen of a submitted or owner-waiting gate is not held by an unstarted agent UAT', () => {
+  for (const gateState of ['SUBMITTED', 'WAITING_OWNER']) {
+    const fx = fixture();
+    fx.sweep();
+    assert.equal(fx.open(), true, `${gateState}: the finding is open`);
+    fx.store.mutate('child', TASK, { writer: controller, parentDoc: fx.parent(), change: doc => ({ ...doc, lifecycle: 'ACTIVE', gate: { ...doc.gate, role: 'G1', state: gateState, assignment: { id: 'g1-a1', role: 'G1' } } }) });
+    const { error } = fx.run(['reopen', '--issue', String(TASK), '--reason', 'correction']);
+    assert.equal(error, null, `${gateState}: ${error?.message}`);
+    assert.equal(fx.child(TASK).gate.state, 'ACTIVE', `${gateState}: the reopen goes through`);
+  }
+});
+
+test('an open PR list that could not be read raises no AGENT_UAT_UNSTARTED, and the next pass that reads it does', () => {
+  const fx = fixture();
+  const request = fx.github.request.bind(fx.github);
+  fx.github.request = (method, path, ...rest) => method === 'GET' && /pulls\?state=open/.test(path) ? { status: 502, json: null, headers: {} } : request(method, path, ...rest);
+  fx.refreshPass();
+  assert.equal(fx.finding(), null, 'nothing is flagged on a pass that did not read every open PR');
+  fx.github.request = request;
+  fx.refreshPass();
+  assert.equal(fx.open(), true, 'the same owed UAT is flagged once the open PRs are read');
+});
+
+test('a landed task whose issue is closed raises no AGENT_UAT_UNSTARTED', () => {
+  const control = fixture();
+  control.sweep();
+  assert.equal(control.open(), true, 'control: the open landed task is flagged');
+  const fx = fixture();
+  Object.assign(fx.github.issues.get(LANDED), { state: 'closed', closed_at: new Date(fx.github.clock).toISOString() });
+  fx.sweep();
+  assert.equal(fx.finding(), null, 'the closed task is skipped');
+});
+
+test('a finding at an older head holds no assignment once the owed UAT has moved to a new head', () => {
+  const fx = fixture();
+  fx.sweep();
+  assert.equal(fx.finding().head, HEAD);
+  assert.equal(fx.assign('G1', 'g1-a1').error?.code, 'AGENT_UAT_UNSTARTED', 'control: held at the flagged head');
+  fx.store.mutate('child', LANDED, { writer: controller, parentDoc: fx.parent(), change: doc => ({ ...doc, uat: { state: 'PENDING', at_head: OLDER } }) });
+  assert.equal(fx.open(), true, 'the stored finding names the old head until the next pass');
+  assert.equal(fx.assign('G1', 'g1-a1').error, null, 'the UAT is owed at a new head with nothing recorded, so the old finding holds nothing');
+});
+
+test('an owed agent UAT with no head is never flagged and holds no assignment', () => {
+  const fx = fixture({ uat: { state: 'PENDING', at_head: null } });
+  const report = fx.sweep();
+  assert.equal(fx.finding(), null, 'no head, no finding');
+  assert.equal(report.findings.some(entry => entry.code === 'AGENT_UAT_UNSTARTED'), false);
+  assert.equal(fx.assign('G1', 'g1-a1').error, null, 'and nothing waits for it');
 });

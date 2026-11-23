@@ -1,7 +1,8 @@
 'use strict';
 
-// refresh toolkit: every row keeps its displayed A. Keep current with no bank while the questions match
-// the last bank answered on this computer; any new or different question shows the full bank.
+// refresh toolkit on Codex: every row keeps its displayed A. Keep current with no bank while the questions
+// match the last bank answered on this computer; any new or different question shows the full bank. On Claude
+// Code each row's own state decides: refresh asks only while a setting has no value yet.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -10,7 +11,6 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
-const HOSTS = ['codex', 'claude-code'];
 
 function tempFolder(t) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-refresh-'));
@@ -25,7 +25,8 @@ function settledState(host, overrides = {}) {
     ...base,
     ...(host === 'claude-code' ? {
       agentProfile: { supported: true, topology: 'root-only' },
-      claudeSubagentDepth: { state: 'default' },
+      claudeSubagentDepth: { state: 'toolkit-one-layer' },
+      antigravity: { ...base.antigravity, copies: true },
       claudeSettings: [],
       claudePluginInstall: { installed: true, enabled: true, recordCurrent: true, version: '1.0.0', runningRoot: base.managed.currentPath },
       nativePlugin: { status: 'fresh', manifest_version: '1.0.0' },
@@ -88,7 +89,7 @@ function assertKept(outcome) {
   assert.match(outcome.written, /refresh kept your current answers/);
 }
 
-for (const host of HOSTS) {
+for (const host of ['codex']) {
   test(`${host}: same questions keep every displayed Keep current with no bank`, async (t) => {
     const file = path.join(tempFolder(t), 'shapes.json');
     const state = settledState(host);
@@ -190,23 +191,49 @@ test('codex: a turned-off plugin is a real change, so the bank asks', async (t) 
   assertBankShown(await refresh('codex', off, file), /Keep Toolkit available in Codex\?: setup now recommends a change/);
 });
 
-test('claude-code: an installed, turned-on plugin left behind by an update is refreshed with no bank', async (t) => {
+test('claude-code: a settled computer keeps every row with no bank, whatever the saved record holds', async (t) => {
+  const folder = tempFolder(t);
+  const state = settledState('claude-code');
+  const broken = path.join(folder, 'broken.json');
+  fs.writeFileSync(broken, '{ not json');
+  for (const file of [path.join(folder, 'missing.json'), broken]) {
+    const outcome = await refresh('claude-code', state, file);
+    assertKept(outcome);
+    assert.equal(outcome.args.setupChoices.claudeTopology, 'root-only');
+  }
+  assert.equal(fs.existsSync(path.join(folder, 'missing.json')), false, 'a Claude Code refresh saves no question shapes');
+  assert.equal(fs.readFileSync(broken, 'utf8'), '{ not json');
+});
+
+test('claude-code: a version move and an off the owner chose stay silent', async (t) => {
   const file = path.join(tempFolder(t), 'shapes.json');
-  saveAnswered(file, 'claude-code', settledState('claude-code'));
+  assertKept(await refresh('claude-code', settledState('claude-code', {
+    claudePluginInstall: (install) => ({ ...install, version: '1.1.0' }),
+    nativePlugin: { status: 'fresh', manifest_version: '1.1.0' },
+  }), file));
+  const off = await refresh('claude-code', settledState('claude-code', { audit: (audit) => ({ ...audit, update_report_enabled: false }) }), file);
+  assertKept(off);
+  assert.equal(off.args.updateReports, false, 'reports stay off');
+});
+
+test('claude-code: a setting with no value yet shows the bank and names it', async (t) => {
+  const outcome = await refresh('claude-code', settledState('claude-code', { claudeSubagentDepth: { state: 'default' } }), path.join(tempFolder(t), 'shapes.json'));
+  assertBankShown(outcome, /Refresh: setup asks because these settings have no value yet:\n- 2\.1 /);
+});
+
+test('claude-code: an installed, turned-on plugin left behind by an update is refreshed with no bank', async (t) => {
   const stale = settledState('claude-code', { nativePlugin: { status: 'stale', manifest_version: '1.1.0' } });
-  const outcome = await refresh('claude-code', stale, file);
+  const outcome = await refresh('claude-code', stale, path.join(tempFolder(t), 'shapes.json'));
   assertKept(outcome);
   assert.equal(outcome.args.setupChoices.claudePluginBehavior, 'install');
 });
 
-test('claude-code: a turned-off plugin is a real change, so the bank asks', async (t) => {
-  const file = path.join(tempFolder(t), 'shapes.json');
-  saveAnswered(file, 'claude-code', settledState('claude-code'));
+test('claude-code: a turned-off plugin has no Toolkit value, so the bank asks', async (t) => {
   const off = settledState('claude-code', {
     claudePluginInstall: (install) => ({ ...install, enabled: false }),
     nativePlugin: { status: 'stale', manifest_version: '1.1.0' },
   });
-  assertBankShown(await refresh('claude-code', off, file), /Keep Toolkit available in Claude Code\?: setup now recommends a change/);
+  assertBankShown(await refresh('claude-code', off, path.join(tempFolder(t), 'shapes.json')), /Keep Toolkit available in Claude Code\?/);
 });
 
 test('--refresh refuses every other answer source before any write', () => {
