@@ -102,7 +102,7 @@ test('after the table the bank lists what it does by default, then one reply lin
     'Nothing to answer here:',
     '- Set in .github/toolkit-programme.json: evidence store toolkit-test-fixture/store, parent #1, required check validate, merge trains on. To change them, edit that file in a pull request and merge it.',
     '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
-    '- Governance App: Not checked. After your answer, Toolkit gives you one command for your own terminal (it refuses to run under an agent, so the App\'s private key never passes through one); you click Create on GitHub and it saves the App on this repository. Governance works without it, but its jobs on GitHub need it to open pull requests.',
+    '- Governance App: Not checked. After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests.',
     '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
     '- Toolkit permissions (Claude Code): Outdated: 2 missing, 1 old. After your answer, Toolkit gives you one command to run yourself that brings Claude Code\'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter.',
   ].join('\n'));
@@ -211,6 +211,21 @@ async function reply(ctx, reference, answer) {
   return run(ctx, ['setup', '--answers', `${reference}: ${answer}`, '--ticket', ticket]);
 }
 const noBank = out => assert.doesNotMatch(out, /Bank reference|^\| 1\.1 \|/m, 'the bank is not shown again');
+
+// Owner decision INT-TK421-1263 (24 Nov): the App setup stays the owner's, as one line to paste into
+// PowerShell with nothing to choose; their other steps are the Enters it asks for and Create and Install.
+test('an answer that takes the App default gives exactly one PowerShell line for it, with nothing to choose', async t => {
+  const ctx = fixture(t, { quiet: true });
+  ctx.cli = { ...QUIET, appReader: args => ({ ok: true, value: { total_count: 0, [/\/actions\/(variables|secrets)\?/.exec(args[0])[1]]: [] } }) };
+  const shown = await run(ctx, ['setup']);
+  assert.match(shown.out, /^- Governance App: Not set up\. After your answer, Toolkit gives you one line to paste into PowerShell /m);
+  const answered = await reply(ctx, /Bank reference: (\S+)/.exec(shown.out)[1], KEEP);
+  assert.equal(answered.code, 0, answered.out + answered.err);
+  assert.match(answered.out, /^Governance App: paste this one line into PowerShell and press Enter\. It saves the App's Client ID and key on toolkit-test-fixture\/card\. It asks for Enter before it opens GitHub and again before it checks the installation; on GitHub you click Create, then Install\. It runs only outside an agent, so the App's private key never passes through one\.$/m);
+  const blocks = [...answered.out.matchAll(/^```\n([\s\S]*?)\n```$/gm)].map(match => match[1]);
+  assert.deepEqual(blocks, [`node "${path.join(scripts, 'toolkit-governance-app-setup.cjs')}" --repo toolkit-test-fixture/card --store toolkit-test-fixture/store`]);
+  assert.doesNotMatch(answered.out, /with gh signed in|<Client ID>|\.pem/);
+});
 // Keeps both questions as they are.
 const KEEP = '1.1=A, 1.2=A';
 

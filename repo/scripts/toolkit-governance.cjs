@@ -412,9 +412,7 @@ class ToolkitGovernanceCli {
     const slug = proposal.repository;
     const read = this.#appRead();
     const state = governanceApp.presence(slug, read);
-    // The owner type picks the App page, so it is read only when the setup steps will show.
-    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state,
-      state.variable === 'found' || state.secret === 'found' ? null : governanceApp.ownerType(slug, read));
+    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state);
     const others = governance.enabledRepositories(this.#registryOptions).filter(name => name.toLowerCase() !== slug.toLowerCase());
     return governanceApp.removalLines(slug, state, others);
   }
@@ -789,8 +787,8 @@ class ToolkitGovernanceCli {
     // answer; otherwise the answer says nothing about it.
     const governedAfter = chosen.governance === 'on' || (state.state === 'ENABLED' && chosen.governance !== 'off');
     if (chosen.governanceApp === 'setup' && governedAfter && code === 0 && state.repository) {
-      this.#print(false, {}, ['', `Governance App: run this once in your own PowerShell or terminal, outside any agent, with gh signed in. You click Create on GitHub; it saves the App's Client ID and key on ${state.repository}, opens the install page and checks the installation.`, '',
-        ...fenced(`node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`)]);
+      this.#print(false, {}, ['', `Governance App: paste this one line into PowerShell and press Enter. It saves the App's Client ID and key on ${state.repository}. ${governanceApp.SETUP_STEPS}`, '',
+        ...fenced(governanceApp.setupCommand(state.repository, store))]);
       acted = true;
       commanded += 1;
     }
@@ -972,7 +970,6 @@ function copiesRow(copies) {
 }
 
 // The owner's governance App setup command (it refuses under an agent).
-const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs');
 // A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
 // quotes, never curly ones) with a copy button.
 const fenced = command => ['```', command, '```'];

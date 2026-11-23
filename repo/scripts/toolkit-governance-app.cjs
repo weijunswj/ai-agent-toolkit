@@ -38,15 +38,6 @@ function appName(slug) {
   return `${repo.slice(0, NAME_LIMIT - suffix.length).replace(/[-_.]+$/, '')}${suffix}`;
 }
 
-// GitHub's pre-filled "New GitHub App" page, named for this repository. An organisation's App is
-// made on the organisation's own page: with public=false only its owner can install it, so an App
-// made on a personal page cannot be installed on an organisation's repository.
-function creationLink(slug, owner = 'User') {
-  const params = new URLSearchParams({ name: appName(slug), url: `https://github.com/${slug}`, public: 'false', webhook_active: 'false', ...APP.permissions });
-  const base = owner === 'Organization' ? `https://github.com/organizations/${slug.split('/')[0]}/settings/apps/new` : 'https://github.com/settings/apps/new';
-  return `${base}?${params}`;
-}
-
 // Who owns the repository: 'Organization', 'User', or null when it cannot be read. One read-only
 // `repos/<slug>` call, which works wherever the repository's variables can be listed.
 function ownerType(slug, { reader = ghReader, offline = false } = {}) {
@@ -134,7 +125,16 @@ function manualSteps(slug, which = 'both') {
   ];
 }
 
-function setupLines(slug, store, state, owner = null) {
+// The owner's one setup line (owner decision of 24 Nov: one line to paste into PowerShell, nothing to
+// choose): the setup script with this repository and its evidence store filled in. It runs only in
+// the owner's own terminal, so the App's private key never passes through an agent.
+function setupCommand(slug, store = null) {
+  return `node "${SETUP_SCRIPT}" --repo ${slug}${store ? ` --store ${store}` : ''}`;
+}
+// What the owner does after pasting it, as the setup script asks for it.
+const SETUP_STEPS = 'It asks for Enter before it opens GitHub and again before it checks the installation; on GitHub you click Create, then Install. It runs only outside an agent, so the App\'s private key never passes through one.';
+
+function setupLines(slug, store, state) {
   if (set(state)) return [`Governance GitHub App: the variable and the secret are set on ${slug}. Reuse that App: do not set it up again. The first governance job run proves the App is installed.`];
   if (found(state)) return [
     `Governance GitHub App: ${slug} already has part of an App setup (variable ${state.variable}, secret ${state.secret}). Reuse that App: set only what is missing, from the same App (the same Client ID and a private key generated for it). Toolkit never overwrites it for you.`,
@@ -147,21 +147,10 @@ function setupLines(slug, store, state, owner = null) {
     ...saveCommands(slug, 'both', { replace: true }),
     'Then remove this repository from the old App\'s installation (Installed GitHub Apps, Configure, Repository access).',
   ];
-  const repositories = store ? `${slug} and ${store}` : slug;
   return [
-    `Governance GitHub App: the governance jobs on GitHub do nothing until the App is set up (${unknown(state) ? `could not be checked (${state.reason})` : `variable ${state.variable}, secret ${state.secret}`}). Toolkit never creates it for you. After you merge the governance pull request:`,
-    `1. Create this repository's own App from this pre-filled page: ${creationLink(slug, owner || 'User')}`,
-    ...(owner ? [] : [`   If ${slug.split('/')[0]} is an organisation, use its page instead, or the App cannot be installed there: ${creationLink(slug, 'Organization')}`]),
-    `   Check the page: webhook "Active" unticked, installable only on this account, repository permissions ${permissionText()}, and everything else, Workflows included, no access. If GitHub says the name is taken, pick another; names are unique across GitHub.`,
-    '2. On the App\'s page, copy the Client ID and generate a private key (a .pem file downloads).',
-    `3. Install App, Only select repositories: ${repositories}.`,
-    `4. Save both on ${slug}:`,
-    ...manualSteps(slug),
-    '   Or in your own terminal, with gh signed in (it keeps an App someone else set up here meanwhile):',
-    ...saveCommands(slug),
-    '5. Delete the .pem file once the secret is saved. It is the App\'s password and never expires; the App\'s page can generate a new key any time.',
-    `6. Check both halves are in place: run toolkit governance check in ${slug}. It should report the App's variable and secret as set and the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate, which the governance pull request carries) as current.`,
-    'Use one App per governed repository, even if another repository already has one: GitHub gives each App installation its own hourly allowance, so a busy repository never slows this one. toolkit governance check cannot tell whether two repositories share an App, because it reads only the variable and secret names.',
+    `Governance GitHub App: the governance jobs on GitHub do nothing until the App is set up (${unknown(state) ? `could not be checked (${state.reason})` : `variable ${state.variable}, secret ${state.secret}`}). Toolkit never creates it for you. After you merge the governance pull request, paste this one line into PowerShell and press Enter:`,
+    `   ${setupCommand(slug, store)}`,
+    SETUP_STEPS,
   ];
 }
 
@@ -184,14 +173,14 @@ function removalLines(slug, state, others) {
 }
 
 // The `toolkit governance check` finding, or null when there is nothing to say.
-function appFinding(stateName, slug, store, state, others, owner = null) {
+function appFinding(stateName, slug, store, state, others) {
   const finding = (id, severity, lines) => Object.freeze({ id, severity, message: lines.join('\n  ') });
   if (stateName === 'ENABLED') {
-    if (set(state)) return finding('GOVERNANCE_APP_SET', 'info', setupLines(slug, store, state, owner));
-    return finding(unknown(state) ? 'GOVERNANCE_APP_UNVERIFIED' : 'GOVERNANCE_APP_NOT_SET_UP', unknown(state) ? 'unverified' : 'info', setupLines(slug, store, state, owner));
+    if (set(state)) return finding('GOVERNANCE_APP_SET', 'info', setupLines(slug, store, state));
+    return finding(unknown(state) ? 'GOVERNANCE_APP_UNVERIFIED' : 'GOVERNANCE_APP_NOT_SET_UP', unknown(state) ? 'unverified' : 'info', setupLines(slug, store, state));
   }
   if (state.variable === 'found' || state.secret === 'found') return finding('GOVERNANCE_APP_LEFT_OVER', 'info', removalLines(slug, state, others));
   return null;
 }
 
-module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, permissionText, creationLink, ownerType, manualSteps, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });
+module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, permissionText, ownerType, manualSteps, saveCommands, setupCommand, SETUP_STEPS, ghReader, presence, setupLines, removalLines, appFinding });

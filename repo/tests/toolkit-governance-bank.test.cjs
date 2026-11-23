@@ -93,7 +93,7 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   // How to keep governance off is said once, in the reply line.
   assert.equal(shown.split('no store').length, 2, shown);
   // The App command is the owner's because its setup refuses to run under an agent; the bank says why.
-  assert.match(shown, /^- Governance App: Not checked\. After your answer, Toolkit gives you one command for your own terminal \(it refuses to run under an agent, so the App's private key never passes through one\); you click Create on GitHub and it saves the App on this repository\. Governance works without it, but its jobs on GitHub need it to open pull requests\.$/m);
+  assert.match(shown, /^- Governance App: Not checked\. After your answer, Toolkit gives you one line to paste into PowerShell \(it refuses to run under an agent, so the App's private key never passes through one\): press Enter when it asks, then click Create and Install on GitHub\. Governance works without it, but its jobs on GitHub need it to open pull requests\.$/m);
   assert.doesNotMatch(shown, /undefined/);
   assert.match(shown, /^- Toolkit permissions \(Codex\): Up to date\.$/m);
   // The answer also covers the settings Toolkit adds on its own after the merge, so the bank names them before it.

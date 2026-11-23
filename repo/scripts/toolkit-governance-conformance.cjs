@@ -175,10 +175,7 @@ function appFindings(state, options) {
     offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) };
   const appState = governanceApp.presence(slug, read);
   const others = governance.enabledRepositories(options).filter(name => name.toLowerCase() !== slug.toLowerCase());
-  // The owner type picks the App page, so it is read only when the setup steps will show.
-  const setup = state.state === 'ENABLED' && !(appState.variable === 'found' || appState.secret === 'found');
-  const owner = setup ? governanceApp.ownerType(slug, read) : null;
-  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others, owner);
+  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others);
   return found ? [found] : [];
 }
 

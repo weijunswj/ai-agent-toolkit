@@ -226,7 +226,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: 'Off (needs governance)', text: 'Nothing is made while governance is off' }));
   } else {
     specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
-      text: 'After your answer, Toolkit gives you one command for your own terminal (it refuses to run under an agent, so the App\'s private key never passes through one); you click Create on GitHub and it saves the App on this repository. Governance works without it, but its jobs on GitHub need it to open pull requests' }), app_setup: true });
+      text: 'After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests' }), app_setup: true });
   }
   // The instruction copies older setups left: removed by default with any answer that keeps governance
   // on (toolkit-governance-cleanup.cjs), in the working tree; the owner commits them and merges one PR.
