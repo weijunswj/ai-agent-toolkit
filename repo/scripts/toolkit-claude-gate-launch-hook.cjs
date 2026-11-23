@@ -38,15 +38,14 @@
 // ordinary title is not read.
 
 const fs = require('node:fs');
-const path = require('node:path');
 
 const TOOL = /^mcp__ccd_session__start_session$/;
 const TITLE_GATE = /^[ \t]*(?:\*\*)?G([012])\b/i;
 const CLAUDE_MODEL = /^(?:opus|sonnet|haiku|fable)-\d/;
-const PROGRAMME = path.join(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs').replace(/\\/g, '/');
 const PREFIX = 'Toolkit gate launch check: ';
 
 const gateRoute = () => require('./toolkit-gate-route.cjs');
+const programmeCommand = args => require('./toolkit-user-state.cjs').programmeCommand(args);
 const assignmentId = () => require('../../skills/github-program-reconciler/scripts/programme-state.cjs').ASSIGNMENT_ID;
 
 // The host model id for a registry model: `opus-5.5` -> `claude-opus-5-5`; null for a model Claude
@@ -102,10 +101,10 @@ function launchCheck(toolInput, { registry, callerEffort = null } = {}) {
   const model = hostModel(pin.model);
   if (!model) return deny(`${pin.profile}/${pin.member} runs ${pin.model}, and ${pin.model} is not a Claude model, so a Claude Code session cannot run this ${gate}. Start it where that model runs, or name a Claude route: ${routeLines(registry, gate, { claudeOnly: true })}.`);
   let assignment = null;
-  if (brief.assignment === null) return deny(`this ${gate} brief has no \`Assignment:\` line. Add \`Assignment: <id>\` naming the assignment the controller recorded with \`programme.cjs assign\` (the session binds to it), or \`Assignment: none\` for a gate outside a programme.`);
+  if (brief.assignment === null) return deny(`this ${gate} brief has no \`Assignment:\` line. Add \`Assignment: <id>\` naming the assignment the controller recorded with \`${programmeCommand(`assign --issue <n> --role ${gate} --assignment <id>`)}\` (the session binds to it), or \`Assignment: none\` for a gate outside a programme.`);
   const id = brief.assignment.replace(/[`*]/g, '').trim().split(/\s+/)[0] || '';
   if (id.toLowerCase() !== 'none') {
-    if (!assignmentId().test(id)) return deny(`\`Assignment: ${brief.assignment}\` is not an assignment id (letters, digits, dot, dash or underscore, up to 60, as \`programme.cjs assign --assignment\` takes). Use \`Assignment: <id>\` or \`Assignment: none\`.`);
+    if (!assignmentId().test(id)) return deny(`\`Assignment: ${brief.assignment}\` is not an assignment id (letters, digits, dot, dash or underscore, up to 60). Use \`Assignment: <id>\` or \`Assignment: none\`.`);
     assignment = id;
   }
   const launch = { gate, pin, assignment, effort: null, model, cloud: call.target === 'cloud' };
@@ -157,7 +156,7 @@ function postToolUse(input, { environment = process.env, registry } = {}) {
       steps.push(`its first turn runs at ${decision.effort}, below its ${pin.model}/${pin.effort} pin (start_session cannot go above this session's own effort), so its route check refuses its tools until the raise: let that first turn end (it should only reply READY), then call mcp__ccd_session_mgmt__set_session_effort with session_id ${id} and effort ${pin.effort}, confirm it with get_session, and only then send it the go-ahead.`);
     }
     if (assignment && ['G0', 'G1', 'G2'].includes(gate)) {
-      steps.push(`it binds to assignment ${assignment}, and bind refuses until that assignment is recorded: if \`node "${PROGRAMME}" assign --issue <n> --role ${gate} --assignment ${assignment}\` has not run yet, run it now.`);
+      steps.push(`it binds to assignment ${assignment}, and bind refuses until that assignment is recorded: if \`${programmeCommand(`assign --issue <n> --role ${gate} --assignment ${assignment}`)}\` has not run yet, run it now.`);
     }
     if (!steps.length) return {};
     const head = session ? `Toolkit gate launch: ${gate} session ${id} started.` : `Toolkit gate launch: ${gate} card ${card[1]} is proposed; once it starts, take its session id from the linked sessions note.`;
