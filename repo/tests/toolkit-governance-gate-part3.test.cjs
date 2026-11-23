@@ -162,7 +162,7 @@ test('nothing is held: the first message of a run carries the question once, and
   const first = hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 's1' });
   assert.equal(first.action, 'pass');
   // The agent is told to do the work, then put the question, word for word, as the last lines; never a script to run.
-  assert.deepEqual(noticeOf(first.context).split('\n'), [QUESTION_LINE, 'Reply `toolkit governance enable` or `toolkit governance disable` as a message, or just say yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.']);
+  assert.deepEqual(noticeOf(first.context).split('\n'), [`${QUESTION_LINE} Records and evidence go to this repository's own private TRANSPORT-<repository name> store on GitHub, found or created.`, 'Reply `toolkit governance enable` or `toolkit governance disable` as a message, or just say yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.']);
   assert.match(first.context, /1\. Do what the user asked in the message above\./);
   assert.ok(first.context.endsWith(`For agents: ${gate.NEVER_OWNER}`));
   assert.doesNotMatch(first.context, /toolkit-governance\.cjs|node |held/);

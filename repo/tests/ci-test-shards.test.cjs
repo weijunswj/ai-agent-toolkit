@@ -240,6 +240,46 @@ test('in GitHub Actions a shard summary records the run that measured it', () =>
   for (const id of [undefined, '', 'abc', '0', '9.5', '-1']) assert.equal(runner.measuringRun({ GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: id }), null, String(id));
 });
 
+test('a one-file shard run writes run_id into its summary only inside GitHub Actions, and a named-file run never does', (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-id-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(work, 'repo', 'tests'), { recursive: true });
+  fs.mkdirSync(path.join(work, 'repo', 'contracts', 'ci'), { recursive: true });
+  fs.writeFileSync(path.join(work, 'repo', 'tests', 'one.test.cjs'), "require('node:test')('passes', () => {});\n");
+  fs.writeFileSync(path.join(work, 'repo', 'contracts', 'ci', 'test-shards.json'), JSON.stringify({
+    schema: shards.MANIFEST_SCHEMA,
+    systems: { linux: { shards: [{ id: 'linux-1', rest: true }] }, windows: { shards: [{ id: 'windows-1', rest: true }] } },
+  }));
+  const system = shards.platformSystem();
+  // main reads the run's identity from process.env; NODE_TEST_CONTEXT is unset so the inner node --test is a fresh run.
+  const run = (args, vars) => {
+    const names = ['GITHUB_ACTIONS', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA', 'NODE_TEST_CONTEXT'];
+    const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    const file = path.join(work, `summary-${Math.random().toString(16).slice(2)}.json`);
+    try {
+      for (const name of names) delete process.env[name];
+      Object.assign(process.env, vars);
+      assert.equal(runner.main([...args, '--summary', file], { root: work, out: sink(), err: sink() }), 0, args.join(' '));
+    } finally {
+      for (const name of names) {
+        if (saved[name] === undefined) delete process.env[name];
+        else process.env[name] = saved[name];
+      }
+    }
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  };
+  const shardArgs = ['--shard', `${system}-1`, '--os', system];
+  const actions = { GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: '123' };
+  const measured = run(shardArgs, actions);
+  assert.equal(measured.shard, `${system}-1`);
+  assert.deepEqual(measured.files.map((entry) => entry.file), ['repo/tests/one.test.cjs']);
+  assert.equal(measured.run_id, '123');
+  assert.equal(Object.hasOwn(run(shardArgs, { GITHUB_RUN_ID: '123' }), 'run_id'), false, 'outside GitHub Actions');
+  const named = run(['repo/tests/one.test.cjs'], actions);
+  assert.equal(Object.hasOwn(named, 'shard'), false);
+  assert.equal(Object.hasOwn(named, 'run_id'), false, 'a named-file run is not a shard run');
+});
+
 test('Windows hook pack groups cover every corpus host case exactly once', () => {
   const pack = require('../scripts/toolkit-hook-pack.cjs');
   const corpus = pack.loadCorpus(ROOT);
