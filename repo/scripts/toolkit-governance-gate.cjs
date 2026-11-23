@@ -1115,6 +1115,13 @@ class PromptHold {
       // message through with the question. A first, pre-question Projects delivery stays spent, so
       // the host delivering it again cannot answer. A note that cannot be saved asks again next time.
       if (message.wrapped && ownTyped(message)) { try { this.#tickets.acceptDelivery(message, null); } catch { /* receipts are kept as they are */ } }
+      // A first message that asks for the bank (toolkit governance and its other phrases) gets the
+      // bank, which asks whether to turn governance on, so the run is noted as asked with no reply
+      // window and no question: one ask, never the question and then the bank.
+      if (ownTyped(message) && require('./toolkit-commands.cjs').typedCommand(message.text)?.action === 'guide') {
+        try { this.#asked.set(id, sessionId, marks); } catch { /* the next message is asked instead */ }
+        return { action: 'pass' };
+      }
       let noted = true;
       try { this.#asked.set(id, sessionId, marks, { window: true }); } catch { noted = false; }
       return this.#ask(verdict, noted ? null : UNSAVED_LINE);

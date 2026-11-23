@@ -102,7 +102,7 @@ test('after the table the bank lists what it does by default, then one reply lin
     'Nothing to answer here:',
     '- Set in .github/toolkit-programme.json: evidence store toolkit-test-fixture/store, parent #1, required check validate, merge trains on. To change them, edit that file in a pull request and merge it.',
     '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
-    '- Governance App: Not checked. After your answer, Toolkit gives you one command to run yourself in your own PowerShell or terminal: you click Create on GitHub, and it saves the App\'s Client ID and key on this repository. The governance jobs on GitHub need it to open pull requests; everything else works without it.',
+    '- Governance App: Not checked. After your answer, Toolkit gives you one command for your own terminal (it refuses to run under an agent, so the App\'s private key never passes through one); you click Create on GitHub and it saves the App on this repository. Governance works without it, but its jobs on GitHub need it to open pull requests.',
     '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
     '- Toolkit permissions (Claude Code): Outdated: 2 missing, 1 old. After your answer, Toolkit gives you one command to run yourself that brings Claude Code\'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter.',
   ].join('\n'));
@@ -308,7 +308,7 @@ test('questions are numbered without gaps, status rows have none, and an answer 
   for (const id of ['governance', 'evidence-store', 'parent-issue', 'required-checks', 'governance-app', 'permission-blocks']) assert.equal(refs(undecided)[id], '', `${id} is a status row`);
   const shown = renderGovernanceBank(undecided);
   assert.match(shown, /^# Toolkit governance choices - 1 question across 1 section$/m);
-  assert.match(shown, /^- Evidence store: TRANSPORT-card\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply; reply no store to keep governance off\.$/m);
+  assert.match(shown, /^- Evidence store: TRANSPORT-card\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply\.$/m);
   assert.doesNotMatch(shown, /Status \(nothing to answer\)|Already set|\| 1\.2 \|/);
   assert.equal(parseBankAnswer('all recommended', undecided, { requireBankReference: false }).governance, 'on');
   assert.equal(parseBankAnswer('1.1=A', undecided, { requireBankReference: false }).governance, 'on', 'any answer to this bank turns governance on');
@@ -494,6 +494,28 @@ test('typing toolkit governance while a bank is open asks for the bank afresh, n
 // summary. Now setup reads once more with a longer limit and shows the bank when that read works; when
 // it fails too, the owner gets one line to type the command again and the agent is told to show no
 // status. An answer still writes nothing on an unread binding.
+// Owner test 2, 23 Nov: GitHub could not be read in a repository with no decision yet, so the state
+// was UNAVAILABLE, and the bank printed "GitHub governance: undefined" with a turn-on row for a state
+// it could not know. It reads once more, then gives the same line to type it again as an unread binding.
+test('a repository whose governance cannot be read gets one more read, then the line to type it again, never a bank', async t => {
+  const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
+  const ctx = fixture(t);
+  const stateDir = path.dirname(ctx.registryOptions.registryPath);
+  const identity = governance.readIdentity(ctx.repo);
+  const unread = { ...cache.readBindingCache(identity, stateDir), status: 'absent', text: null, bytes_sha256: null, refresh_error: 'read-timed-out' };
+  let reads = 0;
+  ctx.cli = { refresh: () => { reads += 1; cache.writeCache(stateDir, unread); return { refreshed: false, error: 'read-timed-out' }; } };
+  ctx.cli.refresh();
+  reads = 0;
+  assert.equal(governance.governanceState(ctx.repo, ctx.registryOptions).state, 'UNAVAILABLE');
+  const shown = await run(ctx, ['setup']);
+  assert.equal(reads, 2, 'one more read after the failed one');
+  assert.equal(shown.code, 1);
+  assert.doesNotMatch(shown.out, /undefined|Bank reference|Your answer turns it on/);
+  assert.match(shown.out, /^The governance question bank could not be shown because GitHub could not be read just now.*Type toolkit governance again in a moment\.$/m);
+  agentsLast(shown.out);
+});
+
 test('a fresh session whose binding read fails just now gets the bank or a line to type it again, never a status', async t => {
   const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
   for (const recovers of [true, false]) {

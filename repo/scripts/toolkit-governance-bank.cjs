@@ -111,6 +111,9 @@ function statusRow({ id, section, title, current, text = '', change = '', bound 
 // (parallel CI shards by CI time, the evidence store, the App and permission commands, the copies
 // cleanup). Merge trains keep their stored value and are not asked.
 function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null }) {
+  // Only a state read from the merged binding has words here; any other (GitHub could not be read)
+  // gets the CLI's line to type it again, never a bank.
+  if (!Object.hasOwn(STATE_LABEL, String(state.state))) throw new Error(`The governance bank cannot show the state ${state.state}.`);
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const governed = state.state === 'ENABLED';
@@ -132,9 +135,10 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       ],
     }) });
   } else {
-    // Not decided yet: the turn-on card asked, so any answer here turns governance on; no store keeps it off.
+    // Not decided yet: the turn-on card asked, so any answer here turns governance on; the reply line
+    // says once how to keep it off (no store).
     specs.push({ ...statusRow({ id: 'governance', section, title: 'GitHub governance', current: STATE_LABEL[state.state],
-      text: 'Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it', change: 'Reply no store to keep it off' }), turns_on: true });
+      text: 'Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it' }), turns_on: true });
   }
   // Task auto-merge is On only while governance is On, or in the same answer that turns it on.
   const on = task === 'after-gates';
@@ -183,13 +187,14 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     shards_default: slow ? 'yes' : 'not-now', estimateShort: estimateShort(ciShards.measured) });
   }
   if (adoption && adoption.blocked) {
-    specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Could not be checked', text: `GitHub could not be read (${adoption.blocked}), so turning on makes nothing until it can` }));
+    // The search's own reason is for the logs, not the owner: an answer makes nothing until it works.
+    specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Not checked yet', text: 'GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing. Type toolkit governance again in a moment' }));
   } else if (adoption) {
     // The store is this repository's own private TRANSPORT-<name>, found or created; another one only
     // when the owner names it, and no store keeps governance off.
     specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: adoption.store_name,
       text: adoption.found_store ? `Found: your private GitHub repository ${adoption.found_store}, used for programme records and evidence` : `None yet: Toolkit creates the private GitHub repository ${adoption.store.repository} when governance turns on, for programme records and evidence`,
-      change: 'To use another private repository of yours, add store=<owner/name> to your reply; reply no store to keep governance off' }));
+      change: 'To use another private repository of yours, add store=<owner/name> to your reply' }));
     specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
     // With none yet, the turn-on result says how to add protection later (turnOnSummary).
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'None yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : 'Default-branch protection waits for them' }));
@@ -221,7 +226,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: 'Off (needs governance)', text: 'Nothing is made while governance is off' }));
   } else {
     specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
-      text: 'After your answer, Toolkit gives you one command to run yourself in your own PowerShell or terminal: you click Create on GitHub, and it saves the App\'s Client ID and key on this repository. The governance jobs on GitHub need it to open pull requests; everything else works without it' }), app_setup: true });
+      text: 'After your answer, Toolkit gives you one command for your own terminal (it refuses to run under an agent, so the App\'s private key never passes through one); you click Create on GitHub and it saves the App on this repository. Governance works without it, but its jobs on GitHub need it to open pull requests' }), app_setup: true });
   }
   // The instruction copies older setups left: removed by default with any answer that keeps governance
   // on (toolkit-governance-cleanup.cjs), in the working tree; the owner commits them and merges one PR.
@@ -264,7 +269,7 @@ function replyLine(specs) {
   const explain = first ? first.presentation.question_ref : '1.1';
   const overrides = [specs.some(spec => spec.shards_default) ? 'shards=' : '', specs.some(spec => spec.id === 'evidence-store' && !spec.bound) ? 'store=' : ''].filter(Boolean);
   const extra = overrides.length ? ` Add ${overrides.join(' or ')} only to change that default.` : '';
-  if (specs.some(spec => spec.turns_on)) return `Reply all recommended to turn governance on as shown, or only your changes such as ${example}.${extra} Reply no store to keep governance off. Say "explain ${explain}" for the full text of a row.`;
+  if (specs.some(spec => spec.turns_on)) return `Reply all recommended to turn governance on as shown, or only your changes such as ${example}.${extra} To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session. Say "explain ${explain}" for the full text of a row.`;
   return `Reply all recommended, or only your changes such as ${example}. Rows you leave out stay as they are; each change is a pull request you merge.${extra} Say "explain ${explain}" for the full text of a row.`;
 }
 

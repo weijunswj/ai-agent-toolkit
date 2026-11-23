@@ -461,8 +461,11 @@ class ToolkitGovernanceCli {
   async #bank(json, answers, ticket, explain = null) {
     this.#refresh(this.#cwd);
     let state = this.#state();
-    // One failed read of the merged binding is often a moment's network or git trouble: read once more.
-    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+    // Not read: an enabled binding read too long ago, or no read at all (UNAVAILABLE), where the bank
+    // cannot know whether governance is decided. One failed read is often a moment's network or git
+    // trouble: read once more.
+    const unread = read => read.state === 'UNAVAILABLE' || (read.state === 'ENABLED' && !read.programme_records_bind);
+    if (unread(state)) {
       this.#refresh(this.#cwd, { timeout: BANK_REREAD_TIMEOUT_MS });
       state = this.#state();
     }
@@ -473,7 +476,7 @@ class ToolkitGovernanceCli {
     }
     // Still unread: no bank and no governed write from an old read. The bank's own line asks the owner
     // to type it again; an answer is refused with nothing written (main adds its Agents line).
-    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+    if (unread(state)) {
       this.#print(json, { state: state.state, writes: 0 }, answers === null && !explain ? [BANK_UNREAD, '', BANK_UNREAD_AGENTS] : [ANSWER_UNREAD]);
       return 1;
     }

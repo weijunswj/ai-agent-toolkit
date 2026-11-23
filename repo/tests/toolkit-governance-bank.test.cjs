@@ -89,13 +89,26 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   assert.match(table, /^\| 1\.1 \| Task auto-merge \| Off \(needs governance\) \| A\. Keep current \| B\. On \|$/m);
   assert.doesNotMatch(table, /GitHub governance|\| 1\.2 \|/);
   const shown = bank.renderGovernanceBank(undecided);
-  assert.match(shown, /^- GitHub governance: Not decided\. Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it\. Reply no store to keep it off\.$/m);
+  assert.match(shown, /^- GitHub governance: Not decided\. Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it\.$/m);
+  // How to keep governance off is said once, in the reply line.
+  assert.equal(shown.split('no store').length, 2, shown);
+  // The App command is the owner's because its setup refuses to run under an agent; the bank says why.
+  assert.match(shown, /^- Governance App: Not checked\. After your answer, Toolkit gives you one command for your own terminal \(it refuses to run under an agent, so the App's private key never passes through one\); you click Create on GitHub and it saves the App on this repository\. Governance works without it, but its jobs on GitHub need it to open pull requests\.$/m);
+  assert.doesNotMatch(shown, /undefined/);
   assert.match(shown, /^- Toolkit permissions \(Codex\): Up to date\.$/m);
   // The answer also covers the settings Toolkit adds on its own after the merge, so the bank names them before it.
   assert.ok(shown.includes(after), shown);
   assert.equal(shown.split(after).length, 2, 'named once');
   assert.match(shown, /default-branch protection[^|]*ruleset that blocks force pushes[^|]*security settings/);
-  assert.match(shown, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\. Reply no store to keep governance off\. Say "explain 1\.1" for the full text of a row\.$/m);
+  assert.match(shown, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\. To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\. Say "explain 1\.1" for the full text of a row\.$/m);
+  // A failed GitHub read of the store and parent issue is one plain line, with no internal note.
+  const blocked = bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, adoption: { blocked: "couldn't check governance; ordinary work continues" } }));
+  assert.match(blocked, /^- Store and parent issue: Not checked yet\. GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing\. Type toolkit governance again in a moment\.$/m);
+  assert.doesNotMatch(blocked, /ordinary work continues/);
+  // A state the bank has no words for is never shown (it once printed "GitHub governance: undefined").
+  for (const unknown of ['UNAVAILABLE', 'ERROR', undefined]) {
+    assert.throws(() => bank.governanceBankSpecs({ state: { state: unknown, repository: 'owner/app', root: '/x' } }), /governance bank cannot show the state/, String(unknown));
+  }
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);
   assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', store: null, governanceApp: 'setup', permissionBlocks: 'keep' });

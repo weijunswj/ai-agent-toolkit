@@ -114,11 +114,11 @@ test('a fresh repository after the card\'s yes asks only task auto-merge, names 
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /^\| 1\.1 \| Task auto-merge \| Off \(needs governance\) \| A\. Keep current/m);
   assert.doesNotMatch(table, /^\| 1\.2 \||^\| 2\.1 \|/m, 'no second question');
-  assert.match(table, /^- GitHub governance: Not decided\. Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it\. Reply no store to keep it off\.$/m);
+  assert.match(table, /^- GitHub governance: Not decided\. Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it\.$/m);
   // The store is named before the answer: this repository's own TRANSPORT-<name>, to be created.
   assert.match(table, /^- Evidence store: TRANSPORT-fresh\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on, for programme records and evidence\./m);
   assert.match(table, /^- Parent issue: None yet\. Toolkit opens one when governance turns on\.$/m);
-  assert.match(table, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\..* Reply no store to keep governance off\./m);
+  assert.match(table, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\..* To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\./m);
   assert.equal(github.calls.length, 0, 'showing the bank makes nothing');
 
   const before = fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8');
@@ -239,7 +239,7 @@ test('when GitHub cannot be searched, turning on makes nothing and says why', as
   const github = fakeGitHub();
   const offline = { ...github, discoveryGh: () => ({ ok: false, reason: 'gh-unavailable' }) };
   const shown = await run(ctx, ['setup'], offline, { interactive: true, answers: [''] });
-  assert.match(shown.out, /^- Store and parent issue: Could not be checked\. GitHub could not be read/m);
+  assert.match(shown.out, /^- Store and parent issue: Not checked yet\. GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing\. Type toolkit governance again in a moment\.$/m);
   const answered = await run(ctx, ['setup'], offline, { interactive: true, answers: ['all recommended'] });
   assert.notEqual(answered.code, 0);
   assert.match(answered.out, /GitHub could not be read \(.+\), so the evidence store and parent issue could not be found or made\./, 'the answer says why');
