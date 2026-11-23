@@ -40,7 +40,7 @@ function missingFiles(files) { return REQUIRED_FILES.filter(name => typeof files
 // the binding, so a repository never gets one without the other. A Toolkit source checkout runs its
 // own workflow files, so it gets nothing and no warning. When the copies cannot be rendered, the
 // existing ones (if any) still travel and the warning names the reason and the fix.
-const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run toolkit governance check';
+const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run the governance check (toolkit-governance.cjs check) in this repository';
 // `ciShards` is the proposed binding's ci_shards answer, so the shard copies follow the pull request's
 // own answer rather than this computer's last read of the merged binding. `root` and `commit` (the
 // Toolkit checkout and the commit to pin) are only for tests.

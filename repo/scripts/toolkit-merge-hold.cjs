@@ -9,7 +9,7 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // its own initiative or by mistake. It reads command text, and text can be reshaped (wrappers, nested
 // sessions, scripts, files), so it cannot stop an agent set on getting past it. Agents also act as
 // the user on GitHub, so GitHub cannot tell an agent's merge from the user's either. Where the
-// repository has them (`toolkit governance check` reports them), its own GitHub rules are the hard
+// repository has them (the governance check, `toolkit-governance.cjs check`, reports them), its own GitHub rules are the hard
 // limit: a pull request for every change to the default branch, no force-push, no deletion.
 //
 // What an approval is: one line of the user's own typed message (UserPromptSubmit) that says "merge"

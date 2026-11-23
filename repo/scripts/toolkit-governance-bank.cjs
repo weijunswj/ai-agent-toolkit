@@ -215,7 +215,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
   if (appSet || appPart) {
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
-      text: appSet ? 'Its variable and secret are on GitHub' : 'toolkit governance check shows how to finish or replace it',
+      text: appSet ? 'Its variable and secret are on GitHub' : 'the governance check shows how to finish or replace it',
       change: appSet ? `To stop using it, delete ${APP_NAMES_ON_GITHUB} under Settings, Secrets and variables, Actions on GitHub; governance works without it` : '' }));
   } else {
     const off = state.state === 'DISABLED';
@@ -227,7 +227,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
         ? { value: 'keep', outcome: 'No App is made.', reason: 'Governance is off.' }
         : { value: 'setup', outcome: 'You get one command to run yourself that makes the App and saves its key on this repository.', reason: 'Without it the governance jobs on GitHub cannot open pull requests.' },
       choices: [
-        bank.wizardChoice('keep', 'Keep current', 'Not now: no App is made. Governance works without it, and toolkit governance check keeps showing how to add it.'),
+        bank.wizardChoice('keep', 'Keep current', 'Not now: no App is made. Governance works without it, and the governance check keeps showing how to add it.'),
         bank.wizardChoice('setup', off ? 'Set up (needs governance on)' : 'Set up', 'You get one command to run yourself in your own PowerShell or terminal: you click Create on GitHub, and it saves the App\'s Client ID and key on this repository and opens its install page.'),
       ],
     }));
