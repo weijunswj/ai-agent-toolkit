@@ -162,7 +162,8 @@ function fixtureErrors(fixture) {
   for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
-    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged'].includes(fixture.handoff.memory))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }');
+    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
+    || (['deleted', 'stale'].includes(fixture.handoff.memory) && fixture.handoff.session !== 'checked'))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }, or { session: checked, memory: deleted or stale }');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -702,7 +703,9 @@ cp.spawnSync = function(file, args, options) {
   // The controller handoff snapshot the after-tool hook keeps fresh (toolkit-handoff-hook.cjs): a memory
   // folder and its snapshot, taken 50 minutes ago, with the hook's record of it. For `checked`, the session
   // record of a first check two minutes ago, which held the memory as it was then. For `moved`, the memory
-  // is then saved, as the tool call under test just did. The folder sits beside work, outside the snapshot.
+  // is then saved, as the tool call under test just did; for `deleted`, owner-rules.md is then deleted.
+  // For `stale`, the snapshot already removed owner-rules.md and this session holds its old bytes again.
+  // The folder sits beside work, outside the snapshot.
   #handoff(spec) {
     const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
     const handoff = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
@@ -720,7 +723,16 @@ cp.spawnSync = function(file, args, options) {
     save(memoryFile, '# Memory\n- queue: #1\n', 60 * 60 * 1000);
     save(path.join(memory, 'owner-rules.md'), 'merge commits only\n', 2 * 60 * 60 * 1000);
     const stamp = { taken_at: this.#now(50 * 60 * 1000).toISOString(), toolkit_version: require(path.join(ROOT, 'repo', 'scripts', 'toolkit-version.cjs')).readToolkitVersion(), repository_commit: this.head };
+    const rulesFile = path.join(memory, 'owner-rules.md');
     handoff.write(store, handoff.plan({ base: store, repository, sources: handoff.normaliseSources({ memory }, this.work), stamp }), repository);
+    if (spec.handoff.memory === 'stale') {
+      // An earlier session held owner-rules.md and deleted it; its run removed it from the snapshot.
+      const held = handoff.sessionRows({ memory, instructions: null, files: [] });
+      const rules = fs.readFileSync(rulesFile);
+      fs.rmSync(rulesFile);
+      handoff.write(store, handoff.plan({ base: store, repository, sources: null, stamp, session: { rows: held, real: handoff.realBySource(held) } }), repository);
+      save(rulesFile, rules, 2 * 60 * 60 * 1000);
+    }
     fs.mkdirSync(userState, { recursive: true });
     fs.writeFileSync(path.join(userState, 'handoff-refresh.json'), `${JSON.stringify({ out: store, repo_root: this.work, repository, at: stamp.taken_at }, null, 2)}\n`);
     if (spec.handoff.session === 'checked') {
@@ -730,7 +742,9 @@ cp.spawnSync = function(file, args, options) {
       fs.writeFileSync(sessionFile, `${JSON.stringify({ started_at: checkedAt, checked_at: checkedAt, rows, real: handoff.realBySource(rows) }, null, 2)}\n`);
     }
     if (spec.handoff.memory === 'moved') save(memoryFile, '# Memory\n- queue: #7\n', 30 * 1000);
-    this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex') };
+    if (spec.handoff.memory === 'deleted') fs.rmSync(rulesFile);
+    this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex'),
+      ...(spec.handoff.memory === 'deleted' ? { removedFile: 'memory/owner-rules.md' } : {}) };
   }
 
   // Writes the fixture's paths into a payload or transcript value. A payload also gets {plugin}, the
@@ -831,11 +845,17 @@ async function runRow(row, hosts, { roots, scratch }) {
   return results;
 }
 
-// Whether a handoff refresh a hook started has landed: the snapshot is current, and this session's record
-// holds the saved memory (the run rewrites that record last).
+// Whether a handoff refresh a hook started has landed: the snapshot is current, this session's record
+// holds the saved memory (the run rewrites that record last), and a deleted memory file has left the
+// snapshot, its copy included.
 function handoffLanded({ handoff }) {
-  const { store, repository, sessionFile, memoryHash } = handoff;
-  if (require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs')).check({ base: store, repository }).state !== 'CURRENT') return false;
+  const { store, repository, sessionFile, memoryHash, removedFile } = handoff;
+  const lib = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
+  if (lib.check({ base: store, repository }).state !== 'CURRENT') return false;
+  if (removedFile) {
+    const folder = lib.snapshotFolder(repository);
+    if (fs.existsSync(path.join(store, folder, ...removedFile.split('/'))) || lib.readManifest(store, folder).files.some(row => row.path === removedFile)) return false;
+  }
   const session = readJsonFile(sessionFile);
   return Array.isArray(session?.rows) && session.rows.some(row => row.path === 'MEMORY.md' && row.sha256 === memoryHash);
 }

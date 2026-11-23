@@ -455,12 +455,13 @@ class FakeGitHub {
 }
 
 // A child whose gate the controller assigned and, optionally, whose return it recorded and consumed.
-// A G1 acceptance first records a G2 review PASSED at `head`, the live PR head it is checked against.
+// A G1 acceptance first records a G2 review PASSED at `head`, the live PR head it is checked against;
+// a G2 consume is judged by a trusted PASS verdict at `head`, as the command line reads it from the PR.
 function gatedChild(state, doc, { role = 'G1', assignment = `${role.toLowerCase()}-a1`, returnId = null, verdict = null, writer = null, parentDoc = null, head = 'c'.repeat(40) } = {}) {
   let next = state.assignGate(doc, { assignment, role });
   if (returnId) next = state.recordReturn(next, { returnId, assignment });
   if (verdict === 'ACCEPT' && role === 'G1') next = state.applyPatch('child', next, { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head, verdict: 'PASSED' }] } }, { writer, parentDoc });
-  if (verdict) next = state.consumeReturn(next, { returnId, verdict, writer, parentDoc, liveHead: head });
+  if (verdict) next = state.consumeReturn(next, { returnId, verdict, writer, parentDoc, liveHead: head, review: { verdict: 'PASS', head, link: `verdict for ${head}` } });
   return next;
 }
 

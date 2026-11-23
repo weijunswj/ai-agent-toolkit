@@ -171,6 +171,7 @@ function parseArgs(argv) {
     needs(args.issue !== undefined && Boolean(args.record) !== Boolean(args.consume), 'return needs --issue <n> and either --record <id> --assignment <id> or --consume <id> --verdict ACCEPT|REOPEN|WAITING_OWNER.');
     needs(!args.record || args.assignment, 'return --record needs --assignment <id>.');
     needs(!args.consume || args.verdict, 'return --consume needs --verdict ACCEPT|REOPEN|WAITING_OWNER.');
+    needs(!args.reason || args.consume, '--reason goes with return --consume (the owner\'s answer to a return consumed WAITING_OWNER needs one).');
   }
   if (command === 'bind') {
     needs(args.issue !== undefined && args.assignment && args.session, 'bind needs --issue <n>, --assignment <id> and --session <this session\'s own id>.');
@@ -695,6 +696,32 @@ function liveHead(context, child) {
   return number ? reader.pullRequest(number)?.head || null : null;
 }
 
+// The verdict a G2 return is judged by: the newest `Toolkit-G2:` verdict comment on the task PR for the
+// head the return names (else the live PR head), from an account that can write here, read with the
+// merge train finder's own parser and trust rule. Null when there is no PR, head or such verdict.
+function g2Review(context, child, returnId) {
+  let finder;
+  try { finder = require('../../../repo/scripts/toolkit-merge-train-finder.cjs'); } catch {
+    throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'This copy cannot read G2 verdicts, so a G2 return is not consumed. Use a full Toolkit install. Nothing was written.');
+  }
+  const reader = new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository });
+  const number = child.pr.number || (child.candidate.branch ? reader.pullRequestForBranch(child.candidate.branch) : null);
+  if (!number) return null;
+  const named = child.gate.returns.find(entry => entry.return_id === returnId)?.at_head;
+  const head = /^[0-9a-f]{40}$/.test(String(named || '')) ? named : reader.pullRequest(number)?.head || null;
+  if (!head) return null;
+  const comments = [];
+  for (let page = 1; ; page += 1) {
+    const response = context.transport.request('GET', `repos/${context.repository}/issues/${number}/comments?per_page=100&page=${page}`);
+    if (response.status !== 200 || !Array.isArray(response.json)) throw new ProgrammeError('GH_FAILED', `Reading the comments of PR #${number} failed (HTTP ${response.status}); nothing was written.`);
+    comments.push(...response.json);
+    if (response.json.length < 100) break;
+    if (page >= 50) throw new ProgrammeError('GH_FAILED', `PR #${number} has more comments than this reader pages through; nothing was written.`);
+  }
+  const found = finder.verdictFor(comments, head);
+  return found ? { verdict: found.verdict, head, link: found.link } : null;
+}
+
 function makeReconciler(context) {
   return new state.Reconciler({
     store: context.store,
@@ -1065,8 +1092,10 @@ const commands = {
     } else {
       const child = context.store.read('child', args.issue).doc;
       const head = child && args.verdict === 'ACCEPT' && child.gate.role === 'G1' ? liveHead(context, child) : undefined;
+      const review = child && child.gate.role === 'G2' && ['ACCEPT', 'REOPEN'].includes(args.verdict) ? g2Review(context, child, args.consume) : undefined;
+      const now = nowText(deps);
       change = doc => {
-        const next = state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head });
+        const next = state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head, review, reason: args.reason ?? null, now });
         dropped = laneWaitDrops(doc, next);
         return next;
       };

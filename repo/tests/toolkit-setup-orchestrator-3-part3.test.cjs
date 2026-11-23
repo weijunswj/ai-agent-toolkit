@@ -3,8 +3,17 @@ const test = require('node:test');
 const {
   assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, escapeRegExp,
   createGitBackedSetupRepo, createGitBackedRealSetupRepo, createFakeManagedSetupScript,
-  runWithUnclosedStdin, codexConfig, backupFiles
+  runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference
 } = require('./toolkit-setup-test-support.cjs');
+// The recorded update source the managed copy reads (the same fake audit the prebank tests use).
+function recordedUpdateSource(managedPath) {
+  return JSON.stringify({
+    update_report_enabled: true, update_report_open_enabled: false, update_report_retention_days: 7,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: true, last_status: 'configured', repo_path: managedPath },
+    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(managedPath, 'tmp-reports') },
+  });
+}
 function runOwnManagedSetup(root, origin, managedPath) {
   const managedScript = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   return spawnSync(process.execPath, [managedScript, '--execute', '--profile', 'auto-main', '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], {
@@ -74,4 +83,25 @@ test('an update outside setup scripts does not stop the setup run', () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.doesNotMatch(result.stdout, /## Setup updated itself/);
   assert.equal(fs.existsSync(codexConfig(root)), true);
+});
+
+test('a no to the Claude Code bank after setup fast-forwarded the Toolkit checkout says so and names the move', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedRealSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  const managedScript = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
+  const env = { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: recordedUpdateSource(managedPath) };
+  const runManaged = (input) => spawnSync(process.execPath, [managedScript, '--execute', '--host', 'claude-code', '--profile', 'auto-main', '--repo-remote', origin], {
+    cwd: managedPath, encoding: 'utf8', input, env: { ...process.env, ...env }, timeout: 300000, windowsHide: true
+  });
+  const shown = runManaged('');
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  const before = runTestGit(managedPath, ['rev-parse', 'HEAD']).trim();
+  const after = pushToOrigin(setupRepo, 'repo/docs/NOTE.md', 'docs only\n');
+  const declined = runManaged(`${displayedBankReference(shown.stdout)}: no\n`);
+  assert.equal(declined.status, 0, declined.stderr || declined.stdout);
+  assert.match(declined.stdout, new RegExp(`^Setup changed none of your settings: you answered no\\. Before the question, setup fast-forwarded the Toolkit checkout from ${before.slice(0, 7)} to ${after.slice(0, 7)}\\.`, 'm'));
+  assert.equal(runTestGit(managedPath, ['rev-parse', 'HEAD']).trim(), after);
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'settings.json')), false);
 });

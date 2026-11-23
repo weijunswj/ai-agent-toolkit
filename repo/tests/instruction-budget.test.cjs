@@ -46,8 +46,9 @@ test('each block stays inside its own budget', () => {
   // cap decision, preserving wording and allowing Windows CRLF. The combined limit still applies.
   // The global cap rose to 21,800 for the Development Principles section: the owner asked on
   // 14 November for principles that steer all development in every repository, so they load every session,
-  // then to 21,900 when the owner added fixing problems upstream, at the shared source, to the root-cause principle.
-  assert.ok(crlfBytes(GLOBAL) <= 21900, `global block ${crlfBytes(GLOBAL)} bytes`);
+  // then to 21,900 when the owner added fixing problems upstream, at the shared source, to the root-cause principle,
+  // then to 22,014 (owner OK, 23 November, for opening a given link yourself), inside the accuracy principle with no new line.
+  assert.ok(crlfBytes(GLOBAL) <= 22014, `global block ${crlfBytes(GLOBAL)} bytes`);
   // The governed cap rose to 4,850 for the Governance Principles section (owner, 14 November).
   assert.ok(crlfBytes(GOVERNED) <= 4850, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);

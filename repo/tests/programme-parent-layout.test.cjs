@@ -163,14 +163,19 @@ test('a live gate outranks a listed blocker on the board, and its return puts th
   assert.equal(status(), 'LATER', 'set back to planned with no PR');
 });
 
-// A lane wait is one blocker starting with the word `Queued`: the task waits only for a free gate lane.
+// A lane wait is one blocker starting `Queued in NOW:`: the task waits only for a free gate lane.
 // A gate going live (assign, reopen) drops it in the same write and keeps every other blocker, so a
 // gate start is one write and the board shows the worked task in progress after its gate returns.
 const LANE_WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+// A G2 is accepted only on its PASS verdict, which the command line reads from the task PR.
+const G2_PASS = { verdict: 'PASS', head: 'c'.repeat(40), link: 'https://github.com/acme/app/pull/1#issuecomment-1' };
 
-test('a lane wait is a blocker starting with the word Queued; any other blocker is a real block', () => {
-  for (const text of [LANE_WAIT, 'Queued', 'Queued behind #1322 for the gate lane']) assert.equal(state.isLaneWait(text), true, text);
-  for (const text of ['waits for PR 1098', 'queued behind #12', 'Queuedness', ' Queued in NOW', 'Blocked: Queued in NOW', '', null]) assert.equal(state.isLaneWait(text), false, String(text));
+test('a lane wait is a blocker starting `Queued in NOW:`; any other blocker, other `Queued` labels included, is a real block', () => {
+  for (const text of [LANE_WAIT, 'Queued in NOW:']) assert.equal(state.isLaneWait(text), true, text);
+  for (const text of ['waits for PR 1098', 'queued behind #12', 'Queuedness', ' Queued in NOW:', 'Blocked: Queued in NOW:', 'Queued in NOW', 'queued in NOW: x', '', null,
+    'Queued', 'Queued behind #1322 for the gate lane', 'Queued 1 - after Alpha2', 'Queued 1 — after Alpha2', 'Queued, not idle: x', 'Queued leftover: x', 'Queued after #1419: x']) {
+    assert.equal(state.isLaneWait(text), false, String(text));
+  }
 });
 
 test('assign drops the lane wait in the same write, keeps every other blocker, and the task stays in progress after its gate returns', () => {
@@ -184,7 +189,7 @@ test('assign drops the lane wait in the same write, keeps every other blocker, a
   assert.deepEqual(f.children.get(641).blockers, [], 'assign dropped the lane wait');
   assert.equal(board(641), 'NOW · IN PROGRESS | G2');
   step(641, child => state.recordReturn(child, { returnId: 'g2-641.r1', assignment: 'g2-641' }));
-  step(641, child => state.consumeReturn(child, { returnId: 'g2-641.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }));
+  step(641, child => state.consumeReturn(child, { returnId: 'g2-641.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent, review: G2_PASS }));
   assert.equal(f.cell(641)[2], 'NOW · IN PROGRESS', 'an accepted gate waiting for its train is not queued for a lane again');
   step(642, child => state.assignGate(child, { assignment: 'g1-642', role: 'G1' }));
   assert.deepEqual(f.children.get(642).blockers, ['waits for PR 1098'], 'every other blocker stays');
@@ -268,7 +273,7 @@ test('the gate route a Projects controller follows: each gate ends on its return
   const step = change => f.children.set(631, change(f.children.get(631)));
   const close = (id, verdict = 'ACCEPT') => {
     step(child => state.recordReturn(child, { returnId: `${id}.r1`, assignment: id }));
-    if (verdict) step(child => state.consumeReturn(child, { returnId: `${id}.r1`, verdict, writer, parentDoc: f.parent }));
+    if (verdict) step(child => state.consumeReturn(child, { returnId: `${id}.r1`, verdict, writer, parentDoc: f.parent, review: G2_PASS }));
   };
   const board = () => `${f.cell(631)[2]} | ${f.cell(631)[3]}`;
   step(child => state.assignGate(child, { assignment: 'g0-631', role: 'G0' }));
