@@ -7912,7 +7912,7 @@ class Reconciler {
       });
     }
     flush();
-    if (plan.complete && !holds.length && !this.pass.stop() && (verifiedBodies.size || closedPrs.size)) {
+    if (plan.complete && !holds.length && !this.pass.stop() && verifiedBodies.size) {
       if ((parentDoc.attention || []).some(entry => canResolveSize(entry))) {
         finalRedraw = true; redrawing = true; renderPages(true); redrawing = false;
       }
