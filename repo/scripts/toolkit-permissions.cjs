@@ -60,7 +60,7 @@ const GUARDS = Object.freeze({
 // Every subcommand of the two multi-command scripts is classified here. A test compares these
 // lists with the scripts' own command lists, so a new subcommand fails until someone decides.
 const PROGRAMME_ALLOW = Object.freeze(['reconcile', 'refresh', 'show', 'inventory', 'attention', 'update', 'update-parent', 'bind', 'checkpoint',
-  'assign', 'return', 'reopen', 'interrupt', 'ack', 'dispose', 'closing-comment', 'run-order']);
+  'assign', 'return', 'reopen', 'interrupt', 'gate-session', 'ack', 'dispose', 'closing-comment', 'run-order']);
 const PROGRAMME_ASK = Object.freeze({
   claim: 'Taking or taking over the controller role is an authority change.',
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
