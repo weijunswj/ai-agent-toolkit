@@ -6959,7 +6959,8 @@ class Reconciler {
     const settledChildren = new Map([...plan.children].filter(([,entry])=>entry.doc).map(([number,entry])=>[number,entry.doc]));
     const writtenChildren = new Set();
     const verifiedBodies = new Set();
-    // A merged or closed PR's over-budget finding resolves on a complete pass (closedPrPages).
+    // A merged or closed PR's over-budget finding resolves on a complete pass (closedPrPages); a
+    // stopped plan carries no set and resolves nothing.
     const closedPrs = plan.closedPrs instanceof Set ? plan.closedPrs : new Set();
     const sizeIds = new Set([...(plan.parent.attention || []), ...plan.findings]
       .filter(entry => PAGE_CODES.includes(entry.code)).map(entry => findingId('reconcile', entry.code, entry.issue)));
