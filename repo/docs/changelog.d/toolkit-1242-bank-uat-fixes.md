@@ -1,6 +1,7 @@
 ### Fixed
 
 - **Governance bank shows the real merged values:** every row of `toolkit governance` that shows what the merged programme file sets now comes from one read of this computer's copy of it. Before, another session's failed read of GitHub could mark that copy stale between two reads, and the bank then showed "Merge trains: Off. Bound in the merged programme file" for a file that has them on; task auto-merge could show Off the same way. When the read the bank uses is stale, the line now says GitHub could not be read just now, why, and that these are the values this computer last read. With no programme file read at all, the bank shows no values and says so.
+- **The governance question offers only yes, no or later:** the question in a repository with no decision yet, the status line and the how-to guide no longer pass the enable and disable commands on to the owner. Agents still recognise those commands as answers and are told never to show them. A reply that is not an answer is no longer quoted back: the agent says at most, in plain words, that no governance answer was recorded.
 
 ### Changed
 

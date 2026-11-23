@@ -808,7 +808,7 @@ function ticketContext(repositories, ticket) {
     `Toolkit governance: the user's message above is the first since Toolkit asked them whether to turn on GitHub governance for the repository ${repositoryNames(repositories)}. It may be their answer, or ordinary work. Read what they mean before anything else.`,
     `- If it clearly answers yes, no or later (in any words, such as "ur rec" after your recommendation of no), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded.`,
     `- If you think they mean one answer but are not sure, record nothing yet: run exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" confirm-ANSWER ${ticket}\n  Toolkit then gives you the question to ask, naming exactly what it would record; their reply to it comes with a ticket that can record only that answer.`,
-    '- If it is about something else, a question, or unclear, record nothing and carry on with what they asked. Do not ask the governance question again; Toolkit asks next session, and they can send `toolkit governance enable` or `toolkit governance disable` as a message at any point in this one.',
+    '- If it is about something else, a question, or unclear, record nothing and carry on with what they asked. Do not ask the governance question again or quote their message back; if you mention it, say in plain words only that no governance answer was recorded. Toolkit asks next session, and they can send `toolkit governance enable` or `toolkit governance disable` as a message at any point in this one. Never show the user these commands or ask them to type one.',
     `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
   ].join('\n');
 }
@@ -855,7 +855,7 @@ function ticketCommand(text, sessionId, tickets) {
 // The question as the user reads it. Nothing waits on the answer.
 const QUESTION = [
   "Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Turn on GitHub governance (issues, records, evidence store) for this repository? Records and evidence go to this repository's own private TRANSPORT-<repository name> store on GitHub, found or created.",
-  'Reply `toolkit governance enable` or `toolkit governance disable` as a message, or just say yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.',
+  'Reply yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.',
 ];
 
 function questionText(verdict) {
@@ -930,7 +930,7 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click it for them.';
 
 // What the agent is told once the user's own answer is on record, or once they said "later".
-const LATER_CONTEXT = 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
+const LATER_CONTEXT = 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message. Never show the user these commands or ask them to type one.';
 // The user's yes: show the governance question bank, exactly as `toolkit governance` does.
 function enableContext() {
   return `The user answered yes to turning on Toolkit's GitHub governance. Nothing is written yet: the governance question bank comes next, and its one setup pull request is made by Toolkit's own script. Build nothing by hand (no programme file, rules files, parent issue or evidence store), and run no other governance subcommand. ${require('./toolkit-commands.cjs').bankGuide()} The bank asks only what is left, and the user's answer to it turns governance on; \`no store\` keeps it off.`;
@@ -951,7 +951,7 @@ const UNSAVED_LINE = `Toolkit could not note that it asked (its user-state folde
 const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since the governance bank was shown, so this message cannot answer it. If it was meant as the answer, tell the user in one line that it was not recorded because another session started here, and that they can type toolkit governance to see the bank again. Do not show the bank yourself.';
 const BANK_LOST = 'Toolkit: the reply to the governance bank could not be kept (its local state could not be written), so nothing can be recorded from this message. If it was meant as the answer, tell the user in one line that it was not recorded, and that they can type toolkit governance to see the bank again. Do not show the bank yourself.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since Toolkit asked, so nothing was recorded and Toolkit asks again.';
-const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card. Carry on with what the user asked; they can still send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
+const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card. Carry on with what the user asked; they can still send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. Never show the user these commands or ask them to type one. ${NEVER_OWNER}`;
 // A session the session-start hook never marked cannot be asked once or answer in chat.
 const BARE_LINE = `Toolkit governance: this repository has no governance decision yet, so it counts as off. This session started before Toolkit could note it, so the user decides in a new session or by running ${terminalCommand('enable')} or ${terminalCommand('disable')} in their own terminal. ${NEVER_OWNER}`;
 
@@ -1449,7 +1449,7 @@ class ToolGate {
         return { deny: `Toolkit: a governance bank reply runs only as the exact command Toolkit gave this session with the user's reply and its live ticket, on its own with nothing added, and the answer between its straight double quotes holds no curly quote, straight double quote, $, backtick or %. Nothing was sent. If the answer held one of those, run the same command again without it; if the ticket was not given to this session, tell the user in one line that it was not sent. ${NEVER_OWNER}` };
       }
       if (answerCommand(text)) {
-        return { deny: `Toolkit: only the user answers the governance question, on Toolkit's card or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. If they asked you to decide it, tell them that in plain words. ${NEVER_OWNER}` };
+        return { deny: `Toolkit: only the user answers the governance question, on Toolkit's card or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. Never show the user these commands or ask them to type one. If they asked you to decide it, tell them in plain words that only they can. ${NEVER_OWNER}` };
       }
       if (proposalRun(text)) {
         return { deny: `Toolkit: its governance proposals are made only by Toolkit itself, from the user's own answer. ${NEVER_OWNER}` };
@@ -1505,7 +1505,7 @@ function verdictLine(verdict, registryOptions, programmeDeps, refresh = null) {
   if (verdict.pending) return verdict.pending.text;
   if (verdict.reason === 'unavailable') return unavailableText(causeOf(state, refresh));
   if (verdict.open) {
-    return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
+    return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. Never show the user these commands or ask them to type one. ${NEVER_OWNER}`;
   }
   const { lines, checkpoints, stale } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [], stale: null };
   // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
@@ -1862,6 +1862,8 @@ function insideRepository(cwd) {
 
 module.exports = Object.freeze({
   ANSWER,
+  LATER_CONTEXT,
+  PICKER_UNCOUNTED,
   decidedLine,
   FINDING_ACTIONS,
   HOST_SESSION_VARIABLE,
