@@ -8082,7 +8082,7 @@ function bindRepository({ transport, originUrl, binding }) {
 
 module.exports = Object.freeze({
   get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
-  SCHEMA, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
+  SCHEMA, ASSIGNMENT_ID, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,

@@ -116,7 +116,7 @@ test('after a start it prints the effort raise and the record steps', () => {
 });
 
 test('a failure inside the check lets the start through with a note', () => {
-  const broken = { profiles: null };
+  const broken = { get profiles() { throw new Error('registry unreadable'); } };
   const output = launch.preToolUse({ tool_name: TOOL, tool_input: start(), effort: { level: 'high' } }, { environment: {}, registry: broken });
   assert.equal(reason(output), null);
   assert.match(output.systemMessage, /^Toolkit gate launch check could not run/);
