@@ -956,4 +956,3 @@ test('red: in a cloud session a store that answers 403 or 404 says the check wai
   });
   assert.match(fx.run(['attention'], { transport: open, environment: { CLAUDE_CODE_REMOTE: 'true' } }, { json: false }).result, /because it is not private\. Choose a private repository/);
 });
-
