@@ -73,6 +73,30 @@
       "status": "pass"
     },
     {
+      "id": "GOV.leftover-n8n-block-enabled",
+      "source": "n8n block retirement: the global rules carry the n8n rules, so an older n8n block in AGENTS.md is a leftover where governance is on, and refresh governance offers its removal",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Own rules\n\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->\n## n8n Safety Router\n\nLoad n8n-safety-router before n8n work.\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->\n",".github/plain-text.json":"{\"off_reason\":\"hook pack fixture: no checks in this row\"}\n"}},
+      "expect": {"decision":"allow","context_contains":["this repository still carries Toolkit instruction copies (AGENTS.md) that the installed Toolkit now delivers itself."],"context_excludes":["before this task ends"]},
+      "note": "Codex only: the pack reads Claude Code context from JSON additionalContext, and the bridge prints this note as plain text on both hosts; the Claude Code path runs the same preflight and is covered by the bridge unit test.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.leftover-n8n-block-disabled",
+      "source": "n8n block retirement: an older n8n block in AGENTS.md is a leftover where governance is off too; the note names the leftover scan and asks nothing of the task",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"disabled"},"files":{"AGENTS.md":"# Own rules\n\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->\n## n8n Safety Router\n\nLoad n8n-safety-router before n8n work.\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->\n"}},
+      "expect": {"decision":"allow","context_contains":["this repository still carries Toolkit instruction copies (AGENTS.md) from an older setup. Governance is not on here"],"context_excludes":["before this task ends"]},
+      "note": "Codex only: the pack reads Claude Code context from JSON additionalContext, and the bridge prints this note as plain text on both hosts; the Claude Code path runs the same preflight and is covered by the bridge unit test.",
+      "status": "pass"
+    },
+    {
       "id": "GOV.rules-disabled-none",
       "source": "plug-and-play S1: a disabled repository gets no governed rules",
       "kind": "benign",

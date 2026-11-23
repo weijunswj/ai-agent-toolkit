@@ -265,7 +265,8 @@ test('retained synchronizer checks and repairs exactly three n8n safety derivati
 });
 
 // The retired installer and its adapter templates are gone, and no file outside the changelog or the
-// tests names them, so a stale copy or reference cannot quietly come back.
+// tests names or describes them, so a stale copy or a line sending agents to them cannot quietly come back.
+const RETIRED_ADAPTER_TEXT = /install-n8n-agent-adapter|n8n-brief\.template|adapter installer|n8n adapter template|AGENTS adapter|brief adapters?\b|n8n-safety-router\/adapters|under `adapters\/`/i;
 test('the retired n8n adapter installer and templates are gone, and nothing outside the changelog or tests names them', () => {
   assert.equal(exists('skills/n8n-safety-router/scripts/install-n8n-agent-adapter.cjs'), false);
   assert.equal(exists('skills/n8n-safety-router/adapters'), false);
@@ -276,7 +277,7 @@ test('the retired n8n adapter installer and templates are gone, and nothing outs
   for (const relPath of tracked.stdout.split('\0').filter(Boolean)) {
     if (path.posix.basename(relPath) === 'CHANGELOG.md' || relPath.split('/').includes('changelog.d') || relPath.startsWith('repo/tests/')) continue;
     if (!exists(relPath)) continue;
-    if (/install-n8n-agent-adapter|n8n-brief\.template/.test(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'))) named.push(relPath);
+    fs.readFileSync(path.join(repoRoot, relPath), 'utf8').split(/\r?\n/).forEach((line, index) => { if (RETIRED_ADAPTER_TEXT.test(line)) named.push(`${relPath}:${index + 1}`); });
   }
   assert.deepEqual(named, []);
 });
