@@ -307,7 +307,8 @@ test('BASE names the git blob of every base file the Projects controller inherit
 // read its own old main as current on 19 Nov). Tests pass the tip; one test below uses real git.
 const TIP = 'a'.repeat(40);
 const atTip = (options = {}) => guidebook({ tip: () => ({ head: TIP, main: TIP }), ...options });
-const mainSkill = () => fs.readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf8');
+// LF text to build saved copies from (a Windows runner checks the file out with CRLF).
+const mainSkill = () => fs.readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
 
 function synced(t, copies) {
   const dir = path.join(tmp(t), 'synced');
@@ -340,7 +341,8 @@ test('--card says OUTDATED with a text fingerprint only when the saved text real
   const changed = synced(t, [saved(skill.replace('Run Toolkit repos through Claude Projects.', 'Run Toolkit repos through Projects.'))]);
   const outdated = run(['--card', '--synced', changed], atTip());
   assert.deepEqual([outdated.code, outdated.stderr], [0, '']);
-  assert.match(outdated.stdout, new RegExp(`^SKILL CARD OUTDATED: saved 2026-01-01\\.1, main ${version.replace(/\./g, '\\.')}, text [0-9a-f]{8}\\n$`));
+  assert.ok(outdated.stdout.startsWith(`SKILL CARD OUTDATED: saved 2026-01-01.1, main ${version}, text `), outdated.stdout);
+  assert.match(outdated.stdout, /, text [0-9a-f]{8}\n$/);
   // A Version line, CRLF line ends and the missing final newline are not text.
   const restamp = run(['--card', '--synced', synced(t, [saved(skill).replace(/\n/g, '\r\n')])], atTip());
   assert.deepEqual(restamp, { code: 0, stdout: `SKILL CARD CURRENT ${version} (saved 2026-01-01.1, Version line only)\n`, stderr: '' });
@@ -427,7 +429,8 @@ test('the tip proof reads real git: a fresh clone refreshes, a clone left behind
   const lib = path.join(dir, 'lib');
   const fresh = run(['--refresh', lib], new Guidebook({ root: clone }));
   assert.equal(fresh.code, 0, fresh.stderr);
-  assert.match(fresh.stdout, new RegExp(`^GUIDEBOOK REFRESHED none -> ${skillVersion().replace(/\./g, '\\.')} toolkit \\S+, main ${git(clone, 'rev-parse', '--short=7', 'HEAD')}\\n`));
+  const toolkit = new ProjectsInstructions({ root: ROOT }).expectedBlock().version;
+  assert.equal(fresh.stdout, `GUIDEBOOK REFRESHED none -> ${skillVersion()} toolkit ${toolkit}, main ${git(clone, 'rev-parse', '--short=7', 'HEAD')}\nBLOCK CHANGED ${toolkit}\n`);
   // main moves on after the clone: the old clone no longer reads as current.
   fs.appendFileSync(path.join(source, 'repo/contracts/claude-projects/web-controller-projects/reference/setup.md'), '\nA later line.\n');
   git(source, 'commit', '-q', '-am', 'later');

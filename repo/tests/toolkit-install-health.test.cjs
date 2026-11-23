@@ -288,7 +288,7 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   assert.equal(check().summary, `Your saved copy is current (${repoVersion}).`);
   // A release that only restamped the Version line changes nothing for the owner: no card. The synced copy
   // drops the final newline; CRLF line ends are not text either.
-  writeFile(skillFile, body.toString('utf8').replace(/^Version: .*$/m, 'Version: 2026-01-01.1').replace(/\s+$/, '').replace(/\n/g, '\r\n'));
+  writeFile(skillFile, body.toString('utf8').replace(/\r\n/g, '\n').replace(/^Version: .*$/m, 'Version: 2026-01-01.1').replace(/\s+$/, '').replace(/\n/g, '\r\n'));
   const restamp = check();
   assert.equal(restamp.status, STATUS.PASSED);
   assert.equal(restamp.summary, `Your saved copy matches Toolkit's text (saved 2026-01-01.1, Toolkit ${repoVersion}); no card needed.`);

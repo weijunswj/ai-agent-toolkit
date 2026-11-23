@@ -9,7 +9,9 @@ const card = require('../scripts/toolkit-projects-skill-card.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const MAIN = fs.readFileSync(path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'), 'utf8');
+// As checked out (CRLF on a Windows runner), and as LF text the fixtures below are built from.
+const MAIN_RAW = fs.readFileSync(path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'), 'utf8');
+const MAIN = MAIN_RAW.replace(/\r\n/g, '\n');
 const VERSION = /^Version: (\S+)$/m.exec(MAIN)[1];
 // The synced copy as Claude Code keeps it: an older Version line, frontmatter kept, final newline dropped.
 const restamped = MAIN.replace(/^Version: .*$/m, 'Version: 2026-01-01.1').replace(/\s+$/, '');
@@ -24,7 +26,10 @@ test('only the text decides: the Version line, line endings, trailing whitespace
     ['a byte order mark', `﻿${restamped}`],
     ['body only (the claude.ai record)', restamped.replace(/^---\n[\s\S]*?\n---\n/, '')],
     ['unquoted description', restamped.replace(/^description: "(.*)"$/m, 'description: $1')],
-  ]) assert.equal(card.compareSkill(saved, MAIN).state, 'current', label);
+  ]) {
+    assert.equal(card.compareSkill(saved, MAIN).state, 'current', label);
+    assert.equal(card.compareSkill(saved, MAIN_RAW).state, 'current', `${label}, main as checked out`);
+  }
   const result = card.compareSkill(restamped, MAIN);
   assert.deepEqual(result, { state: 'current', saved: '2026-01-01.1', main: VERSION, fingerprint: card.fingerprint(card.skillText(MAIN)) });
   assert.equal(card.cardLine(result), `SKILL CARD CURRENT ${VERSION} (saved 2026-01-01.1, Version line only)`);
@@ -42,10 +47,11 @@ test('any real text change is outdated, and the fingerprint follows main\'s text
   ]) {
     const result = card.compareSkill(saved, MAIN);
     assert.equal(result.state, 'outdated', label);
-    assert.match(card.cardLine(result), new RegExp(`^SKILL CARD OUTDATED: saved 2026-01-01\\.1, main ${VERSION.replace(/\./g, '\\.')}, text [0-9a-f]{8}$`), label);
+    assert.equal(card.cardLine(result), `SKILL CARD OUTDATED: saved 2026-01-01.1, main ${VERSION}, text ${result.fingerprint}`, label);
   }
   const fp = card.compareSkill(restamped, MAIN).fingerprint;
   assert.match(fp, /^[0-9a-f]{8}$/);
+  assert.equal(card.compareSkill(restamped, MAIN_RAW).fingerprint, fp, 'line endings of main do not move it');
   assert.equal(card.compareSkill(restamped, MAIN.replace(/^Version: .*$/m, 'Version: 2099-12-31.9')).fingerprint, fp, 'a Version-only release keeps the fingerprint');
   assert.notEqual(card.compareSkill(restamped, MAIN.replace('Run Toolkit repos', 'Run repos')).fingerprint, fp, 'a text change moves it');
 });
