@@ -160,7 +160,7 @@ test("only the user's own message is read: a relayed or attachment-bearing Proje
 // The Claude Code hook with a stub gate: the line is added only on a pass with no governance context.
 function prompt(decision, text, extra = {}, environment = {}) {
   const stubGate = { PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session', ownerReply: gate.ownerReply, ...extra };
-  const mergeHold = { recordPrompt: () => 0 };
+  const mergeHold = { recordPromptNote: () => ({ count: 0, note: '' }) };
   return claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: text }, { gate: stubGate, mergeHold, environment });
 }
 
