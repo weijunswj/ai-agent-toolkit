@@ -472,8 +472,10 @@ test('lease: a release that meets a branch race tries again and frees the lease'
     }
     return undefined;
   });
-  assert.equal(f.run({ cloud: true }).code, 0);
+  const pauses = [];
+  assert.equal(f.run({ cloud: true, leasePause: ms => pauses.push(ms) }).code, 0);
   assert.equal(refused, 2, 'the release met the race twice');
+  assert.deepEqual(pauses, [1000, 2000], 'it waits a moment before each new try, so a busy branch can settle');
   assert.equal(f.record().holder, null, 'the lease is free for the next sweep at once');
   assert.ok(f.record().last_complete_at, 'the release carried the finished pass');
 });
@@ -484,7 +486,9 @@ test('lease: a release that never lands says so, and the next sweep reports the 
   let errors = '';
   f.github.intercept(call => (call.method === 'PUT' && call.path.endsWith('/sweep-lease.json') && call.body?.message === 'programme sweep: release the lease'
     ? { status: 409, json: { message: 'is at another commit' } } : undefined));
-  assert.equal(f.run({ cloud: true, stderr: { write: text => { errors += text; } } }).code, 0);
+  const pauses = [];
+  assert.equal(f.run({ cloud: true, leasePause: ms => pauses.push(ms), stderr: { write: text => { errors += text; } } }).code, 0);
+  assert.deepEqual(pauses, [1000, 2000], 'no pause after the last try');
   f.github.hooks = [];
   assert.ok(f.record().holder, 'the lease is still held');
   assert.match(errors, /^Sweep lease: the release did not land after 3 tries, so the lease ends on its own at \S+Z; the next sweep waits for it and reports this pass as stopped\.$/m);

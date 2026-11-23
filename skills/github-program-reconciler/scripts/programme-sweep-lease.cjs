@@ -23,8 +23,12 @@ const state = require('./programme-state.cjs');
 const TTL_MS = 20 * 60 * 1000;
 const RENEW_BEFORE_MS = 10 * 60 * 1000;
 const STREAK_FINDING = 3;
-// Reads and writes a release makes before it leaves the lease to run out.
+// Reads and writes a release makes before it leaves the lease to run out, with a pause before each new
+// try that grows by RELEASE_PAUSE_MS, so a store branch that other writers are moving can settle.
 const RELEASE_TRIES = 3;
+const RELEASE_PAUSE_MS = 1000;
+const PAUSE_CELL = new Int32Array(new SharedArrayBuffer(4));
+const pauseFor = ms => { Atomics.wait(PAUSE_CELL, 0, 0, ms); };
 // The stuck rule the board shows: no pass has finished for STUCK_MS, and the passes in that time read
 // fewer than STUCK_READS tasks in all. The lease's history file keeps the passes of that window.
 const STUCK_MS = 6 * 60 * 60 * 1000;
@@ -36,9 +40,9 @@ const empty = repository => ({ schema: 'toolkit.programme-sweep-lease.v1', repos
 const lost = () => new state.ProgrammeError('PASS_LOCK_LOST', 'The sweep lease changed hands; this pass stopped.');
 
 class SweepLease {
-  constructor({ store, repository, host, endsBy, nowMs = Date.now, nonce = crypto.randomBytes(16).toString('hex') }) {
+  constructor({ store, repository, host, endsBy, nowMs = Date.now, nonce = crypto.randomBytes(16).toString('hex'), pause = pauseFor }) {
     if (!Number.isFinite(endsBy)) throw new TypeError('SweepLease needs endsBy, the time the pass is killed by.');
-    Object.assign(this, { store, repository, host, endsBy, nowMs, nonce });
+    Object.assign(this, { store, repository, host, endsBy, nowMs, nonce, pause });
     this.file = store.sweepRecordPath();
     this.held = null;
     this.acquired = false;
@@ -263,6 +267,7 @@ class SweepLease {
     return this.writing(() => {
       let recorded = false;
       for (let attempt = 0; attempt < RELEASE_TRIES; attempt += 1) {
+        if (attempt) this.pause(RELEASE_PAUSE_MS * attempt);
         const { doc, sha } = this.current();
         if (doc.holder?.nonce !== this.nonce) { this.held = null; return false; }
         // A pass that ended with an error (a lost lock among them) writes only the lease itself.

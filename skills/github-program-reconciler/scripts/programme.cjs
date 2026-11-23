@@ -1342,6 +1342,8 @@ function runPasses(args, deps, out) {
   const context = openContext(args, passDeps);
   context.pass = pass;
   context.requests = requests;
+  // Tests pass a pause that does not sleep; the lease waits for real otherwise.
+  context.leasePause = typeof deps.leasePause === 'function' ? deps.leasePause : null;
   const environment = deps.environment || process.env;
   const host = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1' ? 'cloud' : 'computer';
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
@@ -1481,7 +1483,7 @@ function takeLease(context, host, pass, progress) {
   requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
   context.store.graphqlRefused = false;
   const store = typeof context.store.private === 'object' ? context.store.private : context.store;
-  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy });
+  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy, ...(context.leasePause ? { pause: context.leasePause } : {}) });
   context.busyLease = null;
   if (!lease.acquire(pass.started_at)) { context.busyLease = lease.busy; return false; }
   context.lease = lease;

@@ -26,7 +26,10 @@
 // A refresh that finds another sweep holding the lease (QUEUED) is tried again: every minute, or just
 // after that lease ends when sooner, for up to QUEUED_WAIT_MS, each retry with the pass budget the
 // wait left. A run that still cannot take the lease fails with NOTICES.not_refreshed and asks the
-// follow-up job for one more run at once, so a push to main never ends green without a refresh.
+// follow-up job for one more run at once, so a push to main never ends green without a refresh. On a
+// private repository the wait holds a paid runner; it only waits while another sweep keeps the lease,
+// so the push still refreshes. A pass whose lease release never landed (the reconciler's fixed
+// `Sweep lease:` stderr line) gets one titled warning, LEASE_UNRELEASED, whatever else it did.
 //
 // `refreshed` tells the footer step the pass ran on this commit and saved its work, read back as
 // written; any skip, failure, run that never got the lease, pass that wrote nothing
@@ -73,6 +76,10 @@ const sleepFor = ms => { Atomics.wait(SLEEP_CELL, 0, 0, ms); };
 // A version 1 binding has no governance key and reads as enabled, as everywhere else.
 const { bindingEnabled } = programmeState;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const STOP_CODE = /^([A-Z][A-Z0-9_]{0,63}):/;
+// The fixed start of the reconciler's line for a lease release that never landed (programme.cjs
+// releaseLease); only its presence is read, never its text.
+const UNRELEASED_LINE = 'Sweep lease: ';
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BOT_LOGIN = /^[A-Za-z0-9-]{1,100}\[bot\]$/;
 const METRICS = /^[A-Za-z0-9_ =,.:/()-]{1,500}$/;
@@ -126,6 +133,7 @@ const NOTICES = Object.freeze({
   not_refreshed: 'Programme Sweep did not refresh: another sweep held the lease for 30 minutes, so this run wrote nothing. It starts one more run now; if this repeats, check which sweep keeps the lease (the evidence store\'s sweep-lease.json names its host).',
   private_wait: 'Programme Sweep follow-up left to the hourly gate: this repository is private, so no runner waits for GitHub\'s hourly App limit to reset; the gate resumes the saved place after the reset.',
   paused: 'Programme Sweep paused: GitHub\'s hourly App limit for this repository is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.',
+  unreleased: 'Programme Sweep lease not released: this pass could not free the sweep lease, so the next sweep waits until it runs out (at most twenty minutes) and reports this pass as stopped. Three in a row turn the hourly gate red; if it repeats, check what else writes to the evidence store.',
   unsaved: 'Programme Sweep held: this pass saved nothing, so the board was not refreshed and footer cleaning is skipped; the next run retries.',
 });
 const SIGN_IN_FAILURE = `Programme Sweep failed: the governance GitHub App could not sign in. Check ${CLIENT_ID_VARIABLE} and ${PRIVATE_KEY_SECRET}: the App may not be installed on this repository or its evidence store, or the key was revoked.`;
@@ -183,11 +191,15 @@ function runRefresh({ root, env, budgetMs, toolkitRoot = TOOLKIT_ROOT, spawn = s
       { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: budget.length ? budgetMs + KILL_SLACK_MS : RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
   } catch { return { code: 'EXEC_FAILED', report: null, status: 1 }; }
   if (!result || result.error) return { code: 'EXEC_FAILED', report: null, status: 1 };
-  const first = String(result.stderr || '').trimStart().split('\n')[0];
-  const code = /^([A-Z][A-Z0-9_]{0,63}):/.exec(first)?.[1] || null;
+  // The stop code is on the first line that starts with one: the lease's own fixed line (a release
+  // that never landed) can come before the pass's error.
+  const lines = String(result.stderr || '').split(/\r?\n/).map(line => line.trimStart());
+  const coded = lines.find(line => STOP_CODE.test(line)) || '';
+  const code = STOP_CODE.exec(coded)?.[1] || null;
   // Only the HTTP status number of a failed GitHub request is kept, never GitHub's own text.
-  const http = code ? /\(([1-5][0-9]{2})\)/.exec(first)?.[1] || null : null;
-  return { code, http, report: lastReport(result.stdout), status: result.status };
+  const http = code ? /\(([1-5][0-9]{2})\)/.exec(coded)?.[1] || null : null;
+  const unreleased = lines.some(line => line.startsWith(UNRELEASED_LINE));
+  return { code, http, unreleased, report: lastReport(result.stdout), status: result.status };
 }
 
 // The general failure, naming the stop code and HTTP status when the CLI gave them, so a failed run
@@ -399,6 +411,8 @@ class ProgrammeSweepAction {
       const budgetMs = Math.max(programmeState.PASS_BUDGETS['after-write'].budgetMs, programmeState.PASS_BUDGETS.scheduled.budgetMs - (started - first));
       try { result = this.refresh({ root: this.root, env, budgetMs }); } catch { this.failure(GENERAL_FAILURE); return 1; }
     }
+    // A release that never landed is said in the run log, whatever else the pass did.
+    if (result.unreleased) this.warning(NOTICES.unreleased, { title: HELD_TITLE, code: 'LEASE_UNRELEASED' });
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
     if (result.code === 'MAIN_MOVED') { this.notice(NOTICES.main_moved, { title: NO_PASS_TITLE, code: 'main_moved' }); return 0; }
     if (result.code === 'CLOUD_PUBLIC_STATE') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'public_state'), { title: SKIP_TITLE, code: 'public_state' }); return 0; }

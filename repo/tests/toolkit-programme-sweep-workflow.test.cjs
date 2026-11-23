@@ -275,6 +275,32 @@ test('action: the wait plus the pass it leaves ends before the job is stopped', 
   assert.equal(seen[0].options.timeout, pass + state.PASS_BUDGETS.scheduled.killMs - state.PASS_BUDGETS.scheduled.budgetMs);
 });
 
+// G2 round 1 (F1): the lease's fixed "Sweep lease:" line goes to stderr before the pass's own error,
+// so the stop code must come from the line that carries one, and a dropped release must reach the
+// cloud run's log as a warning instead of ending green with nothing said.
+test('action: a dropped lease release keeps the stop code and warns in the run log', () => {
+  const unreleased = 'Sweep lease: the release did not land after 3 tries, so the lease ends on its own at 2026-11-23T12:09:51.161Z; the next sweep waits for it and reports this pass as stopped.';
+  const failing = () => ({ status: 2, stdout: '', stderr: `${unreleased}\nGH_FAILED: Writing state/x/sweep-lease.json failed (502): Bad gateway\n` });
+  const parsed = action().runRefresh({ root: ROOT, env: minted, spawn: failing });
+  assert.deepEqual([parsed.code, parsed.http, parsed.unreleased], ['GH_FAILED', '502', true]);
+  assert.equal(action().failureLine(parsed), 'Programme Sweep failed (GH_FAILED, HTTP 502). Open this workflow run and toolkit governance check for the cause.');
+  const signIn = action().runRefresh({ root: ROOT, env: minted, spawn: () => ({ status: 2, stdout: '', stderr: `${unreleased}\nGH_AUTH: gh is not signed in\n` }) });
+  assert.equal(signIn.code, 'GH_AUTH', 'a sign-in failure still reads as one');
+  const clean = action().runRefresh({ root: ROOT, env: minted, spawn: () => ({ status: 0, stdout: '{\n  "metrics": "Sweep: requests=1"\n}\n', stderr: '' }) });
+  assert.equal(clean.unreleased, false);
+  // A pass that refreshed but could not release: still refreshed, with one titled warning.
+  const run = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, unreleased: true, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }) });
+  assert.equal(run.code, 0);
+  assert.ok(run.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'));
+  assert.deepEqual(run.warnings, [action().NOTICES.unreleased]);
+  assert.deepEqual(run.tags, [{ title: action().HELD_TITLE, code: 'LEASE_UNRELEASED' }], 'three in a row turn the hourly gate red');
+  // A failed pass whose release also failed: red, named by its own code, and the warning too.
+  const failed = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'GH_FAILED', http: '502', unreleased: true, report: null }) });
+  assert.equal(failed.code, 1);
+  assert.deepEqual(failed.failures, ['Programme Sweep failed (GH_FAILED, HTTP 502). Open this workflow run and toolkit governance check for the cause.']);
+  assert.deepEqual(failed.warnings, [action().NOTICES.unreleased]);
+});
+
 test('action: a failed pass names its stop code and HTTP status, never GitHub text or a token', () => {
   const failed = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'GH_FAILED', http: '403', report: null }) });
   assert.equal(failed.code, 1);
