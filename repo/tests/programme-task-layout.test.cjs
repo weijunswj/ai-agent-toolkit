@@ -754,9 +754,53 @@ test('a task whose PRs have all merged is on the work queue after one quiet hour
 
 const KEEP = { reason: 'Kept open for the owner\'s real-host smoke' };
 
-test('a merged task the controller keeps open on purpose leaves the work queue, and its page says why', () => {
-  assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30, keepOpen: KEEP }), []);
-  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30, keepOpen: KEEP });
+// The kept-open closure matrix: a merged task kept open on purpose is skipped only until nothing
+// has worked it for KEPT_OPEN_IDLE_HOURS, then it is TASK_MERGED_OPEN, never skipped for ever. Each row is
+// the task's state and the work-queue codes the sweep raises for it.
+const KEPT_MERGED = { merged: true, pr: { number: 900, state: 'MERGED' }, keepOpen: KEEP };
+const KEPT_OPEN_MATRIX = [
+  ['kept open, quiet 2 hours: skipped (the mark says why)', { ...KEPT_MERGED, hours: 2 }, []],
+  ['kept open, quiet 5 hours: skipped', { ...KEPT_MERGED, hours: 5 }, []],
+  ['kept open, quiet 7 hours: raised', { ...KEPT_MERGED, hours: 7 }, ['TASK_MERGED_OPEN']],
+  ['kept open, quiet 30 hours: raised (was skipped for ever)', { ...KEPT_MERGED, hours: 30 }, ['TASK_MERGED_OPEN']],
+  ['kept open, quiet 30 hours, a comment 4 hours ago: skipped (a change restarts the window)', { ...KEPT_MERGED, hours: 30, comment: 26 }, []],
+  ['kept open, quiet 30 hours, a gate at work: skipped (a lane works it)', { ...KEPT_MERGED, hours: 30, gate: { role: 'G1', state: 'ACTIVE', assignment: { id: 'g1-806', role: 'G1' } } }, []],
+  ['kept open, quiet 30 hours, a holder on its state: skipped', { ...KEPT_MERGED, hours: 30, holder: true }, []],
+  ['kept open, quiet 30 hours, waiting on the owner: skipped (the owner has it)', { ...KEPT_MERGED, hours: 30, lifecycle: 'WAITING_OWNER' }, []],
+  ['kept open, quiet 30 hours, a listed blocker: skipped for up to 7 days', { ...KEPT_MERGED, hours: 30, blockers: ['waits for #807'] }, []],
+  ['kept open, quiet 8 days, a listed blocker: raised', { ...KEPT_MERGED, hours: 8 * 24, blockers: ['waits for #807'] }, ['TASK_MERGED_OPEN']],
+  ['not kept open, quiet 2 hours: raised after the merged hour (control)', { merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 }, ['TASK_MERGED_OPEN']],
+];
+
+test('a merged task kept open on purpose is skipped only while something worked it in the last six hours (closure matrix)', () => {
+  for (const [name, options, codes] of KEPT_OPEN_MATRIX) assert.deepEqual(idle(options).map(finding => finding.code), codes, name);
+  assert.equal(state.KEPT_OPEN_IDLE_HOURS, 6, 'the idle window: no lane and no change for six hours');
+  const [found] = idle({ ...KEPT_MERGED, hours: 30 });
+  // One wait, the kept-open window: never `over 1 hour` beside `over 6 hours`.
+  assert.match(found.detail, /every PR merged or closed and nothing working it since \S+Z \(over 6 hours\); kept open on purpose \(since \d{4}-\d\d-\d\d \d\d:\d\dZ\)$/);
+});
+
+test('a kept-open stall is raised, resolves when the task changes, comes back after six more quiet hours and holds a dispose while still', () => {
+  const f = idleRun({ ...KEPT_MERGED, hours: 30 });
+  const entry = () => f.store.read('parent', 421).doc.attention.find(item => item.code === 'TASK_MERGED_OPEN' && item.issue === 806);
+  f.reconciler().run({ apply: true });
+  assert.equal(entry().state, 'new', 'raised after 30 quiet hours');
+  f.github.addComment(806, { body: 'Next slice planned', createdAt: new Date(f.time.now).toISOString() });
+  f.time.now += HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(entry().state, 'resolved', 'a change on the task clears it');
+  f.time.now += 6 * HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(entry().state, 'new', 'six more quiet hours bring it back');
+  f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, { id: entry().id, state: 'disposed', reason: 'Waits for the release batch', now: new Date(f.time.now).toISOString() }) });
+  f.time.now += 24 * HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(entry().state, 'disposed', 'a dispose holds while the task stays still');
+});
+
+test('a merged task the controller keeps open on purpose leaves the work queue for a while, and its page says why', () => {
+  assert.deepEqual(idle({ ...KEPT_MERGED, hours: 5 }), []);
+  const f = idleRun({ ...KEPT_MERGED, hours: 30 });
   f.reconciler().run({ apply: true });
   const child = f.store.read('child', 806).doc;
   assert.equal(child.private.keep_open.reason, KEEP.reason);
@@ -1110,13 +1154,13 @@ test('QUEUED_BUT_MOVING refuses ack, holds a dispose while it stands, and clears
   assert.deepEqual(f.store.read('child', 806).doc.blockers, []);
 });
 
-test('the parent page counts the work queue and the graph row is the task, its number and MERGED · awaiting proof', () => {
+test('the parent page counts the work queue and the graph row is the task, its number and NOW · CLOSE CHECK', () => {
   const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   f.reconciler().run({ apply: true });
   const body = f.github.issues.get(421).body;
   assert.match(body, /Attention: \d+ new, 0 acknowledged, 1 in the work queue/);
   assert.doesNotMatch(body, /\*\*Work queue\*\*/, 'CURRENT counts the work queue; the attention command lists it');
-  assert.match(body, /^\|Issue 806\|#806\|MERGED · awaiting proof\|-\|/m, 'a merged task kept open reads merged, not in progress');
+  assert.match(body, /^\|Issue 806\|#806\|NOW · CLOSE CHECK\|-\|/m, 'a merged task kept open reads merged, not in progress');
 });
 
 // The batch rule: BATCH_NEXT, on the parent, says no NOW task needs a gate lane while LATER has work.

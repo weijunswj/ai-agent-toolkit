@@ -238,8 +238,8 @@ test('every numbered setup row has letter choices in the Codex and Claude Code p
       bySection.set(section, index);
     }
     assert.doesNotMatch(result.stdout, /report only/i, host);
-    // The heading counts only the numbered questions.
-    assert.match(result.stdout, new RegExp(`Toolkit setup choices - ${rows.length} questions across`), host);
+    // The Codex heading counts only the numbered questions; Claude Code asks one question over all of them.
+    assert.match(result.stdout, host === 'codex' ? new RegExp(`Toolkit setup choices - ${rows.length} questions across`) : /Toolkit setup - 1 question: Apply these defaults\?/, host);
     if (host === 'codex') {
       assert.match(result.stdout, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: All 6 off\. Turn them on in Codex: open \/hooks and turn on /);
       assert.doesNotMatch(result.stdout, /\| Toolkit hooks in Codex \|/);

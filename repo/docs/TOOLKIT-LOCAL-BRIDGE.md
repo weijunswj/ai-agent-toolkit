@@ -432,7 +432,7 @@ The hook validation is intentionally lighter than `npm run validate:all` so Sess
 
 ```powershell
 npm run validate:all
-node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs
+node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs repo/tests/toolkit-local-bridge-repo-update.test.cjs repo/tests/toolkit-local-bridge-hook-update.test.cjs
 ```
 
 Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. The only change Toolkit makes to a project repository is the session-start catch-up below. Codex native Toolkit cache refresh and exact supported n8n Skills hook reconciliation run only after the user enables Codex plugin cache auto-refresh. If validation, fetch, fast-forward, delegation, native cache refresh, or n8n hook reconciliation fails in hook mode, the hook prints or reports a concise warning, records the last status when possible, and exits successfully so agent startup is not blocked.

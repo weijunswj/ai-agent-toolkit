@@ -106,6 +106,17 @@
       "status": "pass"
     },
     {
+      "id": "GOV.stale-check-line-new-kinds",
+      "source": "stale check rows for a kept-open child that stalls and for a merged PR whose rows stay unticked: the session-start line counts them by kind",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"stale_rows":["KEPT OPEN? #12 kept open since 2026-11-22 12:33Z with every PR merged, and no lane has worked it for over 6 hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)","UNTICKED? #13 PR #900 merged, but none of its 4 DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)"]},
+      "expect": {"decision":"allow","context_contains":["2 rows to answer (KEPT OPEN? 1, UNTICKED? 1)"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.stale-check-silent-disabled",
       "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
       "kind": "state",

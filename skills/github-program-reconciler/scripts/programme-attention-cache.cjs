@@ -66,11 +66,16 @@ function readStaleStamp(repository, deps = {}) {
   } catch { return null; }
 }
 
+// The one stamp file every repository shared before stamps were per repository. Nothing reads it, so
+// the first per-repository write removes it.
+const OLD_SHARED_STAMP = 'stale-sweep.json';
+
 // Throws when the stamp cannot be written, so the check can say so.
 function writeStaleStamp(repository, record, deps = {}) {
   const file = staleStampFile(repository, deps);
   if (!file) throw new Error('the repository is not owner/name');
   writeAtomically(file, record);
+  try { fs.rmSync(path.join(path.dirname(path.dirname(file)), OLD_SHARED_STAMP), { force: true }); } catch { /* housekeeping only */ }
 }
 
 // Records what a run on this computer read: { line, counts, digest, complete, queue }. Keeps the digest

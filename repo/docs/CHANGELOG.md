@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.167.0 (One approval question for Claude Code setup)
+
+### Added
+
+- Claude Code setup now asks one question, `Apply these defaults?`, over a table per section that shows each setting's current value, what setup applies and the other choices. A yes applies the Toolkit default only to settings that have no value yet; a setting that already has a value, including one you turned off, keeps it. A reply such as `3.5=off` changes just that setting, and a setting you do not list keeps its current value unless you also say yes. A no writes nothing.
+- An off you choose for a Claude Code setting (attribution, cross-session messages, reading AGENTS.md) or for the Antigravity skills copy is recorded, so later setups and refreshes keep it off without asking.
+- The AGENTS.md setting goes where the running Claude Code reads it: `cc-plugin-agents-md@builtin` on 2.1.285 and later, `agents-md@builtin` on 2.1.277 to 2.1.284, and nowhere on older versions, which setup says.
+- The setup skill now keeps the rule for relaying the question bank as its own short section.
+- The stale check flags a child whose page shows a merged PR while none of its DONE WHEN or ROWS checkboxes is ticked, as an `UNTICKED?` row. The row shows once for each new merged PR; on later days the child is named on the `held, not proposed` line until a row is ticked. It reads only checkbox rows under those headings (fenced code and HTML comments hold none) and only merged rows of the PR GRAPH the sweep draws.
+- The session-start stale-check line counts `KEPT OPEN?` and `UNTICKED?` rows by kind.
+
+### Fixed
+
+- A Claude Code refresh asks the question again when a setting still has no value, and stays silent otherwise.
+- Setup saves the answers refresh compares with only after they are applied, so a run that stopped to rerun the updated setup no longer leaves a later refresh silent with nothing applied.
+- On Claude Code, an empty reply to the approval question stops setup with the "requires an answer" message instead of asking again forever.
+- The first per-repository stale-check stamp write removes the old shared `user-state/stale-sweep.json`. A test now pins that the stamp is written to a temporary file and renamed, and a dead comment and test about the old shared stamp are gone.
+
+### Changed
+
+- The task status `MERGED · awaiting proof` is now `NOW · CLOSE CHECK`, so the board says the controller's close check is next (judge DONE WHEN against what merged, then close the task, plan its next slice or queue it again). It keeps its place in the NOW band and its one-hour `TASK_MERGED_OPEN` alarm, and CURRENT reads `merged, close check`. `NOW · AGENT UAT` still marks a recorded test the agent owes.
+- The full bridge test suite is split by area into `toolkit-local-bridge.test.cjs`, `toolkit-local-bridge-repo-update.test.cjs` and `toolkit-local-bridge-hook-update.test.cjs`, so each file runs well inside the per-file time budget.
+
+- A merged child kept open on purpose (`Kept open:`) is no longer skipped for ever: once no lane, holder, write or comment has touched it for six hours, the sweep raises `TASK_MERGED_OPEN` again, saying it was kept open, and the stale check shows it as a `KEPT OPEN?` row. A longer planned wait is a dispose with a reason, which holds while the child stays still.
+- In a cloud session, an evidence store that answers 401, 403 or 404 now says it is not reachable from that session and that the check waits for the owner's computer, instead of advising a different store.
+
 ## 3.166.0 (handoff snapshot review fixes; polish bundle 2)
 
 ### Added

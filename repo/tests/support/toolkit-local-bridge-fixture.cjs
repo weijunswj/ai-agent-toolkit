@@ -208,7 +208,7 @@ function writeRepoToolkitFixture(repoPath, label) {
     '}',
     ''
   ].join('\n'));
-  for (const name of ['toolkit-local-bridge.test.cjs', 'toolkit-local-bridge-codex.test.cjs', 'toolkit-local-bridge-claude.test.cjs']) {
+  for (const name of ['toolkit-local-bridge.test.cjs', 'toolkit-local-bridge-codex.test.cjs', 'toolkit-local-bridge-claude.test.cjs', 'toolkit-local-bridge-repo-update.test.cjs', 'toolkit-local-bridge-hook-update.test.cjs']) {
     writeFile(path.join(repoPath, 'repo', 'tests', name), [
       "'use strict';",
       "const assert = require('node:assert/strict');",

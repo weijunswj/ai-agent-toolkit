@@ -3,7 +3,7 @@ const test = require('node:test');
 const {
   assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, escapeRegExp,
   createGitBackedSetupRepo, createGitBackedRealSetupRepo, createFakeManagedSetupScript,
-  runWithUnclosedStdin, codexConfig, backupFiles
+  runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference
 } = require('./toolkit-setup-test-support.cjs');
 function runOwnManagedSetup(root, origin, managedPath) {
   const managedScript = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
@@ -51,28 +51,28 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
 
+// Claude Code asks one question: piped input answers it with the displayed bank reference, and an answer with
+// a part setup cannot read is refused before any write. Empty piped lines are not an answer.
 test('Claude setup rejects extra non-empty piped input before every setup write', () => {
+  const claudeArgs = (repo) => ['--execute', '--host', 'claude-code', '--repo-root', repo.setupRepo, '--repo-remote', repo.origin];
   const validRoot = tmpRoot();
   const validRepo = createGitBackedSetupRepo(validRoot);
-  const valid = run([
-    '--execute', '--host', 'claude-code', '--repo-root', validRepo.setupRepo, '--repo-remote', validRepo.origin,
-  ], {
-    env: isolatedHomeEnv(validRoot),
-    input: Array(16).fill('').join('\n'),
-  });
+  const empty = run(claudeArgs(validRepo), { env: isolatedHomeEnv(validRoot), input: Array(16).fill('').join('\n') });
+  assert.equal(empty.status, 23, empty.stderr || empty.stdout);
+  const valid = run(claudeArgs(validRepo), { env: isolatedHomeEnv(validRoot), input: `${displayedBankReference(empty.stdout)}: yes\n` });
   assert.equal(valid.status, 0, valid.stderr || valid.stdout);
 
   const rejectedRoot = tmpRoot();
   const rejectedRepo = createGitBackedSetupRepo(rejectedRoot);
   const beforeStatus = runTestGit(rejectedRepo.setupRepo, ['status', '--porcelain']);
-  const rejected = run([
-    '--execute', '--host', 'claude-code', '--repo-root', rejectedRepo.setupRepo, '--repo-remote', rejectedRepo.origin,
-  ], {
+  const shown = run(claudeArgs(rejectedRepo), { env: isolatedHomeEnv(rejectedRoot), input: '' });
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  const rejected = run(claudeArgs(rejectedRepo), {
     env: isolatedHomeEnv(rejectedRoot),
-    input: `${Array(16).fill('').join('\n')}\nunexpected`,
+    input: `${displayedBankReference(shown.stdout)}: yes\nunexpected`,
   });
   assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
-  assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
+  assert.match(rejected.stderr, /Setup question bank answer has a part it cannot read: unexpected\./);
   assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_HELPER_ARGS.log')), false);
   assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false);
   assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'BRIDGE_ARGS.log')), false);
