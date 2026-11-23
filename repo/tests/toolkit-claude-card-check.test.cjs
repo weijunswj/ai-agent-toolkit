@@ -52,7 +52,7 @@ test('an over-long question is refused before the transcript is read', () => {
 
 test('a missing transcript or a turn past the read budget shows the card with a note', () => {
   assert.deepEqual(decide(path.join(folder, 'missing.jsonl')), { note: card.UNREAD });
-  assert.deepEqual(decide(undefined), { note: card.UNREAD });
+  assert.equal(decide(undefined), null, 'no path given: nothing to read, no note');
   assert.deepEqual(decide(folder), { note: card.UNREAD });
   const long = transcript([owner('go'), ...Array.from({ length: 40 }, (_, i) => [tool(`t${i}`), result(`t${i}`)]).flat()]);
   assert.deepEqual(decide(long, question(), { chunk: 256, budget: 1024 }), { note: card.PARTIAL });

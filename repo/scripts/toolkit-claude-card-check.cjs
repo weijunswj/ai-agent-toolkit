@@ -17,7 +17,7 @@
 // Toolkit's own cards pass whatever came before them: the governance question and the exact merge
 // card carry everything the owner needs in the card itself.
 //
-// Fail-open: a missing or unreadable transcript, or a turn longer than the read budget, lets the
+// Fail-open: a transcript path that cannot be read, or a turn longer than the read budget, lets the
 // card through with one note, since a refused card leaves the owner unasked. Accepted gap: the host
 // does not always write a turn's text to the transcript before the card's hook runs (a 23 Nov 2026
 // probe found a text block missing from the transcript entirely), so a card can pass after text;
@@ -107,6 +107,9 @@ function cardDecision(input, options = {}) {
   if (toolkitCard(toolInput, options)) return null;
   const questions = toolInput && Array.isArray(toolInput.questions) ? toolInput.questions : [];
   if (questions.some(question => question && typeof question.question === 'string' && question.question.length > MAX_QUESTION)) return { deny: TOO_LONG };
+  // Claude Code always sends a transcript path; a call without one (another host, a direct test
+  // run) has nothing to read and gets no note.
+  if (typeof input.transcript_path !== 'string' || input.transcript_path === '') return null;
   const found = turnText(input.transcript_path, options);
   if (found === 'text') return { deny: TEXT_FIRST };
   if (found === null) return { note: UNREAD };
