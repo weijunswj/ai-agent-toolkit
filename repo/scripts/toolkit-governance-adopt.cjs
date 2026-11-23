@@ -5,10 +5,12 @@
 // ready" and an agent had to build the pieces by hand. After the owner's ticketed answer (or their
 // own terminal), Toolkit does it in this order and reads back each step:
 //
-//   1. Evidence store: when discovery found none, or the owner chose a new one, it creates the
-//      private store TRANSPORT-<name> under the repository's owner with the owner's own `gh` login,
-//      reads back that it is private and owned by the same account, and seeds archives/README.md so
-//      discovery accepts it.
+//   1. Evidence store, in this order: the store the owner named in their answer (used only when it
+//      reads back as a private store of the same owner, else nothing is made), else this repository's
+//      own TRANSPORT-<name> when discovery found it, else it creates that private store under the
+//      repository's owner with the owner's own `gh` login, reads back that it is private and owned by
+//      the same account, and seeds archives/README.md so discovery accepts it. Another repository's
+//      store is never picked on its own.
 //   2. Parent issue: when discovery found none, it opens one programme parent issue. The controller
 //      still turns it into a programme parent document later; this only gives the binding its issue.
 //   3. The plain-text check (which a governed repository always carries) and the dependency security
@@ -52,24 +54,24 @@ function adoptionPrepared(root) {
 
 function storeName(slug) { return `TRANSPORT-${slug.split('/')[1]}`; }
 
-// What turning on would make, from a discovery result: { store: { repository, create }, parent: { issue, title, create }, checks }.
+// What turning on would make, from a discovery result: { store: { repository, create, named }, parent: { issue, title, create }, checks }.
 // A search that failed blocks it ({ blocked }), so an unreadable GitHub never leads to a second store or parent.
-function adoptionPlan(found, { newStore = false } = {}) {
+// `store` is the owner/name the owner named in their answer, or null for the default.
+function adoptionPlan(found, { store: named = null } = {}) {
   if (!found || ['unavailable', 'error'].includes(found.status)) return { blocked: found ? found.reason : 'discovery did not run' };
   if (found.status !== 'propose') return null;
   if (found.parents.status === 'unknown' || found.stores.status === 'unknown' || found.unknown.some(item => /^(?:parent issues|the owner's repositories)/.test(item))) {
     return { blocked: found.unknown.join('; ') || 'the search failed' };
   }
   const owner = found.repository.split('/')[0];
-  // A new store is offered only when the found one is not already the name Toolkit would create.
-  const choice = Boolean(found.stores.recommended) && found.stores.recommended.repository.toLowerCase() !== `${owner}/${storeName(found.repository)}`.toLowerCase();
-  const reuse = !(newStore && choice) && found.stores.recommended;
+  // Discovery recommends only this repository's own TRANSPORT-<name>; a named store is checked in adopt.
+  const own = found.stores.recommended;
   return {
     repository: found.repository,
-    store: reuse ? { repository: found.stores.recommended.repository, create: false } : { repository: `${owner}/${storeName(found.repository)}`, create: true },
-    found_store: found.stores.recommended ? found.stores.recommended.repository : null,
+    store: named ? { repository: named, create: false, named: true }
+      : own ? { repository: own.repository, create: false } : { repository: `${owner}/${storeName(found.repository)}`, create: true },
+    found_store: own ? own.repository : null,
     store_name: storeName(found.repository),
-    store_choice: choice,
     parent: found.parents.recommended ? { issue: found.parents.recommended.issue, title: found.parents.recommended.title, create: false } : { issue: null, create: true },
     checks: found.binding_draft.required_checks,
     visibility: found.visibility || 'unknown',
@@ -111,6 +113,12 @@ class GitHubAdoptionWriter {
 function ensureStore(plan, writer, made) {
   const owner = plan.repository.split('/')[0];
   const reader = args => writer.get(args[0]);
+  // A store the owner named passes the same checks as a found one before anything is made.
+  if (plan.store.named) {
+    const judged = discovery.judgeStore(reader, owner, plan.store.repository, ['named by you']);
+    if (!judged.eligible) throw new AdoptError(`${plan.store.repository} was not used as the evidence store, because ${judged.rejected}.`, made);
+    return judged.repository;
+  }
   if (!plan.store.create) return plan.store.repository;
   const [, name] = plan.store.repository.split('/');
   const existing = writer.get(`repos/${plan.store.repository}`);

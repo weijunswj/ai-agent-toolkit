@@ -286,6 +286,11 @@ test('a same-role gate after an accepted one is a reopen under a new assignment,
   assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G1', assignment: 'g1' }]), ['assign:WRITTEN'], 'another role after an accepted gate is a plain assign');
   assert.deepEqual(ops([{ command: 'return', issue: 423, record: 'g1.r1', assignment: 'g1' }]), ['return:WRITTEN']);
   assert.deepEqual(ops([{ command: 'assign', issue: 423, role: 'G2', assignment: 'g2', supersede: true, reason: 'G2 follows G1' }]), ['assign:WRITTEN']);
+  // A G2 is accepted only on its trusted PASS verdict on the task PR, at the head its return judged.
+  const head = 'c'.repeat(40);
+  f.github.addPr(540, { head, branch: 'feature' });
+  f.github.addComment(540, { body: `Toolkit-G2: PASS ${head} tier=RISKY\nRoute: host-verified opus-5.5/xhigh pin=owner-claude/REVIEWER` });
+  assert.deepEqual(ops([{ command: 'update', issue: 423, patch: { candidate: { branch: 'feature' } } }]), ['update:WRITTEN']);
   end('g2');
   assert.equal(state.completionAccepted(f.store.read('child', 423).doc), true);
   sameRole('G2', 'g2-delta', 'delta G2 after a PASS');
@@ -330,11 +335,26 @@ test('a holder order that starts a gate drops the task\'s lane wait in that one 
   const root = path.join(__dirname, '..', '..');
   const route = fs.readFileSync(path.join(root, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference', 'periodic-runs.md'), 'utf8')
     .split('\n').find(line => line.startsWith('- **Gate assignments**'));
-  for (const phrase of ['one blocker starting with the word `Queued`', '`assign` and `reopen` drop it and keep every other blocker', 'Answer `QUEUED_BUT_MOVING`', 'a commit after the wait and outside every recorded gate', 'with the missed `assign`', "check each result's `dropped_lane_waits`"]) assert.ok(route.includes(phrase), phrase);
+  for (const phrase of ['one blocker starting `Queued in NOW:`', '`assign` and `reopen` drop it and keep every other blocker', 'Answer `QUEUED_BUT_MOVING`', 'a commit after the wait and outside every recorded gate', 'with the missed `assign`', "check each result's `dropped_lane_waits`"]) assert.ok(route.includes(phrase), phrase);
   const skill = fs.readFileSync(path.join(root, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8');
-  assert.match(skill, /^  - Status is worked out: [^\n]*one blocker starting with the word `Queued` [^\n]*`assign` and `reopen` \(and a consume `REOPEN`\) drop lane waits in the same write and keep every other blocker/m);
+  assert.match(skill, /^  - Status is worked out: [^\n]*one blocker starting `Queued in NOW:` [^\n]*`assign` and `reopen` \(and a consume `REOPEN`\) drop lane waits in the same write and keep every other blocker/m);
+  assert.match(skill, /^  - Status is worked out: [^\n]*a lane controller's `assign` on its own child drops them too/m);
   assert.match(skill, /^- `QUEUED_BUT_MOVING`: [^\n]*committed after the wait was written and after its last recorded gate ended/m);
   assert.match(skill, /`assign`, `reopen` and a consume `REOPEN` list each one they dropped \(`dropped_lane_waits`/);
   assert.match(skill, /^- `QUEUED_BUT_MOVING`: A task shown `NOW · QUEUED` by lane waits alone/m);
   assert.match(skill, /`TASK_IDLE`, `TASK_MERGED_OPEN`, `QUEUED_BUT_MOVING`, `BATCH_NEXT` and `AGENT_UAT_UNSTARTED` are its alarms/);
+});
+
+test('a holder order records the owner\'s answer to a G0 question on the same return, with its reason, through the one return path', t => {
+  const f = setup(t);
+  let n = 0;
+  const run = list => f.run(f.order({ order_id: `answer-${++n}`, ops: list })).report.results.map(entry => `${entry.command}:${entry.outcome}`);
+  assert.deepEqual(run([{ command: 'assign', issue: 423, role: 'G0', assignment: 'g0-q' }, { command: 'return', issue: 423, record: 'g0-q.r1', assignment: 'g0-q' },
+    { command: 'return', issue: 423, consume: 'g0-q.r1', verdict: 'WAITING_OWNER' }]), ['assign:WRITTEN', 'return:WRITTEN', 'return:WRITTEN']);
+  assert.equal(f.store.read('child', 423).doc.gate.state, 'WAITING_OWNER');
+  assert.deepEqual(run([{ command: 'return', issue: 423, consume: 'g0-q.r1', verdict: 'ACCEPT', reason: 'the owner answered: option a' }]), ['return:WRITTEN']);
+  const doc = f.store.read('child', 423).doc;
+  assert.deepEqual([doc.gate.state, doc.gate.returns.map(entry => entry.verdict)], ['RETIRED', ['ACCEPT']]);
+  assert.deepEqual(doc.private.gate_history.at(-1), { assignment: 'g0-q', role: 'G0', ended: 'OWNER_ANSWERED', return_id: 'g0-q.r1', verdict: 'ACCEPT', reason: 'the owner answered: option a', at: new Date(NOW).toISOString() });
+  assert.throws(() => orders.validateOrder(f.order({ ops: [{ command: 'return', issue: 423, consume: 'g0-q.r1', verdict: 'ACCEPT', reason: '' }] }), { nowMs: () => NOW }), { code: 'ORDER_INVALID' }, 'a blank reason is refused whole');
 });

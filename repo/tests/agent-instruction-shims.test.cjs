@@ -532,3 +532,11 @@ test('the sync check refuses a linked rule folder or rule file without following
   assert.match(file.stderr, /FAIL: \.agents\/rules\/linked\.md is not allowed/);
   assert.equal(fs.readFileSync(path.join(outside, 'hidden.md'), 'utf8'), '# Rules\n');
 });
+
+// Owner rule (23 November): a link the user gives is opened and inspected directly, and the reply
+// says what was not inspected. It sits inside the accuracy principle, so the installed rules gain no line.
+test('the global rules say to open a given link yourself and name what was not inspected', () => {
+  const accuracy = fs.readFileSync(path.join(repoRoot, globalPath), 'utf8').split(/\r?\n/).filter(line => line.startsWith('- **Accuracy first:**'));
+  assert.equal(accuracy.length, 1);
+  assert.ok(accuracy[0].includes('Open a given link yourself (a PR: metadata, files, diff, checks, comments, review threads); say what you did not inspect.'));
+});
