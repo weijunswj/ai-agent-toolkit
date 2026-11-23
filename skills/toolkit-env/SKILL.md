@@ -40,7 +40,7 @@ Comments over 200 characters are refused before screening. The screen checks `NA
 ## Rules
 
 - Never ask for a value in chat, never type one into a command, and never pipe one into `set`.
-- Never open, read, write, search or list the edit file or its folder (`~/.ai-agent-toolkit/env/edit/`): it holds the real values. You only start `edit` and pass on "done" by running `apply`. Changing the file yourself would be acting as the user.
+- Never open, read, write, search or list the edit file or its folder (`~/.ai-agent-toolkit/env/edit/`): it holds the real values. You only start `edit` and pass on "done" by running `apply`. Changing the file yourself would be acting as the user. In Claude Code a Toolkit hook refuses such calls; never work around a refusal.
 - Never print, echo, read back or summarise a value. `status` shows names only; do not try to show more.
 - Never run `show`, and never ask the user to paste what it printed. It refuses in agent shells and the app's built-in terminal, and needs a real terminal: this stops a value reaching you by accident or on a casual request, not a determined program running as the user.
 - Do not run `header`; the apps run it. Do not use `run` to start a shell or anything that prints the environment.

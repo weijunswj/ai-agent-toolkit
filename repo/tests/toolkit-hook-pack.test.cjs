@@ -200,14 +200,14 @@ test('end to end: a recorded date-name approval reaches the final allowed merge 
 
 test('the hooks a host starts for a call come from its real hooks.json', () => {
   const names = (host, event, tool) => pack.selectHooks(hooksOf(host), event, tool).map(hook => /([a-z-]+)\.cjs/.exec(hook.command)[1]);
-  assert.deepEqual(names('claude', 'PreToolUse', 'Bash'), ['toolkit-claude-attribution-hook', 'toolkit-governance-hook']);
+  assert.deepEqual(names('claude', 'PreToolUse', 'Bash'), ['toolkit-claude-attribution-hook', 'toolkit-governance-hook', 'toolkit-claude-env-edit-hook']);
   assert.deepEqual(names('claude', 'PreToolUse', 'mcp__github__merge_pull_request'), ['toolkit-governance-hook']);
   assert.deepEqual(names('claude', 'PreToolUse', 'mcp__hearthbot__post_message'), ['toolkit-governance-hook']);
-  assert.deepEqual(names('claude', 'PreToolUse', 'Read'), ['toolkit-governance-hook']);
+  assert.deepEqual(names('claude', 'PreToolUse', 'Read'), ['toolkit-governance-hook', 'toolkit-claude-env-edit-hook']);
   assert.deepEqual(names('codex', 'PreToolUse', 'exec_command'), ['toolkit-codex-helper-hook']);
   assert.deepEqual(names('codex', 'UserPromptSubmit'), ['toolkit-codex-helper-hook']);
   const blocking = pack.selectHooks(hooksOf('claude'), 'PreToolUse', 'Bash').map(hook => hook.onFailure || 'none');
-  assert.deepEqual(blocking, ['none', 'block']);
+  assert.deepEqual(blocking, ['none', 'block', 'none']);
 });
 
 test('the plugin root is written into the command, and Codex on Windows runs the installed launcher', () => {

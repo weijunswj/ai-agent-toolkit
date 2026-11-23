@@ -3389,8 +3389,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)', '^(?:Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Grep|Glob|LS|Bash|PowerShell|Monitor)$']);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
+  // The env edit guard, Claude Code only, last (toolkit-claude-env-edit-hook.test.cjs checks what it refuses).
+  assert.match(claudeHooks.hooks.PreToolUse[4].hooks[0].command, /toolkit-claude-env-edit-hook\.cjs/);
   // The governance hook in two entries: state-changing tools (held if the hook cannot start) and the rest.
   for (const index of [2, 3]) assert.match(claudeHooks.hooks.PreToolUse[index].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
   assert.deepEqual([claudeHooks.hooks.PreToolUse[2].hooks[0].onFailure, claudeHooks.hooks.PreToolUse[3].hooks[0].onFailure], ['block', undefined]);
