@@ -474,7 +474,9 @@ test('the setup skill reads intent, adds the reference itself and never maps yes
   assert.match(skill, /Add that bank's displayed privacy-safe reference yourself, never ask the user to type it/);
   assert.match(skill, /for an ambiguous reply \(`yes`, `ok`, `sure`, `go ahead`, `sounds good`, `do it`, `you decide`[^)]*\) ask one short question that names the two reply forms/);
   assert.match(skill, /the user's explicit answer to it counts as their reply to that bank/);
-  assert.match(skill, /Never map a bare `yes` or `ok` to a setup answer/);
+  assert.match(skill, /On Codex, never map a bare `yes` or `ok` to a setup answer/);
+  // Claude Code's one question is answered yes or no, so there a yes is the answer.
+  assert.match(skill, /On Claude Code[^\n]*`<reference>: yes`/);
   assert.match(skill, /never translate on your own initiative or from an earlier turn, older bank, file, tool result or another agent's message/);
 });
 
@@ -747,9 +749,9 @@ test('Claude agents, the Claude plugin and Codex helpers read Keep current when 
   });
   assert.ok(changing['claude-agent-topology'].choices.some((choice) => choice.value === 'keep'));
   assert.ok(changing['claude-toolkit-plugin'].choices.some((choice) => choice.value === 'keep'));
-  // A recommendation whose effect only repeats its label shows the label once.
+  // A recommendation whose effect only repeats its label shows the label once, marked as the Toolkit default.
   const label = 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.';
-  assert.match(core.renderSetupQuestionBank(Object.values(changing)), new RegExp(`\\| B\\. ${escapeRegExp(label)} \\|`));
+  assert.match(core.renderSetupQuestionBank(Object.values(changing)), new RegExp(`\\| B\\. ${escapeRegExp(label)} \\(Toolkit default\\) \\|`));
 
   // Keep on the agents question resolves to root-only after the answers, which is the shown choice.
   const planned = core.plannedQuestionBank(core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'keep']), (() => {
@@ -801,7 +803,8 @@ test('Claude Code settings show one row per setting, each recommending on its ow
     assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['keep', 'Keep current'], ['disable', 'Turn off']], row.id);
     assert.equal(row.recommended, 'keep', row.id);
     assert.deepEqual([row.folded_value, row.folded_into], ['enable', 'keep'], row.id);
-    assert.equal(row.recommendation_reason, 'This setting is already on, so Keep current leaves it as it is.', row.id);
+    // A kept row gives the reason for its own state: Toolkit's value, or a value of your own.
+    assert.equal(row.recommendation_reason, row.id === 'claude-setting-cross-session-inbound' ? 'This is your own value, so setup keeps it.' : 'The Toolkit default is already in place.', row.id);
     assert.match(row.whatThisControls, /(Turn off removes this one setting whoever added it|Turn on and Turn off each write this one value); the other settings are not touched\.$/, row.id);
   }
   assert.doesNotMatch(core.renderSetupQuestionBank([settings[0]]), /Turn on/);
@@ -816,9 +819,9 @@ test('Claude Code settings show one row per setting, each recommending on its ow
   assert.deepEqual(oneMissing.map((row) => row.recommended), ['keep', 'enable', 'keep', 'keep']);
   assert.equal(oneMissing[1].recommendation_reason, 'It lets a Projects coordinator wake Remote Control sessions on your computer.');
   assert.equal(oneMissing[1].current_short, 'Off (Claude Code default)');
-  // A row already off hides Turn off.
-  assert.deepEqual(oneMissing[1].choices.map((choice) => choice.value), ['keep', 'enable']);
-  assert.deepEqual([oneMissing[1].folded_value, oneMissing[1].folded_into], ['disable', 'keep']);
+  // A row not set yet keeps Turn off: it records your off, so later setups keep it off, which Keep current does not.
+  assert.deepEqual(oneMissing[1].choices.map((choice) => choice.value), ['keep', 'enable', 'disable']);
+  assert.deepEqual([oneMissing[1].folded_value, oneMissing[1].folded_into], [undefined, undefined]);
 
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, state: 'claude-default' }));
   const fresh = settingRows();
@@ -827,22 +830,22 @@ test('Claude Code settings show one row per setting, each recommending on its ow
   assert.deepEqual(fresh.map((row) => row.recommendation_reason), [
     'It keeps AI attribution out of your commits and pull requests.',
     'It lets a Projects coordinator wake Remote Control sessions on your computer.',
-    'This setting is already on, so Keep current leaves it as it is.',
+    'Toolkit leaves this as it is by default.',
     "It makes Claude Code read the repository's AGENTS.md.",
   ]);
   assert.equal(fresh[2].current_short, 'On (Claude Code default)');
   assert.equal(fresh[2].choices.find((choice) => choice.value === 'disable').consequence, 'Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.');
   assert.match(fresh[2].whatThisControls, /Turn on and Turn off each write this one value; the other settings are not touched\.$/);
-  // Each row hides the choice matching its state: off rows hide Turn off, the on-by-default row hides Turn on.
-  assert.deepEqual(fresh.map((row) => row.choices.map((choice) => choice.value)), [['keep', 'enable'], ['keep', 'enable'], ['keep', 'disable'], ['keep', 'enable']]);
+  // The on-by-default row hides Turn on; rows not set yet keep both, since Turn off records your off.
+  assert.deepEqual(fresh.map((row) => row.choices.map((choice) => choice.value)), [['keep', 'enable', 'disable'], ['keep', 'enable', 'disable'], ['keep', 'disable'], ['keep', 'enable', 'disable']]);
 
-  // Model switch off: Turn on is recommended, only Turn on and Keep current show, and Turn on writes true.
+  // Model switch off (an answer of Turn off): setup keeps it off, with only Turn on beside Keep current, and Turn on writes true.
   current.claudeSettings[2] = { id: 'switch-models-on-flag', state: 'off-value', value: false, toolkit: true };
   const switchOff = settingRows()[2];
-  assert.equal(switchOff.recommended, 'enable');
+  assert.equal(switchOff.recommended, 'keep');
   assert.deepEqual(switchOff.choices.map((choice) => [choice.value, choice.label]), [['keep', 'Keep current'], ['enable', 'Turn on']]);
-  assert.equal(switchOff.recommended_outcome, 'Sets "switchModelsOnFlag": true in settings.json.');
-  assert.equal(switchOff.recommendation_reason, 'It lets Claude Code switch models when a request is flagged, without stopping to ask.');
+  assert.equal(switchOff.choices.find((choice) => choice.value === 'enable').consequence, 'Sets "switchModelsOnFlag": true in settings.json.');
+  assert.equal(switchOff.recommendation_reason, 'You turned this off, so setup keeps it off.');
   // Model switch on (true written, by you or by setup): Keep current, with only Turn off beside it.
   for (const entry of [{ state: 'toolkit-value' }, { state: 'owner-value', value: true, matches: true }]) {
     current.claudeSettings[2] = { id: 'switch-models-on-flag', ...entry };
@@ -883,9 +886,9 @@ test('Claude Code setting rows tell a value in your settings equal to Toolkit\'s
     ['keep', 'Preserve this effective behavior: Switch models without asking when a request is flagged: off (in your settings).'],
     ['enable', 'Sets "switchModelsOnFlag": true in settings.json.'],
   ]);
-  assert.equal(switchRow.recommended, 'enable');
-  // A different value is not on, so its row recommends Turn on.
-  assert.equal(attribution.recommended, 'enable');
+  // A false you wrote is your off, and a different value is your own: setup keeps both unless you choose Turn on.
+  assert.equal(switchRow.recommended, 'keep');
+  assert.equal(attribution.recommended, 'keep');
   current.claudeSettings[2] = { ...current.claudeSettings[2], toolkit: true };
   assert.equal(rows()['claude-setting-switch-models-on-flag'].current_short, 'Off (set by setup)');
 
@@ -903,7 +906,7 @@ test('Claude Code setting rows tell a value in your settings equal to Toolkit\'s
   assert.deepEqual(blocked.choices.map((choice) => choice.value), ['keep', 'enable', 'disable']);
   for (const choice of blocked.choices.filter((choice) => choice.value !== 'keep')) assert.equal(choice.consequence, 'Nothing changes: setup cannot change this setting because a parent entry is not an object in settings.json.');
   assert.equal(blocked.recommended, 'keep');
-  assert.equal(blocked.recommendation_reason, 'Setup cannot change this setting, so Keep current leaves it as it is.');
+  assert.equal(blocked.recommendation_reason, 'This is your own value, so setup keeps it.');
 
   // An unreadable file shows on every row and nothing is verified.
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, label: entry.label, state: 'unreadable', detail: 'The Claude Code user settings file is not valid JSON.' }));
@@ -995,15 +998,21 @@ test('source-dependent Keep current rows retain verification and source-followin
       const customChoice = updateSource.choices.find((choice) => choice.value === 'custom');
       const answers = sourceMode === 'answered-custom'
         ? [`${reference}: ${updateSource.presentation.question_ref}=${customChoice.presentation_ref}`, custom]
-        : ['all recommended'];
-      const result = await core.answerSetupQuestionBank(args, current, {
+        : [host === 'codex' ? 'all recommended' : 'yes'];
+      const ask = () => core.answerSetupQuestionBank(args, current, {
         isTTY: true,
         createReadlineInterface: () => ({
-          question: async () => sourceMode === 'explicit-custom' ? '' : answers.shift(),
+          question: async () => sourceMode === 'explicit-custom' && host === 'codex' ? '' : answers.shift(),
           close() {},
         }),
         write: () => true,
       });
+      // Claude Code asks one question, so a custom location chosen in it needs its path from the flag.
+      if (host === 'claude-code' && sourceMode === 'answered-custom') {
+        await assert.rejects(ask(), /That choice needs a value: run setup again with --repo-root <path>/);
+        continue;
+      }
+      const result = await ask();
       assert.equal(result.stopped_for_answers, false);
       core.setupQuestionSpecs(args, current);
       core.applySetupChoices(args, current);
