@@ -235,6 +235,16 @@
       "status": "pass"
     },
     {
+      "id": "HANDOFF.scheduled-off-file-touch-passes",
+      "source": "PR 1436 delta G2 L6: a scheduled task's first tool step makes the handoff off-file, and every other guard lets that command run",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "touch ~/.toolkit-handoff-off"}},
+      "fixture": {"repo": {"governance": "enabled"}},
+      "expect": {"decision": "allow"},
+      "status": "pass"
+    },
+    {
       "id": "HANDOFF.ordinary-session-writes-session-file",
       "source": "Handoff refresh 1435, control for the scheduled-session rows: with no signal the hook records its session check",
       "kind": "state",
