@@ -820,7 +820,9 @@ const commands = {
       ...(entry.due ? { due: entry.due, overdue: state.ackOverdue(entry, Date.parse(nowText(deps))) } : {}),
       ...(entry.due && parentDoc.private?.attention_notes?.[entry.id] ? { promised: parentDoc.private.attention_notes[entry.id] } : {}),
       ...(entry.diagnostics ? { diagnostics: entry.diagnostics } : {}) }));
-    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open, ...ownerWaitsOf(context, parentDoc) };
+    // The stale-work net's callout: net findings unanswered for 4 hours (new that long, or past due).
+    const callout = state.netCallout(parentDoc.attention, nowText(deps));
+    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open, callout: { count: callout.count, entries: callout.entries }, ...ownerWaitsOf(context, parentDoc) };
   },
 
   // The documents in the private store, moved to the public state branch. The dry run writes nothing;
@@ -1278,6 +1280,9 @@ function formatAttention(result) {
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
+  // Stale-work net findings nobody answered for 4 hours lead: answer each this turn.
+  if (result.callout?.count) lines.push('', `Unanswered over ${state.NET_CALLOUT_HOURS} h (${result.callout.count}): answer each this turn`,
+    ...result.callout.entries.map(entry => `- ${entry.id} ${entry.code} ${entry.ref}: ${entry.state === 'overdue' ? `promise overdue ${entry.hours} h` : `new for ${entry.hours} h`}`), '');
   // Work-queue findings first: each is a task on the graph that needs the controller's next step now.
   const queue = result.findings.filter(entry => state.WORK_QUEUE_CODES.has(entry.code));
   if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id}${entry.state === 'acknowledged' ? ' acknowledged' : ''} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
