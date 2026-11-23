@@ -272,8 +272,9 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   // no case asks the owner to upload by hand, because the coordinator reads the copy pulled from the repo.
   const body = fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md'));
   const sha256 = require('node:crypto').createHash('sha256').update(body).digest('hex');
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md \\(${body.length} bytes, sha256 ${sha256}\\) as a skill update card to save\\. If no card can be offered, the coordinator reads the copy pulled from the repo, nothing to do\\.$`));
-  assert.doesNotMatch(older.summary, /upload (?:the|it)|by hand/i);
+  // Where the session has no propose_skills tool (Claude Code), the line says so plainly and asks nothing.
+  assert.match(older.summary, new RegExp(`Your saved copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)} with changed text\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md \\(${body.length} bytes, sha256 ${sha256}\\) as a skill update card to save\\. Where this session has no \`propose_skills\` tool, the card can't be offered here and nothing needs asking: the Projects daily check-in offers it, and the coordinator reads the copy pulled from the repo\\.$`));
+  assert.doesNotMatch(older.summary, /upload (?:the|it)|by hand|\?/i);
   const reference = path.join(synced, 'abc_def', 'web-controller-projects', 'reference');
   fs.cpSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference'), reference, { recursive: true });
   assert.match(check().summary, /Skill card: offer/, 'reference files equal to Toolkit\'s: a card is enough');
@@ -282,8 +283,18 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   const edited = check();
   assert.match(edited.summary, /Skill card: offer \S*web-controller-projects\/SKILL\.md \(\d+ bytes, sha256 [0-9a-f]{64}\) as a skill update card to save\. Your copy has its own reference files: the card replaces SKILL\.md only, so they stay as they are\./);
   assert.doesNotMatch(edited.summary, /upload (?:the|it)|by hand/i);
-  writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
-  assert.match(check().summary, /Your uploaded copy is current/);
+  const skillFile = path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md');
+  writeFile(skillFile, body.toString('utf8'));
+  assert.equal(check().summary, `Your saved copy is current (${repoVersion}).`);
+  // A release that only restamped the Version line changes nothing for the owner: no card. The synced copy
+  // drops the final newline; CRLF line ends are not text either.
+  writeFile(skillFile, body.toString('utf8').replace(/^Version: .*$/m, 'Version: 2026-01-01.1').replace(/\s+$/, '').replace(/\n/g, '\r\n'));
+  const restamp = check();
+  assert.equal(restamp.status, STATUS.PASSED);
+  assert.equal(restamp.summary, `Your saved copy matches Toolkit's text (saved 2026-01-01.1, Toolkit ${repoVersion}); no card needed.`);
+  // A copy the check cannot compare is named, with nothing to do.
+  writeFile(skillFile, '# a copy with no Version line\n');
+  assert.equal(check().summary, 'Your saved copy could not be compared (saved copy has no Version line); the coordinator reads the copy pulled from the repo, nothing to do.');
 });
 
 test('a Projects skill body too large for a skill card gets no card and no hand upload', (t) => {
@@ -303,7 +314,7 @@ test('a Projects skill body too large for a skill card gets no card and no hand 
   writeFile(skillFile, frontmatter + head + 'x'.repeat(48000 - head.length));
   const large = check();
   assert.equal(large.status, STATUS.PASSED);
-  assert.match(large.summary, /Your uploaded copy is 2026-01-01\.1; Toolkit has 2026-02-01\.1\. Too large for a skill card \(48000 bytes\); the coordinator reads the copy pulled from the repo, nothing to do\.$/);
+  assert.match(large.summary, /Your saved copy is 2026-01-01\.1; Toolkit has 2026-02-01\.1 with changed text\. Too large for a skill card \(48000 bytes\); the coordinator reads the copy pulled from the repo, nothing to do\.$/);
   assert.doesNotMatch(large.summary, /Skill card: offer|upload (?:the|it)|by hand/i);
   // One byte under the limit, the frontmatter not counted, the card is offered.
   writeFile(skillFile, frontmatter + head + 'x'.repeat(47999 - head.length));
@@ -316,7 +327,8 @@ test('the setup skill turns the Projects skill notice into a skill card and neve
   assert.match(text, /Then, in this session \(never through a subagent or helper\), load `propose_skills` \(ToolSearch\) and call it with one proposal: kind `improvement`, target and name `web-controller-projects`, the description copied from that SKILL\.md's frontmatter, and `skillMd` set to that file's text exactly as read \(never retyped\)\./);
   assert.match(text, /The card must carry main's SKILL\.md: when this Toolkit copy is behind main, refresh Toolkit and run the install check again first\./);
   assert.match(text, /Then tell the owner to tap Save on the card, and that saving replaces any edits made directly to their claude\.ai copy\./);
-  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, say so in one line and offer no hand upload, because the coordinator reads the copy pulled from the repo\./);
+  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, print that line as it is, ask nothing about the card and offer no hand upload, because the Projects daily check-in offers it and the coordinator reads the copy pulled from the repo\./);
+  assert.match(text, /A line that says the saved copy matches Toolkit's text or is current needs no card\./);
   assert.match(text, /When the line says too large for a skill card, offer no card\./);
   assert.doesNotMatch(text, /hand-upload step|folder upload step/);
 });
