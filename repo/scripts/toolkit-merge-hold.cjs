@@ -30,8 +30,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // in a session the user started, not one another session or a Toolkit launcher started, and not a
 // forked run or a run resumed from a session's shell (the governance gate's session marks). A
 // Claude Code chat the app reopened on the same id (SessionStart resume, no host-session variable)
-// is the user's own chat and records typed lines; a resume that ever carried the variable, and a
-// Codex or unknown-host reconnect, do not. The host is the hook entry point's own (the Claude Code
+// is the user's own chat and records typed lines; a resume that ever carried the variable, a
+// Codex or unknown-host reconnect, and any resumed cloud session (CLAUDE_CODE_REMOTE=true), do not. The host is the hook entry point's own (the Claude Code
 // hook passes 'claude', the Codex hook 'codex'), never a payload field. Where a line is read but
 // not recorded, the hook says so in the turn's context with the reason and where to approve
 // instead (recordPromptNote), and a later merge refusal in that chat says the chat cannot record
@@ -171,7 +171,7 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     or commit message about the hooks in the same text as a node run, or after such an env, is
 //     refused too; run it as a separate command;
 //   - refused, so an agent cannot plant the user's line: a session brief, a message to another
-//     session, a scheduled wakeup or a scheduled prompt (PROMPT_TOOLS) whose text holds a line the
+//     session, a move to the cloud, a scheduled wakeup or a scheduled prompt (PROMPT_TOOLS) whose text holds a line the
 //     approval reader would count, or a Projects merge card tap or wake with merge wording.
 //
 // Not covered for the reopened chat: the host sends the same SessionStart resume for a chat the app
@@ -1091,8 +1091,12 @@ function recordPromptNote(input, { environment = process.env, registryOptions = 
   if (message.wrapped) {
     if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return { count: 0, note: '' };
   } else {
-    const block = sessionBlock(sessionChecks(sessionId, environment || {}, registryOptions, now, host));
-    if (block) return { count: 0, note: unrecordedNote(found.map(entry => ({ ...entry, repository: entry.repository || here })), block) };
+    // The reopened-chat rule is for Claude Code on this computer: a cloud session reads typed lines
+    // with no host, as before, so a resumed cloud session records none, and gets no note either
+    // (its routes are the Projects card and the typed line in the thread that merges).
+    const cloud = (environment || {}).CLAUDE_CODE_REMOTE === 'true';
+    const block = sessionBlock(sessionChecks(sessionId, environment || {}, registryOptions, now, cloud ? null : host));
+    if (block) return { count: 0, note: cloud ? '' : unrecordedNote(found.map(entry => ({ ...entry, repository: entry.repository || here })), block) };
   }
   const entries = found.map(entry => ({ repository: entry.repository || here, pr: entry.pr, sha: entry.sha, session: sessionId }))
     .filter(entry => typeof entry.repository === 'string');
@@ -2358,13 +2362,13 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
 }
 
 // Tools that deliver text an agent writes as a future user prompt: a session brief, a message to
-// another session, a scheduled wakeup, a cron prompt, a remote routine and a scheduled task. In a
-// chat that may record approvals that text would arrive as if the user typed it, so a call whose
+// another session, a move to a cloud session (its summary is that session's first message), a
+// scheduled wakeup, a cron prompt, a remote routine and a scheduled task. In a chat that may record approvals that text would arrive as if the user typed it, so a call whose
 // text holds a line the approval reader would count is refused (the failure: an agent approving a
 // merge by writing the user's line into another session). Closed list, by exact tool name; every
 // string in the input is read, whatever its field. Tools outside the list are an accepted gap.
 const PROMPT_TOOLS = new Set([
-  'mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session', 'mcp__ccd_session_mgmt__send_message', 'SendMessage',
+  'mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session', 'mcp__ccd_session__move_to_cloud', 'mcp__ccd_session_mgmt__send_message', 'SendMessage',
   'ScheduleWakeup', 'CronCreate', 'RemoteTrigger', 'mcp__scheduled-tasks__create_scheduled_task', 'mcp__scheduled-tasks__update_scheduled_task',
 ]);
 const MOST_PROMPT_STRINGS = 2000;

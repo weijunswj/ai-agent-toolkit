@@ -561,6 +561,33 @@ if (HOST === 'claude-code') test('closure matrix: typed, card, offer and standin
   }
 });
 
+// The reopened-chat rule is for Claude Code on this computer only: a cloud session
+// (CLAUDE_CODE_REMOTE=true) reads typed lines as before, so a resumed cloud session records none
+// and gets no note, through the real hook entry too; a fresh cloud startup still records.
+if (HOST === 'claude-code') test('closure matrix, cloud: a resumed cloud session records no typed line, as before', t => {
+  const ctx = context(t, HOST);
+  const registryOptions = ctx.registryOptions;
+  const cloud = { CLAUDE_CODE_REMOTE: 'true' };
+  const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
+  const start = (id, source) => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment: cloud, host: 'claude-code' });
+  const found = () => new hold.MergeApprovals({ registryOptions }).find('owner/a', 7);
+  for (const [row, setup, records] of [
+    ['S11a fresh cloud startup', id => start(id, 'startup'), true],
+    ['S11b resumed cloud session', id => { start(id, 'startup'); start(id, 'resume'); }, false],
+  ]) {
+    const id = `cloud-${row.slice(0, 4)}`;
+    setup(id);
+    const typed = hold.recordPromptNote({ cwd: ctx.repo, session_id: id, prompt: 'merge 7' }, { registryOptions, environment: cloud, host: 'claude' });
+    assert.equal(typed.count, records ? 1 : 0, row);
+    assert.equal(typed.note, '', `${row}: no note in a cloud session`);
+    new hold.MergeApprovals({ registryOptions }).drop('owner/a', 7);
+    const said = claudeHook.respond('UserPromptSubmit', { cwd: ctx.repo, session_id: id, prompt: 'merge 7' }, { registryOptions, environment: cloud });
+    assert.equal(Boolean(found()), records, `${row} through the hook`);
+    assert.doesNotMatch(JSON.stringify(said), /did not record it/, `${row}: no note through the hook`);
+    new hold.MergeApprovals({ registryOptions }).drop('owner/a', 7);
+  }
+});
+
 // D9: in a chat that cannot approve, the refusal names that chat's reason, not the binding's; in
 // the owner's reopened chat the binding's reason stays and the card comes first (the PR 1454 shape).
 if (HOST === 'claude-code') test('a refusal leads with the chat reason where the chat cannot approve, and offers the card where it can', t => {

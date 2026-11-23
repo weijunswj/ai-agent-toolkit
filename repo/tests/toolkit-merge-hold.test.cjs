@@ -396,6 +396,7 @@ const tapWake = question => `<wake reason="decision-chosen" current-time="${new 
 const PROMPT_CALLS = {
   mcp__ccd_session__start_session: text => ({ title: 'Side task', prompt: text, initiation: 'user_asked', context: 'fresh' }),
   mcp__ccd_session__hand_off_to_session: text => ({ title: 'Hand off', remaining_plan: text }),
+  mcp__ccd_session__move_to_cloud: text => ({ summary: text }),
   mcp__ccd_session_mgmt__send_message: text => ({ session_id: 'local_x', message: text }),
   SendMessage: text => ({ to: 'local_x', message: text }),
   ScheduleWakeup: text => ({ delaySeconds: 1200, prompt: text, reason: 'check back' }),
