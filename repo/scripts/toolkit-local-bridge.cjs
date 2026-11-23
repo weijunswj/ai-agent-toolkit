@@ -37,8 +37,8 @@ const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
 const DEFAULT_UPDATE_REPORT_MAX_FILES = 200;
-// The full bridge suite: the shared file plus its per-host files (Codex, Claude Code).
-const FULL_VALIDATION_TESTS = Object.freeze(['toolkit-local-bridge.test.cjs', 'toolkit-local-bridge-codex.test.cjs', 'toolkit-local-bridge-claude.test.cjs']
+// The full bridge suite: the shared file, its per-host files (Codex, Claude Code) and the files split out of it by area.
+const FULL_VALIDATION_TESTS = Object.freeze(['toolkit-local-bridge.test.cjs', 'toolkit-local-bridge-codex.test.cjs', 'toolkit-local-bridge-claude.test.cjs', 'toolkit-local-bridge-repo-update.test.cjs', 'toolkit-local-bridge-hook-update.test.cjs']
   .map((name) => path.join('repo', 'tests', name)));
 const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs');
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
@@ -502,7 +502,7 @@ function buildValidationSuite({ hookMode = false } = {}) {
           timeout: HOOK_LIGHT_VALIDATION_TIMEOUT_MS
         }
       : {
-          label: 'node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs',
+          label: 'node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs repo/tests/toolkit-local-bridge-repo-update.test.cjs repo/tests/toolkit-local-bridge-hook-update.test.cjs',
           args: ['--test', ...FULL_VALIDATION_TESTS],
           timeout: VALIDATE_TOOLKIT_TIMEOUT_MS
         }

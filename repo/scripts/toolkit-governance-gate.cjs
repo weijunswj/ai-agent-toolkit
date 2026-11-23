@@ -1620,7 +1620,7 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
 // per 15 minutes per repository, and only when `start` allows). No gh, git or network call. Today's
 // rows give one line; a day with no rows gives none; a recorded failure gives a line naming which read
 // failed and how to retry, so a check that keeps failing is never silent.
-const STALE_KINDS = Object.freeze(['JUDGE?', 'OWNER OK?', 'FOLD?', 'MOVE?', 'POLISH']);
+const STALE_KINDS = Object.freeze(['JUDGE?', 'OWNER OK?', 'FOLD?', 'MOVE?', 'KEPT OPEN?', 'UNTICKED?', 'POLISH']);
 const STALE_FAILED = Object.freeze({
   attention: 'the programme attention list (the programme store)',
   'owner-waits': 'the owner waits in the programme store',
