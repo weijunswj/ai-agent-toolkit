@@ -485,7 +485,7 @@ test('typing toolkit governance while a bank is open asks for the bank afresh, n
   const commands = require(path.join(scripts, 'toolkit-commands.cjs'));
   const ctx = fixture(t, { quiet: true });
   const prompt = text => hook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: text, session_id: SESSION }, {
-    registryOptions: ctx.registryOptions, environment: { [gate.HOST_SESSION_VARIABLE]: SESSION }, mergeHold: { recordPrompt: () => 0 },
+    registryOptions: ctx.registryOptions, environment: { [gate.HOST_SESSION_VARIABLE]: SESSION }, mergeHold: { recordPromptNote: () => ({ count: 0, note: '' }) },
   }).hookSpecificOutput?.additionalContext || '';
   for (const phrase of ['toolkit governance', 'Governance setup.', 'refresh governance']) {
     const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
