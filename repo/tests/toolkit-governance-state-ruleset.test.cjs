@@ -1,8 +1,8 @@
 'use strict';
 
 // The "Toolkit: keep programme state" ruleset: its body and verdict, and `toolkit governance migrate`
-// offering it, after its own Enter, only for a repository whose merged binding keeps programme
-// state on the public state branch. A private repository on GitHub Free reports not-enforceable.
+// offering it in its one question with the other changes, only for a repository whose merged binding
+// keeps programme state on the public state branch. A private repository on GitHub Free reports not-enforceable.
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
@@ -54,13 +54,13 @@ function governedRepo(t, { state }) {
   return { projects, registryPath };
 }
 
-// Every Enter prompt is answered with Enter, except the keep-state one, which gets `keepState`.
-async function migrate(ctx, { keepState = true, rulesets, created, readerReason = null }) {
+// `migrate` asks one question for all the changes it found; `answer` is the owner's answer to it.
+async function migrate(ctx, { answer = true, rulesets, created, readerReason = null }) {
   const asked = [];
   const out = [];
   const cli = new ToolkitGovernanceCli({
     stdout: { write: text => { out.push(String(text)); return true; } }, stderr: { write: () => true }, interactive: true, cwd: ctx.projects,
-    confirm: async effect => { asked.push(effect); return effect.includes(ruleset.KEEP_STATE_RULESET_NAME) ? keepState : true; },
+    confirm: async effect => { asked.push(effect); return answer; },
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
     rulesetReader: slug => (readerReason ? { ok: false, reason: readerReason } : { ok: true, rulesets: rulesets[slug] || [] }),
     rulesetCreator: slug => { (rulesets[slug] ||= []).push(ruleset.noForcePushRulesetBody()); return { ok: true, id: 1 }; },
@@ -72,14 +72,15 @@ async function migrate(ctx, { keepState = true, rulesets, created, readerReason 
   return { code, asked, out: out.join('') };
 }
 
-test('migrate offers the keep-state ruleset only after its own Enter, and only with the state branch in the merged binding', async (t) => {
+test('migrate offers the keep-state ruleset in its one question, and only with the state branch in the merged binding', async (t) => {
   const withState = governedRepo(t, { state: true });
   const rulesets = {};
   const created = [];
-  const declined = await migrate(withState, { keepState: false, rulesets, created });
+  const declined = await migrate(withState, { answer: false, rulesets, created });
+  assert.equal(declined.asked.length, 1, 'one question for every change');
   assert.ok(declined.asked.some(question => question.includes(ruleset.KEEP_STATE_RULESET_NAME)), declined.asked.join('\n'));
-  assert.deepEqual(created, [], 'no without its own yes');
-  assert.match(declined.out, /Programme state rulesets not added/);
+  assert.deepEqual(created, [], 'no without the yes');
+  assert.match(declined.out, /No rulesets or default-branch protection were added/);
   const accepted = await migrate(withState, { rulesets, created });
   assert.deepEqual(created, ['example-owner/example-repo']);
   assert.match(accepted.out, /programme state ruleset added and read back/);

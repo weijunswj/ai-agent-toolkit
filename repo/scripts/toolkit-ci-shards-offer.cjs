@@ -30,14 +30,6 @@ const MAX_NAMED_SHARDS = 8;
 const NODE_GLOBS = Object.freeze(['**/*.test.cjs', '**/*.test.mjs', '**/*.test.js', 'test/**/*.js', 'tests/**/*.js']);
 const ANSWERS = Object.freeze(['yes', 'not-now', 'never']);
 
-// The question's minutes line. `estimate` is { minutes, workflow } from the last green CI run, or null.
-function estimateText(estimate) {
-  const cost = 'Each shard adds a minute or two of setup, which a private repository pays for.';
-  if (!estimate || !Number.isFinite(estimate.minutes)) return `Minutes: unknown, because no green CI run could be read. ${cost}`;
-  const minutes = Math.max(1, Math.round(estimate.minutes));
-  return `Minutes: the last green ${estimate.workflow || 'CI'} run used about ${minutes} runner minute${minutes === 1 ? '' : 's'}. ${cost}`;
-}
-
 // The repository's own CI on its default branch, read with read-only gh: for each of its workflows
 // (up to MAX_ESTIMATE_WORKFLOWS) the newest green push run, and the largest of those by summed job
 // time, so a small lint workflow does not stand in for the test run. Returns { minutes, workflow,
@@ -78,6 +70,19 @@ function readEstimate(root, { run = spawnSync } = {}) {
 
 function readText(file) {
   try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+}
+
+// The workflow that already runs this repository's tests in parallel, or null: a job matrix with a
+// shard key (`shard: [linux-1, linux-2]`, `shard-index: [1, 2]`) or a step reading matrix.shard.
+// Read only. A shard list on its own does not count: its workflows come only with a yes.
+function existingShards(root) {
+  let names = [];
+  try { names = fs.readdirSync(path.join(root, '.github', 'workflows')).filter(name => /\.ya?ml$/i.test(name)).sort(); } catch { return null; }
+  for (const name of names) {
+    const text = readText(path.join(root, '.github', 'workflows', name)) || '';
+    if (/^\s*matrix\s*:/m.test(text) && (/^\s+-?\s*shard[\w-]*\s*:/im.test(text) || /\$\{\{\s*matrix\.shard/i.test(text))) return `.github/workflows/${name}`;
+  }
+  return null;
 }
 
 // The repository's Node tests: { ok: true, discover, files } or { ok: false, reason }. A layout counts
@@ -177,4 +182,4 @@ function ciShardsText(mergedText, parsed, value) {
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
 
-module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, detectNodeTests, estimateText, firstList, oldSweepCopies, readEstimate, readersReady });
+module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, detectNodeTests, existingShards, firstList, oldSweepCopies, readEstimate, readersReady });

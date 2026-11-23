@@ -348,3 +348,21 @@ test('a default branch that merges heads without its latest commit gets the Tool
   assert.deepEqual(wrote.map(args => args.slice(0, 2)), [['example-owner/example-repo', ['validate']]]);
   assert.match(finishing.entryFor(ctx.registryOptions, state.repository_id).line, /On and read back: .*default-branch protection/);
 });
+
+test('a finish mark whose turn-on pull request closed without merging is cleared, never finished', async t => {
+  const ctx = governedRepo(t), created = [];
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 12 });
+  const asked = [];
+  const closed = cli(ctx, [], created, { proposalTransport: { outcome: (repository, number) => { asked.push([repository, number]); return 'closed'; }, list: () => [] } });
+  assert.equal(await closed.run(), 0);
+  assert.deepEqual(asked, [['example-owner/example-repo', 12]]);
+  assert.match(closed.out.join(''), /Nothing finished: the governance turn-on pull request #12 was closed without merging, so its post-merge setup was dropped\./);
+  assert.deepEqual(created, [], 'no ruleset or setting is written');
+  assert.equal(finishing.entryFor(ctx.registryOptions, state.repository_id), null, 'the mark is cleared');
+  // A merged one finishes as before.
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 13 });
+  const merged = cli(ctx, [], created, { proposalTransport: { outcome: () => 'merged', list: () => [] } });
+  await merged.run();
+  assert.deepEqual(created, ['no-force-push'], 'the merged turn-on is finished');
+});
