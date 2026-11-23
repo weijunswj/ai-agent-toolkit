@@ -281,3 +281,24 @@ test('--save writes nothing when a name appears on the repository between the pr
     assert.match(run.said.join('\n'), /changed while the prompt was open.*Nothing changed\./s, name);
   }
 });
+
+// When the names cannot be read back after Enter, nothing is known to have changed: the stop says they could
+// not be read, not that the repository changed. The names read fine before the prompt, as the owner saw them.
+test('--save says the names could not be read back after Enter, and writes nothing', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-save-unread-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keyFile = path.join(dir, 'key.pem');
+  fs.writeFileSync(keyFile, PEM);
+  const run = owner(t, { answers: [true] });
+  const ask = run.deps.confirm;
+  const spawn = run.deps.spawn;
+  let readable = true;
+  run.deps.confirm = effect => { readable = false; return ask(effect); };
+  run.deps.spawn = (command, args, options) => (!readable && /actions\/(variables|secrets)\?/.test(args[1] || '') ? { status: 1, stdout: '', stderr: '' } : spawn(command, args, options));
+  assert.equal(await setup.main(['--repo', SLUG, '--save', 'both', '--client-id', 'Iv23example', '--key-file', keyFile], run.deps), 1, run.said.join('\n'));
+  assert.deepEqual(run.asked, [`save both on ${SLUG}`]);
+  assert.deepEqual(run.gh.calls.filter(call => ['variable', 'secret'].includes(call.args[0])), [], 'nothing is written');
+  const out = run.said.join('\n');
+  assert.match(out, /names on example-owner\/example-repo could not be read back after Enter, so nothing was saved\..*Nothing changed\./s);
+  assert.doesNotMatch(out, /changed while the prompt was open/);
+});

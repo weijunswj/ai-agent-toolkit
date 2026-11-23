@@ -763,11 +763,15 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
 
 // The stale check offers the owner a close only when no gate is live on the task. ownerStep's `after`
 // misses two live gates (a gate at work on a task waiting on the owner, and a blocked gate), so every
-// owner wait carries gate_live: a gate assigned or active, blocked or not.
-test('owner waits carry gate_live for a gate at work on a task waiting on the owner, a blocked gate, and none',()=>{
+// owner wait carries gate_live: any gate state but RETIRED (assigned, active, submitted, interrupted or
+// waiting on the owner), blocked or not.
+test('owner waits carry gate_live for a non-final gate on the task, blocked or not, and none for a retired or no gate',()=>{
   const cases = [
     ['gate at work, task waiting on the owner', 'WAITING_OWNER', {role:'G2',state:'ACTIVE'}, [], true],
     ['blocked live gate', 'ACTIVE', {role:'G1',state:'ACTIVE'}, ['Laptop offline'], true],
+    ['submitted gate, agent UAT passed', 'ACTIVE', {role:'G1',state:'SUBMITTED'}, [], true],
+    ['interrupted gate, agent UAT passed', 'ACTIVE', {role:'G1',state:'INTERRUPTED'}, [], true],
+    ['retired gate, agent UAT passed', 'ACTIVE', {role:'G1',state:'RETIRED'}, [], false],
     ['no gate', 'ACTIVE', null, [], false],
   ];
   for (const [name, lifecycle, gate, blockers, live] of cases) {

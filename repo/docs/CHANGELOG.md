@@ -1,5 +1,29 @@
 # Toolkit Changelog
 
+## 3.166.0 (handoff snapshot review fixes; polish bundle 2)
+
+### Added
+
+- `toolkit-store.cjs handoff --check` names `unsure=<files>`: files this copy holds differently from a snapshot row written before rows carried a time, whose order nobody knows (this copy may hold a save the snapshot missed, or be older). It says `STALE` for them instead of `CURRENT`. `handoff --reseed`, run only from the newest copy, takes this copy for those files; hook-started runs still never decide that order themselves. A row whose time came from its snapshot is marked `modified_from: "snapshot"`, so later checks still know.
+
+### Fixed
+
+- The handoff hook's first check in a session only notes what the session holds and never starts a refresh; the next check, at least a minute later, decides. A scheduled task whose first tool call comes before the one that turns the hook off no longer starts one refresh.
+- A memory folder that is there but empty (a re-sync that cleared it, an empty mount point) counts as unreachable, so a hook-started run keeps its rows instead of dropping them all.
+- A hook-started run judges a memory row by the memory folder it names now, so rows first written under an older folder path are kept when the folder cannot be reached.
+- **A stopped check says why on its controller check row.** A check that stops with nothing on its output, such as a handoff `--check` that cannot read the snapshot, now shows its `Stopped:` line instead of a bare ATTENTION row.
+- **The PR body pre-flight reads the programme file as the sweep does.** A repository whose `.github/toolkit-programme.json` turns governance off no longer gets the page budget, and the success line names only the checks that ran there.
+- **The governance App `--save` says when it could not read back.** When the names cannot be read again after the Enter, the stop says so instead of saying the repository changed; nothing is saved either way.
+- **Remove takes the update lock and moving marker too.** `update.lock` and `update.tree-moving` are removed with the rest of Toolkit's own files instead of being kept as "not a Toolkit file".
+- **Owner closes wait for every open gate.** A task whose gate is submitted, interrupted or waiting on the owner is no longer offered to the owner as a close (`gate_live` counts every gate state but retired).
+- **The parent state schema knows every finding code.** `AGENT_UAT_UNSTARTED` and `QUEUED_BUT_MOVING` are in its code list, and a test keeps the list in step with the code.
+
+### Changed
+
+- **A hand-made task's refresh refusal says what to save.** The refusal and the recurring-tasks reference say to write the task's project lines word for word in `project-additions.md`, or the line `- none` when it has none.
+- **Gate rules: agent UAT start.** A landed PR's owed agent UAT starts at once, and an `OWNER_TEST_NEEDED` PR still needs its `Agent UAT: PASSED` line before merge.
+- **Agent UAT lane check:** a UAT with no head is never flagged, and each of the lane check's paths has its own test.
+
 ## 3.165.0 (stale check from the session-start hook)
 
 ### Changed

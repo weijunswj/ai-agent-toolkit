@@ -20,10 +20,15 @@
 //     (an equal time keeps the row; a row with no time is given a fixed one, see pick);
 //   - a row whose file is missing here stays: missing means unknown, not deleted. It is dropped only
 //     when the session baseline (the files this session held, from the after-tool hook) shows this
-//     session held that file and deleted it, and its source is reachable here;
+//     session held that file and deleted it, and its source is reachable here (a memory folder with
+//     no files counts as unreachable; a memory row belongs to the memory folder the run names now);
 //   - a source whose modified times are not real (most of its files saved within one minute: a plain
 //     copy) is judged once, from the baseline when there is one; then a differing file is written only
 //     when this session changed it since its baseline.
+// A row written before rows carried a time has no real time: its fixed one is the snapshot's time,
+// marked `modified_from: "snapshot"`. When this copy differs from such a row and a run keeps the row,
+// the order of the two is unknown (this copy may hold a save the snapshot missed, or be older), so
+// `check` names the file as unsure and only a run with `reseed` takes this copy for it.
 // Ordering trusts each machine's clock, so clock skew between machines can misorder saves made within
 // the skew. A file deleted in one session comes back when a later session still holds an older copy
 // of it (the earlier full-copy refresh did the same).
@@ -132,9 +137,10 @@ function memoryFiles(fs, dir) {
   return out;
 }
 
-// Reads and scans every reachable source. A source that is not reachable here (missing, or a path
-// that is not a full path on this computer) is returned in `kept`, unread, so the last copy and its
-// manifest rows stay as they were.
+// Reads and scans every reachable source. A source that is not reachable here (missing, a path that
+// is not a full path on this computer, or a memory folder with no files, as an emptied re-sync or an
+// empty mount point leaves it) is returned in `kept`, unread, so the last copy and its manifest rows
+// stay as they were. `memory` is the memory folder this run names.
 function readSources(sources, { fs = nodeFs, platform = process.platform, scan = true } = {}) {
   const entries = [];
   const kept = [];
@@ -144,7 +150,7 @@ function readSources(sources, { fs = nodeFs, platform = process.platform, scan =
     if (fullPathHere(sources.memory, platform)) {
       try { if (fs.statSync(sources.memory).isDirectory()) names = memoryFiles(fs, sources.memory); } catch (error) { if (error instanceof HandoffError) throw error; }
     }
-    if (!names) kept.push(sources.memory);
+    if (!names || !names.length) kept.push(sources.memory);
     else for (const name of names) {
       const read = readText(fs, path.join(sources.memory, name));
       if (read) add(name === 'MEMORY.md' ? 'MEMORY.md' : `memory/${name}`, sources.memory, read);
@@ -152,13 +158,15 @@ function readSources(sources, { fs = nodeFs, platform = process.platform, scan =
   }
   const single = [...(sources.instructions ? [[sources.instructions, `files/instructions${path.extname(leaf(sources.instructions)) || '.md'}`]] : []),
     ...(() => { const names = fileNames(sources.files); return sources.files.map((file, index) => [file, `files/${names[index]}`]); })()];
+  // Which named source each files/ path comes from now.
+  const places = Object.fromEntries(single.map(([file, dest]) => [dest, file]));
   for (const [file, dest] of single) {
     const read = fullPathHere(file, platform) ? readText(fs, file) : null;
     if (read) add(dest, file, read); else kept.push(file);
   }
   const findings = !scan ? [] : entries.flatMap(entry => scanText(entry.text).map(found => `${entry.source === sources.memory ? path.join(sources.memory, entry.path.replace(/^memory\//, '')) : entry.source}:${found.line} (${found.rule})`));
   if (findings.length) throw new HandoffError(`secret scan found ${findings.length} match(es): ${findings.slice(0, 5).join(', ')}. Nothing was written.`, 'remove the value from the source, then run handoff again.');
-  return { entries, kept };
+  return { entries, kept, memory: sources.memory || null, places };
 }
 
 function readManifest(base, folder, { fs = nodeFs } = {}) {
@@ -198,23 +206,28 @@ function realBySource(rows) {
 // The file set a run records (see the top of this file). `session` is the hook's session file:
 // { rows: the files this session held when last seen, real: each source's realness when it started },
 // or null for a run with no session (no deletions, realness judged from the files here now).
-function pick({ entries, kept }, previous, session = null) {
+// `reseed` (a manual run that says this copy is the newest) takes this copy for every unsure file.
+// `unsure` lists the files this copy holds differently from a kept row that has no real time.
+function pick({ entries, kept, memory = null, places = {} }, previous, session = null, { reseed = false } = {}) {
   const prev = new Map((previous?.files || []).map(row => [row.path, row]));
   const baseline = Array.isArray(session?.rows) ? session.rows.filter(row => row && typeof row.path === 'string') : null;
   const seen = baseline ? new Map(baseline.map(row => [row.path, row.sha256])) : null;
   const real = session?.real && typeof session.real === 'object' ? session.real : realBySource(baseline || entries);
   // A row with no time (written before rows carried one) gets a fixed time the first time a run
   // keeps it: this copy's own time when its content matches (and its source's times are real), else
-  // the time of the snapshot that wrote it. It then never moves with later snapshots.
+  // the time of the snapshot that wrote it, marked as such. It then never moves with later snapshots.
   const takenAt = typeof previous?.stamp?.taken_at === 'string' && !Number.isNaN(Date.parse(previous.stamp.taken_at)) ? new Date(previous.stamp.taken_at).toISOString() : null;
   const timed = (row, entry = null) => {
     if (row.modified) return row;
     const own = entry && entry.sha256 === row.sha256 && real[entry.source] !== false ? entry.modified : null;
-    return own || takenAt ? { ...row, modified: own || takenAt } : row;
+    if (own) return { ...row, modified: own };
+    return takenAt ? { ...row, modified: takenAt, modified_from: 'snapshot' } : row;
   };
+  const noRealTime = row => !row.modified || row.modified_from === 'snapshot';
   const rowTime = row => { const time = Date.parse(row.modified || ''); return Number.isNaN(time) ? -Infinity : time; };
   const out = [];
   const writes = [];
+  const unsure = [];
   for (const entry of entries) {
     const row = prev.get(entry.path) ? timed(prev.get(entry.path), entry) : null;
     let take;
@@ -222,31 +235,34 @@ function pick({ entries, kept }, previous, session = null) {
     else if (row.sha256 === entry.sha256) take = false;
     else if (real[entry.source] !== false) take = Date.parse(entry.modified || '') > rowTime(row);
     else take = Boolean(seen) && seen.get(entry.path) !== entry.sha256;
+    if (!take && row && row.sha256 !== entry.sha256 && noRealTime(row)) { if (reseed) take = true; else unsure.push(entry.path); }
     if (take) { out.push(rowOf(entry)); writes.push(entry); } else out.push(row);
   }
   // A row whose file is missing here stays, unless this session held that file and deleted it while
-  // its source was reachable.
+  // its source was reachable. A row's source is the one that holds its path now (the memory folder
+  // this run names, or the named file saved under that path), not the path it was first written with.
   const here = new Set(entries.map(entry => entry.path));
+  const sourceNow = row => (memory && (row.path === 'MEMORY.md' || row.path.startsWith('memory/')) ? memory : places[row.path] || row.source);
   for (const row of prev.values()) {
-    if (!here.has(row.path) && !(seen && seen.has(row.path) && !(kept || []).includes(row.source))) out.push(timed(row));
+    if (!here.has(row.path) && !(seen && seen.has(row.path) && !(kept || []).includes(sourceNow(row)))) out.push(timed(row));
   }
-  return { files: out.sort(byPath), writes, real };
+  return { files: out.sort(byPath), writes, real, unsure: unsure.sort() };
 }
 
 const sameFiles = (a, b) => JSON.stringify((a || []).map(row => [row.path, row.sha256])) === JSON.stringify((b || []).map(row => [row.path, row.sha256]));
 
 // Works out one run: the folder, the new manifest, what to write, and whether anything changed.
-function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform, session = null, scan = true }) {
+function plan({ base, repository, sources, stamp, fs = nodeFs, platform = process.platform, session = null, scan = true, reseed = false }) {
   const folder = snapshotFolder(repository);
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'run it from a checkout of the controlled repository, or name one with --repo-root.');
   const previous = readManifest(base, folder, { fs });
   const chosen = chooseSources(sources, previous);
   if (!hasSources(chosen)) throw new HandoffError('no sources were named and no earlier snapshot remembers any.', 'name --memory <folder>, --instructions <file> or --file <path> once; later runs remember them.');
   const read = readSources(chosen, { fs, platform, scan });
-  const picked = pick(read, previous, session);
+  const picked = pick(read, previous, session, { reseed });
   const unchanged = Boolean(previous) && sameFiles(previous.files, picked.files);
   const manifest = { schema: SCHEMA, stamp, sources: chosen, files: picked.files };
-  return { folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, seen: seenOf(read.entries), real: picked.real };
+  return { folder, previous, manifest, unchanged, kept: read.kept, writes: picked.writes, seen: seenOf(read.entries), real: picked.real, unsure: picked.unsure };
 }
 
 // Writes the snapshot and returns an undo that puts every file it touched back as it was (a file it
@@ -280,8 +296,9 @@ function sessionRows(sources, { fs = nodeFs, platform = process.platform } = {})
   return seenOf(readSources(sources, { fs, platform, scan: false }).entries);
 }
 
-// Read-only: would a run change the snapshot? STALE names what it would change; a source not
-// reachable here is not counted as a change.
+// Read-only: would a run change the snapshot? STALE names what it would change, and the unsure files
+// (this copy differs from a row with no real time, so a run keeps the row; `reseed` takes this copy);
+// a source not reachable here is not counted as a change.
 function check({ base, repository, sources = null, now = new Date(), fs = nodeFs, platform = process.platform }) {
   const folder = snapshotFolder(repository);
   if (!folder) throw new HandoffError(`${JSON.stringify(repository)} is not a plain owner/repo name.`, 'name the controlled repository\'s checkout with --repo-root.');
@@ -289,13 +306,13 @@ function check({ base, repository, sources = null, now = new Date(), fs = nodeFs
   if (!previous) return { state: 'MISSING', folder };
   const chosen = chooseSources(sources, previous);
   const read = readSources(chosen, { fs, platform });
-  const { files } = pick(read, previous);
+  const { files, unsure } = pick(read, previous);
   const before = new Map(previous.files.map(row => [row.path, row.sha256]));
   const after = new Map(files.map(row => [row.path, row.sha256]));
   const changed = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key)).sort();
   const takenAt = previous.stamp?.taken_at || null;
   const hours = takenAt && !Number.isNaN(Date.parse(takenAt)) ? Math.max(0, Math.round((now.getTime() - Date.parse(takenAt)) / 360000) / 10) : null;
-  return { state: changed.length ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, kept: read.kept };
+  return { state: changed.length || unsure.length ? 'STALE' : 'CURRENT', folder, taken_at: takenAt, age_hours: hours, changed, unsure, kept: read.kept };
 }
 
 module.exports = Object.freeze({ SCHEMA, ROOT, HandoffError, snapshotFolder, fullPathHere, normaliseSources, hasSources, readSources, readManifest, plan, write, check, sessionRows, realBySource });
