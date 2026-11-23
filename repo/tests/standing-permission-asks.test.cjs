@@ -79,15 +79,18 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
     'tell the owner which change to undo and in which file',
-    'Write the lines below, apart from Options, as plain-English formatted text, then ask with one card holding only the short question and its options (just this once, from now on, no), the recommended one marked.',
-    'Where the host still blocks a granted step, the text above the card names the exact native change.',
-    '`native_rule` (the native change shown above the card, with its file,',
-    'save a copy of the card, the text shown above it and the owner\'s answer, word for word with its id and time, at `standing-permissions/answers/<id>.md` beside the ledger. The copy is a record only: the original wins whenever it can be opened, and if the two differ beyond the label swaps the entry covers nothing and the owner is told.',
+    // The owner may see only an open card, not the text above it (owner, 23 November), so the ask goes as written text.
+    'The owner may see only an open card, never the text above it, and this ask needs its context, so ask it as written text at the end of the closing message, not on a card: the lines below as plain-English formatted text, then the question and its options (just this once, from now on, no), the recommended one marked.',
+    'In Claude Projects, where web chat keeps the text above a card on screen, follow the Projects skill: these lines, then one decision card.',
+    'batch several asks into one message where they arrive together',
+    'Where the host still blocks a granted step, the ask names the exact native change.',
+    '`native_rule` (the native change the ask named, with its file,',
+    'save a copy of the ask as the owner saw it (the written ask, or the card and any text shown with it) and the owner\'s answer, word for word with its id and time, at `standing-permissions/answers/<id>.md` beside the ledger. The copy is a record only: the original wins whenever it can be opened, and if the two differ beyond the label swaps the entry covers nothing and the owner is told.',
     'A session that can open only the copy (such as one on the owner\'s computer reading a Projects card) asks the owner one line that restates the entry, as at review, and acts only on their yes. Each answer backs one entry.',
     'The ledger and its answer copies hold no secrets or personal data',
     'apart from the label swaps, the copy is word for word',
     'A hard stop is never offered, never honoured from the ledger, and only explained to the owner',
-    'for a card with several asks, which ask',
+    'for a message or card with several asks, which ask',
     'agents never post an answer, approval or grant as the owner (a record that names who answered and where, such as a decision trace, is not one; posting one as the owner is acting as the owner, a hard stop)',
     '`granted_at` (the date the owner answered, not the date the entry was written)',
     'append that answer to the entry\'s copy file (keeping the earlier text)',
@@ -96,6 +99,8 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
   ]) assert.ok(toolkit.includes(text), text);
   for (const field of FIELDS) assert.ok(toolkit.includes(`\`${field}\``), field);
   assert.doesNotMatch(toolkit, /or its saved copy/);
+  // The old split (scope lines above, a bare question on the card) left the owner answering a card without its scope.
+  assert.doesNotMatch(toolkit, /only the short question|above the card|shown above it|into one card/);
 });
 
 test('the Projects skill uses a decision card, the same ledger and the playbook hard stops', () => {

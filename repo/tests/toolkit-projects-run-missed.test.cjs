@@ -122,7 +122,7 @@ test('receipt ledger: every broken or unfinished receipt state prints its line',
     ['receipt with no stamp', { '20261120T091000Z': { stamp: false, relayed: 'relayed x', done: 'done x' }, '20261120T111000Z': { relayed: 'r', done: 'd' } }, ['RECEIPT ORPHAN: Hourly nudge 20261120T091000Z (.relayed, .done with no stamp)']]
   ];
   for (const [label, receipts, want] of rows) assert.deepEqual(lines('2026-11-20T11:36:00Z', [ledger(receipts)]), want, label);
-  // Past the next fire (13:10 Singapore, 05:10Z): a relayed run without .done is pending, with its age.
+  // Past the next fire (13:10Z, 21:10 Singapore): a relayed run without .done is pending, with its age.
   assert.deepEqual(lines('2026-11-20T13:11:00Z', [ledger({ '20261120T111000Z': { relayed: 'relayed x' }, '20261120T131000Z': { relayed: 'r', done: 'd' } }, { last_fired_at: '2026-11-20T13:10:04Z' })]),
     ['RUN PENDING: Hourly nudge 20261120T111000Z (not done, 2 h)']);
 });

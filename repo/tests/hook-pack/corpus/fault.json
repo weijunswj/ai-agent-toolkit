@@ -305,6 +305,30 @@
       "status": "pass"
     },
     {
+      "id": "HANDOFF.deleted-memory-file-starts-refresh",
+      "source": "Handoff mirror 1435: a memory file the session held and then deleted starts a refresh that removes it from the snapshot, its copy included",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "rm {dir}/handoff/memory/owner-rules.md"}, "tool_response": {"stdout": "", "stderr": "", "interrupted": false}},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "checked", "memory": "deleted"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "handoff-refresh",
+      "status": "pass"
+    },
+    {
+      "id": "HANDOFF.stale-copy-starts-no-refresh",
+      "source": "Handoff mirror 1435: a session still holding the old bytes of a memory file the snapshot removed starts no refresh, so the file never comes back",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name": "Write", "tool_input": {"file_path": "{work}/notes.md", "content": "x\n"}, "tool_response": {"filePath": "{work}/notes.md"}},
+      "fixture": {"repo": {"governance": "enabled"}, "handoff": {"session": "checked", "memory": "stale"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-handoff-refresh",
+      "status": "pass"
+    },
+    {
       "id": "HANDOFF.nul-memory-starts-no-refresh",
       "source": "Polish 10 G2 F1: a memory file saved with a NUL byte starts no refresh, which the store's save would refuse and undo every ten minutes",
       "kind": "state",

@@ -1031,9 +1031,11 @@ function stampKeepOpen(previous, next, now) {
 }
 
 // A lane wait: a blocker that says a NOW task waits only for a free gate lane, written as one blocker
-// whose text starts with the word `Queued` (the reserved form; any other blocker is a real block).
-// A gate going live (assign, reopen) drops every lane wait in the same write and keeps the rest.
-const LANE_WAIT = /^Queued\b/;
+// whose text starts `Queued in NOW:` (the reserved form; any other blocker is a real block, queue
+// labels such as `Queued 1 - after Alpha2` included). A gate going live (assign, reopen, a consume
+// REOPEN) drops every lane wait in the same write and keeps the rest; a lane controller's assign on
+// its own child does too, as intended.
+const LANE_WAIT = /^Queued in NOW:/;
 const isLaneWait = text => typeof text === 'string' && LANE_WAIT.test(text);
 const laneWaits = doc => (Array.isArray(doc?.blockers) ? doc.blockers : []).filter(isLaneWait);
 function dropLaneWaits(doc) {
@@ -1468,12 +1470,24 @@ const needsReason = (reason, command) => {
   return String(reason).trim();
 };
 
-// How an assignment ended, kept in `private` (bounded) so the controller can see the handover trail.
+// The gate trail, kept in `private` (bounded) so the controller can see how each assignment ended and
+// when each return was consumed.
+function logGate(next, entry) {
+  const history = Array.isArray(next.private.gate_history) ? next.private.gate_history : [];
+  next.private = { ...next.private, gate_history: [...history, entry].slice(-GATE_HISTORY_LIMIT) };
+}
+
 function endAssignment(next, ended, reason = null) {
   const assignment = next.gate.assignment;
   if (!assignment) return;
-  const history = Array.isArray(next.private.gate_history) ? next.private.gate_history : [];
-  next.private = { ...next.private, gate_history: [...history, { assignment: assignment.id, role: assignment.role, ended, ...(reason ? { reason } : {}) }].slice(-GATE_HISTORY_LIMIT) };
+  logGate(next, { assignment: assignment.id, role: assignment.role, ended, ...(reason ? { reason } : {}) });
+}
+
+// The role an earlier assignment had, from the gate trail; null when the trail no longer holds it.
+function assignmentRole(doc, id) {
+  if (doc.gate.assignment?.id === id) return doc.gate.assignment.role;
+  const history = Array.isArray(doc.private?.gate_history) ? doc.private.gate_history : [];
+  return history.findLast(entry => entry?.assignment === id && GATE_ROLES.includes(entry.role))?.role || null;
 }
 
 function assignmentUsed(doc, id) {
@@ -1596,23 +1610,42 @@ function recordReturn(doc, { returnId, assignment, atHead = null, mode = 'toolki
 // LIFE-1: returns are consumed by return ID, never by session. REOPEN keeps the assignment and its
 // session; the next submission needs a new return ID. Only the parent's holder consumes a return, and a
 // G1 acceptance needs a G2 review PASSED at the live PR head (`liveHead`, else the recorded PR head).
-function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null, liveHead = undefined }) {
+// A consumed verdict is final, with one exception: the newest return consumed WAITING_OWNER takes the
+// owner's answer (ACCEPT or REOPEN, with `reason`) once, while the gate still waits at the same epoch
+// and assignment; ACCEPT runs the same checks as a first ACCEPT.
+// A G2 return is judged by `review`, the newest trusted `Toolkit-G2:` verdict the caller read from the
+// task PR for the return's head ({ verdict: PASS|FAIL, head, link } or null): ACCEPT needs a PASS at
+// that head and records it in `review`; a FAIL there allows only REOPEN and is recorded as NOT_PASSED.
+// A G2 ACCEPT closes every older assignment's unconsumed return in the same write: a G1 return at the
+// passed head as ACCEPT, any other as REOPEN. Every consume is logged in the gate trail with `now`.
+function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null, liveHead = undefined, review = undefined, reason = null, now = null }) {
   if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT, REOPEN or WAITING_OWNER.');
   if (!isDecisionHolder(parentDoc, writer)) throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) consumes a gate return.');
   const next = clone(doc);
   const entry = next.gate.returns.find(item => item.return_id === returnId);
   if (!entry) throw new ProgrammeError('RETURN_UNKNOWN', `No return ${returnId} on issue ${next.issue}.`);
+  let answer = null;
   if (entry.consumed) {
     if (entry.verdict === verdict) return null;
-    throw new ProgrammeError('RETURN_CONFLICT', `Return ${returnId} was already consumed as ${entry.verdict}, not ${verdict}.`);
+    if (entry.verdict !== 'WAITING_OWNER' || verdict === 'WAITING_OWNER') {
+      throw new ProgrammeError('RETURN_CONFLICT', `Return ${returnId} was already consumed as ${entry.verdict}, not ${verdict}.`);
+    }
+    const newest = next.gate.returns.at(-1);
+    if (newest.return_id !== returnId) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} is not the newest return (${newest.return_id}); only the newest return waiting on the owner takes the owner's answer.`);
   }
   if (entry.epoch !== next.fence.epoch) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} was submitted at epoch ${entry.epoch}; the document is at epoch ${next.fence.epoch}.`);
   if (entry.assignment && entry.assignment !== next.gate.assignment?.id) {
     throw new ProgrammeError('STALE_ASSIGNMENT', `Return ${returnId} belongs to assignment ${entry.assignment}; the current assignment is ${next.gate.assignment?.id || 'none'}.`);
   }
-  const latest = next.gate.returns.filter(item => !item.consumed).at(-1);
-  if (latest.return_id !== returnId) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} is not the latest submission (${latest.return_id}).`);
-  if (next.gate.state !== 'SUBMITTED') throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${next.gate.state || 'not assigned'}; only a submitted return is consumed.`);
+  if (entry.consumed) {
+    if (next.gate.state !== 'WAITING_OWNER') throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${next.gate.state || 'not assigned'}; the owner's answer is recorded only while the gate still waits on the owner.`);
+    answer = needsReason(reason, `return --consume ${returnId} --verdict ${verdict} (the owner's answer)`);
+  } else {
+    const latest = next.gate.returns.filter(item => !item.consumed).at(-1);
+    if (latest.return_id !== returnId) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} is not the latest submission (${latest.return_id}).`);
+    if (next.gate.state !== 'SUBMITTED') throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${next.gate.state || 'not assigned'}; only a submitted return is consumed.`);
+  }
+  if (reason != null && !isText(String(reason).trim())) throw new ProgrammeError('USAGE', '--reason needs text.');
   if (verdict === 'ACCEPT' && next.gate.role === 'G1') {
     // The command line passes the live PR head; without it the last observed head is used.
     const head = liveHead === undefined ? next.pr.head : liveHead;
@@ -1622,14 +1655,46 @@ function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null
       throw new ProgrammeError('EVIDENCE_STALE', `G1 is accepted only after a G2 review PASSED at the live PR head (${isSha(head) ? shortSha(head) : 'no PR head found'}). Controller: record the G2 verdict at that head first, or consume this return as REOPEN.`);
     }
   }
+  const at = isText(now) ? now : new Date().toISOString();
+  if (next.gate.role === 'G2' && verdict !== 'WAITING_OWNER') {
+    // The verdict counts only at the head this return judged (its at_head, else the head the caller read).
+    const found = isObject(review) && isSha(review.head) && (!isSha(entry.at_head) || review.head === entry.at_head) ? review : null;
+    const pr = next.pr?.number ? `PR #${next.pr.number}` : 'the task PR';
+    if (verdict === 'ACCEPT' && found?.verdict === 'FAIL') {
+      throw new ProgrammeError('REVIEW_FAILED', `The newest G2 verdict on ${pr} at ${shortSha(found.head)} is FAIL (${found.link}). Controller: consume this return as REOPEN; it records the FAIL.`);
+    }
+    if (verdict === 'ACCEPT' && found?.verdict !== 'PASS') {
+      const head = isSha(entry.at_head) ? shortSha(entry.at_head) : 'the live head';
+      throw new ProgrammeError('EVIDENCE_MISSING', `No G2 PASS for ${head} on ${pr} from an account that can write here. Controller: have the G2 post its \`Toolkit-G2: PASS <head> tier=<tier>\` verdict there, then consume again, or consume as REOPEN. Nothing was written.`);
+    }
+    if (found && ['PASS', 'FAIL'].includes(found.verdict)) {
+      const outcome = found.verdict === 'PASS' ? 'PASSED' : 'NOT_PASSED';
+      if (verdict === 'ACCEPT' || outcome === 'NOT_PASSED') {
+        next.review.verdicts = [...next.review.verdicts.filter(item => item.head !== found.head), { reviewer: next.gate.assignment?.id || 'G2', head: found.head, verdict: outcome }];
+        next.review.state = outcome;
+      }
+    }
+    if (verdict === 'ACCEPT') {
+      for (const older of next.gate.returns) {
+        if (older.consumed || older === entry || (older.assignment && older.assignment === next.gate.assignment?.id)) continue;
+        const role = older.assignment ? assignmentRole(next, older.assignment) : null;
+        older.consumed = true;
+        older.verdict = role === 'G1' && older.at_head === found.head ? 'ACCEPT' : 'REOPEN';
+        logGate(next, { assignment: older.assignment || null, role, ended: 'CLOSED_BY_G2', return_id: older.return_id, verdict: older.verdict, at });
+      }
+    }
+  }
   entry.consumed = true;
   entry.verdict = verdict;
   next.gate.state = verdict === 'REOPEN' ? 'ACTIVE' : verdict === 'WAITING_OWNER' ? 'WAITING_OWNER' : 'RETIRED';
+  const why = answer || (reason != null ? String(reason).trim() : null);
+  logGate(next, { assignment: entry.assignment || next.gate.assignment?.id || null, role: next.gate.role, ended: answer ? 'OWNER_ANSWERED' : 'CONSUMED',
+    return_id: returnId, verdict, ...(why ? { reason: why } : {}), at });
   // REOPEN makes the gate live again, as `reopen` does, so it drops lane waits too.
   if (verdict === 'REOPEN') dropLaneWaits(next);
   next.next_action = verdict === 'ACCEPT' ? `Controller: ${next.gate.role} accepted; assign the next gate or record completion`
     : verdict === 'REOPEN' ? `Executor: continue ${next.gate.role}; the next return needs a new return ID`
-      : 'Owner: answer the question, then Controller: reopen the gate';
+      : `Owner: answer the question, then Controller: consume return ${returnId} again as ACCEPT or REOPEN with --reason <the answer>`;
   return next;
 }
 

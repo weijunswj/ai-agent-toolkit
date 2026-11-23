@@ -82,7 +82,7 @@ Shipping bias never overrides approvals, safety gates, privacy, required validat
 
 All development aims at these; repository rules may add, never relax:
 
-- **Accuracy first:** zero hallucinations and no false data, always the top priority: check every claim, status or done verdict in depth against its sources (full text, criteria, comments, code, merged work); never skim.
+- **Accuracy first:** zero hallucinations and no false data, always the top priority: check every claim, status or done verdict in depth against its sources (full text, criteria, comments, code, merged work); never skim. Open a given link yourself (a PR: metadata, files, diff, checks, comments, review threads); say what you did not inspect.
 - **Tests first:** each escaped bug gets a permanent test before merge, end-to-end first; no silent skips; fixed means the installed build has it. Each test fails on the old code for the right reason or guards a real contract, via the real path with realistic inputs; reviews flag shaped data, test-only branches, a stubbed unit under test, duplicates and tautologies.
 - **Fast CI:** shard or cache with coverage unchanged, each file within its time budget; no duplicate runs; free fixes first; tests and CI evolve with the code.
 - **Grouped changes:** one coherent PR per goal; dependency updates grouped, not one PR per package.
@@ -140,4 +140,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, explanation first and "(my pick)" on the best option. Failing that, ask in one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, its card clear alone, "(my pick)" on the best option. Failing that, ask in one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
