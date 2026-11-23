@@ -354,7 +354,19 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Launch every gate with model and effort pinned explicitly",
-      "instruction_only": "Gates start from Projects threads, Remote Control or a person; no Toolkit launcher starts them, so there is nothing to hook a route check to."
+      "covers": "On Claude Code, the gate launch hook refuses a start_session gate brief without valid Gate, Route and Assignment lines or with an unpinned model or effort, and after a capped start prints the effort raise and record steps; the started session's route check refuses an off-pin gate. Projects threads and starts by a person stay instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-claude-gate-launch-hook.cjs",
+          "test": "repo/tests/toolkit-claude-gate-launch-hook.test.cjs"
+        },
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-gate-route.cjs",
+          "test": "repo/tests/toolkit-gate-route.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/roles-and-routes.md",

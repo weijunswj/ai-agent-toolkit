@@ -114,21 +114,21 @@
         ]
       },
       {
-        "matcher": "^(?!(?:Read|Grep|Glob|LS|NotebookRead|WebFetch|WebSearch|ToolSearch|TodoWrite|TaskGet|TaskList|TaskOutput)$)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-handoff-hook.cjs\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "^mcp__ccd_session__start_session$",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-gate-launch-hook.cjs\" --event PostToolUse",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(?!(?:Read|Grep|Glob|LS|NotebookRead|WebFetch|WebSearch|ToolSearch|TodoWrite|TaskGet|TaskList|TaskOutput)$)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-handoff-hook.cjs\"",
             "timeout": 10
           }
         ]

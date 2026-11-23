@@ -3389,7 +3389,9 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)', '^mcp__ccd_session__start_session$']);
+  // The gate launch check runs on the desktop app's start_session only, and fails open.
+  assert.deepEqual(claudeHooks.hooks.PreToolUse[4].hooks, [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-gate-launch-hook.cjs" --event PreToolUse', timeout: 10 }]);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
   // The governance hook in two entries: state-changing tools (held if the hook cannot start) and the rest.
   for (const index of [2, 3]) assert.match(claudeHooks.hooks.PreToolUse[index].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
@@ -3410,7 +3412,9 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
     const footer = { matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-github-footer-hook.cjs"`, timeout: 10 }] };
     // Claude Code also starts the controller handoff refresh after any tool but a read-only one moves a remembered source.
     const handoff = { matcher: require('../scripts/toolkit-handoff-hook.cjs').MATCHER, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-handoff-hook.cjs"`, timeout: 10 }] };
-    assert.deepEqual(hooks.hooks.PostToolUse, hooks === claudeHooks ? [card, checkpoint, footer, handoff] : [checkpoint]);
+    // Claude Code also prints the effort and record steps after a gate start (toolkit-claude-gate-launch-hook.cjs).
+    const launch = { matcher: '^mcp__ccd_session__start_session$', hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-claude-gate-launch-hook.cjs" --event PostToolUse`, timeout: 10 }] };
+    assert.deepEqual(hooks.hooks.PostToolUse, hooks === claudeHooks ? [card, checkpoint, footer, launch, handoff] : [checkpoint]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
