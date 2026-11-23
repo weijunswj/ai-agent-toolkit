@@ -128,7 +128,7 @@ test('row 5: a removed line in a save with a blocking problem deletes nothing', 
     ['quoted value', 'X1_TEST_QUOTE_KEY="quoted"\n'],
     ['duplicate name', `X1_TEST_KEPT_KEY=${sentinel()}\n`],
     ['too long', `X1_TEST_LONG_KEY=${'x'.repeat(2561)}\n`],
-    ['secret-like comment', '# token sk-abcdefghijklmnopqrstuvwxyz0123\n'],
+    ['secret-like comment', '# X1_TEST_HIDDEN_KEY=hidden-value-123\n'],
     ['UTF-16', null],
   ]) {
     await t.test(label, async (t) => {
@@ -281,8 +281,8 @@ test('row 20: the store\'s delete has one call site, in the edit-file save; remo
   assert.equal('remove' in store.PlatformStore.prototype, false);
   const calls = [];
   for (const file of scriptFiles(SCRIPTS)) {
-    // Comment lines are blanked (same length), so only code counts.
-    const text = fs.readFileSync(file, 'utf8').replace(/^\s*\/\/.*$/gm, (line) => ' '.repeat(line.length));
+    // Line ends as LF (a Windows checkout has CRLF); comment lines blanked (same length), so only code counts.
+    const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').replace(/^\s*\/\/.*$/gm, (line) => ' '.repeat(line.length));
     const relative = path.relative(ROOT, file).replace(/\\/g, '/');
     for (const match of text.matchAll(/removeForEditSave\(/g)) calls.push({ relative, at: match.index, text });
     if (relative !== 'repo/scripts/toolkit-env-store.cjs') {
