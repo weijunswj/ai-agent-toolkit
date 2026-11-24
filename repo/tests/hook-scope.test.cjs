@@ -116,6 +116,22 @@ test('a second command chained after the script, or a path that leaves its folde
   has(fixture(t, { claude: { Stop: ['repo/../../outside.cjs'] }, files })(), /is not a node script in the repository/);
 });
 
+test('a scope row for a hook no hooks.json runs any more fails until the row goes', t => {
+  // The shape of removing a hook (the handoff snapshot hook): its hooks.json entries go, its row stays.
+  const copy = realCopy(t);
+  const script = 'repo/scripts/toolkit-handoff-hook.cjs';
+  assert.ok(copy.scope.hooks.some(item => item.script === script), `${script} has a row`);
+  for (const rel of copy.scope.hook_files.claude) {
+    const hooks = JSON.parse(fs.readFileSync(path.join(copy.root, ...rel.split('/')), 'utf8'));
+    for (const [event, groups] of Object.entries(hooks.hooks)) hooks.hooks[event] = groups.filter(group => !group.hooks.some(hook => hook.command.includes(script)));
+    write(copy.root, rel, JSON.stringify(hooks));
+  }
+  const result = runReal(copy);
+  assert.ok(result.errors.includes(`hook row claude ${script} names a script no claude hooks.json runs: remove the row`), result.errors.join('\n'));
+  const scope = { ...copy.scope, hooks: copy.scope.hooks.filter(item => item.script !== script) };
+  assert.deepEqual(runReal(copy, scope).errors, []);
+});
+
 test('an entry on an event its row does not list, or a listed event with no why_event line, fails', t => {
   const files = { 'repo/scripts/a.cjs': "'use strict';\n" };
   has(fixture(t, { claude: { PreToolUse: ['repo/scripts/a.cjs'], Stop: ['repo/scripts/a.cjs'] }, files, scope: { hooks: [row('claude', 'repo/scripts/a.cjs', ['PreToolUse'])] } })(), /on Stop, an event its claude row does not list and justify/);
