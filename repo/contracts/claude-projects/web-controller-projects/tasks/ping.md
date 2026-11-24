@@ -1,5 +1,4 @@
 TASK PING ({{task_name}}, {{project}} project, Toolkit base layer)
-- Your very first tool call, before the first check: run `touch ~/.toolkit-handoff-off` in a shell. The empty file turns Toolkit's handoff hook off for this scheduled session.
 - First check, before anything else: if this turn cannot post in a project thread or cannot read /mnt/project-files/, it started outside its home thread or project. Make no other tool call and end the turn with the single line "skipped: started outside its home thread".
 - This task is a ping: it stamps its run and posts one line, and the coordinator works its checklist that turn. Read nothing but this task's run folder, change nothing else, never write a .relayed or .done file and never ask the owner anything.
 - Run folder: /mnt/project-files/toolkit/task-runs/{{task_slug}}/. Choose this run's UTC time once, as YYYYMMDDTHHMMSSZ (<run UTC>).

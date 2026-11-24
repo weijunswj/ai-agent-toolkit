@@ -484,7 +484,7 @@ test('red: an ENABLED repository with stale rows today gets one stale-check line
   const text = world.evaluate();
   const line = /Stale check [^\n]*?Controller: answer each this turn: [^\n]*?next ask to the owner\./.exec(text)?.[0];
   assert.ok(line, text);
-  assert.match(line, new RegExp(`^Stale check ${staleToday()}: 4 rows to answer \\(JUDGE\\? 1, OWNER OK\\? 1, FOLD\\? 1, POLISH 1\\)\\. Run node "[^"]*toolkit-controller-check\\.cjs" --checkout "[^"]+" --skip toolkit,guidebook,instructions,memory,tasks,handoff,programme,traces,ci,footer,refs for the rows`));
+  assert.match(line, new RegExp(`^Stale check ${staleToday()}: 4 rows to answer \\(JUDGE\\? 1, OWNER OK\\? 1, FOLD\\? 1, POLISH 1\\)\\. Run node "[^"]*toolkit-controller-check\\.cjs" --checkout "[^"]+" --skip toolkit,guidebook,instructions,memory,tasks,programme,traces,ci,footer,refs for the rows`));
   assert.match(line, /close each child you judge done yourself/);
   assert.doesNotMatch(text, /CLOSE LIST|post (?:it )?to the owner/);
   assert.deepEqual(world.started.stale, [], 'today\'s run already happened');

@@ -26,10 +26,6 @@
 //   ci, footer, refs                         any controller (refs checks this Toolkit copy: no
 //                                            permission row or document names a retired or missing
 //                                            script)
-//   handoff                                  any controller given --handoff and --checkout: the
-//                                            controller handoff snapshot against its live sources,
-//                                            read-only (`toolkit-store.cjs handoff --check`); for a
-//                                            session start, so periodic runs skip it
 // Every check runs an existing script as a child process, except stale, which also reads the
 // parents' sub-issues read-only with `gh api` (it needs a signed-in gh).
 // The host is `projects` when the Projects library folder exists (only Claude Projects has
@@ -39,7 +35,7 @@
 // Usage: node repo/scripts/toolkit-controller-check.cjs [--host projects|chat] [--checkout <dir>]
 //          [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>]
 //          [--task <kind>=<prompt file>]... [--since <ISO time>] [--skip <name,...>]
-//          [--handoff <folder>] [--expand] [--json]
+//          [--expand] [--json]
 //   --checkout       a checkout of the controlled repository (CI check-up and the programme binding)
 //   --repo           the GitHub repository for the footer scan (default: the binding's repository)
 //   --guidebook      the Projects library copy of the skill (default on a Projects host:
@@ -49,7 +45,6 @@
 //   --task           a stored task prompt and its kind (daily-check-in or hourly-nudge); repeatable
 //   --since          footer scan start (default: 26 hours ago)
 //   --skip           checks the caller already ran elsewhere
-//   --handoff        the store checkout (or other folder) that holds the controller handoff snapshot
 //   --expand         every line of every check, passed and skipped ones included (default: one
 //                    line when clear; otherwise each check that needs attention or could not run,
 //                    with up to 3 detail lines and a count of the rest; programme findings are
@@ -64,7 +59,7 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const LIBRARY = '/mnt/project-files/toolkit/web-controller-projects';
 const BINDING_REL = '.github/toolkit-programme.json';
-const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'handoff', 'programme', 'traces', 'stale', 'ci', 'footer', 'refs'];
+const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'stale', 'ci', 'footer', 'refs'];
 const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
@@ -88,12 +83,11 @@ const SCRIPTS = {
   ci: 'skills/secure-ci-cd/scripts/ci-checkup.cjs',
   footer: 'repo/scripts/toolkit-github-footer-sweep.cjs',
   refs: 'repo/scripts/check-script-references.cjs',
-  handoff: 'repo/scripts/toolkit-store.cjs',
 };
-const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--handoff <folder>] [--json]';
+const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--json]';
 
 function parseArgs(argv) {
-  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, handoff: null, skip: new Set(), json: false, expand: false };
+  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, skip: new Set(), json: false, expand: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -121,7 +115,7 @@ function parseArgs(argv) {
         if (!CHECKS.includes(name)) throw new Error(`--skip names unknown check ${name}`);
         options.skip.add(name);
       }
-    } else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff'].includes(arg)) options[arg.slice(2)] = value();
+    } else if (['--checkout', '--guidebook', '--instructions', '--memory'].includes(arg)) options[arg.slice(2)] = value();
     else throw new Error(`unknown argument ${arg}`);
   }
   return options;
@@ -492,9 +486,6 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'footer') {
       if (!repo) { skip(name, 'pass --repo <owner/name>'); continue; }
       outcome = checkFooter(run, repo, since);
-    } else if (name === 'handoff') {
-      if (!options.handoff || !options.checkout) { skip(name, 'pass --handoff <folder holding the snapshot> and --checkout <dir>'); continue; }
-      outcome = statusCheck(run, SCRIPTS.handoff, ['handoff', '--check', '--store', options.handoff, '--repo-root', options.checkout], `toolkit-store.cjs handoff --store ${options.handoff} --repo-root ${options.checkout}`);
     } else outcome = statusCheck(run, SCRIPTS.refs, [], 'check-script-references.cjs');
     checks.push({ name, ...outcome });
   }

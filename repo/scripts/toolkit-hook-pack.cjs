@@ -49,11 +49,9 @@ const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'unset', 'legacy-on', 'v1']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
-const POSTCONDITIONS = Object.freeze(['no-local-decision-write', 'no-handoff-write', 'handoff-write', 'handoff-refresh', 'no-handoff-refresh']);
-// The session id every row's hook calls carry (unless the payload sets one): the handoff hook's session file is named after it.
+const POSTCONDITIONS = Object.freeze(['no-local-decision-write']);
+// The session id every row's hook calls carry (unless the payload sets one).
 const HOOK_SESSION_ID = 'hook-pack';
-// A handoff refresh a row started is polled every 100 ms for up to this long before the row reads the fixture.
-const HANDOFF_WAIT_MS = 20000;
 const HOST_SESSIONS = Object.freeze(['matching', 'mismatching', 'empty']);
 const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'issue', 'note', 'steps', 'host_session', 'postcondition']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
@@ -113,9 +111,6 @@ function rowErrors(row) {
   }
   if (!STATUSES.includes(row.status)) errors.push(`status must be ${STATUSES.join(' or ')}`);
   if (row.postcondition !== undefined && !POSTCONDITIONS.includes(row.postcondition)) errors.push('unknown postcondition');
-  if (['handoff-refresh', 'no-handoff-refresh'].includes(row.postcondition) && !row.fixture?.handoff) errors.push(`${row.postcondition} needs a handoff fixture`);
-  // The snapshot a handoff fixture builds is not reset between hosts, so it runs on one host only.
-  if (row.fixture?.handoff && row.hosts?.join() !== 'claude') errors.push('a handoff fixture runs on claude alone: its snapshot is built once and not reset for a second host');
   if (row.status === 'known-bad') {
     if (typeof row.lane !== 'string' || !row.lane.trim()) errors.push('a known-bad row names the lane that fixes it');
     if (typeof row.added !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.added)) errors.push('a known-bad row gives the date it was added (YYYY-MM-DD)');
@@ -159,11 +154,7 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
-  if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
-  if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
-    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'nul', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
-    || (['deleted', 'stale'].includes(fixture.handoff.memory) && fixture.handoff.session !== 'checked'))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved, nul or unchanged }, or { session: checked, memory: deleted or stale }');
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -419,9 +410,6 @@ class Fixture {
     if (!spec.repo && !spec.evidence_merge) this.env.GH_REPO = 'toolkit-test-fixture/fixture';
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
-    // A scheduled session's handoff signal: from its launcher, or the file its first tool step makes.
-    if (spec.handoff_off === 'env') this.env.TOOLKIT_HANDOFF_HOOK = 'off';
-    if (spec.handoff_off === 'file') fs.writeFileSync(path.join(this.home, '.toolkit-handoff-off'), '');
     if (spec.repo) this.#repo(spec.repo);
     if (spec.repo?.legacy_answer) {
       const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
@@ -463,7 +451,6 @@ class Fixture {
     }
     if (spec.owner_session) this.#ownerSession();
     if (spec.bank_open) this.#bankOpen();
-    if (spec.handoff) this.#handoff(spec);
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
   }
@@ -707,54 +694,6 @@ cp.spawnSync = function(file, args, options) {
     if (!noted) throw new Error('the fixture bank could not be noted');
   }
 
-  // The controller handoff snapshot the after-tool hook keeps fresh (toolkit-handoff-hook.cjs): a memory
-  // folder and its snapshot, taken 50 minutes ago, with the hook's record of it. For `checked`, the session
-  // record of a first check two minutes ago, which held the memory as it was then. For `moved`, the memory
-  // is then saved, as the tool call under test just did; for `nul`, saved holding a NUL byte; for `deleted`,
-  // owner-rules.md is then deleted. For `stale`, the snapshot already removed owner-rules.md and this
-  // session holds its old bytes again. The folder sits beside work, outside the snapshot.
-  #handoff(spec) {
-    const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
-    const handoff = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
-    const memory = path.join(this.dir, 'handoff', 'memory');
-    const store = path.join(this.dir, 'handoff', 'store');
-    const userState = path.join(this.home, '.ai-agent-toolkit', 'user-state');
-    const sessionFile = path.join(userState, 'handoff-sessions', `${crypto.createHash('sha256').update(HOOK_SESSION_ID).digest('hex').slice(0, 16)}.json`);
-    const save = (file, text, ageMs) => {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, text);
-      const time = this.#now(ageMs);
-      fs.utimesSync(file, time, time);
-    };
-    const memoryFile = path.join(memory, 'MEMORY.md');
-    save(memoryFile, '# Memory\n- queue: #1\n', 60 * 60 * 1000);
-    save(path.join(memory, 'owner-rules.md'), 'merge commits only\n', 2 * 60 * 60 * 1000);
-    const stamp = { taken_at: this.#now(50 * 60 * 1000).toISOString(), toolkit_version: require(path.join(ROOT, 'repo', 'scripts', 'toolkit-version.cjs')).readToolkitVersion(), repository_commit: this.head };
-    const rulesFile = path.join(memory, 'owner-rules.md');
-    handoff.write(store, handoff.plan({ base: store, repository, sources: handoff.normaliseSources({ memory }, this.work), stamp }), repository);
-    if (spec.handoff.memory === 'stale') {
-      // An earlier session held owner-rules.md and deleted it; its run removed it from the snapshot.
-      const held = handoff.sessionRows({ memory, instructions: null, files: [] });
-      const rules = fs.readFileSync(rulesFile);
-      fs.rmSync(rulesFile);
-      handoff.write(store, handoff.plan({ base: store, repository, sources: null, stamp, session: { rows: held, real: handoff.realBySource(held) } }), repository);
-      save(rulesFile, rules, 2 * 60 * 60 * 1000);
-    }
-    fs.mkdirSync(userState, { recursive: true });
-    fs.writeFileSync(path.join(userState, 'handoff-refresh.json'), `${JSON.stringify({ out: store, repo_root: this.work, repository, at: stamp.taken_at }, null, 2)}\n`);
-    if (spec.handoff.session === 'checked') {
-      const rows = handoff.sessionRows({ memory, instructions: null, files: [] });
-      const checkedAt = this.#now(2 * 60 * 1000).getTime();
-      fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-      fs.writeFileSync(sessionFile, `${JSON.stringify({ started_at: checkedAt, checked_at: checkedAt, rows, real: handoff.realBySource(rows) }, null, 2)}\n`);
-    }
-    if (spec.handoff.memory === 'moved') save(memoryFile, '# Memory\n- queue: #7\n', 30 * 1000);
-    if (spec.handoff.memory === 'nul') save(memoryFile, '# Memory\n- queue: #7\0\n', 30 * 1000);
-    if (spec.handoff.memory === 'deleted') fs.rmSync(rulesFile);
-    this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex'),
-      ...(spec.handoff.memory === 'deleted' ? { removedFile: 'memory/owner-rules.md' } : {}) };
-  }
-
   // Writes the fixture's paths into a payload or transcript value. A payload also gets {plugin}, the
   // plugin copy its hooks run from, so a row can name Toolkit's own script as the hooks see it.
   expand(value, plugin) {
@@ -853,38 +792,6 @@ async function runRow(row, hosts, { roots, scratch }) {
   return results;
 }
 
-// Whether a handoff refresh a hook started has landed: the snapshot is current, this session's record
-// holds the saved memory (the run rewrites that record last), and a deleted memory file has left the
-// snapshot, its copy included. A source the check refuses (a NUL byte) never lands, so a refresh an
-// older hook started for it is awaited in full and reported, not a crash.
-function handoffLanded({ handoff }) {
-  const { store, repository, sessionFile, memoryHash, removedFile } = handoff;
-  const lib = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
-  let state = null;
-  try { state = lib.check({ base: store, repository }).state; } catch (error) { if (!(error instanceof lib.HandoffError)) throw error; }
-  if (state !== 'CURRENT') return false;
-  if (removedFile) {
-    const folder = lib.snapshotFolder(repository);
-    if (fs.existsSync(path.join(store, folder, ...removedFile.split('/'))) || lib.readManifest(store, folder).files.some(row => row.path === removedFile)) return false;
-  }
-  const session = readJsonFile(sessionFile);
-  return Array.isArray(session?.rows) && session.rows.some(row => row.path === 'MEMORY.md' && row.sha256 === memoryHash);
-}
-
-// Polls a check every 100 ms until it passes, or until HANDOFF_WAIT_MS has passed.
-async function waitFor(passed) {
-  const end = Date.now() + HANDOFF_WAIT_MS;
-  while (!passed()) {
-    if (Date.now() >= end) return false;
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  return true;
-}
-
-function readJsonFile(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-}
-
 async function runOnHost(row, host, fixture, roots) {
   // Every event uses the real host matcher and process, sharing only this row's isolated home.
   // A mismatch in an earlier step fails the row, even if the final merge happens to be refused.
@@ -903,14 +810,6 @@ async function runOnHost(row, host, fixture, roots) {
   if (row.host_session !== undefined) env.TOOLKIT_HOST_SESSION = row.host_session === 'matching' ? payload.session_id : row.host_session === 'empty' ? '' : 'different-fixture-session';
   const decisionFile = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   const oldDecision = fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null;
-  // The handoff hook's session files: their names and times, before and after the event.
-  const handoffSessions = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'handoff-sessions');
-  const handoffWrites = () => (fs.existsSync(handoffSessions) ? fs.readdirSync(handoffSessions).map(name => `${name}:${fs.statSync(path.join(handoffSessions, name)).mtimeMs}`).sort().join('|') : '');
-  const oldHandoff = handoffWrites();
-  // The lock a handoff hook writes when it starts a background refresh: its time before and after the event.
-  const handoffLock = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'handoff-refresh.lock');
-  const lockTime = () => (fs.existsSync(handoffLock) ? fs.statSync(handoffLock).mtimeMs : null);
-  const oldLock = lockTime();
   const before = fixture.snapshot();
   const decisions = [];
   const contexts = [];
@@ -921,19 +820,8 @@ async function runOnHost(row, host, fixture, roots) {
     decisions.push(hookDecision(host, hook, result));
     contexts.push(hookContext(host, event, result));
   }
-  // A handoff refresh this event started is awaited before the fixture is read or removed.
-  const lockAfter = lockTime();
-  const handoffStarted = Boolean(fixture.handoff) && lockAfter !== null && lockAfter !== oldLock;
-  const landed = handoffStarted ? await waitFor(() => handoffLanded(fixture)) : false;
   const problems = [];
   if (row.postcondition === 'no-local-decision-write' && (fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null) !== oldDecision) problems.push('a local governance decision was written');
-  if (row.postcondition === 'no-handoff-write' && handoffWrites() !== oldHandoff) problems.push('the handoff hook wrote its session file');
-  if (row.postcondition === 'handoff-write' && handoffWrites() === oldHandoff) problems.push('the handoff hook wrote no session file');
-  if (row.postcondition === 'handoff-refresh' && !handoffStarted) problems.push('the handoff hook started no refresh');
-  if (row.postcondition === 'handoff-refresh' && handoffStarted && !landed) problems.push(`the refresh it started did not land within ${HANDOFF_WAIT_MS / 1000} s`);
-  if (row.postcondition === 'no-handoff-refresh' && handoffStarted) problems.push('the handoff hook started a refresh');
-  // A hook that failed silently also starts nothing, so the hook must have recorded this check.
-  if (row.postcondition === 'no-handoff-refresh' && handoffWrites() === oldHandoff) problems.push('the handoff hook recorded no check (its session file is unchanged)');
   const after = fixture.snapshot();
   const changedFiles = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(file => before[file] !== after[file]);
   if (changedFiles.length) problems.push(`a fixture file changed: ${changedFiles.join(', ')}`);

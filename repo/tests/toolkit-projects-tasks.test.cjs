@@ -540,7 +540,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --refresh /mnt/project-files/toolkit/web-controller-projects` every run, whatever the other checks say',
     'an old clone prints `SKILL COPY FAILED STALE_CHECKOUT <head7>, main <tip7>` and writes nothing', '`GUIDEBOOK CURRENT <Version> toolkit <x.y.z>, main <commit7>`',
     '`GUIDEBOOK REFRESHED <old> -> <new>, main <commit7>` and any `BLOCK CHANGED <version>`', 'Then run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --card`',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,stale,ci,handoff,guidebook`', 'adding `--repo example-owner/example-repo` when step 9a applies',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,stale,ci,guidebook`', 'adding `--repo example-owner/example-repo` when step 9a applies',
     '`CONTROLLER CHECK: clear ...`: write "**Controller check:** clear".',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"SKILL CARD OUTDATED: saved <old>, main <new>, text <fp8> | " when `--card` printed it, unless memory has a "skill card" line with the same text <fp8>',
     '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
@@ -1177,8 +1177,8 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   // The nudge's step 9 names the governance session-start hook for the stale check.
   assert.match(nudge, /the governance session-start hook runs the stale check, and the daily check-in the decision traces and CI drift/);
   // The controller check's stale check runs only from the governance session-start hook: every Projects call skips it.
-  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,stale,ci,handoff,guidebook`/);
-  assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs,handoff`/);
+  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,stale,ci,guidebook`/);
+  assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`/);
   const ownerAsks = fs.readFileSync(path.join(projects, 'reference', 'owner-asks.md'), 'utf8');
   assert.match(ownerAsks, /\*\*Owner UAT comes after agent UAT\.\*\* Ask the owner for UAT only once every agent UAT step at that build passed[^\n]*lists only the steps no tool reaches[^\n]*links the agent UAT evidence/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
@@ -1265,7 +1265,7 @@ test('rendered daily check-ins run workflow health, and the decision trace and C
   const text = rendered('daily-check-in');
   const step = text.slice(text.indexOf('11b. TOOL STEP (shell, GitHub): CHECKERS'), text.indexOf('12. Promises'));
   for (const phrase of ['the hourly controller check skips them', 'R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs,handoff`',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`',
     '"TRACE GAPS: <its counts> | "', '--repair --out <file>', 'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', '"CI GAPS: <n> | "']) {
     assert.ok(step.includes(phrase), phrase);
   }
@@ -1591,27 +1591,23 @@ test('ping rules: each invariant and matrix row is pinned in the file that state
   for (const [label, rel, phrase] of rows) assert.ok(at(rel).includes(phrase), `${label}: ${rel}`);
 });
 
-// Owner rule: the handoff refresh never runs in a scheduled task. No host marks a session as
-// scheduled, so every Toolkit task prompt's first tool call creates the file the after-tool handoff
-// hook checks first (it runs after each call, so that first call is covered), and whoever runs a
-// ping run's tool steps does the same. The file name is the one the hook reads.
-test('every Toolkit scheduled task keeps the handoff refresh out of its session with its first tool call', () => {
-  const step = '- Your very first tool call, before the first check: run `touch ~/.toolkit-handoff-off` in a shell. The empty file turns Toolkit\'s handoff hook off for this scheduled session.';
+// The retired handoff snapshot's hook is gone, so no stored prompt or checklist keeps the step that
+// turned it off: a stored prompt starts with its first check again, and an unswapped pointer's run
+// loads none of it either.
+test('no Toolkit scheduled task keeps the retired handoff step', () => {
   for (const kind of Object.keys(PARAMS)) {
     for (const session of ['bound', 'fresh']) {
       const promptParams = validateParams(kind, { ...PARAMS[kind], session });
       const stored = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
       const [block] = findBlocks(stored).blocks;
-      assert.equal(block.body.split('\n')[1], step, `${kind} ${session}: the stored prompt's first step`);
-      const loaded = tasks().expand(kind, promptParams);
-      if (block.name === 'TASK-PING') assert.ok(loaded.includes(step), `${kind} ${session}: an unswapped pointer's run gets it too`);
+      assert.match(block.body.split('\n')[1], /^- First check, before anything else: /, `${kind} ${session}: the stored prompt's first step`);
+      assert.doesNotMatch(stored, /handoff/i, `${kind} ${session}: stored prompt`);
+      assert.doesNotMatch(tasks().expand(kind, promptParams), /toolkit-handoff|--skip [^`]*handoff/, `${kind} ${session}: loaded text`);
     }
   }
-  for (const file of ['ping-run.md', 'hourly-nudge.md', 'daily-check-in.md']) {
-    assert.ok(fs.readFileSync(path.join(TASKS, file), 'utf8').includes('first runs `touch ~/.toolkit-handoff-off`'), `${file}: tool steps set it first`);
+  for (const file of fs.readdirSync(TASKS)) {
+    assert.doesNotMatch(fs.readFileSync(path.join(TASKS, file), 'utf8'), /toolkit-handoff|--skip [^`]*handoff/, file);
   }
-  const hook = fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-handoff-hook.cjs'), 'utf8');
-  assert.ok(hook.includes("'.toolkit-handoff-off'"), 'the hook reads the file the prompts create');
 });
 
 // A checklist step that runs `TK/...` or `--checkout R` before the step that clones it fails when run
