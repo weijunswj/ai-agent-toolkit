@@ -171,7 +171,7 @@ test('fix1 L2: skip children of a catalogued registered parent and still adopt u
   assert.deepEqual(f.parent().attention.filter(e=>e.code==='CHILD_ADDED').map(e=>e.issue),[12]);
 });
 
-test('a task the sweep adds later lands before the task pinned last in its band, in the catalogue order and natively',()=>{
+test('a task the sweep adds later lands before the queued task marked last, in the catalogue order and natively',()=>{
   const f=fixture([2,3],[3]);
   const lifecycle=value=>f.store.mutate('child',3,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:value})});
   lifecycle('PLANNED'); f.run();
@@ -183,7 +183,7 @@ test('a task the sweep adds later lands before the task pinned last in its band,
   assert.equal(f.parent().outcomes.find(o=>o.issue===3).last,true,'the pin survives the sweep');
   assert.deepEqual(f.github.issues.get(1).subs,[2,4,5,3],'native sub-issues follow, with the pinned task last');
   lifecycle('ACTIVE'); f.run();
-  assert.deepEqual(f.github.issues.get(1).subs,[2,3,4,5],'a pinned task in progress ends its NOW band, never below LATER');
+  assert.deepEqual(f.github.issues.get(1).subs,[2,3,4,5],'a task marked last that is in flight sorts in its band by order: last places only queued tasks');
 });
 
 test('fix1 L2: failed adoption never records CHILD_ADDED',()=>{
@@ -787,8 +787,8 @@ test('agent UAT first: a listed blocker still queues a merged task and shows in 
   const f=fixture(); pr(f,22,merged('2026-11-07T00:00:00Z','Refs #2',{head:UAT_HEAD}));
   owing(f, doc=>({pr:{...doc.pr,number:22},uat:{state:'PENDING',at_head:UAT_HEAD},blockers:['Laptop offline']}));
   f.run();
-  assert.deepEqual([statusOf(f),owedOn(f).waiting],['NOW · QUEUED','Blocked: Laptop offline']);
-  assert.equal(owedOn(f).current,'- #2 Issue 2 · PR #22 · blocked: Laptop offline');
+  assert.deepEqual([statusOf(f),owedOn(f).waiting],['QUEUED','Blocked: Laptop offline']);
+  assert.equal(owedOn(f).current,undefined,'a queued task, blocked or not, leaves CURRENT');
 });
 
 test('agent UAT first: NOW · AGENT UAT rows sort after work in progress and before NOW · CLOSE CHECK rows',()=>{
@@ -800,7 +800,7 @@ test('agent UAT first: NOW · AGENT UAT rows sort after work in progress and bef
   f.run();
   const rows=f.github.issues.get(1).body.split('\n').filter(line=>/^\|[^|]*\|#\d+\|/.test(line)).map(line=>line.split('|').slice(2,4).join(' '));
   assert.deepEqual(rows,['#3 NOW · IN PROGRESS','#2 NOW · AGENT UAT','#4 NOW · CLOSE CHECK']);
-  assert.match(f.github.issues.get(1).body,/Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW · QUEUED, LATER/);
+  assert.match(f.github.issues.get(1).body,/Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, then QUEUED in work order/);
 });
 
 const OWNER_PASS = {uat:{state:'PASSED',at_head:UAT_HEAD}};
@@ -1133,7 +1133,7 @@ test('self-record S5: two open claimants stay report-only, with a finding naming
   const f=unrecorded(); pr(f,20,{body:'Refs #2',branch:'a'}); pr(f,21,{body:'Closes #2',branch:'b'});
   const report=f.run();
   assert.deepEqual(recorded(f),UNRECORDED);
-  assert.equal(graphRow(f,2),'LATER');
+  assert.equal(graphRow(f,2),'QUEUED');
   assert.match(untracked(report)[0].detail,/open PRs #20, #21 claim this task/);
 });
 

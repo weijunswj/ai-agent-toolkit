@@ -18,7 +18,7 @@
 // Pure functions only: no reads, no writes.
 
 // Archive contents are quotations, even when they contain old records or index markers.
-function isArchiveComment(body) { return /^<!-- programme-page-archive key=graph-(?:retired|completed|optional|later|now)-[1-9][0-9]* -->\r?\n# Programme graph: (?:RETIRED|COMPLETED|OPTIONAL|LATER|NOW)\r?\n/.test(String(body || ''))
+function isArchiveComment(body) { return /^<!-- programme-page-archive key=graph-(?:retired|completed|queued|now|optional|later)-[1-9][0-9]* -->\r?\n# Programme graph: (?:RETIRED|COMPLETED|QUEUED|NOW|OPTIONAL|LATER)\r?\n/.test(String(body || ''))
     || /^<!-- programme-page-archive key=note-[0-9a-f]{12}-[1-9][0-9]* -->\r?\n# Archived notes: part [1-9][0-9]* of [1-9][0-9]*\r?\n/.test(String(body || '')); }
 
 const OTHER_COMMENTS = 'Other comments';

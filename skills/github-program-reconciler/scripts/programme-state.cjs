@@ -61,8 +61,12 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 const CLASSES = ['COMMITTED', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
-// Classes from before Now and Later, read as COMMITTED and sorted like any other task (the graph
-// sorts by group, then `order`, the priority, then child number). Each pass reports CLASS_LEGACY
+// Work-order inputs on an outcome (queueStep): `priority` P0 or P1 (none is normal work) and the
+// controller's `size` judgement after evaluating the task (none is unknown, never guessed quick).
+const QUEUE_PRIORITIES = ['P0', 'P1'];
+const QUEUE_SIZES = ['S', 'M', 'L'];
+// Classes from before Now and Later, read as COMMITTED and sorted like any other task (in work
+// order, then child number). Each pass reports CLASS_LEGACY
 // with a patch that migrates them in one step, renumbering `order` in the old CORE, HARDENING,
 // LATER sequence; a write never adds one. Remove these once no parent document carries them.
 const LEGACY_CLASSES = ['CORE', 'HARDENING', 'LATER'];
@@ -182,7 +186,7 @@ const SHAPES = {
   finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics', 'kind', 'due'], optional: ['diagnostics', 'kind', 'due'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
-  outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix', 'last'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix', 'last'] },
+  outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix', 'last', 'priority', 'size', 'after'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix', 'last', 'priority', 'size', 'after'] },
   release_plan: { all: ['record', 'comment_id'], optional: ['record', 'comment_id'] },
   gate: { all: ['role', 'state', 'session_id', 'assignment', 'route', 'returns'], optional: ['assignment'] },
   assignment: { all: ['id', 'role'] },
@@ -256,7 +260,7 @@ function validateEffects(errors, effects) {
     if (['post_archive_comment', 'edit_archive_comment'].includes(effect?.kind)) {
       const target = effect.target;
       checkShape(errors, target, { all: ['issue', 'key', 'comment_id', 'login', 'before', 'digest'] }, `pending_effects[${index}].target`);
-      check(errors, isObject(target) && isInt(target.issue, 1) && (/^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/.test(target.key) || effect.kind === 'post_archive_comment' && archiveTools().NOTE_KEY.test(target.key))
+      check(errors, isObject(target) && isInt(target.issue, 1) && (archiveTools().GRAPH_KEY.test(target.key) || effect.kind === 'post_archive_comment' && archiveTools().NOTE_KEY.test(target.key))
         && isText(target.login) && /^[0-9a-f]{64}$/.test(target.digest)
         && (effect.kind === 'post_archive_comment' ? target.comment_id === null && target.before === null
           : isInt(target.comment_id, 1) && /^[0-9a-f]{64}$/.test(target.before)), `pending_effects[${index}].target must name a bounded archive intent`);
@@ -273,14 +277,14 @@ function validatePageArchive(errors, archive) {
     if (!isObject(entry)) continue;
     const note = entry.kind === 'note';
     checkShape(errors, entry, { all: ['key', 'kind', 'group', 'title', 'comment_id', 'login', 'digest', 'state', 'untrusted_ids', 'untrusted_before', ...(note ? ['copy'] : [])], optional: ['untrusted_ids', 'untrusted_before'] }, 'page_archive entry');
-    check(errors, typeof entry.key === 'string' && (note ? archiveTools().NOTE_KEY : /^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/).test(entry.key) && !keys.has(entry.key), 'page_archive key must be unique and fixed');
+    check(errors, typeof entry.key === 'string' && (note ? archiveTools().NOTE_KEY : archiveTools().GRAPH_KEY).test(entry.key) && !keys.has(entry.key), 'page_archive key must be unique and fixed');
     keys.add(entry.key);
     // A note part is one verified, never-edited comment holding marked hand-written text; `copy`
     // is the SHA-256 of the whole page saved to the private store before that text could move.
     if (note) check(errors, entry.group === null && typeof entry.copy === 'string' && /^[0-9a-f]{64}$/.test(entry.copy), 'page_archive note must have no group and name its saved page copy');
-    // OPTIONAL is a legacy group: optional rows now show and archive as LATER, and an OPTIONAL part a
-    // parent still lists is kept and redrawn empty.
-    else check(errors, entry.kind === 'graph' && [...archiveTools().GROUPS, 'OPTIONAL'].includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
+    // OPTIONAL and LATER are legacy groups (archiveTools().LEGACY_GROUPS): their rows now show and
+    // archive as QUEUED, and such a part a parent still lists is kept and redrawn empty.
+    else check(errors, entry.kind === 'graph' && [...archiveTools().GROUPS, ...archiveTools().LEGACY_GROUPS].includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
     check(errors, isText(entry.title) && entry.title.length <= 200, 'page_archive title must be bounded text');
     check(errors, ['pending', 'moved', ...(note ? ['withdrawn'] : [])].includes(entry.state), 'page_archive state must be pending or moved, or withdrawn for a note');
     check(errors, entry.comment_id === null ? entry.login === null && entry.state === 'pending' : isInt(entry.comment_id, 1) && isText(entry.login) && !ids.has(entry.comment_id), 'page_archive id must be unique with verified login');
@@ -339,9 +343,23 @@ function validateParent(doc) {
       check(errors, optional(outcome.name, isText), `${at}.name must be text`);
       check(errors, optional(outcome.description, isText), `${at}.description must be text`);
       check(errors, optional(outcome.last, value => value === true), `${at}.last must be true or left out`);
+      // Work-order inputs (queueStep): set by the controller, never derived.
+      check(errors, optional(outcome.priority, value => QUEUE_PRIORITIES.includes(value)), `${at}.priority must be ${QUEUE_PRIORITIES.join(' or ')}, or left out`);
+      check(errors, optional(outcome.size, value => QUEUE_SIZES.includes(value)), `${at}.size must be ${QUEUE_SIZES.join(', ')}, or left out`);
+      check(errors, outcome.priority === undefined || (outcome.last !== true && outcome.class !== 'OPTIONAL'), `${at}.priority cannot go with last or class OPTIONAL: a task is either priority or marked to go last`);
     }
     // Expected parents must be the programme parent or another outcome, and the tree must have no loop.
     const outcomes = new Map((Array.isArray(doc.outcomes) ? doc.outcomes : []).filter(isObject).map(entry => [entry.issue, entry]));
+    // A task waits only for catalogued tasks, each named once, never itself.
+    for (const outcome of outcomes.values()) {
+      if (outcome.after === undefined) continue;
+      const after = outcome.after;
+      check(errors, Array.isArray(after) && after.length > 0 && after.every(number => isInt(number, 1)), `outcome ${outcome.issue}: after must be a list of issue numbers`);
+      if (!Array.isArray(after)) continue;
+      check(errors, new Set(after).size === after.length, `outcome ${outcome.issue}: after names an issue twice`);
+      check(errors, !after.includes(outcome.issue), `outcome ${outcome.issue}: after cannot name the task itself`);
+      for (const number of after.filter(value => isInt(value, 1) && value !== outcome.issue)) check(errors, outcomes.has(number), `outcome ${outcome.issue}: after names #${number}, which is not a catalogued task`);
+    }
     for (const outcome of outcomes.values()) {
       if (outcome.parent === null || outcome.parent === undefined) continue;
       check(errors, outcome.parent === doc.parent_issue || outcomes.has(outcome.parent), `outcome ${outcome.issue}: parent ${outcome.parent} is not the programme parent or a catalogued outcome`);
@@ -420,7 +438,6 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
-  BATCH_NEXT: { source: 'reconcile', queue: true, next_action: "Controller: no NOW task needs a gate lane. Start the batch's next task (picked tasks lead LATER); if none is left, read all of LATER and pick the next batch: top priority, then quickest, at most 6 PRs and one large task; set their order to lead LATER and record the pick" },
   QUEUED_BUT_MOVING: { source: 'reconcile', queue: true, next_action: 'Controller: queue the gate\'s missed `assign` (it drops the lane wait), or dispose with a reason if no gate is working it' },
   TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued), or mark it kept open on purpose with a new keep_open reason' },
   AGENT_UAT_UNSTARTED: { source: 'reconcile', queue: true, next_action: 'Controller: start this task\'s agent UAT now in its own lane, in parallel with the gate lane, and record its start (update --patch, private.agent_uat state STARTED); until then a new G0 or G1 assignment is refused. Or dispose with a reason' },
@@ -433,6 +450,7 @@ const FINDING_CODES = Object.freeze({
   JOURNAL_INVALID: { source: 'reconcile', next_action: 'Controller: check the unusable checkpoint journal' },
   CLASS_LEGACY: { source: 'reconcile', next_action: 'Controller: migrate the old classes with the patch from reconcile --json' },
   ORDER_TIE: { source: 'reconcile', next_action: 'Controller: give the tied tasks distinct priorities' },
+  DEPENDENCY_CYCLE: { source: 'reconcile', next_action: 'Controller: these queued tasks each wait for another in a loop, so their `after` is ignored and they keep their place; remove the `after` entry that is wrong with update-parent' },
   DUPLICATE_HIERARCHY: { source: 'reconcile', next_action: 'Controller: decide which registered parent owns the issue; nothing was moved' },
   // Drift: part of the programme fell behind its state with nothing to fix it (programme-drift.cjs).
   CHILD_NOT_NATIVE: { source: 'reconcile', next_action: 'Controller: an open task PR names this closed issue, but it is not under the programme parent; attach it natively, mark it outside the programme, or dispose with a reason' },
@@ -458,6 +476,16 @@ const FINDING_CODES = Object.freeze({
 // they list first, and a disposed one resolves when its condition clears so a later stall is new.
 // A code joins it with `queue: true` in its FINDING_CODES row.
 const WORK_QUEUE_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].queue === true));
+// Codes a newer Toolkit removed, each with its old source. A stored parent may still hold such a
+// finding: it reads (validateAttention), never counts or lists as open (openFindings), and the
+// parent's next write drops it (dropRetiredFindings). Remove a code here once no governed store holds it.
+const RETIRED_FINDING_CODES = Object.freeze({ BATCH_NEXT: 'reconcile' });
+function dropRetiredFindings(doc) {
+  if (Array.isArray(doc?.attention) && doc.attention.some(entry => Object.hasOwn(RETIRED_FINDING_CODES, entry?.code))) {
+    doc.attention = doc.attention.filter(entry => !Object.hasOwn(RETIRED_FINDING_CODES, entry?.code));
+  }
+  return doc;
+}
 // The stale-work net: rows marked `net: true`, and every work-queue code.
 const NET_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].net === true || WORK_QUEUE_CODES.has(code)));
 // A net finding new for this long, or acknowledged past its due time, is called out to the controller.
@@ -526,12 +554,6 @@ const TASK_MERGED_OPEN_HOURS = 1;
 // is an idle task, so it gets the idle window. A longer planned wait is a dispose with a reason, which
 // holds while the task stays still.
 const KEPT_OPEN_IDLE_HOURS = TASK_IDLE_HOURS;
-// The batch tail guard: a NOW task still for this long, waiting on something other than the owner,
-// stops holding the next batch (it stays NOW and keeps its own work-queue finding).
-const BATCH_TAIL_HOURS = 24;
-// A free lane is reported once no open task's state has changed for this long, so a controller that
-// is already starting the next task, or a batch that has only just finished, is not flagged.
-const BATCH_NEXT_HOURS = 1;
 // An open PR with no update (push, comment, review or edit) for this long no longer counts as moving its task.
 const PR_STALE_HOURS = 24;
 // A task behind a blocker (a moving native one, or one its state lists) is left off the work queue only
@@ -650,7 +672,8 @@ function validateAttention(errors, attention) {
     check(errors, isObject(entry), `${at} must be an object`);
     if (!isObject(entry)) continue;
     checkShape(errors, entry, 'finding', at);
-    const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
+    const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code]
+      : Object.hasOwn(RETIRED_FINDING_CODES, entry.code) ? { source: RETIRED_FINDING_CODES[entry.code] } : null;
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
     if (SIZE_CODES.includes(entry.code)) validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
     else if (entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') {
@@ -842,7 +865,7 @@ function answerFinding(doc, { id, state, reason = null, next = null, due = null,
 }
 
 function attentionCounts(attention) {
-  const list = Array.isArray(attention) ? attention : [];
+  const list = openFindings(attention);
   return { new: list.filter(entry => entry.state === 'new').length, acknowledged: list.filter(entry => entry.state === 'acknowledged').length };
 }
 
@@ -899,7 +922,7 @@ function workQueue(attention) {
 
 // Open findings, newest first.
 function openFindings(attention) {
-  return (Array.isArray(attention) ? attention : []).filter(entry => OPEN_FINDING_STATES.includes(entry.state))
+  return (Array.isArray(attention) ? attention : []).filter(entry => OPEN_FINDING_STATES.includes(entry.state) && !Object.hasOwn(RETIRED_FINDING_CODES, entry.code))
     .sort((a, b) => Date.parse(b.changed_at) - Date.parse(a.changed_at) || a.id.localeCompare(b.id));
 }
 
@@ -2176,28 +2199,30 @@ function revisionLine(parent, children) {
   return `<!-- programme-state parent=${parent.parent_issue}@${parent.revision} children=${revs} -->`;
 }
 
-// A row's Status is worked out, never stored. A task in progress (an open or draft PR, or active,
-// waiting on the owner or held) is NOW: `NOW · IN PROGRESS`, or `NOW · QUEUED` while its state lists
-// a blocker, since it cannot move until that clears, or `NOW · CLOSE CHECK` once its task PR
-// merged while the issue stays open (closeCheckDue), so the controller's close check is next, or
-// `NOW · AGENT UAT` before that while the
-// agent still owes its UAT (agentUatDue). Every other open task, optional ones too, is
-// `LATER`; a finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is
-// COMPLETED or RETIRED. A planned release names where the work merges; it does not change the
-// status. Waiting on names what an active task waits for; PRs, review and UAT are on its own page,
-// which lists every PR. Rows sort by these open bands, then COMPLETED, then RETIRED (graphOrder).
+// A row's Status is worked out, never stored. A task in flight (an open or draft PR, or active,
+// waiting on the owner or held, with no listed blocker or with a live gate over one) is
+// `NOW · IN PROGRESS`, or `NOW · CLOSE CHECK` once its task PR merged while the issue stays open
+// (closeCheckDue), so the controller's close check is next, or `NOW · AGENT UAT` before that while
+// the agent still owes its UAT (agentUatDue). Every other open task is `QUEUED`: planned work, and
+// work whose state lists a blocker with no live gate (its Waiting on names the blocker). A finished
+// outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is COMPLETED or RETIRED. A
+// planned release names where the work merges; it does not change the status. Waiting on names what
+// an active task waits for; PRs, review and UAT are on its own page, which lists every PR. Rows sort
+// by these open bands, the queue in work order, then COMPLETED, then RETIRED (graphOrder).
 const NOW_CLOSE_CHECK = 'NOW · CLOSE CHECK';
 const NOW_AGENT_UAT = 'NOW · AGENT UAT';
-const GRAPH_BANDS = Object.freeze(['NOW · IN PROGRESS', NOW_AGENT_UAT, NOW_CLOSE_CHECK, 'NOW · QUEUED', 'LATER']);
+const QUEUED = 'QUEUED';
+const IN_FLIGHT_BANDS = Object.freeze(['NOW · IN PROGRESS', NOW_AGENT_UAT, NOW_CLOSE_CHECK]);
+const GRAPH_BANDS = Object.freeze([...IN_FLIGHT_BANDS, QUEUED]);
 const GRAPH_HEADER = ['| Task | Child # | Status | Waiting on | Last Updated (SGT) |', '|---|---|---|---|---|'];
 // The parent keeps this many COMPLETED rows, the most recent; older ones and every RETIRED row sit
 // in archive comments behind one link line.
 const GRAPH_COMPLETED_SHOWN = 10;
 
+// `NOW` for a task in progress (statusText), blocked or not; `QUEUED` for any other open task.
 function graphClass(outcome, child) {
   if (!outcome || isFinished(outcome, child)) return '-';
-  if (statusText(outcome, child) === 'IN PROGRESS') return 'NOW';
-  return outcome.class === 'OPTIONAL' ? 'OPTIONAL' : 'LATER';
+  return statusText(outcome, child) === 'IN PROGRESS' ? 'NOW' : QUEUED;
 }
 
 function isFinished(outcome, child) {
@@ -2263,21 +2288,17 @@ function lastUpdated(outcome, child, issue, comments) {
   return Number.isFinite(newest) ? new Date(newest + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '-';
 }
 
-// Active rows by status band (GRAPH_BANDS: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK,
-// NOW · QUEUED, LATER), so moving work
-// leads parked work. Inside a band: rows pinned last (`last`) after the rest, so tasks added later
-// still sort before them; optional tasks after the rest of LATER; then priority (`order`, lowest
-// first) and child issue number, so the top LATER row starts next. Then every finished row, oldest
-// completion first and the most recent last (unknown times last). Nested children sort like any
-// other row.
-const pinnedLast = outcome => outcome.last === true;
+// Rows in flight by status band (IN_FLIGHT_BANDS: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE
+// CHECK), each band by `order`, then child issue number, so moving work leads. Then the one queue in
+// work order (queueOrder), so its top row starts next as a lane frees. Then every finished row, oldest
+// completion first and the most recent last (unknown times last). Nested children sort like any other
+// row. The sort reads only stored fields, so the same state always gives the same order.
 function graphOrder(parent, children, issues) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
-  const band = outcome => GRAPH_BANDS.indexOf(statusCell(outcome, children.get(outcome.issue)));
-  const optional = outcome => Number(graphClass(outcome, children.get(outcome.issue)) === 'OPTIONAL');
-  const byBand = (a, b) => band(a) - band(b) || Number(pinnedLast(a)) - Number(pinnedLast(b)) || optional(a) - optional(b)
-    || a.order - b.order || a.issue - b.issue;
+  const band = outcome => IN_FLIGHT_BANDS.indexOf(statusCell(outcome, children.get(outcome.issue)));
+  const inFlight = active.filter(outcome => band(outcome) >= 0).sort((a, b) => band(a) - band(b) || a.order - b.order || a.issue - b.issue);
+  const queued = active.filter(outcome => band(outcome) < 0);
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
   const byCompletion = (a, b) => {
     const left = when(a);
@@ -2288,32 +2309,136 @@ function graphOrder(parent, children, issues) {
   };
   const retired = finished.filter(outcome => isRetired(outcome, children.get(outcome.issue)));
   const completed = finished.filter(outcome => !retired.includes(outcome));
-  return [...active.sort(byBand), ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
+  return [...inFlight, ...queueOrder(queued).rows, ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
 }
 
-// Queued rows (LATER or OPTIONAL) in the same group that share an `order`, the priority: each list
-// is one tie, lowest order first. Work in progress is left out, since NOW is not picked by priority.
-// Rows pinned last tie only with each other, since they never sort among the rest.
+// The four work-order steps of the queue, in order: priority work (`priority` P0 or P1), then quick
+// wins (the controller sized the task S), then all other work (sized M or L, or not sized), then work
+// marked to go last (`last`, or class OPTIONAL). The validator refuses priority with last or OPTIONAL.
+const QUEUE_STEPS = Object.freeze(['priority', 'quick', 'other', 'last']);
+function queueStep(outcome) {
+  if (QUEUE_PRIORITIES.includes(outcome.priority)) return 'priority';
+  if (outcome.last === true || outcome.class === 'OPTIONAL') return 'last';
+  return outcome.size === 'S' ? 'quick' : 'other';
+}
+
+// A queued row's place before dependencies: its step; inside the priority step P0 before P1, then
+// size S, M, L, unsized; then `order`, lowest first. Rows with the same key tie (orderTies).
+function queueKey(outcome) {
+  const step = queueStep(outcome);
+  const inner = step === 'priority' ? [QUEUE_PRIORITIES.indexOf(outcome.priority), outcome.size ? QUEUE_SIZES.indexOf(outcome.size) : QUEUE_SIZES.length] : [];
+  return [QUEUE_STEPS.indexOf(step), ...inner, outcome.order];
+}
+const compareKeys = (a, b) => {
+  for (let at = 0; at < Math.max(a.length, b.length); at += 1) if (a[at] !== b[at]) return (a[at] ?? -1) - (b[at] ?? -1);
+  return 0;
+};
+
+// The queue in work order: { rows, moved, cycles }. Rows sort by queueKey, then child number. Then a
+// row whose `after` names a queued row below it moves to just after its last prerequisite (a hard
+// dependency outranks its step); a prerequisite in flight, finished or not queued is met already.
+// Rows waiting on each other in a loop (`cycles`, each a list of issues) keep their key order and
+// their `after` is set aside, so the sort always ends. `moved` maps each moved row to the
+// prerequisite it now follows.
+function queueOrder(queued) {
+  const sorted = [...queued].sort((a, b) => compareKeys(queueKey(a), queueKey(b)) || a.issue - b.issue);
+  const inQueue = new Map(sorted.map(outcome => [outcome.issue, outcome]));
+  const cycles = dependencyCycles(sorted);
+  const looped = new Set(cycles.flat());
+  const needs = outcome => (looped.has(outcome.issue) ? [] : (outcome.after || []).filter(number => inQueue.has(number)));
+  const rows = [];
+  const placed = new Set();
+  const moved = new Map();
+  let waiting = [];
+  const place = outcome => {
+    rows.push(outcome);
+    placed.add(outcome.issue);
+    for (let ready = waiting.find(row => needs(row).every(number => placed.has(number))); ready; ready = waiting.find(row => needs(row).every(number => placed.has(number)))) {
+      waiting = waiting.filter(row => row !== ready);
+      moved.set(ready.issue, outcome.issue);
+      place(ready);
+    }
+  };
+  for (const outcome of sorted) {
+    if (needs(outcome).every(number => placed.has(number))) place(outcome);
+    else waiting.push(outcome);
+  }
+  return { rows, moved, cycles };
+}
+
+// The loops among queued rows' `after` lists: each loop (a strongly connected group of two or more
+// rows) as its issue numbers, lowest first, the loops by their lowest issue.
+function dependencyCycles(queued) {
+  const inQueue = new Map(queued.map(outcome => [outcome.issue, outcome]));
+  const edges = outcome => (outcome.after || []).filter(number => inQueue.has(number) && number !== outcome.issue);
+  const index = new Map(), low = new Map(), stack = [], onStack = new Set(), groups = [];
+  let next = 0;
+  const visit = outcome => {
+    index.set(outcome.issue, next); low.set(outcome.issue, next); next += 1;
+    stack.push(outcome.issue); onStack.add(outcome.issue);
+    for (const number of edges(outcome)) {
+      if (!index.has(number)) { visit(inQueue.get(number)); low.set(outcome.issue, Math.min(low.get(outcome.issue), low.get(number))); }
+      else if (onStack.has(number)) low.set(outcome.issue, Math.min(low.get(outcome.issue), index.get(number)));
+    }
+    if (low.get(outcome.issue) !== index.get(outcome.issue)) return;
+    const group = [];
+    for (let number = stack.pop(); ; number = stack.pop()) { onStack.delete(number); group.push(number); if (number === outcome.issue) break; }
+    if (group.length > 1) groups.push(group.sort((a, b) => a - b));
+  };
+  for (const outcome of [...queued].sort((a, b) => a.issue - b.issue)) if (!index.has(outcome.issue)) visit(outcome);
+  return groups.sort((a, b) => a[0] - b[0]);
+}
+
+// The open tasks shown QUEUED, from the stored parent and child documents.
+function queuedOutcomes(parent, children) {
+  return parent.outcomes.filter(outcome => statusCell(outcome, children.get(outcome.issue)) === QUEUED);
+}
+
+// Queued rows with the same work-order key (queueKey), so only the child number decides between
+// them: each list is one tie, lowest issue first, ties in queue order. Work in flight is left out,
+// since it is not picked from the queue.
 function orderTies(parent, children) {
   const ties = new Map();
-  for (const outcome of parent.outcomes) {
-    const cls = graphClass(outcome, children.get(outcome.issue));
-    if (cls !== 'LATER' && cls !== 'OPTIONAL') continue;
-    const key = `${cls}${pinnedLast(outcome) ? ' last' : ''} ${outcome.order}`;
+  for (const outcome of queuedOutcomes(parent, children)) {
+    const key = queueKey(outcome).join(' ');
     ties.set(key, [...(ties.get(key) || []), outcome]);
   }
   return [...ties.values()].filter(list => list.length > 1).map(list => list.sort((a, b) => a.issue - b.issue))
-    .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
+    .sort((a, b) => compareKeys(queueKey(a[0]), queueKey(b[0])) || a[0].issue - b[0].issue);
 }
 
-// The Status cell (see above): NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW ·
-// QUEUED, LATER, COMPLETED or RETIRED. A live gate outranks a listed blocker; once it returns, the
-// blocker queues the task again, merged or not.
+// Why each queued row sits where it does, in queue order, for `show --queue`: its place (1 first),
+// step, the inputs read (priority, size, order, after, last, optional) and the prerequisite it was
+// moved after, if any. `cycles` lists any loop whose `after` was set aside.
+function explainQueue(parent, children) {
+  const { rows, moved, cycles } = queueOrder(queuedOutcomes(parent, children));
+  return {
+    steps: [...QUEUE_STEPS],
+    rows: rows.map((outcome, index) => {
+      const reasons = [
+        outcome.priority ? `priority ${outcome.priority}` : null,
+        outcome.size ? `size ${outcome.size}` : null,
+        outcome.last === true ? 'marked last' : null,
+        outcome.class === 'OPTIONAL' ? 'optional' : null,
+        `order ${outcome.order}`,
+        outcome.after?.length ? `after ${outcome.after.map(number => `#${number}`).join(', ')}` : null,
+        moved.has(outcome.issue) ? `moved after #${moved.get(outcome.issue)}` : null,
+        children.get(outcome.issue)?.blockers?.length ? 'blocked' : null,
+      ].filter(Boolean);
+      return { place: index + 1, issue: outcome.issue, step: queueStep(outcome), why: reasons.join(', ') };
+    }),
+    cycles,
+  };
+}
+
+// The Status cell (see above): NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, QUEUED,
+// COMPLETED or RETIRED. A live gate outranks a listed blocker; once it returns, the blocker queues
+// the task again, merged or not.
 function statusCell(outcome, child) {
   const cls = graphClass(outcome, child);
   if (cls === '-') return statusText(outcome, child);
-  if (cls !== 'NOW') return 'LATER';
-  if (child?.blockers?.length && !gateLive(child)) return 'NOW · QUEUED';
+  if (cls !== 'NOW') return QUEUED;
+  if (child?.blockers?.length && !gateLive(child)) return QUEUED;
   if (!closeCheckDue(outcome, child)) return 'NOW · IN PROGRESS';
   return agentUatDue(outcome, child) ? NOW_AGENT_UAT : NOW_CLOSE_CHECK;
 }
@@ -2511,7 +2636,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW · IN PROGRESS, ${NOW_AGENT_UAT}, ${NOW_CLOSE_CHECK}, NOW · QUEUED, LATER, each by priority (optional tasks last in LATER${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? '; pinned tasks end their band' : ''}), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: ${IN_FLIGHT_BANDS.join(', ')}, then ${QUEUED} in work order (priority, then quick wins, then other work, then tasks marked last; a task follows the tasks it waits for), then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2541,16 +2666,16 @@ function renderTraceBlockBody(number, comments = [], repository = '', handover =
     `${handover ? `Handover: [handover file](${handover}) · ` : ''}Decisions: \`programme.cjs trace ${number}\` · ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)})` : 'None yet.'}`].join('\n');
 }
 
-// The generated CURRENT summary, kept slim: the board line, the tasks in progress in Programme Graph
-// order (each with its PR, gate or `merged, close check`, and any wait on the owner), then one line with the attention counts
-// and the holds (tasks blocked or on hold), then any open PASS_STOPPED finding in full, since a
-// stopped pass means the page itself may be behind. What starts next is the graph's order; every
+// The generated CURRENT summary, kept slim: the board line, the tasks in flight (IN_FLIGHT_BANDS) in
+// Programme Graph order (each with its PR, gate or `merged, close check`, and any wait on the owner), then one line with the attention counts
+// and the holds (tasks blocked or on hold, queued ones too), then any open PASS_STOPPED finding in full, since a
+// stopped pass means the page itself may be behind. What starts next is the graph's queue; every
 // other finding is in `programme.cjs attention`.
 function renderCurrentBlockBody(parent, children, issues = new Map(), now = new Date().toISOString(), board = null) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
   // The owner's step (ownerStep) says "waiting on you"; the agent's (agentStep) never does; a blocker
   // is only "blocked".
-  const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
+  const working = rows.filter(row => IN_FLIGHT_BANDS.includes(statusCell(row.outcome, row.child))).map(row => {
     const owner = ownerStep(row.outcome, row.child);
     const agent = agentStep(row.outcome, row.child);
     const step = owner || agent;
@@ -3780,6 +3905,7 @@ class StateStore {
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
     if (kind === 'child') stampChild(previous, doc, this.now());
+    else if (kind === 'parent') dropRetiredFindings(doc);
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -3900,6 +4026,7 @@ class StateBatch {
       const doc = clone(entry.doc);
       if (entry.kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
       if (entry.kind === 'child') stampChild(entry.base, doc, store.now());
+      else if (entry.kind === 'parent') dropRetiredFindings(doc);
       doc.revision = entry.base ? entry.base.revision + (contentDigest(entry.base) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
       doc.volatile = { written_at: store.now(), ...(store.toolkitVersion ? { toolkit: store.toolkitVersion } : {}) };
       assertValid(entry.kind, doc);
@@ -4494,6 +4621,7 @@ class BranchStateStore extends StateStore {
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
     if (kind === 'child') stampChild(previous, doc, this.now());
+    else if (kind === 'parent') dropRetiredFindings(doc);
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -6033,11 +6161,10 @@ class Reconciler {
   // PRs have all merged or closed is TASK_MERGED_OPEN after TASK_MERGED_OPEN_HOURS of quiet; any other
   // idle task is TASK_IDLE after TASK_IDLE_HOURS. A task natively blocked by another open task on the
   // graph that is itself moving or waiting on the owner is skipped: the blocker carries the work. So is a
-  // task whose state lists a blocker (shown NOW · QUEUED): its blocker says why. Both skips hold only for
+  // task whose state lists a blocker (shown QUEUED): its blocker says why. Both skips hold only for
   // BLOCKED_SKIP_DAYS after the task last changed, so a blocker that cleared but is still listed cannot
   // hide it for ever; then it is raised and the detail says why it was skipped. The skips sit here, not
-  // in stillness, so the batch tail guard still counts the task as still and a queued blocker still counts
-  // as stalled for the tasks behind it. A merged task kept open on purpose (keptOpen) is skipped only
+  // in stillness, so a queued blocker still counts as stalled for the tasks behind it. A merged task kept open on purpose (keptOpen) is skipped only
   // until nothing has worked it for KEPT_OPEN_IDLE_HOURS; then it is TASK_MERGED_OPEN and the detail
   // says it was kept open. A pass that could not read every open PR raises none, since an unread open PR
   // could be moving the task.
@@ -6086,7 +6213,7 @@ class Reconciler {
     }
   }
 
-  // Work queue: QUEUED_BUT_MOVING, a task shown NOW · QUEUED by its lane waits alone (no other blocker)
+  // Work queue: QUEUED_BUT_MOVING, a task shown QUEUED by its lane waits alone (no other blocker)
   // whose tracked PR is open or draft at a head other than the one its lane-wait stamp names, committed
   // after the stamp's time, with no gate assigned or active and nothing waiting on the owner: a gate is
   // working it but its `assign` was missed. The stamp's time is when the wait was written or a recorded
@@ -6099,7 +6226,7 @@ class Reconciler {
     for (const outcome of parent.outcomes) {
       if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
       const doc = docs.get(outcome.issue);
-      if (!doc || statusCell(outcome, doc) !== 'NOW · QUEUED' || !doc.blockers.every(isLaneWait)) continue;
+      if (!doc || statusCell(outcome, doc) !== QUEUED || !doc.blockers.every(isLaneWait)) continue;
       if (doc.lifecycle === 'WAITING_OWNER' || doc.gate?.state === 'WAITING_OWNER') continue;
       const stamp = doc.private?.lane_wait;
       if (!isObject(stamp) || !['OPEN', 'DRAFT'].includes(doc.pr?.state) || !isSha(doc.pr.head) || doc.pr.head === stamp.head) continue;
@@ -6109,7 +6236,7 @@ class Reconciler {
       if (!Number.isFinite(since) || !Number.isFinite(committed) || committed <= since) continue;
       const minute = time => `${new Date(time).toISOString().slice(0, 16)}Z`;
       findings.push({ code: 'QUEUED_BUT_MOVING', issue: outcome.issue,
-        detail: `shown NOW · QUEUED by its lane wait alone, but PR #${doc.pr.number} moved from ${stamp.head ? shortSha(stamp.head) : 'no head'} to ${shortSha(doc.pr.head)}, committed at ${minute(committed)}, after the wait was written or its last recorded gate ended (${minute(since)}), and no gate is assigned or active` });
+        detail: `shown QUEUED by its lane wait alone, but PR #${doc.pr.number} moved from ${stamp.head ? shortSha(stamp.head) : 'no head'} to ${shortSha(doc.pr.head)}, committed at ${minute(committed)}, after the wait was written or its last recorded gate ended (${minute(since)}), and no gate is assigned or active` });
     }
   }
 
@@ -6202,48 +6329,6 @@ class Reconciler {
       }
     }
   }
-
-  // Work queue, batch rule (delivery contract section 3): lanes finish the NOW batch before LATER work
-  // starts. BATCH_NEXT, on the parent, says a lane is free for LATER work: the graph has an open LATER
-  // task and no open NOW task still needs a gate lane. A NOW task needs none when it waits on the owner
-  // (its lifecycle or gate), its open PR passed review at its current head and its required checks are not
-  // red (on a merge train or waiting for a merge OK), every one of its PRs has merged or closed (its next step is the controller's, and
-  // TASK_MERGED_OPEN asks for it), or, by the tail guard, it has been still for BATCH_TAIL_HOURS. Optional
-  // tasks never raise it: the owner keeps them, the batch rule does not start them. Its first raise waits
-  // until no open task's state document has been written for BATCH_NEXT_HOURS (one without a write time
-  // is new, so it waits too); once open or disposed it is reported on while the condition holds. Only a whole-graph pass that read every open PR checks it; the finding clears
-  // once a NOW task needs a lane again.
-  diffBatch(parent, docs, observed, only, findings) {
-    if (only || observed.prGraph?.openComplete === false) return;
-    const now = Date.parse(this.now());
-    const rows = parent.outcomes.filter(outcome => observed.issues.get(outcome.issue)?.state !== 'closed')
-      .map(outcome => ({ outcome, doc: docs.get(outcome.issue), group: graphClass(outcome, docs.get(outcome.issue)) }));
-    const later = rows.filter(row => row.group === 'LATER');
-    if (!later.length) return;
-    const needsLane = ({ outcome, doc }) => {
-      if (doc.lifecycle === 'WAITING_OWNER' || doc.gate?.state === 'WAITING_OWNER') return false;
-      // Red required checks put the task back on its lane: the lane fixes red CI first.
-      const passedAtHead = ['OPEN', 'DRAFT'].includes(doc.pr?.state) && isSha(doc.pr.head) && doc.review?.state === 'PASSED'
-        && (doc.review.verdicts || []).some(verdict => verdict.verdict === 'PASSED' && verdict.head === doc.pr.head) && doc.pr.checks?.state !== 'RED';
-      if (passedAtHead) return false;
-      const still = this.stillness(outcome, doc, observed, now);
-      if (still?.merged) return false;
-      return !(still && now - still.latest >= BATCH_TAIL_HOURS * HOUR_MS);
-    };
-    const current = rows.filter(row => row.group === 'NOW');
-    if (current.some(needsLane)) return;
-    // The quiet hour holds back only the first raise. An open or disposed BATCH_NEXT is reported on while
-    // its condition holds, so a routine task write never resolves it or drops its dispose.
-    const reported = (parent.attention || []).some(entry => entry.code === 'BATCH_NEXT' && entry.issue === parent.parent_issue
-      && (OPEN_FINDING_STATES.includes(entry.state) || entry.state === 'disposed'));
-    const written = rows.filter(row => row.doc).map(row => Date.parse(row.doc.volatile?.written_at || ''));
-    if (!reported && written.some(time => !Number.isFinite(time) || now - time < BATCH_NEXT_HOURS * HOUR_MS)) return;
-    const top = graphOrder(parent, docs, observed.issues).find(outcome => later.some(row => row.outcome === outcome));
-    const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
-    findings.push({ code: 'BATCH_NEXT', issue: parent.parent_issue,
-      detail: `${current.length ? `none of the ${count(current.length, 'NOW task')} needs a gate lane` : 'NOW is empty'} and LATER has ${count(later.length, 'task')}, led by #${top.issue}` });
-  }
-
   // Drift (programme-drift.cjs): what fell behind its state with nothing in this pass to fix it. Open
   // task pages and task PR pages are checked from the bodies this pass already holds; a task the
   // sweep left queued for a later pass, or outside this pass's scope, is not checked until it is read.
@@ -6618,7 +6703,7 @@ class Reconciler {
       const link = part => commentLink(issueUrl(this.binding.repository, number), commentId(part));
       // One link line under the table: earlier completed rows, retired rows, then any active group
       // moved for size, each with its count and further parts.
-      const summary = ['COMPLETED', 'RETIRED', 'NOW', 'LATER'].map(group => {
+      const summary = ['COMPLETED', 'RETIRED', 'NOW', QUEUED].map(group => {
         const parts = graphs.filter(part => part.group === group && part.count);
         const count = parts.reduce((sum, part) => sum + part.count, 0);
         const label = { COMPLETED: 'Earlier completed', RETIRED: 'Retired' }[group] || group;
@@ -6667,7 +6752,7 @@ class Reconciler {
     if (projected.body.length < safe && projected.budgetFits) return projected;
     for (const group of archiveTools().GROUPS) {
       // Trace pages go before any live row moves.
-      if (group === 'LATER') {
+      if (group === QUEUED) {
         tracePaging = true; projected = build();
         rememberFeasible();
         if (!hard && projected.body.length < this.threshold && projected.budgetFits) hard = projected;
@@ -7210,15 +7295,15 @@ class Reconciler {
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
     this.diffQueuedMoving(parent, projected, observed, only, findings);
-    this.diffBatch(parent, desiredDocs, observed, only, findings);
     this.diffAgentUat(parent, desiredDocs, observed, only, findings);
     this.diffStaleNet(parent, desiredDocs, observed, only, findings);
     this.diffCloseDue(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
-      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
-    if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
+      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, in work order and then child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
+    if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share order ${tie[0].order} in the ${queueStep(tie[0])} step of the queue, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the order in one update-parent patch` });
+    if (!only) for (const loop of queueOrder(queuedOutcomes(parent, desiredDocs)).cycles) findings.push({ code: 'DEPENDENCY_CYCLE', issue: parent.parent_issue, detail: `${loop.map(number => `#${number}`).join(', ')} wait for each other in a loop (after), so their after is set aside and they keep their place in the queue. Controller: remove the wrong after entry with update-parent` });
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     this.pass.planning();
     for (const effect of effects) effect.text = describeEffect(effect);
@@ -8467,7 +8552,7 @@ module.exports = Object.freeze({
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
-  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
+  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies, queueOrder, queueStep, explainQueue, dependencyCycles, GRAPH_BANDS, IN_FLIGHT_BANDS, RETIRED_FINDING_CODES,
   evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, uatOwer, agentUatUnstarted, unstartedAgentUats, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
@@ -8475,7 +8560,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue, NET_CODES, NET_CALLOUT_HOURS, NEAREST_WINDOW_DAYS, netCallout, GATE_SESSION_HOSTS, GATE_SESSIONS_LIMIT, recordGateSession, closeDueOf, closeDueSessions, KIND_CODES, kindText,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue, NET_CODES, NET_CALLOUT_HOURS, NEAREST_WINDOW_DAYS, netCallout, GATE_SESSION_HOSTS, GATE_SESSIONS_LIMIT, recordGateSession, closeDueOf, closeDueSessions, KIND_CODES, kindText,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });

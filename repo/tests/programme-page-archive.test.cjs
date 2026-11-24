@@ -9,9 +9,9 @@ const { pageFixture } = require('./support/programme-page-fixture.cjs');
 
 // Active groups only: the page always moves RETIRED and older COMPLETED rows into archive comments,
 // so tests about archiving for size use rows that move only when the page is too large.
-const SIZE_GROUPS = ['OPTIONAL', 'LATER', 'NOW'];
+const SIZE_GROUPS = ['OPTIONAL', 'QUEUED', 'NOW'];
 // Hand-written text that needs all five comment slots: one per graph group (RETIRED, COMPLETED,
-// LATER, NOW) and one for the marked notes.
+// QUEUED, NOW) and one for the marked notes.
 const FIVE_PARTS = '# Programme\n\nKept.\n\n## Archive\n\n' + 'Notes. '.repeat(1000) + '\n\n## Live\n\n' + 'Live. '.repeat(7300);
 
 // Wide escaped graph rows leave a whole-row margin for trace and finding growth.
@@ -322,11 +322,11 @@ test('large overflow respects graph group order, five posts and reaches a stable
   assert.ok(f.posts().length <= 5);
   const archive = f.parent().page_archive;
   const moved = archive.map(entry => [entry.group, (f.github.comments.get(entry.comment_id).body.match(/^\|[^|\n]*\|#\d+\|/gm) || []).length]);
-  assert.deepEqual(moved.map(([group]) => group), ['RETIRED', 'COMPLETED', 'LATER', 'NOW'].slice(0, moved.length));
+  assert.deepEqual(moved.map(([group]) => group), ['RETIRED', 'COMPLETED', 'QUEUED', 'NOW'].slice(0, moved.length));
   assert.equal(moved.reduce((sum, [, count]) => sum + count, 0) + (f.page().match(/^\|[^|\n]*\|#\d+\|/gm) || []).length, 180);
   for (const entry of archive) {
     const ids = [...f.github.comments.get(entry.comment_id).body.matchAll(/^\|[^|\n]*\|#(\d+)\|/gm)].map(match => Number(match[1]));
-    const eligible = f.parent().outcomes.filter(outcome => ['RETIRED', 'COMPLETED', 'LATER', 'LATER', 'NOW'][(outcome.issue - 100) % 5] === entry.group).map(outcome => outcome.issue).sort((a, b) => a - b);
+    const eligible = f.parent().outcomes.filter(outcome => ['RETIRED', 'COMPLETED', 'QUEUED', 'QUEUED', 'NOW'][(outcome.issue - 100) % 5] === entry.group).map(outcome => outcome.issue).sort((a, b) => a - b);
     assert.deepEqual([...ids].sort((a, b) => a - b), eligible.slice(0, ids.length), `${entry.group}: oldest eligible rows move first`);
     const graphOrder = [...state.renderParentBlockBody(f.parent(), f.children, f.issues).matchAll(/^\|[^|\n]*\|#(\d+)\|/gm)].map(match => Number(match[1]));
     assert.deepEqual(ids, graphOrder.filter(id => ids.includes(id)), `${entry.group}: archive keeps graph sort`);
@@ -530,22 +530,23 @@ test('H2: graph replacements share five posts with the owed repair notice', () =
 });
 
 
-test('a parent that still lists a legacy OPTIONAL graph part stays valid, and a pass redraws that part empty', () => {
+for (const [group, row] of [['OPTIONAL', 'OPTIONAL · QUEUED'], ['LATER', 'LATER']]) test(`a parent that still lists a legacy ${group} graph part stays valid, and a pass redraws that part empty`, () => {
   const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const tools = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-page-archive.cjs'));
-  const body = `${tools.marker('graph-optional-1')}\n# Programme graph: OPTIONAL\n\n| Task | PRs | Status | Waiting on | Updated (SGT) |\n|---|---|---|---|---|\n|#100 Task 0|-|OPTIONAL · QUEUED|-|-|\n`;
+  const key = `graph-${group.toLowerCase()}-1`;
+  const body = `${tools.marker(key)}\n# Programme graph: ${group}\n\n| Task | PRs | Status | Waiting on | Updated (SGT) |\n|---|---|---|---|---|\n|#100 Task 0|-|${row}|-|-|\n`;
   const id = f.github.addComment(12, { body });
   const read = f.store.read('parent', 12);
   const doc = structuredClone(read.doc);
-  doc.page_archive.push({ comment_id: id, digest: tools.digest(body), group: 'OPTIONAL', key: 'graph-optional-1', kind: 'graph', login: f.github.login, state: 'moved', title: 'OPTIONAL' });
+  doc.page_archive.push({ comment_id: id, digest: tools.digest(body), group, key, kind: 'graph', login: f.github.login, state: 'moved', title: group });
   assert.deepEqual(state.validateParent(doc), [], 'the legacy group still reads');
   f.store.write('parent', 12, doc, { sha: read.sha, previous: read.doc });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
-  const entry = f.parent().page_archive.find(item => item.key === 'graph-optional-1');
+  const entry = f.parent().page_archive.find(item => item.key === key);
   assert.ok(entry, 'the part stays registered');
-  assert.match(f.github.comments.get(entry.comment_id).body, /No rows are archived in this part\./, 'its rows now show, or archive, as LATER');
-  assert.doesNotMatch(f.page(), /OPTIONAL/);
+  assert.match(f.github.comments.get(entry.comment_id).body, /No rows are archived in this part\./, 'its rows now show, or archive, as QUEUED');
+  assert.doesNotMatch(f.page(), new RegExp(`${group}|NOW · QUEUED`));
   assert.deepEqual(state.validateParent(f.parent()), []);
 });
 

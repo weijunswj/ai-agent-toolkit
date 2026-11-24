@@ -739,8 +739,8 @@ const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, hol
   f.time.now = START + hours * HOUR;
   return f;
 };
-// The task's own work-queue findings; BATCH_NEXT, on the parent, has its own tests below.
-const idle = options => idleRun(options).reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code) && finding.code !== 'BATCH_NEXT');
+// The task's own work-queue findings.
+const idle = options => idleRun(options).reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code));
 
 test('a task shown IN PROGRESS with no open PR, no live gate, no holder and no change for six hours is flagged', () => {
   assert.equal(state.TASK_IDLE_HOURS, 6);
@@ -966,7 +966,7 @@ test('a task blocked by another open task that is moving is not idle; behind a s
   assert.deepEqual(queue(), [806, 807], 'a stalled blocker surfaces, and so does the task behind it');
 });
 
-test('a task whose state lists a blocker (NOW · QUEUED) is off the work queue: its blocker says why', () => {
+test('a task whose state lists a blocker (QUEUED) is off the work queue: its blocker says why', () => {
   const blockers = ['waits for #807'];
   assert.deepEqual(idle({ hours: 14, blockers }), [], 'queued behind its blocker, not idle');
   assert.deepEqual(idle({ hours: 14 }).map(finding => finding.code), ['TASK_IDLE'], 'the same task with no blocker is idle');
@@ -1018,6 +1018,20 @@ for (const [kind, blocker] of [['held by a lane', { lifecycle: 'ACTIVE', fence: 
   assert.match(found[0].detail, /; blocked by #807 \(moving\), but unchanged for over 7 days$/);
 });
 
+test('a task behind both a moving native blocker and a listed blocker is raised after seven days naming the native one', () => {
+  const f = setup({ clock: true, outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });
+  f.github.issues.get(806).blockedBy = [807];
+  f.reconciler().run({ apply: true });
+  const parentDoc = f.store.read('parent', 421).doc;
+  f.store.mutate('child', 806, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: ['waits for #807'] }) });
+  f.store.mutate('child', 807, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'WAITING_OWNER' }) });
+  f.time.now = START + 7 * 24 * HOUR;
+  const found = f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code));
+  assert.deepEqual(found.map(finding => [finding.code, finding.issue]), [['TASK_IDLE', 806]]);
+  assert.match(found[0].detail, /; blocked by #807 \(moving\), but unchanged for over 7 days$/, 'the native blocker is the reason shown, not the listed one');
+  assert.doesNotMatch(found[0].detail, /its state lists a blocker/);
+});
+
 for (const code of ['TASK_IDLE', 'TASK_MERGED_OPEN']) test(`an open ${code} finding stays open and unchanged through a pass that could not read every open PR`, () => {
   const f = code === 'TASK_IDLE' ? idleRun() : idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   const refresh = () => f.reconciler(VERSION, { refreshFacts: true, writer: state.refreshWriter(f.store.read('parent', 421).doc) }).run({ apply: true });
@@ -1033,7 +1047,7 @@ for (const code of ['TASK_IDLE', 'TASK_MERGED_OPEN']) test(`an open ${code} find
   assert.deepEqual(finding(), before, 'an unread open PR list neither raises nor settles a work-queue finding');
 });
 
-// QUEUED_BUT_MOVING: a task shown NOW · QUEUED only by its lane wait whose open PR moved with a commit
+// QUEUED_BUT_MOVING: a task shown QUEUED only by its lane wait whose open PR moved with a commit
 // made after the wait was written and outside every recorded gate: the gate start's `assign` was missed.
 // The wait is written at START (idleRun); a move is a new head with its commit time in minutes from START.
 const LANE_WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
@@ -1047,7 +1061,7 @@ const movingRun = ({ move = 30, blockers = [LANE_WAIT], pr = { number: 900, stat
   return f;
 };
 const raised = f => f.reconciler().run().findings.filter(finding => finding.code === 'QUEUED_BUT_MOVING').map(finding => finding.issue);
-const moving = options => movingRun(options).reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code) && finding.code !== 'BATCH_NEXT');
+const moving = options => movingRun(options).reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code));
 const write = (f, change) => f.store.mutate('child', 806, { writer, parentDoc: f.store.read('parent', 421).doc, change });
 const LIVE_G1 = { role: 'G1', state: 'ACTIVE', assignment: { id: 'g1-806', role: 'G1' } };
 
@@ -1056,7 +1070,7 @@ test('a task queued only by its lane wait whose open PR moved after the wait wit
   assert.match(state.FINDING_CODES.QUEUED_BUT_MOVING.next_action, /missed `assign` \(it drops the lane wait\)/);
   const found = moving();
   assert.deepEqual(found.map(finding => [finding.code, finding.issue]), [['QUEUED_BUT_MOVING', 806]]);
-  assert.match(found[0].detail, /^shown NOW · QUEUED by its lane wait alone, but PR #900 moved from aaaaaaa to bbbbbbb, committed at 2026-11-01T00:30Z, after the wait was written or its last recorded gate ended \(2026-11-01T00:00Z\), and no gate is assigned or active$/);
+  assert.match(found[0].detail, /^shown QUEUED by its lane wait alone, but PR #900 moved from aaaaaaa to bbbbbbb, committed at 2026-11-01T00:30Z, after the wait was written or its last recorded gate ended \(2026-11-01T00:00Z\), and no gate is assigned or active$/);
   assert.deepEqual(moving({ pr: { number: 900, state: 'OPEN', head: null } }).map(finding => finding.code), ['QUEUED_BUT_MOVING'], 'a PR opened since the wait counts');
   const f = movingRun();
   const refresh = f.reconciler(VERSION, { refreshFacts: true, writer: state.refreshWriter(f.store.read('parent', 421).doc) }).run();
@@ -1195,109 +1209,6 @@ test('the parent page counts the work queue and the graph row is the task, its n
   assert.match(body, /Attention: \d+ new, 0 acknowledged, 1 in the work queue/);
   assert.doesNotMatch(body, /\*\*Work queue\*\*/, 'CURRENT counts the work queue; the attention command lists it');
   assert.match(body, /^\|Issue 806\|#806\|NOW · CLOSE CHECK\|-\|/m, 'a merged task kept open reads merged, not in progress');
-});
-
-// The batch rule: BATCH_NEXT, on the parent, says no NOW task needs a gate lane while LATER has work.
-// Task 806 is the NOW task each case shapes; 807 is a planned LATER task.
-const BATCH = [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }];
-const PASSED = head => ({ state: 'PASSED', verdicts: [{ reviewer: 'g2-806', head, verdict: 'PASSED' }] });
-const batchRun = options => idleRun({ outcomes: BATCH, hours: 2, ...options });
-const batch = options => batchRun(options).reconciler().run().findings.filter(finding => finding.code === 'BATCH_NEXT');
-
-test('BATCH_NEXT is a work-queue finding on the parent once no NOW task needs a gate lane', () => {
-  assert.equal(state.WORK_QUEUE_CODES.has('BATCH_NEXT'), true, 'answered by acting or dispose, never ack');
-  assert.equal(state.BATCH_NEXT_HOURS, 1);
-  assert.equal(state.BATCH_TAIL_HOURS, 24);
-  const found = batch({ lifecycle: 'WAITING_OWNER' });
-  assert.equal(found.length, 1);
-  assert.equal(found[0].issue, 421);
-  assert.equal(found[0].detail, 'none of the 1 NOW task needs a gate lane and LATER has 1 task, led by #807');
-  assert.match(state.FINDING_CODES.BATCH_NEXT.next_action, /Start the batch's next task.*pick the next batch: top priority, then quickest, at most 6 PRs and one large task/);
-  // The session-start line carries the oldest queue step from a cache that keeps at most 300 characters.
-  for (const code of state.WORK_QUEUE_CODES) assert.ok(state.FINDING_CODES[code].next_action.length <= 300, code);
-  assert.deepEqual(batch({ lifecycle: 'PLANNED' }).map(finding => finding.detail), ['NOW is empty and LATER has 2 tasks, led by #806']);
-});
-
-for (const [name, options] of [
-  ['waits on the owner', { lifecycle: 'WAITING_OWNER' }],
-  ['has its gate waiting on the owner', { gate: { role: 'G2', state: 'WAITING_OWNER', assignment: { id: 'g2-806', role: 'G2' } } }],
-  ['has an open PR that passed review at its head', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED(SHA_A) }],
-  ['has every PR merged', { merged: true, pr: { number: 900, state: 'MERGED' } }],
-  ['has been still for a day (the tail guard)', { hours: 25 }],
-  ['lists a blocker and has been still for a day (queued, off the work queue, and still under the tail guard)', { hours: 25, blockers: ['waits for #807'] }],
-]) test(`a NOW task that ${name} does not hold the next batch`, () => {
-  assert.equal(batch(options).length, 1);
-});
-
-for (const [name, options] of [
-  ['has a live gate', { gate: { role: 'G1', state: 'ACTIVE', assignment: { id: 'g1-806', role: 'G1' } } }],
-  ['has an open PR that moved today', { openPr: true, openPrUpdated: 1 }],
-  ['has an open PR whose review passed at an older head', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED('b'.repeat(40)) }],
-  ['has an open PR that passed review at its head but has red required checks', { openPr: true, pr: { number: 900, state: 'OPEN', head: SHA_A }, review: PASSED(SHA_A),
-    prContexts: [{ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion: 'FAILURE', required: true }] }],
-  ['is idle for less than a day (TASK_IDLE, not yet the tail)', { hours: 7 }],
-]) test(`a NOW task that ${name} still holds the batch`, () => {
-  assert.deepEqual(batch(options), []);
-});
-
-test('BATCH_NEXT waits for a quiet hour, skips optional work and needs a whole-graph pass that read every open PR', () => {
-  assert.deepEqual(batch({ lifecycle: 'WAITING_OWNER', hours: 0.5 }), [], 'a batch that only just finished is still settling');
-  assert.deepEqual(batch({ lifecycle: 'WAITING_OWNER', outcomes: [BATCH[0], { issue: 807, class: 'OPTIONAL', order: 2 }] }), [], 'optional work is the owner\'s to start');
-  const f = batchRun({ lifecycle: 'WAITING_OWNER' });
-  assert.deepEqual(f.reconciler().plan({ issue: 806 }).findings.filter(finding => finding.code === 'BATCH_NEXT'), [], 'an issue-scoped pass does not see the whole graph');
-  const pass = f.reconciler();
-  const parentDoc = f.store.read('parent', 421).doc;
-  const docs = new Map(BATCH.map(outcome => [outcome.issue, f.store.read('child', outcome.issue).doc]));
-  const observed = complete => ({ prGraph: { openComplete: complete }, references: new Map(), prUpdated: new Map(), comments: new Map(), blockedBy: new Map(), issues: new Map() });
-  const run = complete => { const findings = []; pass.diffBatch(parentDoc, docs, observed(complete), null, findings); return findings.map(finding => finding.code); };
-  assert.deepEqual(run(true), ['BATCH_NEXT'], 'the same graph is flagged when the list was read whole');
-  assert.deepEqual(run(false), [], 'an unread open PR could need a lane');
-});
-
-const THREE = [...BATCH, { issue: 808, class: 'COMMITTED', order: 3 }];
-const batchEntry = f => f.store.read('parent', 421).doc.attention.find(entry => entry.code === 'BATCH_NEXT');
-const touch = (f, number, next) => f.store.mutate('child', number, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => ({ ...doc, next_action: next }) });
-
-test('BATCH_NEXT resolves by itself once a task takes a lane, even with LATER work left', () => {
-  const f = batchRun({ lifecycle: 'WAITING_OWNER', outcomes: THREE });
-  f.reconciler().run({ apply: true });
-  assert.equal(batchEntry(f).state, 'new');
-  f.store.mutate('child', 807, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
-  f.time.now += 2 * HOUR;
-  f.reconciler().run({ apply: true });
-  assert.equal(batchEntry(f).state, 'resolved', '#808 is still LATER, but #807 now needs a lane');
-});
-
-test('a disposed BATCH_NEXT survives an unrelated task write, before and after the quiet hour', () => {
-  const f = batchRun({ lifecycle: 'WAITING_OWNER' });
-  f.reconciler().run({ apply: true });
-  f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, { id: batchEntry(f).id, state: 'disposed', reason: 'Owner paused new work today', now: new Date(f.time.now).toISOString() }) });
-  f.time.now += HOUR / 3;
-  touch(f, 806, 'Controller: wait for the owner UAT');
-  f.time.now += HOUR / 6;
-  f.reconciler().run({ apply: true });
-  assert.equal(batchEntry(f).state, 'disposed', 'inside the quiet hour of the write');
-  f.time.now += HOUR;
-  f.reconciler().run({ apply: true });
-  assert.equal(batchEntry(f).state, 'disposed', 'after it');
-});
-
-test('an open BATCH_NEXT keeps its time across an unrelated task write', () => {
-  const f = batchRun({ lifecycle: 'WAITING_OWNER' });
-  f.reconciler().run({ apply: true });
-  const raised = batchEntry(f);
-  assert.equal(raised.state, 'new');
-  f.time.now += HOUR / 3;
-  touch(f, 806, 'Controller: wait for the owner UAT');
-  f.time.now += HOUR / 6;
-  f.reconciler().run({ apply: true });
-  assert.deepEqual([batchEntry(f).state, batchEntry(f).changed_at], ['new', raised.changed_at]);
-});
-
-test('BATCH_NEXT leaves out a LATER task whose issue is closed', () => {
-  const f = batchRun({ lifecycle: 'WAITING_OWNER' });
-  f.github.issues.get(807).state = 'closed';
-  assert.deepEqual(f.reconciler().run().findings.filter(finding => finding.code === 'BATCH_NEXT'), []);
 });
 
 // Blocks that are only shown: an example of a block inside a code fence, a quote, a list item or
