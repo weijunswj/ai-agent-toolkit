@@ -1,6 +1,6 @@
 ---
 name: agent-cost-control
-description: Use when setting up or reviewing any scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much. Picks the cheapest model tier and effort that can do the job, records every raise with its reason, and keeps long-running threads short by rotating them with handoff files. Coding gates and their helpers keep their pinned routes.
+description: Use before starting any subagent, helper agent or spawned thread, and when setting up or reviewing any scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much. Picks the cheapest model tier and effort that can do the job, records every raise with its reason, and keeps long-running threads short by rotating them with handoff files. Coding gates and their helpers keep their pinned routes.
 ---
 
 # Agent Cost Control
@@ -20,6 +20,18 @@ Every automation and every non-gate worker starts on the cheapest model and effo
 - **Gates are outside the ladder.** G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin.
 - **A merge-train lane is on the ladder.** Building, verifying and landing a merge train is mechanical and needs no G0 or G1: step 1 (small, medium). It never resolves a conflict or edits code; it ejects the member and that member's builder fixes it.
 - **A gatekeeper is on the ladder.** A session that only starts gate runs, waits and relays their reports is no gate: it runs at step 2 (mid, medium), never the small tier, and a raise needs its written reason.
+
+## Before you start a subagent
+
+Read this before starting any subagent, helper agent or spawned thread: once per chat, and again after the chat's context is compacted.
+
+- **Worth it?** Start one only for separable work that saves wall time (it runs while you do something else) or keeps a large read out of your own context. A handful of tool calls, or a lookup whose target you already know, you do yourself.
+- **Cheapest route:** pick the cheapest tier and effort on the ladder that can do the job and set both on the launch. A launch that sets neither inherits your own route.
+- **Default helper ladder:** the Small tier for lookups, inventories and "where is X used"; the Mid tier for bounded code or tests and for summarising long reads; never the Top tier as a helper: work that needs it, you do yourself.
+- **Full brief:** fetch the data it needs first and put it in the brief, with the files, the scope and what done looks like, so it does not repeat your reads.
+- **Cheaper, or approved:** cheaper means a lower tier at any effort short of the maximum, or the same tier at a lower effort. Anything else (the same route, a higher tier or effort, any maximum effort, or a launch that inherits your route) needs approval first, from the person or session that assigned your work, or the user. Say why it is worth the cost.
+- **Nesting:** a subagent that starts another applies the same test against its own route, so work only gets cheaper going down. A helper given no launch tool stays a leaf.
+- **Host checks:** a host may require this section to be read before a launch, and may ask before any launch that is not cheaper, or refuse it where nobody is there to answer; follow the fix its message names.
 
 ## Raising and lowering
 
