@@ -4,7 +4,10 @@
 // governance gate, the merge hold and the attribution, force-push and push checks. Hosts shape a
 // shell call differently:
 //   - Claude Code sends Bash, PowerShell or Monitor with a string `command` and the session folder as
-//     the top-level `cwd`;
+//     the top-level `cwd`; its desktop app's Terminal panel tool (`mcp__terminal__run_in_terminal`)
+//     sends one command line and the tab's folder as `cwd`, typed into the user's own PowerShell, or
+//     the login shell of an SSH host, which the call does not say, so it is judged as an unknown shell
+//     (shellOf gives null, scriptContext an uncertain shell);
 //   - Codex documents Bash with a string `command`, but its shell and exec tools also carry `cmd`,
 //     an argument list, and `workdir`, the folder the command runs in, which can differ from `cwd`.
 //     Nested code-mode shell calls arrive as Bash, including when Codex uses PowerShell.
@@ -25,7 +28,9 @@
 const os = require('node:os');
 const path = require('node:path');
 
-const SHELL_TOOL_NAMES = Object.freeze(['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']);
+// Every tool that runs a command line. A new one goes here and in the Claude attribution hook's
+// matcher; repo/tests/toolkit-shell-call.test.cjs fails when a known command tool is missing.
+const SHELL_TOOL_NAMES = Object.freeze(['Bash', 'PowerShell', 'Monitor', 'mcp__terminal__run_in_terminal', 'exec_command', 'shell', 'local_shell']);
 const SHELL_TOOLS = new RegExp(`^(?:${SHELL_TOOL_NAMES.join('|')})$`);
 const UNREADABLE = 'Toolkit could not read this shell command, so it was refused. Retry it; if this repeats, run `setup toolkit`.';
 // The same broad screen the launcher uses when a check cannot run (toolkit-codex-helper-hook.ps1):
@@ -206,7 +211,8 @@ function folderWord(word, variables, shell = null) {
 function shellReadings(shell) { return shell ? [shell] : [null, 'unset']; }
 
 // The shell a call runs in, when the host says: Claude Code's Bash tool runs bash and its PowerShell
-// tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null.
+// tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null,
+// and so is Claude's Terminal panel tool (PowerShell here, or an SSH host's login shell).
 function shellOf(input, host) {
   if (host !== 'claude') return null;
   const tool = input && (input.tool_name || input.toolName);
