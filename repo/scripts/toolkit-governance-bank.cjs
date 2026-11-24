@@ -221,7 +221,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
   if (appSet || appPart) {
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
-      text: !appSet ? 'toolkit governance check shows how to finish or replace it' : decided ? `Say "explain ${GOVERNANCE_REF}" for how to stop using it` : appStop }));
+      text: !appSet ? 'the governance check shows how to finish or replace it' : decided ? `Say "explain ${GOVERNANCE_REF}" for how to stop using it` : appStop }));
   } else if (state.state === 'DISABLED') {
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: 'Off (needs governance)', text: 'Nothing is made while governance is off' }));
   } else {

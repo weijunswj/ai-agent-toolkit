@@ -191,7 +191,7 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 
 ## n8n Plugin Path Note
 
-Setup copies the official `n8n-io/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed. After a good copy, setup turns that plugin off in Claude Code's user scope; in Codex, the user turns it off in the app's plugin settings.
+Setup copies the official `n8n-io/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed. Toolkit never turns that plugin on or off; if it is on too, the skills load twice, so the user turns it off in the app's plugin settings.
 
 Plain skill installs for OpenCode, AG2/Antigravity, or other folder-based targets do not include official n8n plugin hooks, so target repo instructions must cue `using-n8n-skills`.
 

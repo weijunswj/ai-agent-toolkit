@@ -239,7 +239,7 @@ test('by-hand website steps lead every repair and removal; the commands follow a
 test('removal ends by checking both halves: the App and the cloud sweep copies', () => {
   const removal = app.removalLines(SLUG, found, []).join('\n');
   assert.match(removal, /turns governance off also removes the cloud sweep copies/);
-  assert.match(removal, /4\. Check both halves are gone: run toolkit governance check .*no App variable or secret left over and no cloud sweep copies/);
+  assert.match(removal, /4\. Check both halves are gone: ask your agent to check governance in .*no App variable or secret left over and no cloud sweep copies/);
 });
 
 test('check reports cloud sweep copies left behind once governance is off, and only Toolkit copies', t => {
@@ -300,7 +300,7 @@ test('an online check that could not confirm a setting is unverified (exit 3) wi
   assert.equal(conformance.unverifiedExit([{ id: 'X', severity: 'info', message: 'x' }], {}, {}), 0);
   const result = conformance.report(3, null, unverified, path.resolve(__dirname, '..', '..'));
   assert.deepEqual([result.exit_code, result.status], [3, 'unverified']);
-  assert.match(result.next_step, /repository admin signs in with `gh auth login` and runs `toolkit governance check` again/);
+  assert.match(result.next_step, /repository admin signs in with `gh auth login` and runs the governance check \(`toolkit-governance\.cjs check`\) again/);
   const drift = conformance.report(1, null, [...unverified, { id: 'D', severity: 'drift', message: 'd' }], path.resolve(__dirname, '..', '..'));
   assert.deepEqual([drift.exit_code, drift.status, drift.next_step], [1, 'drift', undefined], 'drift still wins');
 });

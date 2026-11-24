@@ -1,6 +1,6 @@
 'use strict';
 
-// `toolkit governance check`: a read-only conformance report for one repository. It never
+// The governance check (`toolkit-governance.cjs check`): a read-only conformance report for one repository. It never
 // writes anything. Exit codes: 0 conformant, 1 drift, incomplete materials or a decision still
 // pending, 2 the state could not be read, 3 unverified (no drift, but an online GitHub read could not
 // confirm a setting; the report names the repository admin's step).
@@ -426,7 +426,7 @@ function unverifiedExit(findings, options = {}, environment = process.env) {
   return !offline && findings.some(entry => entry.severity === 'unverified') ? 3 : 0;
 }
 
-const UNVERIFIED_STEP = 'A repository admin signs in with `gh auth login` and runs `toolkit governance check` again; until then nothing here counts as conformant.';
+const UNVERIFIED_STEP = 'A repository admin signs in with `gh auth login` and runs the governance check (`toolkit-governance.cjs check`) again; until then nothing here counts as conformant.';
 
 function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
   const code = exitCode === 2 ? 2 : (findings.some(entry => entry.severity === 'drift') ? 1 : exitCode);
