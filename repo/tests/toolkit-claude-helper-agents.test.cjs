@@ -128,7 +128,12 @@ test('a registry change makes installed helpers stale; refresh backs them up and
   assert.equal(read(path.join(f.agents, FILE.G0)), rendered(f, 'G0'));
   assert.equal(read(path.join(f.agents, FILE.G1)), rendered(f, 'G1'));
   assert.equal(defs.check().status, 'current');
-  assert.deepEqual(policy.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' } }, {}), {});
+  // In a gate run the helper also passes the cost test against its lead (Opus high here), read from a
+  // lead transcript started after the refresh.
+  const lead = path.join(f.dir || require('node:os').tmpdir(), `lead-${process.hrtime.bigint()}.jsonl`);
+  fs.writeFileSync(lead, JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' }) + '\n');
+  t.after(() => fs.rmSync(lead, { force: true }));
+  assert.deepEqual(policy.decide({ tool_input: { subagent_type: 'toolkit-g0-helper' }, transcript_path: lead }, {}), {});
 });
 
 test('an empty user agents directory is not-installed, and refresh writes nothing', t => {

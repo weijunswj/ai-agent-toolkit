@@ -151,16 +151,17 @@ function firstLine(file) {
 
 function list(folder) { try { return fs.readdirSync(folder, { withFileTypes: true }); } catch { return []; } }
 
-// Removes the copies the editors in `folders` keep of edit files in `editDir`, other than `keep`:
-// Local History folders whose entries.json names such a file, and hot-exit backups whose first line
-// does. Each copy is overwritten with zeros, then deleted. Nothing else is touched, and folders that
-// cannot be read are skipped. Returns how many copies were removed.
-function cleanEditorCopies({ editDir, folders, isEditFile, keep = '', platform = process.platform }) {
+// Removes the copies the editors in `folders` keep of edit files in `editDir`, other than the files in
+// `keep` (the open tab, and older tabs whose typing is kept): Local History folders whose entries.json
+// names such a file, and hot-exit backups whose first line does. Each copy is overwritten with zeros,
+// then deleted. Nothing else is touched, and folders that cannot be read are skipped. Returns how many
+// copies were removed.
+function cleanEditorCopies({ editDir, folders, isEditFile, keep = [], platform = process.platform }) {
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const ours = (uri) => {
     const file = uriPath(uri, platform);
     if (!file || !sameFolder(pathApi.dirname(file), editDir, platform) || !isEditFile(pathApi.basename(file))) return false;
-    return !(keep && sameFolder(file, keep, platform));
+    return !keep.some((kept) => sameFolder(file, kept, platform));
   };
   let removed = 0;
   for (const folder of folders) {

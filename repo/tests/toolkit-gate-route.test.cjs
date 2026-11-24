@@ -234,19 +234,20 @@ test('a brief may name the member by its role: REVIEWER resolves to the profile\
   assert.equal(run(brief('G2', 'owner-claude opus-b opus-5.5/xhigh'), 'xhigh', two).stamp, 'Route: host-verified opus-5.5/xhigh pin=owner-claude/opus-b');
 });
 
-test('a helper inside a gate is checked against its helper pin, never the gate\'s', t => {
+test('a helper inside a gate is never held to the gate\'s pin or a stack route', t => {
   const dir = scratch(t);
   const g2 = transcript(dir, { brief: brief('G2', 'owner-claude REVIEWER opus-5.5/xhigh'), effort: 'xhigh' });
   const g1 = transcript(dir, { brief: G1 });
   const g0 = transcript(dir, { brief: brief('G0', 'owner-claude DISCOVERY opus-5.5/high') });
   const helper = (file, level, tool_name = 'Bash', tool_input = { command: 'git log -1' }, environment = {}) => route.preToolUse({ transcript_path: file, cwd: dir, tool_name, tool_input, agent_id: 'agent-1', agent_type: 'Explore', ...(level ? { effort: { level } } : {}) }, { environment, registry });
-  // The hook input of a helper's call carries the gate's transcript and the helper's own effort.
+  // The hook input of a helper's call carries the gate's transcript and the helper's own effort; the
+  // agent hook checked its route when it started (cheaper than the lead), so any effort runs here.
   assert.equal(helper(g2, 'medium'), null, 'a helper at medium inside an xhigh G2');
-  assert.equal(helper(g1, 'xhigh'), null, 'a G1 helper on its BUILDER_HELPER pin (xhigh) inside a high G1');
-  assert.equal(helper(g0, 'xhigh', 'Write', { file_path: 'x', content: 'y' }), null, 'a G0 helper on its DISCOVERY_HELPER pin');
+  assert.equal(helper(g1, 'xhigh'), null, 'a G1 helper at xhigh inside a high G1');
+  assert.equal(helper(g1, 'medium'), null, 'a G1 helper at medium inside a high G1');
+  assert.equal(helper(g0, 'low', 'Write', { file_path: 'x', content: 'y' }), null, 'a G0 helper at low');
   assert.equal(helper(g1, null), null, 'a helper whose host sends no effort');
   assert.equal(helper(g1, 'xhigh', 'Bash', { command: 'ls' }, { CLAUDE_EFFORT: 'high' }), null, 'the session environment is the gate\'s, not the helper\'s');
-  assert.match(helper(g1, 'medium'), /this G1 helper runs on effort medium, but the owner-claude\/BUILDER_HELPER pin is haiku-5.5\/xhigh/);
   assert.match(helper(g2, 'xhigh', 'mcp__github__add_issue_comment', { body: `Toolkit-G2: PASS ${HEAD} tier=NORMAL\nRoute: host-verified opus-5.5/xhigh pin=owner-claude/opus\n---` }), /a helper does not post a Toolkit-G2 verdict/);
   // The gate's own calls are still checked.
   assert.match(route.preToolUse({ transcript_path: g1, cwd: dir, tool_name: 'Bash', tool_input: { command: 'ls' }, effort: { level: 'xhigh' } }, { environment: {}, registry }), /this G1 runs on effort xhigh/);

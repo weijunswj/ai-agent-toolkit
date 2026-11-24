@@ -18,7 +18,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { StackRegistrySnapshot, CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
 const { claudeNativeModel } = require('./toolkit-v3-native-helper-adapter.cjs');
-const { ROLES, roleSpec, roleInstructions } = require('./toolkit-claude-helper-spec.cjs');
+const { ROLES, roleSpec, roleInstructions, claudeUserAgentsDirectory } = require('./toolkit-claude-helper-spec.cjs');
 
 const MARKER = '<!-- ai-agent-toolkit:generated claude-helper-agent v1 -->';
 const REGISTRY_REL = 'repo/contracts/controller-kernel/stack-registry-v3.json';
@@ -43,10 +43,6 @@ function writeFileAtomically(file, text) {
   }
 }
 
-// The one owner of the Claude user agents directory: CLAUDE_CONFIG_DIR, else ~/.claude.
-function claudeUserAgentsDirectory(environment = process.env) {
-  return path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'agents');
-}
 function defaultBackupRoot() { return path.join(os.homedir(), '.ai-agent-toolkit', 'backups', 'claude-helper-agents'); }
 
 class ClaudeHelperAgentRenderer {
