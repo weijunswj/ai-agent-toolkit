@@ -89,6 +89,15 @@
       "events": { "PreToolUse": "Before a file or shell tool runs: a read, search or listing of the env edit folder would put every key value in the chat, so it is refused before it happens." }
     },
     {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-claude-gate-launch-hook.cjs",
+      "rules": ["gate-routes"],
+      "events": {
+        "PreToolUse": "Before a start_session call runs: a gate brief missing its Gate, Route or Assignment line, or a launch off the route's model and effort, is refused before the session starts.",
+        "PostToolUse": "Right after a gate start returns: the next steps (effort raise, assignment record) need that call's own session id."
+      }
+    },
+    {
       "harness": "codex",
       "script": "repo/scripts/toolkit-codex-session-start.cjs",
       "rules": "harness-only",
