@@ -69,7 +69,7 @@ const relayHoldExplicitSteps = relayHold.replace('those steps', 'the generic jou
 const relayIdentity = 'The coordinator qualifies from its own host role line and tools; the relay selects a procedure, never establishes identity.';
 const bootstrapCommand = '`node repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects/`';
 const relayExpected = {
-  controller: `${relayStart}, relays the setup line and guidebook link before takeover writes. Relay bootstrap: the coordinator starts a cloud thread on fresh Toolkit \`main\` to run ${bootstrapCommand}, requires \`SKILL COPY REFRESHED\`, reads the library's \`SKILL.md\`, runs guided setup steps 0-10. ${relayHold} ${relayIdentity}`,
+  controller: `${relayStart}, relays the setup line and guidebook link before takeover writes. Relay bootstrap: with the owner's OK in chat, the coordinator starts a cloud thread on fresh Toolkit \`main\` to run ${bootstrapCommand}, requires \`SKILL COPY REFRESHED\`, reads the library's \`SKILL.md\`, runs guided setup steps 0-10. ${relayHold} ${relayIdentity}`,
   skill: `${relayStart}, relays the setup line, [guidebook link](reference/guidebook.md) and **Missing folder** bootstrap before takeover writes. ${relayHoldExplicitSteps} ${relayIdentity}`,
   guide: `${relayStart}, relays the setup line and [guidebook link](guidebook.md) before takeover writes. Relay the **Missing folder** bootstrap step below too. ${relayHoldExplicitSteps} ${relayIdentity} No special phrase or preference line is required. Threads also have \`read_project_chat\`; it does not distinguish a coordinator. A setup step's own brief permits only its specified action, such as generic step 7's takeover record; it never transfers controller identity or allows general controller work. Ordinary G1/G2 briefs that read the file continue on their brief.`,
 };
@@ -127,7 +127,7 @@ const projectsEntryContracts = [
   ['copy executor', 'guide', ['The thread only performs its copy brief and remains an executor']],
   ['existing copy', 'guide', ['With an existing copy, read the skill and enter or resume the same setup; generic step 3 checks freshness']],
   ['resume', 'guide', ['Resume verified progress after interruption', 'Do not post the generic takeover record ahead of setup or post it twice']],
-  ['failure hold', 'guide', ['`SKILL COPY FAILED`: start one fresh refresh thread; when that fails too, tell the owner once what failed',
+  ['failure hold', 'guide', ["`SKILL COPY FAILED`: with the user's OK, start one fresh refresh thread; when that fails too, tell the owner once what failed",
     'With no usable copy, hold takeover', 'Preserve any last usable copy and setup progress',
     'never substitute generic takeover for guided setup']],
   ['outside appointment', 'guide', ['Outside an appointment, a missing or failed copy keeps working from the last usable copy or the managed block and reports it']],
@@ -137,7 +137,7 @@ const projectsEntryContracts = [
     'the relay selects a procedure, never establishes identity',
   ]]),
   ['controller bare read', 'controller', ['or only to read or report on it']],
-  ['controller bootstrap relay', 'controller', ['Relay bootstrap: the coordinator starts a cloud thread on fresh Toolkit `main`',
+  ['controller bootstrap relay', 'controller', ["Relay bootstrap: with the owner's OK in chat, the coordinator starts a cloud thread on fresh Toolkit `main`",
     bootstrapCommand, 'requires `SKILL COPY REFRESHED`', "reads the library's `SKILL.md`, runs guided setup steps 0-10"]],
   ['relay wording', 'guide', ['or only to read or report on it',
     'No special phrase or preference line is required', 'Threads also have `read_project_chat`; it does not distinguish a coordinator',
@@ -467,7 +467,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /`VERSION` \(`Version: <skill Version> toolkit <x\.y\.z> main <commit7> copied <UTC>`, written last, so a copy cut short never looks current\)/);
   assert.match(text, /Never edit the copy: every refresh overwrites it, and changes go into Toolkit through a PR\./);
   assert.match(text, /The hourly nudge checks the copy against a fresh clone of main every run and refreshes a stale or changed copy itself/);
-  assert.match(text, /After a merge that changes this skill or the Toolkit version, start a cloud thread for the refresh at once/);
+  assert.match(text, /After a merge that changes this skill or the Toolkit version, start a cloud thread for the refresh at once only when the user agrees in chat to that cloud start/);
   assert.match(text, /The daily check-in is the backstop/);
   // The library folder is writable by any thread, so only a refresh from a fresh clone of main may change the block,
   // and nothing in the copy loosens a safeguard.
@@ -481,12 +481,15 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Its closing checklist carries "coordinator: refresh the guidebook"/);
   assert.match(text, /`SKILL UPDATE`: the guidebook's Version is newer than the one on the BINDING line\./);
   assert.match(text, /a guidebook refresh reports BLOCK CHANGED, or the daily check-in reports BLOCK OUTDATED/);
-  // The old skill card thread route stays gone; the coordinator offers one card per Version on SKILL CARD OUTDATED.
+  // The old skill card thread route stays gone; the coordinator offers one card per text fingerprint on SKILL CARD
+  // OUTDATED, which the script prints only when the saved text differs from main's.
   assert.ok(!fs.existsSync(path.join(repoRoot, REFERENCE_DIR, 'skill-card.md')));
-  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|skill-card|card due|damaged card|tap Save/);
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|skill-card|card due|damaged card|tap Save|current there: skip the card/);
+  assert.match(text, /the `--card` line compared the texts, so a release that only restamped the Version line never gets here/);
   assert.match(text, /call `propose_skills` once with kind `improvement`, name and target `web-controller-projects`/);
-  assert.match(text, /Record `skill card <guidebook Version> offered <date>`/);
-  assert.match(text, /never a hand upload\. Never offer a Version that has a `skill card` line again\./);
+  assert.match(text, /Record `skill card <guidebook Version> <fp8> offered <date>` in memory, <fp8> being the line's `text` fingerprint/);
+  assert.match(text, /never a hand upload\. Never offer a text fingerprint \(or, for an older line without one, a Version\) that has a `skill card` line again\./);
+  assert.match(text, /- `SKILL CARD OUTDATED`: as in \*\*Acting on the check-in report\*\*; the nudge and the check-in share the same `skill card` memory lines, so a card is offered once\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
   assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
@@ -526,7 +529,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /declined project-instructions <version>/);
   assert.match(text, /Never apply that version again; apply the next newer version as usual/);
   assert.match(text, /Threads cannot read project settings\. Read the current project instructions yourself/);
-  assert.match(text, /give a cloud thread the verbatim text/);
+  assert.match(text, /give a thread the verbatim text/);
   assert.match(text, /\*\*Dedupe in the same change\.\*\*[^\n]*dedupe the owner lines outside the markers against main's block, never an older saved block/);
   assert.match(text, /\*\*Dedupe in the same change\.\*\*[^\n]*Remove lines the block fully duplicates/);
   // Partial repeats are trimmed, not kept whole: the repeated part goes and the project-specific rest stays.
@@ -800,7 +803,7 @@ test('nothing tells the owner to upload the Projects skill by hand', () => {
 test('device steps go to the Remote Control session, not the owner', () => {
   const text = read(SKILL_REL);
   // The owner was once asked to create a local scheduled task that a Remote Control session could create.
-  assert.match(text, /Use local rc on the user's device only when the step needs it:.*installs and setup, the user's final-product UAT/);
+  assert.match(text, /Start every thread, lane, gate and coordinator worker \([^)]*\) as local rc on the user's device\./);
   assert.match(text, /Hand the user a device step only when its safety check blocks the session\./);
   assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
 });
@@ -839,7 +842,7 @@ test('the programme sweep runs in the cloud: Projects sets up, suggests and appl
   const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
   const recurring = at('reference/recurring-tasks.md');
   assert.match(recurring, /\*\*Programme sweep in the cloud\.\*\* Each governed repository carries the Toolkit Programme Sweep workflow/);
-  assert.match(recurring, /`toolkit governance check` names the reason and the fix/);
+  assert.match(recurring, /the governance check \(`toolkit-governance\.cjs check`\) names the reason and the fix/);
   assert.match(recurring, /setup names them and points to `remove toolkit`, whose plan the owner confirms/);
   assert.match(recurring, /Never create, re-arm or suggest a local programme sweep/);
   assert.match(at('SKILL.md'), /\*\*Programme pages refresh themselves in the cloud\.\*\*[^\n]*never set up a sweep on a computer/);
@@ -903,35 +906,37 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/instructions-sync.md').includes('the note adds: "This project now runs 1 lane at a time by default; say lanes N to change it."'));
 });
 
-test('Projects runs cloud first and names the work that needs a device', () => {
+test('Projects starts work on the device, and the cloud only by the user', () => {
   const text = read(SKILL_REL);
   const where = text.split('## Where work runs\n')[1].split('\n## ')[0];
-  for (const phrase of ['**Cloud first.** Run every step a cloud thread can do in the cloud',
-    'G0, G2 and rechecks on their pinned routes', 'Use local rc on the user\'s device only when the step needs it',
-    'the Toolkit hooks must actually run there', 'Windows-sensitive or real-host checks and smokes',
-    'installs and setup', 'the user\'s final-product UAT', 'files only on the device',
-    'a route only the device has', 'Hand the user a device step only when its safety check blocks the session',
+  for (const phrase of ['**Local first.** Start every thread, lane, gate and coordinator worker',
+    'as local rc on the user\'s device', 'Start one in the cloud only when the user starts it or agrees in chat to that named cloud start',
+    'When the device is busy or offline, the work waits and one line says so; never fall back to the cloud',
+    'Scheduled tasks keep their own rules (`reference/recurring-tasks.md`)',
+    'Hand the user a device step only when its safety check blocks the session',
     'Project lines name the device, its folder and any exceptions']) assert.ok(where.includes(phrase), phrase);
-  assert.doesNotMatch(text, /Hybrid by default/);
+  // Cloud starts cost too much usage (owner, 24 November): no cloud-first rule and no cloud fallback.
+  assert.doesNotMatch(text, /Hybrid by default|\*\*Cloud first\.\*\*|Cloud work never waits|written by a cloud thread|from the cloud without asking/);
   const device = read(`${REFERENCE_DIR}/device-work.md`);
   for (const phrase of ['**What needs the device.**', 'hook-behaviour smoke', 'Windows path review', 'Codex CLI G1']) {
     assert.ok(device.includes(phrase), phrase);
   }
 });
 
-test('cloud reviews count toward the work cap unless a project sets review lanes', () => {
+test('reviews count toward the work cap unless a project sets review lanes', () => {
   const lanes = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Run independent lanes side by side.**'));
-  for (const phrase of ['device-bound work shares one device', 'a serial review route runs one review at a time',
-    'Cloud work never waits for the device or a serial route',
-    'cloud reviews and rechecks count toward the cap unless a project line `- Review lanes: <n>` runs up to that many beside it']) {
+  for (const phrase of ['lanes share the device', 'a serial review route runs one review at a time',
+    'Reviews and rechecks count toward the cap unless a project line `- Review lanes: <n>` runs up to that many beside it']) {
     assert.ok(lanes.includes(phrase), phrase);
   }
 });
 
-test('gate route placement supports a cloud default and a device exception per gate', () => {
+test('gate route placement defaults to the device, with a cloud gate only from the user\'s line', () => {
   const route = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Gate route line.**'));
+  assert.doesNotMatch(route, /`cloud` for new projects/);
   for (const phrase of ['`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`',
-    '`placement cloud G1=remote_control folder <path>`', 'per-gate placement', '`cloud` for new projects']) {
+    '`placement remote_control G2=cloud folder <path>`', 'per-gate placement', '`cloud` only from the user\'s line',
+    '`remote_control` for new projects']) {
     assert.ok(route.includes(phrase), phrase);
   }
 });
@@ -1173,4 +1178,16 @@ test('the hourly and daily PR sweeps flag a missing or invalid UAT line by the a
     assert.ok(text.includes('`missing UAT verdict` for a ready PR whose body has no UAT line, or `invalid UAT verdict` when the auto-merge check refuses its UAT line (`toolkit-auto-merge-eligible.cjs` prints `Missing UAT verdict` or `UAT verdict invalid: <why>` for the saved body)'), task);
     assert.ok(!text.includes('no line starting `UAT: `'), `${task} still judges the line by its first word`);
   }
+});
+
+// Owner decision (24 Nov): the coordinator no longer watches Toolkit features to suggest improvements or
+// settings to the owner, but keeps the guard that it never changes Toolkit features or settings itself.
+test('Projects drops the suggest-improvements duty and keeps the never-change-settings guard as its own line', () => {
+  const skill = read(SKILL_REL);
+  const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  for (const text of [bundle(), block]) {
+    assert.doesNotMatch(text, /suggest improvements|suggests changes to the owner|Watch every Toolkit-enabled feature|watches Toolkit features/i);
+  }
+  assert.ok(skill.split('\n').includes('- Never change Toolkit features or their settings yourself. The managed block carries this to threads.'));
+  assert.ok(block.split('\n').includes('- The coordinator never changes Toolkit features or their settings itself.'));
 });

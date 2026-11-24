@@ -16,7 +16,6 @@ const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('.
 const { ClaudeUserSettings, SETTINGS: CLAUDE_SETTINGS, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
-const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
 const { STATUS: INSTALL_CHECK_STATUS, claudeAccountToolkitVersion } = require('./toolkit-install-health.cjs');
@@ -1384,25 +1383,17 @@ function claudeSubagentDepthChoice(options) {
   return options.claudeSubagentDepthChoice || SUBAGENT_DEPTH_FOR_TOPOLOGY[options.setupChoices?.claudeTopology] || '';
 }
 
-const N8N_SKILLS_PLUGIN = 'n8n-skills@n8n-io';
-
 // A file-system error names its code only, so no private path reaches the summary.
 const copyFailure = (error) => (error?.code ? `file error ${error.code}` : error.message);
 
 // Keeps Toolkit's copies of the official n8n skills current in this app's skills folder (and Antigravity's).
-// The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
-// plugin is turned off; Codex has no supported switch, so the summary says how.
-function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: antigravityState(args).copies }),
-  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli }), notice = null) {
-  let summary;
+// Toolkit only copies the skills: the n8n plugin is the owner's, in every app.
+function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: antigravityState(args).copies }), notice = null) {
   try {
     const result = owner.install();
     notice?.addCopies(result);
-    summary = n8nSkillsSummary(result);
+    return `${n8nSkillsSummary(result)}.`;
   } catch (error) { return `not copied (${copyFailure(error)}).`; }
-  if (args.host !== 'claude-code') return `${summary}. If the n8n Skills plugin is installed, turn it off in the Codex app's plugin settings so the skills do not load twice.`;
-  try { return disablePlugin(N8N_SKILLS_PLUGIN) ? `${summary}. Turned off the n8n Skills plugin so the skills do not load twice.` : `${summary}.`; }
-  catch (error) { return `${summary}. Could not turn off the n8n Skills plugin (${error.message}); run \`claude plugin disable ${N8N_SKILLS_PLUGIN}\` so the skills do not load twice.`; }
 }
 
 // Whether Antigravity is installed and whether Toolkit's copies of its skills are already there.
@@ -4060,7 +4051,7 @@ class ToolkitSetupExecution {
     // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
     const notice = new NewSessionNotice(args.host, { antigravityTarget: newSessionAntigravityTarget(args) }).addNativePlugin(nativeCache);
     const antigravitySkills = applyAntigravitySkills(args, undefined, undefined, notice);
-    const n8nSkills = installOfficialN8nSkills(args, undefined, undefined, notice);
+    const n8nSkills = installOfficialN8nSkills(args, undefined, notice);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     // Saved only once the answers are applied: a run that stops earlier (such as the self-update rerun) leaves
     // the next refresh to ask again rather than keep answers that never took effect. Claude Code saves none.
@@ -4106,7 +4097,7 @@ function cloudSweepSkipLines({ bindings = () => require('./toolkit-governance-st
     const reason = skipReason(binding);
     if (reason) lines.push(`Cloud sweep: ${binding.repository} is skipped because ${reason.why}. ${reason.fix}; until then run ${require('./toolkit-user-state.cjs').programmeCommand('refresh')} there by hand.`);
   }
-  lines.push('Cloud sweep: to check the governance App and the sweep workflow too, run toolkit governance check in each governed repository.');
+  lines.push('Cloud sweep: to check the governance App and the sweep workflow too, ask your agent to check governance in each governed repository.');
   return lines;
 }
 

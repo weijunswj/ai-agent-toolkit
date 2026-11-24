@@ -2,7 +2,8 @@
 'use strict';
 
 // Read-only renderer/checker. The coordinator applies the block itself, with a saved copy of the
-// previous instructions, a check of the result and a note with an undo (Projects skill sync).
+// previous instructions, a check of the result and a note with an undo (Projects skill sync). A block
+// whose text equals main's is current whatever Toolkit version its marker names.
 //
 //   --render                    the managed block
 //   --check <file> [--declined <version>] [--declined-dedupe <version>]
@@ -45,7 +46,8 @@ function target(text) {
 function checkInstructions(text, expected, declinedVersion) {
   const { malformed, found } = target(text);
   if (malformed) return { state: 'malformed', exitCode: 2 };
-  let state = { absent: 'missing', tampered: 'edited', stale: 'outdated', current: 'current' }[blockState(found, expected)];
+  // The coordinator applies the block for its text, so a release that only moved its marker is current.
+  let state = { absent: 'missing', tampered: 'edited', stale: 'outdated', current: 'current' }[blockState(found, expected, { anyVersion: true })];
   if (state === 'outdated' && declinedVersion === expected.version) return { state: 'declined', exitCode: 0 };
   // The block goes first: only blank lines may come before it.
   if (state === 'current' && text.slice(0, found.start).trim()) state = 'misplaced';

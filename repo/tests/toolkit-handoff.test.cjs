@@ -951,3 +951,93 @@ test('a hook-started run keeps memory rows first written under an older folder p
   assert.equal(result.kept, s.memory);
   for (const name of ['MEMORY.md', 'memory/owner-rules.md']) assert.ok(v.row(name), name);
 });
+
+// ---- polish rows: the reader's limits, the undo, a named-source check, network-share paths, the README
+
+test('the snapshot skips dot-named memory files and refuses a source over 5 MB or holding a NUL byte', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  s.put('memory/.draft.md', 'an editor\'s swap copy\n');
+  s.put('memory/.cache/notes.md', 'a tool\'s cache\n');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  const rows = JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8')).files.map(row => row.path);
+  assert.deepEqual(rows.filter(name => name.includes('.draft') || name.includes('.cache')), [], 'dot-names are never copied');
+  // Over 5 MB: refused by name before it is read.
+  const big = s.put('plans/big.md', 'a'.repeat(5 * 1024 * 1024 + 1));
+  const over = run(['--file', big]);
+  assert.equal(over.code, 1);
+  assert.match(over.result.stopped, /big\.md is over 5 MB\./);
+  // A NUL byte is valid UTF-8 but the store refuses it as binary, so the reader refuses it first:
+  // otherwise every refresh would write, stop at the save and undo, and --check would stay STALE.
+  const nul = s.put('plans/nul.md', 'text\u0000more\n');
+  const binary = run(['--file', nul]);
+  assert.equal(binary.code, 1);
+  assert.match(binary.result.stopped, /nul\.md holds a NUL byte \(binary\)\./);
+  assert.ok(!fs.existsSync(path.join(out, FOLDER, 'files', 'nul.md')), 'nothing is written');
+});
+
+test('undo of a stopped save removes the files the write created and restores the ones it changed', t => {
+  const handoff = handoffLib();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-handoff-undo-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const folder = 'evidence/handoff/acme/widget';
+  const at = rel => path.join(base, folder, ...rel.split('/'));
+  fs.mkdirSync(path.dirname(at('manifest.json')), { recursive: true });
+  fs.writeFileSync(at('manifest.json'), 'old manifest\n');
+  const undo = handoff.write(base, { folder, manifest: { schema: handoff.SCHEMA, files: [] }, writes: [{ path: 'memory/new-topic.md', text: 'new\n' }] }, 'acme/widget');
+  assert.ok(fs.existsSync(at('memory/new-topic.md')) && fs.existsSync(at('README.md')));
+  undo();
+  assert.equal(fs.existsSync(at('memory/new-topic.md')), false, 'a created snapshot file is removed');
+  assert.equal(fs.existsSync(at('README.md')), false, 'a created README is removed');
+  assert.equal(fs.readFileSync(at('manifest.json'), 'utf8'), 'old manifest\n', 'a changed file gets its old bytes back');
+});
+
+test('--check with a named source compares against that source, not the remembered one', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const act = argv => { const lines = []; const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv], { handoffState: s.state, now: NOW, stdout: text => lines.push(text), stderr: text => lines.push(text) }); return { code, text: lines.join('') }; };
+  assert.equal(act(['--memory', s.memory]).code, 0);
+  const other = path.join(s.base, 'other-memory');
+  fs.cpSync(s.memory, other, { recursive: true });
+  fs.writeFileSync(path.join(other, 'MEMORY.md'), '# Memory\n- the other folder\n');
+  fs.utimesSync(path.join(other, 'MEMORY.md'), new Date('2026-11-21T12:30:00Z'), new Date('2026-11-21T12:30:00Z'));
+  fs.utimesSync(path.join(other, 'owner-rules.md'), new Date('2026-11-20T09:00:00Z'), new Date('2026-11-20T09:00:00Z'));
+  assert.match(act(['--check']).text, /^HANDOFF CURRENT /, 'the remembered folder is unchanged');
+  const named = act(['--check', '--memory', other]);
+  assert.equal(named.code, 1, named.text);
+  // A folder this computer never saved from holds rows it never recorded: diverged, not changed.
+  assert.match(named.text, /^HANDOFF STALE .*diverged=MEMORY\.md/);
+});
+
+test('a Windows network-share path is a full path on Windows and another computer\'s path elsewhere', () => {
+  const { fullPathHere } = handoffLib();
+  for (const share of ['\\\\server\\share\\memory', '//server/share/memory']) {
+    assert.equal(fullPathHere(share, 'win32'), true, share);
+  }
+  assert.equal(fullPathHere('\\\\server\\share\\memory', 'linux'), false);
+  assert.equal(fullPathHere('\\\\server\\share\\memory', 'darwin'), false);
+  assert.equal(fullPathHere('\\\\', 'win32'), false, 'a bare double separator names no share');
+});
+
+test('the snapshot README gives a successor its reading order: MEMORY.md first, then the named working files', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory, '--instructions', s.instructions, '--file', s.hourly, '--file', s.daily]).code, 0);
+  const readme = fs.readFileSync(path.join(out, FOLDER, 'README.md'), 'utf8');
+  const order = readme.slice(readme.indexOf('## Read in this order'));
+  assert.ok(readme.includes('## Read in this order'), readme);
+  const steps = order.split('\n').filter(line => /^\d+\. /.test(line));
+  assert.match(steps[0], /^1\. `MEMORY\.md`/);
+  assert.match(steps[1], /`files\/instructions\.md`/);
+  assert.match(steps[2], /`files\/daily-additions\.md`, `files\/hourly-additions\.md`/);
+});
+
+test('a snapshot with no memory folder gives no MEMORY.md reading step', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--file', s.hourly]).code, 0);
+  const readme = fs.readFileSync(path.join(out, FOLDER, 'README.md'), 'utf8');
+  const steps = readme.slice(readme.indexOf('## Read in this order')).split('\n').filter(line => /^\d+\. /.test(line));
+  assert.deepEqual(steps, ['1. The named working files: `files/additions.md`.'], readme);
+});

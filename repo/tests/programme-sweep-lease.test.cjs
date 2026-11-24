@@ -458,6 +458,45 @@ test('lease: a cloud pass that ends with an error records its stop in the lease'
   assert.equal(f.record().unreported, null);
 });
 
+// After train PR 1468 merged, a cloud pass's release met a 409 (its own state commit and another
+// writer had just moved the store branch), the release was dropped without a word, and the lease
+// stayed live for twenty minutes: every sweep started for the merge wrote nothing.
+test('lease: a release that meets a branch race tries again and frees the lease', t => {
+  const f = fixture(t);
+  secondPass(f);
+  let refused = 0;
+  f.github.intercept(call => {
+    if (call.method === 'PUT' && call.path.endsWith('/sweep-lease.json') && call.body?.message === 'programme sweep: release the lease' && refused < 2) {
+      refused += 1;
+      return { status: 409, json: { message: 'is at another commit' } };
+    }
+    return undefined;
+  });
+  const pauses = [];
+  assert.equal(f.run({ cloud: true, leasePause: ms => pauses.push(ms) }).code, 0);
+  assert.equal(refused, 2, 'the release met the race twice');
+  assert.deepEqual(pauses, [1000, 2000], 'it waits a moment before each new try, so a busy branch can settle');
+  assert.equal(f.record().holder, null, 'the lease is free for the next sweep at once');
+  assert.ok(f.record().last_complete_at, 'the release carried the finished pass');
+});
+
+test('lease: a release that never lands says so, and the next sweep reports the stop once the lease ends', t => {
+  const f = fixture(t);
+  secondPass(f);
+  let errors = '';
+  f.github.intercept(call => (call.method === 'PUT' && call.path.endsWith('/sweep-lease.json') && call.body?.message === 'programme sweep: release the lease'
+    ? { status: 409, json: { message: 'is at another commit' } } : undefined));
+  const pauses = [];
+  assert.equal(f.run({ cloud: true, leasePause: ms => pauses.push(ms), stderr: { write: text => { errors += text; } } }).code, 0);
+  assert.deepEqual(pauses, [1000, 2000], 'no pause after the last try');
+  f.github.hooks = [];
+  assert.ok(f.record().holder, 'the lease is still held');
+  assert.match(errors, /^Sweep lease: the release did not land after 3 tries, so the lease ends on its own at \S+Z; the next sweep waits for it and reports this pass as stopped\.$/m);
+  f.advance(TTL_MS + 1000);
+  assert.equal(f.run({ cloud: true }).code, 0);
+  assert.equal(f.stop().diagnostics.cause, 'interrupted', 'the unreleased pass is a programme finding');
+});
+
 test('lease: on the computer an error stop is in the note only', t => {
   // Row L14: the local note records it, so the lease carries no second copy.
   const f = fixture(t);
@@ -567,6 +606,83 @@ test('batch: STATE_BRANCH_BUSY after three', t => {
 // The cloud sweep raises CLOUD_LAYOUT_STALE on the parent when the repository's Toolkit workflow
 // copies are behind the Toolkit's layout, and the finding resolves once a refresh lands. A computer's
 // pass never checks.
+// 23 Nov 2026: the controller's computer ran after-write refreshes back to back from 14:05Z, each with
+// the computer's 300-request cap, re-taking the lease within seconds, so no pass completed and the
+// cloud sweep's full-budget pass never got the lease. A computer refresh now leaves the lease to a
+// cloud sweep that is queued or running its refresh job.
+const RUNS = 'repos/example.test/app/actions/workflows/toolkit-programme-sweep.yml/runs';
+function actions(f, { runs = [], jobs = {}, status = 200 } = {}) {
+  const seen = [];
+  f.github.intercept(call => {
+    if (call.method !== 'GET') return undefined;
+    if (call.path.startsWith(RUNS)) { seen.push(call.path); return status === 200 ? { status, json: { total_count: runs.length, workflow_runs: runs } } : { status, json: { message: 'error' } }; }
+    const job = /^repos\/example\.test\/app\/actions\/runs\/(\d+)\/jobs/.exec(call.path);
+    if (job) { seen.push(call.path); return { status: 200, json: { jobs: jobs[job[1]] || [] } }; }
+    return undefined;
+  });
+  return seen;
+}
+
+test('computer refresh: a queued or running cloud sweep gets the lease, and this refresh writes nothing', t => {
+  const f = fixture(t);
+  secondPass(f);
+  const seen = actions(f, { runs: [{ id: 7, status: 'queued', event: 'push' }] });
+  const commits = f.github.commits;
+  const from = f.github.calls.length;
+  const yielded = f.run();
+  assert.equal(yielded.code, 0);
+  assert.deepEqual(yielded.report, { outcome: 'QUEUED', reason: 'the cloud sweep picks this up', cloud_run: { id: 7, status: 'queued' } });
+  assert.equal(f.github.commits, commits, 'nothing written');
+  assert.deepEqual(f.leaseWrites(null, from), [], 'the lease is left alone');
+  assert.equal(seen.length, 1, 'one Actions read');
+  assert.match(f.run({ argv: ['refresh'] }).output, /^The cloud sweep picks this up: run 7 is queued, so this refresh leaves the sweep lease to it and wrote nothing\.$/m);
+  assert.notEqual(f.lifecycle(500), 'DONE', 'the close waits for the cloud pass');
+});
+
+test('computer refresh: a cloud run past its refresh job (its follow-up waiting) does not hold this refresh back', t => {
+  const f = fixture(t);
+  secondPass(f);
+  const seen = actions(f, { runs: [{ id: 8, status: 'in_progress', event: 'workflow_dispatch' }], jobs: { 8: [{ name: 'Refresh the programme', status: 'completed' }, { name: 'Start the next run after an early stop', status: 'in_progress' }] } });
+  assert.equal(f.run().code, 0);
+  assert.equal(f.lifecycle(500), 'DONE', 'this refresh ran');
+  assert.deepEqual(seen.map(item => item.replace(/\?.*$/, '')), [RUNS, 'repos/example.test/app/actions/runs/8/jobs']);
+  // The same run while its refresh job is still at work: this refresh leaves the lease to it.
+  const g = fixture(t);
+  secondPass(g);
+  actions(g, { runs: [{ id: 9, status: 'in_progress', event: 'push' }], jobs: { 9: [{ name: 'Refresh the programme', status: 'in_progress' }] } });
+  assert.equal(g.run().report.cloud_run.status, 'in_progress');
+  assert.notEqual(g.lifecycle(500), 'DONE');
+});
+
+test('computer refresh: when the Actions read fails it runs as usual and says so; no cloud sweep runs as usual quietly', t => {
+  const f = fixture(t);
+  secondPass(f);
+  actions(f, { status: 502 });
+  let errors = '';
+  assert.equal(f.run({ stderr: { write: text => { errors += text; } } }).code, 0);
+  assert.equal(f.lifecycle(500), 'DONE', 'fail open: the refresh ran');
+  assert.match(errors, /^Cloud sweep check: the Actions read failed \(HTTP 502\), so this refresh runs as usual\.$/m);
+  // No cloud sweep workflow here (404) and no run at work: the refresh runs with no line.
+  for (const setup of [{ status: 404 }, { runs: [{ id: 3, status: 'completed', event: 'push' }] }]) {
+    const g = fixture(t);
+    secondPass(g);
+    actions(g, setup);
+    let said = '';
+    assert.equal(g.run({ stderr: { write: text => { said += text; } } }).code, 0);
+    assert.equal(g.lifecycle(500), 'DONE');
+    assert.doesNotMatch(said, /Cloud sweep check/);
+  }
+});
+
+test('cloud refresh: the cloud sweep itself never checks for a cloud run', t => {
+  const f = fixture(t);
+  secondPass(f);
+  const seen = actions(f, { runs: [{ id: 7, status: 'in_progress', event: 'push' }], jobs: { 7: [{ name: 'Refresh the programme', status: 'in_progress' }] } });
+  assert.equal(f.run({ cloud: true }).code, 0);
+  assert.deepEqual(seen, []);
+  assert.equal(f.lifecycle(500), 'DONE');
+});
+
 test('cloud sweep: CLOUD_LAYOUT_STALE is raised while the copies are stale and resolves after the refresh', t => {
   const f = fixture(t);
   let stale = true;
