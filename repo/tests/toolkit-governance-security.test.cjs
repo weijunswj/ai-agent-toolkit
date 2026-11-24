@@ -4,7 +4,7 @@
 // workflow, tested against this invariant model and closure matrix.
 //
 // Actors: the owner (answers in their own chat or terminal, merges pull requests); an agent (runs
-// `toolkit governance check` and `security`, and can edit any working tree); Dependabot (opens and
+// the governance check and `security`, and can edit any working tree); Dependabot (opens and
 // updates its pull requests); anyone else with write access (can push to a Dependabot branch); the
 // auto-merge workflow (the built-in token only).
 //

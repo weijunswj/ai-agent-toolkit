@@ -61,6 +61,27 @@ test('governance answers and other governance wording stay with the gate or plai
   for (const text of plain) assert.equal(commands.phraseContext(text), '', text);
 });
 
+// Nothing routes `toolkit governance check` as a typed command (agents run toolkit-governance.cjs check
+// themselves), so no Toolkit text may tell the owner, a coordinator or a workflow reader to type it.
+// The changelog keeps its history; tests may name the phrase to prove it stays plain words.
+test('no Toolkit text tells anyone to type toolkit governance check', () => {
+  const root = path.join(__dirname, '..', '..');
+  const skip = new Set([path.join(root, 'repo', 'docs', 'CHANGELOG.md'), path.join(root, 'repo', 'docs', 'changelog.d'), path.join(root, 'repo', 'tests')]);
+  const hits = [];
+  const walk = dir => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (skip.has(file) || entry.name === 'node_modules') continue;
+      if (entry.isDirectory()) { walk(file); continue; }
+      if (!/\.(md|cjs|js|json|ya?ml|ps1|toml)$/.test(entry.name)) continue;
+      fs.readFileSync(file, 'utf8').split(/\r?\n/).forEach((line, index) => { if (/toolkit governance check/i.test(line)) hits.push(`${path.relative(root, file)}:${index + 1}`); });
+    }
+  };
+  for (const top of ['skills', 'repo', '.github', '.claude-plugin', '.codex-plugin']) if (fs.existsSync(path.join(root, top))) walk(path.join(root, top));
+  for (const file of ['README.md', 'AGENTS.md']) if (fs.readFileSync(path.join(root, file), 'utf8').match(/toolkit governance check/i)) hits.push(file);
+  assert.deepEqual(hits, []);
+});
+
 test('each typed command maps to its own action, whatever the letter case, spacing or closing full stop', () => {
   const cases = [
     ['toolkit cmd', 'list'], ['toolkit command', 'list'], ['toolkit refresh', 'refresh'], ['toolkit setup', 'setup'], ['toolkit show env', 'env'],
@@ -160,7 +181,7 @@ test("only the user's own message is read: a relayed or attachment-bearing Proje
 // The Claude Code hook with a stub gate: the line is added only on a pass with no governance context.
 function prompt(decision, text, extra = {}, environment = {}) {
   const stubGate = { PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session', ownerReply: gate.ownerReply, ...extra };
-  const mergeHold = { recordPrompt: () => 0 };
+  const mergeHold = { recordPromptNote: () => ({ count: 0, note: '' }) };
   return claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: text }, { gate: stubGate, mergeHold, environment });
 }
 
