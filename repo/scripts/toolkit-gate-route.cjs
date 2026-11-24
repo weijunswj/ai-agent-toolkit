@@ -215,7 +215,7 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
 // more (no device session, connector or card).
 const REPORT_TOOLS = /^(?:mcp__hearthbot__(?:post_message|edit_message|react|unreact|update_progress_checklist|request_decision|close_decision|message_coordinator|message_thread|no_reply_needed|read_thread|read_messages_by_id|read_project_chat|list_threads|rename_thread|show_helpline_card|stop_remote_control)|mcp__claude-code-remote__get_session)$/;
 const STATE_CHANGING = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|ScheduleWakeup|SendMessage|Workflow|mcp__.*)$/;
-const SHELL = /^(?:Bash|PowerShell)$/;
+const { SHELL_TOOLS: SHELL } = require('./toolkit-shell-call.cjs');
 // A verdict where the train finder counts one: the first line of a published comment.
 const VERDICT_FIRST = /^[ \t\r\n]*Toolkit-G2: (?:PASS|FAIL) [0-9a-f]{40} tier=(?:LIGHT|NORMAL|RISKY)/;
 

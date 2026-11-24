@@ -36,7 +36,7 @@ Fixtures and hook-pack results prove no installed delivery. Qualification needs 
 
 | | Rule |
 |---|---|
-| Event | `Stop`, one command hook in each plugin's `hooks.json`, no matcher |
+| Event | `Stop`, one command hook in each plugin's `hooks.json`, no matcher; Claude Code runs the owed check after it in the same group (below) |
 | Script | `repo/scripts/toolkit-programme-checkpoint-hook.cjs` |
 | Timeout | 30 seconds in `hooks.json`; the hook stops itself at 20 seconds and each GitHub call at 8 |
 | Never blocks | Always exits 0 and prints nothing on stdout (Codex reads turn-end stdout as JSON; exit 2 or a block decision would continue the turn on either host) |
@@ -46,6 +46,15 @@ Fixtures and hook-pack results prove no installed delivery. Qualification needs 
 | Windows | Claude Code runs the same command. Codex runs `commandWindows`: the full `powershell.exe` path with `-File repo/scripts/toolkit-programme-checkpoint-hook.ps1`, which setup adds to the installed copy only and which also always exits 0 |
 | Trust | Codex skips a plugin hook until it is reviewed and trusted in `/hooks`; any plugin bundle change needs approval again, and setup reports changed or unverified approval |
 | Programme refresh | After the checkpoint, a session the after-tool hook marked starts `programme.cjs refresh` detached, once for each governed repository it wrote for, then clears the mark; output is appended to one `last-run-<checkout key>.log` per checkout in `~/.ai-agent-toolkit/user-state/programme-refresh/`, and marks older than a day are removed. A write with no governed checkout on this computer, or governance not ENABLED there, starts nothing |
+
+**Owed check (Claude Code only).** `repo/scripts/toolkit-owed-check-hook.cjs` runs second at turn end, 30-second timeout. It reads only local files: this computer's attention cache, the session's transcript and the Claude desktop app's session files; no git, gh or network call. In a governed repository, a session that acted as the controller (it launched a gate with `start_session`, or ran a programme command with `--controller`) gets a block decision listing what the turn left owed:
+
+- Findings due: open programme findings new for 4 hours or more, or acknowledged past their due time.
+- Gate sessions due to close: open `CLOSE_DUE` findings.
+- Finished side sessions: sessions it started that are not archived, not running, have every pull request merged or closed and nothing waiting on the owner.
+- Gate launches from the last 24 hours with no `gate-session` record, and gate sessions archived in the last week with no close record.
+
+It blocks again only when an entry is added to the list; it remembers the shown entries by hash, per session. With no attention cache, or one over an hour old, it starts `programme.cjs refresh` in the background, at most once per 15 minutes per repository and never in a cloud session. Session start shows no attention or stale-work line: this check is where due work reaches the controller. It stays silent when `stop_hook_active` is true, in gate, helper and side sessions, and in any session that did not act as the controller. A missing cache, an unreadable transcript or desktop session files in an unknown format become one `systemMessage` note, shown once, never a block. Codex runs the turn-end hook alone.
 
 The same script also runs on `PostToolUse` (one command hook, matcher `^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$` in Claude Code and `^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$` in Codex, 10-second timeout, the same Windows launcher in Codex). It reads only the hook input: after a GitHub write (a GitHub connector tool that writes an issue, comment, sub-issue link, pull request, review or branch files; `gh issue` or `gh pr` writes; `gh api` with a write method, or fields without `GET`, or a GraphQL mutation; `git push`) it writes one small mark file for the session. No git, gh or network call, exit 0, nothing on stdout.
 

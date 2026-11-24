@@ -68,7 +68,7 @@ const RULES_TEXT = Object.freeze({
   UNAVAILABLE: "Couldn't check governance. Continue with global rules and coding gates; no governance effects or standing task auto-merge until it can be checked.",
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
-  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by saying \`toolkit governance\` and answering its question bank, by sending \`toolkit governance enable\` or \`toolkit governance disable\` as a message, or by running ${CMD('enable')} or ${CMD('disable')} in its own terminal.`,
+  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by answering yes, no or later when Toolkit asks, or by saying toolkit governance and answering its question bank.`,
 });
 
 // The fixed summary of a bank turn-on pull request: what merging it does, what it holds and what
@@ -416,9 +416,7 @@ class ToolkitGovernanceCli {
     const slug = proposal.repository;
     const read = this.#appRead();
     const state = governanceApp.presence(slug, read);
-    // The owner type picks the App page, so it is read only when the setup steps will show.
-    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state,
-      state.variable === 'found' || state.secret === 'found' ? null : governanceApp.ownerType(slug, read));
+    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state);
     const others = governance.enabledRepositories(this.#registryOptions).filter(name => name.toLowerCase() !== slug.toLowerCase());
     return governanceApp.removalLines(slug, state, others);
   }
@@ -432,12 +430,6 @@ class ToolkitGovernanceCli {
     const lines = [answer.answered ? `Task auto-merge: ${answer.auto_merge === 'after-gates' ? 'on (finished task pull requests merge once their gates pass)' : 'off (every pull request waits for a typed merge)'}.` : governance.TASK_SWITCH_UPGRADE_LINE];
     if (removed.length) lines.push(`Removed the old per-app task auto-merge answers on this computer (${removed.join(', ')}); the repository's switch replaces them.`);
     return { value: answer.answered ? answer.auto_merge : 'unset', answer, removed, lines };
-  }
-
-  // The repository's merge-train switch, as merged and read back on this computer.
-  #trainSwitch(root) {
-    const train = governance.mergeTrain(root, this.#registryOptions);
-    return { value: train.on ? 'on' : 'off', fresh: train.fresh };
   }
 
   // One binding pull request that changes only the named task_prs members ({ auto_merge,
@@ -471,8 +463,11 @@ class ToolkitGovernanceCli {
   async #bank(json, answers, ticket, explain = null) {
     this.#refresh(this.#cwd);
     let state = this.#state();
-    // One failed read of the merged binding is often a moment's network or git trouble: read once more.
-    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+    // Not read: an enabled binding read too long ago, or no read at all (UNAVAILABLE), where the bank
+    // cannot know whether governance is decided. One failed read is often a moment's network or git
+    // trouble: read once more.
+    const unread = read => read.state === 'UNAVAILABLE' || (read.state === 'ENABLED' && !read.programme_records_bind);
+    if (unread(state)) {
       this.#refresh(this.#cwd, { timeout: BANK_REREAD_TIMEOUT_MS });
       state = this.#state();
     }
@@ -483,15 +478,21 @@ class ToolkitGovernanceCli {
     }
     // Still unread: no bank and no governed write from an old read. The bank's own line asks the owner
     // to type it again; an answer is refused with nothing written (main adds its Agents line).
-    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+    if (unread(state)) {
       this.#print(json, { state: state.state, writes: 0 }, answers === null && !explain ? [BANK_UNREAD, '', BANK_UNREAD_AGENTS] : [ANSWER_UNREAD]);
       return 1;
     }
     // The open governance pull requests are read again first, so one closed outside Toolkit no longer
     // reads as pending (it would hold the turn-on with a misleading "not ready" line).
     if (state.state === 'UNDECIDED' && this.#proposalsLive) this.#proposals.refresh(this.#cwd);
-    const merged = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions) : null;
-    const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
+    // Every row that shows what the merged binding sets comes from this one read: other sessions
+    // refresh the same cache, and a read of theirs that fails marks it stale between two reads of ours
+    // (that once showed merge trains Off for a binding that has them on). The bank says when it is stale.
+    const read = state.state === 'ENABLED' && state.root ? governance.mergedBindingRead(state.root, this.#registryOptions) : null;
+    const merged = read ? read.binding : null;
+    const switches = governance.mergedSwitches(merged);
+    // #taskSwitch also retires the old per-app answers once the switch reads back fresh.
+    const task = read ? { ...this.#taskSwitch(state.root), value: merged ? switches.task : 'off' } : null;
     let permissions = { checked: false, missing: 0 };
     try { permissions = this.#permissionsChecker(state.root) || permissions; } catch { /* shown as not checked */ }
     // A repository that is not on and not prepared: what turning on would make (store, parent, checks).
@@ -514,11 +515,10 @@ class ToolkitGovernanceCli {
     if (offered) { try { existing = ciOffer.existingShards(state.root); } catch { existing = null; } }
     const ciShards = offered ? { measured: estimate, open, existing } : null;
     this.#lastCiEstimate = estimate;
-    const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
     // The App row reads its variable and secret only where governance is on or can be turned on here.
     const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
     const reference = governanceBank.bankReference(specs);
     if (explain) {
       this.#print(false, {}, this.#explainShown(state, specs, reference, explain));
@@ -791,8 +791,8 @@ class ToolkitGovernanceCli {
     // answer; otherwise the answer says nothing about it.
     const governedAfter = chosen.governance === 'on' || (state.state === 'ENABLED' && chosen.governance !== 'off');
     if (chosen.governanceApp === 'setup' && governedAfter && code === 0 && state.repository) {
-      this.#print(false, {}, ['', `Governance App: run this once in your own PowerShell or terminal, outside any agent, with gh signed in. You click Create on GitHub; it saves the App's Client ID and key on ${state.repository}, opens the install page and checks the installation.`, '',
-        ...fenced(`node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`)]);
+      this.#print(false, {}, ['', `Governance App: paste this one line into PowerShell and press Enter. It saves the App's Client ID and key on ${state.repository}. ${governanceApp.SETUP_STEPS}`, '',
+        ...fenced(governanceApp.setupCommand(state.repository, store))]);
       acted = true;
       commanded += 1;
     }
@@ -974,7 +974,6 @@ function copiesRow(copies) {
 }
 
 // The owner's governance App setup command (it refuses under an agent).
-const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs');
 // A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
 // quotes, never curly ones) with a copy button.
 const fenced = command => ['```', command, '```'];

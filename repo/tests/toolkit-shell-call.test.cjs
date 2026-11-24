@@ -313,7 +313,7 @@ test('shellPath reads the home folder, Git Bash drive paths and /tmp as the shel
 });
 
 test('the shell tool list is the one the gate, the merge hold and the Codex hook use', () => {
-  assert.deepEqual(SHELL_TOOL_NAMES, ['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']);
+  assert.deepEqual(SHELL_TOOL_NAMES, ['Bash', 'PowerShell', 'Monitor', 'mcp__terminal__run_in_terminal', 'exec_command', 'shell', 'local_shell']);
   for (const name of SHELL_TOOL_NAMES) assert.equal(ShellCall.isShellTool(name), true, name);
   for (const name of ['bash', 'write_stdin', 'apply_patch', 'Edit', '', undefined, 7]) assert.equal(ShellCall.isShellTool(name), false, String(name));
   assert.equal(ShellCall.from({ tool_name: 'Edit', tool_input: { command: 'git push' } }).isShell, false);
@@ -694,4 +694,57 @@ test('779 round 4: every placement is charged the script and words it reads', ()
   const started = process.hrtime.bigint();
   assert.equal(matrixDecide('CB', `sh -c '${'$9'.repeat(30720)}echo $1' x hello`), 'allow');
   assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 5000);
+});
+
+// Every Claude Code tool whose input carries a command line, from the host's own tool list (the
+// desktop app's Terminal panel tools included). A tool that runs a command but is not a shell tool
+// skips the merge hold, the push and attribution checks and the user-state guard, as the Terminal
+// panel tool did before it joined the list.
+const CLAUDE_COMMAND_TOOLS = Object.freeze(['Bash', 'PowerShell', 'Monitor', 'mcp__terminal__run_in_terminal']);
+const CLAUDE_NO_COMMAND_TOOLS = Object.freeze(['mcp__terminal__open_terminal_tab', 'mcp__terminal__list_terminal_tabs', 'mcp__terminal__stop_terminal_tab', 'mcp__terminal__read_terminal']);
+
+test('every tool that runs a command line is a shell tool and reaches every Claude shell guard', () => {
+  const fs = require('node:fs');
+  const root = path.join(__dirname, '..', '..');
+  for (const name of CLAUDE_COMMAND_TOOLS) assert.ok(SHELL_TOOL_NAMES.includes(name), `${name} runs a command but is not a shell tool`);
+  for (const name of CLAUDE_NO_COMMAND_TOOLS) assert.equal(ShellCall.isShellTool(name), false, name);
+  // Any tool a hook-pack row sends with a string `command` is a shell tool too, so a row added for a
+  // new command tool fails here until the tool joins the list.
+  const corpus = path.join(root, 'repo', 'tests', 'hook-pack', 'corpus');
+  const seen = new Set();
+  const walk = item => {
+    if (Array.isArray(item)) item.forEach(walk);
+    else if (item && typeof item === 'object') {
+      if (typeof item.tool_name === 'string' && item.tool_input && typeof item.tool_input.command === 'string') seen.add(item.tool_name);
+      Object.values(item).forEach(walk);
+    }
+  };
+  for (const file of fs.readdirSync(corpus).filter(name => name.endsWith('.json'))) walk(JSON.parse(fs.readFileSync(path.join(corpus, file), 'utf8')));
+  assert.ok(seen.has('mcp__terminal__run_in_terminal'));
+  for (const name of seen) assert.ok(ShellCall.isShellTool(name), `hook-pack rows send ${name} a command, but it is not a shell tool`);
+  // Each Claude command tool reaches the attribution hook and the blocking governance hook (merge
+  // hold, push and user-state checks) through the real matchers of both plugin copies.
+  for (const file of [['.claude-plugin', 'hooks', 'hooks.json'], ['repo', 'contracts', 'toolkit-local-bridge', 'claude-plugin', 'hooks', 'hooks.json']]) {
+    const groups = JSON.parse(fs.readFileSync(path.join(root, ...file), 'utf8')).hooks.PreToolUse;
+    const reaching = (script, blocking = false) => groups.filter(group => group.hooks.some(hook => hook.command.includes(script) && (!blocking || hook.onFailure === 'block')));
+    const matches = (group, name) => (/^[A-Za-z0-9_|]+$/.test(group.matcher) ? group.matcher.split('|').includes(name) : new RegExp(group.matcher).test(name));
+    for (const name of CLAUDE_COMMAND_TOOLS) {
+      assert.ok(reaching('attribution-hook.cjs').some(group => matches(group, name)), `${file.join('/')}: ${name} skips the attribution hook`);
+      assert.ok(reaching('governance-hook.cjs" --event PreToolUse', true).some(group => matches(group, name)), `${file.join('/')}: ${name} skips the blocking governance hook`);
+    }
+  }
+});
+
+test('the Terminal panel tool is read as an unknown shell, so both the bash and PowerShell readings judge it', () => {
+  const { shellOf, scriptContext } = require('../scripts/toolkit-shell-call.cjs');
+  const input = { tool_name: 'mcp__terminal__run_in_terminal', cwd: os.tmpdir(), tool_input: { command: 'gh pr merge 5 --merge', cwd: path.join(os.tmpdir(), 'tab'), title: 'merge' } };
+  const call = ShellCall.from(input);
+  assert.equal(call.isShell, true);
+  assert.equal(call.unreadable, false);
+  assert.equal(call.text, 'gh pr merge 5 --merge');
+  assert.equal(call.folder, path.join(os.tmpdir(), 'tab'));
+  assert.equal(shellOf(input, 'claude'), null);
+  assert.equal(scriptContext(input, { host: 'claude' }).uncertainShell, true);
+  // A Terminal call with no command at all cannot be read; one that could merge is refused.
+  assert.equal(ShellCall.from({ tool_name: 'mcp__terminal__run_in_terminal', tool_input: { cwd: os.tmpdir(), title: 'gh pr merge 5' } }).refusal(), UNREADABLE);
 });

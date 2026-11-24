@@ -142,11 +142,13 @@ function verifySessionStartHook(hooksPath) {
   if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
     errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
   }
-  // The turn-end hook is only the programme checkpoint, which never blocks a turn.
+  // The turn-end hooks are exactly the programme checkpoint, which never blocks a turn, then the owed
+  // check, which stops a controller's turn once per new owed entry.
   const stopHooks = (Array.isArray(hooks?.hooks?.Stop) ? hooks.hooks.Stop : []).flatMap((group) => group?.hooks || []);
-  if (stopHooks.length !== 1 || stopHooks[0]?.type !== 'command'
-    || stopHooks[0].command !== 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"') {
-    errors.push('Stop must have exactly one hook, the programme checkpoint through CLAUDE_PLUGIN_ROOT');
+  const stopScripts = ['toolkit-programme-checkpoint-hook.cjs', 'toolkit-owed-check-hook.cjs'];
+  if (stopHooks.length !== stopScripts.length || stopHooks.some((hook, index) => hook?.type !== 'command'
+    || hook.command !== `node "\${CLAUDE_PLUGIN_ROOT}/repo/scripts/${stopScripts[index]}"`)) {
+    errors.push('Stop must have exactly two hooks, the programme checkpoint then the owed check, through CLAUDE_PLUGIN_ROOT');
   }
   return errors;
 }
@@ -310,6 +312,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/controller/evidence-and-finish.md",false],
     ["repo/ARCHITECTURE.md",false],
     ["repo/scripts/toolkit-programme-checkpoint-hook.cjs",false],
+    ["repo/scripts/toolkit-owed-check-hook.cjs",false],
     ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs",false],
     ["skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs",false],
   ];

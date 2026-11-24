@@ -165,10 +165,9 @@ test('a cloud session at the scan limit stays within the host limit and keeps th
   for (const name of names) assert.ok(text.includes(`- ${name}: `), `${name} still has a state line`);
 });
 
-// The stale check at a cloud session start: the same attention and stale-check lines as on a computer,
-// only from caches already in the session, never a programme store read or a background start (a cloud
-// session's GitHub link may not reach the store). With neither cache it says plainly that both wait for
-// the owner's computer.
+// Session start shows the governance status only, in a cloud session and on a computer: no attention
+// line, no stale-check line and no background job, whatever this computer's files from an earlier
+// Toolkit hold. Due findings reach the controller at turn end.
 function cloudProgrammeWorld(t) {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'governed', { remote: 'https://github.com/example-owner/governed.git' });
@@ -182,58 +181,23 @@ function cloudProgrammeWorld(t) {
   return { ctx, repo, programmeDeps, started, start };
 }
 
-test('red: a cloud session inside an ENABLED repository with no programme cache says the attention and stale check wait for the owner\'s computer, and reads or starts nothing', t => {
+test('red: a session start inside an ENABLED repository shows no attention or stale-check line, reads no programme file and starts nothing', t => {
   const world = cloudProgrammeWorld(t);
   assert.equal(governance.governanceState(world.repo, world.ctx.options).programme_records_bind, true, 'fixture binds programme records');
-  const text = world.start(world.repo);
-  assert.ok(text.startsWith(`${claudeHook.CLOUD_LINE}\n\n`), text);
-  const repoLine = text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
-  assert.match(repoLine, /\n {2}Attention and stale check: not read in this cloud session \(a cloud session does not read the programme store\); both run at the next session start on the owner's computer\. Controller: check them from a session on the owner's computer before closing or planning children\./);
-  assert.doesNotMatch(text, /could not run|add_repo|Choose a private repository/);
-  assert.deepEqual(world.started, { refresh: [], stale: [] }, 'no background job from a cloud session');
-  // A session started above its clones (a Projects thread) is not inside the repository: no programme lines.
-  assert.doesNotMatch(world.start(world.ctx.root), /Attention and stale check|Stale check|Attention: /);
-  assert.deepEqual(world.started, { refresh: [], stale: [] });
-});
-
-test('red: a cloud session with the session\'s own attention cache and today\'s stale rows shows both lines with their Controller: actions', t => {
-  const world = cloudProgrammeWorld(t);
-  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
-  const now = new Date('2026-11-22T10:00:00.000Z');
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  cache.writeCache('example-owner/governed', { line: 'Attention: 1 new, 0 acknowledged', counts: { new: 1, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => now.toISOString() });
-  cache.writeStaleStamp('example-owner/governed', { date: today, at: now.toISOString(), rows: ['FOLD? #20 new under #1 with no Nearest child: line'] }, world.programmeDeps);
-  const text = world.start(world.repo);
-  const repoLine = text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
-  assert.match(repoLine, /\n {2}Attention: 1 new, 0 acknowledged\. Run node "[^"]*programme\.cjs" attention for the list\. Controller: answer each new or overdue finding this turn/);
-  assert.match(repoLine, new RegExp(`\\n {2}Stale check ${today}: 1 row to answer \\(FOLD\\? 1\\)\\. Run node "[^"]*toolkit-controller-check\\.cjs" [^\\n]*?Controller: answer each this turn: `));
-  assert.doesNotMatch(text, /Attention and stale check: not read/);
-  assert.deepEqual(world.started, { refresh: [], stale: [] });
-  // On a computer (no CLAUDE_CODE_REMOTE) the same repository shows the stale line in its session line.
-  assert.match(world.start(world.repo, {}), new RegExp(`Stale check ${today}: 1 row to answer`));
-});
-
-// With an attention cache but no stamp for today, the attention line alone left the stale check unsaid.
-test('red: a cloud session with an attention cache but no stamp for today says the stale check waits for the owner\'s computer', t => {
-  const world = cloudProgrammeWorld(t);
-  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
-  const now = new Date('2026-11-22T10:00:00.000Z');
-  cache.writeCache('example-owner/governed', { line: 'Attention: 1 new, 0 acknowledged', counts: { new: 1, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => now.toISOString() });
-  const waits = /\n {2}Stale check: not run in this cloud session; it runs at the next session start on the owner's computer\. Controller: check it from a session on the owner's computer before closing or planning children\./;
-  const lineOf = text => text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
-  let repoLine = lineOf(world.start(world.repo));
-  assert.match(repoLine, /\n {2}Attention: 1 new, 0 acknowledged\./);
-  assert.match(repoLine, waits);
-  assert.doesNotMatch(repoLine, /Attention and stale check: not read/, 'the attention line is there, so only the stale check waits');
-  // A stamp from an earlier day is no stamp for today.
-  cache.writeStaleStamp('example-owner/governed', { date: '2026-11-20', at: '2026-11-20T09:00:00.000Z', rows: ['FOLD? #20 new under #1 with no Nearest child: line'] }, world.programmeDeps);
-  assert.match(lineOf(world.start(world.repo)), waits);
-  // Today's stamp with no rows is a clear check: nothing to say.
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  cache.writeStaleStamp('example-owner/governed', { date: today, at: now.toISOString(), rows: [] }, world.programmeDeps);
-  repoLine = lineOf(world.start(world.repo));
-  assert.doesNotMatch(repoLine, /Stale check/);
-  assert.deepEqual(world.started, { refresh: [], stale: [] });
+  // An attention cache and a stale-check stamp as an earlier Toolkit wrote them.
+  fs.mkdirSync(world.programmeDeps.attentionDir, { recursive: true });
+  fs.writeFileSync(path.join(world.programmeDeps.attentionDir, 'example-owner--governed.json'), JSON.stringify({ schema: 'toolkit.programme-attention-cache.v1', repository: 'example-owner/governed',
+    as_of: '2026-11-22T09:00:00.000Z', complete: true, counts: { new: 1, acknowledged: 0 }, line: 'Attention: 1 new, 0 acknowledged', digest: 'd1' }));
+  const stamp = path.join(world.programmeDeps.home, '.ai-agent-toolkit', 'user-state', 'stale-check', 'example-owner--governed.json');
+  fs.mkdirSync(path.dirname(stamp), { recursive: true });
+  fs.writeFileSync(stamp, JSON.stringify({ date: '2026-11-22', at: '2026-11-22T09:00:00.000Z', rows: ['FOLD? #20 new under #1 with no Nearest child: line'] }));
+  for (const environment of [{ CLAUDE_CODE_REMOTE: 'true' }, {}]) {
+    const text = world.start(world.repo, environment);
+    assert.match(text, /Toolkit governance: ENABLED/, JSON.stringify(environment));
+    assert.doesNotMatch(text, /Attention|Stale check|stale check|toolkit-controller-check|could not run|add_repo|Choose a private repository/, JSON.stringify(environment));
+  }
+  assert.ok(world.start(world.repo).startsWith(`${claudeHook.CLOUD_LINE}\n\n`));
+  assert.deepEqual(world.started, { refresh: [], stale: [] }, 'no background job from session start');
 });
 
 test('a cloud session with no repository at or under its start folder gets no governance text', (t) => {
