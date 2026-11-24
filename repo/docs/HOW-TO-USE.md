@@ -81,7 +81,7 @@ Governance has one entry:
 
 - `toolkit governance`, `setup governance` or `refresh governance` (with or without `toolkit` in front): show this repository's governance question bank, in the same format as `setup toolkit`. It asks at most two questions: whether governance stays on or off (only where it is already decided; in a new repository your yes on the turn-on question decided it, so the answer turns governance on) and whether task auto-merge is on. Everything else is a status line under the table: what is set, or the Toolkit default your answer applies. Those defaults are parallel CI shards when the last green CI run took 10 minutes or more and the CI does not already split its tests (`shards=not-now` or `shards=never` in your reply skips them, `shards=yes` adds them anyway), the commands for Toolkit's permission blocks and the governance App when they are needed (you run them yourself), and, where governance is on and older setups left copies of the governed rules or playbooks, removing those copies in the working tree for one pull request you merge yourself. Reply `all recommended` or only your changes, such as `1.1=B`, in chat; no terminal step. Toolkit checks that the reply is your own message before it acts. Every change to governance, task auto-merge or parallel CI shards is one pull request for you to merge, and applies only after your merge. In a new repository the bank also names the evidence store, parent issue and required checks: the store is this repository's own private `TRANSPORT-<name>`, found or created when governance turns on (`store=<owner/name>` uses another private repository of yours instead, and `no store` keeps governance off), and the pull request holds only the programme file and the Toolkit CI checks.
 
-`toolkit governance enable` and `toolkit governance disable` are your answers to Toolkit's governance question. Each prepares a pull request for you to merge, and counts only while that question is open for this repository.
+When Toolkit asks whether to turn on governance, reply yes, no or later in your own words. Yes or no prepares a pull request for you to merge, and counts only while that question is open for this repository.
 
 ### Evidence Store
 
@@ -174,7 +174,7 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 ### Antigravity 2
 
-Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target.
+Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target. For now that skills copy is all Antigravity gets, apart from the global rules when setup runs with `--antigravity-global-rules`: no plugin, no hooks, no Toolkit-only skills (so no `toolkit-playbooks`) and no governed rules, also in a governed repository. Its sessions follow the repository's own `AGENTS.md`. A plugin route may come later.
 
 When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills and the official n8n skills into Antigravity's global skills folder (`~/.gemini/config/skills`). After that, each Claude Code or Codex session start refreshes Toolkit's copies from the managed checkout once Toolkit has updated (an unchanged Toolkit costs it two small file reads), and setup shows the answer as Keep current; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed. Start a new Antigravity session after a refresh to load the changed skills.
 
@@ -271,7 +271,7 @@ Policy layering stays portable:
 
 Templates are canonical material. Review them before copying into a consumer repo and update the owning `skills/**` or `repo/contracts/**` surface directly.
 
-- [Generic agent rule templates](../../skills/repository-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
+- [Repository agent rules](../../skills/repository-agent-rules/) holds the one-line `CLAUDE.md` shim template only; the rules themselves come from the installed Toolkit.
 - [n8n agent rules](../../skills/n8n-safety-router/) contain the full n8n operating ruleset; the global rules carry its short n8n section, so a repository needs no n8n block.
 - [n8n local setup](../../skills/n8n-environment-setup/references/n8n/local-setup.md), [production Cloudflare Tunnel self-hosting](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md), and [Hostinger Coolify VPS n8n](../../skills/n8n-environment-setup/references/n8n/hostinger-vps.md) contain the full local dev, local/CGNAT production, and hosted n8n setup guides.
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify setup, SSH preflight, maintenance, and incident response. Use it before the hosted n8n guide when Coolify is not already running.

@@ -7,7 +7,7 @@ description: Use when explicitly asked to set up, check or repair monitoring on 
 
 ## Overview
 
-One monitor per Linux host, assuming the provider offers no monitoring. A read-only hourly pulse classifies the host, an off-host heartbeat notices when the host goes quiet, and alerts go wherever the owner chose. Toolkit runs no central service: everything runs on the target host.
+One monitor per Linux host, assuming the provider offers no monitoring. A read-only hourly pulse classifies the host, an off-host heartbeat notices when the host goes quiet, and alerts go wherever the owner chose. This skill runs no central service: everything runs on the target host.
 
 ## Use When
 

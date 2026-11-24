@@ -1,5 +1,88 @@
 # Toolkit Changelog
 
+## 3.176.0
+
+### Added
+
+- The controller enforcement map now also covers the gate rules, and each row carries the hash of its rule line: an edited controller or gate rule fails the map check until its row is reviewed and the hash updated.
+- An instruction-only row now says its basis: judgement (no code can decide it), host-gap (the host lacks the event, with a line saying how to test for it now) or planned (with the slice that builds it). `--list host-gap` prints the host-gap rows for a hooks or setup review.
+
+### Fixed
+
+- Seven out-of-date reasons in the map: three rules a hook or script already enforces are now mapped to it, and four reasons now name the slice or host gap that applies.
+- `toolkit governance check` no longer asks for a governed rules block back. Before governance is decided, a `TOOLKIT-GOVERNED-RULES` block (current, older or edited) or an older `GLOBAL-AGENTS.MD-TEMPLATE` block in `AGENTS.md` is now reported as a leftover copy that is not followed, with the cleanup offered once governance is on, instead of "refresh it to the TOOLKIT-GOVERNED-RULES block through a pull request" or "a refresh asks first". Broken markers are still reported.
+- The disabled-governance rules line says any governed block in `AGENTS.md` is an old copy and is not followed.
+- Playbooks and skills no longer point at Toolkit copies that plug and play removed from repositories. The safety-gates and git-completion playbooks name the evidence-store line of the Toolkit-governed rules instead of a managed `AGENTS.md`; the model-safety-flags playbook says to add an `Authorised context` section to the repository's own `AGENTS.md`; the controller bootstrap names the gate rules' fresh-context triggers; the secure CI/CD prompt points to the repository's own test-sharding guide; and the playbooks README says the plugin installs it, with no copy-by-hand step. A test keeps any skill from naming those old copies as live sources.
+- Docs describe plug and play: a governed repository holds only its programme file, CI checks and dependency-update files, while the rules and playbooks come from the installed Toolkit; no doc says a governed rules block may still belong in `AGENTS.md`; the agent routing table lists `toolkit-playbooks`; the safety matrix names the cleanup route for leftover copies; and the source-of-truth contract says Toolkit's own skills ship in the plugin and are not for copying.
+- Antigravity's docs say it gets only the portable skills copied into its skills folder for now: no plugin, hooks, Toolkit-only skills or governed rules.
+- The real Codex host check in the bridge doc matches today's session start: no question about repository rules, and one leftover note for an old rules block.
+- `release-readiness-audit` no longer asks for scope again when the request already gives a full read-only scope (the target, that nothing is changed, and what to report); it starts the audit.
+- When the session-start governance check crashes inside a repository, Claude Code and Codex now get one line saying so, with the error's kind (never its message), the path of the Toolkit-governed rules file to read if the repository is governed, and `setup toolkit` to repair the plugin. Before, the session started with no rules and no notice. Outside a repository it still says nothing, and session start never blocks.
+- The skill-routing source says governance comes from the installed Toolkit, never from a block in `AGENTS.md`.
+
+### Changed
+
+- The portable skills no longer name Toolkit terms or a coding app in their main instructions, so they read the same in any agent. App-specific and Toolkit-specific details moved to a reference file in each skill (`agent-cost-control`, `n8n-environment-setup`, `secure-ci-cd`, `windows-local-dev-services`), and the rest were reworded (`external-operation-preflight`, `frontend-art-direction`, `host-observability`, `managed-app-foundation-review`, `n8n-workflow-transport`, `release-readiness-audit`, `skill-product-review`). The Hostinger maintainer skill keeps its Codex name, now recorded as an app it depends on.
+- `agent-cost-control` calls the planning, build and review sessions by those names and a merge train a batch merge; they stay outside the model ladder as before.
+
+## 3.175.0 (A turn-end owed check for the controller in Claude Code)
+
+### Added
+
+- **Owed check at turn end (Claude Code).** A second turn-end hook, `toolkit-owed-check-hook.cjs`, stops the controller's turn once with the exact steps when the turn leaves owed work: programme findings new for 4 hours or more, or acknowledged past their due time; open `CLOSE_DUE` findings; side sessions the desktop app shows finished but not archived (every pull request merged or closed, not running, nothing waiting on the owner); gate launches from the last 24 hours with no `gate-session` record; and archived gate sessions with no close record. It reads only local files (no git, gh or network call) and stops a turn again only when an entry is added. It stays silent in gate, helper and side sessions, in sessions that did not act as the controller, outside governed repositories and when the host says the stop already follows a hook block. A missing cache, an unreadable transcript or desktop session files in an unknown format become one note, shown once, never a block. Codex keeps the single turn-end hook.
+- **Net findings in the attention cache.** `programme.cjs attention` and `refresh` write the open net findings (ID, code, task, kind, state and times; no free text) into this computer's attention cache, which the owed check reads. The owed check starts `programme.cjs refresh` in the background when the cache is missing or over an hour old (at most once per 15 minutes per repository, never in a cloud session).
+- **Hook pack.** Rows can use the `Stop` event, and fixtures can plant attention-cache findings (`attention_net`) and desktop session files (`desktop_sessions`).
+- In Claude Code, a question card is refused when the agent already wrote text earlier in the same turn, since the desktop app shows only the open card and hides that text, and when a card's question is longer than 120 characters. The refusal tells the agent to ask in its closing message instead, or to put the context into the card's option descriptions. Toolkit's own governance and merge cards are not affected, and a card is shown with a note when the session's transcript cannot be read.
+- `agent-cost-control` has a "Before you start a subagent" section, read once per chat before any subagent, helper agent or spawned thread: start one only for separable work that saves time or context, set the cheapest tier and effort on the launch, brief it with the data it needs, and get approval first for anything not cheaper than yourself (the same route, a higher tier or effort, any maximum effort, or a launch that inherits your route). A default helper ladder: the small tier for lookups and inventories, the mid tier for bounded code, tests and long summaries, never the top tier as a helper. A subagent that starts another applies the same test against its own route.
+
+### Removed
+
+- **Session start shows the governance status only.** The session-start hook no longer prints the attention line, the stale-check line or the cloud "attention and stale check wait" line, and starts no background refresh or stale check; due programme work reaches the controller at turn end. Checkpoint and stale-copy lines stay.
+- **The daily stale check is gone.** `toolkit-controller-check.cjs` has no `stale` check, its date stamp (`~/.ai-agent-toolkit/user-state/stale-check/`) is no longer written or read, and the session-start command line for it is gone; the programme sweep raises the same rows as stale-work net findings. `--skip stale` is still accepted and does nothing, for Claude Projects task prompts stored before this change. An existing `stale-check` folder is left on disk unread and can be deleted by hand.
+- **The attention cache holds only the net findings.** Its line, counts, digest, work-queue summary and shown-digest fields are gone (schema v2); a cache an earlier Toolkit wrote is not read and is rewritten by the next refresh.
+
+### Changed
+
+- Setup's check of the installed Claude Code hooks now expects exactly two turn-end hooks, the programme checkpoint then the owed check.
+- The controller principle **Stale check** is now **Stale-work net**: the sweep raises the rows and the turn-end owed check brings them to the controller. The Claude Projects hourly nudge and daily check-in no longer pass `stale` to the controller check.
+- A cloud session that cannot reach the programme store now says the next refresh on the owner's computer reads it.
+
+### Fixed
+
+- Commands typed through the Claude desktop app's Terminal panel now get the same checks as the Bash tool: a merge without the owner's approval, a chat launched to merge, a push to the default branch and a write to Toolkit's user-state folder are refused there too. Terminal panel and Monitor commands also get the AI attribution, force-push and credential checks. A test fails CI when a tool that runs a command line misses any of these checks.
+
+## 3.174.0 (lane waits removed; one ordered work queue on the programme graph; one-task catalogue patches)
+
+### Removed
+
+- Lane waits: a blocker starting `Queued in NOW:` is no longer special. `assign`, `reopen` and a consume `REOPEN` keep every blocker, results no longer carry `dropped_lane_waits`, child writes no longer stamp `private.lane_wait`, and the `QUEUED_BUT_MOVING` work-queue finding and the PR head commit time it read are gone. A task waiting only for a free lane stays planned in the queue with no blocker.
+- A parent that still stores a `QUEUED_BUT_MOVING` finding reads, never counts it as open, and drops it on its next write; a stored `private.lane_wait` stamp still reads, and the controller's one clean-up order removes it with the old blockers.
+- The `LATER` band, the `BATCH_NEXT` work-queue finding and its timers. A parent that still stores a `BATCH_NEXT` finding reads, never counts it as open, and drops it on its next write; old `LATER` and `OPTIONAL` archive parts stay registered and are redrawn empty.
+
+### Changed
+
+- The programme graph has one queue: tasks in flight keep their bands on top (`NOW · IN PROGRESS`, `NOW · AGENT UAT`, `NOW · CLOSE CHECK`), and every other open task is `QUEUED`, sorted on every pass in work order: priority, then quick wins, then all other work, then tasks marked last (`last` or optional). A blocked task keeps its place in the queue with its blocker in Waiting on.
+- CURRENT lists only tasks in flight; queued tasks, blocked or not, are in the graph's queue and still count in `Holds`.
+- Native sub-issues follow the same order, and graph archive parts use the `QUEUED` group.
+- A parent patch changes the catalogue with exactly one of `outcomes`, `outcome` or `move`; an unknown task (`OUTCOME_UNKNOWN`), an unknown field or a move after itself is refused and writes nothing. The reconciler skill says to write holder orders as compact JSON.
+- **Shorter "Nothing to answer here" list:** what the merged programme file sets is one line (for example "Set in .github/toolkit-programme.json: evidence store owner/TRANSPORT-name, the parent issue, required check validate, merge trains on"), with how to change it said once. The other rows are one short line each: parallel CI shards already in your CI name the workflow, up-to-date permissions say only "Up to date", and a set-up governance App says to type "explain 1.1", which now holds the steps to stop using it.
+- **Setup's AGENTS.md question says it covers every repository:** the Claude Code setting row now reads "Read AGENTS.md (in all local repos) too?", so it no longer looks like a choice for one repository. What it does is unchanged.
+
+### Added
+
+- Optional work-order fields on the parent's task list: `priority` (`P0` or `P1`), `size` (`S`, `M` or `L`, the controller's judgement after evaluating a task) and `after` (tasks this one waits for). A task waiting on a queued task moves to just after it; a loop raises the report-only `DEPENDENCY_CYCLE` and keeps its place.
+- `programme.cjs show --queue` prints, read-only, each queued task's place, step and why.
+- `update-parent` takes a one-task catalogue patch: `{"outcome": {"issue": n, ...}}` sets `name`, `description`, `order`, `last`, `priority`, `size` or `after` on that task (`null` removes an optional field), and `{"move": {"issue": n, "after": m}}` slots task n right after m in the hand order, renumbering only the tasks after the slot. Every other task stays byte-identical, so a holder order no longer resends the whole catalogue.
+
+### Fixed
+
+- **Governance bank shows the real merged values:** every row of `toolkit governance` that shows what the merged programme file sets now comes from one read of this computer's copy of it. Before, another session's failed read of GitHub could mark that copy stale between two reads, and the bank then showed "Merge trains: Off. Bound in the merged programme file" for a file that has them on; task auto-merge could show Off the same way. When the read the bank uses is stale, the line now says GitHub could not be read just now, why, and that these are the values this computer last read. With no programme file read at all, the bank shows no values and says so.
+- **The governance question offers only yes, no or later:** the question in a repository with no decision yet, the status line and the how-to guide no longer pass the enable and disable commands on to the owner. Agents still recognise those commands as answers and are told never to show them. A reply that is not an answer is no longer quoted back: the agent says at most, in plain words, that no governance answer was recorded.
+- **One ask when the first message asks for the bank:** `refresh governance` (or `toolkit governance`) as a chat's first message in a repository with no decision yet no longer also shows the session question or its card; the bank is the one ask.
+- **No bank from an unreadable GitHub:** where GitHub could not be read, so Toolkit cannot tell whether governance is decided, the bank reads once more and then says to type it again in a moment, instead of showing "GitHub governance: undefined" and a turn-on row. A failed read of the store and parent issue is one plain line, without Toolkit's internal note.
+- **Plainer bank lines:** how to keep governance off is said once ("To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session"), and the governance App line says why the owner runs its command: the setup refuses to run under an agent, so the App's private key never passes through one.
+- **Governance App setup is one line to paste:** the bank's answer, a published turn-on and the governance check now give the owner one line to paste into PowerShell, with the repository and its evidence store filled in, and say what follows: Enter when it asks, then Create and Install on GitHub. The six-step guide by hand (a pre-filled page, copying the Client ID, a key file, saving both on GitHub's website) is gone for a new App; repairing a part setup keeps its steps.
+
 ## 3.173.0 (A close-due finding for each finished gate session; One stale-work net in the programme sweep; The worktree residue report finishes on large checkouts and checks one worktree; Projects skill card only on real text changes)
 
 ### Added

@@ -9,14 +9,14 @@ description: Use when starting, relaunching, verifying, or debugging Windows loc
 
 Start the local service, prove it is reachable, and report the exact working launch path. Prefer fast diagnosis over repeating the same broken startup command.
 
-This skill is most useful for Codex and Claude Code on Windows. Use it before attempting to start, restart, or verify a Windows localhost service so known Windows and sandbox launch failures are handled up front. It can also guide ChatGPT or Claude when shell access is unavailable by returning commands for the user to run manually.
+This skill is most useful for coding agents on Windows. Use it before attempting to start, restart, or verify a Windows localhost service so known Windows and sandbox launch failures are handled up front. It can also guide ChatGPT or other chat assistants when shell access is unavailable by returning commands for the user to run manually.
 
 ## Platform Support
 
 - ChatGPT: use when tool/shell access exists, or provide manual PowerShell steps.
-- Codex: primary use case; run commands in the repo and verify localhost.
-- Claude: use when Claude Skills and shell/tool access are available.
-- Claude Code: copy the skill folder into `~/.claude/skills/` for personal use or `.claude/skills/` for project use.
+- The coding agent: primary use case; run commands in the repo and verify localhost.
+- Any other agent with skill support: use when skills and shell/tool access are available.
+- Installing the skill folder: see [host-specific install notes](references/host-notes.md).
 
 If the platform cannot run shell commands, do not claim the service was started. Provide the exact commands and checks for the user to run.
 
@@ -141,7 +141,7 @@ Use this when the service is long-running and the working command is known. A re
 3. Start the server with stdout/stderr logs.
 4. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
 5. After the launch shell command returns, re-check the port or HTTP endpoint before claiming the server persists.
-6. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
+6. If a sandboxed launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
 7. Keep restart and verification as separate steps: stop or reuse an old server, start the new server, then health-check with a short timeout. Do not bundle stop/start/health into one long command where one hung step hides the actual state.
 8. Report the exact URL, command, process id, and log paths.
 
@@ -380,9 +380,9 @@ Prefer the temporary `.ps1` launcher pattern above and call it through `-File`. 
 
 If the dev server fails inside an agent sandbox with `spawn EPERM`, request elevated/unsandboxed execution if the environment supports it. Do not keep retrying the same command inside the same failing sandbox.
 
-### Codex sandbox background process does not persist
+### Sandbox background process does not persist
 
-In Codex sandboxed shells, background localhost servers may exit or be killed when the shell command returns. If the user needs the dev server to keep running after the command finishes, relaunch it with `sandbox_permissions: require_escalated` when available, then repeat the same log and HTTP health verification. Report that the escalation is for local process persistence, not for external network exposure.
+In sandboxed agent shells, background localhost servers may exit or be killed when the shell command returns. If the user needs the dev server to keep running after the command finishes, relaunch it with an escalated (unsandboxed) launch when the agent supports one, then repeat the same log and HTTP health verification. The agent-specific launch parameter is in [host-specific notes](references/host-notes.md). Report that the escalation is for local process persistence, not for external network exposure.
 
 Even when a sandboxed background launch appears to work while the shell command is still running, do not claim the service is persistent until a follow-up port or HTTP check succeeds after that shell command has returned.
 

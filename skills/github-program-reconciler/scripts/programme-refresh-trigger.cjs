@@ -238,28 +238,4 @@ function startRefresh(root, deps = {}) {
   }
 }
 
-// Starts the stale check (`toolkit-controller-check.cjs` with every other check skipped) detached, for
-// the governance session-start hook, with its output in the checkout's last-run file. The check writes
-// its stamp where the session-start line reads it (programme-attention-cache.cjs staleStampFile). Its own
-// `programme.cjs attention` read also refreshes this computer's attention cache. It reads GitHub only
-// and writes the stamp; a spawn that fails later is retried at a later start (the stamp stays undated).
-function startStaleSweep(root, deps = {}) {
-  const controllerCheck = path.join(__dirname, '..', '..', '..', 'repo', 'scripts', 'toolkit-controller-check.cjs');
-  const { staleOnlySkip } = require(controllerCheck);
-  const log = lastRunFile(deps, root);
-  fs.mkdirSync(path.dirname(log), { recursive: true });
-  try { if (fs.statSync(log).size > LOG_LIMIT) fs.unlinkSync(log); } catch { /* no log yet */ }
-  const fd = fs.openSync(log, 'a', 0o600);
-  try {
-    fs.writeSync(fd, `${new Date().toISOString()} stale check ${root}\n`);
-    const child = spawn(process.execPath, [controllerCheck, '--host', 'chat', '--checkout', root, '--skip', staleOnlySkip, '--json'], {
-      cwd: root, detached: true, stdio: ['ignore', fd, fd], windowsHide: true,
-    });
-    child.on('error', () => {});
-    child.unref();
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-module.exports = Object.freeze({ WRITE_TOOLS, githubWrite, markWrite, onStop, startRefresh, startStaleSweep, governedRoot, refreshDir, markFile, lastRunFile, pruneMarks, MARK_MAX_AGE_MS });
+module.exports = Object.freeze({ WRITE_TOOLS, githubWrite, markWrite, onStop, startRefresh, governedRoot, refreshDir, markFile, lastRunFile, pruneMarks, MARK_MAX_AGE_MS });

@@ -225,12 +225,21 @@ function readBinding(root, identity) {
 // cache, or null. Only this binding names the evidence store and required checks: a working tree
 // any agent can edit does not.
 function mergedBinding(root, options = {}) {
+  return mergedBindingRead(root, options).binding;
+}
+
+// The same from one read of this computer's cache, with whether that read is fresh and, when GitHub
+// could not be read last time, why: { binding, fresh, refresh_error }. A failed read keeps the merged
+// text and marks it (refreshBindingCache), and other sessions refresh the same cache, so whatever is
+// shown together reads it once.
+function mergedBindingRead(root, options = {}) {
+  const none = { binding: null, fresh: false, refresh_error: null };
   try {
     const identity = readIdentity(root);
-    if (!identity.valid) return null;
+    if (!identity.valid) return none;
     const judged = judgeMerged(bindingCache.readBindingCache(identity, userStateDirectory(options)), identity, new Date());
-    return judged.status === 'enabled' ? judged.binding : null;
-  } catch { return null; }
+    return { binding: judged.status === 'enabled' ? judged.binding : null, fresh: judged.fresh === true, refresh_error: judged.refresh_error || null };
+  } catch { return none; }
 }
 
 // The evidence store the merged binding names ("owner/name"), or null. Kept out of the state result,
@@ -302,6 +311,14 @@ function trainSwitchOf(binding) {
   return value === 'on' || value === 'off' ? value : null;
 }
 
+// What an enabled merged binding sets, freshness aside: task auto-merge ('after-gates', 'off', or
+// 'unset' for a version 2 binding with no switch) and merge trains ('on' or 'off'). Only a version 2
+// binding carries the switches, and there no merge_train key means on.
+function mergedSwitches(binding) {
+  const v2 = Boolean(binding) && binding.schema === 'toolkit.programme-binding.v2';
+  return { task: v2 ? taskSwitchOf(binding) || 'unset' : 'off', train: v2 && trainSwitchOf(binding) !== 'off' ? 'on' : 'off' };
+}
+
 // Whether merge trains run here. Only a fresh, enabled, version 2 binding turns them on, and there
 // no key means on; every other state (disabled, undecided, stale, unreadable) means off.
 function mergeTrain(root, options = {}) {
@@ -313,8 +330,8 @@ function mergeTrain(root, options = {}) {
     const now = typeof options.now === 'function' ? options.now() : new Date();
     const judged = judgeMerged(bindingCache.readBindingCache(identity, userStateDirectory(options)), identity, now);
     if (judged.status !== 'enabled' || judged.binding.schema !== 'toolkit.programme-binding.v2' || judged.fresh !== true) return { ...off, reason: 'fresh-enabled-binding-required' };
-    const value = trainSwitchOf(judged.binding);
-    return value === 'off' ? { ...off, fresh: true, reason: 'repository-off' } : { on: true, fresh: true, source: 'binding', reason: value ? 'repository-on' : 'default-on' };
+    if (mergedSwitches(judged.binding).train === 'off') return { ...off, fresh: true, reason: 'repository-off' };
+    return { on: true, fresh: true, source: 'binding', reason: trainSwitchOf(judged.binding) ? 'repository-on' : 'default-on' };
   } catch { return { ...off, reason: 'binding-unreadable' }; }
 }
 
@@ -698,6 +715,7 @@ module.exports = Object.freeze({
   refreshMergedBinding,
   judgeMerged,
   mergedBinding,
+  mergedBindingRead,
   governanceCommand,
   isGitHubHost: trackingHost,
   readIdentity,
@@ -709,6 +727,7 @@ module.exports = Object.freeze({
   workingBindingRequiredChecks,
   taskAutoMerge,
   mergeTrain,
+  mergedSwitches,
   trainSwitchOf,
   taskSwitchOf,
   retireLegacyTaskAnswers,
