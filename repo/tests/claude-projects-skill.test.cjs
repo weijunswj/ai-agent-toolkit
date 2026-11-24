@@ -839,7 +839,7 @@ test('the programme sweep runs in the cloud: Projects sets up, suggests and appl
   const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
   const recurring = at('reference/recurring-tasks.md');
   assert.match(recurring, /\*\*Programme sweep in the cloud\.\*\* Each governed repository carries the Toolkit Programme Sweep workflow/);
-  assert.match(recurring, /`toolkit governance check` names the reason and the fix/);
+  assert.match(recurring, /the governance check \(`toolkit-governance\.cjs check`\) names the reason and the fix/);
   assert.match(recurring, /setup names them and points to `remove toolkit`, whose plan the owner confirms/);
   assert.match(recurring, /Never create, re-arm or suggest a local programme sweep/);
   assert.match(at('SKILL.md'), /\*\*Programme pages refresh themselves in the cloud\.\*\*[^\n]*never set up a sweep on a computer/);

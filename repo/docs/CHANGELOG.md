@@ -1,5 +1,32 @@
 # Toolkit Changelog
 
+## 3.171.0
+
+### Added
+
+- **Remove Toolkit:** `remove toolkit` now also removes Codex setup's journal once its last step finished (an unfinished one stays as recovery evidence) and the update reports the bridge writes to the temp folder, once no Toolkit plugin is installed.
+
+### Changed
+
+- **Remove Toolkit:** the Claude Code settings setup turned on are listed as Claude Code's own settings, left exactly as they are, and the recovery records folder is kept as evidence instead of being called someone else's file. Removal never deletes a key from the credential store and has no step for other plugins.
+- **n8n skills:** setup only copies the official n8n skills; it no longer turns the n8n Skills plugin off in Claude Code or tells you to turn it off in Codex.
+- **Governance check:** no message or document tells you to type `toolkit governance check` any more. Owner-facing steps say to ask your agent to check governance; agent and workflow text names the script, `toolkit-governance.cjs check`.
+- **Repository files:** `repository-agent-rules` expects the one-line `@AGENTS.md` CLAUDE.md only where Claude Code would otherwise miss AGENTS.md: the repository has its own CLAUDE.md and the "Read AGENTS.md as well as CLAUDE.md" setting is off.
+
+### Fixed
+
+- The programme sweep now resolves a merged or closed pull request's over-budget page finding on its next complete pass. Such a pull request keeps the body it was approved with, so its finding no longer needs a dispose by hand. Open pull requests and task pages still count.
+- The background stale check now runs only when the binding merged on origin's default branch has governance on, the same binding the session-start hook reads before it starts the check. Before, a worktree made before governance was turned on skipped the check with no stamp, and the hook started it again every 15 minutes.
+- A cloud session that has an attention cache but no stale-check stamp for today now says the stale check waits for the owner's computer. Before, it said nothing about it.
+- The controller handoff snapshot now refuses a source file holding a NUL byte, as the store's save does, and the handoff hook starts no refresh for it. Before, every refresh wrote the file, stopped at the save and undid the write, so `--check` stayed STALE.
+- The handoff snapshot README now gives a successor a reading order: `MEMORY.md` first when the snapshot holds one, then the saved instructions, then the named working files.
+
+### Tests
+
+- New handoff tests cover the dot-name skip, the 5 MB cap, the undo removing a created file, `--check` with a named memory folder and Windows network-share paths.
+- A new hook pack row checks that a scheduled task's `touch ~/.toolkit-handoff-off` passes every guard on both hosts.
+- A new hook pack row checks that a memory file saved with a NUL byte starts no handoff refresh.
+
 ## 3.170.0 (merge approvals in a reopened chat)
 
 ### Added
