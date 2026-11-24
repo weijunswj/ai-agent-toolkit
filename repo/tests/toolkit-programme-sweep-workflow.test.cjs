@@ -179,7 +179,7 @@ test('gate: it turns governance on for exactly the files the sweep reads as enab
 test('action: no App configured gives a warning naming the repository, the variable, the secret and the check', () => {
   const result = runAction('run', { env: { STORE_REPOSITORY: 'owner/evidence', APP_CLIENT_ID_SET: 'false', MINT_OUTCOME: 'skipped/skipped' } });
   assert.equal(result.code, 0);
-  assertSkipWarning(result, /TOOLKIT_GOVERNANCE_APP_CLIENT_ID.*TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY.*toolkit governance check/);
+  assertSkipWarning(result, /TOOLKIT_GOVERNANCE_APP_CLIENT_ID.*TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY.*the governance check lists what the App needs/);
   assert.deepEqual(result.tags, [{ title: gateScript().TITLES.skipped, code: 'no_app' }], 'the gate counts this skip by title and code');
   const disabled = runAction('store', { file: binding({ governance: 'disabled' }) });
   assert.equal(disabled.tags[0]?.title, gateScript().TITLES.skipped);
@@ -233,9 +233,9 @@ test('action: a healthy run writes the metrics line; a held pass is resumable; a
 test('action: a failed pass names its stop code and HTTP status, never GitHub text or a token', () => {
   const failed = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'GH_FAILED', http: '403', report: null }) });
   assert.equal(failed.code, 1);
-  assert.deepEqual(failed.failures, ['Programme Sweep failed (GH_FAILED, HTTP 403). Open this workflow run and toolkit governance check for the cause.']);
+  assert.deepEqual(failed.failures, ['Programme Sweep failed (GH_FAILED, HTTP 403). Open this workflow run, and have an agent run the governance check (toolkit-governance.cjs check), for the cause.']);
   const noStatus = runAction('run', { env: minted, refresh: () => ({ status: 1, code: 'PASS_LOCK_LOST', http: null, report: null }) });
-  assert.deepEqual(noStatus.failures, ['Programme Sweep failed (PASS_LOCK_LOST). Open this workflow run and toolkit governance check for the cause.']);
+  assert.deepEqual(noStatus.failures, ['Programme Sweep failed (PASS_LOCK_LOST). Open this workflow run, and have an agent run the governance check (toolkit-governance.cjs check), for the cause.']);
   const unknown = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: null }) });
   assert.deepEqual(unknown.failures, [action().GENERAL_FAILURE]);
   const hostile = runAction('run', { env: minted, refresh: () => ({ status: 1, code: `X ${fakeToken}`, http: 'abc', report: null }) });

@@ -63,7 +63,7 @@ const BOT_LOGIN = /^[A-Za-z0-9-]{1,100}\[bot\]$/;
 const METRICS = /^[A-Za-z0-9_ =,.:/()-]{1,500}$/;
 // Record 808: nothing is skipped silently. Each skip is one warning that names the repository, the
 // reason and the fix: { reason, fix } here, joined by skipWarning.
-const CHECK = 'run toolkit governance check in a clone of this repository';
+const CHECK = 'have an agent run the governance check (toolkit-governance.cjs check) in a clone of this repository';
 const SKIPS = Object.freeze({
   absent: Object.freeze({ reason: 'there is no programme file (.github/toolkit-programme.json) on the commit this run checked out', fix: 'turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if this repository should not be governed' }),
   too_large: Object.freeze({ reason: `the programme file is larger than ${BINDING_LIMIT} bytes`, fix: `${CHECK} and repair the programme file it names` }),
@@ -71,7 +71,7 @@ const SKIPS = Object.freeze({
   disabled: Object.freeze({ reason: 'the merged programme file turns governance off', fix: 'turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows' }),
   foreign_store: Object.freeze({ reason: 'the evidence store belongs to another owner, so one governance App cannot reach it', fix: 'move the evidence store under this repository\'s owner; until then nothing sweeps this repository, so run programme.cjs refresh by hand' }),
   public_state: Object.freeze({ reason: 'this repository keeps its state on a public branch, which the cloud sweep does not run', fix: 'move the state to a private evidence store (say toolkit store); until then nothing sweeps this repository, so run programme.cjs refresh by hand' }),
-  no_app: Object.freeze({ reason: `the governance GitHub App is not set up here (repository variable ${CLIENT_ID_VARIABLE}, secret ${PRIVATE_KEY_SECRET})`, fix: 'set both from this repository\'s own App; toolkit governance check lists what the App needs' }),
+  no_app: Object.freeze({ reason: `the governance GitHub App is not set up here (repository variable ${CLIENT_ID_VARIABLE}, secret ${PRIVATE_KEY_SECRET})`, fix: 'set both from this repository\'s own App; the governance check lists what the App needs' }),
 });
 function skipWarning(repository, status, detail = {}) {
   const skip = status === 'other_repository'
@@ -114,7 +114,7 @@ const NOTICES = Object.freeze({
   unsaved: 'Programme Sweep held: this pass saved nothing, so the board was not refreshed and footer cleaning is skipped; the next run retries.',
 });
 const SIGN_IN_FAILURE = `Programme Sweep failed: the governance GitHub App could not sign in. Check ${CLIENT_ID_VARIABLE} and ${PRIVATE_KEY_SECRET}: the App may not be installed on this repository or its evidence store, or the key was revoked.`;
-const GENERAL_FAILURE = 'Programme Sweep failed. Open this workflow run and toolkit governance check for the cause.';
+const GENERAL_FAILURE = 'Programme Sweep failed. Open this workflow run, and have an agent run the governance check (toolkit-governance.cjs check), for the cause.';
 const SUMMARY_FAILURE = 'Programme Sweep could not write its metrics summary.';
 const ORDERS_REFUSED = 'Holder orders refused: the evidence store\'s orders/refused folder holds each refused order with its code. Send the controller a corrected order under a new order_id.';
 const ORDERS_RETRYING = 'Holder orders waiting: a GitHub failure kept queued orders from running this time; they retry each run until their own expiry. If this repeats, check the governance App\'s access to the evidence store.';

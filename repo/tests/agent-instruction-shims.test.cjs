@@ -148,6 +148,20 @@ test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists
   assert.match(skill, /remove a `GEMINI\.md` that holds only the old Toolkit `GEMINI\.SHIM` block/);
 });
 
+// Claude Code reads AGENTS.md itself where a repository has no CLAUDE.md, and reads both while its
+// "Read AGENTS.md as well as CLAUDE.md" setting is on, so calling the shim expected everywhere sent
+// agents to add a CLAUDE.md nobody needed.
+test('the CLAUDE.md shim is expected only where Claude Code would otherwise miss AGENTS.md', () => {
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  const check = skill.split('## Cheap state check')[1].split('\n## ')[0];
+  assert.match(check, /A `CLAUDE\.md` that loads `AGENTS\.md` is expected only when Claude Code would otherwise miss it: the repository has its own `AGENTS\.md` and its own `CLAUDE\.md` \(or `\.claude\/CLAUDE\.md` or `CLAUDE\.local\.md`\), and Claude Code's "Read AGENTS\.md as well as CLAUDE\.md" setting is off\./);
+  assert.doesNotMatch(skill, /where the repository has its own `AGENTS\.md`, a `CLAUDE\.md` that loads it/);
+  assert.match(skill, /A missing `CLAUDE\.md` is created from its template only when the user asks for one/);
+  // The setting's name as Toolkit's own Claude Code settings show it.
+  const { SETTINGS } = require('../scripts/toolkit-claude-user-settings.cjs');
+  assert.ok(SETTINGS.some(spec => spec.label === 'Read AGENTS.md as well as CLAUDE.md'), 'the skill names the setting by its label');
+});
+
 test('the n8n adapter template is generated from its source and stays compact and fail-closed', () => {
   const body = readText(n8nAdapterPath).trimEnd();
   const block = assertCurrentBlock('skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md', 'N8N-AGENT-RULES-ADAPTER', n8nAdapterPath, body);
@@ -531,4 +545,12 @@ test('the sync check refuses a linked rule folder or rule file without following
   assert.equal(file.status, 1, file.stderr);
   assert.match(file.stderr, /FAIL: \.agents\/rules\/linked\.md is not allowed/);
   assert.equal(fs.readFileSync(path.join(outside, 'hidden.md'), 'utf8'), '# Rules\n');
+});
+
+// Owner rule (23 November): a link the user gives is opened and inspected directly, and the reply
+// says what was not inspected. It sits inside the accuracy principle, so the installed rules gain no line.
+test('the global rules say to open a given link yourself and name what was not inspected', () => {
+  const accuracy = fs.readFileSync(path.join(repoRoot, globalPath), 'utf8').split(/\r?\n/).filter(line => line.startsWith('- **Accuracy first:**'));
+  assert.equal(accuracy.length, 1);
+  assert.ok(accuracy[0].includes('Open a given link yourself (a PR: metadata, files, diff, checks, comments, review threads); say what you did not inspect.'));
 });

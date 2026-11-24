@@ -1,10 +1,98 @@
 # Toolkit Changelog
 
+## 3.171.0
+
+### Added
+
+- **Remove Toolkit:** `remove toolkit` now also removes Codex setup's journal once its last step finished (an unfinished one stays as recovery evidence) and the update reports the bridge writes to the temp folder, once no Toolkit plugin is installed.
+
+### Changed
+
+- **Remove Toolkit:** the Claude Code settings setup turned on are listed as Claude Code's own settings, left exactly as they are, and the recovery records folder is kept as evidence instead of being called someone else's file. Removal never deletes a key from the credential store and has no step for other plugins.
+- **n8n skills:** setup only copies the official n8n skills; it no longer turns the n8n Skills plugin off in Claude Code or tells you to turn it off in Codex.
+- **Governance check:** no message or document tells you to type `toolkit governance check` any more. Owner-facing steps say to ask your agent to check governance; agent and workflow text names the script, `toolkit-governance.cjs check`.
+- **Repository files:** `repository-agent-rules` expects the one-line `@AGENTS.md` CLAUDE.md only where Claude Code would otherwise miss AGENTS.md: the repository has its own CLAUDE.md and the "Read AGENTS.md as well as CLAUDE.md" setting is off.
+
+### Fixed
+
+- The programme sweep now resolves a merged or closed pull request's over-budget page finding on its next complete pass. Such a pull request keeps the body it was approved with, so its finding no longer needs a dispose by hand. Open pull requests and task pages still count.
+- The background stale check now runs only when the binding merged on origin's default branch has governance on, the same binding the session-start hook reads before it starts the check. Before, a worktree made before governance was turned on skipped the check with no stamp, and the hook started it again every 15 minutes.
+- A cloud session that has an attention cache but no stale-check stamp for today now says the stale check waits for the owner's computer. Before, it said nothing about it.
+- The controller handoff snapshot now refuses a source file holding a NUL byte, as the store's save does, and the handoff hook starts no refresh for it. Before, every refresh wrote the file, stopped at the save and undid the write, so `--check` stayed STALE.
+- The handoff snapshot README now gives a successor a reading order: `MEMORY.md` first when the snapshot holds one, then the saved instructions, then the named working files.
+
+### Tests
+
+- New handoff tests cover the dot-name skip, the 5 MB cap, the undo removing a created file, `--check` with a named memory folder and Windows network-share paths.
+- A new hook pack row checks that a scheduled task's `touch ~/.toolkit-handoff-off` passes every guard on both hosts.
+- A new hook pack row checks that a memory file saved with a NUL byte starts no handoff refresh.
+
+## 3.170.0 (merge approvals in a reopened chat)
+
+### Added
+
+- **Reopened chats approve merges:** in Claude Code on this computer, a chat the user started and the app later reopened on the same session takes a typed `merge N` and a tap on the merge card again, as a fresh chat does. Launched, forked and shell-resumed chats, a resume that carried the host-session variable, Codex or unknown-app reconnects and resumed cloud sessions still record nothing. The host now comes from the hook entry point, never from a field in the event.
+- **No planted merge lines:** a session brief, a message to another session, a move to the cloud, a scheduled wakeup, a cron prompt, a remote routine or a scheduled task whose text holds a line Toolkit would read as the user's merge approval is refused, so an agent cannot approve a merge by writing the user's line into another chat. A side chat the user opens and types into still counts as theirs.
+
+### Changed
+
+- **Honest refusals:** when a chat cannot record a typed merge approval, the hook says so on the message that held it, with the reason and where to approve instead (a new chat, a direct Projects message or the Merge button on GitHub), and the merge refusal in that chat no longer asks the user to type the line again there.
+
+## 3.169.0
+
+### Changed
+
+- **Handoff snapshot mirrors the memory folder, deletes included:** a memory file deleted on this computer now leaves the controller handoff snapshot (`toolkit-store.cjs handoff`): its row becomes a removed row with the time it was removed, and its copy leaves the store's current files (Git history keeps it; the snapshot README says how to get it back). A file is removed only when this computer's last saved run (its folder record, kept in the Toolkit user-state folder) or the session's baseline held exactly the snapshot's content, so a stale, partial or other computer's copy never deletes a newer save. A removed file comes back only from different content saved more than 5 minutes after the removal, so a session still holding the old copy no longer brings it back. A clock behind the snapshot removes nothing (`clock=behind`).
+- **A computer changes only memory it has seen:** a run updates a stored memory file only when this computer's last saved run or this session held exactly the stored content. Otherwise the stored copy stays and the run and `--check` name it as `diverged=<files>`, so a second computer that has not synced can add new memory files but never replace or remove one. A manual `--reseed` run takes this copy for the diverged files; the after-tool hook never does.
+- **Two computers saving at once:** when a handoff save meets a store another computer just saved to, the merge keeps the store's snapshot folder whole (never one computer's manifest beside the other's files) and the run plans once more from it, so neither computer's save is lost or deleted and the store checkout keeps working. A snapshot copy that no row lists is removed only by a computer that held it, or by `--replace-memory`.
+- **Store deletions:** the store command still refuses every deletion, except the handoff snapshot's own removals of memory files its manifest lists as removed in the same commit.
+- **Manifest version 2:** the snapshot manifest is `toolkit.handoff-snapshot.v2` (adds the removed rows). This copy reads version 1 and writes version 2 on the next change; an older Toolkit copy reads version 2 as no snapshot.
+
+### Added
+
+- **`handoff --confirm-removals`:** a run that would remove more than max(10, a fifth of the memory rows) holds them and says `held_removals=<n>`; a manual run with this flag applies them.
+- **`handoff --memory <folder> --replace-memory`:** a manual run that makes the named folder the whole memory set: every memory row it lacks is removed and its copy of every other memory file wins.
+- **`handoff --check` fields:** `removed=`, `held_removals=`, `clock=behind`, `removed_here=` (removed files this copy holds with different content) and `diverged=` (memory files this computer never held at the stored content) and `unlisted=` (snapshot copies no row lists that this computer never held). A run whose save lost a race says `took_store=<folder>`.
+
+## 3.168.0 (Governance asks two questions; Gate endings that can always be recorded)
+
+### Changed
+
+- The governance question bank now asks at most two questions: GitHub governance (on or off) and task auto-merge. Everything else is a Toolkit default shown as a status line under the table, which any answer applies: parallel CI shards when the last green CI run took 10 minutes or more (none for faster or unknown CI, and none where CI already runs its tests in parallel), the governance App and Toolkit permissions commands when they are needed, and the instruction copies cleanup while governance stays on. Merge trains are no longer asked; turning governance on writes them off, and a governed repository keeps its stored value.
+- Where governance is not decided yet, the answer itself turns it on, so the governance row is a status line and only task auto-merge is asked. Reply `no store` to keep governance off: nothing is written and Toolkit asks again next session.
+- Add `shards=yes`, `shards=not-now` or `shards=never` to a reply to change the shards default, and `store=<owner/name>` to use another private repository of yours as the evidence store.
+- Turning governance on uses this repository's own private `TRANSPORT-<repository name>` store, found or created, and never another repository's store unless you name it. The session-start question and the turn-on result name the store.
+- `toolkit governance migrate` asks one Enter for all of its GitHub changes (the no-force-push ruleset, the programme-state ruleset and default-branch protection) instead of one each, and a no writes none of them.
+- An answer to a bank whose status lines changed since it was shown is refused, so an answer never applies a default you did not see.
+- Question cards: a host may show only the card while it is open, not the text written above it, so a card's question and options now make sense on their own, and a question that needs explaining ends the closing message as written text instead of sitting below a hidden explanation (global rules, controller principles, takeover playbook). Standing permission asks follow suit: outside Claude Projects the whole ask, its scope lines and then the question, goes as written text at the end of the closing message (safety-gates playbook).
+- A lane wait is now only a blocker starting `Queued in NOW:`. Other blockers that start with `Queued`, such as a queue label `Queued 1 - after Alpha2`, are real blocks that `assign`, `reopen` and a consume send-back keep. Older lane waits in another form are not matched: rewrite each to the new form or keep it as a real blocker.
+- The reconciler's Gates rule now says a G2 recheck is a `reopen` only with no G1 round between; after a G1 round it is `assign --supersede`.
+
+### Fixed
+
+- A finish mark whose governance turn-on pull request was closed without merging is cleared instead of waiting for ever.
+- The bank heading says "1 question across 1 section" instead of "1 questions across 1 sections".
+- The Claude Code setup question says how many settings a yes would set, so it reads on its own on a question card.
+- A piped setup reply with a second non-empty line is refused before anything is written.
+- A no to the Claude Code setup question says when setup had already updated the Toolkit checkout before asking.
+- Setup reads the AGENTS.md memory setting under either plugin name, writes the older name when it cannot tell the Claude Code version, and keeps a value you set under the other name.
+- **Projects ping transition:** a task still on an old pointer now posts a line that tells the coordinator to refresh a guidebook copy from before pings first and to take that run's project additions from the stored prompt until the swap; its TASKS OUTDATED prefix comes after any COORDINATOR BEHIND prefix. Swapped pings are unchanged.
+- **Projects checklist wording:** the hourly nudge clones Toolkit in step 4a, where it is first used; tool threads are read-only apart from the guidebook copy refresh and the programme sweep; a fresh-fallback task's tool steps go to a thread that has the tools; the daily check-in's setup step reads the coordinator's own model and effort; and the recurring-tasks reference no longer calls Toolkit tasks pointers.
+- **Projects tier-gap check:** when a task's tool steps run in another thread, the daily check-in lists its model and effort as unverified and names that thread, instead of leaving it unverified with no reason.
+- A G2 return is accepted only when the task PR carries a `Toolkit-G2: PASS` verdict for the return's head from an account that can write to the repository, read with the merge train finder's own parser and trust rule. The accept records that PASS in the task's review in the same write; a FAIL at that head allows only a send-back, which records it as not passed. Before, a G2 could be accepted with no verdict at all.
+- A G2 accept closes the builder's older return in the same write (accepted when it was at the passed head, sent back otherwise), so it no longer stays open for good after the G2's supersede.
+
+### Added
+
+- **Global rules, open a given link yourself:** the accuracy principle now says to open and inspect a link you are given directly (for a PR: metadata, files, diff, checks, comments and review threads) and to say what you did not inspect. It joins the existing line, so the installed rules gain no line; the global block cap rises to 22,014 bytes for it.
+- After the owner answers a gate question, the controller records the answer on the same return: `return --consume <id> --verdict ACCEPT|REOPEN --reason <the answer>` works once on the newest return consumed `WAITING_OWNER`, while the gate still waits at the same epoch and assignment. Before, the only way out was a reopen and a new return ID. A holder order's `return` write takes the same `reason`.
+- Every consumed return is logged with its time in the task's gate trail (`private.gate_history`), so a later check can tell when a plan was accepted.
+
 ## 3.167.1
 
 ### Fixed
 
-- **The test duration check says when a failed-only rerun cannot help.** When CI fails a test file over its time budget and that file's newest time comes from a shard of the same run that passed in an earlier attempt, the failure line now adds which attempt and shard measured it, that the shard was not run again, and that a failed-only rerun reads the same time, so rerun all jobs. A light run, which reuses an earlier run's test results, and a failed shard's time keep the plain line, since rerunning all jobs would not measure them again. Each CI shard summary now records the run that measured it for this. Exit codes and checks are unchanged.
+- **The test duration check says when a failed-only rerun cannot help.** When CI fails a test file over its time budget and that file's newest time comes from a shard of the same run that passed in an earlier attempt, the failure line now adds which attempt and shard measured it, that the shard was not run again, and that a failed-only rerun reads the same time, so rerun all jobs. A light run's time keeps the plain line, since a light run reuses an earlier run's test results and rerunning it reuses them again. A failed shard's time keeps it too, since any rerun, failed-only included, runs that shard and measures it again. Each CI shard summary now records the run that measured it for this. Exit codes and checks are unchanged.
 
 ## 3.167.0 (One approval question for Claude Code setup)
 

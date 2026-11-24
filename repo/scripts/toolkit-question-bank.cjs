@@ -143,11 +143,13 @@ function questionBankApprovalPayload(specs) {
     questions: specs.map((spec) => {
       // A report-only row takes no answer and setup never changes what it shows (the Codex hook
       // states, which the owner changes in Codex's /hooks), so only its place in the table is bound:
-      // turning a hook on while the table is open does not void the answers.
+      // turning a hook on while the table is open does not void the answers. A row whose text says what
+      // the answer will do (`bound_text`) binds that text too, so the answer applies only what was shown.
       if (spec.report_only) {
         return { id: spec.id, key: spec.key, section_id: spec.presentation.section_id, section_index: spec.presentation.section_index,
           question_index: spec.presentation.question_index, question_ref: spec.presentation.question_ref, section_title: spec.section,
-          title: spec.title, report_only: true, what_this_controls: spec.whatThisControls };
+          title: spec.title, report_only: true, what_this_controls: spec.whatThisControls,
+          ...(spec.bound_text ? { shown: spec.bound_text } : {}) };
       }
       const recommendedChoice = selectedChoice(spec, spec.recommended);
       const displayedSelection = spec.selected || spec.empty_input || '';
@@ -406,7 +408,8 @@ function renderCompactQuestionTable(specs, markdown = true) {
 function renderQuestionBankHeader(specs, markdown = true, quickIndex = true, title = 'Toolkit setup choices') {
   const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
   const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
-  const heading = `${title} - ${questionCount} questions across ${sectionCount} sections`;
+  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  const heading = `${title} - ${plural(questionCount, 'question')} across ${plural(sectionCount, 'section')}`;
   const bankReference = specs[0]?.presentation.bank_reference || '';
   const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, ''];
   if (!quickIndex) return lines;
@@ -604,7 +607,7 @@ function assertQuestionBankAnswerBinding(parsed, specs, label = 'Setup') {
 }
 
 // Strong-default rows. Each row keeps its number, choices and full text, but setup asks no question of its own
-// for it: the bank asks one approval question, "Apply these defaults?". The row's state says what a yes does.
+// for it: the bank asks one approval question, approvalQuestion(). The row's state says what a yes does.
 // UNSET takes the row's Toolkit default; every other state keeps what is there: a value Toolkit set
 // (TOOLKIT_DEFAULT), the owner's own value (OWNER_VALUE), the owner's earlier off (OWNER_OFF, so a default is
 // never put back), or a setting setup could not read (UNREADABLE, nothing written). The owner overrides one row
@@ -618,7 +621,12 @@ const KEPT_REASONS = Object.freeze({
   'owner-off': 'You turned this off, so setup keeps it off.',
   unreadable: 'Setup could not read this setting, so it writes nothing.',
 });
-const APPROVAL_QUESTION = 'Apply these defaults?';
+// The one approval question, saying how many settings a yes would set. It makes sense on its own on a native question card.
+function approvalQuestion(pending) {
+  if (!pending) return "Apply Toolkit's defaults to the Claude Code settings that have no value yet? None is left, so a yes changes nothing. Your own values and offs stay.";
+  const one = pending === 1;
+  return `Apply Toolkit's default${one ? '' : 's'} to the ${pending} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
+}
 
 // definition: a resolvedQuestion definition plus defaultState, defaultChoice (the value a yes applies while the
 // row is UNSET; 'keep' for a row whose default is to leave it), defaultOutcome and defaultReason, and optionally
@@ -655,7 +663,7 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
   const pending = pendingDefaults(specs).length;
   const rows = answerable(specs);
   const flagged = rows.filter((spec) => spec.selected).length;
-  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting' : `1 question: ${APPROVAL_QUESTION}`;
+  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting' : `1 question: ${approvalQuestion(pending)}`;
   const summary = flagged === rows.length ? 'Your setup flags answer every setting, so setup asks nothing and applies them as shown.'
     : [pending ? `Setup applies the Toolkit default to ${pending} setting${pending === 1 ? '' : 's'} not set yet and keeps every other setting as it is.`
       : 'Every setting already has a value, so a yes keeps them all as they are.',
@@ -685,7 +693,8 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
   return lines;
 }
 
-const STRONG_DEFAULT_REPLY = `${APPROVAL_QUESTION} Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.`;
+// The reply line under the bank: the approval question for the same count of pending settings, then the reply grammar.
+const strongDefaultReply = (pending) => `${approvalQuestion(pending)} Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.`;
 
 const YES_WORDS = new Set(['yes', 'y', 'all-recommended']);
 const STRONG_DEFAULT_ITEM = /^(\d+\.\d+)=([A-Za-z][A-Za-z-]{0,23})$/;
@@ -762,8 +771,8 @@ function parseStrongDefaultAnswer(input, specs, options = {}) {
 module.exports = Object.freeze({
   BANK_REFERENCE_PATTERN,
   STRONG_DEFAULT_STATES,
-  STRONG_DEFAULT_REPLY,
-  APPROVAL_QUESTION,
+  strongDefaultReply,
+  approvalQuestion,
   strongDefaultRow,
   pendingDefaults,
   renderStrongDefaultBank,

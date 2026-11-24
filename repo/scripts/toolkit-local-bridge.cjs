@@ -1423,7 +1423,7 @@ function runAgentRulesPreflight(args, options = {}) {
   // governed rules there too. Anywhere else a copy is a leftover to remove, and a missing one is the goal.
   if (sourceVersion) for (const spec of specs) { if (spec.template) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec })); }
   else findings.push(...leftoverRuleCopies(targetRoot), ...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
-  // A leftover note depends on governance: where it is on, removal is the owner's Clean up answer.
+  // A leftover note depends on governance: where it is on, the owner's governance answer removes them.
   const leftovers = findings.some((finding) => finding.kind === 'leftover');
   const governedLeftovers = leftovers && (!rulesManaged || governed());
   // Where governance is on but its programme file cannot be used here (ERROR), the bank does not ask
@@ -1463,8 +1463,8 @@ function formatAgentRulesPreflight(result) {
     : result.governanceError === 'toolkit-too-old'
       ? `this repository still carries Toolkit instruction copies (${copies}) from an older setup. Removing them is the owner's choice: its programme file needs a newer Toolkit than the running copy, so update Toolkit (setup toolkit) first; then \`refresh governance\` asks about them. Nothing is due in this task.`
       : result.governanceError
-        ? `this repository still carries Toolkit instruction copies (${copies}) from an older setup. Removing them is the owner's choice: \`refresh governance\` asks about them once the programme file can be used. Nothing is due in this task.`
-        : `this repository still carries Toolkit instruction copies (${copies}) that the installed Toolkit now delivers itself. Removing them is the owner's choice: \`refresh governance\` asks about them (Toolkit instruction copies), and only a Clean up answer opens the one cleanup pull request; nothing is due in this task.`;
+        ? `this repository still carries Toolkit instruction copies (${copies}) from an older setup. Removing them is the owner's choice: \`refresh governance\` shows them once the programme file can be used. Nothing is due in this task.`
+        : `this repository still carries Toolkit instruction copies (${copies}) that the installed Toolkit now delivers itself. Removing them is the owner's choice: \`refresh governance\` shows them (Toolkit instruction copies), and only the owner's answer to it removes them, for one cleanup pull request; nothing is due in this task.`;
   // Broken markers hide where a Toolkit block ends, so nothing in that file is touched; fixing them is
   // the owner's choice, never a step due in this task.
   const brokenFiles = named(['broken-marker']);
@@ -3783,6 +3783,7 @@ module.exports = {
   recordHookSkip,
   clearHookSkips,
   updateReportDir,
+  isUpdateReportPath,
   cleanupUpdateReports,
   sanitizeOutputMessage,
   openUpdateReport,

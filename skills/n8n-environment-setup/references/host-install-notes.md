@@ -9,7 +9,7 @@ For Hostinger VPS plus Coolify setup or server maintenance, use `codex-ssh-hosti
 ## Official n8n Skills Install
 
 - `setup toolkit` ships the official n8n skills as plain skill folders, pinned and copied unchanged into this app's skills folder (Claude Code `~/.claude/skills`, Codex `~/.agents/skills`) and into Antigravity's `~/.gemini/config/skills` when Antigravity is installed. No plugin, hook or script comes with them. Folders you copied yourself are reported and never changed, including older-release copies (names without `-official`, or in Antigravity's older `~/.gemini/antigravity/skills`) that would load twice.
-- With the skills copied, the `n8n-skills@n8n-io` plugin would load them twice. In Claude Code, setup turns it off (user scope) and says so. In Codex, turn it off in the Codex app's plugin settings.
+- With the skills copied, the `n8n-skills@n8n-io` plugin would load them twice. Setup never turns it on or off; turn it off yourself in the app's plugin settings.
 - Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks.
 
 ## Generic Agent Rules
