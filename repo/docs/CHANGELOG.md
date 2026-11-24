@@ -1,5 +1,32 @@
 # Toolkit Changelog
 
+## 3.173.0 (A close-due finding for each finished gate session; One stale-work net in the programme sweep; The worktree residue report finishes on large checkouts and checks one worktree; Projects skill card only on real text changes)
+
+### Added
+
+- **Gate sessions are recorded.** `assign` and `reopen` open an entry for each new gate assignment in the task's private state, and the controller records the gate's host session right after the launch with `programme.cjs gate-session --issue <n> --assignment <id> --host <host> [--host-session <id>]`, then its close with `gate-session --closed`. Each host's value and where its session ID comes from are in the host contract (section 10). The command refuses the parent's holder, its earlier holders and the calling session's own desktop ID. Holder orders can carry `gate-session`.
+- **`CLOSE_DUE`.** The sweep raises one finding per finished gate assignment whose session is still open: no longer the live assignment and, for a G1, every PR it returned merged or closed with no UAT owed there (or the agent's UAT handed on). It is part of the stale-work net, is never disposed and is acknowledged for at most 72 hours. It resolves once the close is recorded. `programme.cjs attention` shows the host and session beside it; the session ID stays in private state and never reaches a page, a finding detail or the session-start cache.
+- **The stale-work net.** The programme sweep now raises the stale check's rows as attention findings, with the usual life (new, acknowledged with a due time, overdue): `OWNER_OK_CLOSE` for a task whose PR merged, whose agent UAT passed and with no gate open and every DONE WHEN row ticked, so only the owner's OK to close is left; `CHILD_NO_NEAREST` for a task opened in the last 7 days with no `Nearest child:` line; `POLISH_CAP` for a polish task at 8 rows or more, or while two are open; and `ROWS_UNTICKED` for a task with a merged PR while none of its DONE WHEN or ROWS checkboxes is ticked. A merged task's `READY_TO_CLOSE` and `TASK_MERGED_OPEN` details say how many DONE WHEN rows are still unchecked.
+- **Net findings cannot hang.** Each finding code says whether it is part of the net, its longest acknowledgement and whether it may be disposed. `OWNER_OK_CLOSE` and `POLISH_CAP` are never disposed (`FINDING_NO_DISPOSE` names the routes that clear them), and an acknowledgement past a code's cap is refused with that cap named.
+- **The 4-hour callout.** `programme.cjs attention` lists the net findings nobody answered for 4 hours (new for 4 hours, or acknowledged past their due time) first, under `Unanswered over 4 h (<n>)`; `--json` adds `callout`.
+- **One worktree at a time.** `workspace-residue-report.cjs --worktree <path>` checks only that worktree and, when it is ready to remove, prints the safe lines to run (`git worktree remove <path>`, then `git branch -d <branch>` when its branch is merged, is not a default branch and no other worktree holds it); otherwise it says why it is not ready. `--json` adds `remove_commands`. It never offers `--force` or `-D`, and host-made worktrees are still left to the host.
+- **Age.** Each worktree reports `age_hours`, and `--min-age-hours <n>` keeps a worktree made more recently than that out of the ready list.
+- `toolkit-projects-guidebook.cjs --card` prints one line on the owner's saved claude.ai copy of the Projects skill: `SKILL CARD OUTDATED: saved <old>, main <new>, text <fingerprint>`, `SKILL CARD CURRENT` or `SKILL CARD NOT SEEN`. It compares the text, leaving out the Version line, line endings and trailing whitespace, so a release that only restamps the Version line offers no card, and a declined card is remembered by its text fingerprint.
+- `toolkit-projects-guidebook.cjs --refresh <folder>`, the hourly nudge's every-run guidebook refresh: it refuses a clone that is not origin's main tip (`SKILL COPY FAILED STALE_CHECKOUT`), then prints `GUIDEBOOK CURRENT` or `GUIDEBOOK REFRESHED <old> -> <new>`.
+
+### Changed
+
+- The controller principle **Close what you spawn** asks for each gate's session to be recorded at launch and its close when closed, and the enforcement map now names the sweep as its check for gate assignments.
+- Update Toolkit on every computer that runs the sweep: an older Toolkit holds on a parent document carrying `CLOSE_DUE` (`attention[n].code is not a known finding code`) until it is updated.
+- `BODY_OVER_BUDGET` is raised only when a page is 5 per cent or more over its budget (500 characters for the parent, 200 for a task, 150 for a pull request), so a page a few characters over raises nothing.
+- `CLOSED_WITHOUT_ACCEPTANCE` is no longer raised for a task closed as completed that has its closing story after the close.
+- Update Toolkit on every computer that runs the sweep: an older Toolkit holds on a parent document carrying the new finding codes (`attention[n].code is not a known finding code`) until it is updated.
+- The report has a time budget (`--budget-ms`, default 60 seconds): worktrees it did not reach are listed as not checked, the report says it stopped, and `--json` carries `complete`. In text mode each worktree line is printed as soon as it is checked, so a checkout with many worktrees shows progress at once.
+- Setup and the Claude Code session start offer the Projects skill update card only when the saved text really differs; a Version-only difference says the copy matches Toolkit's text. Where the session has no `propose_skills` tool, the line says so plainly and nothing is asked.
+- The hourly nudge deletes any old Toolkit clone before cloning, runs the guidebook refresh and the skill card check every run, and deletes the clone at the end. The daily check-in uses the scripted card line instead of comparing Version lines by hand.
+- The guidebook refresh no longer reports `BLOCK CHANGED`, and the project-instructions check no longer reports the block outdated, when only the block's marker version or digest moved, so an identical block is not re-applied every release.
+- The Projects coordinator no longer watches Toolkit features to suggest improvements or settings to the owner; it still never changes Toolkit features or their settings itself.
+
 ## 3.172.0
 
 ### Changed
