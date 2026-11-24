@@ -32,7 +32,7 @@ function realCopy(t) {
   const root = tempRoot(t, 'real');
   const scope = realScope();
   const files = new Set([SCOPE, ...Object.values(scope.hook_files).flat()]);
-  for (const nodes of inventory(ROOT, scope).graphs.values()) for (const rel of nodes.keys()) files.add(rel);
+  for (const nodes of inventory(ROOT, scope).graphs.values()) for (const [rel, node] of nodes) for (const file of [rel, ...(node.data || [])]) files.add(file);
   for (const item of scope.dynamic_requires) for (const rel of item.loads) files.add(rel);
   for (const rel of files) write(root, rel, fs.readFileSync(path.join(ROOT, ...rel.split('/'))));
   return { root, scope, tracked: Object.values(scope.hook_files).flat() };

@@ -210,11 +210,13 @@ function resolveFile(candidate) {
   return tries.find(file => fs.existsSync(file) && fs.statSync(file).isFile()) || null;
 }
 
-// The repository files a script requires, and the requires it could not resolve.
+// The repository scripts a script requires, the data files (JSON) it requires, and the requires it
+// could not resolve.
 function requiresOf(root, rel, source = fs.readFileSync(path.join(root, rel), 'utf8')) {
   const tokens = tokenize(source);
   const context = { dir: path.dirname(path.join(root, rel)), bindings: constBindings(tokens) };
   const loads = new Set();
+  const data = new Set();
   const unresolved = [];
   for (let k = 0; k + 1 < tokens.length; k += 1) {
     const token = tokens[k];
@@ -233,8 +235,9 @@ function requiresOf(root, rel, source = fs.readFileSync(path.join(root, rel), 'u
     const target = posix(path.relative(root, file));
     if (target.startsWith('../') || path.isAbsolute(target)) { unresolved.push(`require('${spec}') leaves the repository`); continue; }
     if (SCRIPT_EXTENSIONS.includes(path.extname(target))) loads.add(target);
+    else data.add(target);
   }
-  return { loads: [...loads].sort(), unresolved };
+  return { loads: [...loads].sort(), data: [...data].sort(), unresolved };
 }
 
 // Every repository script reachable from the entries, with what each loads. A boundary (`boundaries`)
