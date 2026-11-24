@@ -1493,7 +1493,7 @@
       "source": "merge card first try: with task auto-merge on, an agent's merge question is shown, since a merge could pass with no card",
       "kind": "benign",
       "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_round","tool_input":{"questions":[{"question":"toolkit-test-fixture/hook-pack-fixture#5 has two FAIL verdicts. Merge with the open items as follow-ups, run one more round, or split it?","header":"Next","multiSelect":false,"options":[{"label":"Merge with follow-ups","description":"Merge with follow-ups."},{"label":"One more round","description":"One more round."},{"label":"Split the PR","description":"Split the PR."}]}]}},
+      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_round","tool_input":{"questions":[{"question":"toolkit-test-fixture/hook-pack-fixture#5 has two FAIL verdicts. Merge with follow-ups, run one more round, or split it?","header":"Next","multiSelect":false,"options":[{"label":"Merge with follow-ups","description":"Merge with follow-ups."},{"label":"One more round","description":"One more round."},{"label":"Split the PR","description":"Split the PR."}]}]}},
       "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
       "expect": {"decision":"allow"},
       "status": "pass"
