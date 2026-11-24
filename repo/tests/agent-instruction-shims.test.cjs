@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { controllerText } = require('./support/controller-text.cjs');
-const { findBlocks, bodyDigest, blockState } = require('../scripts/toolkit-managed-block.cjs');
+const { findBlocks } = require('../scripts/toolkit-managed-block.cjs');
 const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -20,7 +20,6 @@ const governedPath = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
 const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
-const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
 const forbiddenDefaultPromptPhrases = ['GitHub PR Completion Rules', 'GITHUB APPROVAL NEEDED', 'VERSION CONTROL APPROVAL NEEDED',
   'REMOTE APPROVAL NEEDED', 'LOCAL CHANGE APPROVAL NEEDED', 'PR: none yet', 'PR lane', 'remote source-of-truth', 'GitHub PR URL',
   'Should I push this branch'];
@@ -29,23 +28,6 @@ function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');
 }
 const exists = relPath => fs.existsSync(path.join(repoRoot, relPath));
-
-function onlyBlock(relPath, name) {
-  const { blocks, errors } = findBlocks(readText(relPath));
-  assert.deepEqual(errors, [], relPath);
-  const found = blocks.filter(block => block.name === name);
-  assert.equal(found.length, 1, `${relPath}: one ${name} block`);
-  return found[0];
-}
-
-function assertCurrentBlock(relPath, name, source, body) {
-  const block = onlyBlock(relPath, name);
-  assert.equal(block.format, 2, `${relPath}: v2 markers`);
-  assert.equal(block.version, VERSION, `${relPath}: package version`);
-  assert.equal(block.digest, bodyDigest(block.body), `${relPath}: digest matches body`);
-  assert.equal(blockState(block, { source, name, version: VERSION, body }), 'current', relPath);
-  return block;
-}
 
 test('the rule sources exist and the superseded sources and templates are gone', () => {
   for (const relPath of [globalPath, governedPath, n8nAdapterPath, 'repo/contracts/agent-rules/n8n-safety-rules.md',
@@ -162,10 +144,9 @@ test('the CLAUDE.md shim is expected only where Claude Code would otherwise miss
   assert.ok(SETTINGS.some(spec => spec.label === 'Read AGENTS.md as well as CLAUDE.md'), 'the skill names the setting by its label');
 });
 
-test('the n8n adapter template is generated from its source and stays compact and fail-closed', () => {
+test('the n8n adapter source, which the global rules carry, stays compact and fail-closed', () => {
   const body = readText(n8nAdapterPath).trimEnd();
-  const block = assertCurrentBlock('skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md', 'N8N-AGENT-RULES-ADAPTER', n8nAdapterPath, body);
-  assert.ok(Buffer.byteLength(block.body) < 700);
+  assert.ok(Buffer.byteLength(body) < 700);
   assert.match(body, /stop and load `skills\/n8n-safety-router` before planning or editing/i);
   assert.match(body, /skill or its full rules are unavailable, stop and report the limitation/i);
   for (const term of [/live n8n/i, /Docker/, /import\/export/, /activation/, /execution/, /publish\/unpublish/, /credential/, /deployment/, /production/]) assert.match(body, term);

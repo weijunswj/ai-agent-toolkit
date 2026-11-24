@@ -76,6 +76,36 @@ test('an AGENTS.md left with nothing of its own goes, with its one-line CLAUDE.m
   for (const file of ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md']) assert.equal(read(r.root, file), null, file);
 });
 
+// The global rules carry the n8n rules, so the n8n block older setups copied into AGENTS.md goes with
+// the other copies where governance is on: the owner's text stays byte for byte, a file that held only
+// the block goes with its one-line CLAUDE.md, and with governance off nothing changes.
+const N8N_BLOCK_V2 = require('../scripts/toolkit-managed-block.cjs').renderBlock({
+  source: 'repo/contracts/agent-rules/n8n-safety-router-adapter.md', name: 'N8N-AGENT-RULES-ADAPTER', version: '3.167.1',
+  body: '## n8n Safety Router\n\nUse the n8n Safety Router skill before any n8n work.',
+});
+const N8N_BLOCK_V1 = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->\n## n8n Safety Router\n\nLoad n8n-safety-router before n8n work.\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const N8N_OWN = '# Adopter rules\n\nKeep these exactly.\n';
+const N8N_CLEANUP_ROWS = [
+  ['v2 block beside own text, governance on', 'ENABLED', `${N8N_OWN}\n${N8N_BLOCK_V2}\n`, { 'AGENTS.md': N8N_OWN, 'CLAUDE.md': '@AGENTS.md\n' }],
+  ['v1 block beside own text, governance on', 'ENABLED', `${N8N_OWN}\n${N8N_BLOCK_V1}\n`, { 'AGENTS.md': N8N_OWN, 'CLAUDE.md': '@AGENTS.md\n' }],
+  ['block only, governance on', 'ENABLED', `${N8N_BLOCK_V2}\n`, { 'AGENTS.md': null, 'CLAUDE.md': null }],
+  ['v2 block beside own text, governance off', 'DISABLED', `${N8N_OWN}\n${N8N_BLOCK_V2}\n`, null],
+];
+for (const [label, state, agents, expected] of N8N_CLEANUP_ROWS) {
+  test(`the cleanup removes an older n8n block from AGENTS.md only where governance is on (${label})`, t => {
+    const r = repo(t, { 'AGENTS.md': agents, 'CLAUDE.md': '@AGENTS.md\n', '.github/toolkit-programme.json': BINDING }, state);
+    const done = cleanup.run({ root: r.root, write: true, governance: r.governance });
+    if (!expected) {
+      assert.equal(done.ok, false, label);
+      assert.equal(read(r.root, 'AGENTS.md'), agents, 'nothing changes with governance off');
+      return;
+    }
+    assert.equal(done.ok, true, done.lines.join('\n'));
+    for (const [file, text] of Object.entries(expected)) assert.equal(read(r.root, file), text, `${label}: ${file}`);
+    assert.deepEqual(cleanup.run({ root: r.root, write: false, governance: r.governance }).changes.filter(change => change.file === 'AGENTS.md'), [], 'a second run finds no n8n block');
+  });
+}
+
 test('only a governed repository is cleaned, and a broken or unreadable programme file stops it', t => {
   const off = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': BINDING }, 'DISABLED');
   const refused = cleanup.run({ root: off.root, write: true, governance: off.governance });

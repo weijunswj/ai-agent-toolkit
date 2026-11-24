@@ -38,6 +38,15 @@ function archiveTools() {
 function drift() {
   return require('./programme-drift.cjs');
 }
+// Checkbox-row readers of a task page, for the stale-work net in reconcile passes.
+function childRows() {
+  return require('./programme-child-rows.cjs');
+}
+// A merged task's detail says how many DONE WHEN rows are still unchecked, for the controller's judgement.
+function uncheckedNote(body) {
+  const count = childRows().uncheckedRows(body);
+  return count ? `; ${count} unchecked DONE WHEN row${count === 1 ? '' : 's'}` : '';
+}
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
@@ -304,6 +313,11 @@ function validateParent(doc) {
   const errors = [];
   if (validateCommon(errors, doc, SCHEMA.parent)) {
     if (doc.sweep !== undefined) validateSweep(errors, doc.sweep);
+    const closeDue = isObject(doc.private) ? doc.private.close_due : undefined;
+    check(errors, closeDue === undefined || (isObject(closeDue) && Object.entries(closeDue).every(([id, value]) => FINDING_ID.test(id) && isObject(value)
+      && Object.keys(value).length === 2 && optional(value.host, host => GATE_SESSION_HOSTS.includes(host))
+      && optional(value.session, session => isText(value.host) && hostSessionValid(value.host, session)))),
+    'private.close_due must map close-due finding IDs to the host and session of each');
     check(errors, isInt(doc.parent_issue, 1), 'parent_issue must be an issue number');
     check(errors, optional(doc.release_plan, value => isObject(value)
       && optional(value.record, isText) && optional(value.comment_id, v => isInt(v, 1))), 'release_plan must hold record and comment_id');
@@ -371,7 +385,13 @@ const FINDING_ID = /^[0-9a-f]{12}$/;
 const ATTENTION_KEEP = 200;
 const ATTENTION_LIMIT = 500;
 // Codes whose finding speaks for one PR head; a new head is a new finding.
-const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED']);
+const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED', 'OWNER_OK_CLOSE']);
+// A row may also carry, for the stale-work net (one lifecycle for every check of work left undone):
+//   net: true          a stale-work net member: one unanswered for NET_CALLOUT_HOURS is called out to the
+//                      controller (netCallout); every work-queue code is a member too;
+//   ack_max_hours: n   the longest acknowledgement it takes (default ACK_DUE_MAX_HOURS);
+//   no_dispose: true   it clears only when its work is done or acknowledged, never by a reasoned dispose,
+//                      since a dispose would let that work hang.
 const FINDING_CODES = Object.freeze({
   // reconcile source: what the reconciler reports but never changes itself.
   ISSUE_MISSING: { source: 'reconcile', next_action: 'Controller: fix or remove the catalogue entry; the issue cannot be read or is a pull request' },
@@ -380,7 +400,7 @@ const FINDING_CODES = Object.freeze({
   DEPENDENCY_IMPLIES_PARENT: { source: 'reconcile', next_action: 'Controller: set the native parent on purpose; a dependency never sets one' },
   PR_HEAD_MOVED: { source: 'reconcile', next_action: 'Controller: re-check review and UAT at the new head before accepting' },
   CHECKS_RED: { source: 'reconcile', next_action: 'Controller: have the builder fix the failing checks' },
-  READY_TO_CLOSE: { source: 'reconcile', next_action: 'Controller: close the issue as completed if every criterion is met' },
+  READY_TO_CLOSE: { source: 'reconcile', net: true, next_action:'Controller: close the issue as completed if every criterion is met' },
   CHILD_STATE_CONFLICT: { source: 'reconcile', next_action: 'Controller: bring the state document and the issue in line' },
   CLOSED_WITHOUT_ACCEPTANCE: { source: 'reconcile', next_action: 'Controller: record G2 and UAT, or confirm the close' },
   CHILD_REOPENED: { source: 'reconcile', next_action: 'Controller: confirm the restored task lifecycle' },
@@ -391,7 +411,7 @@ const FINDING_CODES = Object.freeze({
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   PAGE_LAYOUT_HELD: { source: 'reconcile', next_action: 'Controller: fix what the finding names on the task page (an unclosed code block, a section that appears twice, an unknown marker or a secret-shaped value); until then its blocks are updated where they are and its text is not moved' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  BODY_OVER_BUDGET: { source: 'reconcile', next_action: 'Controller: the page is over its budget (parent 10,000, task 4,000, PR 3,000 characters). Parent or task page: queue a holder order with a `mark-archive` write that puts one `## Archive` line above the old hand-written text, so the next sweep moves it (and, once moved, removes link lines nothing uses). PR page: its builder trims the description to the CHANGE shape' },
+  BODY_OVER_BUDGET: { source: 'reconcile', next_action: 'Controller: the page is 5 per cent or more over its budget (parent 10,000, task 4,000, PR 3,000 characters). Parent or task page: queue a holder order with a `mark-archive` write that puts one `## Archive` line above the old hand-written text, so the next sweep moves it (and, once moved, removes link lines nothing uses). PR page: its builder trims the description to the CHANGE shape' },
   ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
@@ -423,9 +443,16 @@ const FINDING_CODES = Object.freeze({
   BLOCK_BEHIND: { source: 'reconcile', next_action: 'Controller: this open task page shows an older state than the stored one and nothing redraws it; settle any effect left in flight (the pass report names it), then run refresh' },
   PR_NAV_MISSING: { source: 'reconcile', next_action: 'Controller: this open task PR has no readable PATH block and nothing redraws it; repair or remove the broken markers on the PR page, then run refresh' },
   NEXT_ACTION_STALE: { source: 'reconcile', next_action: "Controller: the task's next action was set before its latest merge or close; set the next step with update --patch" },
+  // Stale-work net rows read from the task pages and owner waits the pass already holds.
+  OWNER_OK_CLOSE: { source: 'reconcile', net: true, no_dispose: true, next_action: 'Controller: the task\'s PR merged, its agent UAT PASSED, no gate is open and every DONE WHEN row is ticked, so only the owner\'s OK to close is left: put "reply ok to close" for it in your next ask to the owner and ack this finding, then close the task with its closing comment on the owner\'s OK' },
+  CHILD_NO_NEAREST: { source: 'reconcile', net: true, next_action: 'Controller: this task opened in the last 7 days with no `Nearest child:` line. Check it duplicates no open task: add the line naming the closest open task and why it does not fit, put a duplicate in your next ask to the owner to fold, or dispose with the reason it is a new area' },
+  POLISH_CAP: { source: 'reconcile', net: true, no_dispose: true, next_action: 'Controller: the polish task is full (8 rows) or over its cap (more rows, or more than one polish task open): ship it as one PR and open a fresh one, or move rows out until it is under the cap and only one polish task is open' },
+  ROWS_UNTICKED: { source: 'reconcile', net: true, next_action: 'Controller: a PR on this task merged, but none of its DONE WHEN or ROWS checkbox rows is ticked: tick each row a merged PR delivered, so the done-when read counts them' },
+  // One per finished gate assignment (kind = its assignment ID) whose host session is still open.
+  CLOSE_DUE: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 72, next_action: 'Controller: check the gate\'s report is in the evidence store, archive its session with its host\'s archive action (HOST-CONTRACT 10; never your own session), then run gate-session --issue <n> --assignment <id> --closed; or acknowledge it with why it stays open' },
   // inventory source: open issues and registered parents.
   NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
-  CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', next_action: 'Controller: reopen the parent, or move or close its open descendants' },
+  CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', net: true, next_action: 'Controller: reopen the parent, or move or close its open descendants' },
   INVENTORY_INCOMPLETE: { source: 'inventory', next_action: 'Controller: run programme.cjs attention --refresh again; this run could not read every open issue' },
   ATTENTION_FULL: { source: 'inventory', next_action: 'Controller: answer or dispose open findings; no new finding is recorded until there are fewer than 500' },
 });
@@ -434,6 +461,18 @@ const FINDING_CODES = Object.freeze({
 // they list first, and a disposed one resolves when its condition clears so a later stall is new.
 // A code joins it with `queue: true` in its FINDING_CODES row.
 const WORK_QUEUE_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].queue === true));
+// The stale-work net: rows marked `net: true`, and every work-queue code.
+const NET_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].net === true || WORK_QUEUE_CODES.has(code)));
+// A net finding new for this long, or acknowledged past its due time, is called out to the controller.
+const NET_CALLOUT_HOURS = 4;
+// A task opened within this many days with no `Nearest child:` line raises CHILD_NO_NEAREST; older
+// tasks are left alone, so turning the check on does not flag every old task at once.
+const NEAREST_WINDOW_DAYS = 7;
+// Codes whose finding ID also carries a kind: a closing finding's pr or issue, a close-due
+// finding's assignment ID.
+const KIND_CODES = new Set(['CLOSING_COMMENT_MISSING', 'CLOSE_DUE']);
+// How a finding's kind reads in a line of text.
+const kindText = entry => (entry.kind === 'pr' ? ' PR' : entry.kind === 'issue' ? ' issue' : entry.kind ? ` ${entry.kind}` : '');
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
@@ -451,8 +490,11 @@ const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT', 'BODY_OVER_BUDGET'];
 // Page budgets in characters, checked by the run itself: well under GitHub's limit, so a page stays
 // quick to read. Over budget the page is still written and BODY_OVER_BUDGET names its largest parts.
 const PAGE_BUDGETS = Object.freeze({ parent: 10000, child: 4000, pr: 3000 });
+// BODY_OVER_BUDGET is raised only at 5 per cent over (parent 500, task 200, PR 150 characters), so a
+// page a few characters over raises nothing; the hard-limit codes keep their own thresholds.
+const budgetMargin = budget => Math.ceil(budget / 20);
 function pageBudgetFinding(number, body, budget) {
-  return body.length < budget ? null
+  return body.length < budget + budgetMargin(budget) ? null
     : { code: 'BODY_OVER_BUDGET', issue: number, diagnostics: bodySizeDiagnostics(body, budget), detail: `The page is ${body.length} characters, over its ${budget}-character budget` };
 }
 const PAGE_CODES = SIZE_CODES;
@@ -630,7 +672,9 @@ function validateAttention(errors, attention) {
     check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
     check(errors, FINDING_STATES.includes(entry.state), `${at}.state must be ${FINDING_STATES.join(', ')}`);
     for (const field of ['first_seen', 'changed_at']) check(errors, isText(entry[field]) && !Number.isNaN(Date.parse(entry[field])), `${at}.${field} must be a date and time`);
-    check(errors, entry.code === 'CLOSING_COMMENT_MISSING' ? ['pr','issue'].includes(entry.kind) : entry.kind === undefined, `${at}.kind belongs to a closing finding and must be pr or issue`);
+    check(errors, entry.code === 'CLOSING_COMMENT_MISSING' ? ['pr','issue'].includes(entry.kind)
+      : entry.code === 'CLOSE_DUE' ? ASSIGNMENT_ID.test(String(entry.kind ?? '')) : entry.kind === undefined,
+    `${at}.kind belongs to a closing finding (pr or issue) or a close-due finding (its assignment ID)`);
     check(errors, entry.due === undefined || (isText(entry.due) && !Number.isNaN(Date.parse(entry.due))), `${at}.due must be a date and time`);
     check(errors, FINDING_ID.test(String(entry.id)) && entry.id === findingId(entry.source, entry.code, entry.issue, entry.head, entry.kind), `${at}.id must be the finding's own id`);
     check(errors, !ids.has(entry.id), `${at}.id is repeated`);
@@ -692,7 +736,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
     add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
       [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'ARCHIVE_SECTION_UNSAFE', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null,
-      finding.code === 'CLOSING_COMMENT_MISSING' ? finding.kind : null);
+      KIND_CODES.has(finding.code) ? finding.kind : null);
   }
   // After this run's reports, so a fresh event reopens as itself, not as a missed promise.
   if (expireAcknowledged(list, now)) changed = true;
@@ -766,6 +810,11 @@ function answerFinding(doc, { id, state, reason = null, next = null, due = null,
   if (state === 'acknowledged' && WORK_QUEUE_CODES.has(entry.code)) {
     throw new ProgrammeError('QUEUE_FINDING_NEEDS_ACTION', `Finding ${id} (${entry.code}) is on the work queue: act on it (${FINDING_CODES[entry.code].next_action}), or dispose --finding ${id} --reason <text>. It clears by itself once the task moves.`);
   }
+  const row = FINDING_CODES[entry.code] || {};
+  const maxHours = row.ack_max_hours ?? ACK_DUE_MAX_HOURS;
+  if (state === 'disposed' && row.no_dispose === true) {
+    throw new ProgrammeError('FINDING_NO_DISPOSE', `Finding ${id} (${entry.code}) is never disposed: a reasoned dispose would leave its work hanging. It clears once the work is done (${row.next_action}); or ack --finding ${id} --next <step> with a due time at most ${maxHours} hours ahead.`);
+  }
   if (state === 'disposed' && (!isText(reason) || reason.length > ATTENTION_NOTE_LIMIT)) {
     throw new ProgrammeError('USAGE', `dispose needs --reason <text> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
   }
@@ -774,9 +823,9 @@ function answerFinding(doc, { id, state, reason = null, next = null, due = null,
     if (!isText(next) || next.length > ATTENTION_NOTE_LIMIT) throw new ProgrammeError('USAGE', `ack needs --next <the step you will take> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
     const time = Date.parse(now);
     if (due !== null && !DUE_TIME.test(String(due))) throw new ProgrammeError('USAGE', 'ack --due must be an ISO 8601 date and time with Z or an offset, for example 2026-11-14T09:00:00Z.');
-    dueAt = due === null ? time + ACK_DUE_HOURS * HOUR_MS : Date.parse(due);
-    if (Number.isNaN(dueAt) || dueAt <= time || dueAt > time + ACK_DUE_MAX_HOURS * HOUR_MS) {
-      throw new ProgrammeError('USAGE', `ack --due must be a date and time after now and at most ${ACK_DUE_MAX_HOURS} hours ahead; a longer wait is a tracked task, or dispose with a reason.`);
+    dueAt = due === null ? time + Math.min(ACK_DUE_HOURS, maxHours) * HOUR_MS : Date.parse(due);
+    if (Number.isNaN(dueAt) || dueAt <= time || dueAt > time + maxHours * HOUR_MS) {
+      throw new ProgrammeError('USAGE', `ack --due must be a date and time after now and at most ${maxHours} hours ahead for ${entry.code}; a longer wait is a tracked task${row.no_dispose ? '' : ', or dispose with a reason'}.`);
     }
   }
   // An acknowledgement past its due time is answered again as if new: the missed step needs a new one.
@@ -812,6 +861,38 @@ function attentionLine(attention, now = new Date().toISOString()) {
   const waiting = waitingFindings(attention, now).filter(entry => !WORK_QUEUE_CODES.has(entry.code)).length;
   const queue = workQueue(attention).length;
   return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged${queue ? `, ${queue} in the work queue` : ''}${waiting ? `, ${waiting} waiting on you` : ''}` : 'Attention: clear';
+}
+
+// The stale-work net's callout at a time: every open net finding new for NET_CALLOUT_HOURS or more, or
+// whose acknowledgement passed its due time (at once, even after a pass stored it as new again).
+// Returns { count, entries, oldest }: entries oldest first, each { id, ref, code, state, hours } with
+// the whole hours since it was raised or fell due; `oldest` is the first three. Pure: the session-start
+// line runs it on the cached entries and the current time, with no network read.
+// The parent's private close_due: the host and session of each open CLOSE_DUE finding in `attention`,
+// from this pass (`seen`, finding ID to {host, session}) or else as stored; pruned with the finding.
+function closeDueSessions(stored, attention, seen = new Map()) {
+  const kept = {};
+  for (const entry of openFindings(attention || [])) {
+    if (entry.code !== 'CLOSE_DUE') continue;
+    const value = seen?.get?.(entry.id) || (isObject(stored) ? stored[entry.id] : null);
+    if (isObject(value)) kept[entry.id] = { host: value.host ?? null, session: value.session ?? null };
+  }
+  return kept;
+}
+
+function netCallout(findings, now) {
+  const time = typeof now === 'number' ? now : Date.parse(now);
+  const entries = [];
+  for (const entry of Array.isArray(findings) ? findings : []) {
+    if (!entry || !NET_CODES.has(entry.code) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
+    const overdue = ackOverdue(entry, time);
+    const since = overdue ? ackDue(entry) : Date.parse(entry.changed_at);
+    if (!Number.isFinite(since) || (!overdue && (entry.state !== 'new' || time - since < NET_CALLOUT_HOURS * HOUR_MS))) continue;
+    entries.push({ id: entry.id, ref: isInt(entry.issue, 1) ? `#${entry.issue}` : '-', code: entry.code, state: overdue ? 'overdue' : 'new', hours: Math.max(0, Math.floor((time - since) / HOUR_MS)), since });
+  }
+  entries.sort((a, b) => a.since - b.since || String(a.id).localeCompare(String(b.id)));
+  const out = entries.map(({ since, ...rest }) => rest);
+  return { count: out.length, entries: out, oldest: out.slice(0, 3) };
 }
 
 // Open work-queue findings, oldest first: the longest-stalled task leads.
@@ -853,7 +934,7 @@ function findingText(entry) {
     return `ARCHIVE_COMMENT_UNTRUSTED #${entry.issue}: a comment holding archived notes is ${entry.diagnostics.reason === 'missing' ? 'missing' : 'no longer as written'}; the notes are in the private store at page-copies/issue-${entry.issue}/${entry.diagnostics.copy}.md. Put them back on the page under \`## Archive\` for a fresh comment, or dispose of this finding`;
   }
   const next = FINDING_CODES[entry.code]?.next_action || '';
-  return `${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${entry.issue ? next.replace('issue-<n>', `issue-${entry.issue}`) : next}`;
+  return `${entry.code}${kindText(entry)}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${entry.issue ? next.replace('issue-<n>', `issue-${entry.issue}`) : next}`;
 }
 
 // A digest of the open findings and their states, to tell when the set changed.
@@ -951,6 +1032,7 @@ function validateChild(doc) {
     if (isObject(doc.private) && doc.private.pr_heads !== undefined) validatePrHeads(errors, doc.private.pr_heads);
     if (isObject(doc.private) && doc.private.agent_uat !== undefined) validateAgentUat(errors, doc.private.agent_uat);
     if (isObject(doc.private) && doc.private.lane_wait !== undefined) validateLaneWaitStamp(errors, doc.private.lane_wait);
+    if (isObject(doc.private) && doc.private.gate_sessions !== undefined) validateGateSessions(errors, doc.private.gate_sessions);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
       && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
@@ -979,6 +1061,127 @@ function validateAgentUat(errors, record) {
   check(errors, isObject(record) && Object.keys(record).length === 3 && AGENT_UAT_STATES.includes(record.state) && isSha(record.at_head)
     && isText(record.evidence) && record.evidence.length <= JOURNAL_TEXT_LIMIT && !secretShaped(record.evidence),
   `private.agent_uat must hold state (${AGENT_UAT_STATES.join(', ')}), at_head (the owed UAT's full head SHA) and evidence (text of at most ${JOURNAL_TEXT_LIMIT} characters, no secret)`);
+}
+
+// The host session each gate assignment ran in, so the sweep can say when a finished gate's session
+// is due to close (CLOSE_DUE). `assign` and `reopen` add an entry ({assignment, role, at, host: null,
+// session: null, closed_at: null}); the controller records the launch (`gate-session --host`) and the
+// close (`gate-session --closed`). At most GATE_SESSIONS_LIMIT entries, closed ones dropped first.
+// Like pr_heads it lives in the child's private part, so the ID is never public and older Toolkit
+// readers still load the document.
+const GATE_SESSIONS_LIMIT = 20;
+// The hosts a gate runs on. A `codex-exec` run ends with its process, so it has nothing to close.
+const GATE_SESSION_HOSTS = Object.freeze(['claude-code', 'claude-code-cloud', 'claude-projects', 'codex-app', 'codex-exec']);
+// Default-deny host session readers: the Claude Code desktop app's own ID (what its archive action
+// takes), else 8 to 80 letters, digits, `_` or `-`.
+const CLAUDE_CODE_SESSION = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const HOST_SESSION = /^[A-Za-z0-9_-]{8,80}$/;
+const hostSessionValid = (host, session) => (host === 'claude-code' ? CLAUDE_CODE_SESSION : HOST_SESSION).test(String(session ?? ''));
+const timeText = value => isText(value) && DUE_TIME.test(value);
+function validateGateSessions(errors, list) {
+  const keys = ['assignment', 'role', 'at', 'host', 'session', 'closed_at'];
+  check(errors, Array.isArray(list) && list.length <= GATE_SESSIONS_LIMIT && new Set(list.map(entry => entry?.assignment)).size === list.length
+    && list.every(entry => isObject(entry) && Object.keys(entry).every(key => [...keys, 'reason'].includes(key)) && keys.every(key => Object.hasOwn(entry, key))
+      && ASSIGNMENT_ID.test(String(entry.assignment)) && GATE_ROLES.includes(entry.role) && timeText(entry.at)
+      && optional(entry.host, host => GATE_SESSION_HOSTS.includes(host))
+      && optional(entry.session, session => isText(entry.host) && hostSessionValid(entry.host, session))
+      && optional(entry.closed_at, timeText)
+      && (entry.reason === undefined || (isText(entry.reason) && entry.reason.length <= JOURNAL_TEXT_LIMIT && !secretShaped(entry.reason)))),
+  `private.gate_sessions must list at most ${GATE_SESSIONS_LIMIT} different assignments, each with assignment, role, at, host (${GATE_SESSION_HOSTS.join(', ')} or null), session (that host's session ID or null), closed_at and an optional reason`);
+}
+
+// Adds the entry for a newly issued assignment. Past the limit the oldest closed entries go first,
+// then the oldest open ones; returns the assignments dropped.
+function noteGateSession(next, { assignment, role, now }) {
+  const list = Array.isArray(next.private?.gate_sessions) ? next.private.gate_sessions.filter(entry => entry.assignment !== assignment) : [];
+  list.push({ assignment, role, at: timeText(now) ? now : new Date().toISOString(), host: null, session: null, closed_at: null });
+  const dropped = [];
+  while (list.length > GATE_SESSIONS_LIMIT) {
+    const closed = list.findIndex(entry => entry.closed_at);
+    dropped.push(list.splice(closed >= 0 ? closed : 0, 1)[0].assignment);
+  }
+  next.private = { ...next.private, gate_sessions: list };
+  return dropped;
+}
+
+// The open gate sessions of a task that are due to close: each entry with no close recorded, not a
+// `codex-exec` run, whose assignment is finished. Finished: it is not the live assignment (the slot
+// holds another one, or holds it RETIRED or INTERRUPTED); for a G1 also every PR its returns name is
+// merged or closed, or a later G1 on the task has an entry (it owns those PRs now), and no UAT is owed
+// at those PRs' heads unless the agent's UAT there is handed on (PASSED or OWNER_ONLY). A return whose
+// head names no PR the task knows keeps its G1 open. Returns [{ entry, why }].
+function closeDueOf(doc) {
+  const list = Array.isArray(doc?.private?.gate_sessions) ? doc.private.gate_sessions : [];
+  const gate = doc?.gate || {};
+  const prs = new Map([doc?.pr, ...(Array.isArray(doc?.prs) ? doc.prs : [])].filter(pr => isInt(pr?.number, 1)).map(pr => [pr.number, pr]));
+  const headPr = new Map((Array.isArray(doc?.private?.pr_heads) ? doc.private.pr_heads : []).map(entry => [entry.head, entry.pr]));
+  for (const pr of prs.values()) if (isSha(pr.head) && !headPr.has(pr.head)) headPr.set(pr.head, pr.number);
+  const due = [];
+  list.forEach((entry, index) => {
+    if (entry.closed_at || entry.host === 'codex-exec') return;
+    const current = gate.assignment?.id === entry.assignment;
+    if (current && !['RETIRED', 'INTERRUPTED'].includes(gate.state)) return;
+    let why = !current ? 'no longer the live assignment' : gate.state === 'RETIRED' ? 'accepted' : 'interrupted';
+    if (entry.role === 'G1') {
+      const later = list.slice(index + 1).some(other => other.role === 'G1');
+      if (!later) {
+        const heads = (gate.returns || []).filter(item => item.assignment === entry.assignment && isSha(item.at_head)).map(item => item.at_head);
+        const numbers = heads.map(head => headPr.get(head));
+        if (numbers.some(number => !number)) return;
+        if (numbers.some(number => !['MERGED', 'CLOSED'].includes(prs.get(number)?.state))) return;
+        const prHeads = new Set([...heads, ...[...headPr].filter(([, number]) => numbers.includes(number)).map(([head]) => head)]);
+        const owed = OWED_UAT_STATES.includes(doc.uat?.state) && prHeads.has(doc.uat.at_head) && !AGENT_UAT_HANDED.includes(agentUatAt(doc, doc.uat.at_head));
+        if (owed) return;
+        if (numbers.length) why += `; PR ${[...new Set(numbers)].map(number => `#${number}`).join(', ')} merged or closed`;
+      } else why += '; a later G1 took over its PRs';
+    }
+    due.push({ entry, why });
+  });
+  return due;
+}
+
+// The controller records a gate's host session after launching it (host, and session when the host
+// gives one), or its close (`closed`). Re-recording the same values or a second close is a no-op
+// (null); other values need `replace` with a reason. The controller's own sessions (the parent's
+// holder, its earlier holders and the calling session's own host ID, `controllerSessions`) are
+// never recorded as a gate's.
+function recordGateSession(doc, { assignment, host = null, session = null, closed = false, replace = false, reason = null, now = null, controllerSessions = [] } = {}) {
+  if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'gate-session needs --assignment <id>.');
+  if (Boolean(closed) === Boolean(host)) throw new ProgrammeError('USAGE', 'gate-session needs exactly one of --host <host> (after the launch) or --closed (after the close).');
+  if (closed && (session || replace || reason)) throw new ProgrammeError('USAGE', 'gate-session --closed takes no --host-session, --replace or --reason.');
+  if (session && !host) throw new ProgrammeError('USAGE', '--host-session goes with --host.');
+  if (replace && !isText(String(reason ?? '').trim())) throw new ProgrammeError('USAGE', 'gate-session --replace needs --reason <why>.');
+  if (reason && !replace) throw new ProgrammeError('USAGE', '--reason goes with --replace on gate-session.');
+  if (host && !GATE_SESSION_HOSTS.includes(host)) throw new ProgrammeError('USAGE', `--host must be one of ${GATE_SESSION_HOSTS.join(', ')}.`);
+  if (session && !hostSessionValid(host, session)) {
+    throw new ProgrammeError('USAGE', host === 'claude-code'
+      ? '--host-session for claude-code must be the app\'s own session ID: local_ and a lowercase UUID.'
+      : '--host-session must be 8 to 80 letters, digits, _ or -.');
+  }
+  if (session && controllerSessions.filter(isText).includes(session)) {
+    throw new ProgrammeError('ROLE_REFUSED', 'That is a controller session of this programme, never a gate\'s: a gate session is the one the controller launched.');
+  }
+  const next = clone(doc);
+  const list = Array.isArray(next.private?.gate_sessions) ? next.private.gate_sessions : [];
+  const entry = list.find(item => item.assignment === assignment);
+  if (!entry) {
+    throw new ProgrammeError('STALE_ASSIGNMENT', `#${next.issue} has no gate session entry for assignment ${assignment}: assign and reopen add one, and assignments issued before this Toolkit, or dropped past the newest ${GATE_SESSIONS_LIMIT}, have none.`);
+  }
+  if (closed) {
+    if (entry.closed_at) return null;
+    entry.closed_at = timeText(now) ? now : new Date().toISOString();
+    return next;
+  }
+  if (entry.closed_at) throw new ProgrammeError('GATE_STATE', `The session of assignment ${assignment} on #${next.issue} is already recorded as closed.`);
+  const wanted = session || null;
+  if (entry.host === host && entry.session === wanted) return null;
+  if (entry.host && !replace) {
+    throw new ProgrammeError('GATE_SESSION_RECORDED', `Assignment ${assignment} on #${next.issue} already has its ${entry.host} session recorded${entry.session ? '' : ' (no session ID)'}. To change it: gate-session --issue ${next.issue} --assignment ${assignment} --host <host> [--host-session <id>] --replace --reason <why>.`);
+  }
+  entry.host = host;
+  entry.session = wanted;
+  if (replace) entry.reason = String(reason).trim();
+  return next;
 }
 
 // Adds the heads a pass saw (`seen`, from PR discovery, then the tracked PR's head) to the task's
@@ -1500,7 +1703,7 @@ function assignmentUsed(doc, id) {
 
 // The controller (or the lane holding this child) issues an assignment. Only the session bound to the
 // current assignment may journal; nothing else can make a gate live.
-function assignGate(doc, { assignment, role, supersede = false, reason = null }) {
+function assignGate(doc, { assignment, role, supersede = false, reason = null, now = null }) {
   if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'assign needs --assignment <id> (letters, digits, dot, dash or underscore; up to 60).');
   if (!GATE_ROLES.includes(role)) throw new ProgrammeError('USAGE', '--role must be G0, G1 or G2.');
   const next = clone(doc);
@@ -1527,6 +1730,7 @@ function assignGate(doc, { assignment, role, supersede = false, reason = null })
   gate.state = 'ASSIGNED';
   gate.session_id = null;
   gate.route = null;
+  noteGateSession(next, { assignment, role, now });
   if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
   dropLaneWaits(next);
   next.next_action = `Executor: bind to assignment ${assignment} and start ${role}`;
@@ -1536,7 +1740,7 @@ function assignGate(doc, { assignment, role, supersede = false, reason = null })
 // The controller reopens a gate. An accepted (RETIRED) gate gets a new assignment for its correction,
 // which removes the acceptance; a submitted return is sent back (REOPEN); a gate waiting on the owner
 // continues once the controller has recorded the answer.
-function reopenGate(doc, { reason, assignment = null }) {
+function reopenGate(doc, { reason, assignment = null, now = null }) {
   const why = needsReason(reason, 'reopen');
   const next = clone(doc);
   const gate = next.gate;
@@ -1548,6 +1752,7 @@ function reopenGate(doc, { reason, assignment = null }) {
     gate.state = 'ASSIGNED';
     gate.session_id = null;
     gate.route = null;
+    noteGateSession(next, { assignment, role: gate.role, now });
     if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
     dropLaneWaits(next);
     next.next_action = `Executor: bind to assignment ${assignment} and correct ${gate.role}`;
@@ -3918,9 +4123,13 @@ function validatePublic(kind, doc) {
   return doc;
 }
 
-// The session IDs a document names: its holder, its gate's session and retired parent holders.
+// The session IDs a document names: its holder, its gate's session, retired parent holders, and the
+// host sessions recorded for its gate assignments (a child's gate_sessions, the parent's close_due).
 function sessionsOf(doc) {
-  return [doc?.fence?.holder_session, doc?.gate?.session_id, ...(Array.isArray(doc?.private?.retired_holders) ? doc.private.retired_holders : [])];
+  const priv = doc?.private;
+  return [doc?.fence?.holder_session, doc?.gate?.session_id, ...(Array.isArray(priv?.retired_holders) ? priv.retired_holders : []),
+    ...(Array.isArray(priv?.gate_sessions) ? priv.gate_sessions.map(entry => entry?.session) : []),
+    ...(isObject(priv?.close_due) ? Object.values(priv.close_due).map(entry => entry?.session) : [])];
 }
 
 // The public view of a full document. Raw session IDs become hashes; a raw session ID of this
@@ -4558,7 +4767,7 @@ class ProgrammeGraphReader {
     return {
       complete,
       number: issue.number, id: issue.id, state: issue.state, state_reason: issue.state_reason || null,
-      title: issue.title, body: issue.body || '', updated_at: issue.updated_at, closed_at: issue.closed_at || null,
+      title: issue.title, body: issue.body || '', created_at: issue.created_at || null, updated_at: issue.updated_at, closed_at: issue.closed_at || null,
       is_pull_request: Boolean(issue.pull_request),
       parent: parentFromUrl(issue.parent_issue_url, this.repository),
       blocked_by_total: issue.issue_dependencies_summary?.total_blocked_by ?? 0,
@@ -5932,7 +6141,7 @@ class Reconciler {
       const blocked = blocker ? `; blocked by #${blocker} (moving), but unchanged for over ${BLOCKED_SKIP_DAYS} days`
         : listed ? `; its state lists a blocker, but it has not changed for over ${BLOCKED_SKIP_DAYS} days` : '';
       findings.push(merged
-        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${waited} hour${waited === 1 ? '' : 's'})${keptNote}${blocked}` }
+        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${waited} hour${waited === 1 ? '' : 's'})${keptNote}${blocked}${uncheckedNote(observed.issues.get(outcome.issue)?.body)}` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}${blocked}` });
     }
   }
@@ -5981,6 +6190,76 @@ class Reconciler {
       const pr = uatPr(doc);
       findings.push({ code: 'AGENT_UAT_UNSTARTED', issue: outcome.issue, head,
         detail: `landed, and its agent UAT on ${pr ? `PR #${pr}` : `head ${shortSha(head)}`} has not started. Controller: start it now in its own lane, in parallel with the gate lane, and record its start (update --issue ${outcome.issue} --patch with private.agent_uat state STARTED, at_head ${head} and where it runs); until then a new G0 or G1 assignment is refused. Or dispose with a reason` });
+    }
+  }
+
+  // Stale-work net rows read from what the pass already holds (task pages, documents, owner waits),
+  // each raised while its condition holds and resolved on the first complete pass where it is gone:
+  //   OWNER_OK_CLOSE   an open task whose PR merged, whose only owner wait is a UAT after the agent's UAT
+  //                    PASSED, with no gate open (gate_live false), no `Kept open:` mark, no open
+  //                    sub-issue and a DONE WHEN with every row ticked; bound to the UAT's head;
+  //   CHILD_NO_NEAREST an open task opened in the last NEAREST_WINDOW_DAYS with no `Nearest child:` line;
+  //   POLISH_CAP       an open task titled `Polish...` with POLISH_CAP rows or more, or any open one while
+  //                    two or more are open;
+  //   ROWS_UNTICKED    an open task with a merged PR and DONE WHEN or ROWS checkbox rows, none ticked.
+  // A task the pass did not read is left as it stands (the attention fold holds its findings).
+  diffStaleNet(parent, docs, observed, only, findings) {
+    const rows = childRows();
+    const now = Date.parse(this.now());
+    const inScope = number => !(only && number !== only) && !(this.scope && !this.scope.has(number));
+    const open = parent.outcomes.map(outcome => ({ outcome, issue: observed.issues.get(outcome.issue), doc: docs.get(outcome.issue) }))
+      .filter(row => row.issue && !row.issue.is_pull_request && row.issue.state === 'open');
+    const waits = new Map(ownerWaits(parent, docs).map(wait => [wait.issue, wait]));
+    const polish = open.filter(row => /^Polish\b/i.test(row.issue.title || ''));
+    for (const { outcome, issue, doc } of open) {
+      if (!inScope(outcome.issue)) continue;
+      const body = String(issue.body || '').replace(/\r\n?/g, '\n');
+      const wait = waits.get(outcome.issue);
+      if (wait && wait.agent_uat === 'PASSED' && !wait.after && wait.gate_live === false && wait.pr_state === 'MERGED' && doc && !keptOpen(doc)
+        && !issue.open_sub_issues && rows.sectionOf(body, rows.DONE_WHEN) && !rows.uncheckedRows(body)) {
+        const head = isSha(wait.uat_head) ? wait.uat_head : wait.head;
+        findings.push({ code: 'OWNER_OK_CLOSE', issue: outcome.issue, head, detail: `${wait.pr ? `PR #${wait.pr} merged, ` : ''}agent UAT PASSED${head ? ` at ${shortSha(head)}` : ''}, no gate open and every DONE WHEN row ticked: only the owner's OK to close is left` });
+      }
+      const created = Date.parse(issue.created_at || '');
+      if (Number.isFinite(created) && now - created < NEAREST_WINDOW_DAYS * 24 * HOUR_MS && !/Nearest child:/.test(body)) {
+        findings.push({ code: 'CHILD_NO_NEAREST', issue: outcome.issue, detail: `opened ${new Date(created).toISOString().slice(0, 16)}Z with no \`Nearest child:\` line` });
+      }
+      if (polish.some(row => row.outcome.issue === outcome.issue)) {
+        const { rows: count, under } = rows.polishRows(body);
+        const state = count > rows.POLISH_CAP ? 'over cap' : count === rows.POLISH_CAP ? 'full' : null;
+        const several = polish.length > 1 ? `${polish.length} polish tasks open (${polish.map(row => `#${row.outcome.issue}`).join(', ')})` : null;
+        if (state || several) findings.push({ code: 'POLISH_CAP', issue: outcome.issue, detail: [state ? `${state}: ${count} rows (${under}), cap ${rows.POLISH_CAP}` : null, several].filter(Boolean).join('; ') });
+      }
+      const merged = [...new Set([doc?.pr, ...(doc?.prs || [])].filter(pr => pr?.state === 'MERGED' && isInt(pr.number, 1)).map(pr => pr.number))];
+      const ticks = rows.rowTicks(body);
+      if (merged.length && !ticks.ticked && ticks.unticked) {
+        findings.push({ code: 'ROWS_UNTICKED', issue: outcome.issue, detail: `PR ${merged.map(number => `#${number}`).join(', ')} merged, but none of its ${ticks.unticked} DONE WHEN or ROWS checkbox row(s) is ticked` });
+      }
+    }
+  }
+
+  // CLOSE_DUE, one per finished gate assignment whose host session is still open (closeDueOf), on
+  // every task the pass read, open or closed; kind is the assignment ID. Its host and session go to
+  // `this.closeDue` (never into the finding), from which the parent's private close_due is written.
+  // A task whose document the pass could not read keeps its CLOSE_DUE findings as they stand.
+  diffCloseDue(parent, docs, observed, only, findings) {
+    this.closeDue = new Map();
+    this.closeDueHolds = [];
+    for (const outcome of parent.outcomes) {
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
+      const doc = docs.get(outcome.issue);
+      if (!doc) {
+        this.closeDueHolds.push(...(parent.attention || []).filter(entry => entry.code === 'CLOSE_DUE' && entry.issue === outcome.issue).map(entry => entry.id));
+        continue;
+      }
+      for (const { entry, why } of closeDueOf(doc)) {
+        const where = entry.host
+          ? `close its ${entry.host} session${entry.session ? '' : '; its session ID was not recorded: find it by the assignment ID or title'}`
+          : 'its session was not recorded: find it by the assignment ID or title';
+        findings.push({ code: 'CLOSE_DUE', issue: outcome.issue, kind: entry.assignment,
+          detail: `${entry.role} assignment ${entry.assignment} on #${outcome.issue} is finished (${why}); ${where}` });
+        this.closeDue.set(findingId('reconcile', 'CLOSE_DUE', outcome.issue, null, entry.assignment), { host: entry.host, session: entry.session });
+      }
     }
   }
 
@@ -6152,7 +6431,11 @@ class Reconciler {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    // A close as completed that already has its closing story after the close needs no confirming: the
+    // story is the closer's account. The comments are the ones this pass already read for the task.
+    const story = issue?.closed_at && (observed.comments.get(issueNumber) || []).length
+      && require('./closing-comments.cjs').marked(observed.comments.get(issueNumber), { closed_at: issue.closed_at }, require('./closing-comments.cjs').STORY);
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired) && !story) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
@@ -6206,7 +6489,7 @@ class Reconciler {
         const openSubs = issue.open_sub_issues > 0 || (observed.subIssues.get(issueNumber) || []).some(sub => observed.issues.get(sub.number)?.state !== 'closed');
         const closable = accepted && CLOSABLE_UAT.includes(uat) && reviewSettled && Boolean(pr.base) && pr.base === pr.default_branch && !openSubs;
         findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, closable, uat, review,
-          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
+          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}${uncheckedNote(issue.body)}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
         findings.push({ code: 'PR_HEAD_MOVED', issue: issueNumber, head: pr.head, detail: `candidate ${shortSha(desired.candidate.head)}, PR #${pr.number} head ${shortSha(pr.head)}; review and UAT evidence at the old head is STALE_HEAD` });
@@ -6825,7 +7108,7 @@ class Reconciler {
       : sweep && (!sweep.changedComplete || sweep.left.length || sweep.failed.length)).map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...unread, ...(observed.prGraph?.holdWithoutTask || []),
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...unread, ...(this.closeDueHolds || []), ...(observed.prGraph?.holdWithoutTask || []),
         ...(parent.attention || []).filter(entry=>entry.code==='CLOSING_COMMENT_MISSING' && !observed.closing?.checked.has(`${entry.kind}:${entry.issue}`)).map(entry=>entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
@@ -6836,8 +7119,12 @@ class Reconciler {
     // page is found here, while planning, and folds like any other finding: no recheck, so a page
     // that stays over budget still settles to no changes.
     const settlingSize = !only && openFindings(stored).some(entry => PAGE_CODES.includes(entry.code) && entry.code !== 'BODY_OVER_BUDGET');
-    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize && !(stoppedHolds.length && !only)) return;
+    const closeDue = closeDueSessions(parent.private?.close_due, next, this.closeDue);
+    const closeDueChanged = JSON.stringify(canonical(closeDue)) !== JSON.stringify(canonical(parent.private?.close_due || {}));
+    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !closeDueChanged && !settlingSize && !(stoppedHolds.length && !only)) return;
     const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next, now) };
+    // The sessions ride the effect out of sight: a plan's JSON never prints them.
+    Object.defineProperty(effect, 'closeDue', { value: this.closeDue || new Map(), enumerable: false });
     effects.push(effect);
     const number = parent.parent_issue;
     const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'TRACE_INDEX_INVALID', 'MANAGED_BLOCK_BROKEN', ...PAGE_CODES]);
@@ -6985,6 +7272,8 @@ class Reconciler {
     this.diffQueuedMoving(parent, projected, observed, only, findings);
     this.diffBatch(parent, desiredDocs, observed, only, findings);
     this.diffAgentUat(parent, desiredDocs, observed, only, findings);
+    this.diffStaleNet(parent, desiredDocs, observed, only, findings);
+    this.diffCloseDue(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
@@ -7300,8 +7589,11 @@ class Reconciler {
           const concurrent = stored.filter(entry => !plannedIds.has(entry.id)).map(entry => entry.id);
           const stoppedIds = stored.filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
           const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, hold: [...(fold.hold || []), ...concurrent, ...stoppedIds], now: effect.now }), stored);
-          if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return null;
+          const closeDue = closeDueSessions(doc.private?.close_due, next, effect.closeDue);
+          const sameDue = JSON.stringify(canonical(closeDue)) === JSON.stringify(canonical(doc.private?.close_due || {}));
+          if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && sameDue) return null;
           doc.attention = next;
+          if (!sameDue) doc.private = { ...doc.private, close_due: closeDue };
           // A dispose reason goes when its finding drops off the list.
           const notes = doc.private?.attention_notes;
           if (isObject(notes)) {
@@ -8243,7 +8535,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue, NET_CODES, NET_CALLOUT_HOURS, NEAREST_WINDOW_DAYS, netCallout, GATE_SESSION_HOSTS, GATE_SESSIONS_LIMIT, recordGateSession, closeDueOf, closeDueSessions, KIND_CODES, kindText,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });
