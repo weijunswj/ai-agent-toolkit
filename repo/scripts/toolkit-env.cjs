@@ -56,6 +56,8 @@ const EDIT_TICK_MS = 500;
 const UNCHANGED = '<unchanged>';
 // Shown instead of a value that one line of the edit file cannot hold exactly; the line keeps the value.
 const KEPT = /^<kept: change it with toolkit env set ([A-Za-z0-9_]+)>$/;
+// Line breaks some editor or parser honours beyond CRLF and LF, left inside a line after the split.
+const STRAY_BREAK = /[\r\v\f\u0085\u2028\u2029]/;
 // The edit file is named .env so it opens in the app this computer uses for .env files.
 const EDIT_FILE = /^env-edit-([0-9a-f]{16})\.env$/;
 const editFileName = (id) => `env-edit-${id}.env`;
@@ -586,6 +588,9 @@ class EnvEditSession {
     const { layout, refused } = layoutOf(lines, { skip: isHeaderLine });
     for (const line of refused) problems.push(`line ${line}: this comment looks like it may hold a key or token (or is over ${MAX_COMMENT_CHARS} characters); remove or reword it`);
     lines.forEach((line, index) => {
+      // A line break other than CRLF or LF (a lone CR, NEL, LS, PS, VT, FF) would hide the key line after
+      // it inside this line, so a save would delete that key: refuse the whole save instead.
+      if (STRAY_BREAK.test(line)) { problems.push(`line ${index + 1} holds a line break this file cannot use; save it again with Windows (CRLF) or Unix (LF) line ends`); return; }
       const text = line.trim();
       if (!text || text.startsWith('#')) return;
       const at = text.indexOf('=');
