@@ -370,7 +370,8 @@ test('a line break other than CRLF or LF refuses the whole save, so no key is de
       assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED/m, `${name}, ${place}: the file says it was not saved`);
       const done = await h.run('apply');
       assert.notEqual(done.code, 0, `${name}, ${place}`);
-      assert.match(done.stdout + done.stderr, /holds a line break this file cannot use/, `${name}, ${place}`);
+      // A comment line holding the break is refused by the comment screen, a key line by the break itself.
+      assert.match(done.stdout + done.stderr, place === 'before a key line' ? /holds a line break this file cannot use/ : /holds a line break this file cannot use|this comment looks like it may hold a key/, `${name}, ${place}`);
       assert.equal(storeImage(h), before, `${name}, ${place}: done changed nothing`);
       assert.equal(h.store.removes, 0);
     }
