@@ -21,8 +21,9 @@ function scratch(t) {
   return dir;
 }
 
-// A governed repository, a Claude config directory with the rendered helpers, and an empty control root.
-// `environment` is a Toolkit gate run (a launcher marker, a G1 lead), the only session the named-helper
+// A governed repository, a Claude config directory with the rendered helpers, an empty control root and
+// the lead's transcript (it read agent-cost-control and serves on Opus high), given to calls outside a gate run.
+// `environment` is a Toolkit gate run (a launcher marker, a G1 lead), the only session the helper-route
 // policy applies to; `open` is any other session.
 function fixture(t, { install = true } = {}) {
   const dir = scratch(t);
@@ -33,9 +34,12 @@ function fixture(t, { install = true } = {}) {
   fs.mkdirSync(path.join(configDir, 'agents'), { recursive: true });
   const renderer = ClaudeHelperAgentRenderer.fromRepository('owner-claude', ROOT);
   if (install) for (const role of ['G0', 'G1']) { const { file, text } = renderer.render(role); fs.writeFileSync(path.join(configDir, 'agents', file), text); }
+  const transcript = path.join(dir, 'lead.jsonl');
+  fs.writeFileSync(transcript, [{ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 't', name: 'Skill', input: { skill: 'agent-cost-control' } }] }, effort: 'high' },
+    { type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' }].map(entry => JSON.stringify(entry)).join('\n') + '\n');
   const open = { CLAUDE_CONFIG_DIR: configDir };
   const environment = { ...open, TOOLKIT_GATE_ROLE: 'G1' };
-  const decide = (input, env = environment) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: repo, ...input },
+  const decide = (input, env = environment) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: repo, ...(env.TOOLKIT_GATE_ROLE ? {} : { transcript_path: transcript }), ...input },
     { root: controlRoot, environment: env, helper_policy: { toolkitRoot: ROOT } });
   return { dir, repo, plain, configDir, controlRoot, environment, open, decide };
 }
@@ -79,25 +83,29 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   assert.equal(governedRepo(ROOT, {}).governed, false, 'the Toolkit checkout is asked like any other repository');
 });
 
-const INHERITED = /names no model, so it would run on this session's model/;
+const NOT_CHEAPER = /not cheaper than this agent's opus-5\.5\/high/;
+const OFF_ROUTE = /cannot be checked against a helper route|helper route of the/;
 
-test('outside a gate run a main-session launch that names a model is left to Claude Code, in a governed repository too; one that would run on the session model is refused', t => {
+test('outside a gate run a main-session launch runs with no prompt only when cheaper than the lead, in a governed repository too; others ask', t => {
   const f = fixture(t);
   for (const cwd of [f.plain, f.dir, f.repo]) {
-    for (const tool_input of [{ subagent_type: 'general-purpose', model: 'haiku' }, { model: 'sonnet' }, { subagent_type: 'Explore', model: 'opus' }, { subagent_type: 'toolkit-g0-helper' }]) {
+    for (const tool_input of [{ subagent_type: 'general-purpose', model: 'haiku' }, { model: 'sonnet' }, { subagent_type: 'toolkit-g0-helper' }]) {
       assert.deepEqual(f.decide({ cwd, tool_input }, f.open), {}, `${cwd} ${JSON.stringify(tool_input)}`);
       assert.deepEqual(f.decide({ cwd, tool_name: 'Task', tool_input }, f.open), {}, `${cwd} Task ${JSON.stringify(tool_input)}`);
     }
-    for (const tool_input of [{ subagent_type: 'general-purpose' }, {}, { subagent_type: 'Explore' }]) {
-      assert.match(reason(f.decide({ cwd, tool_input }, f.open)), INHERITED, `${cwd} ${JSON.stringify(tool_input)}`);
-      assert.match(reason(f.decide({ cwd, tool_name: 'Task', tool_input }, f.open)), INHERITED, `${cwd} Task ${JSON.stringify(tool_input)}`);
+    for (const tool_input of [{ subagent_type: 'general-purpose' }, {}, { subagent_type: 'Explore' }, { subagent_type: 'Explore', model: 'opus' }]) {
+      for (const tool_name of ['Agent', 'Task']) {
+        const output = f.decide({ cwd, tool_name, tool_input }, f.open);
+        assert.equal(output.hookSpecificOutput.permissionDecision, 'ask', `${cwd} ${tool_name} ${JSON.stringify(tool_input)}`);
+        assert.match(reason(output), NOT_CHEAPER);
+      }
     }
     // A main session started with --agent carries agent_type but no agent_id; it is still the main session.
     assert.deepEqual(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore', model: 'haiku' } }, f.open), {}, `${cwd} --agent main session`);
-    assert.match(reason(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }, f.open)), INHERITED, `${cwd} --agent main session, no model`);
+    assert.match(reason(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }, f.open)), NOT_CHEAPER, `${cwd} --agent main session, no model`);
   }
-  // The same launch in a gate run there gets the named-helper policy.
-  assert.match(reason(f.decide({ tool_input: { subagent_type: 'Explore' } })), /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: Explore\)/);
+  // The same launch in a gate run there gets the helper-route policy.
+  assert.match(reason(f.decide({ tool_input: { subagent_type: 'Explore' } })), OFF_ROUTE);
   assert.deepEqual(hook.decision({ tool_name: 'Read', cwd: f.repo }, { root: f.controlRoot, environment: f.environment }), {});
 });
 
@@ -138,13 +146,14 @@ test('broader native behaviour lifts the normal-folder refusal; a missing or unr
   }
   assert.equal(reason(nested(f.repo)), ONE_LAYER_REASON, 'a governed repository keeps one layer');
   assert.equal(reason(f.decide({ tool_name: 'Task', agent_id: 'a2', tool_input: {} }, f.open)), ONE_LAYER_REASON, 'Task keeps one layer too');
-  assert.deepEqual(f.decide({ tool_input: { subagent_type: 'general-purpose', model: 'haiku' } }, f.open), {}, 'the main session may launch any agent with a model');
-  assert.match(reason(f.decide({ tool_input: { subagent_type: 'general-purpose' } }, f.open)), INHERITED, 'but not one on the session model');
-  // A gate run under broader native without a launcher binding gets the named-helper policy:
-  // a subagent caller is refused, the lead may launch a current Toolkit helper, and nothing else.
+  assert.deepEqual(f.decide({ tool_input: { subagent_type: 'general-purpose', model: 'haiku' } }, f.open), {}, 'the main session may launch a cheaper agent');
+  assert.match(reason(f.decide({ tool_input: { subagent_type: 'general-purpose' } }, f.open)), NOT_CHEAPER, 'and is asked about one on its own route');
+  // A gate run under broader native without a launcher binding gets the helper-route policy: a
+  // subagent caller is refused, the lead may launch a current Toolkit helper, and with no gate brief
+  // nothing else.
   assert.match(reason(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })), /a helper cannot launch another agent/);
   assert.deepEqual(await f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }), {});
-  assert.match(reason(await f.decide({ tool_input: { subagent_type: 'general-purpose' } })), /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
+  assert.match(reason(await f.decide({ tool_input: { subagent_type: 'general-purpose' } })), OFF_ROUTE);
 });
 
 test('in governed work a main session started with --agent is the lead; only an agent_id caller is a helper', t => {
@@ -152,7 +161,7 @@ test('in governed work a main session started with --agent is the lead; only an 
   // agent_type without agent_id: a --agent main session, judged like any lead launch.
   assert.deepEqual(f.decide({ agent_type: 'security-reviewer', tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }), {});
   assert.match(reason(f.decide({ agent_type: 'security-reviewer', tool_input: { subagent_type: 'general-purpose' } })),
-    /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: general-purpose\)/);
+    /the general-purpose launch cannot be checked against a helper route/);
   for (const caller of [{ agent_id: 'a1', agent_type: 'toolkit-g1-helper' }, { agent_id: 'a2' }]) {
     const output = f.decide({ ...caller, tool_input: { subagent_type: 'toolkit-g0-helper' } });
     assert.equal(reason(output), 'Toolkit: a helper cannot launch another agent. Only the main session launches helpers.', JSON.stringify(caller));
@@ -166,12 +175,12 @@ test('in governed work the matching Toolkit helpers are allowed and other launch
     assert.deepEqual(f.decide({ tool_name: 'Task', tool_input: { subagent_type: name, prompt: 'y' } }), {}, `${name} via Task`);
   }
   const cases = [
-    [{ tool_input: { subagent_type: 'general-purpose' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: general-purpose\)/],
-    [{ tool_input: { prompt: 'y' } }, /requested: the default agent/],
+    [{ tool_input: { subagent_type: 'general-purpose' } }, /the general-purpose launch cannot be checked against a helper route/],
+    [{ tool_input: { prompt: 'y' } }, /the default agent launch cannot be checked/],
     // Inherited object keys are not helper names.
-    [{ tool_input: { subagent_type: 'constructor' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: constructor\)/],
-    [{ tool_input: { subagent_type: '__proto__' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: __proto__\)/],
-    [{ tool_input: { subagent_type: 'toString' } }, /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: toString\)/],
+    [{ tool_input: { subagent_type: 'constructor' } }, /the constructor launch cannot be checked/],
+    [{ tool_input: { subagent_type: '__proto__' } }, /the __proto__ launch cannot be checked/],
+    [{ tool_input: { subagent_type: 'toString' } }, /the toString launch cannot be checked/],
     [{ agent_id: 'a1', agent_type: 'toolkit-g1-helper', tool_input: { subagent_type: 'toolkit-g0-helper' } }, /a helper cannot launch another agent/],
     [{ tool_input: { subagent_type: 'toolkit-g0-helper', model: 'opus' } }, /cannot override model/],
     [{ tool_input: { subagent_type: 'toolkit-g0-helper', effort: 'low' } }, /cannot override effort/],

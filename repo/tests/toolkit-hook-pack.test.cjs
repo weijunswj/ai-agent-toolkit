@@ -124,7 +124,7 @@ test('a row with a wrong shape is refused with the reason', () => {
   const cases = [
     [row({ id: 'lower' }), /id must start/],
     [row({ hosts: ['claude', 'claude'] }), /hosts must list/],
-    [row({ expect: { decision: 'maybe' } }), /decision must be allow or deny/],
+    [row({ expect: { decision: 'maybe' } }), /decision must be allow, deny or ask/],
     [row({ expect: { decision: 'deny', reason: 'Refused because ...' } }), /reason is a hook name/],
     [row({ status: 'known-bad' }), /names the lane/],
     [row({ status: 'known-bad', lane: 'x', added: '2026-10-30', known_bad_on: ['codex'] }), /known_bad_on lists some/],
@@ -230,6 +230,61 @@ test('a hook process decides as the host reads it', () => {
   assert.equal(pack.hookDecision('claude', blocking, output(null)).decision, 'deny');
   assert.equal(pack.hookDecision('claude', plain, output(1, '', 'boom')).decision, 'allow');
   assert.equal(pack.hookDecision('codex', blocking, output(1, '', 'boom')).decision, 'allow');
+});
+
+test('a hook that asks for permission reads as ask with its reason, and a refusal still wins inside that hook', () => {
+  const plain = { command: 'node "x/repo/scripts/toolkit-a-hook.cjs"' };
+  const ask = JSON.stringify({ hookSpecificOutput: { permissionDecision: 'ask', permissionDecisionReason: '  confirm the push \n' } });
+  assert.deepEqual(pack.hookDecision('claude', plain, output(0, ask)), { decision: 'ask', reason: 'toolkit-a-hook', text: 'confirm the push' });
+  assert.deepEqual(pack.hookDecision('claude', plain, output(0, JSON.stringify({ hookSpecificOutput: { permissionDecision: 'ask' } }))), { decision: 'ask', reason: 'toolkit-a-hook', text: '' });
+  const blockedToo = JSON.stringify({ hookSpecificOutput: { permissionDecision: 'ask', permissionDecisionReason: 'confirm' }, decision: 'block', reason: 'held' });
+  assert.equal(pack.hookDecision('claude', plain, output(0, blockedToo)).decision, 'deny');
+  assert.equal(pack.hookDecision('codex', plain, output(2, ask, 'no')).decision, 'deny');
+});
+
+test('the hooks of one call combine as deny, then ask, then allow, and the winning entry gives the reason and text', () => {
+  const hook = name => ({ command: `node "x/repo/scripts/${name}.cjs"` });
+  const reply = (name, decision) => pack.hookDecision('claude', hook(name), output(0, JSON.stringify({ hookSpecificOutput: { permissionDecision: decision, permissionDecisionReason: `${name} says ${decision}` } })));
+  const allowed = name => pack.hookDecision('claude', hook(name), output(0, ''));
+  const asked = pack.combineDecisions([allowed('toolkit-a-hook'), reply('toolkit-b-hook', 'ask')]);
+  assert.equal(asked.decision, 'ask');
+  assert.equal(asked.reason, 'toolkit-b-hook');
+  assert.equal(asked.text, 'toolkit-b-hook says ask');
+  const both = [reply('toolkit-b-hook', 'ask'), reply('toolkit-c-hook', 'deny')];
+  for (const decisions of [both, [...both].reverse()]) {
+    const refused = pack.combineDecisions(decisions);
+    assert.equal(refused.decision, 'deny');
+    assert.equal(refused.reason, 'toolkit-c-hook');
+    assert.equal(refused.text, 'toolkit-c-hook says deny');
+  }
+  assert.equal(pack.combineDecisions([allowed('toolkit-a-hook')]).decision, 'allow');
+  // A hook that failed still lists itself, and the ask beside it still decides.
+  const broken = pack.hookDecision('claude', hook('toolkit-broken-hook'), output(1, '', 'boom'));
+  const withFailure = pack.combineDecisions([broken, reply('toolkit-b-hook', 'ask')]);
+  assert.equal(withFailure.decision, 'ask');
+  assert.deepEqual(withFailure.failed, ['toolkit-broken-hook (exit 1)']);
+});
+
+test('an ask expectation meets only an ask, and each wrong decision names its failure', () => {
+  const observed = (decision, reason) => ({ decision, reason, problems: [], failed: [] });
+  const asked = observed('ask', 'toolkit-a-hook');
+  const askRow = row({ kind: 'hostile', expect: { decision: 'ask' } });
+  assert.equal(pack.meets(askRow, 'claude', asked), true);
+  assert.equal(pack.meets(askRow, 'claude', observed('allow')), false);
+  assert.equal(pack.meets(askRow, 'claude', observed('deny', 'toolkit-a-hook')), false);
+  assert.equal(pack.meets(row({ kind: 'hostile', expect: { decision: 'ask', reason: 'toolkit-b-hook' } }), 'claude', asked), false);
+  assert.equal(pack.meets(row({ expect: { decision: 'allow' } }), 'claude', asked), false);
+  assert.equal(pack.failureKind(row({ expect: { decision: 'allow' } }), 'claude', asked), 'false block (asked by toolkit-a-hook)');
+  assert.equal(pack.failureKind(askRow, 'claude', observed('allow')), 'leak (allowed)');
+  assert.equal(pack.failureKind(row({ kind: 'hostile', expect: { decision: 'deny' } }), 'claude', asked), 'leak (asked instead of refused, by toolkit-a-hook)');
+  assert.equal(pack.failureKind(askRow, 'claude', observed('deny', 'toolkit-a-hook')), 'false block (refused by toolkit-a-hook)');
+  assert.equal(pack.failureKind(row({ kind: 'hostile', expect: { decision: 'ask', reason: 'toolkit-b-hook' } }), 'claude', asked), 'asked by toolkit-a-hook, expected toolkit-b-hook');
+});
+
+test('a row may expect ask, per host too, and any other decision is still refused', () => {
+  assert.deepEqual(pack.rowErrors(row({ expect: { decision: 'ask' } })), []);
+  assert.deepEqual(pack.rowErrors(row({ hosts: ['claude', 'codex'], expect: { decision: 'allow' }, expect_by_host: { codex: { decision: 'ask' } }, note: 'Codex asks here' })), []);
+  for (const decision of ['maybe', 'Ask']) assert.match(pack.rowErrors(row({ expect: { decision } })).join('\n'), /decision must be allow, deny or ask/, decision);
 });
 
 test('a refusal only because a hook failed meets a row only when the row names it', () => {

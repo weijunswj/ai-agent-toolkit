@@ -143,7 +143,7 @@ function rowErrors(row) {
 function expectErrors(expect, label) {
   if (!expect || typeof expect !== 'object') return [`${label} must be an object`];
   const errors = [];
-  if (!['allow', 'deny'].includes(expect.decision)) errors.push(`${label}.decision must be allow or deny`);
+  if (!['allow', 'deny', 'ask'].includes(expect.decision)) errors.push(`${label}.decision must be allow, deny or ask`);
   if (expect.reason !== undefined && (typeof expect.reason !== 'string' || !/^[a-z0-9.-]+(?::failure)?$/.test(expect.reason))) errors.push(`${label}.reason is a hook name (the script file name without .cjs), with :failure when the host blocked because the hook itself failed`);
   for (const key of ['context_contains', 'context_excludes']) if (expect[key] !== undefined
     && (!Array.isArray(expect[key]) || !expect[key].length || expect[key].some(text => typeof text !== 'string' || !text.trim())
@@ -313,6 +313,8 @@ function hookDecision(host, hook, result) {
   if (result.status === 0 && result.stdout.trim()) { try { output = JSON.parse(result.stdout); } catch { output = null; } }
   const denied = output && (output.hookSpecificOutput?.permissionDecision === 'deny' || output.decision === 'block' || output.continue === false);
   if (result.status === 2 || denied) return { decision: 'deny', reason: name, text: (output?.hookSpecificOutput?.permissionDecisionReason || output?.reason || result.stderr || '').trim() };
+  // Exit 0 with an ask: the host shows its permission prompt to the person instead of running the call.
+  if (result.status === 0 && output?.hookSpecificOutput?.permissionDecision === 'ask') return { decision: 'ask', reason: name, text: (output.hookSpecificOutput.permissionDecisionReason || '').trim() };
   if (result.status === 0) return { decision: 'allow' };
   // Any other exit, or a stop at the timeout: Claude Code blocks only where the hook says
   // onFailure: block; Codex blocks only on exit 2.
@@ -323,6 +325,18 @@ function hookDecision(host, hook, result) {
 function scriptName(command) {
   const match = /([A-Za-z0-9._-]+)\.(?:cjs|ps1)"/.exec(command || '');
   return match ? match[1] : 'hook';
+}
+
+// One call's decisions from several hooks, as the call gets them: deny first, then ask, then allow.
+// reason and text come from the winning deny or ask.
+function combineDecisions(decisions) {
+  const winner = decisions.find(entry => entry.decision === 'deny') || decisions.find(entry => entry.decision === 'ask');
+  return {
+    decision: winner ? winner.decision : 'allow',
+    reason: winner?.reason,
+    text: winner ? winner.text : decisions.find(entry => entry.failed)?.text,
+    failed: decisions.filter(entry => entry.failed).map(entry => entry.failed),
+  };
 }
 
 // Read only the surface delivered as context by each host, never stderr diagnostics.
@@ -938,8 +952,7 @@ async function runOnHost(row, host, fixture, roots) {
   const changedFiles = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(file => before[file] !== after[file]);
   if (changedFiles.length) problems.push(`a fixture file changed: ${changedFiles.join(', ')}`);
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
-  const deny = decisions.find(entry => entry.decision === 'deny');
-  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, context: contexts.join('\n'), failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
+  return { ...combineDecisions(decisions), context: contexts.join('\n'), problems };
 }
 
 // The hosts a row is known to fail on (none for a passing row).
@@ -966,9 +979,12 @@ function failureKind(row, host, observed) {
   const context = contextProblems(expect, observed.context);
   if (context.length) return context.join('; ');
   if (expect.decision === 'allow' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
-  if (expect.decision === 'deny' && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
+  if (expect.decision === 'allow' && observed.decision === 'ask') return `false block (asked by ${observed.reason})`;
+  if (expect.decision === 'ask' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
+  if (expect.decision === 'deny' && observed.decision === 'ask') return `leak (asked instead of refused, by ${observed.reason})`;
+  if ((expect.decision === 'deny' || expect.decision === 'ask') && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
   if (expect.reason === undefined) return `refused only because ${observed.reason.replace(/:failure$/, '')} itself failed; a row that expects that names the reason`;
-  return `refused by ${observed.reason}, expected ${expect.reason}`;
+  return `${observed.decision === 'ask' ? 'asked' : 'refused'} by ${observed.reason}, expected ${expect.reason}`;
 }
 
 async function pool(items, concurrency, work) {
@@ -1053,7 +1069,7 @@ function scoreboard(results, seconds, { budgetSeconds, verbose }, out) {
       const kind = failureKind(row, host, observed);
       if (kind.startsWith('false block')) entry.falseBlocks += 1; else if (kind.startsWith('leak')) entry.leaks += 1; else entry.other += 1;
       lines.push(`FAIL ${row.id} on ${host}: ${kind}`);
-      if (verbose && observed.text && !(row.expect_by_host?.[host] || row.expect).context_contains && !(row.expect_by_host?.[host] || row.expect).context_excludes) lines.push(`  refusal: ${observed.text.replace(/\s+/g, ' ').slice(0, 400)}`);
+      if (verbose && observed.text && !(row.expect_by_host?.[host] || row.expect).context_contains && !(row.expect_by_host?.[host] || row.expect).context_excludes) lines.push(`  ${observed.decision === 'ask' ? 'ask' : 'refusal'}: ${observed.text.replace(/\s+/g, ' ').slice(0, 400)}`);
     }
   }
   out.write('family          cases  pass  known-bad  false-blocks  leaks  other\n');
@@ -1182,5 +1198,5 @@ if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
   CORPUS_REL, FAULTS, HOSTS, KINDS, KNOWN_BAD_DAYS, SCHEMA,
-  agedKnownBad, expectationChanges, selectRows, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  agedKnownBad, expectationChanges, selectRows, explainedRows, combineDecisions, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });

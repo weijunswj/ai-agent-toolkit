@@ -105,7 +105,8 @@ function runHook(context, event, { environment = {}, hook = AGENT_HOOK, args = [
 
 const launch = (name, extra = {}) => ({ tool_input: { subagent_type: name, description: 'matrix', prompt: 'Reply OK', ...extra } });
 const G0 = 'toolkit-g0-helper', G1 = 'toolkit-g1-helper';
-const NOT_ALLOWED = /allows only the toolkit-g0-helper and toolkit-g1-helper agents/;
+// A gate run refuses any agent off the selected stack's helper route; with no readable brief the stack is not known.
+const OFF_ROUTE = /helper route/;
 // A session no Toolkit launcher started: no launcher marker.
 const NO_GATE = Object.freeze({ TOOLKIT_GATE_ROLE: '' });
 const MISMATCH = /does not match the one rendered from the selected stack/;
@@ -123,13 +124,22 @@ const projectAgent = (name, model) => c => {
   fs.writeFileSync(path.join(dir, `${name}.md`), agentText(name, model));
 };
 const agentText = (name, model) => `---\nname: ${name}\ndescription: Matrix agent.\n${model ? `model: ${model}\n` : ''}---\n\nReply OK.\n`;
-const INHERITED = /names no model, so it would run on this session's model/;
-const FORK = /a fork always runs on this session's model/;
+const NOT_CHEAPER = /not cheaper than this agent's opus-5\.5\/high/;
+const SKILL_FIRST = /read the agent-cost-control skill before starting a subagent/;
+// Transcripts a case can name in its `transcript` option: the lead read agent-cost-control and served
+// on Opus high, the same without the skill read, and a G1 gate brief on the owner-claude stack.
+const said = { type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' };
+const TRANSCRIPTS = Object.freeze({
+  'skill-opus': [{ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'toolu_m', name: 'Skill', input: { skill: 'ai-agent-toolkit:agent-cost-control' } }] }, effort: 'high' }, said],
+  'opus-no-skill': [said],
+  'gate-brief': [{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } }, said],
+});
+const READ = Object.freeze({ environment: NO_GATE, transcript: 'skill-opus' });
 const configureTopology = topology => c => require(path.join(SCRIPTS, 'toolkit-agent-control.cjs'))
   .configureProfile('claude-code', { topology, capacity_mode: 'root-only' }, { root: c.controlRoot });
 
 // One entry per hook case: [row, case, event, expected, reason pattern, options]. Options: `environment`,
-// `setup(context)`, `cwd(context)`, `brokenHook` (the decision module fails to load), `gate` (the
+// `setup(context)`, `cwd(context)`, `transcript` (a TRANSCRIPTS name), `brokenHook` (the decision module fails to load), `gate` (the
 // governance hook's PreToolUse event runs instead of the agent hook), `needsBirthtime`.
 const HOOK_CASES = [
   ['A1', 'G0 lead launches toolkit-g0-helper, definition current', launch(G0), 'pass'],
@@ -155,43 +165,46 @@ const HOOK_CASES = [
   ['A14', 'project copy between the working directory and the root differs', launch(G1), 'deny', /the project copy .*packages.* does not match/,
     { setup: c => { projectCopy(['packages'], G1, t => t.replace('maxTurns: 60', 'maxTurns: 99'))(c); fs.mkdirSync(path.join(c.repo, 'packages', 'app'), { recursive: true }); },
       cwd: c => path.join(c.repo, 'packages', 'app') }],
-  ['A14', 'plugin-scoped agent with a Toolkit name', launch(`some-plugin:${G0}`), 'deny', NOT_ALLOWED],
+  ['A14', 'plugin-scoped agent with a Toolkit name', launch(`some-plugin:${G0}`), 'deny', OFF_ROUTE],
   ['A15', 'a helper launches another agent', { agent_id: 'helper-1', agent_type: G1, ...launch(G0) }, 'deny', /a helper cannot launch another agent/],
   ['A15', 'a G2 session launches a helper', launch(G0), 'deny', /G2 review sessions launch no helpers/, { environment: { TOOLKIT_GATE_ROLE: 'G2' } }],
-  ['A17', 'built-in Explore agent', launch('Explore'), 'deny', NOT_ALLOWED],
-  ['A17', 'built-in general-purpose agent', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /requested: the default agent/],
-  ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED,
+  ['A17', 'built-in Explore agent', launch('Explore'), 'deny', OFF_ROUTE],
+  ['A17', 'built-in general-purpose agent', launch('general-purpose'), 'deny', OFF_ROUTE],
+  ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /the default agent launch cannot be checked against a helper route/],
+  ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', OFF_ROUTE,
     { setup: configureTopology('broader-native') }],
-  ['A18', 'ungoverned folder, lead launches any agent with a model', launch('general-purpose', { model: 'haiku' }), 'pass', null, { cwd: c => c.plain, environment: NO_GATE }],
-  ['A18', 'ungoverned folder, lead launches an agent with no model', launch('general-purpose'), 'deny', INHERITED, { cwd: c => c.plain, environment: NO_GATE }],
+  ['A18', 'ungoverned folder, lead launches a cheaper agent after the skill', launch('general-purpose', { model: 'haiku' }), 'pass', null, { ...READ, cwd: c => c.plain }],
+  ['A18', 'ungoverned folder, lead launches an agent with no model: it would run on the lead route, so the person is asked', launch('general-purpose'), 'ask', NOT_CHEAPER, { ...READ, cwd: c => c.plain }],
+  ['A18', 'ungoverned folder, lead has not read the skill', launch('general-purpose', { model: 'haiku' }), 'deny', SKILL_FIRST, { environment: NO_GATE, transcript: 'opus-no-skill', cwd: c => c.plain }],
   ['A18', 'ungoverned folder, a subagent launches another agent', { agent_id: 'sub-1', ...launch('general-purpose') }, 'deny', /one layer only/, { cwd: c => c.plain, environment: NO_GATE }],
   ['A18', 'ungoverned folder, broader native behaviour chosen', { agent_id: 'sub-1', ...launch('general-purpose') }, 'pass', null,
     { cwd: c => c.plain, setup: configureTopology('broader-native'), environment: NO_GATE }],
-  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent with a model', launch('Explore', { model: 'haiku' }), 'pass', null, { environment: NO_GATE }],
-  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent with no model', launch('Explore'), 'deny', INHERITED, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a cheaper built-in agent', launch('Explore', { model: 'haiku' }), 'pass', null, READ],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent with no model', launch('Explore'), 'ask', NOT_CHEAPER, READ],
   ['A18', 'ENABLED repository outside a gate run, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/, { environment: NO_GATE }],
   ['A18', 'ENABLED repository outside a gate run, broader native chosen, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/,
     { environment: NO_GATE, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
-  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent with a model', launch('general-purpose', { model: 'haiku' }), 'pass', null, { cwd: c => c.declined, environment: NO_GATE }],
+  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', OFF_ROUTE],
+  ['A22', 'DISABLED repository is ungoverned: the lead launches a cheaper agent after the skill', launch('general-purpose', { model: 'haiku' }), 'pass', null, { ...READ, cwd: c => c.declined }],
   ['A22', 'UNDECIDED repository counts as off: the governance gate lets the launch through', launch(G0), 'pass', null,
     { cwd: c => c.undecided, gate: true }],
   ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],
-  ['A27', 'outside a gate run, general-purpose with no model and CLAUDE_CODE_SUBAGENT_MODEL set', launch('general-purpose'), 'pass', null,
-    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
-  ['A27', 'outside a gate run, Explore with no model and only CLAUDE_CODE_SUBAGENT_MODEL set', launch('Explore'), 'deny', INHERITED,
-    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
-  ['A27', 'outside a gate run, Explore with no model and the model variable forced', launch('Explore'), 'pass', null,
-    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
-  ['A27', 'outside a gate run, a fork with the model variable forced', launch('fork'), 'deny', FORK,
-    { cwd: c => c.plain, environment: { ...NO_GATE, CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
-  ['A27', 'outside a gate run, a user agent that pins sonnet', launch('matrix-reader'), 'pass', null, { environment: NO_GATE, setup: userAgent('matrix-reader', 'sonnet') }],
-  ['A27', 'outside a gate run, a user agent with model inherit', launch('matrix-reader'), 'deny', INHERITED, { environment: NO_GATE, setup: userAgent('matrix-reader', 'inherit') }],
-  ['A27', 'outside a gate run, a project agent with no model outranks a user agent that pins sonnet', launch('matrix-reader'), 'deny', INHERITED,
-    { environment: NO_GATE, setup: c => { userAgent('matrix-reader', 'sonnet')(c); projectAgent('matrix-reader', null)(c); } }],
+  ['A27', 'outside a gate run, general-purpose with no model and CLAUDE_CODE_SUBAGENT_MODEL=haiku is cheaper', launch('general-purpose'), 'pass', null,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
+  ['A27', 'outside a gate run, Explore with only CLAUDE_CODE_SUBAGENT_MODEL set still inherits', launch('Explore'), 'ask', NOT_CHEAPER,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
+  ['A27', 'outside a gate run, Explore with the model variable forced', launch('Explore'), 'pass', null,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
+  ['A27', 'outside a gate run, a fork with the model variable forced still runs on the lead route', launch('fork'), 'ask', /this fork would run on opus-5\.5\/high/,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
+  ['A27', 'outside a gate run, a user agent that pins sonnet', launch('matrix-reader'), 'pass', null, { ...READ, setup: userAgent('matrix-reader', 'sonnet') }],
+  ['A27', 'outside a gate run, a user agent with model inherit', launch('matrix-reader'), 'ask', NOT_CHEAPER, { ...READ, setup: userAgent('matrix-reader', 'inherit') }],
+  ['A27', 'outside a gate run, a project agent with no model outranks a user agent that pins sonnet', launch('matrix-reader'), 'ask', NOT_CHEAPER,
+    { ...READ, setup: c => { userAgent('matrix-reader', 'sonnet')(c); projectAgent('matrix-reader', null)(c); } }],
+  ['A27', 'a gate lead starts Explore on the stack helper route', launch('Explore', { model: 'haiku', effort: 'xhigh' }), 'pass', null, { transcript: 'gate-brief' }],
+  ['A27', 'a gate lead starts general-purpose off the stack helper route', launch('general-purpose', { model: 'haiku', effort: 'high' }), 'deny', /helper route of the owner-claude stack/, { transcript: 'gate-brief' }],
 ];
 
 // How every other row is proved. Hook rows above are listed by the test, not here.
@@ -217,6 +230,11 @@ function runHookCase(context, [row, name, event, expected, pattern, options = {}
     options.setup?.(context);
     const cwd = options.cwd ? options.cwd(context) : context.repo;
     let input = { ...event, cwd };
+    if (options.transcript) {
+      const file = path.join(context.base, 'lead.jsonl');
+      fs.writeFileSync(file, `${TRANSCRIPTS[options.transcript].map(entry => JSON.stringify(entry)).join('\n')}\n`);
+      input = { ...input, transcript_path: file };
+    }
     if (options.needsBirthtime) {
       const transcript = path.join(context.base, 'session.jsonl');
       fs.writeFileSync(transcript, '{}\n');

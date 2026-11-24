@@ -1,0 +1,12 @@
+{
+  "schema": "toolkit-claude-model-ladder/v1",
+  "description": "Claude Code model families from cheapest to costliest, and the model each launch alias names, for the agent hook's cheaper-launch test and its gate-run route check. Order by output price per million tokens (Claude pricing page, Model pricing, read 2026-11-24): Haiku 5.5 $0.50, Sonnet 5.5 $10, Opus 5.5 $20, Fable 5.2 $40. Effort runs low to max on any model. Recheck at each hook review and when a model is added.",
+  "families": ["haiku", "sonnet", "opus", "fable"],
+  "aliases": {
+    "haiku": "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5",
+    "fable": "claude-fable-5-2"
+  },
+  "efforts": ["low", "medium", "high", "xhigh", "max"]
+}

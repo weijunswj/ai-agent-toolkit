@@ -50,6 +50,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const transcriptHead = require('./toolkit-transcript-head.cjs');
+const transcriptTail = require('./toolkit-transcript-tail.cjs');
 
 const REGISTRY_PATH = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
 const EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -146,23 +147,10 @@ function entryText(entry) {
 // part a caller does not need yet.
 function readTranscript(file, parts = { brief: true, served: true }) {
   const out = { brief: null, model: null, effort: null };
-  let size;
-  try { size = fs.statSync(file).size; } catch { return out; }
-  const parse = line => { try { return JSON.parse(line); } catch { return null; } };
+  try { fs.statSync(file); } catch { return out; }
   if (parts.brief) out.brief = entryText(transcriptHead.firstUserEntry(file, entry => entryText(entry) !== null));
   if (!parts.served) return out;
-  const start = Math.max(0, size - TAIL_BYTES);
-  const lines = transcriptHead.readSlice(file, start, size - start).split('\n');
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const entry = parse(lines[index]);
-    if (!entry || entry.type !== 'assistant' || entry.isSidechain) continue;
-    const model = entry.message && entry.message.model;
-    if (typeof model !== 'string' || !model || model.startsWith('<')) continue;
-    out.model = model;
-    out.effort = EFFORTS.includes(entry.effort) ? entry.effort : null;
-    break;
-  }
-  return out;
+  return { ...out, ...transcriptTail.servedRoute(transcriptTail.readTail(file, TAIL_BYTES)?.entries) };
 }
 
 const refuse = (gate, reason) => ({ gate, deny: `Toolkit gate route check: ${reason}` });
