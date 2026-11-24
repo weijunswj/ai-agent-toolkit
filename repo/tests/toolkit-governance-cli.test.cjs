@@ -317,8 +317,9 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     conformant: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
     stale: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
     edited: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
-    unasked: [1, 'drift', 'DECISION_PENDING'],
-    incomplete: [1, 'drift', 'DECISION_PENDING'],
+    // Before governance is decided, a governed block is a leftover copy too (an info note).
+    unasked: [1, 'drift', 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER'],
+    incomplete: [1, 'drift', 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER'],
     plain: [1, 'drift', 'DECISION_PENDING'],
   });
 
@@ -399,7 +400,7 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);
   const enabledIncomplete = JSON.parse((await run(ctx, incomplete, ['check', '--json'])).stdout);
-  assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['DECISION_PENDING'], 'a yes stays pending until its adoption merges');
+  assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['DECISION_PENDING', 'GOVERNED_BLOCK_LEFTOVER'], 'a yes stays pending until its adoption merges; its old block is a leftover note');
   assert.equal(enabledIncomplete.no_force_push_ruleset, null, 'pending yes grants no governed effects');
   // A merged binding decides, so a local disable is refused; a merged disabled turns it off everywhere.
   const refusedDisable = await run(ctx, stale, ['disable']);
@@ -549,4 +550,40 @@ test('retired repair, reopen, catalogue and automatic migration routes cannot re
     assert.equal(result.code, 2); assert.equal(result.asked.length, 0);
     assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
   }
+});
+
+// Plug and play: no state asks for a governed block back. Before governance is decided, a governed
+// block an older setup left (current, stale, edited or the older GLOBAL-AGENTS.MD-TEMPLATE) is a
+// leftover copy that is not followed, never something to refresh through a pull request.
+test('check: an undecided repository with any old governed block gets the leftover note, never a refresh', async (t) => {
+  const ctx = scratch(t);
+  const expected = conformance.expectedGovernedBlock();
+  const blocks = {
+    current: expectedBlockText(),
+    stale: expectedBlockText('0.0.1'),
+    edited: expectedBlockText().replace(/\n([^\n]+)\n(<!-- AI-AGENT-TOOLKIT:[^\n]*:END)/, '\n$1 (edited)\n$2'),
+    legacy: managedBlock.renderBlock({ ...expected, name: 'GLOBAL-AGENTS.MD-TEMPLATE' }),
+  };
+  const seen = {};
+  for (const [name, blockText] of Object.entries(blocks)) {
+    const repo = gitRepo(ctx, name, `https://github.com/example-owner/${name}.git`);
+    writeGoverned(repo, { blockText, binding: false, repository: `example-owner/${name}` });
+    const result = await run(ctx, repo, ['check', '--json']);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.state.state, 'UNDECIDED', name);
+    seen[name] = parsed.findings.map(entry => entry.id).sort().join(',');
+    const leftover = parsed.findings.find(entry => entry.id === 'GOVERNED_BLOCK_LEFTOVER');
+    assert.ok(leftover, `${name}: leftover note`);
+    assert.equal(leftover.severity, 'info', name);
+    assert.match(leftover.message, /leftover copy/, name);
+    assert.match(leftover.message, /not followed/, name);
+    for (const entry of parsed.findings) assert.doesNotMatch(entry.message, /refresh it to the TOOLKIT-GOVERNED-RULES block|a refresh asks first/, `${name}: ${entry.id}`);
+  }
+  const want = 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER';
+  assert.deepEqual(seen, { current: want, stale: want, edited: want, legacy: want });
+});
+
+test('status: the disabled rules line calls any governed block an old copy', () => {
+  const text = fs.readFileSync(path.join(scripts, 'toolkit-governance.cjs'), 'utf8');
+  assert.match(text, /DISABLED: 'Global rules and coding gates, without GitHub governance\. Any governed block in AGENTS\.md is an old copy and is not followed\.'/);
 });
