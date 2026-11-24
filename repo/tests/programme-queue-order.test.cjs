@@ -132,21 +132,22 @@ test('the LATER band and its batch alarm are gone: a planned-only graph raises n
   assert.ok(!f.rows().some(([, status]) => /LATER|NOW · QUEUED/.test(status)));
 });
 
-test('a stored BATCH_NEXT finding from an older Toolkit still reads, is never listed as open, and the next write drops it', () => {
+for (const [code, issue] of [['BATCH_NEXT', 1], ['QUEUED_BUT_MOVING', 2]]) test(`a stored ${code} finding from an older Toolkit still reads, is never listed as open, and the next write drops it`, () => {
   const f = fixture([{ issue: 2 }]);
   f.run();
   const read = f.store.read('parent', 1);
   const doc = structuredClone(read.doc);
   const stamp = new Date(epoch).toISOString();
-  doc.attention = [...(doc.attention || []), { id: state.findingId('reconcile', 'BATCH_NEXT', 1), source: 'reconcile', code: 'BATCH_NEXT', issue: 1, head: null, state: 'new', first_seen: stamp, changed_at: stamp }];
+  doc.attention = [...(doc.attention || []), { id: state.findingId('reconcile', code, issue), source: 'reconcile', code, issue, head: null, state: 'new', first_seen: stamp, changed_at: stamp }];
   assert.deepEqual(state.validateParent(doc), [], 'the old code still reads');
   // Stored as an older Toolkit wrote it, bytes and all.
   f.github.putFile(f.store.docPath('parent', 1), doc); f.store.ownWrites?.clear();
-  assert.ok(f.parent().attention.some(entry => entry.code === 'BATCH_NEXT'), 'the stored file holds it and reads');
-  assert.ok(!state.openFindings(f.parent().attention).some(entry => entry.code === 'BATCH_NEXT'), 'never counted or listed as open');
-  assert.equal(state.attentionCounts(f.parent().attention).new, state.attentionCounts(f.parent().attention.filter(entry => entry.code !== 'BATCH_NEXT')).new, 'nor in the attention counts');
+  assert.ok(f.parent().attention.some(entry => entry.code === code), 'the stored file holds it and reads');
+  assert.ok(!state.openFindings(f.parent().attention).some(entry => entry.code === code), 'never counted or listed as open');
+  assert.equal(state.attentionCounts(f.parent().attention).new, state.attentionCounts(f.parent().attention.filter(entry => entry.code !== code)).new, 'nor in the attention counts');
+  assert.ok(!Object.hasOwn(state.FINDING_CODES, code));
   f.time(epoch + 60 * 1000); f.run();
-  assert.ok(!f.parent().attention.some(entry => entry.code === 'BATCH_NEXT'), 'the next write drops it');
+  assert.ok(!f.parent().attention.some(entry => entry.code === code), 'the next write drops it');
   assert.deepEqual(state.validateParent(f.parent()), []);
 });
 
