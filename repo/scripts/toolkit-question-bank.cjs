@@ -622,9 +622,9 @@ const KEPT_REASONS = Object.freeze({
   unreadable: 'Setup could not read this setting, so it writes nothing.',
 });
 // The one approval question, saying how many settings a yes would set. It makes sense on its own on a native question card.
-// With none left there is no question (setup asks nothing), so it is never asked for zero.
+// With none left setup asks nothing; the text for zero says so instead of asking for a yes that changes nothing.
 function approvalQuestion(pending) {
-  if (!pending) throw new Error('Setup has no approval question when every setting already has a value.');
+  if (!pending) return 'Every Claude Code setting already has a value, so setup asks nothing. Your own values and offs stay.';
   const one = pending === 1;
   return `Apply Toolkit's default${one ? '' : 's'} to the ${pending} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
 }
