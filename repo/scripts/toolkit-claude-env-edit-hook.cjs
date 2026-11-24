@@ -17,7 +17,8 @@
 // Accepted gaps (an agent slip is the risk, not a determined program): a relative path after changing folder
 // (`cd ~/.ai-agent-toolkit` then `cat env/edit/...`), a path built in a variable or from pieces further apart, a
 // search rooted above the env folder (the home folder or `~/.ai-agent-toolkit`), short or linked folder names,
-// and the saved copies an editor keeps elsewhere. It may wrongly stop a shell command that only mentions the
+// the saved copies an editor keeps elsewhere, and tools outside its matcher that take a local path (an MCP
+// file tool, an artifact publish or a send-file call). It may wrongly stop a shell command that only mentions the
 // folder as text, such as `grep -rn ".ai-agent-toolkit/env/edit" repo` or a commit message naming it; use the Grep
 // tool or a message file instead.
 //

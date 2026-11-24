@@ -130,6 +130,16 @@
       "status": "pass"
     },
     {
+      "id": "ENV.monitor-env-status",
+      "source": "G2 round 1 L2: a must-pass row on every shell tool name",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Monitor", "tool_input": { "command": "node \"{home}/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs\" status", "description": "env status" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
       "id": "ENV.bash-grep-managed-checkout",
       "source": "hook design: daily reads near the pattern",
       "kind": "benign",
