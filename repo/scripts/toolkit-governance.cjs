@@ -223,7 +223,11 @@ class ToolkitGovernanceCli {
   }
 
   #status(json) {
-    const refresh = this.#refresh(this.#cwd) || {};
+    let refresh = this.#refresh(this.#cwd) || {};
+    // Each git call of the read gets GIT_TIMEOUT_MS, and the fetch of a large default branch can come
+    // close to it on a busy computer: a read that ran out of time is read once more with the bank's
+    // longer budget, so one slow fetch does not hold every programme command for a day.
+    if (refresh.refreshed === false && refresh.error === 'read-timed-out') refresh = this.#refresh(this.#cwd, { timeout: BANK_REREAD_TIMEOUT_MS }) || {};
     const state = this.#state();
     if (state.state === 'UNDECIDED' && this.#registryOptions.testOnly !== true && process.env.TOOLKIT_GOVERNANCE_OFFLINE !== '1') this.#proposals.refresh(this.#cwd);
     if (state.merged?.fresh && ['M1', 'M2'].includes(state.rule)) this.#proposals.settle(this.#cwd, state);
