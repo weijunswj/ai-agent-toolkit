@@ -29,7 +29,7 @@ test('an ejected member rejoins a later train only once its branch restores the 
   f.git('switch', '--quiet', 'main');
   const later = (name, head) => {
     const file = path.join(f.root, `${name}.json`);
-    const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, head)] }, `${name}-in.json`), '--branch', `toolkit-train/${name}`, '--main', 'main', '--out', file], f.repo, f.opts);
+    const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, head)] }, `${name}-in.json`), '--branch', `toolkit-train/${name}`, '--main', 'main', '--live', f.noTrains, '--out', file], f.repo, f.opts);
     return { result, file };
   };
   const refused = later('fix-only', fixOnly);
@@ -72,7 +72,7 @@ test('after an eject train lands, other pull requests made from main board and v
   const mergedMain = f.git('rev-parse', 'HEAD');
   f.git('switch', '--quiet', 'main');
   const file = path.join(f.root, 'after.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(5, fresh), f.member(1, mergedMain)] }, 'after-in.json'), '--branch', 'toolkit-train/after', '--main', 'main', '--out', file], f.repo, f.opts);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(5, fresh), f.member(1, mergedMain)] }, 'after-in.json'), '--branch', 'toolkit-train/after', '--main', 'main', '--live', f.noTrains, '--out', file], f.repo, f.opts);
   assert.deepEqual(result.boarded, [5, 1], JSON.stringify(result.ejected));
   const checked = train.run(['verify', '--manifest', file, '--head', result.head, '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, checked.problems.join('\n'));
