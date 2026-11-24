@@ -1,0 +1,5 @@
+### Fixed
+
+- **The turn-end owed check now runs in the Claude desktop app.** It treated `CLAUDE_CODE_CHILD_SESSION` as a side-session mark, but the desktop app sets it in every session, top-level chats included, so the check never stopped the controller there. No variable the host sets decides whether a turn is stopped now, so the check decides the same in the desktop app, the CLI, IDE extensions and headless runs. Gate sessions are still recognised by their brief, launched sessions by Toolkit's launcher marks, and side sessions that never acted as the controller stay silent. The desktop app's session id and files only add the finished side sessions section.
+- The owed check reads Toolkit's launcher marks from the shared list in `toolkit-governed-repo.cjs`, so a session started with a pinned task profile now also counts as launched there. The copies the Claude agent hook, the Codex helper hook and the governance gate keep for a module failure are now checked against that list.
+- The hook test pack's desktop session fixture now sets `CLAUDE_CODE_CHILD_SESSION=1` as the app does, with a row for a top-level controller chat.

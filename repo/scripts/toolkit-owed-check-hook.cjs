@@ -10,11 +10,21 @@
 //   not running, have every pull request merged or closed and no step waiting on the owner;
 // - gate records owed: a gate this session launched with no `programme.cjs gate-session` record after
 //   it, and an archived gate session whose close is not recorded.
-// It reads only local files (no git, gh or network), stops a turn only when the list has an entry it has
-// not shown this session before, never
-// when the host says this stop already follows a hook block, and never in a gate, helper or side
-// session. Anything it cannot read is one visible note and never a block. Claude Code only: Codex runs
-// toolkit-programme-checkpoint-hook.cjs alone, which never prints.
+// It reads only local files (no git, gh or network) and stops a turn only when the list has an entry it
+// has not shown this session before.
+//
+// Who is stopped works the same in every Claude Code entry point (desktop app, CLI in a terminal, IDE
+// extensions, headless): the decision rests only on this session's transcript (it acted as the
+// controller; its first message is not a gate brief), Toolkit's own launcher marks (toolkit-governed-
+// repo.cjs LAUNCHER_MARKERS) and the attention cache. No variable the host sets decides it. The Claude
+// desktop app sets CLAUDE_CODE_CHILD_SESSION in every session, top-level chats included, so it says
+// nothing about the session. CLAUDE_CODE_HOST_SESSION_ID and the desktop app's session files only add
+// the finished side sessions section; without them that section is skipped and the rest still runs.
+// It never stops a turn when the host says this stop already follows a hook block. Anything it cannot
+// read is one visible note and never a block.
+//
+// Codex is not covered: it runs toolkit-programme-checkpoint-hook.cjs alone at turn end, which never
+// prints.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -30,8 +40,6 @@ const PR_STATES = new Set(['OPEN', 'MERGED', 'CLOSED']);
 const TRANSCRIPT_MAX_BYTES = 256 * 1024 * 1024;
 // Desktop session files read per turn end, at most; past it the check says it stopped early.
 const SESSION_FILES_MAX = 5000;
-// Launcher marks of gate and helper runs (programme.cjs EXECUTOR_MARKERS) and the host's side-session mark.
-const SILENT_ENV = ['CLAUDE_CODE_CHILD_SESSION', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING'];
 const GATES = new Set(['G0', 'G1', 'G2', 'DESIGN_CHALLENGE']);
 const LIST_LIMIT = 12;
 // A launch record is owed right after the launch, so launches older than LAUNCH_WINDOW_MS are not
@@ -304,7 +312,9 @@ function check(input, deps = {}) {
   if (!input || typeof input !== 'object') return { outcome: 'NO_INPUT', output: null };
   if (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop') return { outcome: 'NOT_STOP', output: null };
   if (input.stop_hook_active === true) return { outcome: 'ALREADY_BLOCKED', output: null };
-  if (SILENT_ENV.some(name => String(env[name] || '').trim())) return { outcome: 'EXECUTOR', output: null };
+  // A session a Toolkit launcher started (a gate, a pinned helper or task profile) is an executor.
+  const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
+  if (LAUNCHER_MARKERS.some(name => String(env[name] || '').trim())) return { outcome: 'EXECUTOR', output: null };
   const sessionId = typeof input.session_id === 'string' && input.session_id.trim() ? input.session_id : null;
   if (!sessionId) return { outcome: 'NO_SESSION', output: null };
   const root = require(path.join(SCRIPTS, 'programme-refresh-trigger.cjs')).governedRoot(input.cwd);

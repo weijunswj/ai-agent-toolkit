@@ -1882,6 +1882,57 @@
       "status": "pass"
     },
     {
+      "id": "GOV.owed-check-desktop-top-level-blocks",
+      "source": "the Claude desktop app sets CLAUDE_CODE_CHILD_SESSION in every session it runs, top-level chats included; the owed check read it as a side-session mark and never stopped the controller in the desktop app",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ],
+        "desktop_sessions": []
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
       "id": "GOV.owed-check-same-list-silent",
       "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
       "hosts": [

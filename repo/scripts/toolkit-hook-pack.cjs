@@ -42,7 +42,7 @@ const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
 const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']);
 // The fixture's Claude desktop session (fixture.desktop_sessions): this session's own file and the
-// host-session variable the app sets.
+// variables the app sets.
 const DESKTOP_SELF = 'local_00000000-0000-4000-8000-000000000001';
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
@@ -476,7 +476,9 @@ class Fixture {
         const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
         fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
       });
+      // The desktop app sets both in every session it runs, top-level chats included.
       this.env.CLAUDE_CODE_HOST_SESSION_ID = DESKTOP_SELF;
+      this.env.CLAUDE_CODE_CHILD_SESSION = '1';
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));

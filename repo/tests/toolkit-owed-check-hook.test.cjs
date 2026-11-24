@@ -16,6 +16,7 @@ const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-owed-check-hook.cjs');
 const hook = require(HOOK);
 const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
 const support = require('./toolkit-governed-fixture-support.cjs');
+const { LAUNCHER_MARKERS } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governed-repo.cjs'));
 
 const SELF = 'local_00000000-0000-4000-8000-000000000001';
 const CHILD = n => `local_00000000-0000-4000-9000-${String(n).padStart(12, '0')}`;
@@ -118,9 +119,9 @@ test('O-3 an added entry stops the turn again; a shorter list does not', t => {
   assert.equal(fx.run().outcome, 'BLOCK');
 });
 
-test('O-4 gate, helper, side and non-controller sessions and ungoverned checkouts are never stopped', t => {
+test('O-4 gate, helper and non-controller sessions and ungoverned checkouts are never stopped', t => {
   const fx = fixture(t).controller().writeTranscript().desktop().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 9 * HOUR) }]);
-  for (const name of ['CLAUDE_CODE_CHILD_SESSION', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING']) {
+  for (const name of LAUNCHER_MARKERS) {
     fx.deps.env = { CLAUDE_CODE_HOST_SESSION_ID: SELF, [name]: '1' };
     assert.deepEqual(fx.run(), { outcome: 'EXECUTOR', output: null }, name);
   }
@@ -217,7 +218,7 @@ test('O-10 the hook process prints one JSON block on stdout, exits 0, and stays 
   const fx = fixture(t).controller().writeTranscript().desktop().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(Date.now() - 5 * HOUR) }]);
   // The real process with the fixture's home; governance comes from the fixture's recorded binding.
   const env = { ...process.env, HOME: fx.home, USERPROFILE: fx.home, LOCALAPPDATA: path.join(fx.dir, 'local'), TOOLKIT_GOVERNANCE_OFFLINE: '1', CLAUDE_CODE_HOST_SESSION_ID: SELF };
-  for (const name of ['CLAUDE_CODE_CHILD_SESSION', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING']) delete env[name];
+  for (const name of LAUNCHER_MARKERS) delete env[name];
   const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'cli-session-2', transcript_path: fx.transcript, cwd: fx.work, stop_hook_active: false });
   const run = text => childProcess.spawnSync(process.execPath, [HOOK], { input: text, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
   const first = run(input);
@@ -279,5 +280,71 @@ test('O-14 when its memory file cannot be saved, the check notes the owed entrie
     assert.equal(result.outcome, 'NO_MEMORY');
     assert.equal(result.output.decision, undefined);
     assert.match(result.output.systemMessage, /1 entries owed, but its memory file could not be saved, so the turn was not stopped/);
+  }
+});
+
+// Every CLAUDE_CODE_* variable the Claude desktop app sets in a top-level chat, with fake values.
+const DESKTOP_ENV = Object.freeze({
+  CLAUDE_CODE_ACCOUNT_UUID: '00000000-0000-4000-8000-0000000000a1', CLAUDE_CODE_CHILD_NOTES_DIR: 'fixture-notes', CLAUDE_CODE_CHILD_SESSION: '1',
+  CLAUDE_CODE_DESKTOP_APP_VERSION: '0.0.0-fixture', CLAUDE_CODE_DISABLE_CRON: '1', CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1', CLAUDE_CODE_EAGER_FLUSH: '1',
+  CLAUDE_CODE_EMIT_STARTUP_TIMING: '1', CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1', CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL: '1',
+  CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: '1', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_EXECPATH: 'fixture-claude',
+  CLAUDE_CODE_HOST_SESSION_ID: SELF, CLAUDE_CODE_HOST_SHORT_TEMP_DIRS: '1', CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1', CLAUDE_CODE_MESSAGING_SOCKET: 'fixture-socket',
+  CLAUDE_CODE_MESSAGING_TOKEN: 'fixture', CLAUDE_CODE_ORGANIZATION_UUID: '00000000-0000-4000-8000-0000000000a2', CLAUDE_CODE_REPORT_FINDINGS: '1',
+  CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH: '1', CLAUDE_CODE_SESSION_ATTENDED: '1', CLAUDE_CODE_SESSION_ID: '00000000-0000-4000-8000-0000000000a3',
+  CLAUDE_CODE_SIMPLE: '1', CLAUDE_CODE_STARTUP_FAILURE_RESULTS: '1', CLAUDE_CODE_TERMINAL_MCP_TOOLS: '1', CLAUDE_CODE_USER_EMAIL: 'owner@example.com',
+});
+// The two Claude Code shapes: the desktop app (its variables and session files, with one finished side
+// session) and a plain CLI (no host variables, no desktop files).
+const SHAPES = Object.freeze([
+  { name: 'desktop app', env: DESKTOP_ENV, setup: fx => fx.desktop({}, [finished()]), side: true },
+  { name: 'plain CLI', env: {}, setup: fx => fx, side: false },
+]);
+
+test('O-15 a top-level controller is stopped the same in the desktop app and a plain CLI; host variables only add the side-session section', t => {
+  for (const shape of SHAPES) {
+    const fx = shape.setup(fixture(t).launch(1).writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) }]));
+    fx.deps.env = { ...shape.env };
+    const result = fx.run();
+    assert.equal(result.outcome, 'BLOCK', shape.name);
+    assert.match(result.output.reason, /Findings due \(1\):\n- TASK_IDLE on #7/, shape.name);
+    assert.match(result.output.reason, new RegExp(`Gate launches with no gate-session record \\(1\\):\\n- G1 "Gate 1": session_id ${CHILD(1)}`), shape.name);
+    assert.equal(/Finished side sessions, not archived/.test(result.output.reason), shape.side, shape.name);
+    assert.doesNotMatch(result.output.reason, /could not read everything/, shape.name);
+    // The real hook process, with only the shape's host variables (none of this test run's own).
+    const live = shape.setup(fixture(t).launch(1).writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(Date.now() - 5 * HOUR) }]));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:CLAUDE|TOOLKIT_)/i.test(key)));
+    Object.assign(env, { HOME: live.home, USERPROFILE: live.home, LOCALAPPDATA: path.join(live.dir, 'local'), TOOLKIT_GOVERNANCE_OFFLINE: '1' }, shape.env);
+    const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'cli-session-3', transcript_path: live.transcript, cwd: live.work, stop_hook_active: false });
+    const run = childProcess.spawnSync(process.execPath, [HOOK], { input, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
+    assert.equal(run.status, 0, run.stderr);
+    const output = JSON.parse(run.stdout);
+    assert.equal(output.decision, 'block', shape.name);
+    assert.match(output.reason, /TASK_IDLE on #7/, shape.name);
+  }
+});
+
+test('O-16 in both shapes, gate briefs, launcher marks, a repeated stop and non-controller sessions stay silent', t => {
+  const due = [{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 9 * HOUR) }];
+  for (const shape of SHAPES) {
+    const run = (fx, input, extraEnv = {}) => { fx.deps.env = { ...shape.env, ...extraEnv }; return fx.run(input); };
+    const gate = shape.setup(fixture(t).brief('Gate: G2\nRoute: owner-claude BUILDER opus-5.5/high\nReview it.').launch(1).writeTranscript().net(due));
+    assert.deepEqual(run(gate), { outcome: 'GATE', output: null }, shape.name);
+    const controller = shape.setup(fixture(t).launch(1).writeTranscript().net(due));
+    for (const name of LAUNCHER_MARKERS) {
+      assert.deepEqual(run(controller, {}, { [name]: 'fixture' }), { outcome: 'EXECUTOR', output: null }, `${shape.name} ${name}`);
+    }
+    assert.deepEqual(run(controller, { stop_hook_active: true }), { outcome: 'ALREADY_BLOCKED', output: null }, shape.name);
+    const side = shape.setup(fixture(t).brief('Fix the typo.').shell('node programme.cjs attention').writeTranscript().net(due));
+    assert.deepEqual(run(side), { outcome: 'NOT_CONTROLLER', output: null }, shape.name);
+  }
+});
+
+test('O-17 the launcher-marker copies kept for a module failure match the shared list', () => {
+  for (const file of ['toolkit-claude-agent-hook.cjs', 'toolkit-codex-helper-hook.cjs', 'toolkit-governance-gate.cjs']) {
+    const text = fs.readFileSync(path.join(ROOT, 'repo', 'scripts', file), 'utf8');
+    const copy = /const LAUNCHER_MARKERS = (?:Object\.freeze\()?\[([^\]]*)\]/.exec(text);
+    assert.ok(copy, file);
+    assert.deepEqual(copy[1].split(',').map(name => name.trim().replace(/^'|'$/g, '')), [...LAUNCHER_MARKERS], file);
   }
 });
