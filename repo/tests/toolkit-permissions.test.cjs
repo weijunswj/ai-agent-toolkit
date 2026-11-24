@@ -259,12 +259,14 @@ test('script lines allow only what their guard text says; approval-bearing flags
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled`, 'allow'],
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled --budget-ms 2880000 --json`, 'allow'],
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" claim --takeover`, 'prompt'],
+    // show --queue only reads: it explains the queue and writes nothing.
+    [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" show --queue --json`, 'allow'],
     // A holder order runs only the allowed writes it lists; the order itself refuses claims and takeovers.
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" run-order --order C:/x/order.json --session s-1`, 'allow'],
   ];
   for (const tool of ['Bash', 'PowerShell']) for (const [command, expected] of rows) assert.equal(verdict(blocks, tool, command), expected, `${tool}: ${command}`);
   const programmeFlags = [...source('skills/github-program-reconciler/scripts/programme.cjs').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--before', '--body-file', '--budget-ms', '--catalogue', '--child', '--consume', '--controller', '--deadline-ms', '--dry-run', '--due', '--edits', '--effort', '--finding', '--force-another', '--full', '--include-private', '--issue', '--json', '--lane', '--max', '--message-file', '--model', '--next', '--order', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--reason', '--record', '--refresh', '--remove', '--repo', '--repo-root', '--role', '--route-read-back', '--scheduled', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
+  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--before', '--body-file', '--budget-ms', '--catalogue', '--child', '--consume', '--controller', '--deadline-ms', '--dry-run', '--due', '--edits', '--effort', '--finding', '--force-another', '--full', '--include-private', '--issue', '--json', '--lane', '--max', '--message-file', '--model', '--next', '--order', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--queue', '--reason', '--record', '--refresh', '--remove', '--repo', '--repo-root', '--role', '--route-read-back', '--scheduled', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
   // The refresh line's guard says what its time flags may change, and the script clamps them to that.
   const refreshGuard = permissions.ROWS.find(row => row.id === 'programme-refresh').guard;
   assert.match(refreshGuard, /--scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes/);
