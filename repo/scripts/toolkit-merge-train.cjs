@@ -976,7 +976,7 @@ function parseArgs(argv) {
   if (options.pr !== undefined && command === 'find') {
     const named = String(options.pr).split(',').map(part => part.trim());
     if (!named.every(part => /^[1-9]\d*$/.test(part)) || new Set(named).size !== named.length) {
-      throw new TrainError('--pr for find takes pull request numbers separated by commas, each once, for example --pr 1494,1478');
+      throw new TrainError('--pr for find takes pull request numbers separated by commas, each once, for example --pr 12,34');
     }
     options.prs = named.map(Number);
     delete options.pr;

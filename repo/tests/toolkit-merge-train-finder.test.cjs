@@ -56,6 +56,27 @@ test('verdicts: only an exact first line from a writer counts, and the newest fo
   assert.deepEqual(finder.packChanges('x\n## Pack changes\n\n- row-1: why\n- row-2: why\n\n## Next\n- not this'), ['- row-1: why', '- row-2: why']);
 });
 
+test('Pack changes stop at the body lines after them, so a train body never copies a member UAT, Bump or programme block', () => {
+  // A real member body shape (a G1 body on 24 November 2026): the Pack changes section runs straight
+  // into the UAT, Agent UAT, Bump and Refs lines and the programme-state block, with no heading.
+  const body = [
+    '## CHECKED', '', '- Tests pass.', '',
+    '## Pack changes', '',
+    '9 CARD rows added; one changed:', '',
+    '- `MERGE.card-agent-merge-question-task-auto-merge`: question shortened under 120 characters so the new length rule does not refuse it; what it tests is unchanged.', '',
+    'UAT: NOT_REQUIRED (nothing for the owner to run: the agent asks in its closing message instead)',
+    'Agent UAT: OWED (after merge, fresh desktop chat on the installed build: text then card refused, card first shown)', '',
+    'Bump: minor', '', 'Refs #1467', '',
+    '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.169.0 sha256=8bf66b9efd45 -->',
+    '<!-- programme-pr-status pr=1482 -->', '# STATUS', '', '#1467: Gate G1 ASSIGNED',
+    '<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->',
+  ].join('\r\n');
+  assert.deepEqual(finder.packChanges(body), ['9 CARD rows added; one changed:', '- `MERGE.card-agent-merge-question-task-auto-merge`: question shortened under 120 characters so the new length rule does not refuse it; what it tests is unchanged.']);
+  for (const stop of ['Route: host-verified opus-5.5/high pin=owner-claude/BUILDER', 'Tier: RISKY', 'Closes #12', '<!-- note -->']) {
+    assert.deepEqual(finder.packChanges(`## Pack changes\n\n- row-1: why\n${stop}\n- not this`), ['- row-1: why'], stop);
+  }
+});
+
 test('a verdict never lowers a tier: the risk-tier list of the changed files wins when it is higher', t => {
   const f = fixture(t);
   const live = facts(f, [

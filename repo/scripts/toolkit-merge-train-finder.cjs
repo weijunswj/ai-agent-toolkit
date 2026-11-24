@@ -135,14 +135,18 @@ function missingChecks(runs, required) {
   });
 }
 
-// The `Pack changes` lines under that heading, up to the next heading.
+// The body lines that end a Pack changes section even with no heading between: member bodies put
+// their UAT, Bump, closing and route lines and the programme-state block straight after it.
+const PACK_END = /^(?:#{1,6} |UAT:|Agent UAT:|Bump:|Route:|Tier:|(?:Refs|Closes|Fixes|Resolves) |<!--)/;
+
+// The `Pack changes` lines under that heading, up to the next heading or body line that ends it.
 function packChanges(body) {
   const lines = String(body || '').split(/\r?\n/);
   const start = lines.findIndex(line => /^#{2,3} Pack changes\s*$/.test(line));
   if (start < 0) return [];
   const out = [];
   for (const line of lines.slice(start + 1)) {
-    if (/^#{1,6} /.test(line)) break;
+    if (PACK_END.test(line.trim())) break;
     if (line.trim()) out.push(line.trim());
   }
   return out;

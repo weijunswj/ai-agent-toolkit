@@ -84,7 +84,8 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
       // the command text appears once, as mergeStep's printed template, the script starts only git,
       // the manifest's bump command and read-only `gh api`, and it holds no other merge text.
       if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-train.cjs') {
-        const source = fs.readFileSync(full, 'utf8');
+        // LF first: a CRLF checkout (Windows CI) must read the same lines and function bounds.
+        const source = fs.readFileSync(full, 'utf8').replace(/\r\n/g, '\n');
         const named = source.split('\n').filter(line => /gh\s+pr\s+merge/i.test(line)).map(line => line.trim());
         assert.deepEqual(named, ["const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;"]);
         const step = source.slice(source.indexOf('function mergeStep('), source.indexOf('\n}\n', source.indexOf('function mergeStep(')));
