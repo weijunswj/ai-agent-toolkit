@@ -56,6 +56,27 @@ test('verdicts: only an exact first line from a writer counts, and the newest fo
   assert.deepEqual(finder.packChanges('x\n## Pack changes\n\n- row-1: why\n- row-2: why\n\n## Next\n- not this'), ['- row-1: why', '- row-2: why']);
 });
 
+test('Pack changes stop at the body lines after them, so a train body never copies a member UAT, Bump or programme block', () => {
+  // A real member body shape (a G1 body on 24 November 2026): the Pack changes section runs straight
+  // into the UAT, Agent UAT, Bump and Refs lines and the programme-state block, with no heading.
+  const body = [
+    '## CHECKED', '', '- Tests pass.', '',
+    '## Pack changes', '',
+    '9 CARD rows added; one changed:', '',
+    '- `MERGE.card-agent-merge-question-task-auto-merge`: question shortened under 120 characters so the new length rule does not refuse it; what it tests is unchanged.', '',
+    'UAT: NOT_REQUIRED (nothing for the owner to run: the agent asks in its closing message instead)',
+    'Agent UAT: OWED (after merge, fresh desktop chat on the installed build: text then card refused, card first shown)', '',
+    'Bump: minor', '', 'Refs #1467', '',
+    '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.169.0 sha256=8bf66b9efd45 -->',
+    '<!-- programme-pr-status pr=1482 -->', '# STATUS', '', '#1467: Gate G1 ASSIGNED',
+    '<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->',
+  ].join('\r\n');
+  assert.deepEqual(finder.packChanges(body), ['9 CARD rows added; one changed:', '- `MERGE.card-agent-merge-question-task-auto-merge`: question shortened under 120 characters so the new length rule does not refuse it; what it tests is unchanged.']);
+  for (const stop of ['Route: host-verified opus-5.5/high pin=owner-claude/BUILDER', 'Tier: RISKY', 'Closes #12', '<!-- note -->']) {
+    assert.deepEqual(finder.packChanges(`## Pack changes\n\n- row-1: why\n${stop}\n- not this`), ['- row-1: why'], stop);
+  }
+});
+
 test('a verdict never lowers a tier: the risk-tier list of the changed files wins when it is higher', t => {
   const f = fixture(t);
   const live = facts(f, [
@@ -124,21 +145,88 @@ test('find skips each unready pull request with its reason', t => {
   assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).members.map(member => member.pr), [1, 2]);
 });
 
-test('find leaves out pull requests an open train holds, caps at six and writes nothing for fewer than two', t => {
+// An open train pull request: its body holds the member table, as `body` writes it.
+const trainBody = (...members) => `## Merge train\n\n| Member | Reviewed head | Tier | Bump | Review |\n|---|---|---|---|---|\n${members.map(n => `| #${n} | \`${sha(n)}\` | NORMAL | patch | x |\n`).join('')}`;
+const openTrain = (number, branch, base, ...members) => ({ number, draft: false, base: { ref: base }, head: { sha: sha(number), ref: branch, repo: { full_name: 'example/repo' } }, body: trainBody(...members) });
+
+test('find leaves out pull requests an open train holds, stacks the rest onto it, caps at six and writes nothing for one alone', t => {
   const f = fixture(t);
-  const trainBody = `## Merge train\n\n| Member | Reviewed head | Tier | Bump | Review |\n|---|---|---|---|---|\n| #1 | \`${sha(1)}\` | NORMAL | patch | x |\n| #2 | \`${sha(2)}\` | NORMAL | patch | x |\n`;
-  let live = facts(f, [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => ready(n)), { pulls: [{ number: 50, draft: false, base: { ref: 'main' }, head: { sha: sha(5) }, body: trainBody }] });
+  let live = facts(f, [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => ready(n)), { pulls: [openTrain(50, 'toolkit/train-50', 'main', 1, 2)] });
   let { result, out } = find(f, live);
   assert.deepEqual(result.ready, ['#3', '#4', '#5', '#6', '#7', '#8']);
   assert.ok(result.skipped.includes('#1: already on an open train'), result.skipped.join('\n'));
-  assert.deepEqual(result.next, ['board the next train with #9']);
-  assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).members.length, 6);
+  // The 23 November miss: three trains built on main beside an open one. find now stacks onto it.
+  const manifest = JSON.parse(fs.readFileSync(out, 'utf8'));
+  assert.deepEqual(manifest.onto, { pr: 50, branch: 'toolkit/train-50', head: sha(50) });
+  assert.deepEqual(result.onto, manifest.onto);
+  assert.equal(manifest.members.length, 6);
+  assert.deepEqual(result.next, [`stack #3, #4, #5, #6, #7, #8 onto train #50 (toolkit/train-50 at ${sha(50).slice(0, 12)}): fetch it, then build takes onto from this manifest`, 'board the next train with #9']);
+  assert.equal(train.checkManifest(manifest).onto.pr, 50, 'build accepts it');
+
+  // One ready pull request with an open train stacks too: one bump and one owner ask, not two.
+  live = facts(f, [ready(3)], { pulls: [openTrain(50, 'toolkit/train-50', 'main', 1, 2)] });
+  const one = path.join(f.root, 'one.json');
+  ({ result } = find(f, live, one));
+  assert.equal(result.written, true, JSON.stringify(result));
+  assert.deepEqual(JSON.parse(fs.readFileSync(one, 'utf8')).members.map(member => member.pr), [3]);
+  assert.equal(JSON.parse(fs.readFileSync(one, 'utf8')).onto.pr, 50);
 
   live = facts(f, [ready(4), ready(5, { checks: [] })]);
   const lone = path.join(f.root, 'lone.json');
   ({ result } = find(f, live, lone));
   assert.deepEqual([result.written, result.ready, result.next], [false, ['#4'], ['merge #4 alone: one ready pull request makes no train']]);
   assert.equal(fs.existsSync(lone), false);
+  assert.equal(result.onto, undefined);
+});
+
+test('find stacks onto the end of a train chain, and onto the newest when two chains are open', t => {
+  const f = fixture(t);
+  // #51 is stacked on #50 (its pull request targets #50's branch), so new members stack onto #51.
+  let live = facts(f, [ready(3), ready(4)], { pulls: [openTrain(50, 'toolkit/train-50', 'main', 1), openTrain(51, 'toolkit/train-51', 'toolkit/train-50', 2)] });
+  let { result, out } = find(f, live);
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).onto, { pr: 51, branch: 'toolkit/train-51', head: sha(51) });
+  assert.equal(result.next.length, 1, result.next.join('\n'));
+  // Two trains built on main side by side: stack onto the newest and name the other.
+  live = facts(f, [ready(3), ready(4)], { pulls: [openTrain(50, 'toolkit/train-50', 'main', 1), openTrain(52, 'toolkit/train-52', 'main', 2)] });
+  ({ result, out } = find(f, live));
+  assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).onto.pr, 52);
+  assert.ok(result.next.includes('#50 is also open on a chain of its own: this train stacks onto the newest, #52'), result.next.join('\n'));
+  // Only a train pull request from this repository counts: a fork's body with the member table
+  // (this repository is public) neither takes onto nor holds a member back.
+  const fork = { ...openTrain(60, 'toolkit/train-60', 'main', 3), head: { sha: sha(60), ref: 'toolkit/train-60', repo: { full_name: 'someone/fork' } } };
+  const gone = { ...openTrain(61, 'toolkit/train-61', 'main', 4), head: { sha: sha(61), ref: 'toolkit/train-61', repo: null } };
+  live = facts(f, [ready(3), ready(4)], { pulls: [fork, gone] });
+  ({ result, out } = find(f, live));
+  assert.deepEqual([result.ready, JSON.parse(fs.readFileSync(out, 'utf8')).onto], [['#3', '#4'], undefined]);
+  assert.deepEqual(finder.openTrains([fork, gone, openTrain(50, 'a', 'main', 1)], 'Example/Repo').map(entry => entry.pr), [50], 'owner/name compares without case');
+  // A train with no readable head branch cannot be stacked onto: find says so instead of guessing.
+  live = facts(f, [ready(3), ready(4)], { pulls: [{ ...openTrain(50, 'toolkit/train-50', 'main', 1), head: { sha: sha(50), repo: { full_name: 'example/repo' } } }] });
+  assert.throws(() => find(f, live), /open train #50 has no readable head branch and SHA/);
+  assert.deepEqual(finder.stackedOn(finder.openTrains([openTrain(50, 'a', 'main', 1), openTrain(51, 'b', 'a', 2), openTrain(52, 'c', 'b', 3), openTrain(53, 'd', 'main', 4)], 'example/repo'), 'a').map(entry => entry.pr), [51, 52]);
+});
+
+test('find --pr judges only the named pull requests and writes the ready ones, so a train holds the owner-approved members', t => {
+  const f = fixture(t);
+  // The 24 November miss: seven ready, the owner approved the newest four, find wrote the oldest six.
+  let live = facts(f, [1, 2, 3, 4, 5, 6, 7].map(n => ready(n)));
+  let out = path.join(f.root, 'named.json');
+  let result = train.run(['find', '--out', out, '--live', live, '--pr', '7,5,4,6'], f.repo, f.opts);
+  assert.equal(result.written, true, JSON.stringify(result));
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).members.map(member => member.pr), [4, 5, 6, 7]);
+  assert.deepEqual([result.ready, result.skipped], [['#4', '#5', '#6', '#7'], []], 'unnamed pull requests are not judged or listed');
+  // A named pull request that is not ready, or not open, is reported with its reason and left out.
+  live = facts(f, [ready(1), ready(2), ready(3, { checks: [] })]);
+  out = path.join(f.root, 'named-2.json');
+  result = train.run(['find', '--out', out, '--live', live, '--pr', '2,3,9,1'], f.repo, f.opts);
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).members.map(member => member.pr), [1, 2]);
+  assert.deepEqual(result.skipped, ['#3: required checks not green: validate', '#9: not an open pull request here']);
+  // Named past the cap: the first six board, the rest go to the next train.
+  live = facts(f, [1, 2, 3, 4, 5, 6, 7, 8].map(n => ready(n)));
+  result = train.run(['find', '--out', path.join(f.root, 'named-3.json'), '--live', live, '--pr', '1,2,3,4,5,6,7,8'], f.repo, f.opts);
+  assert.deepEqual(result.next, ['board the next train with #7, #8']);
+  for (const bad of ['', '7,,5', 'x', '7,7', '0']) {
+    assert.throws(() => train.run(['find', '--out', out, '--live', live, '--pr', bad], f.repo, f.opts), /--pr for find takes pull request numbers separated by commas, each once/, JSON.stringify(bad));
+  }
 });
 
 test('find refuses where trains are off, like build', t => {

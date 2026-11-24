@@ -34,6 +34,9 @@ test('context assertions validate and read only delivered host context, with pri
   assert.equal(pack.hookContext('claude','SessionStart',output(0,JSON.stringify({ reason: text }))), '');
   assert.equal(pack.hookContext('codex','SessionStart',output(0,text,'wrong')), text);
   assert.equal(pack.hookContext('codex','PreToolUse',output(0,text)), '');
+  // After-tool context, as Claude Code delivers it (the gate launch steps).
+  assert.equal(pack.hookContext('claude','PostToolUse',output(0,JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } }))), text);
+  assert.equal(pack.hookContext('claude','PostToolUse',output(0,text)), '');
   assert.equal(pack.hookContext('codex','SessionStart',output(1,text)), '');
   const observed = context => ({ context, decision: 'allow', problems: [], failed: [] });
   assert.equal(pack.meets(expected,'claude',observed(claude)), true);

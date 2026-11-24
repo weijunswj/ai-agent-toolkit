@@ -74,8 +74,12 @@ function fixture(t) {
     required_checks: ['validate'], ...(taskPrs ? { task_prs: taskPrs } : {}), ...extra,
   });
   governed();
+  // GitHub facts in find's --live format with no open train, for builds on main (build reads the
+  // open trains first and refuses beside one).
+  const noTrains = path.join(root, 'no-trains.json');
+  fs.writeFileSync(noTrains, JSON.stringify({ default_branch: 'main', pulls: [] }));
   const cli = (...args) => spawnSync(process.execPath, [SCRIPT, ...args, '--json'], { cwd: repo, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } });
-  return { root, repo, git, write, main, branch, member, manifestFile, cli, opts, governed };
+  return { root, repo, git, write, main, branch, member, manifestFile, cli, opts, governed, noTrains };
 }
 
 // Writes this computer's fresh read of the binding merged on the default branch (null: none merged).
@@ -95,7 +99,7 @@ function mergedBinding(repo, main, registryOptions, value) {
 
 function built(f, members, extra = {}) {
   const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members, ...extra }), '--branch', 'toolkit-train/one', '--main', 'main', '--out', out], f.repo, f.opts);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members, ...extra }), '--branch', 'toolkit-train/one', '--main', 'main', '--live', f.noTrains, '--out', out], f.repo, f.opts);
   return { result, out, boarded: JSON.parse(fs.readFileSync(out, 'utf8')) };
 }
 
