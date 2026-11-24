@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "59c1db27a8d8",
+      "rule_sha": "8275bd1a2d26",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -355,30 +355,30 @@
       "file": "repo/controller/principles.md",
       "rule": "**Polish child:**",
       "rule_sha": "1c4a06ffbf7d",
-      "covers": "The stale check flags a polish child at 8 rows (POLISH FULL), above 8 rows or with two open (POLISH OVER CAP). Filing a Low as a row, and fixing a one-line Low in the PR, stay judgement.",
+      "covers": "The programme sweep raises POLISH_CAP for a polish child at 8 rows, above 8 rows or with two open. Filing a Low as a row, and fixing a one-line Low in the PR, stay judgement.",
       "enforced_by": [
         {
-          "kind": "script",
-          "path": "repo/scripts/toolkit-controller-check.cjs",
-          "test": "repo/tests/toolkit-controller-check.test.cjs"
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/programme-stale-net.test.cjs"
         }
       ]
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Stale check:**",
-      "rule_sha": "3d29b0afb15f",
-      "covers": "The governance session-start hook shows the stale check's rows and starts it in the background once per local date per repository, only with governance on; the check lists children to judge, owner-OK closes, unexplained new, closed-with-open-work and full polish children. Judging done, obsolete children and folding the owner's OK into the next ask stay judgement.",
+      "rule": "**Stale-work net:**",
+      "rule_sha": "d3185fb924a3",
+      "covers": "The programme sweep raises the net findings (finished children to judge, owner-OK closes, unexplained new children, closed parents with open children, unticked rows and full polish children), and in Claude Code the turn-end owed check stops the controller's turn once for each new one due. Judging done, obsolete children and folding the owner's OK into the next ask stay judgement.",
       "enforced_by": [
         {
-          "kind": "script",
-          "path": "repo/scripts/toolkit-controller-check.cjs",
-          "test": "repo/tests/toolkit-controller-check.test.cjs"
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/programme-stale-net.test.cjs"
         },
         {
-          "kind": "script",
-          "path": "repo/scripts/toolkit-governance-gate.cjs",
-          "test": "repo/tests/toolkit-programme-attention.test.cjs"
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-owed-check-hook.cjs",
+          "test": "repo/tests/toolkit-owed-check-hook.test.cjs"
         }
       ]
     },
@@ -451,12 +451,17 @@
       "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
       "rule_sha": "a38738045dd0",
-      "covers": "Gate assignments only: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. Other sessions, and whether the final message was read in full and acted on, stay instruction text.",
+      "covers": "Gate assignments: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. In Claude Code the turn-end owed check stops the controller's turn once for each new CLOSE_DUE, each finished side session the desktop app shows unarchived, and each gate launch or archive with no gate-session record. Sessions on other hosts, and whether the final message was read in full and acted on, stay instruction text.",
       "enforced_by": [
         {
           "kind": "script",
           "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
           "test": "repo/tests/programme-close-due.test.cjs"
+        },
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-owed-check-hook.cjs",
+          "test": "repo/tests/toolkit-owed-check-hook.test.cjs"
         }
       ]
     },
