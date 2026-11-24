@@ -532,16 +532,14 @@ function showAttention(parentDoc, args, deps) {
   return { line: stored.line, counts: stored.counts, as_of: stored.as_of };
 }
 
-// This computer's attention cache, for the session-start line. Tests that bring their own GitHub
-// (an origin URL) write it only to a folder they name.
+// This computer's attention cache, for the turn-end owed check: the open net findings, oldest first,
+// IDs, codes and times only. Tests that bring their own GitHub (an origin URL) write it only to a
+// folder they name.
 function cacheAttention(context, parentDoc, complete, deps = {}) {
   if (!parentDoc || (deps.originUrl && !deps.attentionDir)) return;
-  // The longest-stalled work-queue task, so session start names it: its number, code, when it was
-  // flagged and the Toolkit's own next step for that code (no text from GitHub).
-  const [oldest] = state.workQueue(parentDoc.attention);
-  attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention, nowText(deps)), counts: state.attentionCounts(parentDoc.attention),
-    digest: state.attentionDigest(parentDoc.attention), complete,
-    queue: oldest ? { count: state.workQueue(parentDoc.attention).length, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } : null }, deps);
+  const net = state.openFindings(parentDoc.attention).filter(entry => state.NET_CODES.has(entry.code)).reverse().slice(0, attentionCache.NET_LIMIT)
+    .map(entry => ({ id: entry.id, code: entry.code, issue: entry.issue ?? null, kind: state.KIND_CODES.has(entry.code) ? entry.kind ?? null : null, state: entry.state, changed_at: entry.changed_at, due: entry.due ?? null }));
+  attentionCache.writeCache(context.repository, { complete, net }, deps);
 }
 
 const TERMINAL = ['DONE', 'RETIRED'];

@@ -2587,7 +2587,7 @@ function agentStep(outcome, child) {
 // the UAT is owed and the agent's result was recorded at (a train merge, say, not the PR head), and
 // `pr_state`. Decisions carry none. Every wait says whether a gate is live on the task (`gate_live`:
 // any gate but a RETIRED one, blocked or not), which `after` does not show for a gate on a task waiting on the
-// owner or a blocked gate; the stale check never offers the owner a close while one is.
+// owner or a blocked gate; the stale-work net never offers the owner a close while one is.
 function ownerWaits(parent, children) {
   return graphOrder(parent, children, new Map()).flatMap(outcome => {
     const child = children.get(outcome.issue);
@@ -3544,7 +3544,7 @@ class StateStore {
     // In a cloud session a refused or hidden store is most often one not attached to the session, not
     // a wrong store, so the advice is to wait for the owner's computer, never to pick another store.
     if (this.cloudSession && [401, 403, 404].includes(repo.status)) {
-      throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store ${this.store.repository} is not reachable from this cloud session (${repo.status}), so nothing was read or written. The check waits for the owner's computer: the next session start there reads the store.`);
+      throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store ${this.store.repository} is not reachable from this cloud session (${repo.status}), so nothing was read or written. The check waits for the owner's computer: the next refresh there reads the store.`);
     }
     const writable = this.installationWrite || repo.json?.permissions?.push === true;
     const reason = repo.status !== 200 ? `it could not be read (${repo.status})`

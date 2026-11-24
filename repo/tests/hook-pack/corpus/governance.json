@@ -119,72 +119,6 @@
       "status": "pass"
     },
     {
-      "id": "GOV.stale-check-line-enabled",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"stale_rows":["JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)"]},
-      "expect": {"decision":"allow","context_contains":["1 row to answer (JUDGE? 1)","Controller: answer each this turn: close each child you judge done yourself"],"context_excludes":["CLOSE LIST"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-line-new-kinds",
-      "source": "stale check rows for a kept-open child that stalls and for a merged PR whose rows stay unticked: the session-start line counts them by kind",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"stale_rows":["KEPT OPEN? #12 kept open since 2026-11-22 12:33Z with every PR merged, and no lane has worked it for over 6 hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)","UNTICKED? #13 PR #900 merged, but none of its 4 DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)"]},
-      "expect": {"decision":"allow","context_contains":["2 rows to answer (KEPT OPEN? 1, UNTICKED? 1)"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-silent-disabled",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"disabled"},"stale_rows":["JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)"]},
-      "expect": {"decision":"allow","context_excludes":["row to answer","Stale check"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-cloud-waits",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true},
-      "expect": {"decision":"allow","context_contains":["Toolkit governance (cloud session)","Attention and stale check: not read in this cloud session (a cloud session does not read the programme store); both run at the next session start on the owner's computer."],"context_excludes":["row to answer"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-cloud-stamp",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"stale_rows":["FOLD? #20 new under #1 with no Nearest child: line"]},
-      "expect": {"decision":"allow","context_contains":["1 row to answer (FOLD? 1)"],"context_excludes":["Attention and stale check: not read"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-cloud-cache-no-stamp",
-      "source": "PR 1442 G2 L6: a cloud session with the attention cache but no stale-check stamp for today said nothing about the stale check",
-      "kind": "state",
-      "hosts": ["claude"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"attention_line":"Attention: 1 new, 0 acknowledged"},
-      "expect": {"decision":"allow","context_contains":["Attention: 1 new, 0 acknowledged","Stale check: not run in this cloud session; it runs at the next session start on the owner's computer."],"context_excludes":["Attention and stale check: not read"]},
-      "status": "pass"
-    },
-    {
       "id": "GOV.rules-cloud-disabled-child-none",
       "source": "plug-and-play S1: a cloud session above a disabled repository gets no governed rules",
       "kind": "benign",
@@ -1895,6 +1829,515 @@
       "expect": {"decision":"allow","context_contains":["couldn't check governance ("]},
       "status": "pass",
       "note": "The pack turns session-start refresh off, so the cause read here is the offline or not-recorded phrase; the cloud side-by-side read and read-timed-out are covered by toolkit-governance-cause.test.cjs and a live probe."
+    },
+    {
+      "id": "GOV.owed-check-finding-due-blocks",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-same-list-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "state",
+      "steps": [
+        {
+          "event": "Stop",
+          "payload": {
+            "stop_hook_active": false
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-owed-check-hook"
+          }
+        }
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "note": "The second turn end sees the same list, so it passes.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-stop-hook-active-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": true
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-gate-session-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "gate_role": "G1",
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-not-controller-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs attention"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-nothing-owed-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 1,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-finished-side-session-blocks",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "desktop_sessions": [
+          {
+            "isArchived": false,
+            "prs": [
+              {
+                "prNumber": 5,
+                "state": "MERGED"
+              }
+            ],
+            "postTurnSummary": {
+              "status_category": "completed",
+              "needs_action": ""
+            },
+            "postTurnSummaryFor": "u1",
+            "lastAssistantUuid": "u1",
+            "lastTurnEdgeAt": 2,
+            "latestUserFrameAt": 1
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-renamed-field-fails-open",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "desktop_sessions": [
+          {
+            "prs": [
+              {
+                "prNumber": 5,
+                "state": "MERGED"
+              }
+            ],
+            "postTurnSummary": {
+              "status_category": "completed",
+              "needs_action": ""
+            },
+            "postTurnSummaryFor": "u1",
+            "lastAssistantUuid": "u1",
+            "lastTurnEdgeAt": 2,
+            "latestUserFrameAt": 1,
+            "archived": false
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "note": "A desktop session file in an unknown format is a one-time note, never a block.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.session-start-governance-only",
+      "source": "session start shows the governance status only: due programme findings reach the controller at turn end, so no attention or stale-check line and no background job at session start",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 9,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit governance: ENABLED for this repository."
+        ],
+        "context_excludes": [
+          "Attention:",
+          "Stale check",
+          "toolkit-controller-check"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.session-start-governance-only-cloud",
+      "source": "session start shows the governance status only: due programme findings reach the controller at turn end, so no attention or stale-check line and no background job at session start",
+      "kind": "state",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "closure_cloud": true,
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 9,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit governance (cloud session)"
+        ],
+        "context_excludes": [
+          "Attention",
+          "Stale check",
+          "stale check"
+        ]
+      },
+      "status": "pass"
     }
   ]
 }
