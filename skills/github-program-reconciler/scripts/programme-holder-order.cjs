@@ -29,8 +29,9 @@ const OPS = Object.freeze({
   reopen: { required: ['issue', 'reason'], optional: ['assignment'] },
   interrupt: { required: ['issue', 'reason'], optional: [] },
   assign: { required: ['issue', 'role', 'assignment'], optional: ['supersede', 'reason'] },
-  return: { required: ['issue'], optional: ['record', 'assignment', 'at-head', 'consume', 'verdict'] },
+  return: { required: ['issue'], optional: ['record', 'assignment', 'at-head', 'consume', 'verdict', 'reason'] },
   'mark-archive': { required: ['issue'], optional: ['before', 'remove'] },
+  'gate-session': { required: ['issue', 'assignment'], optional: ['host', 'host-session', 'closed', 'replace', 'reason'] },
 });
 // A `mark-archive` write names whole lines of the page: the line to put `## Archive` above, or the
 // link lines to remove.
@@ -64,8 +65,10 @@ function checkOp(op, at) {
   if (op.issue !== undefined && !(Number.isSafeInteger(op.issue) && op.issue > 0)) throw refuse(`write ${at + 1} needs a whole issue number`);
   if (op.finding !== undefined && !/^[0-9a-f]{12}$/.test(String(op.finding))) throw refuse(`write ${at + 1} needs the 12-character finding id`);
   if (op.patch !== undefined && (!op.patch || typeof op.patch !== 'object' || Array.isArray(op.patch))) throw refuse(`write ${at + 1} needs its patch as a JSON object`);
-  if (op.supersede !== undefined && typeof op.supersede !== 'boolean') throw refuse(`write ${at + 1} needs supersede as true or false`);
-  for (const key of ['reason', 'assignment', 'role', 'record', 'consume', 'verdict', 'at-head', 'next', 'due']) {
+  for (const key of ['supersede', 'closed', 'replace']) {
+    if (op[key] !== undefined && typeof op[key] !== 'boolean') throw refuse(`write ${at + 1} needs ${key} as true or false`);
+  }
+  for (const key of ['reason', 'assignment', 'role', 'record', 'consume', 'verdict', 'at-head', 'next', 'due', 'host', 'host-session']) {
     if (op[key] !== undefined && !text(op[key], 500)) throw refuse(`write ${at + 1} needs ${key} as non-empty text`);
   }
   // The finding's own limits, so an order is refused whole before a run stops on one write.
@@ -80,8 +83,10 @@ function checkOp(op, at) {
     if (op.remove !== undefined && !(Array.isArray(op.remove) && op.remove.length > 0 && op.remove.length <= REMOVE_LIMIT && op.remove.every(line)))
       throw refuse(`write ${at + 1} (mark-archive) needs remove as a list of 1 to ${REMOVE_LIMIT} lines`);
   }
+  if (op.command === 'gate-session' && Boolean(op.host) === Boolean(op.closed)) throw refuse(`write ${at + 1} (gate-session) needs exactly one of host or closed`);
   if (op.command === 'return' && Boolean(op.record) === Boolean(op.consume)) throw refuse(`write ${at + 1} (return) needs exactly one of record or consume`);
   if (op.command === 'return' && op.consume && !op.verdict) throw refuse(`write ${at + 1} (return consume) needs a verdict`);
+  if (op.command === 'return' && op.reason !== undefined && !op.consume) throw refuse(`write ${at + 1} (return) takes a reason only with consume`);
   return op;
 }
 

@@ -2,7 +2,7 @@
 
 // The cloud jobs contract (App shape): each row's tokens name which of the governance App's
 // permissions they take, at the App's level unless marked read-only, and the lines
-// `toolkit governance check` prints. The App's permission list, its display names and its levels
+// the governance check (toolkit-governance.cjs check) prints. The App's permission list, its display names and its levels
 // exist once, in toolkit-governance-app.cjs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -49,11 +49,10 @@ test('guide: the lines the check prints use the App\'s own names, levels and var
   assert.ok(lines.includes('  Governed repository token: Contents read-only, Issues read and write, Pull requests read and write, Checks read-only, Commit statuses read-only'), lines.join('\n'));
   assert.ok(lines.includes('  Evidence store token: Contents read and write, Issues read and write, Pull requests read and write'), lines.join('\n'));
   assert.ok(lines.includes('Never grant: administration, secrets, workflows, account.'));
-  // The same words as the App's setup steps, from the same helper.
+  // The same words as the setup script shows the owner, from the same helper.
   const app = governanceApp();
   assert.equal(app.permissionLabel('statuses', 'read'), 'Commit statuses read-only');
-  assert.match(app.setupLines('owner/repository', null, { variable: 'missing', secret: 'missing' }).join('\n'),
-    /repository permissions Contents read and write, Issues read and write, Pull requests read and write, Checks read-only, Commit statuses read-only,/);
+  assert.equal(app.permissionText(), 'Contents read and write, Issues read and write, Pull requests read and write, Checks read-only, Commit statuses read-only');
 });
 
 test('one permission list: names, display names and levels live only in the App module', () => {

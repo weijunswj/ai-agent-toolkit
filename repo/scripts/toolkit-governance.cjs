@@ -68,19 +68,21 @@ const RULES_TEXT = Object.freeze({
   UNAVAILABLE: "Couldn't check governance. Continue with global rules and coding gates; no governance effects or standing task auto-merge until it can be checked.",
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
-  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by saying \`toolkit governance\` and answering its question bank, by sending \`toolkit governance enable\` or \`toolkit governance disable\` as a message, or by running ${CMD('enable')} or ${CMD('disable')} in its own terminal.`,
+  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by answering yes, no or later when Toolkit asks, or by saying toolkit governance and answering its question bank.`,
 });
 
 // The fixed summary of a bank turn-on pull request: what merging it does, what it holds and what
 // Toolkit finishes after the merge. The closing line follows the owner's commands (#applyBank).
 // `binding` is the binding the pull request proposes: with no required checks, protection waits.
-function turnOnSummary(result, binding) {
+// `storeNote` says how the store was chosen (found, created or named), or null.
+function turnOnSummary(result, binding, storeNote = null) {
   const url = result.proposal.url;
   const noChecks = Array.isArray(binding?.required_checks) && binding.required_checks.length === 0;
   return [
     result.reused ? (result.updated ? `Toolkit: updated the open governance turn-on pull request with these answers: ${url}.` : `Toolkit: the open governance turn-on pull request already holds these answers: ${url}.`)
       : `Toolkit: prepared the governance turn-on pull request: ${url}.`,
-    'Merging it turns governance on for this repository on every computer. It changes no credentials or deployment, and nothing applies before you merge it.',
+    'Merging it turns governance on for this repository on every computer. It changes no credentials or deployment. Anything listed above as made on GitHub was made now; everything else applies only after you merge it.',
+    ...(binding?.store?.repository ? [`Store: ${binding.store.repository}, a private GitHub repository${storeNote ? ` (${storeNote})` : ''}, for programme records and evidence.`] : []),
     ...(result.files?.length ? [`It holds: ${result.files.join(', ')}.`] : []),
     `After the merge, the next session here finishes on its own: ${finishing.WHAT}. On a private repository on GitHub Free, GitHub cannot enforce the protection or the rulesets; that session says so and the local guards stay the fallback.`,
     ...(noChecks ? [`This repository has no required checks yet, so default-branch protection waits: once a pull request adds the check names to required_checks in ${governance.BINDING_FILE} and merges, run ${CMD('migrate')} in your own terminal to add it.`] : []),
@@ -97,7 +99,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #proposalsLive; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
+  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -109,7 +111,10 @@ class ToolkitGovernanceCli {
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
   // ticket is bound to) are for tests too.
   constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, ciEstimator = null, ciReaders = null } = {}) {
-    this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
+    const pulls = proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
+    this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: pulls });
+    // The turn-on pull request's outcome, read before a post-merge finish (offline and in tests: unread).
+    this.#pullOutcome = pulls && typeof pulls.outcome === 'function' ? (repository, number) => pulls.outcome(repository, number) : null;
     // Whether the open governance pull requests can be read again (a test passes its own transport).
     this.#proposalsLive = Boolean(proposalTransport) || !(registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1');
     this.#stdout = stdout;
@@ -218,7 +223,11 @@ class ToolkitGovernanceCli {
   }
 
   #status(json) {
-    const refresh = this.#refresh(this.#cwd) || {};
+    let refresh = this.#refresh(this.#cwd) || {};
+    // Each git call of the read gets GIT_TIMEOUT_MS, and the fetch of a large default branch can come
+    // close to it on a busy computer: a read that ran out of time is read once more with the bank's
+    // longer budget, so one slow fetch does not hold every programme command for a day.
+    if (refresh.refreshed === false && refresh.error === 'read-timed-out') refresh = this.#refresh(this.#cwd, { timeout: BANK_REREAD_TIMEOUT_MS }) || {};
     const state = this.#state();
     if (state.state === 'UNDECIDED' && this.#registryOptions.testOnly !== true && process.env.TOOLKIT_GOVERNANCE_OFFLINE !== '1') this.#proposals.refresh(this.#cwd);
     if (state.merged?.fresh && ['M1', 'M2'].includes(state.rule)) this.#proposals.settle(this.#cwd, state);
@@ -325,6 +334,17 @@ class ToolkitGovernanceCli {
       this.#print(json, { result: 'nothing' }, ['Nothing to finish here: no governance turn-on from the question bank is waiting for its post-merge setup.']);
       return 0;
     }
+    // A mark whose turn-on pull request closed without merging is cleared, never finished: governance
+    // turned on some other way did not come from that yes.
+    if (Number.isInteger(entry.proposal) && state.repository && this.#pullOutcome) {
+      let outcome = null;
+      try { outcome = this.#pullOutcome(state.repository, entry.proposal); } catch { outcome = null; }
+      if (outcome === 'closed') {
+        finishing.clear(this.#registryOptions, state.repository_id);
+        this.#print(json, { result: 'cleared' }, [`Nothing finished: the governance turn-on pull request #${entry.proposal} was closed without merging, so its post-merge setup was dropped. Run ${CMD('check')} to see this repository's settings.`]);
+        return 0;
+      }
+    }
     const lock = finishing.claim(this.#registryOptions, state.repository_id);
     if (!lock) {
       finishing.touch(this.#registryOptions, state.repository_id);
@@ -378,7 +398,7 @@ class ToolkitGovernanceCli {
     }
     const turnOn = bank && result.proposal?.answer === 'yes';
     if (turnOn) this.#turnOnUrl = result.proposal.url;
-    this.#print(json, result, [...(turnOn ? turnOnSummary(result, binding) : [result.text]), ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
+    this.#print(json, result, [...(turnOn ? turnOnSummary(result, binding, this.#storeNote) : [result.text]), ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
     return 0;
   }
 
@@ -389,17 +409,14 @@ class ToolkitGovernanceCli {
   }
 
   // The governance App steps that follow a published decision: setup for yes, removal for no. A yes
-  // from the bank answered the App row already: Set up prints the owner's command after the bank's
-  // other steps, so only Keep current (not now) says anything here.
+  // from the bank already covered the App: its status row said what is set, and the owner's setup
+  // command follows the bank's other steps when it is needed, so nothing more is said here.
   #appLines(proposal, binding, app = null) {
-    if (proposal.answer === 'yes' && app === 'setup') return [];
-    if (proposal.answer === 'yes' && app === 'keep') return [`Governance GitHub App: not now. Governance works without it; run ${CMD('check')} to see how to add it later.`];
+    if (proposal.answer === 'yes' && (app === 'setup' || app === 'keep')) return [];
     const slug = proposal.repository;
     const read = this.#appRead();
     const state = governanceApp.presence(slug, read);
-    // The owner type picks the App page, so it is read only when the setup steps will show.
-    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state,
-      state.variable === 'found' || state.secret === 'found' ? null : governanceApp.ownerType(slug, read));
+    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state);
     const others = governance.enabledRepositories(this.#registryOptions).filter(name => name.toLowerCase() !== slug.toLowerCase());
     return governanceApp.removalLines(slug, state, others);
   }
@@ -413,12 +430,6 @@ class ToolkitGovernanceCli {
     const lines = [answer.answered ? `Task auto-merge: ${answer.auto_merge === 'after-gates' ? 'on (finished task pull requests merge once their gates pass)' : 'off (every pull request waits for a typed merge)'}.` : governance.TASK_SWITCH_UPGRADE_LINE];
     if (removed.length) lines.push(`Removed the old per-app task auto-merge answers on this computer (${removed.join(', ')}); the repository's switch replaces them.`);
     return { value: answer.answered ? answer.auto_merge : 'unset', answer, removed, lines };
-  }
-
-  // The repository's merge-train switch, as merged and read back on this computer.
-  #trainSwitch(root) {
-    const train = governance.mergeTrain(root, this.#registryOptions);
-    return { value: train.on ? 'on' : 'off', fresh: train.fresh };
   }
 
   // One binding pull request that changes only the named task_prs members ({ auto_merge,
@@ -452,8 +463,11 @@ class ToolkitGovernanceCli {
   async #bank(json, answers, ticket, explain = null) {
     this.#refresh(this.#cwd);
     let state = this.#state();
-    // One failed read of the merged binding is often a moment's network or git trouble: read once more.
-    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+    // Not read: an enabled binding read too long ago, or no read at all (UNAVAILABLE), where the bank
+    // cannot know whether governance is decided. One failed read is often a moment's network or git
+    // trouble: read once more.
+    const unread = read => read.state === 'UNAVAILABLE' || (read.state === 'ENABLED' && !read.programme_records_bind);
+    if (unread(state)) {
       this.#refresh(this.#cwd, { timeout: BANK_REREAD_TIMEOUT_MS });
       state = this.#state();
     }
@@ -464,15 +478,21 @@ class ToolkitGovernanceCli {
     }
     // Still unread: no bank and no governed write from an old read. The bank's own line asks the owner
     // to type it again; an answer is refused with nothing written (main adds its Agents line).
-    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+    if (unread(state)) {
       this.#print(json, { state: state.state, writes: 0 }, answers === null && !explain ? [BANK_UNREAD, '', BANK_UNREAD_AGENTS] : [ANSWER_UNREAD]);
       return 1;
     }
     // The open governance pull requests are read again first, so one closed outside Toolkit no longer
     // reads as pending (it would hold the turn-on with a misleading "not ready" line).
     if (state.state === 'UNDECIDED' && this.#proposalsLive) this.#proposals.refresh(this.#cwd);
-    const merged = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions) : null;
-    const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
+    // Every row that shows what the merged binding sets comes from this one read: other sessions
+    // refresh the same cache, and a read of theirs that fails marks it stale between two reads of ours
+    // (that once showed merge trains Off for a binding that has them on). The bank says when it is stale.
+    const read = state.state === 'ENABLED' && state.root ? governance.mergedBindingRead(state.root, this.#registryOptions) : null;
+    const merged = read ? read.binding : null;
+    const switches = governance.mergedSwitches(merged);
+    // #taskSwitch also retires the old per-app answers once the switch reads back fresh.
+    const task = read ? { ...this.#taskSwitch(state.root), value: merged ? switches.task : 'off' } : null;
     let permissions = { checked: false, missing: 0 };
     try { permissions = this.#permissionsChecker(state.root) || permissions; } catch { /* shown as not checked */ }
     // A repository that is not on and not prepared: what turning on would make (store, parent, checks).
@@ -490,13 +510,15 @@ class ToolkitGovernanceCli {
     // be read leaves the question asked, and publishing then still refuses a second one.
     let open = [];
     if (offered && state.state === 'ENABLED' && this.#switchTransport && state.repository) { try { open = this.#switchTransport.openCiShards(state.repository); } catch { open = []; } }
-    const ciShards = offered ? { estimate: ciOffer.estimateText(estimate), measured: estimate, open } : null;
+    // A repository whose CI already runs its tests in parallel is never offered a shard list.
+    let existing = null;
+    if (offered) { try { existing = ciOffer.existingShards(state.root); } catch { existing = null; } }
+    const ciShards = offered ? { measured: estimate, open, existing } : null;
     this.#lastCiEstimate = estimate;
-    const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
     // The App row reads its variable and secret only where governance is on or can be turned on here.
     const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
     const reference = governanceBank.bankReference(specs);
     if (explain) {
       this.#print(false, {}, this.#explainShown(state, specs, reference, explain));
@@ -516,7 +538,7 @@ class ToolkitGovernanceCli {
           let chosen;
           try { chosen = governanceBank.parseBankAnswer(reply, specs, { requireBankReference: false }); }
           catch (error) { this.#print(false, {}, [`${error.message} Nothing was written. ${governanceBank.REPLY_AGAIN}`]); continue; }
-          return this.#applyBank(state, task, chosen, found, permissions, train);
+          return this.#applyBank(state, task, chosen, found, permissions);
         }
       }
       return this.#showBank(specs, state);
@@ -548,7 +570,7 @@ class ToolkitGovernanceCli {
     catch (error) { return again([`${error.message} Nothing was written.`]); }
     // The bank stays open after an answer too, so the owner's next own message (another change, or a
     // row that does not exist) gets a new one-use ticket and its own line, never a spent ticket.
-    try { return this.#applyBank(state, task, chosen, found, permissions, train); }
+    try { return this.#applyBank(state, task, chosen, found, permissions); }
     finally {
       try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, rows: governanceBank.rowDigests(specs) }); } catch { /* the owner can type toolkit governance */ }
     }
@@ -585,6 +607,8 @@ class ToolkitGovernanceCli {
   }
 
   #lastCiEstimate = null;
+  // How the turn-on answer chose its store, for the turn-on summary.
+  #storeNote = null;
   // The turn-on pull request the bank published in this run, for its closing line.
   #turnOnUrl = null;
 
@@ -673,16 +697,21 @@ class ToolkitGovernanceCli {
   }
 
   // The owner's answer: at most one governance pull request, then the permission blocks.
-  #applyBank(state, task, chosen, found = null, permissions = { checked: false }, train = null) {
+  #applyBank(state, task, chosen, found = null, permissions = { checked: false }) {
     let code = 0;
     let acted = false;
     let commanded = 0;
     this.#turnOnUrl = null;
+    this.#storeNote = null;
+    // No store wanted: governance needs one, so nothing is made and governance stays off.
+    if (chosen.noStore) {
+      this.#print(false, {}, ['Governance needs a store, so it stays off. Nothing was written: no pull request, store or parent issue was made. Toolkit asks again next session.']);
+      return 0;
+    }
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
-    const trainTo = chosen.mergeTrain === 'on' || chosen.mergeTrain === 'off' ? chosen.mergeTrain : null;
-    // Turning governance on writes both switches as the bank showed them: a sub-option is off until
-    // the owner turns it on, so an unanswered one is written off rather than left to its default.
-    const enabling = { auto_merge: switchTo || 'off', merge_train: trainTo || 'off' };
+    // Turning governance on writes both switches: task auto-merge as answered, merge trains off (the
+    // bank does not ask about them; a governed repository keeps its stored value).
+    const enabling = { auto_merge: switchTo || 'off', merge_train: 'off' };
     let shardsDone = false;
     const app = chosen.governanceApp === 'setup' ? 'setup' : 'keep';
     let store = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions)?.store?.repository || null : null;
@@ -695,10 +724,16 @@ class ToolkitGovernanceCli {
       return open.length ? 0 : 2;
     }
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
-      const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
+      const plan = found ? adopt.adoptionPlan(found, { store: chosen.store || null }) : null;
+      if (chosen.store && !(plan && !plan.blocked)) {
+        this.#print(false, {}, [`store=${chosen.store} was not used, because ${plan?.blocked ? `GitHub could not be read (${plan.blocked})` : 'the programme file in the working tree already names the store'}. Nothing was written.`]);
+        return 2;
+      }
       if (plan && plan.blocked) this.#print(false, {}, [`GitHub could not be read (${plan.blocked}), so the evidence store and parent issue could not be found or made.`]);
-      if (plan && !plan.blocked) store = plan.store.repository;
-      else if (!found && adopt.adoptionPrepared(state.root)) {
+      if (plan && !plan.blocked) {
+        store = plan.store.repository;
+        this.#storeNote = plan.store.named ? 'the one you named' : plan.store.create ? 'created for this repository' : 'found';
+      } else if (!found && adopt.adoptionPrepared(state.root)) {
         try { store = JSON.parse(fs.readFileSync(path.join(state.root, governance.BINDING_FILE), 'utf8')).store?.repository || null; } catch { /* no --store */ }
       }
       // A shards yes or never joins the one turn-on pull request.
@@ -713,20 +748,16 @@ class ToolkitGovernanceCli {
     } else if (state.state === 'ENABLED') {
       const changes = {};
       if (switchTo && task && switchTo !== task.value) changes.auto_merge = switchTo;
-      if (trainTo && train && trainTo !== train.value) changes.merge_train = trainTo;
+      const said = changes.auto_merge ? `task auto-merge ${changes.auto_merge === 'after-gates' ? 'on' : 'off'}` : '';
       // A shards yes or never in the same answer joins the switch change: one binding pull request.
-      if (Object.keys(changes).length && ['yes', 'never'].includes(chosen.ciShards)) {
+      if (said && ['yes', 'never'].includes(chosen.ciShards)) {
         const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards, changes);
-        this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${[...(changes.auto_merge ? [`task auto-merge ${changes.auto_merge === 'after-gates' ? 'on' : 'off'}`] : []), ...(changes.merge_train ? [`merge trains ${changes.merge_train}`] : [])].join(' and ')} and records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
+        this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${said} and records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
         acted = true;
         shardsDone = true;
-      } else if (Object.keys(changes).length) {
+      } else if (said) {
         const prepared = this.#prepareSwitch(state.root, changes);
-        const said = [
-          ...(changes.auto_merge ? [`task auto-merge ${changes.auto_merge === 'after-gates' ? 'on' : 'off'}`] : []),
-          ...(changes.merge_train ? [`merge trains ${changes.merge_train}`] : []),
-        ];
-        this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${said.join(' and ')} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
+        this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${said} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
         acted = true;
       }
     }
@@ -755,13 +786,13 @@ class ToolkitGovernanceCli {
         : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;
     }
-    // The governance App command, next to the permissions command; only the owner runs it. Set up is
-    // recommended, so an answer that leaves governance off takes it too: it then gives no command.
+    // The governance App command, next to the permissions command; only the owner runs it. It is the
+    // Toolkit default while the App is not set up, and is given only when governance is on after this
+    // answer; otherwise the answer says nothing about it.
     const governedAfter = chosen.governance === 'on' || (state.state === 'ENABLED' && chosen.governance !== 'off');
-    if (chosen.governanceApp === 'setup' && !governedAfter) this.#print(false, {}, ['Governance App: not set up, because governance is not on after this answer.']);
     if (chosen.governanceApp === 'setup' && governedAfter && code === 0 && state.repository) {
-      this.#print(false, {}, ['', `Governance App: run this once in your own PowerShell or terminal, outside any agent, with gh signed in. You click Create on GitHub; it saves the App's Client ID and key on ${state.repository}, opens the install page and checks the installation.`, '',
-        ...fenced(`node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`)]);
+      this.#print(false, {}, ['', `Governance App: paste this one line into PowerShell and press Enter. It saves the App's Client ID and key on ${state.repository}. ${governanceApp.SETUP_STEPS}`, '',
+        ...fenced(governanceApp.setupCommand(state.repository, store))]);
       acted = true;
       commanded += 1;
     }
@@ -943,7 +974,6 @@ function copiesRow(copies) {
 }
 
 // The owner's governance App setup command (it refuses under an agent).
-const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs');
 // A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
 // quotes, never curly ones) with a copy button.
 const fenced = command => ['```', command, '```'];

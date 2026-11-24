@@ -156,6 +156,103 @@ test('reopen, resubmit and accept work under one assignment; return IDs are idem
   assert.throws(() => state.consumeReturn(fenced, { returnId: 'old', verdict: 'ACCEPT', ...decide }), { code: 'STALE_RETURN' });
 });
 
+// Gate path ends (matrix B of the gate-records plan): every consume is logged with its time, a return
+// waiting on the owner takes the owner's answer once, and a G2 needs its verdict and closes older returns.
+const PASS_A = { verdict: 'PASS', head: SHA_A, link: 'https://github.com/acme/app/pull/540#issuecomment-1' };
+const FAIL_A = { verdict: 'FAIL', head: SHA_A, link: 'https://github.com/acme/app/pull/540#issuecomment-2' };
+
+test('a return consumed WAITING_OWNER takes the owner\'s answer once, as ACCEPT or REOPEN, on the newest return at the same epoch', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const waiting = (role = 'G0') => state.consumeReturn(state.recordReturn(state.assignGate(child(), { assignment: 'a1', role }), { returnId: 'r1', assignment: 'a1' }),
+    { returnId: 'r1', verdict: 'WAITING_OWNER', ...decide, now: '2026-11-23T01:00:00.000Z' });
+  const doc = waiting();
+  assert.equal(doc.gate.state, 'WAITING_OWNER');
+  assert.equal(state.consumeReturn(doc, { returnId: 'r1', verdict: 'WAITING_OWNER', ...decide }), null, 'the same verdict again is a no-op');
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', ...decide }), { code: 'USAGE' }, 'the owner\'s answer needs --reason');
+  const accepted = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', reason: 'the owner picked option a', ...decide, now: '2026-11-23T02:00:00.000Z' });
+  assert.deepEqual([accepted.gate.state, accepted.gate.returns[0].consumed, accepted.gate.returns[0].verdict], ['RETIRED', true, 'ACCEPT']);
+  assert.deepEqual(accepted.private.gate_history, [
+    { assignment: 'a1', role: 'G0', ended: 'CONSUMED', return_id: 'r1', verdict: 'WAITING_OWNER', at: '2026-11-23T01:00:00.000Z' },
+    { assignment: 'a1', role: 'G0', ended: 'OWNER_ANSWERED', return_id: 'r1', verdict: 'ACCEPT', reason: 'the owner picked option a', at: '2026-11-23T02:00:00.000Z' }]);
+  assert.deepEqual(state.validateChild(accepted), []);
+  assert.throws(() => state.consumeReturn(accepted, { returnId: 'r1', verdict: 'REOPEN', reason: 'x', ...decide }), { code: 'RETURN_CONFLICT' }, 'an answered return is final');
+  const sentBack = state.consumeReturn(waiting(), { returnId: 'r1', verdict: 'REOPEN', reason: 'the owner wants another option', ...decide });
+  assert.deepEqual([sentBack.gate.state, sentBack.gate.returns[0].verdict, sentBack.private.gate_history.at(-1).ended], ['ACTIVE', 'REOPEN', 'OWNER_ANSWERED']);
+  assert.throws(() => state.consumeReturn(state.claimDocument(waiting(), other, {}), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide }), { code: 'STALE_RETURN' }, 'epoch moved');
+  assert.throws(() => state.consumeReturn(state.reopenGate(waiting(), { reason: 'continued by hand' }), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide }), { code: 'GATE_STATE' }, 'the gate no longer waits');
+  assert.throws(() => state.consumeReturn(waiting('G1'), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide, liveHead: SHA_A }), { code: 'EVIDENCE_STALE' }, 'a G1 answer still needs a G2 PASS at the live head');
+  assert.throws(() => state.consumeReturn(waiting('G2'), { returnId: 'r1', verdict: 'ACCEPT', reason: 'x', ...decide, review: null }), { code: 'EVIDENCE_MISSING' }, 'a G2 answer still needs its verdict');
+  // A first ACCEPT is logged with its time too: the acceptance time a later check reads.
+  const first = state.consumeReturn(state.recordReturn(state.assignGate(child(), { assignment: 'a2', role: 'G0' }), { returnId: 'r2', assignment: 'a2' }),
+    { returnId: 'r2', verdict: 'ACCEPT', ...decide, now: '2026-11-23T03:00:00.000Z' });
+  assert.deepEqual(first.private.gate_history, [{ assignment: 'a2', role: 'G0', ended: 'CONSUMED', return_id: 'r2', verdict: 'ACCEPT', at: '2026-11-23T03:00:00.000Z' }]);
+});
+
+test('a G2 return is accepted only with a trusted PASS at its head, recorded in review; a FAIL there only sends it back', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const submitted = () => state.recordReturn(state.assignGate(child(), { assignment: 'g2-a1', role: 'G2' }), { returnId: 'g2-r1', assignment: 'g2-a1', atHead: SHA_A });
+  for (const [label, review] of [['no verdict', null], ['no verdict read', undefined], ['a PASS at an older head', { ...PASS_A, head: SHA_B }]]) {
+    assert.throws(() => state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review }), { code: 'EVIDENCE_MISSING' }, label);
+  }
+  assert.throws(() => state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: FAIL_A }), { code: 'REVIEW_FAILED' });
+  const failed = state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'REOPEN', ...decide, review: FAIL_A });
+  assert.deepEqual([failed.gate.state, failed.review], ['ACTIVE', { state: 'NOT_PASSED', verdicts: [{ reviewer: 'g2-a1', head: SHA_A, verdict: 'NOT_PASSED' }] }]);
+  const plain = state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'REOPEN', ...decide, review: null });
+  assert.deepEqual([plain.gate.state, plain.review.verdicts], ['ACTIVE', []], 'a send-back with no verdict records none');
+  const passed = state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A });
+  assert.deepEqual([passed.gate.state, passed.review], ['RETIRED', { state: 'PASSED', verdicts: [{ reviewer: 'g2-a1', head: SHA_A, verdict: 'PASSED' }] }]);
+  assert.deepEqual(state.validateChild(passed), []);
+  // A PASS after a FAIL at the same head replaces it, as the newest verdict decides on the PR.
+  const recheck = state.recordReturn(failed, { returnId: 'g2-r2', assignment: 'g2-a1', atHead: SHA_A });
+  assert.deepEqual(state.consumeReturn(recheck, { returnId: 'g2-r2', verdict: 'ACCEPT', ...decide, review: PASS_A }).review.verdicts, [{ reviewer: 'g2-a1', head: SHA_A, verdict: 'PASSED' }]);
+  assert.equal(state.consumeReturn(submitted(), { returnId: 'g2-r1', verdict: 'WAITING_OWNER', ...decide }).gate.state, 'WAITING_OWNER', 'a question needs no verdict');
+});
+
+test('a G2 ACCEPT closes every older builder return: a G1 return at the passed head as ACCEPT, any other as REOPEN', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const reviewed = g1Head => {
+    let doc = state.recordReturn(state.assignGate(child(), { assignment: 'g1-a1', role: 'G1' }), { returnId: 'g1-r1', assignment: 'g1-a1', atHead: g1Head });
+    doc = state.assignGate(doc, { assignment: 'g2-a1', role: 'G2', supersede: true, reason: 'G2 follows G1' });
+    return state.recordReturn(doc, { returnId: 'g2-r1', assignment: 'g2-a1', atHead: SHA_A });
+  };
+  assert.throws(() => state.consumeReturn(reviewed(SHA_A), { returnId: 'g1-r1', verdict: 'ACCEPT', ...decide }), { code: 'STALE_ASSIGNMENT' }, 'a superseded return is not consumed by itself (unchanged)');
+  const accepted = state.consumeReturn(reviewed(SHA_A), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A, now: '2026-11-23T04:00:00.000Z' });
+  assert.deepEqual(accepted.gate.returns.map(entry => [entry.return_id, entry.consumed, entry.verdict]), [['g1-r1', true, 'ACCEPT'], ['g2-r1', true, 'ACCEPT']]);
+  assert.deepEqual(accepted.private.gate_history.filter(entry => entry.ended === 'CLOSED_BY_G2'),
+    [{ assignment: 'g1-a1', role: 'G1', ended: 'CLOSED_BY_G2', return_id: 'g1-r1', verdict: 'ACCEPT', at: '2026-11-23T04:00:00.000Z' }]);
+  assert.deepEqual(state.validateChild(accepted), []);
+  const other = state.consumeReturn(reviewed(SHA_B), { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A });
+  assert.deepEqual(other.gate.returns.map(entry => [entry.return_id, entry.consumed, entry.verdict]), [['g1-r1', true, 'REOPEN'], ['g2-r1', true, 'ACCEPT']], 'a G1 return at another head is sent back');
+  const sentBack = state.consumeReturn(reviewed(SHA_A), { returnId: 'g2-r1', verdict: 'REOPEN', ...decide, review: null });
+  assert.equal(sentBack.gate.returns[0].consumed, false, 'only an ACCEPT closes older returns');
+});
+
+test('red-first: a blocker starting `Queued in NOW:` is an ordinary blocker: a gate start, a consume REOPEN and a reopen keep every blocker', () => {
+  const OLD_WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+  const ALL = [OLD_WAIT, 'Queued 1 - after Alpha2', 'waits for PR 1098'];
+  const decide = { writer: controller, parentDoc: heldParent() };
+  const started = state.assignGate(child({ blockers: ALL }), { assignment: 'g1-a1', role: 'G1' });
+  assert.deepEqual(started.blockers, ALL, 'assign keeps every blocker');
+  let doc = state.recordReturn(started, { returnId: 'r1', assignment: 'g1-a1' });
+  assert.deepEqual(state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN', ...decide }).blockers, ALL, 'a consume REOPEN too');
+  doc = state.consumeReturn(state.recordReturn(state.assignGate(child(), { assignment: 'g0-a1', role: 'G0' }), { returnId: 'g0-r1', assignment: 'g0-a1' }), { returnId: 'g0-r1', verdict: 'ACCEPT', ...decide });
+  doc.blockers = ALL;
+  assert.deepEqual(state.reopenGate(doc, { reason: 'a second G0', assignment: 'g0-a2' }).blockers, ALL, 'and reopen');
+  assert.equal(state.isLaneWait, undefined, 'no lane-wait reader is left');
+});
+
+test('after a G1 fix round a G2 recheck is a supersede, not a reopen: the reopen is refused', () => {
+  const decide = { writer: controller, parentDoc: heldParent() };
+  let doc = state.recordReturn(state.assignGate(child(), { assignment: 'g2-a1', role: 'G2' }), { returnId: 'g2-r1', assignment: 'g2-a1', atHead: SHA_A });
+  doc = state.consumeReturn(doc, { returnId: 'g2-r1', verdict: 'ACCEPT', ...decide, review: PASS_A });
+  doc = state.recordReturn(state.assignGate(doc, { assignment: 'g1-fix', role: 'G1' }), { returnId: 'g1-fix.r1', assignment: 'g1-fix', atHead: SHA_B });
+  assert.throws(() => state.reopenGate(doc, { reason: 'G2 recheck', assignment: 'g2-a2' }), { code: 'GATE_STATE' }, 'reopen --assignment works only on an accepted gate, and the G1 fix round is live');
+  const recheck = state.assignGate(doc, { assignment: 'g2-a2', role: 'G2', supersede: true, reason: 'G2 recheck follows the G1 fix round' });
+  assert.deepEqual([recheck.gate.role, recheck.gate.state, recheck.gate.assignment.id], ['G2', 'ASSIGNED', 'g2-a2']);
+  const skill = fs.readFileSync(path.join(ROOT, 'skills', 'github-program-reconciler', 'SKILL.md'), 'utf8').split('\n').find(line => line.startsWith('**Gates.**'));
+  assert.ok(skill.includes('(a second G0, a delta G2 or a G2 recheck with no G1 round between)'), 'the reconciler Gates line carries the qualifier');
+});
+
 test('claims and takeovers move the fence; stale writers are refused', () => {
   const claimed = state.claimDocument(child(), writer, {});
   assert.deepEqual(claimed.fence, { epoch: 1, holder_prefix: 'INT-TK421-', holder_session: 'session-one' });
@@ -320,24 +417,21 @@ test('both GraphQL check reads and the REST fallback carry each run\'s completio
   assert.equal(state.evaluateChecks({ head: facts.head, rollupOid: facts.rollupOid, contexts: facts.contexts, configured: ['validate'] }).state, 'GREEN', 'so a passing run read over REST can read GREEN');
 });
 
-// QUEUED_BUT_MOVING counts only a head committed after its lane-wait stamp, so both GraphQL reads carry
-// the head commit's time; a last commit that is not the head, or the REST fallback, gives none.
-test('both GraphQL PR reads carry the head commit time, and only for the head; the REST fallback gives none', () => {
+// The PR reads carry no commit time: nothing reads it since the lane-wait detector went.
+test('both GraphQL PR reads ask for no commit time, and the PR they return carries none', () => {
   const at = '2026-11-19T04:00:00Z';
   const pr = oid => ({ number: 7, title: 't', body: '', state: 'OPEN', isDraft: false, merged: false, mergedAt: null, mergeCommit: null, headRefOid: SHA_A, baseRefName: 'main', mergeable: 'MERGEABLE',
     commits: { nodes: [{ commit: { oid, committedDate: at, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [] } } } }] } });
   const queries = [];
   const single = oid => new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { graphql: query => { queries.push(query); return { repository: { defaultBranchRef: { name: 'main' }, pullRequest: pr(oid) } }; } } });
   const batched = oid => new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath, body) => { queries.push(body.query); return { status: 200, json: { data: { repository: { defaultBranchRef: { name: 'main' }, p7: pr(oid) } } } }; } } });
-  assert.equal(single(SHA_A).pullRequest(7).head_committed_at, at);
-  assert.equal(batched(SHA_A).pullRequests([7]).get(7).head_committed_at, at);
-  assert.equal(single(SHA_B).pullRequest(7).head_committed_at, null, 'the last commit read is not the head');
-  assert.equal(batched(SHA_B).pullRequests([7]).get(7).head_committed_at, null, 'the last commit read is not the head');
-  for (const query of queries) assert.match(query, /commits\(last: ?1\) \{ nodes \{ commit \{ oid committedDate /);
+  assert.equal('head_committed_at' in single(SHA_A).pullRequest(7), false);
+  assert.equal('head_committed_at' in batched(SHA_A).pullRequests([7]).get(7), false);
+  for (const query of queries) assert.doesNotMatch(query, /committedDate/);
   const rest = { 'pulls/7': { number: 7, title: 't', body: '', state: 'open', draft: false, merged: false, head: { sha: SHA_A }, base: { ref: 'main', repo: { default_branch: 'main' } }, mergeable: true },
     [`commits/${SHA_A}/check-runs?per_page=100`]: { total_count: 0, check_runs: [] }, [`commits/${SHA_A}/status`]: { total_count: 0, statuses: [] } };
   const fallback = new state.ProgrammeGraphReader({ repository: 'example.test/app', transport: { request: (method, apiPath) => ({ status: 200, json: rest[apiPath.replace('repos/example.test/app/', '')] }) } });
-  assert.equal(fallback.restPullRequest(7).head_committed_at, null);
+  assert.equal('head_committed_at' in fallback.restPullRequest(7), false, 'nor does the REST fallback');
 });
 
 test('a closed task page is frozen by the hidden task status line its block carries, and drawn again once reopened', () => {
@@ -388,7 +482,7 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW · QUEUED and LATER (optional tasks last), sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
+test('the Programme Graph has five columns, works out NOW · IN PROGRESS and QUEUED (optional tasks last), sorts each by order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
     { issue: 8, class: 'COMMITTED', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
@@ -428,22 +522,22 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
   assert.equal(lines[1], '# PROGRAMME GRAPH');
   assert.ok(lines.includes('| Task | Child # | Status | Waiting on | Last Updated (SGT) |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
-  // Cells: Task (the name), Child # (`#n`), Status (NOW, LATER, OPTIONAL, COMPLETED or RETIRED), Waiting on, Last Updated.
+  // Cells: Task (the name), Child # (`#n`), Status (a band in flight, QUEUED, COMPLETED or RETIRED), Waiting on, Last Updated.
   const rows = lines.filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
   const issueOf = row => /^#(\d+)$/.exec(row[1])[1];
-  assert.deepEqual(rows.map(row => Number(issueOf(row))), [8, 17, 11, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW · IN PROGRESS, NOW · QUEUED, then LATER with optional tasks last, each by priority order and child number; finished oldest first');
+  assert.deepEqual(rows.map(row => Number(issueOf(row))), [8, 17, 10, 11, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW · IN PROGRESS by order, then one QUEUED band, blocked or planned, with optional tasks last, each by order and child number; finished oldest first');
   assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
-  assert.equal(/OPTIONAL|LATER · /.test(body), false, 'LATER needs no second word, and optional tasks show as LATER');
+  assert.equal(/OPTIONAL|LATER|NOW · QUEUED/.test(body), false, 'one QUEUED band: optional and blocked tasks show as QUEUED');
   const statusOf = Object.fromEntries(rows.map(row => [`#${issueOf(row)}`, row[2]]));
   for (const [issue, expected, why] of [
-    ['#11', 'NOW · QUEUED', 'an open PR, held by a blocker'],
+    ['#11', 'QUEUED', 'an open PR, held by a blocker'],
     ['#8', 'NOW · IN PROGRESS', 'a draft PR wins over a release'],
-    ['#10', 'LATER', 'a planned release does not change the group'],
+    ['#10', 'QUEUED', 'a planned release does not change the group'],
     ['#17', 'NOW · IN PROGRESS', 'waiting on the owner with no PR is still in progress'],
-    ['#19', 'LATER', 'an optional task with a release shows as LATER'],
-    ['#21', 'LATER', 'committed, no release'],
-    ['#14', 'LATER', 'a closed PR is not current work'],
-    ['#13', 'LATER', 'optional, no release'],
+    ['#19', 'QUEUED', 'an optional task with a release shows as QUEUED'],
+    ['#21', 'QUEUED', 'committed, no release'],
+    ['#14', 'QUEUED', 'a closed PR is not current work'],
+    ['#13', 'QUEUED', 'optional, no release'],
     ['#12', 'COMPLETED', 'a finished row says so'],
     ['#9', 'RETIRED', 'a retired row says so'],
   ]) assert.equal(statusOf[issue], expected, `${issue}: ${why}`);
@@ -456,12 +550,12 @@ test('the Programme Graph has five columns, works out NOW · IN PROGRESS, NOW ·
   assert.equal(children.get(9).pr.number, 553, 'rendering preserves historical state');
   assert.deepEqual(rows[11].slice(1), ['#16', 'COMPLETED', '-', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
   assert.deepEqual(rows[1].slice(1), ['#17', 'NOW · IN PROGRESS', 'Owner: decision', '-']);
-  assert.deepEqual(rows[2].slice(1), ['#11', 'NOW · QUEUED', 'Blocked: waits for #8', '-'], 'a NOW task with a blocker is queued behind it, after every task in progress');
+  assert.deepEqual(rows[3].slice(1), ['#11', 'QUEUED', 'Blocked: waits for #8', '-'], 'a task in progress with a blocker is queued at its work-order place, after every task in flight');
   assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
 });
 
-test('the Programme Graph sorts by status band (NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED, RETIRED); inside a band pinned tasks go last and optional tasks close LATER', () => {
+test('the Programme Graph sorts by status band (NOW · IN PROGRESS, QUEUED, COMPLETED, RETIRED); tasks marked last and optional tasks close the queue', () => {
   const outcomes = [
     { issue: 2, class: 'COMMITTED', parent: 7, order: 0 },
     { issue: 3, class: 'COMMITTED', parent: 7, order: 1 },
@@ -485,18 +579,18 @@ test('the Programme Graph sorts by status band (NOW · IN PROGRESS, NOW · QUEUE
   const rows = state.renderParentBlockBody(parent, children, new Map()).split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
   const table = rows.map(row => `${row[1]} ${row[2]}`);
   assert.deepEqual(table, [
-    '#3 NOW · IN PROGRESS',
     '#4 NOW · IN PROGRESS',
-    '#2 NOW · QUEUED',
-    '#5 NOW · QUEUED',
-    '#6 LATER',
-    '#8 LATER',
-    '#9 LATER',
-    '#10 LATER',
+    '#3 NOW · IN PROGRESS',
+    '#2 QUEUED',
+    '#6 QUEUED',
+    '#5 QUEUED',
+    '#8 QUEUED',
+    '#9 QUEUED',
+    '#10 QUEUED',
     '#11 COMPLETED',
     '#12 RETIRED',
-  ], 'a task in progress leads a queued one of higher priority; a pinned NOW task stays in its band, never below LATER; LATER keeps today\'s order');
-  const bands = ['NOW · IN PROGRESS', 'NOW · QUEUED', 'LATER', 'COMPLETED', 'RETIRED'];
+  ], 'tasks in flight lead the queue, each band by order (last places only queued tasks); the queue puts tasks marked last and optional tasks last, by order');
+  const bands = ['NOW · IN PROGRESS', 'QUEUED', 'COMPLETED', 'RETIRED'];
   const ranks = rows.map(row => bands.indexOf(row[2]));
   assert.ok(ranks.every((rank, at) => rank >= 0 && (at === 0 || rank >= ranks[at - 1])), `the Status column never steps back a band: ${table.join(', ')}`);
 });
@@ -561,7 +655,7 @@ test('a priority tie is named only among queued rows of one group', () => {
   assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
 });
 
-test('an outcome pinned last sorts after every unpinned open outcome in its status band, even ones added after it', () => {
+test('a queued outcome marked last sorts in the last step with optional ones, after every other queued outcome, even ones added after it', () => {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
   const outcomes = [
@@ -578,23 +672,21 @@ test('an outcome pinned last sorts after every unpinned open outcome in its stat
   const rows = body => body.split('\n').filter(line => /^\|#\d+\|/.test(line)).map(line => Number(line.split('|')[1].slice(1)));
   const current = body => state.renderCurrentBlockBody(body, new Map(), new Map());
   const body = state.renderParentBlockBody(parent, new Map(), new Map());
-  assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
-  assert.match(body, /Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER; pinned tasks end their band\), then the latest 10 COMPLETED/);
+  assert.deepEqual(rows(body), [2, 5, 8, 3, 4, 6], 'other work first, then tasks marked last and optional tasks together by order, then finished rows');
+  assert.match(body, /Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, then QUEUED in work order \(priority, then quick wins, then other work, then tasks marked last; a task follows the tasks it waits for\), then the latest 10 COMPLETED/);
   assert.equal(rows(body)[0], 2, 'the top unpinned task leads, so it starts next');
   assert.doesNotMatch(current(parent), /Start next/, 'CURRENT leaves what starts next to the graph');
   // A task added later takes the next order and still lands before the pinned one.
   const added = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [...outcomes, { issue: 9, class: 'COMMITTED', parent: 7, order: 6 }] });
-  assert.deepEqual(rows(state.renderParentBlockBody(added, new Map(), new Map())), [2, 5, 9, 4, 3, 8, 6]);
+  assert.deepEqual(rows(state.renderParentBlockBody(added, new Map(), new Map())), [2, 5, 9, 8, 3, 4, 6]);
   // Only the pinned task left: it leads. A finished pinned task sorts as finished.
   const alone = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: outcomes.filter(entry => [3, 6].includes(entry.issue)) });
   assert.deepEqual(rows(state.renderParentBlockBody(alone, new Map(), new Map())), [3, 6]);
   const done = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 3, class: 'COMPLETED', parent: 7, order: 2, last: true }, { issue: 2, class: 'COMMITTED', parent: 7, order: 9 }] });
   const doneBody = state.renderParentBlockBody(done, new Map(), new Map());
   assert.deepEqual(rows(doneBody), [2, 3]);
-  assert.match(doneBody, /Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW · QUEUED, LATER, each by priority \(optional tasks last in LATER\), then the latest 10 COMPLETED/);
-  assert.doesNotMatch(doneBody, /pinned tasks/, 'the order line names pinned tasks only while one is open');
-  assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /pinned tasks/);
-  // Pinned rows tie only with each other.
+  assert.match(doneBody, /then QUEUED in work order \(priority, then quick wins, then other work, then tasks marked last; a task follows the tasks it waits for\), then the latest 10 COMPLETED/);
+  // Rows marked last tie only with each other.
   const ties = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
     { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },
     { issue: 3, class: 'COMMITTED', parent: 7, order: 1, last: true },
@@ -615,7 +707,7 @@ test('older class names are read as COMMITTED and anything else is refused', () 
     const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: cls, parent: 7, order: 0 }] });
     assert.deepEqual(state.validateParent(parent), [], `${cls} still reads`);
     const body = state.renderParentBlockBody(parent, new Map(), new Map());
-    assert.match(body, /^\|#8\|#8\|LATER\|-\|-\|$/m, `${cls} shows as LATER with no release`);
+    assert.match(body, /^\|#8\|#8\|QUEUED\|-\|-\|$/m, `${cls} shows as QUEUED with no release`);
   }
   const bad = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: 'NOW', parent: 7, order: 0 }] });
   assert.match(state.validateParent(bad).join('\n'), /class must be one of COMMITTED, OPTIONAL, COMPLETED, RETIRED/, 'the bucket is never stored');
@@ -632,7 +724,8 @@ test('the generated CURRENT summary is slim: work in progress with its PR, gate 
     [1, doc(1, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(541), next_action: 'Finish the sweep' })],
     [2, doc(2, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(543), uat: { state: 'PENDING', at_head: null } })],
     [3, doc(3, { lifecycle: 'WAITING_OWNER' })],
-    [4, doc(4, { lifecycle: 'HOLD', blockers: ['needs the key'] })],
+    [4, doc(4, { lifecycle: 'HOLD', gate: gate('G2'), blockers: ['needs the key'] })],
+    [5, doc(5, { lifecycle: 'ACTIVE', blockers: ['waits for #4'] })],
     [11, doc(11, { lifecycle: 'DONE', blockers: ['an old blocker'] })],
   ]);
   const body = state.renderCurrentBlockBody(parent, children, new Map());
@@ -645,10 +738,10 @@ test('the generated CURRENT summary is slim: work in progress with its PR, gate 
     '- #1 Task 1 · PR #541 · G1',
     '- #2 Task 2 · PR #543 · G1 · then agent UAT on PR #543', // the active G1 is the current step; the owed UAT comes after it, the agent's first
     '- #3 Task 3 · waiting on you: your decision',
-    '- #4 Task 4 · blocked: needs the key', // a blocker is not an owner step
+    '- #4 Task 4 · G2 · blocked: needs the key', // a blocker is not an owner step; the live gate keeps the task in flight
     '',
-    '**Attention: clear** · Holds: 1 · Full list: `programme.cjs attention`',
-  ].join('\n'), 'queued work and next actions show in the graph and on the task pages; a finished task is never a hold');
+    '**Attention: clear** · Holds: 2 · Full list: `programme.cjs attention`',
+  ].join('\n'), 'queued work, blocked or not, and next actions show in the graph and on the task pages; a finished task is never a hold');
   const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
   assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Attention: clear\*\* · Holds: 0 · /);
   assert.doesNotMatch(body + idle, /Start next|next: /);
@@ -931,37 +1024,18 @@ test('a replaced last section ends at the next managed block, keeping the trace 
   assert.equal(body, `# Title\n\n${state.renderBlock('graph', '3.9.1')}\n\n${trace}\n\n[i1]: https://example.com/\n`);
 });
 
-// The lane-wait stamp (private.lane_wait): from when a queued task's PR moves count (the wait written, or
-// a recorded gate ended) and the tracked PR head then, so the sweep sees a move with no gate recorded.
-test('every child write stamps a lane wait with its write time and the PR head then, a recorded gate ending restamps it, and a patch cannot set it', () => {
-  const WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
+// The old lane-wait stamp (private.lane_wait) is no longer written; a stored one reads and the
+// controller's one clean-up order removes it with a private patch.
+test('a child write never stamps a lane wait, a stored stamp still reads, and a private patch removes it', () => {
+  const OLD_WAIT = 'Queued in NOW: one child at a time; starts when the gate lane frees (INT-TK421-1069)';
   const at = '2026-11-19T03:00:00.000Z';
-  const later = '2026-11-19T04:00:00.000Z';
   const base = state.claimDocument(child(), writer, {});
-  const doc = (blockers, head = null, previous = null) => ({ ...base, blockers, pr: { ...base.pr, ...(head ? { number: 900, state: 'OPEN', head } : {}) },
-    private: { ...(previous?.private || {}) } });
-  assert.deepEqual(state.stampChild(doc([]), doc([WAIT]), at).private.lane_wait, { at, head: null }, 'added with no PR');
-  const stamped = state.stampChild(doc([]), doc([WAIT], SHA_A), at);
-  assert.deepEqual(stamped.private.lane_wait, { at, head: SHA_A }, 'added with a PR');
-  assert.deepEqual(state.stampChild(stamped, doc([WAIT, 'waits for PR 1098'], SHA_B, stamped), later).private.lane_wait, { at, head: SHA_A },
-    'a later write that keeps the wait keeps its stamp, whatever else moves');
-  assert.deepEqual(state.stampChild(stamped, doc([`${WAIT}; behind #1322`], SHA_B, stamped), later).private.lane_wait, { at: later, head: SHA_B }, 'a changed wait is a new wait');
-  assert.deepEqual(state.stampChild(doc([WAIT], SHA_A), doc([WAIT], SHA_B), later).private.lane_wait, { at: later, head: SHA_B },
-    'a wait written before stamps existed is stamped like a new one: moves count from this write');
-  const gated = (gateState, base2) => ({ ...base2, gate: { ...base2.gate, role: 'G1', state: gateState, assignment: { id: 'g1-x', role: 'G1' } } });
-  for (const ended of ['SUBMITTED', 'INTERRUPTED', 'WAITING_OWNER', 'RETIRED']) {
-    assert.deepEqual(state.stampChild(gated('ACTIVE', stamped), gated(ended, doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at: later, head: SHA_B },
-      `the write that ends a recorded gate (ACTIVE to ${ended}) restamps the wait: the gate covers every commit before it`);
-  }
-  assert.deepEqual(state.stampChild(gated('ASSIGNED', stamped), gated('ACTIVE', doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at, head: SHA_A }, 'a gate still live keeps it');
-  assert.deepEqual(state.stampChild(gated('SUBMITTED', stamped), gated('SUBMITTED', doc([WAIT], SHA_B, stamped)), later).private.lane_wait, { at, head: SHA_A }, 'a gate already ended keeps it');
-  assert.equal('lane_wait' in state.stampChild(stamped, doc(['waits for PR 1098'], SHA_A, stamped), later).private, false, 'removed with the last wait');
-  const parentDoc = heldParent();
-  const forged = { private: { lane_wait: { at: later, head: SHA_B } } };
-  assert.deepEqual(state.stampChild(stamped, state.applyPatch('child', stamped, forged, { writer, parentDoc }), later).private.lane_wait, { at, head: SHA_A }, 'a patch cannot move it');
-  assert.equal('lane_wait' in state.stampChild(doc([]), state.applyPatch('child', doc([]), forged, { writer, parentDoc }), later).private, false, 'nor set it with no wait');
-  for (const valid of [stamped, doc([WAIT]), state.stampChild(doc([]), doc([WAIT]), at)]) assert.deepEqual(state.validateChild(valid), [], 'valid with and without the stamp');
-  for (const bad of [{ at, head: 'abc' }, { at: '', head: null }, { at, head: null, extra: 1 }, 'x']) {
-    assert.ok(state.validateChild({ ...stamped, private: { lane_wait: bad } }).some(error => error.includes('private.lane_wait')), JSON.stringify(bad));
-  }
+  const written = state.stampChild({ ...base, blockers: [] }, { ...base, blockers: [OLD_WAIT], pr: { ...base.pr, number: 900, state: 'OPEN', head: SHA_A } }, at);
+  assert.equal('lane_wait' in written.private, false, 'no stamp is written');
+  const stored = { ...base, blockers: [OLD_WAIT], private: { ...base.private, lane_wait: { at, head: SHA_A } } };
+  assert.deepEqual(state.validateChild(stored), [], 'an older stamp still reads');
+  const cleared = state.applyPatch('child', stored, { blockers: [], private: { lane_wait: null } }, { writer, parentDoc: heldParent() });
+  assert.equal('lane_wait' in cleared.private, false);
+  assert.deepEqual(cleared.blockers, []);
+  assert.deepEqual(state.validateChild(cleared), []);
 });

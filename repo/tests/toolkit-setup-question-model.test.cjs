@@ -795,7 +795,7 @@ test('Claude Code settings show one row per setting, each recommending on its ow
     'Claude Code setting: Hide AI credit in commits/PRs?',
     'Claude Code setting: Let other sessions wake this one?',
     'Claude Code setting: Switch models without asking on a flag?',
-    'Claude Code setting: Read AGENTS.md too?',
+    'Claude Code setting: Read AGENTS.md (in all local repos) too?',
   ]);
   assert.deepEqual(settings.map((row) => row.key), ['claudeSettingAttribution', 'claudeSettingCrossSessionInbound', 'claudeSettingSwitchModelsOnFlag', 'claudeSettingAgentsMd']);
   for (const row of settings) {

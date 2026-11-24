@@ -357,3 +357,25 @@ test('owner UAT is limited to final-product steps on every current surface', () 
     assert.throws(() => ownerUatScopeContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);
   }
 });
+
+test('the setup skill carries the agent note for other stores, and nothing the owner reads advertises one', () => {
+  const skill = read('skills/toolkit-setup/SKILL.md');
+  const start = skill.indexOf('## Evidence store');
+  assert.ok(start >= 0, 'the Evidence store section exists');
+  const section = skill.slice(start, skill.indexOf('\n## ', start + 1));
+  for (const phrase of ['private', 'read back', 'sole copy', 'one writer at a time', 'programme records stay in the GitHub store']) {
+    assert.ok(section.includes(phrase), `the agent note says "${phrase}"`);
+  }
+  // The owner-facing texts: the card, the bank and How To Use name only the GitHub store.
+  const { governanceBankSpecs, renderGovernanceBank } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-bank.cjs'));
+  const adoption = { repository: 'example-owner/example-repo', store: { repository: 'example-owner/TRANSPORT-example-repo', create: true }, found_store: null, store_name: 'TRANSPORT-example-repo', parent: { create: true }, checks: [], visibility: 'private' };
+  const bankText = renderGovernanceBank(governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'example-owner/example-repo' }, adoption }));
+  const gateText = read('repo/scripts/toolkit-governance-gate.cjs');
+  const card = /const PICKER_OPTIONS = Object\.freeze\(\[[\s\S]*?\]\);/.exec(gateText)[0] + /const QUESTION = \[[\s\S]*?\];/.exec(gateText)[0];
+  // How To Use keeps its table of refused store kinds; it never carries the agent note's setup steps.
+  for (const [name, text] of [['bank', bankText], ['card', card], ['How To Use', read('repo/docs/HOW-TO-USE.md')]]) {
+    assert.doesNotMatch(text, /host's own tools|Agent note|Set the other store up/i, `${name} gives no setup advice for a non-GitHub store`);
+  }
+  for (const [name, text] of [['bank', bankText], ['card', card]]) assert.doesNotMatch(text, /folder|drive|onedrive/i, `${name} offers no folder or drive store`);
+  assert.match(card, /TRANSPORT-<repository name> store on GitHub, found or created/, 'the card names the store');
+});

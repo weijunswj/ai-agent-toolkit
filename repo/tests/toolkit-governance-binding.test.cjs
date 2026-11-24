@@ -561,7 +561,14 @@ test('B: one, several, none and a failed search; stores are judged on GitHub\'s 
 
   const two = discoverWith(ctx, [...base.slice(0, 1), [/^user\/repos/, found([storeRepo('TRANSPORT-example-repo'), storeRepo('TRANSPORT-shared')])],
     [/^repos\/example-owner\/TRANSPORT-(example-repo|shared)$/, found({ private: true, owner: { login: 'example-owner' } })], [/contents\/$/, layout]], 'two').result;
-  assert.deepEqual([two.stores.status, two.stores.recommended.repository, two.stores.alternatives.length], ['several', 'example-owner/TRANSPORT-example-repo', 1]);
+  assert.deepEqual([two.stores.status, two.stores.recommended.repository, two.stores.alternatives.length], ['one', 'example-owner/TRANSPORT-example-repo', 1],
+    'the repository\'s own store is the one recommendation; another store is only listed');
+  assert.match(discovery.describeDiscovery(two).join('\n'), /Other stores, used only when you name one: example-owner\/TRANSPORT-shared\./);
+
+  const sharedOnly = discoverWith(ctx, [...base.slice(0, 1), [/^user\/repos/, found([storeRepo('TRANSPORT-shared')])],
+    [/^repos\/example-owner\/TRANSPORT-shared$/, found({ private: true, owner: { login: 'example-owner' } })], [/contents\/$/, layout]], 'shared').result;
+  assert.equal(sharedOnly.stores.recommended, null, 'another repository\'s store is never recommended on its own');
+  assert.deepEqual(sharedOnly.stores.alternatives.map(entry => entry.repository), ['example-owner/TRANSPORT-shared']);
 });
 
 test('B: adoption lists what exists from the working tree and keeps the owner text', (t) => {

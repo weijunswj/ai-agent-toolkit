@@ -256,9 +256,9 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.
 
-## Toolkit setup - 1 question: Apply these defaults?
+## Toolkit setup - 1 question: Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay.
 
-Bank reference: 441G-WHVV-SX9W-SCKC
+Bank reference: MM3A-XDQ4-26M2-3MFR
 
 Setup applies the Toolkit default to 6 settings not set yet and keeps every other setting as it is.
 
@@ -284,10 +284,10 @@ Setup applies the Toolkit default to 6 settings not set yet and keeps every othe
 | 3.2 | Claude Code setting: Hide AI credit in commits/PRs? | Off (Claude Code default) | B. Turn on: Sets "attribution": false in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
 | 3.3 | Claude Code setting: Let other sessions wake this one? | Off (Claude Code default) | B. Turn on: Sets "crossSessionInbound": "accept" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
 | 3.4 | Claude Code setting: Switch models without asking on a flag? | On (Claude Code default) | A. Keep current | B. Turn off |
-| 3.5 | Claude Code setting: Read AGENTS.md too? | Off (Claude Code default) | B. Turn on: Sets "instructionFiles": "claude-md-and-agents-md" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
+| 3.5 | Claude Code setting: Read AGENTS.md (in all local repos) too? | Off (Claude Code default) | B. Turn on: Sets "instructionFiles": "claude-md-and-agents-md" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
 | 3.6 | Copy Toolkit's skills into Antigravity? | Not copied | B. Copy and keep updated: Copy Toolkit's skills into Antigravity and keep them current. (Toolkit default) | A. Keep current<br>C. Do not copy |
 
-Apply these defaults? Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
+Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay. Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
 
 ## Claude Code rows in full
 
@@ -503,9 +503,9 @@ Apply these defaults? Reply yes to apply the Setup applies column, or no to chan
 
 ---
 
-### 3.5 Claude Code setting: Read AGENTS.md too?
+### 3.5 Claude Code setting: Read AGENTS.md (in all local repos) too?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin and 2.1.277 to 2.1.284 under agents-md@builtin; setup writes the one your version reads, and nothing on an older version. Turn off removes this one setting whoever added it; the other settings are not touched.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin or agents-md@builtin, and 2.1.277 to 2.1.284 only under agents-md@builtin; setup writes cc-plugin-agents-md@builtin on 2.1.285 or later, agents-md@builtin on 2.1.277 to 2.1.284 or when it cannot tell the version, and nothing on an older version. Turn off removes this one setting whoever added it; the other settings are not touched.
 
 **Current:** Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 

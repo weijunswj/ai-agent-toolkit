@@ -58,8 +58,10 @@ class FakeGitHub {
 
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
 
-  addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [], labels = [] } = {}) {
-    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, labels, updated_at: this.tick() };
+  // An issue opened 30 days before the clock unless createdAt says otherwise.
+  addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [], labels = [], createdAt = null } = {}) {
+    const updated = this.tick();
+    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, labels, created_at: createdAt || new Date(this.clock - 30 * 24 * 3600 * 1000).toISOString(), updated_at: updated };
     if (state === 'closed') issue.closed_at = this.tick();
     this.issues.set(number, issue);
     if (parent) this.link(parent, number);
@@ -75,8 +77,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined, author = undefined, headRepository = undefined, committedAt = null } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, committedAt, ...(title === undefined ? {} : { title }),
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined, author = undefined, headRepository = undefined } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }),
       ...(author === undefined ? {} : { author }), ...(headRepository === undefined ? {} : { headRepository }) });
   }
 
@@ -107,7 +109,7 @@ class FakeGitHub {
     if (issue.state === 'closed' && !issue.closed_at) issue.closed_at = issue.updated_at;
     return {
       number: issue.number, id: issue.id, url: `https://api.github.com/repos/${this.repository}/issues/${issue.number}`, title: issue.title, body: issue.body, state: issue.state, state_reason: issue.state_reason || null, closed_at: issue.closed_at || null,
-      updated_at: issue.updated_at, comments: [...this.comments.values()].filter(comment => comment.issue === issue.number).length,
+      created_at: issue.created_at, updated_at: issue.updated_at, comments: [...this.comments.values()].filter(comment => comment.issue === issue.number).length,
       parent_issue_url: issue.parent ? `https://api.github.com/repos/${this.repository}/issues/${issue.parent}` : null,
       issue_dependencies_summary: { total_blocked_by: issue.blockedBy.length },
       sub_issues_summary: { total: issue.subs.length, completed: issue.subs.filter(n => this.issues.get(n)?.state === 'closed').length },
@@ -408,7 +410,7 @@ class FakeGitHub {
     }
     if (/p\d+: pullRequest/.test(body.query)) {
       const repository = { defaultBranchRef: { name: 'main' } };
-      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: `pullRequest { title${/\bcommittedDate\b/.test(body.query) ? ' commits { committedDate }' : ''} }`, variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
+      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: `pullRequest { title }`, variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
       return ok(200, { data: { repository } });
     }
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
@@ -449,18 +451,19 @@ class FakeGitHub {
       // Like GitHub, a field is returned only when the query asks for it.
       number: pr.number, ...(/\btitle\b/.test(body.query) ? { title: pr.title || '' } : {}), body: pr.body || '', state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
       mergedAt: pr.mergedAt, mergeCommit: pr.merged ? {oid:pr.head} : null,
-      commits: { nodes: [{ commit: { oid: pr.rollupOid, ...(/\bcommittedDate\b/.test(body.query) ? { committedDate: pr.committedAt ?? null } : {}), statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
+      commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
     } } } });
   }
 }
 
 // A child whose gate the controller assigned and, optionally, whose return it recorded and consumed.
-// A G1 acceptance first records a G2 review PASSED at `head`, the live PR head it is checked against.
+// A G1 acceptance first records a G2 review PASSED at `head`, the live PR head it is checked against;
+// a G2 consume is judged by a trusted PASS verdict at `head`, as the command line reads it from the PR.
 function gatedChild(state, doc, { role = 'G1', assignment = `${role.toLowerCase()}-a1`, returnId = null, verdict = null, writer = null, parentDoc = null, head = 'c'.repeat(40) } = {}) {
   let next = state.assignGate(doc, { assignment, role });
   if (returnId) next = state.recordReturn(next, { returnId, assignment });
   if (verdict === 'ACCEPT' && role === 'G1') next = state.applyPatch('child', next, { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head, verdict: 'PASSED' }] } }, { writer, parentDoc });
-  if (verdict) next = state.consumeReturn(next, { returnId, verdict, writer, parentDoc, liveHead: head });
+  if (verdict) next = state.consumeReturn(next, { returnId, verdict, writer, parentDoc, liveHead: head, review: { verdict: 'PASS', head, link: `verdict for ${head}` } });
   return next;
 }
 

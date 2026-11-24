@@ -4,8 +4,13 @@
 const crypto = require('node:crypto');
 const digest = text => crypto.createHash('sha256').update(text).digest('hex');
 const COMMENT_LIMIT = 60000;
-// Archive groups follow the graph's Status: optional tasks show, and archive, as LATER.
-const GROUPS = ['RETIRED', 'COMPLETED', 'LATER', 'NOW'];
+// Archive groups follow the first word of the graph's Status: every open task not in flight shows,
+// and archives, as QUEUED. A parent may still list a part of a legacy group (LEGACY_GROUPS) from
+// before the one queue: it is kept and redrawn empty.
+const GROUPS = ['RETIRED', 'COMPLETED', 'QUEUED', 'NOW'];
+const LEGACY_GROUPS = ['OPTIONAL', 'LATER'];
+// A graph part's fixed key: its group in lower case, then its part number.
+const GRAPH_KEY = new RegExp(`^graph-(?:${[...GROUPS, ...LEGACY_GROUPS].map(group => group.toLowerCase()).join('|')})-[1-9][0-9]*$`);
 const marker = key => `<!-- programme-page-archive key=${key} -->`;
 // `header` is the graph's two table header lines, from the renderer, so a copy reads like the page.
 function graphComments(rows, header) {
@@ -410,4 +415,4 @@ function markArchive(body, { before, remove } = {}, { parent = false } = {}) {
   return next;
 }
 
-module.exports = { GROUPS, digest, marker, graphComments, NOTE_MARKER_LINE, NOTE_KEY, NOTE_REASONS, noteArea, noteText, markArchive };
+module.exports = { GROUPS, LEGACY_GROUPS, GRAPH_KEY, digest, marker, graphComments, NOTE_MARKER_LINE, NOTE_KEY, NOTE_REASONS, noteArea, noteText, markArchive };

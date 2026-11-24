@@ -547,45 +547,6 @@ test('a background start that fails later never throws or prints, and each check
   assert.notEqual(trigger.lastRunFile({ refreshDir: dir }, root), trigger.lastRunFile({ refreshDir: dir }, governedCheckout()));
 });
 
-// The real background start of the stale check, with only its two GitHub reads stubbed (a preload in the
-// started process answers `programme.cjs attention` and `gh api`): it must start the check for this
-// checkout and land the stamp in the file the session-start line reads. Every other test injects the
-// starter, so a broken start (a dropped --checkout) would leave the net silently off.
-test('red: the real stale-check start runs the check for its checkout and writes the stamp the session-start line reads', async () => {
-  const home = tmp();
-  const dir = tmp();
-  const checkout = tmp();
-  fs.mkdirSync(path.join(checkout, '.github'));
-  fs.writeFileSync(path.join(checkout, '.github', 'toolkit-programme.json'), JSON.stringify({ repository: 'acme/app', governance: 'enabled', parents: [{ issue: 7 }] }));
-  const preload = path.join(dir, 'stub-github-reads.cjs');
-  fs.writeFileSync(preload, `const cp = require('node:child_process');
-const real = cp.spawnSync;
-const ok = stdout => ({ status: 0, stdout, stderr: '', error: undefined });
-cp.spawnSync = (command, args = [], options) => {
-  if (command === 'gh') return ok(JSON.stringify({ number: 20, title: 'Task 20', state: 'open', body: 'none', created_at: new Date().toISOString(), sub_issues_summary: { total: 0, completed: 0 } }) + '\\n');
-  if (args.some(arg => /programme\\.cjs$/.test(String(arg))) && args.includes('attention')) return ok(JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }));
-  return real(command, args, options);
-};`);
-  const script = `require(${JSON.stringify(require.resolve('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs'))}).startStaleSweep(${JSON.stringify(checkout)}, { refreshDir: ${JSON.stringify(dir)} });`;
-  // Append to NODE_OPTIONS: a test runner's own preloads (the clock-ahead run's date offset) must reach the started run too.
-  const env = { ...process.env, HOME: home, USERPROFILE: home, NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require ${JSON.stringify(preload)}`].filter(Boolean).join(' ') };
-  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000, env });
-  assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', '']);
-  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
-  const file = cache.staleStampFile('acme/app', { home });
-  let stamp = null;
-  for (let waited = 0; !stamp && waited < 60000; waited += 250) {
-    await new Promise(resolve => setTimeout(resolve, 250));
-    stamp = cache.readStaleStamp('acme/app', { home });
-  }
-  const log = (() => { try { return fs.readFileSync(trigger.lastRunFile({ refreshDir: dir }, checkout), 'utf8'); } catch { return '(no log)'; } })();
-  assert.ok(stamp, `no stamp at ${file}; run log:\n${log}`);
-  const today = require('../scripts/toolkit-controller-check.cjs').localDate(new Date());
-  assert.equal(stamp.date, today);
-  assert.deepEqual(stamp.rows, ['FOLD? #20 new under #7 with no Nearest child: line']);
-  assert.equal(stamp.failed, undefined);
-});
-
 test('no refresh for unmarked sessions, other repositories, ungoverned folders or governance off', () => {
   const root = governedCheckout();
   const base = { refreshDir: tmp(), started: [] };

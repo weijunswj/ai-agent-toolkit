@@ -2338,6 +2338,30 @@ test('agent-rules preflight names a governed-rules copy as a leftover and ignore
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: nested, pluginRoot: repoRoot }).status, 'not-managed', 'a repository with only its own rules is quiet');
 });
 
+// The global rules carry the n8n rules, so the n8n block older setups copied into AGENTS.md is a
+// leftover of its own kind, named as such; with a governed-rules copy beside it the note stays general.
+test('agent-rules preflight names an older n8n block in AGENTS.md as an n8n rules copy', () => {
+  const source = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
+  const n8nBlock = [
+    `<!-- AI-AGENT-TOOLKIT:${source}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`,
+    '## n8n Safety Router',
+    'Load `n8n-safety-router` before n8n work.',
+    `<!-- AI-AGENT-TOOLKIT:${source}:END N8N-AGENT-RULES-ADAPTER -->`,
+  ].join('\n');
+  const rows = [
+    ['n8n block alone', ['# Project rules', '', n8nBlock, ''], 'carries an n8n rules copy'],
+    ['n8n block with a governed-rules copy', [managedAgentsTemplate(), '', n8nBlock, ''], 'carries a governed-rules copy'],
+  ];
+  for (const [label, lines, detail] of rows) {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    writeFile(path.join(root, 'AGENTS.md'), lines.join('\n'));
+    const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot });
+    assert.equal(result.status, 'needs-attention', label);
+    assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind, finding.detail]), [['AGENTS.md', 'leftover', detail]], label);
+  }
+});
+
 const NEVER_HALTING = /STOP|stop before repository work|ask the user/i;
 
 // The files a Toolkit source checkout is known by: none of them is an instruction template.
@@ -2578,11 +2602,11 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
         assert.match(message, /still carries Toolkit instruction copies \(AGENTS\.md\) from an older setup\. Governance is not on here/);
         assert.match(message, /toolkit-leftover-files\.cjs scan\) lists them, and removing them is the owner's choice; nothing is due in this task/);
         assert.doesNotMatch(message, /toolkit-governance-cleanup|before this task ends/);
-        // Where governance is on, the note names the owner's Clean up answer and still asks nothing of
-        // this task, matching the bank's Keep current recommendation.
+        // Where governance is on, the note names the owner's governance answer and still asks nothing of
+        // this task.
         const governed = formatAgentRulesPreflight(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, governanceEnabled: () => true }));
-        assert.match(governed, /\(AGENTS\.md\) that the installed Toolkit now delivers itself\. Removing them is the owner's choice: `refresh governance` asks about them/);
-        assert.match(governed, /only a Clean up answer opens the one cleanup pull request; nothing is due in this task/);
+        assert.match(governed, /\(AGENTS\.md\) that the installed Toolkit now delivers itself\. Removing them is the owner's choice: `refresh governance` shows them/);
+        assert.match(governed, /only the owner's answer to it removes them, for one cleanup pull request; nothing is due in this task/);
         // The fixture has no plain-text check, which a governed repository carries: that part is due.
         assert.match(governed, /nothing is due in this task\. Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from/);
         assert.doesNotMatch(governed, /broken Toolkit markers|toolkit-governance-cleanup/);
@@ -2634,10 +2658,10 @@ test('SessionStart notice: broken markers keep the checks part, and ERROR names 
   assert.match(tooOld, /Also, this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or may come from a newer Toolkit \(99\.0\.0\) than the running copy \(3\.0\.0\); next step: refresh Toolkit \(setup toolkit\) before this task ends\./);
   assert.doesNotMatch(tooOld, /repository-agent-rules|\(Toolkit instruction copies\)/);
   const unusable = preflight({ governanceStateAt: () => ({ state: 'ERROR', reason: 'merged-binding-invalid', minToolkit: null }) });
-  assert.match(unusable, /Removing them is the owner's choice: `refresh governance` asks about them once the programme file can be used\. Nothing is due in this task\./);
+  assert.match(unusable, /Removing them is the owner's choice: `refresh governance` shows them once the programme file can be used\. Nothing is due in this task\./);
   assert.match(unusable, /refresh them with repository-agent-rules before this task ends/);
   const enabled = preflight({ governanceStateAt: () => ({ state: 'ENABLED', reason: null, minToolkit: null }) });
-  assert.match(enabled, /`refresh governance` asks about them \(Toolkit instruction copies\), and only a Clean up answer opens the one cleanup pull request/);
+  assert.match(enabled, /`refresh governance` shows them \(Toolkit instruction copies\), and only the owner's answer to it removes them, for one cleanup pull request/);
   for (const message of [withChecks, tooOld, unusable, enabled]) assert.doesNotMatch(message, NEVER_HALTING);
 });
 
@@ -3389,7 +3413,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell|Monitor|mcp__terminal__run_in_terminal', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|ScheduleWakeup|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|ScheduleWakeup|SendMessage|Workflow|mcp__.*)$)']);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
   // The governance hook in two entries: state-changing tools (held if the hook cannot start) and the rest.
   for (const index of [2, 3]) assert.match(claudeHooks.hooks.PreToolUse[index].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
@@ -3397,10 +3421,12 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.match(claudeHooks.hooks.UserPromptSubmit[0].hooks[0].command, /toolkit-governance-hook\.cjs" --event UserPromptSubmit$/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
-  // The only turn-end hook is the programme checkpoint: one command, a 30-second timeout and no matcher.
-  for (const [hooks, root] of [[codexHooks, 'PLUGIN_ROOT'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT']]) {
-    assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
-  }
+  // The turn-end hooks: the programme checkpoint (30-second timeout, no matcher) on both hosts, then on
+  // Claude Code only the owed check, which may stop a controller's turn.
+  const checkpointStop = root => ({ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 });
+  assert.deepEqual(codexHooks.hooks.Stop, [{ hooks: [checkpointStop('PLUGIN_ROOT')] }]);
+  assert.deepEqual(claudeHooks.hooks.Stop, [{ hooks: [checkpointStop('CLAUDE_PLUGIN_ROOT'),
+    { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-owed-check-hook.cjs"', timeout: 30 }] }]);
   // The after-tool checkpoint hook runs the same script, only to mark a GitHub write for the turn-end
   // programme refresh. Claude Code also reads the answer tapped on the governance card after the tool runs.
   for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {

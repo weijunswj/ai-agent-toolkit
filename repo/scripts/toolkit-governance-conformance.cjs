@@ -1,6 +1,6 @@
 'use strict';
 
-// `toolkit governance check`: a read-only conformance report for one repository. It never
+// The governance check (`toolkit-governance.cjs check`): a read-only conformance report for one repository. It never
 // writes anything. Exit codes: 0 conformant, 1 drift, incomplete materials or a decision still
 // pending, 2 the state could not be read, 3 unverified (no drift, but an online GitHub read could not
 // confirm a setting; the report names the repository admin's step).
@@ -175,10 +175,7 @@ function appFindings(state, options) {
     offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) };
   const appState = governanceApp.presence(slug, read);
   const others = governance.enabledRepositories(options).filter(name => name.toLowerCase() !== slug.toLowerCase());
-  // The owner type picks the App page, so it is read only when the setup steps will show.
-  const setup = state.state === 'ENABLED' && !(appState.variable === 'found' || appState.secret === 'found');
-  const owner = setup ? governanceApp.ownerType(slug, read) : null;
-  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others, owner);
+  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others);
   return found ? [found] : [];
 }
 
@@ -429,7 +426,7 @@ function unverifiedExit(findings, options = {}, environment = process.env) {
   return !offline && findings.some(entry => entry.severity === 'unverified') ? 3 : 0;
 }
 
-const UNVERIFIED_STEP = 'A repository admin signs in with `gh auth login` and runs `toolkit governance check` again; until then nothing here counts as conformant.';
+const UNVERIFIED_STEP = 'A repository admin signs in with `gh auth login` and runs the governance check (`toolkit-governance.cjs check`) again; until then nothing here counts as conformant.';
 
 function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
   const code = exitCode === 2 ? 2 : (findings.some(entry => entry.severity === 'drift') ? 1 : exitCode);

@@ -12,13 +12,52 @@ test('what the agent is told: the user answers in chat or on the card, and is ne
   const refused = tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'node repo/scripts/toolkit-governance.cjs enable' } }).deny;
   const question = hold(ctx).decide({ cwd: repo, prompt: 'hello', sessionId: 's1' }).context;
   for (const text of [line, refused, question]) {
-    assert.match(text, /`toolkit governance enable` or `toolkit governance disable` as (?:a|their own) message/, text);
+    // The question the user reads offers yes, no or later; agent texts name the commands to recognise.
+    assert.match(text, text === question ? /^Reply yes, no or later\. /m : /`toolkit governance enable` or `toolkit governance disable` as (?:a|their own) message/, text);
     assert.doesNotMatch(text, /run the command|in (?:your|their) own terminal|toolkit-governance\.cjs/, text);
     assert.ok(text.endsWith(gate.NEVER_OWNER), text);
   }
   // An agent cannot forge an asked run either: the file lives with Toolkit's user state.
   const forged = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
   assert.ok(tools(ctx).decide({ tool_name: 'Write', cwd: repo, tool_input: { file_path: forged } }).deny);
+});
+
+// Owner test, 23 Nov: the agent passed the answer commands on to the owner ("or send `toolkit
+// governance enable`") and quoted their message back ("because 'refresh governance' isn't a yes, no
+// or later"). The owner is asked yes, no or later only; the commands are for agents to recognise.
+test('the owner is offered only yes, no or later: agent texts that name the commands say never to show them, and a reply that is not an answer is never quoted back', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const question = hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 's1' }).context;
+  assert.doesNotMatch(noticeOf(question), /toolkit governance (?:enable|disable)/, 'the question the owner reads names no command');
+  assert.match(noticeOf(question), /^Reply yes, no or later\. /m);
+  const reply = hold(ctx).decide({ cwd: repo, prompt: 'what does that mean?', sessionId: 's1' }).context;
+  assert.match(reply, /- If it is about something else, a question, or unclear, record nothing and carry on with what they asked\. Do not ask the governance question again or quote their message back; if you mention it, say in plain words only that no governance answer was recorded\./);
+  const line = gate.sessionLine(repo, { registryOptions: ctx.options });
+  const refused = tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'node repo/scripts/toolkit-governance.cjs enable' } }).deny;
+  for (const text of [reply, line, refused, gate.LATER_CONTEXT, gate.PICKER_UNCOUNTED]) {
+    assert.match(text, /`toolkit governance enable` or `toolkit governance disable`/, text);
+    assert.match(text, /[Nn]ever show the user these commands or ask them to type one/, text);
+  }
+});
+
+// Owner test 2, 23 Nov: the first message of the chat was "refresh governance", so the owner got the
+// session question (a card in Claude Code) and then the bank. The bank asks whether to turn
+// governance on, so a first message that asks for the bank gets no session question, now or later.
+test('a first message that asks for the bank gets no session question: the bank is the one ask', (t) => {
+  const ctx = scratch(t);
+  for (const [index, phrase] of ['refresh governance', 'toolkit governance', 'Setup governance.'].entries()) {
+    const repo = gitRepo(ctx, `bank-first-${index}`);
+    const first = hold(ctx).decide({ cwd: repo, prompt: phrase, sessionId: `s${index}` });
+    assert.equal(first.action, 'pass');
+    assert.ok(!asksIn(first), `${phrase}: no session question`);
+    assert.equal(first.question, undefined, `${phrase}: no card`);
+    const next = hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: `s${index}` });
+    assert.ok(!asksIn(next), 'not asked on a later message either');
+    assert.doesNotMatch(String(next.context || ''), / ANSWER [0-9a-f]{32}/, 'no session-question reply ticket');
+  }
+  // Any other first message still gets the question.
+  assert.ok(asksIn(hold(ctx).decide({ cwd: gitRepo(ctx, 'work-first'), prompt: 'fix the login bug', sessionId: 'w1' })));
 });
 
 test('H-08: a decision made at the terminal ends the question, and nothing is handed back', (t) => {

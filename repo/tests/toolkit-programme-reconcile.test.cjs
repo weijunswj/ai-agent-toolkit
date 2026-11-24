@@ -1318,10 +1318,10 @@ test('older classes read as COMMITTED and sort by priority like any task, are re
   assert.deepEqual(legacy.holds, []);
   assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), true, 'the old per-class numbers tie, so the pass reorders');
   assert.deepEqual(github.issues.get(7).subs, [8, 11, 12, 9, 10], 'open tasks by order, then child number, then the finished one');
-  assert.match(legacy.findings.find(entry => entry.code === 'ORDER_TIE').detail, /#8, #11, #12 share priority order 0, so child number decides\. Controller: set a distinct order/);
+  assert.match(legacy.findings.find(entry => entry.code === 'ORDER_TIE').detail, /#8, #11, #12 share order 0 in the other step of the queue, so child number decides\. Controller: set a distinct order/);
   const finding = legacy.findings.find(entry => entry.code === 'CLASS_LEGACY');
   assert.ok(finding, 'CLASS_LEGACY is reported');
-  assert.match(finding.detail, /#12 CORE, #9 CORE, #8 HARDENING, #11 LATER read as COMMITTED and sort like any other task, by group, priority \(order\) and child number/);
+  assert.match(finding.detail, /#12 CORE, #9 CORE, #8 HARDENING, #11 LATER read as COMMITTED and sort like any other task, in work order and then child number/);
   assert.doesNotMatch(finding.detail, /kept in their old|moves no task/);
   assert.match(finding.detail, /apply it whole with update-parent/);
   assert.deepEqual(finding.patch.outcomes.map(entry => [entry.issue, entry.class, entry.order]),
@@ -1495,12 +1495,12 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.equal(github.mutations(), 0);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'LATER by priority order and then child number, OPTIONAL, COMPLETED, then RETIRED');
+  assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'the queue by order and then child number, optional tasks last, then COMPLETED, then RETIRED');
   assert.deepEqual(github.issues.get(8).subs, [17, 16]);
   const settled = reconciler().run();
   assert.equal(settled.summary, 'No changes');
   assert.match(settled.next_action, /^Controller: decide on 4 finding\(s\) the reconciler does not change/, 'both priority ties and the completed task with no merged PR wait on the controller');
-  assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#12, #16', '#9, #14, #15']);
+  assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#9, #14, #15', '#12, #16'], 'ties in queue order: other work, then the last step');
 });
 
 test('native sub-issues follow the status bands: a task in progress moves ahead of a queued task of higher priority', () => {
@@ -1508,14 +1508,14 @@ test('native sub-issues follow the status bands: a task in progress moves ahead 
   const { github, store, reconciler } = setup({ repository: 'other/tool', parentIssue: 7, outcomes,
     issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: 7 }); } });
   reconciler().run({ apply: true });
-  assert.deepEqual(github.issues.get(7).subs, [8, 9], 'two LATER tasks by priority');
+  assert.deepEqual(github.issues.get(7).subs, [8, 9], 'two queued tasks by order');
   const parentDoc = store.read('parent', 7).doc;
   store.mutate('child', 8, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: ['waits for #9'] }) });
   store.mutate('child', 9, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE' }) });
   const dry = reconciler().run();
   assert.deepEqual(dry.findings.filter(finding => finding.code === 'NATIVE_ORDER_DRIFT').map(finding => finding.issue), [7]);
   reconciler().run({ apply: true });
-  assert.deepEqual(github.issues.get(7).subs, [9, 8], 'NOW · IN PROGRESS, then NOW · QUEUED');
+  assert.deepEqual(github.issues.get(7).subs, [9, 8], 'NOW · IN PROGRESS, then the blocked task in the queue');
 });
 
 test('merged PRs with green checks list open issues for the controller without closing them', () => {
@@ -1690,7 +1690,8 @@ test('G0-only acceptance is named but cannot count as merged implementation comp
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const report = reconciler().run();
     const accepted = gate !== 'G0';
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: false, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
+    // A G1 acceptance needs a recorded G2 PASS, and a G2 acceptance records its PASS in the same write.
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: false, uat: null, review: gate === 'G0' ? null : 'PASSED' }]);
     const finding = report.findings.find(entry => entry.code === 'READY_TO_CLOSE');
     assert.equal(finding.gate, gate);
     assert.equal(finding.accepted, accepted);

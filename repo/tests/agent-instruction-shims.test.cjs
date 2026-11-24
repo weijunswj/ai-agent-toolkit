@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { controllerText } = require('./support/controller-text.cjs');
-const { findBlocks, bodyDigest, blockState } = require('../scripts/toolkit-managed-block.cjs');
+const { findBlocks } = require('../scripts/toolkit-managed-block.cjs');
 const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -20,7 +20,6 @@ const governedPath = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
 const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
-const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
 const forbiddenDefaultPromptPhrases = ['GitHub PR Completion Rules', 'GITHUB APPROVAL NEEDED', 'VERSION CONTROL APPROVAL NEEDED',
   'REMOTE APPROVAL NEEDED', 'LOCAL CHANGE APPROVAL NEEDED', 'PR: none yet', 'PR lane', 'remote source-of-truth', 'GitHub PR URL',
   'Should I push this branch'];
@@ -29,23 +28,6 @@ function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');
 }
 const exists = relPath => fs.existsSync(path.join(repoRoot, relPath));
-
-function onlyBlock(relPath, name) {
-  const { blocks, errors } = findBlocks(readText(relPath));
-  assert.deepEqual(errors, [], relPath);
-  const found = blocks.filter(block => block.name === name);
-  assert.equal(found.length, 1, `${relPath}: one ${name} block`);
-  return found[0];
-}
-
-function assertCurrentBlock(relPath, name, source, body) {
-  const block = onlyBlock(relPath, name);
-  assert.equal(block.format, 2, `${relPath}: v2 markers`);
-  assert.equal(block.version, VERSION, `${relPath}: package version`);
-  assert.equal(block.digest, bodyDigest(block.body), `${relPath}: digest matches body`);
-  assert.equal(blockState(block, { source, name, version: VERSION, body }), 'current', relPath);
-  return block;
-}
 
 test('the rule sources exist and the superseded sources and templates are gone', () => {
   for (const relPath of [globalPath, governedPath, n8nAdapterPath, 'repo/contracts/agent-rules/n8n-safety-rules.md',
@@ -148,10 +130,23 @@ test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists
   assert.match(skill, /remove a `GEMINI\.md` that holds only the old Toolkit `GEMINI\.SHIM` block/);
 });
 
-test('the n8n adapter template is generated from its source and stays compact and fail-closed', () => {
+// Claude Code reads AGENTS.md itself where a repository has no CLAUDE.md, and reads both while its
+// "Read AGENTS.md as well as CLAUDE.md" setting is on, so calling the shim expected everywhere sent
+// agents to add a CLAUDE.md nobody needed.
+test('the CLAUDE.md shim is expected only where Claude Code would otherwise miss AGENTS.md', () => {
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  const check = skill.split('## Cheap state check')[1].split('\n## ')[0];
+  assert.match(check, /A `CLAUDE\.md` that loads `AGENTS\.md` is expected only when Claude Code would otherwise miss it: the repository has its own `AGENTS\.md` and its own `CLAUDE\.md` \(or `\.claude\/CLAUDE\.md` or `CLAUDE\.local\.md`\), and Claude Code's "Read AGENTS\.md as well as CLAUDE\.md" setting is off\./);
+  assert.doesNotMatch(skill, /where the repository has its own `AGENTS\.md`, a `CLAUDE\.md` that loads it/);
+  assert.match(skill, /A missing `CLAUDE\.md` is created from its template only when the user asks for one/);
+  // The setting's name as Toolkit's own Claude Code settings show it.
+  const { SETTINGS } = require('../scripts/toolkit-claude-user-settings.cjs');
+  assert.ok(SETTINGS.some(spec => spec.label === 'Read AGENTS.md as well as CLAUDE.md'), 'the skill names the setting by its label');
+});
+
+test('the n8n adapter source, which the global rules carry, stays compact and fail-closed', () => {
   const body = readText(n8nAdapterPath).trimEnd();
-  const block = assertCurrentBlock('skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md', 'N8N-AGENT-RULES-ADAPTER', n8nAdapterPath, body);
-  assert.ok(Buffer.byteLength(block.body) < 700);
+  assert.ok(Buffer.byteLength(body) < 700);
   assert.match(body, /stop and load `skills\/n8n-safety-router` before planning or editing/i);
   assert.match(body, /skill or its full rules are unavailable, stop and report the limitation/i);
   for (const term of [/live n8n/i, /Docker/, /import\/export/, /activation/, /execution/, /publish\/unpublish/, /credential/, /deployment/, /production/]) assert.match(body, term);
@@ -531,4 +526,12 @@ test('the sync check refuses a linked rule folder or rule file without following
   assert.equal(file.status, 1, file.stderr);
   assert.match(file.stderr, /FAIL: \.agents\/rules\/linked\.md is not allowed/);
   assert.equal(fs.readFileSync(path.join(outside, 'hidden.md'), 'utf8'), '# Rules\n');
+});
+
+// Owner rule (23 November): a link the user gives is opened and inspected directly, and the reply
+// says what was not inspected. It sits inside the accuracy principle, so the installed rules gain no line.
+test('the global rules say to open a given link yourself and name what was not inspected', () => {
+  const accuracy = fs.readFileSync(path.join(repoRoot, globalPath), 'utf8').split(/\r?\n/).filter(line => line.startsWith('- **Accuracy first:**'));
+  assert.equal(accuracy.length, 1);
+  assert.ok(accuracy[0].includes('Open a given link yourself (a PR: metadata, files, diff, checks, comments, review threads); say what you did not inspect.'));
 });
