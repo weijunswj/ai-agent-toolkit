@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claude Code PreToolUse hook for Bash and PowerShell: refuses a git commit or gh pr create/edit/merge that carries AI
+// Claude Code PreToolUse hook for every tool that runs a command line (Bash, PowerShell, Monitor and the
+// desktop app's Terminal panel tool, `mcp__terminal__run_in_terminal`): refuses a git commit or gh pr create/edit/merge that carries AI
 // attribution, a force push in a governed or guarded repository or to an evidence store, and a push or new pull
 // request whose changes carry a credential (see toolkit-attribution-guard.cjs).
 // A shell call whose shape it cannot read is refused when its raw input could commit, push or touch a
