@@ -252,7 +252,11 @@ test('setup refreshes Toolkit helper definitions made stale by a stack registry 
   const result = claudeSetup(root, setupRepo, origin);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Toolkit helpers: updated this run \(backup: .+\)/);
-  assert.deepEqual(policy.decide(launch, {}), {}, 'the hook policy admits the refreshed helper');
+  // In a gate run the helper also passes the cost test against its lead (Opus high), read from a lead
+  // transcript started after the refresh.
+  const lead = path.join(root, 'lead.jsonl');
+  fs.writeFileSync(lead, `${JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' })}\n`);
+  assert.deepEqual(policy.decide({ ...launch, transcript_path: lead }, {}), {}, 'the hook policy admits the refreshed helper');
 });
 
 test('the Projects controller skill check compares the synced claude.ai copy with the repo and blocks nothing', (t) => {

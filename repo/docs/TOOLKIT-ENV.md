@@ -31,25 +31,32 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 
 ## Your keys in your editor
 
-`edit` writes a fresh private file from the store every time, in your saved order with your own comment lines, and opens it in the app Windows uses for `.env` files (your choice in Settings > Apps > Default apps, or "Open with"). It opens through the Windows shell by full path, never through `cmd` or a bare program name; if no app is set, Windows asks which one to use. When that app is VS Code, VS Code Insiders, VSCodium or Cursor, Toolkit starts it by its own path with `--new-window`, so the file opens in a window with no folder, where workspace extensions and IDE links to agents do not attach. The app starts with system, folder and display variables only, so an agent's markers, session tokens and keys never reach a freshly started editor, its terminals or its extensions.
+`edit` writes a fresh private file from the store (or, while an edit is open, opens that same tab again), in your saved order with your own comment lines, and opens it in the app Windows uses for `.env` files (your choice in Settings > Apps > Default apps, or "Open with"). It opens through the Windows shell by full path, never through `cmd` or a bare program name; if no app is set, Windows asks which one to use. When that app is VS Code, VS Code Insiders, VSCodium or Cursor, Toolkit starts it by its own path with `--new-window`, so the file opens in a window with no folder, where workspace extensions and IDE links to agents do not attach. The app starts with system, folder and display variables only, so an agent's markers, session tokens and keys never reach a freshly started editor, its terminals or its extensions.
 
 - Change a value or add a `NAME=value` line. Type values without quotes; spaces at either end are dropped.
 - Save. A small helper started with the file applies changes and additions once the file has stopped changing for about a second and a half. It watches only that file, prints nothing and writes no log.
 - Delete a line to remove that key. The helper removes it on that save, with no question, and the `# Status:` line says "Removed: NAME". Type the line back and save to add the key again.
+- Leave a line empty (`NAME=`) to keep a place for a key you will fill in later. It is skipped: nothing is stored, a stored value stays as it is, the other lines are applied, and the next tab shows `NAME=` again. Delete the line when you no longer want the place kept.
 - When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, deletes the file and lists what changed, added and removed, by name only, with any app entry that used a removed key.
 
-A save is applied whole or not at all. Nothing is saved, and the `# Status:` line at the top of the file says why, when:
+The file itself says what happened to a save that was refused or skipped a line: a `# Status:` line at the top, then one `#  > line N: ...` note for each line it is about (key names and line numbers only, never a value; line numbers count the file as it is now). An ordinary save leaves the tab alone.
 
-- a line is not `NAME=value`, has no value, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
+A save is applied whole or not at all. Nothing is saved, and the status block at the top of the file says why, when:
+
+- a line is not `NAME=value`, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
 - the file was saved as UTF-16 (save it as UTF-8);
 - the save would remove every key (keep at least one key line; delete the last keys by hand in Windows Credential Manager);
-- a key changed elsewhere (`set`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+- a key changed elsewhere (`set`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across: the refused tab is kept as an older tab, with your typed lines and a note naming the lines that differ, until your next "done".
 
 When Toolkit writes the status line, your editor may reload the file or say it changed; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
 
 A key added elsewhere while the tab is open is never removed by it. A value that one line cannot show exactly (a line break, spaces at either end, or wrapping quotes) appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
 
-Every `edit` wipes the earlier file first, so the new tab always shows what is stored now. A save from an older tab is never applied: the file it writes is wiped, and the next result says to use the newest tab. A save that was not applied when you start a new edit is not carried over, and the result says so. The file is overwritten with zeros, then deleted, at "done" or 30 minutes after its last save.
+There is one edit tab at a time. Asking for your keys again while an edit is open opens that same tab again: a save not applied yet is applied first, and nothing you typed is replaced. A new file, showing what is stored now, is made only when no edit is open.
+
+Any other edit file, such as an ended tab your editor brought back, is an older tab, and a save in it is never applied. If its lines all match what is stored it is deleted. Otherwise Toolkit keeps it, with its editor copies, writes a `NOT SAVED` status block into it naming the lines that differ, and `status`, `edit` and "done" name those keys. Copy those lines into your current tab and save there. The older tab is deleted at the first "done" after one of those commands has shown it to you.
+
+The open edit's file is overwritten with zeros, then deleted, at "done" or 30 minutes after its last save. That 30-minute close applies a save not applied yet first; a tab whose last save was refused is kept as an older tab instead, so your typing is not lost.
 
 Editors can keep their own copies of what you type, so every "done" (and the 30-minute end) says to close the tab without saving, in words for the app the file opened in:
 
