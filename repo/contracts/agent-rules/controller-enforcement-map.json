@@ -336,6 +336,18 @@
     },
     {
       "file": "repo/controller/principles.md",
+      "rule": "**Hook creation:**",
+      "covers": "CI refuses a hooks.json with no harness, a hook command with no scope row, a hook on an event its row does not name and justify, a row naming a hard rule off the closed list, a script serving two harnesses, a module two harnesses load with no policy or library row or holding a harness's tool names, environment names or output fields, a require it cannot follow, and a known-open list that grows or keeps a clean item. Whether a rule really is a hard rule stays a controller and review judgement.",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/check-hook-scope.cjs",
+          "test": "repo/tests/hook-scope.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
       "covers": "Gate assignments: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. In Claude Code the turn-end owed check stops the controller's turn once for each new CLOSE_DUE, each finished side session the desktop app shows unarchived, and each gate launch or archive with no gate-session record. Sessions on other hosts, and whether the final message was read in full and acted on, stay instruction text.",
       "enforced_by": [
