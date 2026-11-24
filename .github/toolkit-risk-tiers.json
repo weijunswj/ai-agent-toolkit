@@ -25,6 +25,7 @@
     "repo/contracts/claude-projects/**",
     "repo/contracts/controller-kernel/**",
     "repo/contracts/toolkit-local-bridge/**",
+    "repo/contracts/hooks/**",
     "skills/repository-agent-rules/repo-local/**",
     "skills/toolkit-setup/**",
     "skills/toolkit-env/**",
