@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const childProcess = require('node:child_process');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const report = require('../scripts/workspace-residue-report.cjs');
@@ -71,6 +72,60 @@ function buildFixture() {
   // The primary checkout sits on a lane branch, so the default branch is listed and must be kept.
   git(repo, ['switch', '-q', '-c', 'lane/active']);
   return { repo, merged, dirty, ignored, locked, unmerged, gone, host };
+}
+
+// A checkout on main whose primary is on lane/primary, with one extra worktree per name. Each worktree
+// is on its own lane branch at the base commit; spaces in a name become dashes in its branch.
+function makeCheckout(names) {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-residue-')));
+  tempFolders.push(root);
+  const repo = path.join(root, 'repo');
+  fs.mkdirSync(repo);
+  git(repo, ['init', '-q', '-b', 'main']);
+  git(repo, ['config', 'user.email', 'test@example.invalid']);
+  git(repo, ['config', 'user.name', 'Test']);
+  git(repo, ['config', 'commit.gpgsign', 'false']);
+  fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+  git(repo, ['add', '.']);
+  git(repo, ['commit', '-q', '-m', 'base']);
+  git(repo, ['switch', '-q', '-c', 'lane/primary']);
+  const paths = {};
+  for (const name of names) {
+    paths[name] = path.join(repo, '.tmp', 'worktrees', name);
+    git(repo, ['worktree', 'add', '-q', '-b', `lane/${name.replace(/ /g, '-')}`, paths[name]]);
+  }
+  return { repo, paths };
+}
+
+// Checkouts shared by the tests that only read them. A test that changes a checkout builds its own.
+let lists = null;
+function listFixture() {
+  if (!lists) lists = makeCheckout(['one', 'two', 'three']);
+  return lists;
+}
+
+let singles = null;
+function singleFixture() {
+  if (!singles) {
+    singles = makeCheckout(['ready', 'dirty', 'with space']);
+    fs.writeFileSync(path.join(singles.paths.dirty, 'scratch.txt'), 'kept\n');
+  }
+  return singles;
+}
+
+// Worktrees made at fixed times: fresh 2.5 hours before NOW, old 30 hours before, and gone with its folder removed.
+const HOUR_MS = 60 * 60 * 1000;
+const NOW = Date.parse('2026-11-23T12:00:00Z');
+let ages = null;
+function ageFixture() {
+  if (!ages) {
+    ages = makeCheckout(['fresh', 'old', 'gone']);
+    const before = (hours) => new Date(NOW - hours * HOUR_MS);
+    fs.utimesSync(path.join(ages.paths.fresh, '.git'), before(2.5), before(2.5));
+    fs.utimesSync(path.join(ages.paths.old, '.git'), before(30), before(30));
+    fs.rmSync(ages.paths.gone, { recursive: true, force: true });
+  }
+  return ages;
 }
 
 test('the report sorts worktrees and branches into ready to remove and look first, and changes nothing', () => {
@@ -155,4 +210,178 @@ test('the report refuses a folder that is not a checkout, an unknown base and un
   assert.match(err2.text(), /is not known here/);
   assert.throws(() => report.parseArgs(['--delete']), /Unknown argument/);
   assert.throws(() => report.parseArgs(['--repo']), /needs a value/);
+});
+
+test('the time budget stops the worktree loop, lists the rest as not checked and marks the report incomplete', () => {
+  const f = listFixture();
+  let now = 0;
+  const result = report.collect(f.repo, 'main', { budgetMs: 1000, nowMs: () => now, onWorktree: () => { now += 1500; } });
+  assert.equal(result.complete, false);
+  assert.equal(result.worktrees.length, 3);
+  assert.equal(result.worktrees.filter((item) => item.checked).length, 1);
+  for (const item of result.worktrees.filter((entry) => !entry.checked)) {
+    assert.equal(item.ready, false);
+    assert.equal(item.changes, null);
+    assert.deepEqual(item.reasons, ['not checked (time budget reached)']);
+  }
+  assert.match(report.render(result), /Stopped at the time budget: 2 worktrees not checked; run again with a larger --budget-ms\./);
+  assert.equal(report.collect(f.repo, 'main').complete, true, 'a run inside the default budget is complete');
+});
+
+test('each git call in the worktree loop gets the time left as its timeout, never under a second', () => {
+  const f = listFixture();
+  let now = 0;
+  const calls = [];
+  const original = childProcess.spawnSync;
+  childProcess.spawnSync = (command, args, options) => {
+    calls.push({ name: args[0], timeout: options.timeout, elapsed: now });
+    return original(command, args, options);
+  };
+  let result;
+  try {
+    result = report.collect(f.repo, 'main', { budgetMs: 10000, nowMs: () => now, onWorktree: () => { now += 9500; } });
+  } finally {
+    childProcess.spawnSync = original;
+  }
+  // The first worktree gets the whole budget, the second gets 500 ms left (raised to 1000), the third is not checked.
+  // Branch checks run after the budget is spent and are not part of the loop.
+  const loop = calls.filter((call) => ['status', 'merge-base'].includes(call.name) && call.elapsed < 10000);
+  assert.deepEqual(loop.map((call) => call.timeout), [10000, 10000, 1000, 1000]);
+  assert.equal(result.complete, false);
+});
+
+test('--budget-ms must be a whole number of at least 1000 milliseconds, and defaults to 60000', () => {
+  assert.equal(report.parseArgs([]).budgetMs, 60000);
+  assert.equal(report.parseArgs(['--budget-ms', '1000']).budgetMs, 1000);
+  for (const value of ['5', 'abc', '1.5']) {
+    assert.throws(() => report.parseArgs(['--budget-ms', value]), /--budget-ms needs a whole number of milliseconds, at least 1000\./);
+  }
+  const err = sink();
+  assert.equal(report.main(['--budget-ms', '5'], { out: sink(), err }), 2);
+  assert.match(err.text(), /^--budget-ms needs a whole number of milliseconds, at least 1000\./);
+});
+
+test('text mode writes each worktree line as soon as it is checked, and each line once', () => {
+  const f = listFixture();
+  const events = [];
+  let text = '';
+  const original = childProcess.spawnSync;
+  childProcess.spawnSync = (command, args, options) => {
+    if (args[0] === 'status') events.push('check');
+    return original(command, args, options);
+  };
+  try {
+    const out = { write: (chunk) => { events.push(chunk); text += chunk; return true; } };
+    assert.equal(report.main(['--repo', f.repo, '--base', 'main'], { out, err: sink() }), 0);
+  } finally {
+    childProcess.spawnSync = original;
+  }
+  const lastCheck = events.lastIndexOf('check');
+  const firstLine = events.findIndex((event) => event.startsWith('- ') && event.includes('.tmp/worktrees/'));
+  assert.ok(lastCheck > 0 && firstLine >= 0 && firstLine < lastCheck, 'a worktree line is written before the last worktree is checked');
+  assert.equal(text.split('.tmp/worktrees/one [').length - 1, 1, 'each worktree line is written once');
+  assert.doesNotMatch(text, /Stopped at the time budget/);
+});
+
+test('the usage line lists the budget, age and worktree options', () => {
+  const out = sink();
+  assert.equal(report.main(['--help'], { out, err: sink() }), 0);
+  for (const option of ['[--budget-ms <n>]', '[--min-age-hours <n>]', '[--worktree <path>]']) {
+    assert.ok(out.text().includes(option), option);
+  }
+});
+
+test('each worktree reports its age in whole hours, and null when its .git file cannot be read', () => {
+  const f = ageFixture();
+  const byName = new Map(report.collect(f.repo, 'main', { nowMs: () => NOW }).worktrees.map((item) => [path.basename(item.path), item]));
+  assert.equal(byName.get('fresh').age_hours, 2);
+  assert.equal(byName.get('old').age_hours, 30);
+  assert.equal(byName.get('gone').age_hours, null);
+});
+
+test('--min-age-hours keeps a worktree made more recently than that out of the ready list', () => {
+  const f = ageFixture();
+  const byName = new Map(report.collect(f.repo, 'main', { nowMs: () => NOW, minAgeHours: 24 }).worktrees.map((item) => [path.basename(item.path), item]));
+  assert.equal(byName.get('old').ready, true);
+  assert.equal(byName.get('fresh').ready, false);
+  assert.deepEqual(byName.get('fresh').reasons, ['made less than 24 hours ago']);
+  assert.match(byName.get('gone').reasons.join(), /age unreadable/);
+  for (const value of ['-1', '1.5', 'abc']) {
+    assert.throws(() => report.parseArgs(['--min-age-hours', value]), /--min-age-hours needs a whole number of hours, 0 or more\./);
+  }
+  assert.equal(report.parseArgs(['--min-age-hours', '0']).minAgeHours, 0);
+});
+
+test('--worktree prints only the safe removal lines for a ready worktree', () => {
+  const f = singleFixture();
+  const out = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths.ready], { out, err: sink() }), 0);
+  assert.equal(out.text(), 'git worktree remove .tmp/worktrees/ready\ngit branch -d lane/ready\n');
+});
+
+test('--worktree says why a worktree is not ready and prints no command', () => {
+  const f = singleFixture();
+  const out = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths.dirty], { out, err: sink() }), 0);
+  assert.equal(out.text(), 'Not ready to remove: 1 uncommitted change(s)\n');
+});
+
+test('--worktree JSON adds remove_commands, empty when not ready, and lists no branches', () => {
+  const f = singleFixture();
+  const readyOut = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths.ready, '--json'], { out: readyOut, err: sink() }), 0);
+  const ready = JSON.parse(readyOut.text());
+  assert.equal(ready.schema, 'toolkit-workspace-residue/v1');
+  assert.equal(ready.complete, true);
+  assert.deepEqual(ready.remove_commands, ['git worktree remove .tmp/worktrees/ready', 'git branch -d lane/ready']);
+  assert.deepEqual(ready.branches, []);
+  const dirtyOut = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths.dirty, '--json'], { out: dirtyOut, err: sink() }), 0);
+  assert.deepEqual(JSON.parse(dirtyOut.text()).remove_commands, []);
+});
+
+test('--worktree refuses the primary checkout and a path that is not a worktree of this checkout', () => {
+  const f = singleFixture();
+  assert.throws(() => report.collect(f.repo, 'main', { worktree: f.repo }), { message: 'The primary checkout is not an extra worktree.' });
+  const missing = path.join(f.repo, '.tmp', 'worktrees', 'nope');
+  assert.throws(() => report.collect(f.repo, 'main', { worktree: missing }), { message: '.tmp/worktrees/nope is not a worktree of this checkout.' });
+  const err = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', missing], { out: sink(), err }), 2);
+  assert.match(err.text(), /^\.tmp\/worktrees\/nope is not a worktree of this checkout\./);
+});
+
+test('--worktree matches the path case-insensitively on Windows only', () => {
+  const f = singleFixture();
+  const out = sink();
+  const code = report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths.ready.toUpperCase()], { out, err: sink() });
+  if (process.platform === 'win32') {
+    assert.equal(code, 0);
+    assert.equal(out.text(), 'git worktree remove .tmp/worktrees/ready\ngit branch -d lane/ready\n');
+  } else {
+    assert.equal(code, 2, 'a case-sensitive file system does not match the upper-case path');
+  }
+});
+
+test('--worktree leaves the branch alone while another worktree also has it checked out', () => {
+  const f = makeCheckout(['one']);
+  git(f.repo, ['worktree', 'add', '-q', '-f', path.join(f.repo, '.tmp', 'worktrees', 'again'), 'lane/one']);
+  const out = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths.one], { out, err: sink() }), 0);
+  assert.equal(out.text(), 'git worktree remove .tmp/worktrees/one\n');
+});
+
+test('--worktree never offers the default branch for deletion', () => {
+  const f = makeCheckout(['d']);
+  const onMain = path.join(f.repo, '.tmp', 'worktrees', 'on-main');
+  git(f.repo, ['worktree', 'add', '-q', onMain, 'main']);
+  const out = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', onMain], { out, err: sink() }), 0);
+  assert.equal(out.text(), 'git worktree remove .tmp/worktrees/on-main\n');
+});
+
+test('--worktree quotes a shown path that has a space', () => {
+  const f = singleFixture();
+  const out = sink();
+  assert.equal(report.main(['--repo', f.repo, '--base', 'main', '--worktree', f.paths['with space']], { out, err: sink() }), 0);
+  assert.equal(out.text(), 'git worktree remove ".tmp/worktrees/with space"\ngit branch -d lane/with-space\n');
 });
