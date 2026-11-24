@@ -23,10 +23,10 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | You want to | Command | What happens |
 |---|---|---|
 | See your keys | `status` | Names, which app entries use each, present or missing. Never a value, length or prefix. |
-| See, change, add or remove keys | `edit`, then `apply` | A private file with your keys as `NAME=value` lines, like a `.env` file, opens in the app your computer uses for `.env` files. Each save applies changes and additions within a few seconds; a deleted line is removed at "done", after your yes: see [Your keys in your editor](#your-keys-in-your-editor). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
+| See, change, add or remove keys | `edit`, then `apply` | A private file with your keys as `NAME=value` lines, like a `.env` file, opens in the app your computer uses for `.env` files. Each save is applied exactly within a few seconds: changed values replaced, new lines added, and a deleted line's key removed. See [Your keys in your editor](#your-keys-in-your-editor). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it yourself in PowerShell, as shown above. |
 | See one value | `show NAME` or `show NAME --copy` | Shows the value once, or copies it to the clipboard, in a PowerShell window you opened yourself. See [Seeing a value](#seeing-a-value). |
-| Remove a key | `remove NAME` | Asks a yes/no that names the key first: your agent asks you in chat, or, run in your own terminal, it waits for a fresh Enter. |
+| Remove a key | `edit` | Delete the key's line and save: the key is removed on that save. The edit file is the only way Toolkit removes a key; no command does, and nothing else in Toolkit (setup, refresh, `remove toolkit`) ever deletes one. You can still delete a key by hand in Windows Credential Manager (entries named `ai-agent-toolkit/env/NAME`). |
 | Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and the usual commands that print the whole environment (such as `env`, `printenv`, `set` or `Get-ChildItem env:`); it cannot catch every way a program can print a variable. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
 
 ## Your keys in your editor
@@ -35,15 +35,15 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 
 - Change a value or add a `NAME=value` line. Type values without quotes; spaces at either end are dropped.
 - Save. A small helper started with the file applies changes and additions once the file has stopped changing for about a second and a half. It watches only that file, prints nothing and writes no log.
-- Delete a line to remove that key. The helper only marks it: the `# Status:` line says "Will remove on "done", after your yes", and `status` lists it. Put the line back before "done" to keep the key.
-- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, asks one yes/no that names every marked key (and any app entry that uses one), removes them only on yes, deletes the file and lists what changed, by name only. A no, no answer, a new edit or the 30-minute end keeps the keys and says so.
+- Delete a line to remove that key. The helper removes it on that save, with no question, and the `# Status:` line says "Removed: NAME". Type the line back and save to add the key again.
+- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, deletes the file and lists what changed, added and removed, by name only, with any app entry that used a removed key.
 
 A save is applied whole or not at all. Nothing is saved, and the `# Status:` line at the top of the file says why, when:
 
 - a line is not `NAME=value`, has no value, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
 - the file was saved as UTF-16 (save it as UTF-8);
-- the save would remove every key;
-- a key changed elsewhere (`set`, `remove`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+- the save would remove every key (keep at least one key line; delete the last keys by hand in Windows Credential Manager);
+- a key changed elsewhere (`set`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
 
 When Toolkit writes the status line, your editor may reload the file or say it changed; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
 
@@ -104,5 +104,7 @@ Comments over 200 characters are refused before screening. The screen refuses a 
 Existing layouts are checked again before use or writes. An unsafe record identifies each layout entry N (counting from 1) in the "layout" list of `~/.ai-agent-toolkit/env/manifest.json`, so you can remove or reword that list entry locally. N is not a JSON file line number.
 
 This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file (while it is open, and any copy your editor keeps of its tab) and a retired `.env` backup intentionally contain real values and must be treated as sensitive. Agents are told never to open, read or search the edit folder.
+
+In Claude Code, a Toolkit hook also refuses an agent's file reads, writes, searches and listings, and shell commands, that name the edit folder (`~/.ai-agent-toolkit/env/edit/`), an edit file (`env-edit-<id>.env`) or the env folder as a whole. Reading `~/.ai-agent-toolkit/env/manifest.json` (names only) and running `toolkit-env.cjs` still work, and so does editing a document that mentions the folder. It stops an agent's slip, not a determined program: a relative path after a folder change, a path built in a variable, a search started above the env folder, an editor's saved copies elsewhere and other tools that take a file path or a command (an MCP file tool or the desktop app's terminal tool, for example) are not caught. A shell command that only mentions the folder as text, such as a `grep` for it, is refused too; use the Grep tool for that. Codex has no such hook.
 
 Values are protected at rest by your operating-system login, and no single plain file holds them all. Any program running as you, including an agent's shell command, can still ask the store for a value, so this is not isolation from the agent or other programs. The skill rules, `run`'s name list and the tests that check no value reaches output reduce that risk but do not remove it. The same holds for `show`: its checks stop an agent reading a value through Toolkit by accident or on a casual request, not a determined program running as you. An agent that runs commands in a pseudo-terminal could pass the terminal check; the agent-shell check and the fresh Enter are what stop it.

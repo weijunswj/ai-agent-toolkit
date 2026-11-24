@@ -31,7 +31,7 @@ const REQUIRED_JOBS = Object.freeze(['gate', 'personal-data', 'issue-closure']);
 const LEG_SETS = Object.freeze({ validate: REQUIRED_JOBS, gate: TEST_JOBS });
 const JOB_ORDER = Object.freeze(['route', ...TEST_JOBS, 'personal-data', 'issue-closure', 'gate', 'validate']);
 // The Windows hook-pack groups: each matrix member runs the families joined by +.
-const HOOK_PACK_WINDOWS_GROUPS = Object.freeze(['attribution+closure-matrix', 'closure-shell+push', 'governance+issue-closure', 'fault+merge+task-governance']);
+const HOOK_PACK_WINDOWS_GROUPS = Object.freeze(['attribution+closure-matrix+env-edit', 'closure-shell+push', 'governance+issue-closure', 'fault+merge+task-governance']);
 
 function platformSystem(platform = process.platform) {
   if (platform === 'win32') return 'windows';

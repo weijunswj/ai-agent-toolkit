@@ -13,6 +13,8 @@ class FakeEnvStore {
     this.#corruptReadBack = new Set(corruptReadBack);
     this.writes = 0;
     this.reads = 0;
+    // Toolkit deletes, so a test can prove a command deleted nothing.
+    this.removes = 0;
   }
 
   get backend() { return 'Test store'; }
@@ -37,7 +39,10 @@ class FakeEnvStore {
     this.writes += 1;
   }
 
-  remove(name) { return this.#values.delete(assertName(name)); }
+  removeForEditSave(name) { this.removes += 1; return this.#values.delete(assertName(name)); }
+
+  // A key the owner deletes by hand in Credential Manager: not a Toolkit delete.
+  dropByHand(name) { return this.#values.delete(name); }
 
   peek(name) { return this.#values.get(name); }
 }
