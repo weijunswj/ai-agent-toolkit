@@ -482,26 +482,6 @@ function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
 }
 
-// Turns off another plugin in Claude Code's user scope when it is on there, then reads the list back.
-// Returns true when it turned the plugin off, false when it was not on; throws with the reason.
-function disableUserPlugin(id, options = {}) {
-  const env = Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env;
-  const resolved = resolveClaudeCommand(options.claudeCli, { env });
-  if (!resolved.command) throw new Error('the Claude Code CLI was not found');
-  const enabled = () => {
-    const list = runClaudeJson(resolved.command, ['plugin', 'list', '--json'], { env });
-    return (Array.isArray(list) ? list : list.installed || []).some((entry) => entry.id === id && entry.scope === 'user' && entry.enabled === true);
-  };
-  if (!enabled()) return false;
-  const home = env.USERPROFILE || env.HOME || os.homedir();
-  const configDir = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
-  const writer = new HostJsonConfigWrite(path.join(configDir, 'settings.json'), path.join(home, '.ai-agent-toolkit', 'backups', 'claude-settings'));
-  const result = writer.runExternalSync(() => runClaudeCommand(resolved.command, ['plugin', 'disable', id, '--scope', 'user'], { env }));
-  if (result.status !== 0) throw new Error(`claude plugin disable failed: ${commandOutput(result) || `exit ${result.status}`}`);
-  if (enabled()) throw new Error('the plugin still reads as on after claude plugin disable');
-  return true;
-}
-
 function claudeSpawnParts(command, args, options = {}) {
   return processLaunch.claudeSpawnParts(command, args, options);
 }
@@ -1112,7 +1092,6 @@ module.exports = {
   MARKETPLACE_REL_PATH,
   claudeSpawnParts,
   commandCandidates,
-  disableUserPlugin,
   evaluateClaudeToolkitPluginState,
   hookActivation,
   hookBlockers,

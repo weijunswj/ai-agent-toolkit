@@ -27,7 +27,7 @@ P2. **Device folder and keep-awake** (only when work runs locally).
 - Have the owner enable the desktop app's keep-awake for Remote Control if that setting is unreachable (Settings > Claude Code). Closing the lid still sleeps it. Save device and folder to memory.
 
 P3. **Project instructions, project lines and lanes.**
-- A cloud thread renders `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit main, saves the block to the shared folder and reads it back.
+- A local rc thread renders `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit main, saves the block to the shared folder and reads it back.
 - Draft only project facts: repos, transport, device/folder, work placement, owner-granted approvals and project-specific roles. Never copy base rules into those lines.
 - Write `- Lanes: <n> working lanes (owner, <date>)` only when the owner gives a number. Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.
 - Block first, one blank line, project lines after; preserve and deduplicate existing owner text below it. Follow `reference/instructions-sync.md`: saved and read-back copy first, markers verified, conflicts held, final saved instructions read back. Record the block's Toolkit version.

@@ -159,11 +159,11 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
-    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
-    || (['deleted', 'stale'].includes(fixture.handoff.memory) && fixture.handoff.session !== 'checked'))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }, or { session: checked, memory: deleted or stale }');
+    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'nul', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
+    || (['deleted', 'stale'].includes(fixture.handoff.memory) && fixture.handoff.session !== 'checked'))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved, nul or unchanged }, or { session: checked, memory: deleted or stale }');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -172,6 +172,7 @@ function fixtureErrors(fixture) {
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.stale_rows !== undefined && (!fixture.repo || !['enabled', 'disabled'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.stale_rows) || !fixture.stale_rows.length || fixture.stale_rows.some(row => typeof row !== 'string' || !row.trim()))) errors.push('fixture.stale_rows needs an enabled or disabled repository and nonempty row strings');
+  if (fixture.attention_line !== undefined && (fixture.repo?.governance !== 'enabled' || typeof fixture.attention_line !== 'string' || !/^Attention: /.test(fixture.attention_line))) errors.push('fixture.attention_line needs an enabled repository and a line starting Attention: ');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -446,6 +447,12 @@ class Fixture {
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
       cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
     }
+    // The programme attention cache in the fixture home, as the session-start refresh leaves it.
+    if (spec.attention_line) {
+      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
+      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
+      cache.writeCache(repository, { line: spec.attention_line, counts: { new: 0, acknowledged: 0 }, digest: 'hook-pack', complete: true }, { home: this.home });
+    }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
       const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
@@ -703,9 +710,9 @@ cp.spawnSync = function(file, args, options) {
   // The controller handoff snapshot the after-tool hook keeps fresh (toolkit-handoff-hook.cjs): a memory
   // folder and its snapshot, taken 50 minutes ago, with the hook's record of it. For `checked`, the session
   // record of a first check two minutes ago, which held the memory as it was then. For `moved`, the memory
-  // is then saved, as the tool call under test just did; for `deleted`, owner-rules.md is then deleted.
-  // For `stale`, the snapshot already removed owner-rules.md and this session holds its old bytes again.
-  // The folder sits beside work, outside the snapshot.
+  // is then saved, as the tool call under test just did; for `nul`, saved holding a NUL byte; for `deleted`,
+  // owner-rules.md is then deleted. For `stale`, the snapshot already removed owner-rules.md and this
+  // session holds its old bytes again. The folder sits beside work, outside the snapshot.
   #handoff(spec) {
     const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
     const handoff = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
@@ -742,6 +749,7 @@ cp.spawnSync = function(file, args, options) {
       fs.writeFileSync(sessionFile, `${JSON.stringify({ started_at: checkedAt, checked_at: checkedAt, rows, real: handoff.realBySource(rows) }, null, 2)}\n`);
     }
     if (spec.handoff.memory === 'moved') save(memoryFile, '# Memory\n- queue: #7\n', 30 * 1000);
+    if (spec.handoff.memory === 'nul') save(memoryFile, '# Memory\n- queue: #7\0\n', 30 * 1000);
     if (spec.handoff.memory === 'deleted') fs.rmSync(rulesFile);
     this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex'),
       ...(spec.handoff.memory === 'deleted' ? { removedFile: 'memory/owner-rules.md' } : {}) };
@@ -847,11 +855,14 @@ async function runRow(row, hosts, { roots, scratch }) {
 
 // Whether a handoff refresh a hook started has landed: the snapshot is current, this session's record
 // holds the saved memory (the run rewrites that record last), and a deleted memory file has left the
-// snapshot, its copy included.
+// snapshot, its copy included. A source the check refuses (a NUL byte) never lands, so a refresh an
+// older hook started for it is awaited in full and reported, not a crash.
 function handoffLanded({ handoff }) {
   const { store, repository, sessionFile, memoryHash, removedFile } = handoff;
   const lib = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
-  if (lib.check({ base: store, repository }).state !== 'CURRENT') return false;
+  let state = null;
+  try { state = lib.check({ base: store, repository }).state; } catch (error) { if (!(error instanceof lib.HandoffError)) throw error; }
+  if (state !== 'CURRENT') return false;
   if (removedFile) {
     const folder = lib.snapshotFolder(repository);
     if (fs.existsSync(path.join(store, folder, ...removedFile.split('/'))) || lib.readManifest(store, folder).files.some(row => row.path === removedFile)) return false;

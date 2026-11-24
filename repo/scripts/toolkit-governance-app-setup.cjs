@@ -20,11 +20,11 @@
 //   - it needs a terminal on stdin and stdout and a fresh Enter; a pipe, a file or a pasted blank
 //     line never answers.
 // It stops, changing nothing, when the repository already holds the App's variable or secret:
-// `toolkit governance check` shows how to finish or replace an existing App.
+// The governance check (toolkit-governance.cjs check) shows how to finish or replace an existing App.
 //
 // --save is the by-hand App's save step: it saves the Client ID and the key file's whole key on the
 // repository, the key piped into the secret on stdin, and reads both names back. It overwrites a
-// name already there only with --replace, which `toolkit governance check` prints only on its
+// name already there only with --replace, which the governance check prints only on its
 // replace route, after the agent has shown the owner what would be replaced.
 //
 // Exit codes: 0 set up and installed, 1 stopped or not yet installed, 2 usage.
@@ -167,7 +167,7 @@ async function saveValues(options, { read, spawn, say, confirm, look }) {
   if (before.variable === 'unverified' || before.secret === 'unverified') throw new SetupStop(`the variable and secret names on ${repo} could not be read.`, 'check gh is signed in as an account that administers it, then run this again. Nothing changed.');
   const taken = writes.filter(key => before[key] === 'found');
   if (taken.length && !replace) {
-    throw new SetupStop(`${repo} already has ${taken.map(key => app.APP[key]).join(' and ')}, so its App was kept.`, `ask your agent to run toolkit governance check in ${repo} and show you what would be replaced; only then run this again with --replace. Nothing changed.`);
+    throw new SetupStop(`${repo} already has ${taken.map(key => app.APP[key]).join(' and ')}, so its App was kept.`, `ask your agent to check governance in ${repo} and show you what would be replaced; only then run this again with --replace. Nothing changed.`);
   }
   let pem = null;
   if (keyFile) {
@@ -192,7 +192,7 @@ async function saveValues(options, { read, spawn, say, confirm, look }) {
   const secret = variable.ok && writes.includes('secret') ? ghRun(['secret', 'set', app.APP.secret, '--repo', repo], { spawn, input: pem }) : { ok: variable.ok };
   const after = app.presence(repo, read);
   if (!variable.ok || !secret.ok || writes.some(key => after[key] !== 'found')) {
-    throw new SetupStop(`the App's values did not read back on ${repo} (variable ${after.variable}, secret ${after.secret}).`, `run toolkit governance check in ${repo}, then run this again.`);
+    throw new SetupStop(`the App's values did not read back on ${repo} (variable ${after.variable}, secret ${after.secret}).`, `ask your agent to check governance in ${repo}, then run this again.`);
   }
   say(ownerTerminal.ok(`Saved on ${repo}: ${writes.map(key => app.APP[key]).join(' and ')}, read back.`, look));
   if (keyFile) say(ownerTerminal.say(`Delete ${keyFile} now: it is the App's password and never expires.`, look));
@@ -218,7 +218,7 @@ async function setup(argv, deps = {}) {
   if (options.save) return saveValues(options, { read, spawn, say, confirm, look });
   const before = app.presence(repo, read);
   if (before.variable !== 'missing' || before.secret !== 'missing') {
-    throw new SetupStop(`${repo} already holds part of an App setup, or its names could not be read (variable ${before.variable}, secret ${before.secret}).`, `run toolkit governance check in ${repo}: it shows how to finish or replace that App. Nothing changed.`);
+    throw new SetupStop(`${repo} already holds part of an App setup, or its names could not be read (variable ${before.variable}, secret ${before.secret}).`, `ask your agent to check governance in ${repo}: it shows how to finish or replace that App. Nothing changed.`);
   }
   const repositories = store ? `${repo} and ${store}` : repo;
   say(ownerTerminal.title(`Set up ${repo}'s governance GitHub App`, look));
@@ -264,7 +264,7 @@ async function setup(argv, deps = {}) {
   const settings = `https://github.com/${owner === 'Organization' ? `organizations/${repo.split('/')[0]}/` : ''}settings/apps/${made.slug}`;
   const again = app.presence(repo, read);
   if (again.variable !== 'missing' || again.secret !== 'missing') {
-    throw new SetupStop(`someone set up an App on ${repo} meanwhile (variable ${again.variable}, secret ${again.secret}), so nothing was saved.`, `delete the App just made (${settings}, Advanced) and run toolkit governance check in ${repo}.`);
+    throw new SetupStop(`someone set up an App on ${repo} meanwhile (variable ${again.variable}, secret ${again.secret}), so nothing was saved.`, `delete the App just made (${settings}, Advanced) and ask your agent to check governance in ${repo}.`);
   }
   const variable = ghRun(['variable', 'set', app.APP.variable, '--repo', repo, '--body', made.client_id], { spawn });
   const secret = variable.ok ? ghRun(['secret', 'set', app.APP.secret, '--repo', repo], { spawn, input: pem }) : { ok: false };
@@ -277,7 +277,7 @@ async function setup(argv, deps = {}) {
   const install = `${appPage}/installations/new`;
   open(install);
   say(ownerTerminal.say(`Install the App: on ${install} choose Only select repositories, pick ${repositories}, then Install.`, look));
-  if (await confirm('check the installation') !== true) throw new SetupStop('the installation was not checked.', `run toolkit governance check in ${repo} once the App is installed.`);
+  if (await confirm('check the installation') !== true) throw new SetupStop('the installation was not checked.', `ask your agent to check governance in ${repo} once the App is installed.`);
   const token = appToken(made.id, pem, now());
   const lines = [];
   let missing = false;
@@ -287,7 +287,7 @@ async function setup(argv, deps = {}) {
     lines.push(`${slug}: ${result === true ? 'installed' : result === false ? `not installed yet; add it on ${install}` : 'could not be checked'}.`);
   }
   lines.forEach(line => say(line));
-  say(missing ? `Not finished: add the missing repository on ${install}, then run toolkit governance check in ${repo}.` : ownerTerminal.ok(`Done. Run toolkit governance check in ${repo} to see the App reported as set.`, look));
+  say(missing ? `Not finished: add the missing repository on ${install}, then ask your agent to check governance in ${repo}.` : ownerTerminal.ok(`Done. Ask your agent to check governance in ${repo} to see the App reported as set.`, look));
   return missing ? 1 : 0;
 }
 

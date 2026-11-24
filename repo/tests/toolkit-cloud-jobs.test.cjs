@@ -2,7 +2,7 @@
 
 // The cloud jobs contract (App shape): each row's tokens name which of the governance App's
 // permissions they take, at the App's level unless marked read-only, and the lines
-// `toolkit governance check` prints. The App's permission list, its display names and its levels
+// the governance check (toolkit-governance.cjs check) prints. The App's permission list, its display names and its levels
 // exist once, in toolkit-governance-app.cjs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

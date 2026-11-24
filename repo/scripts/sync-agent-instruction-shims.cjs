@@ -5,10 +5,8 @@
 // writing them (--write) or checking them (default), and reports every error in one run:
 //   - the CLAUDE.md shim, which is exactly the import line `@AGENTS.md` with no markers, into its
 //     portable copy and this repository's root CLAUDE.md;
-//   - the n8n safety rules into the three portable n8n skill derivatives, and the n8n adapter into
-//     the n8n-safety-router adapter template.
-// The adapter block uses the versioned, hashed marker format of toolkit-managed-block.cjs. Neither the
-// global nor the governed rules are projected here: setup installs the global rules into each
+//   - the n8n safety rules into the three portable n8n skill derivatives.
+// Neither the global nor the governed rules are projected here: setup installs the global rules into each
 // harness's user-level file, and the installed Toolkit delivers the governed rules at session start,
 // this repository included, so root AGENTS.md is all hand-written. The check refuses a Toolkit block
 // in it, or any file under Antigravity's .agents/rules/ folder, so a stale branch cannot bring a copy
@@ -16,7 +14,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { findBlocks, renderBlock } = require('./toolkit-managed-block.cjs');
+const { findBlocks } = require('./toolkit-managed-block.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let i = 0; i < args.length; i += 1) {
@@ -34,15 +32,12 @@ const mode = process.argv.includes('--write') ? 'write' : 'check';
 
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
 const globalPath = 'repo/contracts/agent-rules/global-rules.md';
-const versionPath = 'repo/contracts/toolkit-local-bridge/version.json';
 const n8nRulesPath = 'repo/contracts/agent-rules/n8n-safety-rules.md';
 const n8nDerivativePaths = Object.freeze([
   'skills/n8n-safety-router/n8n-safety-rules.md',
   'skills/n8n-environment-setup/references/n8n-safety-rules.md',
   'skills/n8n-workflow-transport/references/n8n-safety-rules.md'
 ]);
-const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
-const n8nAdapterTemplatePath = 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md';
 const templateRoot = 'repo/contracts/agent-rules/repo-local';
 const publishedRoot = 'skills/repository-agent-rules/repo-local';
 // Root files that must stay free of Toolkit copies. Antigravity reads AGENTS.md itself.
@@ -148,7 +143,7 @@ function n8nCrossSkillHeader() {
 
 // Writes or checks one projected file and collects every error of the run.
 class InstructionProjectionOperation {
-  #mode; #errors = []; #version = null;
+  #mode; #errors = [];
   constructor(options = {}) { this.#mode = options.mode || mode; }
 
   #fail(message) { this.#errors.push(`${message} Run ${fixCommand}.`); }
@@ -173,22 +168,12 @@ class InstructionProjectionOperation {
     if (readOptional(relPath) !== expected) this.#fail(`Stale ${label}: ${relPath}.`);
   }
 
-  #block(source, name, body) { return renderBlock({ source, name, version: this.#version, body }); }
-
   #projectN8n() {
     const rules = this.#readRequired(n8nRulesPath);
     if (rules === null) return;
     const body = `${rules}\n`;
     this.#project(n8nDerivativePaths[0], body, 'n8n safety derivative');
     for (const relPath of n8nDerivativePaths.slice(1)) this.#project(relPath, `${n8nCrossSkillHeader()}${body}`, 'n8n safety derivative');
-  }
-
-  #projectN8nAdapter() {
-    const body = this.#readRequired(n8nAdapterPath);
-    if (body === null) return;
-    const notice = ['<!--', `Generated from ${n8nAdapterPath}. Do not edit directly.`, `Repair: ${fixCommand}`, '-->'].join('\n');
-    const block = this.#block(n8nAdapterPath, 'N8N-AGENT-RULES-ADAPTER', body);
-    this.#project(n8nAdapterTemplatePath, `${notice}\n\n${block}\n`, 'n8n adapter template');
   }
 
   // In both modes: these copies are removed by hand, never rewritten, so no fix command is named.
@@ -216,12 +201,9 @@ class InstructionProjectionOperation {
 
   run() {
     this.#refuseRootCopies();
-    const versionText = this.#readRequired(versionPath);
-    this.#version = versionText === null ? null : JSON.parse(versionText).version;
     this.#readRequired(globalPath);
     this.#projectN8n();
     this.#projectClaudeShim();
-    if (this.#version) this.#projectN8nAdapter();
     return { errors: this.#errors };
   }
 }
@@ -233,7 +215,6 @@ function validateAndSync(options = {}) { return new InstructionProjectionOperati
 // file is hand-written).
 const PROJECTED_OUTPUTS = Object.freeze([
   ...n8nDerivativePaths.map(file => ({ path: file, blocks: null })),
-  { path: n8nAdapterTemplatePath, blocks: null },
   { path: `${publishedRoot}/${CLAUDE_SHIM.file}`, blocks: null },
   { path: CLAUDE_SHIM.target, blocks: null },
 ].map(Object.freeze));

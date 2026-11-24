@@ -9,7 +9,7 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // its own initiative or by mistake. It reads command text, and text can be reshaped (wrappers, nested
 // sessions, scripts, files), so it cannot stop an agent set on getting past it. Agents also act as
 // the user on GitHub, so GitHub cannot tell an agent's merge from the user's either. Where the
-// repository has them (`toolkit governance check` reports them), its own GitHub rules are the hard
+// repository has them (the governance check, `toolkit-governance.cjs check`, reports them), its own GitHub rules are the hard
 // limit: a pull request for every change to the default branch, no force-push, no deletion.
 //
 // What an approval is: one line of the user's own typed message (UserPromptSubmit) that says "merge"
@@ -28,7 +28,14 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // wakes refuse the whole plain prompt; keep approval lines free of host or agent frame markup.
 // Other wording may still count, so the list leans towards not counting. Bare text is recorded only
 // in a session the user started, not one another session or a Toolkit launcher started, and not a
-// resumed or forked run (the governance gate's session marks). A whole Projects wake may instead
+// forked run or a run resumed from a session's shell (the governance gate's session marks). A
+// Claude Code chat the app reopened on the same id (SessionStart resume, no host-session variable)
+// is the user's own chat and records typed lines; a resume that ever carried the variable, a
+// Codex or unknown-host reconnect, and any resumed cloud session (CLAUDE_CODE_REMOTE=true), do not. The host is the hook entry point's own (the Claude Code
+// hook passes 'claude', the Codex hook 'codex'), never a payload field. Where a line is read but
+// not recorded, the hook says so in the turn's context with the reason and where to approve
+// instead (recordPromptNote), and a later merge refusal in that chat says the chat cannot record
+// one rather than asking for the line again. A whole Projects wake may instead
 // supply one fresh human/principal trigger message, including in launched or resumed sessions. That
 // exception is for the verified message only, still needs a session mark, and never changes standing
 // auto-merge. Relays, citations, notes, notifications, attachments and malformed frames grant nothing.
@@ -85,8 +92,9 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
 // These record nothing: a card with other wording, options or keys, a card asked with an answer
 // already filled in, a call that was not noted, a typed "Other" answer, an answer the host marks as
-// idle, follow-up, free text or noted, any field the reader does not know, and a card in a launched,
-// resumed or unmarked session. In a chat where the card could count and no standing task
+// idle, follow-up, free text or noted, any field the reader does not know, and a card in a chat
+// where a typed line would not count (launched, forked, shell-resumed, revoked or unmarked; a Claude
+// Code chat the app reopened counts, as for the typed line). In a chat where the card could count and no standing task
 // auto-merge applies, cardRedirect (PreToolUse) also refuses, before it is shown, a question that
 // asks about merging a named pull request and is not the exact card (reworded and filled-in cards
 // included); see cardRedirect for what it reads. Any exact card counts, whether or
@@ -161,7 +169,15 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     also text that names the hook scripts with a command that starts env whose leading words
 //     (dash options or NAME=value) include -i, --ignore-environment or a bare - as its own word. Both read the whole text, so a search, diff
 //     or commit message about the hooks in the same text as a node run, or after such an env, is
-//     refused too; run it as a separate command.
+//     refused too; run it as a separate command;
+//   - refused, so an agent cannot plant the user's line: a session brief, a message to another
+//     session, a move to the cloud, a scheduled wakeup or a scheduled prompt (PROMPT_TOOLS) whose text holds a line the
+//     approval reader would count, or a Projects merge card tap or wake with merge wording.
+//
+// Not covered for the reopened chat: the host sends the same SessionStart resume for a chat the app
+// reopened and for `claude --resume <id>` run from a plain terminal outside any session, so a
+// terminal resume of the user's own chat counts as that chat. Only a resume from a session's shell
+// carries the variable and is refused.
 //
 // Not covered: a fresh `codex exec` launch from a running Codex shell still keeps standing as it
 // did before, wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
@@ -817,7 +833,8 @@ const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject',
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path']);
 
 const MERGE_ROUTES = 'in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub';
-const ASK_TEXT = `Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, after reading the merge summary. Approval works here in a fresh eligible chat, ${MERGE_ROUTES}. A fully named target works from any folder; merge N needs that repository's folder. Typing in a reconnected or revoked chat records no approval. Never type it yourself, start a session or script to type it, or touch Toolkit's user-state files.`;
+const NEVER_TYPE = 'Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
+const ASK_TEXT = `Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, after reading the merge summary. Approval works here in a chat the user started on this computer, a Claude Code chat the app reopened included, ${MERGE_ROUTES}. A fully named target works from any folder; merge N needs that repository's folder. A launched, forked or shell-resumed chat, or a Codex or unknown-app reconnect, records no approval. ${NEVER_TYPE}`;
 
 class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
@@ -1022,38 +1039,72 @@ function sessionChecks(sessionId, environment, registryOptions, now, nativeHost 
   };
 }
 
-// Bare prompt approvals keep the original fresh-run rule. Only standing merges use recorded
-// origin to accept a resume; neither Projects delivery nor prompt text can establish origin.
-function startedByUser(checks, standing = false) {
-  return checks.sessionMarked && !checks.launcherMarker && checks.hostSessionMatches
-    && (standing ? checks.userStartedOrigin && !checks.forked && !checks.resumedFromSessionShell && !checks.resumeNeedsTypedMerge : !checks.resumed);
+// Why this run of the session cannot take the user's typed line, card tap or (standing) standing
+// answer, as a reason code; null when it can. One rule for all three: the session was marked at
+// start, no launcher marker, no host-session mismatch, not a fork, not resumed from a session's
+// shell, and not a Codex or unknown-host reconnect. A resume must also keep a recorded user-started
+// origin, so a Claude Code chat the user started and the app reopened approves again, while a
+// resume of an id another process started does not. A fresh typed or card run needs no recorded
+// origin (the fresh-run rule before origin existed); standing always does.
+// Neither Projects delivery nor prompt text can establish origin.
+function sessionBlock(checks, standing = false) {
+  if (!checks.sessionMarked) return 'no-session-mark';
+  if (checks.launcherMarker) return 'launcher-marker';
+  if (!checks.hostSessionMatches) return 'host-session-mismatch';
+  if (checks.resumedFromSessionShell) return 'resume-from-session-shell';
+  if (checks.forked) return 'fork';
+  if (checks.resumeNeedsTypedMerge) return 'resume-needs-typed-merge';
+  if (checks.resumed && !checks.userStartedOrigin) return 'resumed-without-user-started-origin';
+  if (standing && !checks.userStartedOrigin) return 'user-started-origin-required';
+  return null;
+}
+function startedByUser(checks, standing = false) { return sessionBlock(checks, standing) === null; }
+
+// What this session can no longer do with a typed line, said plainly: the line was read and not
+// recorded, why, and where the user can approve instead. Never asks for a retype in this chat.
+function unrecordedNote(entries, reason) {
+  const names = [...new Set(entries.map(entry => (entry.repository ? `${entry.repository}#${entry.pr}` : `#${entry.pr}`)))];
+  return `Toolkit read a merge approval for ${names.join(', ')} in this message but did not record it: ${standingReason(reason)}. Approve it ${MERGE_ROUTES}. Do not ask the user to type it again in this chat.`;
 }
 
-// Keeps the approvals a typed message carries; returns how many were kept.
-function recordPrompt(input, { environment = process.env, registryOptions = {}, now } = {}) {
+// Keeps the approvals a typed message carries: { count, note }. count is how many were kept; note
+// is '' or one line naming approvals read in a plain message that this session could not record.
+// It never adds, changes or drops an approval. `host` is the hook entry's own host ('claude',
+// 'codex'), never the payload's; without it a resumed session records nothing.
+function recordPromptNote(input, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
   // A Projects merge card tap (toolkit-projects-cloud.cjs) counts like a typed `merge N at <sha>`
   // from the same thread, once, under the same session-mark rule as a wrapped typed message.
   const tap = projectsCloud.mergeCardTap(input && input.prompt);
   if (tap) {
     const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
-    if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return 0;
-    return new MergeApprovals({ registryOptions, now }).add([{ repository: tap.repository, pr: tap.pr, sha: tap.sha, session: sessionId }], { id: tap.id, sentAt: tap.sentAt });
+    if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return { count: 0, note: '' };
+    return { count: new MergeApprovals({ registryOptions, now }).add([{ repository: tap.repository, pr: tap.pr, sha: tap.sha, session: sessionId }], { id: tap.id, sentAt: tap.sentAt }), note: '' };
   }
   const message = gate.ownerMessage(input && input.prompt);
-  if (message.wrapped ? !message.approvalEligible : message.markup || gate.hasFrameMarkup(message.text)) return 0;
+  if (message.wrapped ? !message.approvalEligible : message.markup || gate.hasFrameMarkup(message.text)) return { count: 0, note: '' };
   const found = approvalsIn(message.text);
-  if (found.length === 0) return 0;
+  if (found.length === 0) return { count: 0, note: '' };
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
+  const here = repositoryOf(input && input.cwd);
   // A direct Projects human trigger attests this message only. The standing-answer route still
   // requires recorded user origin and all standing checks. Even an attested message needs this host's session-start mark.
   if (message.wrapped) {
-    if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return 0;
-  } else if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now))) return 0;
-  const here = repositoryOf(input && input.cwd);
+    if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return { count: 0, note: '' };
+  } else {
+    // The reopened-chat rule is for Claude Code on this computer: a cloud session reads typed lines
+    // with no host, as before, so a resumed cloud session records none, and gets no note either
+    // (its routes are the Projects card and the typed line in the thread that merges).
+    const cloud = (environment || {}).CLAUDE_CODE_REMOTE === 'true';
+    const block = sessionBlock(sessionChecks(sessionId, environment || {}, registryOptions, now, cloud ? null : host));
+    if (block) return { count: 0, note: cloud ? '' : unrecordedNote(found.map(entry => ({ ...entry, repository: entry.repository || here })), block) };
+  }
   const entries = found.map(entry => ({ repository: entry.repository || here, pr: entry.pr, sha: entry.sha, session: sessionId }))
     .filter(entry => typeof entry.repository === 'string');
-  return new MergeApprovals({ registryOptions, now }).add(entries, message.wrapped ? message : null);
+  return { count: new MergeApprovals({ registryOptions, now }).add(entries, message.wrapped ? message : null), note: '' };
 }
+
+// Keeps the approvals a typed message carries; returns how many were kept.
+function recordPrompt(input, options = {}) { return recordPromptNote(input, options).count; }
 
 function wordsOf(text) {
   return [...String(text).matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
@@ -1436,23 +1487,24 @@ function cardMark(card) { return `merge-card ${card.repository.toLowerCase()}#${
 
 // Whether this run of the session may take an approval the way a typed line does. A card event
 // also needs an environment with no host-session variable at all: the host's own hook process has
-// none, and a command run from a session's shell has one.
-function cardSession(input, environment, registryOptions, now) {
+// none, and a command run from a session's shell has one. `host` is the hook entry's own host;
+// without it a resumed session takes no card.
+function cardSession(input, environment, registryOptions, now, host = null) {
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
   if ((environment || {})[gate.HOST_SESSION_VARIABLE] !== undefined) return null;
   // A cloud session runs this hold too, but its taps go through the Projects merge card, never this one.
   if ((environment || {}).CLAUDE_CODE_REMOTE === 'true') return null;
-  if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now))) return null;
+  if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now, host))) return null;
   const mark = new gate.SessionEpochs({ registryOptions, now }).get(sessionId);
   return mark === null ? null : { sessionId, mark };
 }
 
 // PreToolUse: notes an exact merge card shown by a session that may take an approval, so the answer
 // that comes back is known to come from that call. Decides nothing and refuses nothing.
-function cardAsked(input, { environment = process.env, registryOptions = {}, now } = {}) {
+function cardAsked(input, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
   if (String(input && input.tool_name || '') !== CARD_TOOL) return false;
   const card = cardOf(input.tool_input);
-  const session = card && cardSession(input, environment, registryOptions, now);
+  const session = card && cardSession(input, environment, registryOptions, now, host);
   if (!session) return false;
   try {
     new gate.PickerNotes({ registryOptions, now }).note(input.tool_use_id, { session_id: session.sessionId, session: session.mark, repository: cardMark(card) });
@@ -1510,10 +1562,11 @@ function mergeQuestion(toolInput) {
 
 // PreToolUse: { deny } for an agent's own merge question in a session that could record a card and
 // has no standing task auto-merge for its folder, else null. The exact card is never refused.
-function cardRedirect(input, { environment = process.env, registryOptions = {}, now } = {}) {
+function cardRedirect(input, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
   if (String(input && input.tool_name || '') !== CARD_TOOL || cardOf(input.tool_input) || !mergeQuestion(input.tool_input)) return null;
-  if (!cardSession(input, environment, registryOptions, now)) return null;
+  if (!cardSession(input, environment, registryOptions, now, host)) return null;
   let standing;
+  // The card is Claude Code's question tool, so standing is read as Claude's, as before.
   try { standing = standingAnswer(input, input.cwd, { environment, registryOptions, now, host: 'claude' }); } catch { return null; }
   return standing && standing.eligible === false ? { deny: CARD_REDIRECT } : null;
 }
@@ -1530,7 +1583,7 @@ function cardLabel(holder, card, keys) {
 
 // PostToolUse: the card's answer. null when the call was not a merge card; else { context } for
 // the agent, after recording the approval (Merge) or removing unused ones (Not now).
-function cardAnswered(input, { environment = process.env, registryOptions = {}, now } = {}) {
+function cardAnswered(input, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
   if (String(input && input.tool_name || '') !== CARD_TOOL) return null;
   // A cloud session says nothing here: its merge approvals come from the Projects merge card.
   if ((environment || {}).CLAUDE_CODE_REMOTE === 'true') return null;
@@ -1545,7 +1598,7 @@ function cardAnswered(input, { environment = process.env, registryOptions = {}, 
   // carries must be the one the host reports.
   const asked = input.tool_input === undefined ? shown : cardOf(input.tool_input, true);
   const card = shown && asked && cardMark(shown) === cardMark(asked) ? shown : null;
-  const session = card && cardSession(input, environment, registryOptions, now);
+  const session = card && cardSession(input, environment, registryOptions, now, host);
   let label = card ? cardLabel(response, card, CARD_RESPONSE_KEYS) : null;
   if (label !== null && plainObject(input.tool_input) && (Object.hasOwn(input.tool_input, 'answers') || Object.hasOwn(input.tool_input, 'annotations'))
     && cardLabel(input.tool_input, card, CARD_ANSWERED_KEYS) !== label) label = null;
@@ -1566,7 +1619,7 @@ function cardAnswered(input, { environment = process.env, registryOptions = {}, 
 // record one and the merge names everything the card needs; '' otherwise.
 function cardOffer(merge, input, { environment, registryOptions, now, host }) {
   if (host !== 'claude' || !merge || merge.pr === null || typeof merge.repository !== 'string' || !new RegExp(`^${SLUG}$`).test(merge.repository)) return '';
-  if (!cardSession(input, environment, registryOptions, now)) return '';
+  if (!cardSession(input, environment, registryOptions, now, host)) return '';
   if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return 'To show the user Toolkit\'s merge card instead of asking them to type, retry this merge naming its full 40 character head SHA, and ask no merge question of your own.';
   return `Toolkit's merge card is how the user approves this merge, so ask no merge question of your own. After the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
 }
@@ -1594,6 +1647,12 @@ function judge(merge, approvals, standing = null, evidence = null) {
     if (verified?.eligible) return { evidence: true };
     if (verified?.recovery) return { refusal: refuse(`Evidence-store verification failed: ${verified.reason}. ${verified.recovery}`) };
     const evidenceReason = verified?.reason ? ` Evidence-store verification failed: ${verified.reason}.` : '';
+    // A chat that cannot record the user's approval says so first and asks for no retype in it;
+    // the binding's state matters only where this chat could approve.
+    if (!standing?.eligible && standing?.typedBlock) {
+      const why = standingReason(standing.typedBlock);
+      return { refusal: refuse(`no unused approval is recorded for ${name} from the last day, so this merge is refused, and this chat cannot record one: ${why}.${evidenceReason}${why.includes(MERGE_ROUTES) ? '' : ` Approve it ${MERGE_ROUTES}.`} Do not ask the user to type it again in this chat. ${NEVER_TYPE}`) };
+    }
     if (!standing?.eligible) return { refusal: { deny: `Toolkit has no unused approval recorded for ${name} from the last day, so this merge is refused. Standing task auto-merge is unavailable: ${standingReason(standing?.reason)}.${evidenceReason} ${ASK_TEXT}` } };
     const problem = standingProblem(merge, standing);
     if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
@@ -1967,15 +2026,13 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     : !checks.bindingFresh ? 'binding-not-fresh'
     : !checks.autoMergeOn ? 'auto-merge-off'
     : !checks.knownHost ? 'unknown-host'
-    : !checks.sessionMarked ? 'no-session-mark'
-    : checks.launcherMarker ? 'launcher-marker'
-    : !checks.hostSessionMatches ? 'host-session-mismatch'
-    : checks.resumedFromSessionShell ? 'resume-from-session-shell'
-    : checks.forked ? 'fork'
-    : checks.resumeNeedsTypedMerge ? 'resume-needs-typed-merge'
-    : cloud ? null
-    : !startedByUser(checks, true) ? (checks.resumed ? 'resumed-without-user-started-origin' : 'user-started-origin-required') : null;
-  if (reason) return { eligible: false, reason, checks };
+    // A cloud thread skips only the origin checks (above); every other session check still applies.
+    : cloud ? (['resumed-without-user-started-origin', 'user-started-origin-required'].includes(sessionBlock(checks, true)) ? null : sessionBlock(checks, true))
+    : sessionBlock(checks, true);
+  // Why this chat could not record the user's typed line or card tap either (null where it can, in
+  // a cloud thread, which approves through the Projects card, or with no native session context).
+  const typedBlock = cloud || !checks.nativeSessionContext ? null : sessionBlock(checks);
+  if (reason) return { eligible: false, reason, checks, typedBlock };
   const scope = head => {
     const branch = pushTarget(root, 'origin', registryOptions)?.default;
     const base = branch ? mergeScope.commitOf(root, `refs/remotes/origin/${branch}`) : null;
@@ -2220,7 +2277,8 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     if (merges.some(merge => !merge.explicit) && MOVES_TARGET.test(joined ? `${text}\n${joined}` : text)) {
       return deny('this merge command changes folder or GH_REPO first, so Toolkit cannot tell which repository it merges in and it is refused. Name the repository with --repo owner/name or a pull request URL.');
     }
-  } else return null;
+  } else if (PROMPT_TOOLS.has(tool)) return plantedApproval(input);
+  else return null;
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
   const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
@@ -2303,6 +2361,59 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   return null;
 }
 
+// Tools that deliver text an agent writes as a future user prompt: a session brief, a message to
+// another session, a move to a cloud session (its summary is that session's first message), a
+// scheduled wakeup, a cron prompt, a remote routine and a scheduled task. In a chat that may record approvals that text would arrive as if the user typed it, so a call whose
+// text holds a line the approval reader would count is refused (the failure: an agent approving a
+// merge by writing the user's line into another session). Closed list, by exact tool name; every
+// string in the input is read, whatever its field. Tools outside the list are an accepted gap.
+const PROMPT_TOOLS = new Set([
+  'mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session', 'mcp__ccd_session__move_to_cloud', 'mcp__ccd_session_mgmt__send_message', 'SendMessage',
+  'ScheduleWakeup', 'CronCreate', 'RemoteTrigger', 'mcp__scheduled-tasks__create_scheduled_task', 'mcp__scheduled-tasks__update_scheduled_task',
+]);
+const MOST_PROMPT_STRINGS = 2000;
+// Longer text may arrive cut at the reader's limit, with host text before it, so a line can lose
+// its end (and a hold word with it): every prefix of such a line is read too.
+const CUT_RISK_CHARS = MAX_PROMPT_CHARS - 1000;
+const PLANTED = 'text an agent writes into a session brief, a message to another session or a scheduled prompt must never approve a merge, and this call holds a line the merge hold would count as the user\'s approval. Reword that line so it is not a merge approval, for example by keeping the word merge away from the pull request number, or ask the user to type the merge line themselves.';
+
+// Every string in a tool input, depth first; null when there are more than the reader follows.
+function inputStrings(value, found = [], depth = 0) {
+  if (found === null || depth > 16 || found.length > MOST_PROMPT_STRINGS) return null;
+  if (typeof value === 'string') found.push(value);
+  else if (Array.isArray(value)) { for (const item of value) if (inputStrings(item, found, depth + 1) === null) return null; }
+  else if (value && typeof value === 'object') { for (const [key, item] of Object.entries(value)) { found.push(key); if (inputStrings(item, found, depth + 1) === null) return null; } }
+  return found.length > MOST_PROMPT_STRINGS ? null : found;
+}
+
+// Whether one line, read alone, holds an approval: the line, and when it may be cut, each prefix
+// that ends at a space. Reading lines alone ignores fences, so a fenced line counts here (tight).
+function lineApproves(line, cut) {
+  if (!/merge/i.test(line)) return false;
+  if (approvalsIn(line).length > 0) return true;
+  if (!cut) return false;
+  const head = line.slice(0, MAX_APPROVAL_LINE + 64);
+  for (let at = head.indexOf(' '); at > 0; at = head.indexOf(' ', at + 1)) if (approvalsIn(head.slice(0, at)).length > 0) return true;
+  return approvalsIn(head).length > 0;
+}
+
+// PreToolUse: { deny } for a prompt-delivering call that would plant an approval, else null.
+function plantedApproval(input) {
+  const strings = inputStrings(input && input.tool_input);
+  if (strings === null) return /merge/i.test(JSON.stringify(input && input.tool_input) || '') ? refuse(`this call's input is larger than Toolkit reads for a merge approval, and ${PLANTED}`) : null;
+  const total = strings.reduce((sum, text) => sum + text.length, 0);
+  if (total > MAX_COMMAND_CHARS) return strings.some(text => /merge/i.test(text)) ? refuse(`this call's input is larger than Toolkit reads for a merge approval, and ${PLANTED}`) : null;
+  const cut = total > CUT_RISK_CHARS;
+  for (const text of strings) {
+    if (!/merge/i.test(text)) continue;
+    if (projectsCloud.mergeCardTap(text)) return refuse(PLANTED);
+    const message = gate.ownerMessage(text);
+    if (message.wrapped && mergeWording(message.text)) return refuse(PLANTED);
+    if (normalise(text).split(PROMPT_LINES).some(line => lineApproves(line, cut))) return refuse(PLANTED);
+  }
+  return null;
+}
+
 // In a cloud session, a refusal for want of an approval also names the exact Projects merge card
 // that would count (toolkit-projects-cloud.cjs), so the merge thread asks with the right wording.
 function cloudCard(refusal, merge, environment) {
@@ -2316,6 +2427,8 @@ function cloudCard(refusal, merge, environment) {
 function mayMerge(input) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   if (CONNECTOR_MERGE.test(tool)) return true;
+  // A prompt-delivering call that mentions merging is held when the planted-approval check fails.
+  if (PROMPT_TOOLS.has(tool)) { try { return /merge/i.test(JSON.stringify(input.tool_input || input.toolInput || {})); } catch { return true; } }
   if (!SHELL_TOOLS.test(tool)) return false;
   // The whole raw input: this runs when the merge check failed, possibly while reading it.
   const args = input.tool_input || input.toolInput || {};
@@ -2341,6 +2454,6 @@ function main(argv = process.argv.slice(2)) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = Object.freeze({
-  APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, cardAnswered, cardAsked, cardOf, cardRedirect, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, mergeWording, recordPrompt, shellMerges, standingAnswer,
+  APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError, PROMPT_TOOLS: Object.freeze([...PROMPT_TOOLS]),
+  approvalsIn, cardAnswered, cardAsked, cardOf, cardRedirect, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, mergeWording, recordPrompt, recordPromptNote, shellMerges, standingAnswer,
 });

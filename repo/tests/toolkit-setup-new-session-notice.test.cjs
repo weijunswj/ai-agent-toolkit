@@ -59,7 +59,7 @@ test('the closing line names every affected app once, in a fixed order', () => {
 test('setup applies the Antigravity and n8n answers into the notice', () => {
   const notice = new NewSessionNotice('claude-code', { antigravityTarget: '/h/.gemini/config/skills' });
   const owner = { install: () => ({ copied: [{ target: '/h/.claude/skills', skill: 'n8n-x' }], current: [], handCopies: [], pruned: [] }) };
-  core.installOfficialN8nSkills({ host: 'claude-code' }, owner, () => false, notice);
+  core.installOfficialN8nSkills({ host: 'claude-code' }, owner, notice);
   assert.deepEqual(notice.apps(), ['Claude Code']);
   const antigravity = { install: () => ({ copied: [{ target: '/h/.gemini/config/skills', skill: 'a' }], current: [], handCopies: [], pruned: [] }) };
   const after = new NewSessionNotice('codex');
