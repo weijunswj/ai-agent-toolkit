@@ -358,3 +358,77 @@ test('a holder order records the owner\'s answer to a G0 question on the same re
   assert.deepEqual(doc.private.gate_history.at(-1), { assignment: 'g0-q', role: 'G0', ended: 'OWNER_ANSWERED', return_id: 'g0-q.r1', verdict: 'ACCEPT', reason: 'the owner answered: option a', at: new Date(NOW).toISOString() });
   assert.throws(() => orders.validateOrder(f.order({ ops: [{ command: 'return', issue: 423, consume: 'g0-q.r1', verdict: 'ACCEPT', reason: '' }] }), { nowMs: () => NOW }), { code: 'ORDER_INVALID' }, 'a blank reason is refused whole');
 });
+
+// One-task parent patches: `outcome` sets fields on one catalogued task and `move` slots one task right
+// after another in the hand order, so an order's size no longer grows with the catalogue.
+const catalogue = count => Array.from({ length: count }, (_, i) => ({ issue: 1000 + i, label: `T${i}`, class: 'COMMITTED', parent: 421, order: i + 1 }));
+const parentWith = outcomes => state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes });
+const byIssue = doc => new Map(doc.outcomes.map(outcome => [outcome.issue, outcome]));
+
+test('red-first: a move-only order slots one task right after another and renumbers; every other task stays byte-identical', t => {
+  const f = setup(t);
+  const result = f.run(f.order({ order_id: 'move-1', ops: [{ command: 'update-parent', patch: { move: { issue: 423, after: 424 } } }] }));
+  assert.equal(result.error, null, result.error?.message);
+  assert.deepEqual(f.parentDoc().outcomes.map(outcome => [outcome.issue, outcome.order]), [[423, 3], [424, 2]], 'catalogue entries keep their place in the list');
+  assert.deepEqual(state.validateParent(f.parentDoc()), []);
+  const doc = parentWith(catalogue(300));
+  const patch = { move: { issue: 1004, after: 1250 } };
+  assert.ok(JSON.stringify(patch).length < 1024, 'the order line stays small however long the catalogue is');
+  const next = state.applyPatch('parent', doc, patch);
+  const before = byIssue(doc), after = byIssue(next);
+  assert.equal(after.get(1004).order, before.get(1250).order + 1);
+  const changed = next.outcomes.filter(outcome => JSON.stringify(outcome) !== JSON.stringify(before.get(outcome.issue)));
+  assert.deepEqual(changed.map(outcome => outcome.issue), [1004, ...Array.from({ length: 49 }, (_, i) => 1251 + i)], 'only the moved task and the tasks after its slot are renumbered');
+  for (const outcome of changed) assert.deepEqual({ ...outcome, order: null }, { ...before.get(outcome.issue), order: null }, `#${outcome.issue}: only its order changes`);
+  const gap = parentWith(catalogue(5).map(outcome => ({ ...outcome, order: outcome.order * 10 })));
+  const slotted = state.applyPatch('parent', gap, { move: { issue: 1000, after: 1002 } });
+  assert.deepEqual(slotted.outcomes.map(outcome => outcome.order), [31, 20, 30, 40, 50], 'a gap after the slot takes the task, so nothing else is renumbered');
+  const hand = list => [...list].sort((a, b) => a.order - b.order || a.issue - b.issue).map(outcome => outcome.issue);
+  const expected = hand(doc.outcomes).filter(issue => issue !== 1004);
+  expected.splice(expected.indexOf(1250) + 1, 0, 1004);
+  assert.deepEqual(hand(next.outcomes), expected);
+});
+
+test('a move into tied or tight orders renumbers only the tasks after the slot, keeping their sequence', () => {
+  const doc = parentWith([2, 3, 4, 5, 6].map(issue => ({ issue, class: 'COMMITTED', parent: 421, order: issue === 2 ? 0 : 1 })));
+  const next = state.applyPatch('parent', doc, { move: { issue: 6, after: 3 } });
+  assert.deepEqual(next.outcomes.map(outcome => [outcome.issue, outcome.order]), [[2, 0], [3, 1], [4, 3], [5, 4], [6, 2]]);
+  const front = state.applyPatch('parent', doc, { move: { issue: 2, after: 6 } });
+  assert.deepEqual([...front.outcomes].sort((a, b) => a.order - b.order || a.issue - b.issue).map(outcome => outcome.issue), [3, 4, 5, 6, 2]);
+  assert.deepEqual(state.applyPatch('parent', doc, { move: { issue: 4, after: 3 } }).outcomes, doc.outcomes, 'a task already in place keeps every order');
+});
+
+test('a one-task patch sets, replaces or removes fields on that task only', () => {
+  const doc = parentWith(catalogue(300));
+  const patch = { outcome: { issue: 1007, name: 'Shared host contract', last: true, order: 40 } };
+  assert.ok(JSON.stringify(patch).length < 1024);
+  const next = state.applyPatch('parent', doc, patch);
+  const before = byIssue(doc);
+  assert.deepEqual(next.outcomes.filter(outcome => JSON.stringify(outcome) !== JSON.stringify(before.get(outcome.issue))).map(outcome => outcome.issue), [1007]);
+  assert.deepEqual(byIssue(next).get(1007), { ...before.get(1007), name: 'Shared host contract', last: true, order: 40 });
+  const cleared = state.applyPatch('parent', next, { outcome: { issue: 1007, last: null, name: null } });
+  assert.deepEqual(byIssue(cleared).get(1007), { ...before.get(1007), order: 40 }, 'null removes an optional field');
+  assert.deepEqual(state.validateParent(cleared), []);
+});
+
+test('a one-task patch or move naming an unknown task, an unknown field or the task itself is refused and writes nothing', t => {
+  const doc = parentWith(catalogue(3));
+  for (const [patch, code, pattern] of [
+    [{ outcome: { issue: 9 } }, 'OUTCOME_UNKNOWN', /#9 is not in the outcome catalogue/],
+    [{ outcome: { issue: 1000, colour: 'red' } }, 'PATCH_REFUSED', /outcome patch cannot set colour/],
+    [{ outcome: { issue: 1000, class: 'RETIRED' } }, 'PATCH_REFUSED', /outcome patch cannot set class/],
+    [{ outcome: { issue: 1000, order: null } }, 'PATCH_REFUSED', /order cannot be removed/],
+    [{ outcome: { name: 'x' } }, 'USAGE', /outcome patch needs the task's issue number/],
+    [{ move: { issue: 1000, after: 9 } }, 'OUTCOME_UNKNOWN', /#9 is not in the outcome catalogue/],
+    [{ move: { issue: 9, after: 1000 } }, 'OUTCOME_UNKNOWN', /#9 is not in the outcome catalogue/],
+    [{ move: { issue: 1000, after: 1000 } }, 'USAGE', /cannot move a task after itself/],
+    [{ move: { issue: 1000, after: 1001, before: 1002 } }, 'USAGE', /move takes only issue and after/],
+    [{ move: { issue: 1000, after: 1001 }, outcomes: doc.outcomes }, 'PATCH_REFUSED', /one of outcomes, outcome or move/],
+    [{ outcome: { issue: 1000, name: 'x' }, move: { issue: 1000, after: 1001 } }, 'PATCH_REFUSED', /one of outcomes, outcome or move/],
+  ]) assert.throws(() => state.applyPatch('parent', doc, patch), error => error.code === code && pattern.test(error.message), JSON.stringify(patch));
+  const f = setup(t);
+  const catalogueBefore = JSON.stringify(f.parentDoc().outcomes);
+  const result = f.run(f.order({ order_id: 'move-bad', ops: [{ command: 'update-parent', patch: { move: { issue: 423, after: 423 } } }] }));
+  assert.match(JSON.stringify(result.report || { error: result.error?.message }), /cannot move a task after itself/);
+  assert.equal(JSON.stringify(f.parentDoc().outcomes), catalogueBefore, 'the catalogue is not written');
+});

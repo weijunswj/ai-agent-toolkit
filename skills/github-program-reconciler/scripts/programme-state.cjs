@@ -101,7 +101,10 @@ const HEAD_BOUND_UAT = ['PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED'];
 const DECIDED_REVIEW = ['PASSED', 'NOT_PASSED'];
 // UAT must be settled on record: an unrecorded UAT never counts as not required.
 const CLOSABLE_UAT = ['NOT_REQUIRED', 'PASSED', 'UAT_RETAINED'];
-const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
+const PATCHABLE_PARENT_FIELDS = ['outcomes', 'outcome', 'move', 'release_plan', 'private'];
+// The catalogue fields a one-task `outcome` patch may set (applyOutcomePatch). The class, label,
+// parent, lane and owner stay with a whole `outcomes` patch.
+const OUTCOME_PATCH_FIELDS = ['name', 'description', 'order', 'last', 'priority', 'size', 'after'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
 const TRACE_BLOCK_NAME = 'TRACE';
@@ -1786,10 +1789,15 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
       throw new ProgrammeError('ROLE_REFUSED', `Only the holder of the parent document (the controller) records ${[...records, ...(terminal ? ['a DONE or RETIRED lifecycle'] : [])].join(', ')}.`);
     }
   }
+  if (kind === 'parent' && ['outcomes', 'outcome', 'move'].filter(key => Object.hasOwn(patch, key)).length > 1) {
+    throw new ProgrammeError('PATCH_REFUSED', 'A parent patch changes the catalogue with one of outcomes, outcome or move, never two.');
+  }
   const next = clone(doc);
   for (const [key, value] of Object.entries(patch)) {
+    if (kind === 'parent' && key === 'outcome') next.outcomes = applyOutcomePatch(next.outcomes, value);
+    else if (kind === 'parent' && key === 'move') next.outcomes = moveOutcome(next.outcomes, value);
     // Lists and plain values are replaced whole; objects are merge-patched.
-    if (Array.isArray(value) || !isObject(value)) next[key] = clone(value);
+    else if (Array.isArray(value) || !isObject(value)) next[key] = clone(value);
     else next[key] = mergePatch(next[key], value, Object.hasOwn(SHAPES, key) ? SHAPES[key] : null);
   }
   if (kind === 'parent') refuseNewLegacy(doc, next);
@@ -1818,6 +1826,58 @@ function guardAgentUat(previous, next, holder) {
   if (next.uat?.state !== 'PASSED' || !isSha(next.uat.at_head) || (previous.uat?.state === 'PASSED' && previous.uat.at_head === next.uat.at_head)) return;
   if (AGENT_UAT_HANDED.includes(agentUatAt(next, next.uat.at_head))) return;
   throw new ProgrammeError('UAT_AGENT_FIRST', `uat PASSED at ${shortSha(next.uat.at_head)} needs the agent's UAT first: record private.agent_uat with state PASSED or OWNER_ONLY, at_head ${next.uat.at_head} and its evidence, in this write or an earlier one.`);
+}
+
+// A one-task parent patch, so a write no longer resends the whole catalogue: { issue, ...fields }
+// sets each field on that catalogued task (OUTCOME_PATCH_FIELDS; a list is replaced whole) and null
+// removes an optional one. Every other task stays byte-identical; validation then checks the values.
+function applyOutcomePatch(outcomes, patch) {
+  if (!isObject(patch) || !isInt(patch.issue, 1)) throw new ProgrammeError('USAGE', "An outcome patch needs the task's issue number: { \"issue\": <n>, ...fields }.");
+  const at = catalogueIndex(outcomes, patch.issue);
+  const refused = Object.keys(patch).filter(key => key !== 'issue' && !OUTCOME_PATCH_FIELDS.includes(key));
+  if (refused.length) throw new ProgrammeError('PATCH_REFUSED', `An outcome patch cannot set ${refused.join(', ')}. It sets ${OUTCOME_PATCH_FIELDS.join(', ')}; change anything else with a whole outcomes patch.`);
+  if (patch.order === null) throw new ProgrammeError('PATCH_REFUSED', 'The order cannot be removed: every task has one.');
+  const next = outcomes.map(outcome => clone(outcome));
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'issue') continue;
+    if (value === null) delete next[at][key];
+    else next[at][key] = clone(value);
+  }
+  return next;
+}
+
+// A move: { issue, after } slots one catalogued task right after another in the hand order (`order`,
+// then issue number), so in the same band or queue step it sorts right after that task. The task
+// takes the next order after its new neighbour; a later task that would no longer sort after it is
+// renumbered one past the task before it, so only the tasks after the slot can change, and only
+// their order. A task already in that place keeps every order.
+function moveOutcome(outcomes, move) {
+  if (!isObject(move) || Object.keys(move).some(key => !['issue', 'after'].includes(key)) || !isInt(move.issue, 1) || !isInt(move.after, 1)) {
+    throw new ProgrammeError('USAGE', 'A move takes only issue and after, both issue numbers: { "issue": <n>, "after": <m> }.');
+  }
+  if (move.issue === move.after) throw new ProgrammeError('USAGE', `#${move.issue}: cannot move a task after itself.`);
+  catalogueIndex(outcomes, move.issue);
+  catalogueIndex(outcomes, move.after);
+  const hand = [...outcomes].sort((a, b) => a.order - b.order || a.issue - b.issue);
+  const rest = hand.filter(outcome => outcome.issue !== move.issue);
+  const slot = rest.findIndex(outcome => outcome.issue === move.after) + 1;
+  if (hand[slot]?.issue === move.issue && hand[slot - 1].issue === move.after) return outcomes.map(outcome => clone(outcome));
+  rest.splice(slot, 0, hand.find(outcome => outcome.issue === move.issue));
+  const orders = new Map();
+  let previous = rest[slot - 1].order;
+  for (const outcome of rest.slice(slot)) {
+    const order = outcome.issue === move.issue || outcome.order <= previous ? previous + 1 : outcome.order;
+    orders.set(outcome.issue, order);
+    previous = order;
+  }
+  return outcomes.map(outcome => (orders.has(outcome.issue) && orders.get(outcome.issue) !== outcome.order ? { ...clone(outcome), order: orders.get(outcome.issue) } : clone(outcome)));
+}
+
+// The catalogue position of a task, or OUTCOME_UNKNOWN.
+function catalogueIndex(outcomes, issue) {
+  const at = (outcomes || []).findIndex(outcome => outcome.issue === issue);
+  if (at < 0) throw new ProgrammeError('OUTCOME_UNKNOWN', `#${issue} is not in the outcome catalogue.`);
+  return at;
 }
 
 // A write never adds an older class: an entry may keep one it already had until it is migrated.
