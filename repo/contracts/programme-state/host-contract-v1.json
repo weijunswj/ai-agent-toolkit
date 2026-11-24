@@ -14,6 +14,19 @@
     "unbound_session": "returns before any git, gh or network call",
     "refresh": "a session the after-tool hook marked starts programme.cjs refresh in the background once for each governed repository it wrote for, then clears the mark"
   },
+  "owed_check_hook": {
+    "event": "Stop",
+    "script": "repo/scripts/toolkit-owed-check-hook.cjs",
+    "timeout_seconds": 30,
+    "hosts": ["claude-code"],
+    "order": "after the turn-end hook, in the same Stop group",
+    "exit_code": 0,
+    "input_fields": ["session_id", "transcript_path", "cwd", "stop_hook_active"],
+    "stdout": "a block decision listing the owed steps when the controller's turn leaves an owed entry it has not shown this session; a systemMessage note once when something could not be read; otherwise empty",
+    "silent": "when stop_hook_active is true, in a gate, helper or side session, outside a governed repository, and in a session that did not act as the controller",
+    "reads": "the attention cache, this session's transcript and the Claude desktop app's session files; no git, gh or network call",
+    "refresh": "with no attention cache, or one over an hour old, starts programme.cjs refresh in the background, at most once per 15 minutes per repository and never in a cloud session"
+  },
   "after_tool_hook": {
     "event": "PostToolUse",
     "script": "repo/scripts/toolkit-programme-checkpoint-hook.cjs",

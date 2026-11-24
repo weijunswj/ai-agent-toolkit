@@ -1,9 +1,10 @@
 'use strict';
 
-// Claude Code named-helper policy for Toolkit-governed work. Only the main session (in gate
-// work, the G0 or G1 lead) may launch a helper, only the two Toolkit helpers may be launched,
-// and the definition Claude Code would load must byte-match the one rendered from the
-// selected stack.
+// Claude Code helper policy for Toolkit gate runs. Only the main session (the G0 or G1 lead) may
+// launch a helper. A Toolkit helper (toolkit-g0-helper, toolkit-g1-helper) must byte-match the
+// definition rendered from the selected stack. Every agent, the Toolkit helpers included, runs only
+// when strictly cheaper than the lead (toolkit-claude-agent-route.cjs), and is refused otherwise
+// (owner decisions on #1466).
 // Everything else is refused with a plain reason. An allowed launch returns no hook
 // decision, so Claude Code's own permissions still apply.
 //
@@ -21,6 +22,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 
 // Loaded only when a helper launch is decided, so other hook decisions stay light.
 const helperAgents = () => require('./toolkit-claude-helper-agents.cjs');
+const agentRoute = () => require('./toolkit-claude-agent-route.cjs');
 const HELPER_ROLES = Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([role, spec]) => [spec.name, role])));
 const ROUTE_FIELDS = Object.freeze(['model', 'effort', 'reasoning_effort', 'provider', 'model_provider']);
 const TRANSITION_FIELDS = Object.freeze(['resume', 'fork', 'fork_context', 'fork_turns', 'session_id', 'sessionID']);
@@ -117,6 +119,15 @@ class ClaudeNamedHelperPolicy {
     return null;
   }
 
+  // A gate lead may start any other agent for separable work under the same cost test as any agent
+  // (owner decisions on #1466): it runs only when strictly cheaper than the lead, and anything else is
+  // refused with one line, never asked, so an unattended gate never waits on an approval.
+  #gateCostDecision(args, input) {
+    const transition = TRANSITION_FIELDS.filter(field => Object.hasOwn(args, field));
+    if (transition.length) return deny(`helper launches cannot resume or fork a session (${transition.join(', ')}); launch a fresh helper.`);
+    return agentRoute().gateCostDecision(input, { environment: this.#environment, managedAgentsDirectory: this.#managedDirectory });
+  }
+
   decide(input, governance) {
     // `agent_id` marks a subagent or teammate caller. `agent_type` alone also comes from a
     // main session started with --agent, which is the lead, not a helper.
@@ -126,10 +137,7 @@ class ClaudeNamedHelperPolicy {
     const requested = args.subagent_type;
     // Own keys only: inherited names such as `constructor` or `__proto__` are not helpers.
     const role = typeof requested === 'string' && Object.hasOwn(HELPER_ROLES, requested) ? HELPER_ROLES[requested] : undefined;
-    if (!role) {
-      const named = typeof requested === 'string' && requested ? requested : 'the default agent';
-      return deny(`this Toolkit-governed repository allows only the toolkit-g0-helper and toolkit-g1-helper agents (requested: ${named}). Do the work in this session, or use one of those helpers.`);
-    }
+    if (!role) return this.#gateCostDecision(args, input);
     const route = ROUTE_FIELDS.filter(field => Object.hasOwn(args, field));
     if (route.length) return deny(`helper launches cannot override ${route.join(', ')}; the helper definition sets the model and effort.`);
     const transition = TRANSITION_FIELDS.filter(field => Object.hasOwn(args, field));
@@ -144,7 +152,8 @@ class ClaudeNamedHelperPolicy {
       // Claude Code reads agent files when a session starts, so a file rewritten since then runs
       // with the settings this session loaded, not the ones on disk.
       if (changedSinceSessionStart(loaded.file, input)) return deny('Helper settings changed after this session started. Start a new session to use them.');
-      return {};
+      // A preset also passes the cost test against the lead, like any agent (owner decision on #1466).
+      return agentRoute().gateCostDecision(input, { environment: this.#environment, managedAgentsDirectory: this.#managedDirectory });
     }
     if (this.#managedDirectory && samePath(path.dirname(loaded.file), this.#managedDirectory)) {
       return deny(`the managed copy ${loaded.file} does not match the one rendered from the selected stack. Toolkit does not change managed files; ask whoever manages this computer's Claude Code settings to update or remove it.`);
@@ -174,4 +183,4 @@ function changedSinceSessionStart(file, input) {
   } catch { return false; }
 }
 
-module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart, managedAgentsDirectory, managedSettingsDirectory });
+module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, OFF_VALUES, changedSinceSessionStart, managedAgentsDirectory, managedSettingsDirectory });

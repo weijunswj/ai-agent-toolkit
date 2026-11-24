@@ -41,7 +41,7 @@
         ]
       },
       {
-        "matcher": "Bash|PowerShell",
+        "matcher": "Bash|PowerShell|Monitor|mcp__terminal__run_in_terminal",
         "hooks": [
           {
             "type": "command",
@@ -67,6 +67,16 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PreToolUse",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(?:Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Grep|Glob|LS|Bash|PowerShell|Monitor)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-env-edit-hook.cjs\"",
             "timeout": 10
           }
         ]
@@ -120,6 +130,11 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-owed-check-hook.cjs\"",
             "timeout": 30
           }
         ]

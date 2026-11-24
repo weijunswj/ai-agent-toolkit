@@ -83,7 +83,6 @@ function fixture(t) {
 }
 
 // Writes this computer's fresh read of the binding merged on the default branch (null: none merged).
-// Also used by the stale-check start test, whose run gates on this binding.
 function mergedBinding(repo, main, registryOptions, value) {
   const identity = governance.readIdentity(repo);
   const text = value === null ? null : JSON.stringify(value);
@@ -104,4 +103,4 @@ function built(f, members, extra = {}) {
   return { result, out, boarded: JSON.parse(fs.readFileSync(out, 'utf8')) };
 }
 
-module.exports = { fixture, built, mergedBinding, MEMBER_BODY };
+module.exports = { fixture, built, MEMBER_BODY };

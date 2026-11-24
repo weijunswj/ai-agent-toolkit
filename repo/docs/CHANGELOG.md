@@ -1,5 +1,94 @@
 # Toolkit Changelog
 
+## 3.178.0 (env edit keeps your typing: placeholders, notes in the file and one tab)
+
+### Changed
+
+- An empty `NAME=` line in `toolkit env edit` is a placeholder: it is skipped (nothing stored, a stored value kept), the other lines are applied, and the next tab shows it again. It no longer refuses the whole save.
+- The edit file says what happened to a refused save, or one that skipped an empty line: a status line at the top and a note for each line it is about, by line number and key name only.
+- Asking for your keys while an edit is open opens that same tab again, applying a waiting save first, instead of replacing it with a new file.
+
+### Fixed
+
+- A save in an older edit tab, such as one an editor brought back, no longer wipes what was typed there. The tab is kept with its editor copies, says it was not saved and which lines differ, and is deleted at the first "done" after a command has shown it. The 30-minute close applies a waiting save first and keeps a tab whose last save was refused.
+
+### Added
+
+- Claude Code, outside a Toolkit gate run: the agent hook refuses a main-session subagent launch until the agent has loaded the `agent-cost-control` skill in this chat (the Toolkit helper presets need no skill read), then runs it with no prompt only when it is strictly cheaper than the agent starting it: a lower model family at any effort short of max, or the same family at a lower effort. Every other launch gets Claude Code's own permission prompt naming both routes: the same route, a costlier family or effort, any max effort, a fork, a launch that inherits the agent's model, and a route the hook cannot work out (including when the check itself fails).
+- Claude Code, in a Toolkit gate run: a G0 or G1 lead may start any agent for separable work, not just the two Toolkit helpers, when it is strictly cheaper than the lead; the Toolkit helpers pass the same test after their file check. Anything else is refused with one line instead of asked, so an unattended gate never waits on an approval, and helpers still never start agents. A helper's own tool calls are no longer held to a stack helper effort.
+- The hook test pack reads a third decision, `ask` (the host shows its permission prompt), so rows can expect it.
+
+## 3.177.0 (env edit file is the only way to delete a key; Claude Code keeps agents out of the env edit folder)
+
+### Changed
+
+- `toolkit env edit` now applies each save exactly: a changed value is replaced, a new line is added and a deleted line removes its key on that save, with no question at "done". The file's `# Status:` line says which keys were removed, and "done" names any app entry that used one. A save that would remove every key is still refused; it now says to delete the last keys by hand in Windows Credential Manager.
+
+### Removed
+
+- `toolkit env remove NAME`. The edit file is the only way Toolkit deletes a key; no other command, and nothing else in Toolkit (setup, refresh, `remove toolkit`), deletes one. An edit opened by an earlier version that only marked deleted lines is applied from the file at "done".
+
+### Fixed
+
+- Tests can no longer reach the real key store: in a test run the store refuses the real `ai-agent-toolkit/env/` prefix before Windows PowerShell starts.
+- **Merge card after a PC restart:** the owner's Claude Code chat, reopened by the app, keeps its merge card however many other sessions started on this computer meanwhile. Toolkit now keeps each session's start record for 30 days after the chat last started or was reopened (up to 4,096 records) instead of only the newest 256, and a compaction or clear no longer overwrites a record it briefly cannot read.
+- **Exact reason when it cannot:** if any start of the chat found its start record missing or unreadable, the merge refusal and the typed-line note say so once the app reopens it, and name where to approve (a new chat on this computer, a direct Projects message, or the Merge button on GitHub). Before that, the standing task auto-merge note already warns.
+
+### Added
+
+- In Claude Code, a Toolkit hook refuses an agent's file reads, writes, searches and listings, and shell commands, that name the env edit folder, an edit file or the env folder as a whole, because the edit file holds your real key values. Reading the names-only manifest and running `toolkit env` commands still work.
+
+## 3.176.0
+
+### Added
+
+- The controller enforcement map now also covers the gate rules, and each row carries the hash of its rule line: an edited controller or gate rule fails the map check until its row is reviewed and the hash updated.
+- An instruction-only row now says its basis: judgement (no code can decide it), host-gap (the host lacks the event, with a line saying how to test for it now) or planned (with the slice that builds it). `--list host-gap` prints the host-gap rows for a hooks or setup review.
+
+### Fixed
+
+- Seven out-of-date reasons in the map: three rules a hook or script already enforces are now mapped to it, and four reasons now name the slice or host gap that applies.
+- `toolkit governance check` no longer asks for a governed rules block back. Before governance is decided, a `TOOLKIT-GOVERNED-RULES` block (current, older or edited) or an older `GLOBAL-AGENTS.MD-TEMPLATE` block in `AGENTS.md` is now reported as a leftover copy that is not followed, with the cleanup offered once governance is on, instead of "refresh it to the TOOLKIT-GOVERNED-RULES block through a pull request" or "a refresh asks first". Broken markers are still reported.
+- The disabled-governance rules line says any governed block in `AGENTS.md` is an old copy and is not followed.
+- Playbooks and skills no longer point at Toolkit copies that plug and play removed from repositories. The safety-gates and git-completion playbooks name the evidence-store line of the Toolkit-governed rules instead of a managed `AGENTS.md`; the model-safety-flags playbook says to add an `Authorised context` section to the repository's own `AGENTS.md`; the controller bootstrap names the gate rules' fresh-context triggers; the secure CI/CD prompt points to the repository's own test-sharding guide; and the playbooks README says the plugin installs it, with no copy-by-hand step. A test keeps any skill from naming those old copies as live sources.
+- Docs describe plug and play: a governed repository holds only its programme file, CI checks and dependency-update files, while the rules and playbooks come from the installed Toolkit; no doc says a governed rules block may still belong in `AGENTS.md`; the agent routing table lists `toolkit-playbooks`; the safety matrix names the cleanup route for leftover copies; and the source-of-truth contract says Toolkit's own skills ship in the plugin and are not for copying.
+- Antigravity's docs say it gets only the portable skills copied into its skills folder for now: no plugin, hooks, Toolkit-only skills or governed rules.
+- The real Codex host check in the bridge doc matches today's session start: no question about repository rules, and one leftover note for an old rules block.
+- `release-readiness-audit` no longer asks for scope again when the request already gives a full read-only scope (the target, that nothing is changed, and what to report); it starts the audit.
+- When the session-start governance check crashes inside a repository, Claude Code and Codex now get one line saying so, with the error's kind (never its message), the path of the Toolkit-governed rules file to read if the repository is governed, and `setup toolkit` to repair the plugin. Before, the session started with no rules and no notice. Outside a repository it still says nothing, and session start never blocks.
+- The skill-routing source says governance comes from the installed Toolkit, never from a block in `AGENTS.md`.
+
+### Changed
+
+- The portable skills no longer name Toolkit terms or a coding app in their main instructions, so they read the same in any agent. App-specific and Toolkit-specific details moved to a reference file in each skill (`agent-cost-control`, `n8n-environment-setup`, `secure-ci-cd`, `windows-local-dev-services`), and the rest were reworded (`external-operation-preflight`, `frontend-art-direction`, `host-observability`, `managed-app-foundation-review`, `n8n-workflow-transport`, `release-readiness-audit`, `skill-product-review`). The Hostinger maintainer skill keeps its Codex name, now recorded as an app it depends on.
+- `agent-cost-control` calls the planning, build and review sessions by those names and a merge train a batch merge; they stay outside the model ladder as before.
+
+## 3.175.0 (A turn-end owed check for the controller in Claude Code)
+
+### Added
+
+- **Owed check at turn end (Claude Code).** A second turn-end hook, `toolkit-owed-check-hook.cjs`, stops the controller's turn once with the exact steps when the turn leaves owed work: programme findings new for 4 hours or more, or acknowledged past their due time; open `CLOSE_DUE` findings; side sessions the desktop app shows finished but not archived (every pull request merged or closed, not running, nothing waiting on the owner); gate launches from the last 24 hours with no `gate-session` record; and archived gate sessions with no close record. It reads only local files (no git, gh or network call) and stops a turn again only when an entry is added. It stays silent in gate, helper and side sessions, in sessions that did not act as the controller, outside governed repositories and when the host says the stop already follows a hook block. A missing cache, an unreadable transcript or desktop session files in an unknown format become one note, shown once, never a block. Codex keeps the single turn-end hook.
+- **Net findings in the attention cache.** `programme.cjs attention` and `refresh` write the open net findings (ID, code, task, kind, state and times; no free text) into this computer's attention cache, which the owed check reads. The owed check starts `programme.cjs refresh` in the background when the cache is missing or over an hour old (at most once per 15 minutes per repository, never in a cloud session).
+- **Hook pack.** Rows can use the `Stop` event, and fixtures can plant attention-cache findings (`attention_net`) and desktop session files (`desktop_sessions`).
+- In Claude Code, a question card is refused when the agent already wrote text earlier in the same turn, since the desktop app shows only the open card and hides that text, and when a card's question is longer than 120 characters. The refusal tells the agent to ask in its closing message instead, or to put the context into the card's option descriptions. Toolkit's own governance and merge cards are not affected, and a card is shown with a note when the session's transcript cannot be read.
+- `agent-cost-control` has a "Before you start a subagent" section, read once per chat before any subagent, helper agent or spawned thread: start one only for separable work that saves time or context, set the cheapest tier and effort on the launch, brief it with the data it needs, and get approval first for anything not cheaper than yourself (the same route, a higher tier or effort, any maximum effort, or a launch that inherits your route). A default helper ladder: the small tier for lookups and inventories, the mid tier for bounded code, tests and long summaries, never the top tier as a helper. A subagent that starts another applies the same test against its own route.
+
+### Removed
+
+- **Session start shows the governance status only.** The session-start hook no longer prints the attention line, the stale-check line or the cloud "attention and stale check wait" line, and starts no background refresh or stale check; due programme work reaches the controller at turn end. Checkpoint and stale-copy lines stay.
+- **The daily stale check is gone.** `toolkit-controller-check.cjs` has no `stale` check, its date stamp (`~/.ai-agent-toolkit/user-state/stale-check/`) is no longer written or read, and the session-start command line for it is gone; the programme sweep raises the same rows as stale-work net findings. `--skip stale` is still accepted and does nothing, for Claude Projects task prompts stored before this change. An existing `stale-check` folder is left on disk unread and can be deleted by hand.
+- **The attention cache holds only the net findings.** Its line, counts, digest, work-queue summary and shown-digest fields are gone (schema v2); a cache an earlier Toolkit wrote is not read and is rewritten by the next refresh.
+
+### Changed
+
+- Setup's check of the installed Claude Code hooks now expects exactly two turn-end hooks, the programme checkpoint then the owed check.
+- The controller principle **Stale check** is now **Stale-work net**: the sweep raises the rows and the turn-end owed check brings them to the controller. The Claude Projects hourly nudge and daily check-in no longer pass `stale` to the controller check.
+- A cloud session that cannot reach the programme store now says the next refresh on the owner's computer reads it.
+
+### Fixed
+
+- Commands typed through the Claude desktop app's Terminal panel now get the same checks as the Bash tool: a merge without the owner's approval, a chat launched to merge, a push to the default branch and a write to Toolkit's user-state folder are refused there too. Terminal panel and Monitor commands also get the AI attribution, force-push and credential checks. A test fails CI when a tool that runs a command line misses any of these checks.
+
 ## 3.174.0 (lane waits removed; one ordered work queue on the programme graph; one-task catalogue patches)
 
 ### Removed

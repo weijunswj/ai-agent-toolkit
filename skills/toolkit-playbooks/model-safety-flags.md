@@ -15,7 +15,7 @@ Reword or rename only when the new wording describes the code or task more accur
 1. **Stop on fallback.** If this session or a subagent was switched to a fallback model, stop work on the lower model. Report the time, the request ID if shown, and what was asked.
 2. **Find the trigger.** Start `claude --safe-mode` in the same folder (it drops instruction files, skills, MCP servers and hooks, but not git status or directory names). If the flag goes away, the instruction files are the trigger; otherwise it is the task or the repository content.
 3. **Fix wording, not meaning.** In always-loaded files, folder names, scripts and identifiers, prefer plain accurate words (`stop`, `remove`, `reset`, `skip check`, `test the guard`) over `kill`, `nuke`, `exploit`, `inject`, `attack` or `bypass` where the meaning is unchanged. Keep exact terms where they are the precise meaning, and keep real API names.
-4. **Add an authorised-context note** outside the Toolkit block in `AGENTS.md`, for example:
+4. **Add an authorised-context note** as an `Authorised context` section in the repository's own `AGENTS.md`, for example:
 
    ```markdown
    ## Authorised context

@@ -40,7 +40,10 @@ const CORPUS_REL = 'repo/tests/hook-pack/corpus';
 const SCHEMA = 'toolkit-hook-pack/v1';
 const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
-const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
+const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']);
+// The fixture's Claude desktop session (fixture.desktop_sessions): this session's own file and the
+// host-session variable the app sets.
+const DESKTOP_SELF = 'local_00000000-0000-4000-8000-000000000001';
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
@@ -143,7 +146,7 @@ function rowErrors(row) {
 function expectErrors(expect, label) {
   if (!expect || typeof expect !== 'object') return [`${label} must be an object`];
   const errors = [];
-  if (!['allow', 'deny'].includes(expect.decision)) errors.push(`${label}.decision must be allow or deny`);
+  if (!['allow', 'deny', 'ask'].includes(expect.decision)) errors.push(`${label}.decision must be allow, deny or ask`);
   if (expect.reason !== undefined && (typeof expect.reason !== 'string' || !/^[a-z0-9.-]+(?::failure)?$/.test(expect.reason))) errors.push(`${label}.reason is a hook name (the script file name without .cjs), with :failure when the host blocked because the hook itself failed`);
   for (const key of ['context_contains', 'context_excludes']) if (expect[key] !== undefined
     && (!Array.isArray(expect[key]) || !expect[key].length || expect[key].some(text => typeof text !== 'string' || !text.trim())
@@ -159,7 +162,11 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'attention_net', 'desktop_sessions', 'toolkit_helpers'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.attention_net !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.attention_net)
+    || fixture.attention_net.some(entry => !entry || typeof entry !== 'object' || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code)) || !['new', 'acknowledged'].includes(entry.state)
+      || typeof entry.age_hours !== 'number' || entry.age_hours < 0 || Object.keys(entry).some(key => !['code', 'state', 'age_hours', 'issue', 'kind'].includes(key))))) errors.push('fixture.attention_net needs an enabled repository and entries { code, state, age_hours, issue?, kind? }');
+  if (fixture.desktop_sessions !== undefined && (!Array.isArray(fixture.desktop_sessions) || fixture.desktop_sessions.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry)))) errors.push('fixture.desktop_sessions must list session file objects');
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
     || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'nul', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
@@ -170,9 +177,6 @@ function fixtureErrors(fixture) {
   if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title', 'train-members', 'train-sibling', 'train-sibling-row'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
-  if (fixture.stale_rows !== undefined && (!fixture.repo || !['enabled', 'disabled'].includes(fixture.repo.governance)
-    || !Array.isArray(fixture.stale_rows) || !fixture.stale_rows.length || fixture.stale_rows.some(row => typeof row !== 'string' || !row.trim()))) errors.push('fixture.stale_rows needs an enabled or disabled repository and nonempty row strings');
-  if (fixture.attention_line !== undefined && (fixture.repo?.governance !== 'enabled' || typeof fixture.attention_line !== 'string' || !/^Attention: /.test(fixture.attention_line))) errors.push('fixture.attention_line needs an enabled repository and a line starting Attention: ');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -208,6 +212,7 @@ function fixtureErrors(fixture) {
     }
   }
   if (fixture.transcript !== undefined && !Array.isArray(fixture.transcript)) errors.push('fixture.transcript lists transcript entries');
+  if (fixture.toolkit_helpers !== undefined && (typeof fixture.toolkit_helpers !== 'string' || !/^[a-z0-9-]+$/.test(fixture.toolkit_helpers))) errors.push('fixture.toolkit_helpers names the stack the Toolkit helper definitions are rendered for');
   if (fixture.files !== undefined && (typeof fixture.files !== 'object' || Array.isArray(fixture.files))) errors.push('fixture.files maps paths in the working folder to their text');
   return errors;
 }
@@ -313,6 +318,8 @@ function hookDecision(host, hook, result) {
   if (result.status === 0 && result.stdout.trim()) { try { output = JSON.parse(result.stdout); } catch { output = null; } }
   const denied = output && (output.hookSpecificOutput?.permissionDecision === 'deny' || output.decision === 'block' || output.continue === false);
   if (result.status === 2 || denied) return { decision: 'deny', reason: name, text: (output?.hookSpecificOutput?.permissionDecisionReason || output?.reason || result.stderr || '').trim() };
+  // Exit 0 with an ask: the host shows its permission prompt to the person instead of running the call.
+  if (result.status === 0 && output?.hookSpecificOutput?.permissionDecision === 'ask') return { decision: 'ask', reason: name, text: (output.hookSpecificOutput.permissionDecisionReason || '').trim() };
   if (result.status === 0) return { decision: 'allow' };
   // Any other exit, or a stop at the timeout: Claude Code blocks only where the hook says
   // onFailure: block; Codex blocks only on exit 2.
@@ -323,6 +330,18 @@ function hookDecision(host, hook, result) {
 function scriptName(command) {
   const match = /([A-Za-z0-9._-]+)\.(?:cjs|ps1)"/.exec(command || '');
   return match ? match[1] : 'hook';
+}
+
+// One call's decisions from several hooks, as the call gets them: deny first, then ask, then allow.
+// reason and text come from the winning deny or ask.
+function combineDecisions(decisions) {
+  const winner = decisions.find(entry => entry.decision === 'deny') || decisions.find(entry => entry.decision === 'ask');
+  return {
+    decision: winner ? winner.decision : 'allow',
+    reason: winner?.reason,
+    text: winner ? winner.text : decisions.find(entry => entry.failed)?.text,
+    failed: decisions.filter(entry => entry.failed).map(entry => entry.failed),
+  };
 }
 
 // Read only the surface delivered as context by each host, never stderr diagnostics.
@@ -439,19 +458,25 @@ class Fixture {
         purpose: 'Hook pack fixture', created: this.#now().toISOString(), created_by: 'fixture', model: null, effort: null,
       })));
     }
-    // Today's stale-check stamp in the fixture home, as the background run writes it after a good run.
-    if (spec.stale_rows) {
-      const now = this.#now();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    // Open net findings in this computer's attention cache, as `programme.cjs attention` writes it.
+    if (spec.attention_net) {
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
-      cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
+      const net = spec.attention_net.map((entry, index) => ({ id: crypto.createHash('sha256').update(`${index}|${entry.code}`).digest('hex').slice(0, 12), code: entry.code,
+        issue: entry.issue ?? null, kind: entry.kind ?? null, state: entry.state, changed_at: this.#now(entry.age_hours * 3600000).toISOString(), due: null }));
+      cache.writeCache(repository, { complete: true, net }, { home: this.home });
     }
-    // The programme attention cache in the fixture home, as the session-start refresh leaves it.
-    if (spec.attention_line) {
-      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
-      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
-      cache.writeCache(repository, { line: spec.attention_line, counts: { new: 0, acknowledged: 0 }, digest: 'hook-pack', complete: true }, { home: this.home });
+    // The Claude desktop app's session files: this session's own, and each listed one it started
+    // (spawnedFrom names this session unless the entry sets its own).
+    if (spec.desktop_sessions) {
+      const folder = path.join(this.home, 'AppData', 'Local', 'Claude-Data', 'claude_fixture', 'claude-code-sessions', 'a', 'b');
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime() }));
+      spec.desktop_sessions.forEach((entry, index) => {
+        const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
+        fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
+      });
+      this.env.CLAUDE_CODE_HOST_SESSION_ID = DESKTOP_SELF;
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
@@ -466,6 +491,22 @@ class Fixture {
     if (spec.handoff) this.#handoff(spec);
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
+  }
+
+  // Writes toolkit-g0-helper and toolkit-g1-helper into the home's Claude agents folder exactly as the
+  // plugin copy under test renders them for `stack` (so line endings and registry bytes match that
+  // copy), dated an hour back so they are older than the session transcript.
+  installToolkitHelpers(pluginRoot, stack) {
+    const { ClaudeHelperAgentRenderer } = require(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-claude-helper-agents.cjs'));
+    const renderer = ClaudeHelperAgentRenderer.fromRepository(stack, pluginRoot);
+    const dir = path.join(this.home, '.claude', 'agents');
+    fs.mkdirSync(dir, { recursive: true });
+    const earlier = new Date(Date.now() - 3600 * 1000);
+    for (const role of ['G0', 'G1']) {
+      const { file, text } = renderer.render(role);
+      fs.writeFileSync(path.join(dir, file), text);
+      fs.utimesSync(path.join(dir, file), earlier, earlier);
+    }
   }
 
   #git(cwd, args) { return git(cwd, args, { env: this.env }); }
@@ -893,6 +934,7 @@ async function runOnHost(row, host, fixture, roots) {
     if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
   }
   const pluginRoot = roots.forFault(row.fault);
+  if (row.fixture?.toolkit_helpers) fixture.installToolkitHelpers(pluginRoot, row.fixture.toolkit_helpers);
   const event = row.event || 'PreToolUse';
   const payload = { session_id: HOOK_SESSION_ID, transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload, pluginRoot) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
@@ -938,8 +980,7 @@ async function runOnHost(row, host, fixture, roots) {
   const changedFiles = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(file => before[file] !== after[file]);
   if (changedFiles.length) problems.push(`a fixture file changed: ${changedFiles.join(', ')}`);
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
-  const deny = decisions.find(entry => entry.decision === 'deny');
-  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, context: contexts.join('\n'), failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
+  return { ...combineDecisions(decisions), context: contexts.join('\n'), problems };
 }
 
 // The hosts a row is known to fail on (none for a passing row).
@@ -966,9 +1007,12 @@ function failureKind(row, host, observed) {
   const context = contextProblems(expect, observed.context);
   if (context.length) return context.join('; ');
   if (expect.decision === 'allow' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
-  if (expect.decision === 'deny' && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
+  if (expect.decision === 'allow' && observed.decision === 'ask') return `false block (asked by ${observed.reason})`;
+  if (expect.decision === 'ask' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
+  if (expect.decision === 'deny' && observed.decision === 'ask') return `leak (asked instead of refused, by ${observed.reason})`;
+  if ((expect.decision === 'deny' || expect.decision === 'ask') && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
   if (expect.reason === undefined) return `refused only because ${observed.reason.replace(/:failure$/, '')} itself failed; a row that expects that names the reason`;
-  return `refused by ${observed.reason}, expected ${expect.reason}`;
+  return `${observed.decision === 'ask' ? 'asked' : 'refused'} by ${observed.reason}, expected ${expect.reason}`;
 }
 
 async function pool(items, concurrency, work) {
@@ -1053,7 +1097,7 @@ function scoreboard(results, seconds, { budgetSeconds, verbose }, out) {
       const kind = failureKind(row, host, observed);
       if (kind.startsWith('false block')) entry.falseBlocks += 1; else if (kind.startsWith('leak')) entry.leaks += 1; else entry.other += 1;
       lines.push(`FAIL ${row.id} on ${host}: ${kind}`);
-      if (verbose && observed.text && !(row.expect_by_host?.[host] || row.expect).context_contains && !(row.expect_by_host?.[host] || row.expect).context_excludes) lines.push(`  refusal: ${observed.text.replace(/\s+/g, ' ').slice(0, 400)}`);
+      if (verbose && observed.text && !(row.expect_by_host?.[host] || row.expect).context_contains && !(row.expect_by_host?.[host] || row.expect).context_excludes) lines.push(`  ${observed.decision === 'ask' ? 'ask' : 'refusal'}: ${observed.text.replace(/\s+/g, ' ').slice(0, 400)}`);
     }
   }
   out.write('family          cases  pass  known-bad  false-blocks  leaks  other\n');
@@ -1182,5 +1226,5 @@ if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
   CORPUS_REL, FAULTS, HOSTS, KINDS, KNOWN_BAD_DAYS, SCHEMA,
-  agedKnownBad, expectationChanges, selectRows, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  Fixture, agedKnownBad, expectationChanges, selectRows, explainedRows, combineDecisions, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });

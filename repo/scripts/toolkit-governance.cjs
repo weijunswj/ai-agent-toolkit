@@ -67,7 +67,7 @@ const RULES_TEXT = Object.freeze({
   ENABLED: 'Global rules and coding gates, plus GitHub governance: programme records, decision traces and evidence custody.',
   UNAVAILABLE: "Couldn't check governance. Continue with global rules and coding gates; no governance effects or standing task auto-merge until it can be checked.",
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
-  DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
+  DISABLED: 'Global rules and coding gates, without GitHub governance. Any governed block in AGENTS.md is an old copy and is not followed.',
   UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by answering yes, no or later when Toolkit asks, or by saying toolkit governance and answering its question bank.`,
 });
 

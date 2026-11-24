@@ -761,7 +761,7 @@ test('agent UAT first (#1405): a merged task with a UAT owed and no agent result
   assert.deepEqual(state.ownerWaits(f.parent(),new Map([[2,f.child(2)]])).map(entry=>[entry.issue,entry.agent_uat]),[[2,'OWNER_ONLY']]);
 });
 
-// The stale check offers the owner a close only when no gate is live on the task. ownerStep's `after`
+// The stale-work net offers the owner a close only when no gate is live on the task. ownerStep's `after`
 // misses two live gates (a gate at work on a task waiting on the owner, and a blocked gate), so every
 // owner wait carries gate_live: any gate state but RETIRED (assigned, active, submitted, interrupted or
 // waiting on the owner), blocked or not.

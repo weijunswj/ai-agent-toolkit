@@ -5,6 +5,14 @@
 // session `--agents` definition (toolkit-v3-native-helper-adapter.cjs). Model and
 // effort are not here; they come only from the selected stack registry route.
 
+const os = require('node:os');
+const path = require('node:path');
+
+// The one owner of the Claude user agents directory (here, so the agent hook reads it without loading the renderer): CLAUDE_CONFIG_DIR, else ~/.claude.
+function claudeUserAgentsDirectory(environment = process.env) {
+  return path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'agents');
+}
+
 const ROLES = Object.freeze({
   G0: Object.freeze({
     name: 'toolkit-g0-helper', registryRole: 'DISCOVERY_HELPER', title: 'Toolkit planning helper (G0)',
@@ -67,4 +75,4 @@ function roleInstructions(spec) {
   ].join('\n');
 }
 
-module.exports = Object.freeze({ ROLES, HELPER_NAMES, roleSpec, roleInstructions });
+module.exports = Object.freeze({ ROLES, HELPER_NAMES, roleSpec, roleInstructions, claudeUserAgentsDirectory });
