@@ -455,7 +455,7 @@ if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnosti
   ]) assert.match(decide(ctx, bash(ctx, attempt, session)).deny, words, 'resume keeps every merge guard');
   const rows = [
     { id: 'unmarked', reason: 'no-session-mark', words: /no readable session-start mark/ },
-    { id: 'unknown', source: 'resume', reason: 'resumed-start-record-lost', words: /resumed session.*no recorded user-started origin: when it was reopened, Toolkit's record of how it started .*was missing or could not be read/ },
+    { id: 'unknown', source: 'resume', reason: 'resumed-start-record-lost', words: /resumed session.*no recorded user-started origin: at a later start of this chat, Toolkit's record of how it started was missing or could not be read/ },
     { id: 'fork', source: 'fork', reason: 'fork', words: /session is a fork/ },
     { id: 'legacy', source: 'startup', legacy: true, reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
     { id: 'automation', source: 'startup', startupEnv: { TOOLKIT_GATE_ROLE: 'G1' }, reason: 'resumed-without-user-started-origin', words: /no recorded user-started origin/ },
@@ -463,6 +463,12 @@ if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnosti
     { id: session, environment: { TOOLKIT_HOST_SESSION: 'another-native-session' }, reason: 'host-session-mismatch', words: /host session does not match/ },
     ...gate.LAUNCHER_MARKERS.map(name => ({ id: session, environment: { [name]: 'launcher' }, reason: 'launcher-marker', words: /launcher marker is present/ })),
   ];
+  // A mark lost before a compaction: the fresh mark has no origin, so standing names the lost record
+  // before the chat is reopened.
+  start('compacted', 'startup');
+  fs.rmSync(path.join(path.dirname(ctx.registryOptions.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update('compacted').digest('hex').slice(0, 32)}.json`));
+  start('compacted', 'compact');
+  rows.push({ id: 'compacted', reason: 'start-record-lost', words: /Standing task auto-merge is unavailable: this session has no recorded user-started origin: at a later start of this chat, Toolkit's record of how it started was missing or could not be read.*once the app reopens this chat it records no approval/ });
   for (const row of rows) {
     if (row.source) start(row.id, row.source, row.startupEnv);
     if (row.legacy) {

@@ -358,10 +358,11 @@ class SessionEpochs {
         const origin = resumedFromSessionShell || launched || mismatch || priorOrigin === 'automation' ? 'automation'
           : source === 'startup' ? (existing ? priorOrigin : 'user-started')
           : source === 'resume' ? priorOrigin : 'unknown';
-        // A resume that finds no readable mark for its id cannot carry origin over; noting that (kept
-        // on later starts) lets the merge hold say exactly why the reopened chat cannot approve.
+        // A start that finds this id's mark unreadable, or a resume, compaction or clear that finds it
+        // missing, cannot carry origin over; noting which (kept on later starts) lets the merge hold
+        // say exactly why the reopened chat cannot approve. A fresh startup or fork has no mark yet.
         const startRecord = previous ? (previous.startRecord === 'missing' || previous.startRecord === 'unreadable' ? previous.startRecord : null)
-          : source === 'resume' ? (existing ? 'unreadable' : 'missing') : null;
+          : existing ? 'unreadable' : ['resume', 'compact', 'clear'].includes(source) ? 'missing' : null;
         provenance = { origin, resumeHostSessionPresent, resumedFromSessionShell, resumeNeedsTypedMerge,
           ...(startRecord ? { startRecord } : {}),
           ...(RESUMED_SOURCES.includes(source) || previous?.resumed === true ? { resumed: true } : {}),
@@ -426,12 +427,15 @@ class SessionEpochs {
   // A mark that can be neither replaced nor removed (a locked file, a read-only folder) is left
   // behind, so the asked runs that carry it forget their marks instead
   // (they are in another file): no run can match them, and the question is asked again.
+  // A clear or compaction that cannot read an existing mark leaves it as it is and gives this run
+  // none: overwriting it would turn a briefly unreadable mark into a lost origin for good.
   start(sessionId, source, repositoryId = null) {
     if (!SessionEpochs.#valid(sessionId)) return null;
     const kept = source === 'clear' || source === 'compact';
     if (kept) {
       const mark = this.get(sessionId);
       if (mark) return mark;
+      if (fs.existsSync(this.#file('s', sessionId))) return null;
     }
     let epoch = null;
     const stuck = { session: null, repository: null };
@@ -458,8 +462,8 @@ class SessionEpochs {
   }
 
   // Keeps the newest few hundred of each kind, and past those every mark whose last start is under
-  // SESSION_MARK_KEEP_MS old, up to MAX_SESSION_MARKS. A file's age is its real write time, so it
-  // is read against the real clock.
+  // SESSION_MARK_KEEP_MS old, up to MAX_SESSION_MARKS. Ages are file write times read against the
+  // newest mark's (the one this call just wrote), so a moved process clock changes nothing.
   #prune(kind) {
     try {
       const pattern = new RegExp(`^${kind}-[0-9a-f]{32}\\.json$`);
@@ -469,7 +473,7 @@ class SessionEpochs {
         const file = path.join(this.#folder, name);
         try { return { file, at: fs.statSync(file).mtimeMs }; } catch { return { file, at: 0 }; }
       }).sort((a, b) => b.at - a.at);
-      const cutoff = Date.now() - SESSION_MARK_KEEP_MS;
+      const cutoff = aged[0].at - SESSION_MARK_KEEP_MS;
       aged.forEach(({ file, at }, index) => {
         if (index >= MAX_SESSION_MARKS || (index >= MAX_SESSIONS && at < cutoff)) fs.rmSync(file, { force: true });
       });

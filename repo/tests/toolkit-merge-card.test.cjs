@@ -689,7 +689,8 @@ test('the owner\'s chat reopened after a PC restart keeps the card, however many
   const start = (id, source, environment = {}, host = 'claude-code') => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment, host });
   // Before the restart: started by the owner, reopened once, last started two hours ago.
   for (const source of ['startup', 'resume']) start('owner', source);
-  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  // Times come from the file clock, which a moved test clock does not move.
+  const twoHoursAgo = new Date(fs.statSync(markOf('owner')).mtimeMs - 2 * 60 * 60 * 1000);
   fs.utimesSync(markOf('owner'), twoHoursAgo, twoHoursAgo);
   // Many other sessions start meanwhile (side sessions, helpers, headless runs).
   const others = new gate.SessionEpochs({ registryOptions, environment: {}, host: 'claude-code' });
@@ -707,7 +708,7 @@ test('the owner\'s chat reopened after a PC restart keeps the card, however many
   start('lost', 'resume');
   const lost = { id: 'lost', environment: {} };
   const said = merge(ctx, lost).deny;
-  assert.match(said, /this chat cannot record one: this resumed session has no recorded user-started origin: when it was reopened, Toolkit's record of how it started \(kept 30 days after its last start\) was missing or could not be read/);
+  assert.match(said, /this chat cannot record one: this resumed session has no recorded user-started origin: at a later start of this chat, Toolkit's record of how it started was missing or could not be read, so nothing shows the user started it\./);
   assert.match(said, /Approve it in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub\./);
   assert.doesNotMatch(said, /merge card is how|Ask the user to type/);
   assert.equal(tap(ctx, lost, card(), 'Merge').noted, false, 'no card can count there');
@@ -739,6 +740,54 @@ test('the owner\'s chat reopened after a PC restart keeps the card, however many
   }
 });
 
+// The 24 Nov incident path: the owner's reopened chat lost its mark before a compaction, which
+// wrote a fresh mark with no origin, so taps still counted (a fresh run needs none) until the app
+// reopened the chat after a PC restart. That compaction now notes the lost record, so the refusal
+// says exactly why; and a compaction that cannot read the mark leaves it in place, so a mark that
+// was only briefly unreadable keeps its origin and the card.
+test('a start record lost before a compaction is named when the app reopens the chat; an unreadable one is not overwritten', t => {
+  const ctx = context(t);
+  const { registryOptions } = ctx.options;
+  const folder = path.join(path.dirname(registryOptions.registryPath), gate.SESSIONS_FOLDER);
+  const markOf = id => path.join(folder, `s-${require('node:crypto').createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+  const start = (id, source) => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment: {}, host: 'claude-code' });
+  const reopened = id => { start(id, 'startup'); start(id, 'resume'); return { id, environment: {} }; };
+  const lostWords = /this chat cannot record one: this resumed session has no recorded user-started origin: at a later start of this chat, Toolkit's record of how it started was missing or could not be read/;
+
+  // Missing at the compaction: the card still counts until the reopen, then the refusal names it.
+  const missing = reopened('missing');
+  fs.rmSync(markOf('missing'));
+  start('missing', 'compact');
+  assert.equal(JSON.parse(fs.readFileSync(markOf('missing'), 'utf8')).startRecord, 'missing');
+  assert.match(tap(ctx, missing, card(), 'Merge').answered.context, /recorded the user's tap on Merge/, 'a fresh run still takes the card, as before');
+  assert.equal(merge(ctx, missing), null);
+  start('missing', 'resume');
+  const said = merge(ctx, missing).deny;
+  assert.match(said, lostWords);
+  assert.doesNotMatch(said, /merge card is how|Ask the user to type/);
+  assert.equal(tap(ctx, missing, card(), 'Merge').noted, false);
+
+  // Unreadable at the compaction and after: left in place, so the run has no mark, and the reopen
+  // names it.
+  const damaged = reopened('damaged');
+  fs.writeFileSync(markOf('damaged'), 'not json');
+  assert.equal(gate.startSession({ session_id: 'damaged', source: 'compact', cwd: ctx.repo }, { registryOptions, environment: {}, host: 'claude-code' }), null, 'no mark for that run');
+  assert.equal(fs.readFileSync(markOf('damaged'), 'utf8'), 'not json', 'the unreadable mark is not overwritten');
+  assert.match(merge(ctx, damaged).deny, /no readable session-start mark/);
+  start('damaged', 'resume');
+  assert.match(merge(ctx, damaged).deny, lostWords);
+
+  // Unreadable only while the compaction ran: its origin survives the reopen, and so does the card.
+  const brief = reopened('brief');
+  const kept = fs.readFileSync(markOf('brief'));
+  fs.writeFileSync(markOf('brief'), 'not json');
+  start('brief', 'compact');
+  fs.writeFileSync(markOf('brief'), kept);
+  start('brief', 'resume');
+  assert.ok(merge(ctx, brief).deny.includes('"question":"Merge owner/a#618 at 62405eb?"'), 'the card is offered');
+  assert.match(tap(ctx, brief, card(), 'Merge').answered.context, /recorded the user's tap on Merge/);
+});
+
 test('start marks past the newest few hundred are removed only once a month old, and never past the cap', t => {
   const ctx = context(t);
   const { registryOptions } = ctx.options;
@@ -747,7 +796,9 @@ test('start marks past the newest few hundred are removed only once a month old,
   const epochs = new gate.SessionEpochs({ registryOptions, environment: {}, host: 'claude-code' });
   epochs.start('old', 'startup');
   const old = marks()[0];
-  const longAgo = new Date(Date.now() - gate.SESSION_MARK_KEEP_MS - 60 * 1000);
+  // Times come from the file clock, which a moved test clock does not move.
+  const fileNow = fs.statSync(path.join(folder, old)).mtimeMs;
+  const longAgo = new Date(fileNow - gate.SESSION_MARK_KEEP_MS - 60 * 1000);
   fs.utimesSync(path.join(folder, old), longAgo, longAgo);
   for (let index = 0; index < gate.MAX_SESSIONS; index += 1) epochs.start(`new-${index}`, 'startup');
   assert.equal(marks().includes(old), false, 'a mark past the newest few hundred and over a month old is removed');
@@ -755,7 +806,7 @@ test('start marks past the newest few hundred are removed only once a month old,
   // However recent, the folder never holds more than the cap: the oldest go first.
   for (let index = marks().length; index < gate.MAX_SESSION_MARKS; index += 1) fs.writeFileSync(path.join(folder, `s-${index.toString(16).padStart(32, 'f')}.json`), '{}\n');
   const oldest = marks().sort()[0];
-  const earlier = new Date(Date.now() - 60 * 60 * 1000);
+  const earlier = new Date(fileNow - 60 * 60 * 1000);
   fs.utimesSync(path.join(folder, oldest), earlier, earlier);
   epochs.start('newest', 'startup');
   assert.equal(marks().length, gate.MAX_SESSION_MARKS);

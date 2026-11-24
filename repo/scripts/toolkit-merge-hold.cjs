@@ -34,8 +34,9 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // Codex or unknown-host reconnect, and any resumed cloud session (CLAUDE_CODE_REMOTE=true), do not.
 // The reopened chat keeps its route through the start mark the app's resume finds for its id, so
 // marks are kept 30 days after their last start (up to 4096 marks), however many other sessions
-// start meanwhile (a PC restart reopens the chat with the same id); a resume that finds none records
-// nothing and says why. The host is the hook entry point's own (the Claude Code
+// start meanwhile (a PC restart reopens the chat with the same id). A start that finds the mark
+// missing or unreadable notes it, so the reopened chat records nothing and says why; a compaction
+// or clear leaves an unreadable mark in place rather than overwrite its origin. The host is the hook entry point's own (the Claude Code
 // hook passes 'claude', the Codex hook 'codex'), never a payload field. Where a line is read but
 // not recorded, the hook says so in the turn's context with the reason and where to approve
 // instead (recordPromptNote), and a later merge refusal in that chat says the chat cannot record
@@ -1062,6 +1063,7 @@ function sessionBlock(checks, standing = false) {
   if (checks.resumeNeedsTypedMerge) return 'resume-needs-typed-merge';
   if (checks.resumed && !checks.userStartedOrigin && checks.startRecordLost) return 'resumed-start-record-lost';
   if (checks.resumed && !checks.userStartedOrigin) return 'resumed-without-user-started-origin';
+  if (standing && !checks.userStartedOrigin && checks.startRecordLost) return 'start-record-lost';
   if (standing && !checks.userStartedOrigin) return 'user-started-origin-required';
   return null;
 }
@@ -2034,7 +2036,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     : !checks.autoMergeOn ? 'auto-merge-off'
     : !checks.knownHost ? 'unknown-host'
     // A cloud thread skips only the origin checks (above); every other session check still applies.
-    : cloud ? (['resumed-start-record-lost', 'resumed-without-user-started-origin', 'user-started-origin-required'].includes(sessionBlock(checks, true)) ? null : sessionBlock(checks, true))
+    : cloud ? (['resumed-start-record-lost', 'resumed-without-user-started-origin', 'start-record-lost', 'user-started-origin-required'].includes(sessionBlock(checks, true)) ? null : sessionBlock(checks, true))
     : sessionBlock(checks, true);
   // Why this chat could not record the user's typed line or card tap either (null where it can, in
   // a cloud thread, which approves through the Projects card, or with no native session context).
@@ -2047,6 +2049,8 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   };
   return { eligible: true, reason: null, checks, repository, scope };
 }
+
+const RECORD_LOST = "at a later start of this chat, Toolkit's record of how it started was missing or could not be read, so nothing shows the user started it";
 
 function standingReason(reason) {
   return {
@@ -2061,7 +2065,8 @@ function standingReason(reason) {
     'resume-from-session-shell': `a resume carried the host-session variable from a running session, so standing authority is revoked for this session; approve ${MERGE_ROUTES}; typing in this revoked chat records no approval`,
     'fork': 'this session is a fork',
     'resume-needs-typed-merge': `Codex and unknown-host reconnects need a typed merge because they have no reliable signal to distinguish a user reconnect from an agent resume; approve ${MERGE_ROUTES}; typing in this reconnected chat records no approval`,
-    'resumed-start-record-lost': "this resumed session has no recorded user-started origin: when it was reopened, Toolkit's record of how it started (kept 30 days after its last start) was missing or could not be read, so nothing shows the user started it",
+    'resumed-start-record-lost': `this resumed session has no recorded user-started origin: ${RECORD_LOST}`,
+    'start-record-lost': `this session has no recorded user-started origin: ${RECORD_LOST}; once the app reopens this chat it records no approval`,
     'resumed-without-user-started-origin': 'this resumed session has no recorded user-started origin',
     'user-started-origin-required': 'this session has no recorded user-started origin',
   }[reason] || 'the standing answer is unavailable';

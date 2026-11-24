@@ -3515,7 +3515,7 @@
       "hosts": ["claude"],
       "steps": [
         {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow","context_contains":["Toolkit's record of how it started (kept 30 days after its last start) was missing or could not be read","Approve it in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub.","Do not ask the user to type it again in this chat."],"context_excludes":["Toolkit recorded"]}}
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow","context_contains":["at a later start of this chat, Toolkit's record of how it started was missing or could not be read","Approve it in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub.","Do not ask the user to type it again in this chat."],"context_excludes":["Toolkit recorded"]}}
       ],
       "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
       "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
