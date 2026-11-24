@@ -212,7 +212,7 @@ test('lean children: one capped polish child, the stale-work net and automate-fi
   const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(page, /^- \*\*Polish child:\*\* review Lows and small UAT nits are rows on one rolling Later polish child \(title starts `Polish`[^\n]*at most 8 rows; when full it ships as one batched PR and closes, and a fresh one opens\.$/m);
   // The stale-work net reaches the controller at turn end, never as a session-start check; the controller closes what is finished and asks the owner only for a close that needs their OK.
-  assert.ok(page.split('\n').includes("- **Stale-work net:** the programme sweep raises finished children, owner-OK closes, duplicates, closed parents with open children and full polish children as net findings, and the turn-end owed check, on hosts that run it, stops the controller's turn once for each new one due. The controller closes finished children itself and asks the owner only for a close that needs their OK (a duplicate, an obsolete child or an owner-OK close), in its next ask."));
+  assert.ok(page.split('\n').includes("- **Stale-work net:** the sweep raises stale children as net findings; the turn-end owed check, where it runs, stops the controller's turn once per new one due. The controller closes finished children itself and asks the owner only for a close that needs their OK (a duplicate, an obsolete child or an owner-OK close), in its next ask."));
   assert.doesNotMatch(page, /Stale check|session-start hook runs/);
   assert.doesNotMatch(page, /Daily stale sweep/);
   const global = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), 'utf8').replace(/\r\n/g, '\n');
