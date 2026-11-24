@@ -455,7 +455,7 @@ if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnosti
   ]) assert.match(decide(ctx, bash(ctx, attempt, session)).deny, words, 'resume keeps every merge guard');
   const rows = [
     { id: 'unmarked', reason: 'no-session-mark', words: /no readable session-start mark/ },
-    { id: 'unknown', source: 'resume', reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
+    { id: 'unknown', source: 'resume', reason: 'resumed-start-record-lost', words: /resumed session.*no recorded user-started origin: when it was reopened, Toolkit's record of how it started .*was missing or could not be read/ },
     { id: 'fork', source: 'fork', reason: 'fork', words: /session is a fork/ },
     { id: 'legacy', source: 'startup', legacy: true, reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
     { id: 'automation', source: 'startup', startupEnv: { TOOLKIT_GATE_ROLE: 'G1' }, reason: 'resumed-without-user-started-origin', words: /no recorded user-started origin/ },
@@ -515,7 +515,7 @@ if (HOST === 'claude-code') test('closure matrix: typed, card, offer and standin
     { id: 'S2', setup: id => { start(id, 'startup'); start(id, 'resume'); }, records: true },
     { id: 'S3a', setup: id => { start(id, 'startup'); start(id, 'resume', { [gate.HOST_SESSION_VARIABLE]: id }); }, reason: 'resume-from-session-shell' },
     { id: 'S3b', setup: id => { start(id, 'startup'); start(id, 'resume', { [gate.HOST_SESSION_VARIABLE]: id }); start(id, 'resume'); }, reason: 'resume-from-session-shell' },
-    { id: 'S4a', setup: id => start(id, 'resume'), reason: 'resumed-without-user-started-origin' },
+    { id: 'S4a', setup: id => start(id, 'resume'), reason: 'resumed-start-record-lost' },
     { id: 'S4b', setup: id => { start(id, 'startup', { TOOLKIT_GATE_ROLE: 'G1' }); start(id, 'resume'); }, reason: 'resumed-without-user-started-origin' },
     { id: 'S5', setup: id => start(id, 'fork'), reason: 'fork' },
     { id: 'S6', setup: id => start(id, 'startup'), environment: { TOOLKIT_GATE_ROLE: 'G1' }, reason: 'launcher-marker' },

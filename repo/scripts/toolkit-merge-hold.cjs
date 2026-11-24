@@ -31,7 +31,11 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // forked run or a run resumed from a session's shell (the governance gate's session marks). A
 // Claude Code chat the app reopened on the same id (SessionStart resume, no host-session variable)
 // is the user's own chat and records typed lines; a resume that ever carried the variable, a
-// Codex or unknown-host reconnect, and any resumed cloud session (CLAUDE_CODE_REMOTE=true), do not. The host is the hook entry point's own (the Claude Code
+// Codex or unknown-host reconnect, and any resumed cloud session (CLAUDE_CODE_REMOTE=true), do not.
+// The reopened chat keeps its route through the start mark the app's resume finds for its id, so
+// marks are kept 30 days after their last start (up to 4096 marks), however many other sessions
+// start meanwhile (a PC restart reopens the chat with the same id); a resume that finds none records
+// nothing and says why. The host is the hook entry point's own (the Claude Code
 // hook passes 'claude', the Codex hook 'codex'), never a payload field. Where a line is read but
 // not recorded, the hook says so in the turn's context with the reason and where to approve
 // instead (recordPromptNote), and a later merge refusal in that chat says the chat cannot record
@@ -1035,6 +1039,7 @@ function sessionChecks(sessionId, environment, registryOptions, now, nativeHost 
     resumedFromSessionShell: epochs.resumedFromSessionShell(sessionId),
     resumeNeedsTypedMerge: epochs.resumeNeedsTypedMerge(sessionId) || (epochs.resumed(sessionId) && gate.normaliseHost(nativeHost) !== 'claude-code'),
     userStartedOrigin: epochs.origin(sessionId) === 'user-started',
+    startRecordLost: epochs.startRecord(sessionId) !== null,
     forked: epochs.forked(sessionId),
   };
 }
@@ -1045,7 +1050,8 @@ function sessionChecks(sessionId, environment, registryOptions, now, nativeHost 
 // shell, and not a Codex or unknown-host reconnect. A resume must also keep a recorded user-started
 // origin, so a Claude Code chat the user started and the app reopened approves again, while a
 // resume of an id another process started does not. A fresh typed or card run needs no recorded
-// origin (the fresh-run rule before origin existed); standing always does.
+// origin (the fresh-run rule before origin existed); standing always does. A resume that found no
+// readable earlier mark for its id says so: nothing then shows who started the chat.
 // Neither Projects delivery nor prompt text can establish origin.
 function sessionBlock(checks, standing = false) {
   if (!checks.sessionMarked) return 'no-session-mark';
@@ -1054,6 +1060,7 @@ function sessionBlock(checks, standing = false) {
   if (checks.resumedFromSessionShell) return 'resume-from-session-shell';
   if (checks.forked) return 'fork';
   if (checks.resumeNeedsTypedMerge) return 'resume-needs-typed-merge';
+  if (checks.resumed && !checks.userStartedOrigin && checks.startRecordLost) return 'resumed-start-record-lost';
   if (checks.resumed && !checks.userStartedOrigin) return 'resumed-without-user-started-origin';
   if (standing && !checks.userStartedOrigin) return 'user-started-origin-required';
   return null;
@@ -2027,7 +2034,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     : !checks.autoMergeOn ? 'auto-merge-off'
     : !checks.knownHost ? 'unknown-host'
     // A cloud thread skips only the origin checks (above); every other session check still applies.
-    : cloud ? (['resumed-without-user-started-origin', 'user-started-origin-required'].includes(sessionBlock(checks, true)) ? null : sessionBlock(checks, true))
+    : cloud ? (['resumed-start-record-lost', 'resumed-without-user-started-origin', 'user-started-origin-required'].includes(sessionBlock(checks, true)) ? null : sessionBlock(checks, true))
     : sessionBlock(checks, true);
   // Why this chat could not record the user's typed line or card tap either (null where it can, in
   // a cloud thread, which approves through the Projects card, or with no native session context).
@@ -2054,6 +2061,7 @@ function standingReason(reason) {
     'resume-from-session-shell': `a resume carried the host-session variable from a running session, so standing authority is revoked for this session; approve ${MERGE_ROUTES}; typing in this revoked chat records no approval`,
     'fork': 'this session is a fork',
     'resume-needs-typed-merge': `Codex and unknown-host reconnects need a typed merge because they have no reliable signal to distinguish a user reconnect from an agent resume; approve ${MERGE_ROUTES}; typing in this reconnected chat records no approval`,
+    'resumed-start-record-lost': "this resumed session has no recorded user-started origin: when it was reopened, Toolkit's record of how it started (kept 30 days after its last start) was missing or could not be read, so nothing shows the user started it",
     'resumed-without-user-started-origin': 'this resumed session has no recorded user-started origin',
     'user-started-origin-required': 'this session has no recorded user-started origin',
   }[reason] || 'the standing answer is unavailable';

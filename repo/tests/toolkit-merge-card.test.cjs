@@ -677,6 +677,92 @@ test('the owner\'s chat reopened by the app gets the card, the redirect and a co
   assert.match(pre(merge('revoked')).permissionDecisionReason, /this chat cannot record one/);
 });
 
+// #1233 reopened: the owner's chat, reopened by the app after a PC restart, keeps its card route
+// even when many other sessions started on this computer since its last start; those starts once
+// pushed its start mark out, so the resume found no record that the user started it. A resume that
+// finds no mark still records nothing, and the refusal says exactly why and where to approve.
+test('the owner\'s chat reopened after a PC restart keeps the card, however many sessions started meanwhile', t => {
+  const ctx = context(t);
+  const { registryOptions } = ctx.options;
+  const folder = path.join(path.dirname(registryOptions.registryPath), gate.SESSIONS_FOLDER);
+  const markOf = id => path.join(folder, `s-${require('node:crypto').createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+  const start = (id, source, environment = {}, host = 'claude-code') => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment, host });
+  // Before the restart: started by the owner, reopened once, last started two hours ago.
+  for (const source of ['startup', 'resume']) start('owner', source);
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(markOf('owner'), twoHoursAgo, twoHoursAgo);
+  // Many other sessions start meanwhile (side sessions, helpers, headless runs).
+  const others = new gate.SessionEpochs({ registryOptions, environment: {}, host: 'claude-code' });
+  for (let index = 0; index <= gate.MAX_SESSIONS; index += 1) others.start(`other-${index}`, 'startup');
+  assert.ok(fs.existsSync(markOf('owner')), 'the owner\'s recent start mark is kept');
+  // The PC restarts and the app reopens the same chat.
+  start('owner', 'resume');
+  const session = { id: 'owner', environment: {} };
+  const refusal = merge(ctx, session).deny;
+  assert.ok(refusal.includes('"question":"Merge owner/a#618 at 62405eb?"'), 'the refusal offers the card');
+  assert.match(tap(ctx, session, card(), 'Merge').answered.context, /recorded the user's tap on Merge as one approval for owner\/a#618/);
+  assert.equal(merge(ctx, session), null, 'the tapped merge passes');
+
+  // A resume that finds no start mark for its id: nothing shows who started it.
+  start('lost', 'resume');
+  const lost = { id: 'lost', environment: {} };
+  const said = merge(ctx, lost).deny;
+  assert.match(said, /this chat cannot record one: this resumed session has no recorded user-started origin: when it was reopened, Toolkit's record of how it started \(kept 30 days after its last start\) was missing or could not be read/);
+  assert.match(said, /Approve it in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub\./);
+  assert.doesNotMatch(said, /merge card is how|Ask the user to type/);
+  assert.equal(tap(ctx, lost, card(), 'Merge').noted, false, 'no card can count there');
+  // Later reopenings keep saying so, and a startup on that id never restores the route.
+  start('lost', 'resume');
+  start('lost', 'startup');
+  assert.match(merge(ctx, lost).deny, /was missing or could not be read/);
+  // A mark that cannot be read is told apart in the record, and refused the same way.
+  start('damaged', 'startup');
+  fs.writeFileSync(markOf('damaged'), 'not json');
+  start('damaged', 'resume');
+  assert.equal(JSON.parse(fs.readFileSync(markOf('damaged'), 'utf8')).startRecord, 'unreadable');
+  assert.equal(JSON.parse(fs.readFileSync(markOf('lost'), 'utf8')).startRecord, 'missing');
+  assert.match(merge(ctx, { id: 'damaged', environment: {} }).deny, /was missing or could not be read/);
+  // The chats that never approve still do not, after the same restart.
+  start('lane', 'startup', { [gate.LAUNCHER_MARKERS[0]]: 'G1' });
+  start('lane', 'resume');
+  start('shell', 'startup');
+  start('shell', 'resume', { [gate.HOST_SESSION_VARIABLE]: 'shell' });
+  start('shell', 'resume');
+  start('forked', 'fork');
+  start('forked', 'resume');
+  start('codex', 'startup', {}, 'codex');
+  start('codex', 'resume', {}, 'codex');
+  for (const [id, words] of [['lane', /no recorded user-started origin$|no recorded user-started origin\./], ['shell', /a resume carried the host-session variable/], ['forked', /this session is a fork/], ['codex', /Codex and unknown-host reconnects need a typed merge/]]) {
+    const refused = merge(ctx, { id, environment: {} }, { host: id === 'codex' ? 'codex' : 'claude' }).deny;
+    assert.match(refused, words, id);
+    assert.doesNotMatch(refused, /was missing or could not be read|merge card is how/, id);
+  }
+});
+
+test('start marks past the newest few hundred are removed only once a month old, and never past the cap', t => {
+  const ctx = context(t);
+  const { registryOptions } = ctx.options;
+  const folder = path.join(path.dirname(registryOptions.registryPath), gate.SESSIONS_FOLDER);
+  const marks = () => fs.readdirSync(folder).filter(name => /^s-[0-9a-f]{32}\.json$/.test(name));
+  const epochs = new gate.SessionEpochs({ registryOptions, environment: {}, host: 'claude-code' });
+  epochs.start('old', 'startup');
+  const old = marks()[0];
+  const longAgo = new Date(Date.now() - gate.SESSION_MARK_KEEP_MS - 60 * 1000);
+  fs.utimesSync(path.join(folder, old), longAgo, longAgo);
+  for (let index = 0; index < gate.MAX_SESSIONS; index += 1) epochs.start(`new-${index}`, 'startup');
+  assert.equal(marks().includes(old), false, 'a mark past the newest few hundred and over a month old is removed');
+  assert.equal(marks().length, gate.MAX_SESSIONS);
+  // However recent, the folder never holds more than the cap: the oldest go first.
+  for (let index = marks().length; index < gate.MAX_SESSION_MARKS; index += 1) fs.writeFileSync(path.join(folder, `s-${index.toString(16).padStart(32, 'f')}.json`), '{}\n');
+  const oldest = marks().sort()[0];
+  const earlier = new Date(Date.now() - 60 * 60 * 1000);
+  fs.utimesSync(path.join(folder, oldest), earlier, earlier);
+  epochs.start('newest', 'startup');
+  assert.equal(marks().length, gate.MAX_SESSION_MARKS);
+  assert.equal(marks().includes(oldest), false, 'the oldest mark goes first');
+  assert.notEqual(epochs.get('newest'), null);
+});
+
 test('the tap receipt names Toolkit\'s merge card', t => {
   const ctx = context(t);
   const session = SESSIONS['a chat the user started'](ctx);
