@@ -127,7 +127,7 @@ test('an off the owner chose stays off: a later setup keeps it and a refresh ask
   assert.equal(agentsMd(home.read()), undefined, 'refresh leaves it off');
 
   const again = await answer(['yes']);
-  assert.match(again.written, /3\.5 Claude Code setting: Read AGENTS\.md too\?\n  Current: Off \(you turned it off\)\n  Setup applies: A\. Keep current\n/);
+  assert.match(again.written, /3\.5 Claude Code setting: Read AGENTS\.md \(in all local repos\) too\?\n  Current: Off \(you turned it off\)\n  Setup applies: A\. Keep current\n/);
   applyAnswers(again.args);
   assert.equal(agentsMd(home.read()), undefined, 'a later yes leaves it off');
   assert.equal(stateOf('agents-md'), STATES.OWNER_OFF);
