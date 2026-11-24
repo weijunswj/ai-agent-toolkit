@@ -279,7 +279,8 @@ test('Claude Toolkit plugin SessionStart hook validator requires sync-source cla
         hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"' }]
       }],
       Stop: [{
-        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"', timeout: 30 }]
+        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"', timeout: 30 },
+          { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-owed-check-hook.cjs"', timeout: 30 }]
       }]
     }
   });
@@ -287,7 +288,13 @@ test('Claude Toolkit plugin SessionStart hook validator requires sync-source cla
   const withoutStop = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
   delete withoutStop.hooks.Stop;
   writeJson(hooksPath, withoutStop);
-  assert.match(setup.verifySessionStartHook(hooksPath).join('\n'), /Stop must have exactly one hook/);
+  assert.match(setup.verifySessionStartHook(hooksPath).join('\n'), /Stop must have exactly two hooks/);
+  // The owed check alone, or the two in the other order, is refused too.
+  const swapped = JSON.parse(JSON.stringify(withoutStop));
+  swapped.hooks.Stop = [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-owed-check-hook.cjs"', timeout: 30 },
+    { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"', timeout: 30 }] }];
+  writeJson(hooksPath, swapped);
+  assert.match(setup.verifySessionStartHook(hooksPath).join('\n'), /Stop must have exactly two hooks/);
 
   writeJson(hooksPath, {
     hooks: {

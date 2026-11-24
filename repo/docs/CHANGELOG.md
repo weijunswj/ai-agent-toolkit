@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.175.0 (A turn-end owed check for the controller in Claude Code)
+
+### Added
+
+- **Owed check at turn end (Claude Code).** A second turn-end hook, `toolkit-owed-check-hook.cjs`, stops the controller's turn once with the exact steps when the turn leaves owed work: programme findings new for 4 hours or more, or acknowledged past their due time; open `CLOSE_DUE` findings; side sessions the desktop app shows finished but not archived (every pull request merged or closed, not running, nothing waiting on the owner); gate launches from the last 24 hours with no `gate-session` record; and archived gate sessions with no close record. It reads only local files (no git, gh or network call) and stops a turn again only when an entry is added. It stays silent in gate, helper and side sessions, in sessions that did not act as the controller, outside governed repositories and when the host says the stop already follows a hook block. A missing cache, an unreadable transcript or desktop session files in an unknown format become one note, shown once, never a block. Codex keeps the single turn-end hook.
+- **Net findings in the attention cache.** `programme.cjs attention` and `refresh` write the open net findings (ID, code, task, kind, state and times; no free text) into this computer's attention cache, which the owed check reads. The owed check starts `programme.cjs refresh` in the background when the cache is missing or over an hour old (at most once per 15 minutes per repository, never in a cloud session).
+- **Hook pack.** Rows can use the `Stop` event, and fixtures can plant attention-cache findings (`attention_net`) and desktop session files (`desktop_sessions`).
+- In Claude Code, a question card is refused when the agent already wrote text earlier in the same turn, since the desktop app shows only the open card and hides that text, and when a card's question is longer than 120 characters. The refusal tells the agent to ask in its closing message instead, or to put the context into the card's option descriptions. Toolkit's own governance and merge cards are not affected, and a card is shown with a note when the session's transcript cannot be read.
+- `agent-cost-control` has a "Before you start a subagent" section, read once per chat before any subagent, helper agent or spawned thread: start one only for separable work that saves time or context, set the cheapest tier and effort on the launch, brief it with the data it needs, and get approval first for anything not cheaper than yourself (the same route, a higher tier or effort, any maximum effort, or a launch that inherits your route). A default helper ladder: the small tier for lookups and inventories, the mid tier for bounded code, tests and long summaries, never the top tier as a helper. A subagent that starts another applies the same test against its own route.
+
+### Removed
+
+- **Session start shows the governance status only.** The session-start hook no longer prints the attention line, the stale-check line or the cloud "attention and stale check wait" line, and starts no background refresh or stale check; due programme work reaches the controller at turn end. Checkpoint and stale-copy lines stay.
+- **The daily stale check is gone.** `toolkit-controller-check.cjs` has no `stale` check, its date stamp (`~/.ai-agent-toolkit/user-state/stale-check/`) is no longer written or read, and the session-start command line for it is gone; the programme sweep raises the same rows as stale-work net findings. `--skip stale` is still accepted and does nothing, for Claude Projects task prompts stored before this change. An existing `stale-check` folder is left on disk unread and can be deleted by hand.
+- **The attention cache holds only the net findings.** Its line, counts, digest, work-queue summary and shown-digest fields are gone (schema v2); a cache an earlier Toolkit wrote is not read and is rewritten by the next refresh.
+
+### Changed
+
+- Setup's check of the installed Claude Code hooks now expects exactly two turn-end hooks, the programme checkpoint then the owed check.
+- The controller principle **Stale check** is now **Stale-work net**: the sweep raises the rows and the turn-end owed check brings them to the controller. The Claude Projects hourly nudge and daily check-in no longer pass `stale` to the controller check.
+- A cloud session that cannot reach the programme store now says the next refresh on the owner's computer reads it.
+
+### Fixed
+
+- Commands typed through the Claude desktop app's Terminal panel now get the same checks as the Bash tool: a merge without the owner's approval, a chat launched to merge, a push to the default branch and a write to Toolkit's user-state folder are refused there too. Terminal panel and Monitor commands also get the AI attribution, force-push and credential checks. A test fails CI when a tool that runs a command line misses any of these checks.
+
 ## 3.174.0 (lane waits removed; one ordered work queue on the programme graph; one-task catalogue patches)
 
 ### Removed
