@@ -856,13 +856,15 @@ class ToolkitEnv {
       let tab = older[id];
       const saved = !tab || tab.hash !== hash;
       if (saved || report) {
-        const notes = this.#olderNotes(file);
+        const read = this.#olderNotes(file);
         // The store could not be read: leave the tab exactly as it is until the next try.
-        if (!notes) continue;
+        if (!read) continue;
+        const { notes } = read;
         if (!notes.length) { this.#edit.discard(file); delete older[id]; wiped = true; continue; }
         if (saved) {
           const time = this.#now().toISOString().slice(11, 16);
-          const written = this.#edit.writeStatus(file, () => ({
+          // A UTF-16 file gets no note (UTF-8 text would garble it); the tab is still kept and reported.
+          const written = read.utf16 ? null : this.#edit.writeStatus(file, () => ({
             text: `NOT SAVED (${time} UTC). This is an older Toolkit env tab: only your current tab is saved. Copy the lines below into it (ask your agent for your keys to open it), then close this tab. It is deleted at your next "done".`,
             notes,
           }), fs.readFileSync(file));
@@ -902,7 +904,7 @@ class ToolkitEnv {
 
   // An older tab's lines that hold typing not in the store, names and line numbers only: each key line
   // whose value differs from the stored one, and each line that could not be read as a key. Null when
-  // the store cannot be read.
+  // the store cannot be read. Returns { notes, utf16 }.
   #olderNotes(file) {
     let parsed;
     try { parsed = this.#edit.read(file); } catch { return null; }
@@ -912,10 +914,11 @@ class ToolkitEnv {
       const stored = new Set(this.#store.list());
       current = this.#store.readAll(listed.map(([name]) => name).filter((name) => stored.has(name)));
     } catch { return null; }
-    return [
+    const notes = [
       ...listed.filter(([name, entry]) => current.get(name) !== entry.value).map(([name, entry]) => ({ name, line: entry.line, why: `${name} differs from what is stored` })),
       ...parsed.problems.map((problem) => ({ line: problem.line, why: `not saved: ${problem.why}` })),
     ].sort((a, b) => (a.line || 0) - (b.line || 0));
+    return { notes, utf16: parsed.utf16 };
   }
 
   // Never stops an edit: a copy that cannot be removed is left, and the count says what was. The
@@ -971,7 +974,10 @@ class ToolkitEnv {
   }
 
   // With an edit open, edit opens that same tab again: a save not applied yet is applied first, and
-  // nothing in the tab is replaced. Only with no edit open does it write a fresh file from the store.
+  // nothing in the tab is replaced. Only with no edit open does it write a fresh file from the store,
+  // and when the open tab's last save was refused because keys changed elsewhere: that tab can never
+  // be saved, so it is kept as an older tab (its typing and editor copies stay, a note names its
+  // differing lines) and a fresh tab from the store opens beside it.
   async edit({ launch = true } = {}) {
     const out = [];
     // Program file name only is kept; the full path is used for this one open.
@@ -979,14 +985,21 @@ class ToolkitEnv {
     if (launch) { try { app = this.#findApp() || app; } catch {} }
     const created = this.#edit.withLock(() => {
       out.push(...this.#sweepEdits({ report: true }));
-      const state = this.#edit.state();
+      let state = this.#edit.state();
       const file = this.#edit.currentFile();
       if (file) {
         const refused = this.#edit.hash(file) !== state.handled || state.pending?.length ? !this.#applySave(file, state).ok : Boolean(state.refused);
-        if (refused) out.push('Your last save was not applied; the tab says why at the top.');
-        // Opening it again counts as use: the 30-minute close counts from now.
-        this.#edit.writeState({ ...this.#edit.state(), last_save_ms: this.#now().getTime() });
-        return { file, again: true };
+        if (refused && this.#edit.state()?.refused === 'conflict') {
+          this.#edit.clearState();
+          state = null;
+          out.push('Your last save was not applied because keys changed while that tab was open, so a fresh tab opens from what is stored.');
+          out.push(...this.#sweepEdits({ report: true }));
+        } else {
+          if (refused) out.push('Your last save was not applied; the tab says why at the top.');
+          // Opening it again counts as use: the 30-minute close counts from now.
+          this.#edit.writeState({ ...this.#edit.state(), last_save_ms: this.#now().getTime() });
+          return { file, again: true };
+        }
       }
       if (state) this.#edit.clearState();
       out.push(...this.#resultLines(this.#edit.takeResult(), 'Saved from the earlier tab'));
@@ -1093,7 +1106,8 @@ class ToolkitEnv {
     if (!outcome.ok) {
       const written = outcome.utf16 ? null : this.#edit.writeStatus(file, () => this.#refusalBlock(outcome), bytes);
       outcome.lineOf = written?.lineOf;
-      this.#edit.writeState({ ...state, refused: true, handled: written?.hash || sha256(bytes), last_save_ms: now.getTime() });
+      // A conflict can never be saved from this tab, so the next edit opens a fresh one (see edit).
+      this.#edit.writeState({ ...state, refused: outcome.conflicts ? 'conflict' : true, handled: written?.hash || sha256(bytes), last_save_ms: now.getTime() });
       return outcome;
     }
     // The status block is rewritten only when it has something to say (keys removed, empty lines

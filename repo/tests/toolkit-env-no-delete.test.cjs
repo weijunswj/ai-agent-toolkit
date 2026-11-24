@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
-  clockAt, editFile, editFiles, editState, harness, save, sentinel, storeImage, tempHome,
+  bodyOf, clockAt, editFile, editFiles, editState, harness, save, sentinel, storeImage, tempHome,
 } = require('./support/toolkit-env-harness.cjs');
 const { EnvManifest } = require('../scripts/toolkit-env.cjs');
 const { PlatformStore, STORE_PREFIX, WindowsCredentialStore } = require('../scripts/toolkit-env-store.cjs');
@@ -596,4 +596,46 @@ test('row 21: every test that starts the real toolkit env command keeps the test
     }
   }
   assert.ok(found.length >= 5, 'the scan found the known real-command tests');
+});
+
+test('after a save refused because keys changed elsewhere, edit keeps that tab as an older tab and opens a fresh one, and done ends the edit', async (t) => {
+  const run = await opened(t);
+  const { h, clock, file } = run;
+  clock.ms += 1000;
+  // Changed elsewhere while the tab is open (as Credential Manager or another tool would).
+  h.store.writeAll(new Map([['X1_TEST_KEPT_KEY', sentinel()]]));
+  const typed = sentinel();
+  saveAndSettle(run, `${fs.readFileSync(file, 'utf8')}X1_TEST_TYPED_KEY=${typed}\n`);
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED.*These keys changed while this tab was open: X1_TEST_KEPT_KEY/m);
+  const stored = storeImage(h);
+  const again = await h.run('edit');
+  assert.equal(again.code, 0, again.stderr);
+  const fresh = currentFile(h);
+  assert.notEqual(fresh, file, 'a fresh tab');
+  assert.match(again.stdout, /keys changed while that tab was open, so a fresh tab opens from what is stored/);
+  assert.match(again.stdout, /An older Toolkit env tab was not saved: its lines for X1_TEST_KEPT_KEY, X1_TEST_TYPED_KEY differ from what is stored/);
+  const freshBody = bodyOf(fs.readFileSync(fresh, 'utf8'));
+  for (const name of h.store.list()) assert.ok(freshBody.some((line) => line === `${name}=${h.store.peek(name)}`), `${name}: the fresh tab shows the store`);
+  assert.ok(fs.existsSync(file), 'the refused tab and its typing are kept');
+  assert.ok(fs.readFileSync(file, 'utf8').includes(`X1_TEST_TYPED_KEY=${typed}`));
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED.*This is an older Toolkit env tab/m);
+  const done = await h.run('apply');
+  assert.equal(done.code, 0, done.stderr);
+  assert.match(done.stdout, /Deleted an older Toolkit env tab you were shown/);
+  assert.equal(storeImage(h), stored, 'nothing from the refused tab was saved');
+  assert.equal(h.store.peek('X1_TEST_TYPED_KEY'), undefined);
+  assert.equal(h.store.removes, 0);
+});
+
+test('an older tab saved as UTF-16 is kept byte for byte and still named, with no note written into it', async (t) => {
+  const run = await opened(t);
+  const { h } = run;
+  const older = path.join(h.paths.editDir, 'env-edit-00112233aabbccdd.env');
+  const text = '# Status: nothing saved from this tab yet.\r\n# caf\u00e9 keys\r\nX1_TEST_TYPED_KEY=typed-value-123\r\n';
+  save(older, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]));
+  const before = fs.readFileSync(older);
+  const status = await h.run('status');
+  assert.ok(fs.readFileSync(older).equals(before), 'the UTF-16 file is unchanged');
+  assert.match(status.stdout, /An older Toolkit env tab was not saved/);
+  assert.equal(h.store.removes, 0);
 });

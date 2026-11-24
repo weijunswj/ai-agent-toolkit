@@ -46,7 +46,7 @@ A save is applied whole or not at all. Nothing is saved, and the status block at
 - a line is not `NAME=value`, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
 - the file was saved as UTF-16 (save it as UTF-8);
 - the save would remove every key (keep at least one key line; delete the last keys by hand in Windows Credential Manager);
-- a key changed elsewhere (`set`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+- a key changed elsewhere (`set`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across: the refused tab is kept as an older tab, with your typed lines and a note naming the lines that differ, until your next "done".
 
 When Toolkit writes the status line, your editor may reload the file or say it changed; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
 
