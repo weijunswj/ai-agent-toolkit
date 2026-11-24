@@ -132,6 +132,39 @@ test('after a start it prints the effort raise and the record steps', () => {
   assert.deepEqual(post(start({ model: undefined }), started), {});
 });
 
+// G2 round 1, F1: the 23 Nov controller ran at high and passed the G2 pin's own `effort: "xhigh"`;
+// the app took it without an error, capped the start at high, and every such start needed a manual
+// raise. A start above the caller's own effort runs at the caller's.
+test('a start that asks for more effort than the caller has still gets the raise step', () => {
+  const started = 'Started session "G2 PR 1480" (session_id: local_1234abcd-0000-4000-8000-000000000002, name: g2-1480). It runs on its own.';
+  const context = output => output && output.hookSpecificOutput ? output.hookSpecificOutput.additionalContext : '';
+  const g2 = fields => start({ title: 'G2 PR 1480', prompt: G2_BRIEF, effort: 'xhigh', ...fields });
+  for (const [label, input, environment] of [['caller effort in the hook input', { effort: { level: 'high' } }, {}], ['caller effort in CLAUDE_EFFORT', {}, { CLAUDE_EFFORT: 'high' }]]) {
+    const call = { tool_name: TOOL, tool_input: g2(), ...input };
+    assert.deepEqual(launch.preToolUse(call, { environment, registry }), {}, label);
+    const steps = context(launch.postToolUse({ ...call, tool_response: [{ type: 'text', text: started }] }, { environment, registry }));
+    assert.match(steps, /its first turn runs at high, below its opus-5\.5\/xhigh pin/, label);
+    assert.match(steps, /set_session_effort with session_id local_1234abcd-0000-4000-8000-000000000002 and effort xhigh/, label);
+  }
+  // The caller at the pin: the start runs on it, so no raise.
+  const onPin = context(launch.postToolUse({ tool_name: TOOL, tool_input: g2(), effort: { level: 'xhigh' }, tool_response: [{ type: 'text', text: started }] }, { environment: {}, registry }));
+  assert.doesNotMatch(onPin, /set_session_effort/);
+  // A proposal card whose pin is above the caller: confirm and raise once it starts.
+  const card = context(launch.postToolUse({ tool_name: TOOL, tool_input: g2({ initiation: 'own_initiative' }), effort: { level: 'high' }, tool_response: [{ type: 'text', text: 'Proposed "G2 PR 1480" (task_id: task_c1d2e3f4).' }] }, { environment: {}, registry }));
+  assert.match(card, /card task_c1d2e3f4/);
+  assert.match(card, /set_session_effort with session_id <its session id> and effort xhigh/);
+});
+
+// G2 round 1, L3: after an offer card the brief goes in a start_session call with proposal_id, which
+// may not carry model or effort. Its lines are checked; its effort is the caller's.
+test('an offer card brief sent with its proposal id is checked for its lines only', () => {
+  const offer = fields => ({ proposal_id: 'task_0ffe12ab', prompt: G2_BRIEF, background: 'b'.repeat(90), ...fields });
+  assert.deepEqual(pre(offer()), {});
+  assert.match(reason(pre(offer({ prompt: 'Gate: G2\nAssignment: x1\nReview it.' }))), /has no Route line/);
+  const steps = launch.postToolUse({ tool_name: TOOL, tool_input: offer(), effort: { level: 'high' }, tool_response: [{ type: 'text', text: 'Started session "G2" (session_id: local_1234abcd-0000-4000-8000-000000000003, name: g2).' }] }, { environment: {}, registry });
+  assert.match(steps.hookSpecificOutput.additionalContext, /set_session_effort with session_id local_1234abcd-0000-4000-8000-000000000003 and effort xhigh/);
+});
+
 test('a failure inside the check lets the start through with a note', () => {
   const broken = { get profiles() { throw new Error('registry unreadable'); } };
   const output = launch.preToolUse({ tool_name: TOOL, tool_input: start(), effort: { level: 'high' } }, { environment: {}, registry: broken });

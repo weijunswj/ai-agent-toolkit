@@ -1903,6 +1903,27 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
       "expect": {"decision":"allow","context_excludes":["set_session_effort","Toolkit gate launch"]},
       "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.post-pin-effort-above-caller",
+      "source": "G2 round 1 on the gate launch check, F1: a controller at high passed the G2 pin effort xhigh, the app capped the start, and no raise step was printed",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"initiation":"user_asked","title":"G2 PR 1480","model":"claude-opus-5-5","effort":"xhigh","prompt":"Gate: G2\nRoute: owner-claude opus opus-5.5/xhigh\nAssignment: 1265-g2-pr1480\n\nReview PR 1480.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."},"tool_response":[{"type":"text","text":"Started session \"G2 PR 1480\" (session_id: local_1234abcd-0000-4000-8000-000000000002, name: g2-1480). It runs on its own."}]},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["set_session_effort with session_id local_1234abcd-0000-4000-8000-000000000002 and effort xhigh"]},
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.offer-brief-proposal-id",
+      "source": "G2 round 1 on the gate launch check, L3: after an offer card the brief goes with proposal_id, which may carry no model or effort",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"mcp__ccd_session__start_session","effort":{"level":"high"},"tool_input":{"proposal_id":"task_0ffe12ab","prompt":"Gate: G2\nRoute: owner-claude opus opus-5.5/xhigh\nAssignment: 1265-g2-pr1480\n\nReview PR 1480.","background":"Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
     }
   ]
 }
