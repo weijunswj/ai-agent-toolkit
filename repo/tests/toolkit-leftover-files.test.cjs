@@ -113,6 +113,31 @@ test('a block edited by hand is still listed, and says so; Windows line endings 
   assert.match(leftovers.describe({ folder: w.folder, readable: true, repositories: [widget] }).join('\n'), /TOOLKIT-GOVERNED-RULES inside the file, edited by hand since\./);
 });
 
+// The n8n adapter block older setups copied into AGENTS.md is a leftover in every governance state, since
+// the global rules carry the n8n rules now. Each row: the governance state, the AGENTS.md text, and the
+// [file, kind, block, empties] rows the scan must list (none when the file has no such block).
+const N8N_ADAPTER_BLOCK = require('../scripts/toolkit-managed-block.cjs').renderBlock({
+  source: 'repo/contracts/agent-rules/n8n-safety-router-adapter.md', name: 'N8N-AGENT-RULES-ADAPTER', version: '3.167.1',
+  body: '## n8n Safety Router\n\nUse the n8n Safety Router skill before any n8n work.',
+});
+const N8N_LISTED = [['AGENTS.md', 'block', 'N8N-AGENT-RULES-ADAPTER', false]];
+const N8N_ADAPTER_ROWS = [
+  ['governance on', 'ENABLED', `# My rules\n\n${N8N_ADAPTER_BLOCK}\n`, N8N_LISTED],
+  ['governance on, the block is all the file holds', 'ENABLED', `${N8N_ADAPTER_BLOCK}\n`, [['AGENTS.md', 'block', 'N8N-AGENT-RULES-ADAPTER', true]]],
+  ['governance off', 'DISABLED', `# My rules\n\n${N8N_ADAPTER_BLOCK}\n`, N8N_LISTED],
+  ['no governance decision', 'UNDECIDED', `# My rules\n\n${N8N_ADAPTER_BLOCK}\n`, N8N_LISTED],
+  ['governance on, no block', 'ENABLED', '# My rules\n', []],
+  ['governance off, no block', 'DISABLED', '# My rules\n', []],
+  ['no governance decision, no block', 'UNDECIDED', '# My rules\n', []],
+];
+for (const [label, state, agents, expected] of N8N_ADAPTER_ROWS) {
+  test(`an n8n adapter block in AGENTS.md is a leftover, or nothing without one (${label})`, t => {
+    const w = world(t, { widget: { state, files: { 'AGENTS.md': agents } } });
+    const widget = w.of(w.scan(), 'widget');
+    assert.deepEqual(widget.files.map(item => [item.file, item.kind, item.block, item.empties]), expected);
+  });
+}
+
 test('cloud sweep copies with the Toolkit marker are listed; an edited one says so; an unmarked one is not', t => {
   const cloud = require('../scripts/toolkit-cloud-workflows.cjs');
   const [sweep, gate] = cloud.WORKFLOWS;
