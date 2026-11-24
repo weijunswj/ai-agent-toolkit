@@ -59,10 +59,7 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 9500, `CONTROLLER.md ${crlfBytes(read('repo/CONTROLLER.md'))} bytes`);
   const pages = controllerFiles().slice(1);
   assert.equal(pages.length, 4);
-  // The principles page alone may hold 5,090 (owner record 1295, 24 November): the hook creation rule
-  // goes there as a one-line pointer to the hook design playbook, which holds the detail.
-  const PAGE_CAPS = { 'repo/controller/principles.md': 5090 };
-  for (const rel of pages) assert.ok(crlfBytes(read(rel)) <= (PAGE_CAPS[rel] ?? 5000), `${rel} ${crlfBytes(read(rel))} bytes`);
+  for (const rel of pages) assert.ok(crlfBytes(read(rel)) <= 5000, `${rel} ${crlfBytes(read(rel))} bytes`);
   // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
   // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks), then to
   // 11,750 for the hook-change merge rule (the hook test pack, revert proof and real-host smoke), then
