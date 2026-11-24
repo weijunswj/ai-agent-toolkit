@@ -51,8 +51,8 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
 
-// Claude Code asks one question: piped input answers it with the displayed bank reference, and an answer with
-// a part setup cannot read is refused before any write. Empty piped lines are not an answer.
+// Claude Code asks one question: piped input answers it with the displayed bank reference on one line, and a
+// second non-empty line is refused before any write. Empty piped lines are not an answer.
 test('Claude setup rejects extra non-empty piped input before every setup write', () => {
   const claudeArgs = (repo) => ['--execute', '--host', 'claude-code', '--repo-root', repo.setupRepo, '--repo-remote', repo.origin];
   const validRoot = tmpRoot();
@@ -72,10 +72,39 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     input: `${displayedBankReference(shown.stdout)}: yes\nunexpected`,
   });
   assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
-  assert.match(rejected.stderr, /Setup question bank answer has a part it cannot read: unexpected\./);
+  assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
   assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_HELPER_ARGS.log')), false);
   assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false);
   assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'BRIDGE_ARGS.log')), false);
   assert.equal(runTestGit(rejectedRepo.setupRepo, ['status', '--porcelain']), beforeStatus);
   assert.equal(fs.existsSync(codexConfig(rejectedRoot)), false);
+});
+
+test('Claude setup refuses a change typed on a second piped line before any write', () => {
+  const claudeArgs = (repo) => ['--execute', '--host', 'claude-code', '--repo-root', repo.setupRepo, '--repo-remote', repo.origin];
+  const root = tmpRoot();
+  const repo = createGitBackedSetupRepo(root);
+  const shown = run(claudeArgs(repo), { env: isolatedHomeEnv(root), input: '' });
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  const beforeStatus = runTestGit(repo.setupRepo, ['status', '--porcelain']);
+  const rejected = run(claudeArgs(repo), { env: isolatedHomeEnv(root), input: `${displayedBankReference(shown.stdout)}: yes\n3.5=off\n` });
+  assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
+  assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'settings.json')), false, 'no Claude Code setting is written');
+  assert.equal(fs.existsSync(path.join(repo.setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false);
+  assert.equal(runTestGit(repo.setupRepo, ['status', '--porcelain']), beforeStatus);
+  assert.equal(fs.existsSync(codexConfig(root)), false);
+});
+
+test('a no to the Claude Code bank says setup changed none of your settings, and writes none', () => {
+  const claudeArgs = (repo) => ['--execute', '--host', 'claude-code', '--repo-root', repo.setupRepo, '--repo-remote', repo.origin];
+  const root = tmpRoot();
+  const repo = createGitBackedSetupRepo(root);
+  const shown = run(claudeArgs(repo), { env: isolatedHomeEnv(root), input: '' });
+  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  const declined = run(claudeArgs(repo), { env: isolatedHomeEnv(root), input: `${displayedBankReference(shown.stdout)}: no\n` });
+  assert.equal(declined.status, 0, declined.stderr || declined.stdout);
+  assert.match(declined.stdout, /^Nothing changed: you answered no, so setup changed none of your settings\. Say setup toolkit again/m);
+  assert.doesNotMatch(declined.stdout, /fast-forwarded|wrote nothing/);
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'settings.json')), false);
 });

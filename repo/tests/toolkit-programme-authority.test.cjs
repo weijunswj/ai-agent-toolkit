@@ -306,6 +306,45 @@ test('the controller can reopen an accepted gate for a correction, and acceptanc
   }
 });
 
+test('a G2 consume reads the newest trusted Toolkit-G2 verdict for its head from the task PR and records it in the same write', () => {
+  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+  const { github, store, binding } = setup();
+  const run = args => {
+    let output = '';
+    cli.main([...args, '--session', controller.session, '--controller', '--json'], { transport: github, binding, originUrl: 'https://github.com/acme/app.git',
+      repoRoot: __dirname, toolkitVersion: '3.9.1', now: () => '2026-11-23T05:00:00.000Z', stdout: { write: text => { output += text; } } });
+    return JSON.parse(output);
+  };
+  const verdict = (word, head) => `Toolkit-G2: ${word} ${head} tier=RISKY\nRoute: host-verified opus-5.5/xhigh pin=owner-claude/REVIEWER`;
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-g2-verdict-'));
+  try {
+    const patch = (name, value) => { const file = path.join(dir, `${name}.json`); fs.writeFileSync(file, JSON.stringify(value)); return file; };
+    github.addPr(540, { head: SHA_B, contexts: [green('validate')], branch: 'feature' });
+    run(['assign', '--issue', '423', '--role', 'G2', '--assignment', 'g2-a1']);
+    run(['update', '--issue', '423', '--patch', patch('branch', { candidate: { branch: 'feature' } })]);
+    run(['return', '--issue', '423', '--record', 'g2-r1', '--assignment', 'g2-a1', '--at-head', SHA_B]);
+    const accept = () => run(['return', '--issue', '423', '--consume', 'g2-r1', '--verdict', 'ACCEPT']);
+    assert.throws(accept, { code: 'EVIDENCE_MISSING' }, 'no verdict on the PR');
+    github.addComment(540, { body: verdict('PASS', SHA_B), association: 'NONE' });
+    assert.throws(accept, { code: 'EVIDENCE_MISSING' }, 'a PASS from an account that cannot write here is ignored');
+    github.addComment(540, { body: verdict('PASS', SHA_A) });
+    assert.throws(accept, { code: 'EVIDENCE_MISSING' }, 'a PASS at another head is not this return\'s verdict');
+    github.addComment(540, { body: verdict('FAIL', SHA_B) });
+    assert.throws(accept, { code: 'REVIEW_FAILED' }, 'a FAIL at the head only sends it back');
+    assert.equal(store.read('child', 423).doc.gate.state, 'SUBMITTED', 'nothing written');
+    assert.equal(run(['return', '--issue', '423', '--consume', 'g2-r1', '--verdict', 'REOPEN']).outcome, 'WRITTEN');
+    assert.deepEqual(store.read('child', 423).doc.review, { state: 'NOT_PASSED', verdicts: [{ reviewer: 'g2-a1', head: SHA_B, verdict: 'NOT_PASSED' }] });
+    run(['return', '--issue', '423', '--record', 'g2-r2', '--assignment', 'g2-a1', '--at-head', SHA_B]);
+    github.addComment(540, { body: verdict('PASS', SHA_B) });
+    assert.equal(run(['return', '--issue', '423', '--consume', 'g2-r2', '--verdict', 'ACCEPT']).outcome, 'WRITTEN');
+    const doc = store.read('child', 423).doc;
+    assert.deepEqual([doc.gate.state, doc.review], ['RETIRED', { state: 'PASSED', verdicts: [{ reviewer: 'g2-a1', head: SHA_B, verdict: 'PASSED' }] }]);
+    assert.equal(doc.private.gate_history.at(-1).at, '2026-11-23T05:00:00.000Z', 'the consume is logged with its time');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the close list shows evidence at an older head as STALE_HEAD', () => {
   const { github, store, reconciler, parentDoc } = setup();
   store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), create: () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), authorise: true,

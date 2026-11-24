@@ -40,7 +40,10 @@ const CORPUS_REL = 'repo/tests/hook-pack/corpus';
 const SCHEMA = 'toolkit-hook-pack/v1';
 const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
-const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
+const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']);
+// The fixture's Claude desktop session (fixture.desktop_sessions): this session's own file and the
+// host-session variable the app sets.
+const DESKTOP_SELF = 'local_00000000-0000-4000-8000-000000000001';
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
@@ -159,18 +162,21 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'attention_net', 'desktop_sessions'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.attention_net !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.attention_net)
+    || fixture.attention_net.some(entry => !entry || typeof entry !== 'object' || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code)) || !['new', 'acknowledged'].includes(entry.state)
+      || typeof entry.age_hours !== 'number' || entry.age_hours < 0 || Object.keys(entry).some(key => !['code', 'state', 'age_hours', 'issue', 'kind'].includes(key))))) errors.push('fixture.attention_net needs an enabled repository and entries { code, state, age_hours, issue?, kind? }');
+  if (fixture.desktop_sessions !== undefined && (!Array.isArray(fixture.desktop_sessions) || fixture.desktop_sessions.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry)))) errors.push('fixture.desktop_sessions must list session file objects');
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
-    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'unchanged'].includes(fixture.handoff.memory))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved or unchanged }');
+    || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'nul', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
+    || (['deleted', 'stale'].includes(fixture.handoff.memory) && fixture.handoff.session !== 'checked'))) errors.push('fixture.handoff needs an enabled repository and { session: new or checked, memory: moved, nul or unchanged }, or { session: checked, memory: deleted or stale }');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
   if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title', 'train-members', 'train-sibling', 'train-sibling-row'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
-  if (fixture.stale_rows !== undefined && (!fixture.repo || !['enabled', 'disabled'].includes(fixture.repo.governance)
-    || !Array.isArray(fixture.stale_rows) || !fixture.stale_rows.length || fixture.stale_rows.some(row => typeof row !== 'string' || !row.trim()))) errors.push('fixture.stale_rows needs an enabled or disabled repository and nonempty row strings');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -437,13 +443,25 @@ class Fixture {
         purpose: 'Hook pack fixture', created: this.#now().toISOString(), created_by: 'fixture', model: null, effort: null,
       })));
     }
-    // Today's stale-check stamp in the fixture home, as the background run writes it after a good run.
-    if (spec.stale_rows) {
-      const now = this.#now();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    // Open net findings in this computer's attention cache, as `programme.cjs attention` writes it.
+    if (spec.attention_net) {
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
-      cache.writeStaleStamp(repository, { date: today, at: now.toISOString(), rows: spec.stale_rows }, { home: this.home });
+      const net = spec.attention_net.map((entry, index) => ({ id: crypto.createHash('sha256').update(`${index}|${entry.code}`).digest('hex').slice(0, 12), code: entry.code,
+        issue: entry.issue ?? null, kind: entry.kind ?? null, state: entry.state, changed_at: this.#now(entry.age_hours * 3600000).toISOString(), due: null }));
+      cache.writeCache(repository, { complete: true, net }, { home: this.home });
+    }
+    // The Claude desktop app's session files: this session's own, and each listed one it started
+    // (spawnedFrom names this session unless the entry sets its own).
+    if (spec.desktop_sessions) {
+      const folder = path.join(this.home, 'AppData', 'Local', 'Claude-Data', 'claude_fixture', 'claude-code-sessions', 'a', 'b');
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime() }));
+      spec.desktop_sessions.forEach((entry, index) => {
+        const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
+        fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
+      });
+      this.env.CLAUDE_CODE_HOST_SESSION_ID = DESKTOP_SELF;
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
@@ -702,7 +720,9 @@ cp.spawnSync = function(file, args, options) {
   // The controller handoff snapshot the after-tool hook keeps fresh (toolkit-handoff-hook.cjs): a memory
   // folder and its snapshot, taken 50 minutes ago, with the hook's record of it. For `checked`, the session
   // record of a first check two minutes ago, which held the memory as it was then. For `moved`, the memory
-  // is then saved, as the tool call under test just did. The folder sits beside work, outside the snapshot.
+  // is then saved, as the tool call under test just did; for `nul`, saved holding a NUL byte; for `deleted`,
+  // owner-rules.md is then deleted. For `stale`, the snapshot already removed owner-rules.md and this
+  // session holds its old bytes again. The folder sits beside work, outside the snapshot.
   #handoff(spec) {
     const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
     const handoff = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
@@ -720,7 +740,16 @@ cp.spawnSync = function(file, args, options) {
     save(memoryFile, '# Memory\n- queue: #1\n', 60 * 60 * 1000);
     save(path.join(memory, 'owner-rules.md'), 'merge commits only\n', 2 * 60 * 60 * 1000);
     const stamp = { taken_at: this.#now(50 * 60 * 1000).toISOString(), toolkit_version: require(path.join(ROOT, 'repo', 'scripts', 'toolkit-version.cjs')).readToolkitVersion(), repository_commit: this.head };
+    const rulesFile = path.join(memory, 'owner-rules.md');
     handoff.write(store, handoff.plan({ base: store, repository, sources: handoff.normaliseSources({ memory }, this.work), stamp }), repository);
+    if (spec.handoff.memory === 'stale') {
+      // An earlier session held owner-rules.md and deleted it; its run removed it from the snapshot.
+      const held = handoff.sessionRows({ memory, instructions: null, files: [] });
+      const rules = fs.readFileSync(rulesFile);
+      fs.rmSync(rulesFile);
+      handoff.write(store, handoff.plan({ base: store, repository, sources: null, stamp, session: { rows: held, real: handoff.realBySource(held) } }), repository);
+      save(rulesFile, rules, 2 * 60 * 60 * 1000);
+    }
     fs.mkdirSync(userState, { recursive: true });
     fs.writeFileSync(path.join(userState, 'handoff-refresh.json'), `${JSON.stringify({ out: store, repo_root: this.work, repository, at: stamp.taken_at }, null, 2)}\n`);
     if (spec.handoff.session === 'checked') {
@@ -730,7 +759,10 @@ cp.spawnSync = function(file, args, options) {
       fs.writeFileSync(sessionFile, `${JSON.stringify({ started_at: checkedAt, checked_at: checkedAt, rows, real: handoff.realBySource(rows) }, null, 2)}\n`);
     }
     if (spec.handoff.memory === 'moved') save(memoryFile, '# Memory\n- queue: #7\n', 30 * 1000);
-    this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex') };
+    if (spec.handoff.memory === 'nul') save(memoryFile, '# Memory\n- queue: #7\0\n', 30 * 1000);
+    if (spec.handoff.memory === 'deleted') fs.rmSync(rulesFile);
+    this.handoff = { store, repository, sessionFile, memoryHash: crypto.createHash('sha256').update(fs.readFileSync(memoryFile)).digest('hex'),
+      ...(spec.handoff.memory === 'deleted' ? { removedFile: 'memory/owner-rules.md' } : {}) };
   }
 
   // Writes the fixture's paths into a payload or transcript value. A payload also gets {plugin}, the
@@ -831,11 +863,20 @@ async function runRow(row, hosts, { roots, scratch }) {
   return results;
 }
 
-// Whether a handoff refresh a hook started has landed: the snapshot is current, and this session's record
-// holds the saved memory (the run rewrites that record last).
+// Whether a handoff refresh a hook started has landed: the snapshot is current, this session's record
+// holds the saved memory (the run rewrites that record last), and a deleted memory file has left the
+// snapshot, its copy included. A source the check refuses (a NUL byte) never lands, so a refresh an
+// older hook started for it is awaited in full and reported, not a crash.
 function handoffLanded({ handoff }) {
-  const { store, repository, sessionFile, memoryHash } = handoff;
-  if (require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs')).check({ base: store, repository }).state !== 'CURRENT') return false;
+  const { store, repository, sessionFile, memoryHash, removedFile } = handoff;
+  const lib = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-handoff.cjs'));
+  let state = null;
+  try { state = lib.check({ base: store, repository }).state; } catch (error) { if (!(error instanceof lib.HandoffError)) throw error; }
+  if (state !== 'CURRENT') return false;
+  if (removedFile) {
+    const folder = lib.snapshotFolder(repository);
+    if (fs.existsSync(path.join(store, folder, ...removedFile.split('/'))) || lib.readManifest(store, folder).files.some(row => row.path === removedFile)) return false;
+  }
   const session = readJsonFile(sessionFile);
   return Array.isArray(session?.rows) && session.rows.some(row => row.path === 'MEMORY.md' && row.sha256 === memoryHash);
 }

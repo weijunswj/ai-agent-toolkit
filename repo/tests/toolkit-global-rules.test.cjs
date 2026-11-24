@@ -33,6 +33,20 @@ test('the marker format carries the version and a body digest, and detects hand 
   assert.equal(block.blockState({ ...found, body: 'line one\nedited' }, expected), 'tampered');
   assert.equal(block.blockState({ ...found, version: '9.9.8' }, expected), 'stale');
   assert.equal(block.blockState({ ...found, format: 1, version: null, digest: null }, expected), 'stale');
+  // A reader that applies a block only for its text (the Projects block) counts a marker version alone as current;
+  // a hand edit, an old format, another body or another source still is not.
+  const anyVersion = { anyVersion: true };
+  assert.equal(block.blockState({ ...found, version: '9.9.8' }, expected, anyVersion), 'current');
+  assert.equal(block.blockState({ ...found, body: 'line one\nedited' }, expected, anyVersion), 'tampered');
+  assert.equal(block.blockState({ ...found, format: 1, version: null, digest: null }, expected, anyVersion), 'stale');
+  assert.equal(block.blockState({ ...found, version: '9.9.8' }, { ...expected, body: 'line one\nline three' }, anyVersion), 'stale');
+  assert.equal(block.blockState({ ...found, version: '9.9.8' }, { ...expected, source: 'other.md' }, anyVersion), 'stale');
+  assert.equal(block.sameText(found, expected), true);
+  assert.equal(block.sameText({ ...found, version: '1.0.0', digest: '000000000000' }, expected), true, 'marker fields are not text');
+  assert.equal(block.sameText({ ...found, body: 'line one\r\nline two\r\n\r\n' }, expected), true, 'line endings and trailing blank lines');
+  assert.equal(block.sameText({ ...found, body: 'line one' }, expected), false);
+  assert.equal(block.sameText({ ...found, name: 'OTHER' }, expected), false);
+  assert.equal(block.sameText(undefined, expected), false);
   assert.deepEqual(block.findBlocks('<!-- AI-AGENT-TOOLKIT:a:BEGIN X v2 toolkit=1.0.0 sha256=000000000000 -->\nno end\n').errors, ['BEGIN X without END']);
   assert.equal(block.findBlocks('<!-- AI-AGENT-TOOLKIT:a:END X -->\n').errors.length, 1);
 });

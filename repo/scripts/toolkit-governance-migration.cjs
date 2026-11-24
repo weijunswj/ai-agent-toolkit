@@ -96,8 +96,11 @@ class GovernanceMaintenance {
     const rows = discoverRepositories(roots).map(root => ({ root, state: governance.governanceState(root, this.#registryOptions), slug: slugFor(root) }))
       .filter(row => row.state.programme_records_bind === true && row.slug);
     if (!rows.length) { this.#say('No fresh merged enabled repository was found. No governance or settings changes were made.'); return 0; }
-    const rulesets = [...await this.#offerRulesets(rows), ...await this.#offerStateRulesets(rows)];
-    const protections = await this.#offerProtection(rows);
+    // Every change is read first; the owner's one answer then covers all of them, and nothing is written before it.
+    const plans = { noForcePush: this.#planRulesets(rows), keepState: this.#planStateRulesets(rows), protectionCandidates: this.#planProtection(rows) };
+    const approved = await this.#approve(plans);
+    const rulesets = approved ? [...this.#applyRulesets(plans.noForcePush), ...this.#applyStateRulesets(plans.keepState)] : [];
+    const protections = approved ? this.#applyProtection(plans.protectionCandidates) : [];
     const securities = await this.#applySecurity(rows);
     if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
     return [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result)) ? 2 : 0;
@@ -115,40 +118,36 @@ class GovernanceMaintenance {
     const slug = slugFor(root);
     if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
     const rows = [{ root: path.resolve(root), state, slug }];
-    const confirm = this.#confirm;
-    this.#confirm = async () => true;
-    try {
-      const rulesets = [...await this.#offerRulesets(rows), ...await this.#offerStateRulesets(rows)];
-      const protections = await this.#offerProtection(rows);
-      const securities = await this.#applySecurity(rows);
-      if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
-      const on = [], unavailable = [], held = [], retry = [];
-      const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
-      // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
-      // hidden behind "not read back". A refusal for this account (forbidden: not an admin) does not
-      // change on its own, so it is held with the step instead of retried.
-      const answered = entries => [...new Set(entries.filter(entry => entry.result === 'failed' && entry.reason).map(entry => entry.reason))];
-      const because = reasons => (reasons.length ? ` (GitHub answered: ${reasons.join(', ')})` : '');
-      const forbidden = reasons => reasons.length > 0 && reasons.every(reason => reason === 'forbidden');
-      const admin = `GitHub refused the write for the account Toolkit used (forbidden): run \`${governance.governanceCommand('migrate')}\` in your own terminal from an account with admin rights on the repository.`;
-      const rulesetEnd = (name, read, entries) => {
-        if (read.status === 'present') on.push(name);
-        else if (read.status === 'not-enforceable') unavailable.push(name);
-        else if (forbidden(answered(entries))) held.push({ name, step: admin });
-        else retry.push(`${name} is not read back${because(answered(entries))}`);
-      };
-      const noForcePush = ruleset.noForcePushRuleset(rows[0].root, reader);
-      rulesetEnd('the no-force-push ruleset', noForcePush, rulesets.filter(entry => !entry.ruleset));
-      if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state) rulesetEnd('the ruleset that keeps the programme state branch', ruleset.keepStateRuleset(rows[0].root, reader), rulesets.filter(entry => entry.ruleset === 'keep-programme-state'));
-      // A write that did not read back is retried; only what is left after a clean write is held.
-      if (forbidden(answered(protections))) held.push({ name: 'default-branch protection', step: admin });
-      else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
-      else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
-      this.#securityEnd(rows[0], securities, { on, held, retry, because });
-      // Security files written into this working tree still need a pull request; the result says so.
-      const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-      return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, files };
-    } finally { this.#confirm = confirm; }
+    const rulesets = [...this.#finishRulesets(rows), ...this.#finishStateRulesets(rows)];
+    const protections = this.#finishProtection(rows);
+    const securities = await this.#applySecurity(rows);
+    if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
+    const on = [], unavailable = [], held = [], retry = [];
+    const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
+    // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
+    // hidden behind "not read back". A refusal for this account (forbidden: not an admin) does not
+    // change on its own, so it is held with the step instead of retried.
+    const answered = entries => [...new Set(entries.filter(entry => entry.result === 'failed' && entry.reason).map(entry => entry.reason))];
+    const because = reasons => (reasons.length ? ` (GitHub answered: ${reasons.join(', ')})` : '');
+    const forbidden = reasons => reasons.length > 0 && reasons.every(reason => reason === 'forbidden');
+    const admin = `GitHub refused the write for the account Toolkit used (forbidden): run \`${governance.governanceCommand('migrate')}\` in your own terminal from an account with admin rights on the repository.`;
+    const rulesetEnd = (name, read, entries) => {
+      if (read.status === 'present') on.push(name);
+      else if (read.status === 'not-enforceable') unavailable.push(name);
+      else if (forbidden(answered(entries))) held.push({ name, step: admin });
+      else retry.push(`${name} is not read back${because(answered(entries))}`);
+    };
+    const noForcePush = ruleset.noForcePushRuleset(rows[0].root, reader);
+    rulesetEnd('the no-force-push ruleset', noForcePush, rulesets.filter(entry => !entry.ruleset));
+    if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state) rulesetEnd('the ruleset that keeps the programme state branch', ruleset.keepStateRuleset(rows[0].root, reader), rulesets.filter(entry => entry.ruleset === 'keep-programme-state'));
+    // A write that did not read back is retried; only what is left after a clean write is held.
+    if (forbidden(answered(protections))) held.push({ name: 'default-branch protection', step: admin });
+    else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
+    else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
+    this.#securityEnd(rows[0], securities, { on, held, retry, because });
+    // Security files written into this working tree still need a pull request; the result says so.
+    const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
+    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, files };
   }
 
   // Where the security settings ended. A read or write GitHub did not confirm is retried, and so is a
@@ -201,7 +200,41 @@ class GovernanceMaintenance {
     }
   }
 
-  async #offerRulesets(rows) {
+  // The one question for every change the reads found. Nothing is written before a yes; a no writes
+  // nothing and says so once. Asked only when there is a change, and it names each ruleset it covers.
+  async #approve({ noForcePush, keepState, protectionCandidates }) {
+    if (noForcePush.length + keepState.length + protectionCandidates.length === 0) return false;
+    const changes = [];
+    if (noForcePush.length) changes.push(`- Add the "${ruleset.RULESET_NAME}" ruleset (every branch, no bypass) to:`, ...noForcePush.map(row => `  - ${row.slug} (${row.root})`));
+    if (keepState.length) changes.push(`- Add the "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to:`, ...keepState.map(row => `  - ${row.slug} (${row.root})`));
+    if (protectionCandidates.length) changes.push(`- Add or update default-branch protection (the "${protection.RULESET_NAME}" ruleset) on:`, ...protectionCandidates.flatMap(({ row, result }) => [`  - ${row.slug} (${row.root})`, ...GovernanceMaintenance.#protectionNotes(result).map(note => `    - ${note}`)]), ...GovernanceMaintenance.#protectionTerms());
+    this.#say(['These governed GitHub repositories would change on GitHub. Nothing is written until you answer once:', ...changes]);
+    if (await this.#confirm(GovernanceMaintenance.#question({ noForcePush, keepState, protectionCandidates })) === true) return true;
+    this.#say('No rulesets or default-branch protection were added.');
+    return false;
+  }
+
+  static #question({ noForcePush, keepState, protectionCandidates }) {
+    const names = [noForcePush.length && ruleset.RULESET_NAME, keepState.length && ruleset.KEEP_STATE_RULESET_NAME, protectionCandidates.length && protection.RULESET_NAME].filter(Boolean);
+    const what = [noForcePush.length || keepState.length ? 'the rulesets' : null, protectionCandidates.length ? 'default-branch protection' : null].filter(Boolean).join(' and ');
+    return `add or update ${what} listed above to these repositories on GitHub: ${names.map(name => `"${name}"`).join(', ')}`;
+  }
+
+  // What a protection candidate needs changed: the settings that drift, then the workflow problems the
+  // ruleset does not fix, which are shown by hand.
+  static #protectionNotes(result) {
+    return [
+      ...protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])),
+      ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
+    ];
+  }
+
+  static #protectionTerms() {
+    return [`The "${protection.RULESET_NAME}" ruleset covers the default branch:`, '- every change needs a pull request, and the binding\'s required checks must pass (pinned to GitHub Actions) at a head that holds the branch\'s latest commit;', '- merge commits only, and nobody can bypass it;', '- updating it replaces any rules already in that ruleset.'];
+  }
+
+  // Reads only: the enabled repositories that lack the no-force-push ruleset.
+  #planRulesets(rows) {
     const enabled = rows.filter(row => row.state.state === 'ENABLED');
     const missing = [];
     for (const row of enabled) {
@@ -210,12 +243,11 @@ class GovernanceMaintenance {
       else if (result.status === 'not-enforceable') this.#say(`${row.root}: GitHub cannot enforce a no-force-push ruleset here (private repository on GitHub Free); the local force-push guard is the fallback.`);
       else if (result.status === 'unverified') this.#say(`${row.root}: the no-force-push ruleset could not be checked (${result.reason}).`);
     }
-    if (missing.length === 0) return [];
-    this.#say(['These governed GitHub repositories have no ruleset blocking force pushes:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
-    if (await this.#confirm(`add a "${ruleset.RULESET_NAME}" ruleset (every branch, no bypass) to these ${missing.length} repositories on GitHub`) !== true) {
-      this.#say('Rulesets not added.');
-      return [];
-    }
+    return missing;
+  }
+
+  // Adds the no-force-push ruleset to each planned repository, read back after each write.
+  #applyRulesets(missing) {
     const results = [];
     for (const row of missing) {
       const created = this.#rulesetCreator(row.slug);
@@ -227,9 +259,18 @@ class GovernanceMaintenance {
     return results;
   }
 
+  // The finish path: the same list and writes as before, with no question (finish gives its yes).
+  #finishRulesets(rows) {
+    const missing = this.#planRulesets(rows);
+    if (missing.length === 0) return [];
+    this.#say(['These governed GitHub repositories have no ruleset blocking force pushes:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
+    return this.#applyRulesets(missing);
+  }
+
   // Repositories whose merged binding keeps programme state on the public state branch get a second
-  // ruleset that stops anyone deleting that branch, after its own Enter.
-  async #offerStateRulesets(rows) {
+  // ruleset that stops anyone deleting that branch, asked in the same one question as the others.
+  // Reads only.
+  #planStateRulesets(rows) {
     const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     const missing = [];
     for (const row of rows.filter(entry => entry.state.state === 'ENABLED')) {
@@ -240,12 +281,11 @@ class GovernanceMaintenance {
       else if (result.status === 'not-enforceable') this.#say(`${row.root}: GitHub cannot enforce a ruleset that keeps the programme state branch here (private repository on GitHub Free); the branch's checkpoint and restore are the fallback.`);
       else if (result.status === 'unverified') this.#say(`${row.root}: the ruleset that keeps the programme state branch could not be checked (${result.reason}).`);
     }
-    if (missing.length === 0) return [];
-    this.#say(['These governed GitHub repositories keep programme state on the branch ' + ruleset.STATE_BRANCH + ', and nothing stops it being deleted:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
-    if (await this.#confirm(`add a "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to these ${missing.length} repositories on GitHub`) !== true) {
-      this.#say('Programme state rulesets not added.');
-      return [];
-    }
+    return missing;
+  }
+
+  #applyStateRulesets(missing) {
+    const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     const results = [];
     for (const row of missing) {
       const created = this.#stateRulesetCreator(row.slug);
@@ -255,6 +295,14 @@ class GovernanceMaintenance {
       results.push({ repository_id: row.state.repository_id, ruleset: 'keep-programme-state', result: ok ? 'added' : 'failed', ...(ok ? {} : { reason: created && created.reason ? created.reason : 'not-read-back' }) });
     }
     return results;
+  }
+
+  // The finish path: the same list and writes as before, with no question (finish gives its yes).
+  #finishStateRulesets(rows) {
+    const missing = this.#planStateRulesets(rows);
+    if (missing.length === 0) return [];
+    this.#say(['These governed GitHub repositories keep programme state on the branch ' + ruleset.STATE_BRANCH + ', and nothing stops it being deleted:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
+    return this.#applyStateRulesets(missing);
   }
 
   #protectionFor(row) {
@@ -282,7 +330,9 @@ class GovernanceMaintenance {
     if (notes.length) this.#say([`${row.slug}: change by hand (Toolkit edits only its own ruleset):`, ...notes.map(note => `  - ${note}`)]);
   }
 
-  async #offerProtection(rows) {
+  // Reads only: the repositories whose default branch the Toolkit ruleset would fix, and notes on the
+  // ones it cannot be offered to (those are checked by hand, not written).
+  #planProtection(rows) {
     const candidates = [];
     for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug)) {
       const read = this.#protectionFor(row);
@@ -305,18 +355,11 @@ class GovernanceMaintenance {
         this.#byHand(row, result);
       }
     }
-    if (candidates.length === 0) return [];
-    this.#say(['These governed GitHub repositories need default-branch protection:', ...candidates.flatMap(({ row, result }) => [
-      `- ${row.slug} (${row.root})`,
-      ...protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])).map(detail => `  - ${detail}`),
-      // Workflow problems the ruleset does not fix, shown before the question.
-      ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `  - workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
-    ])]);
-    this.#say([`The "${protection.RULESET_NAME}" ruleset covers the default branch:`, '- every change needs a pull request, and the binding\'s required checks must pass (pinned to GitHub Actions) at a head that holds the branch\'s latest commit;', '- merge commits only, and nobody can bypass it;', '- updating it replaces any rules already in that ruleset.']);
-    if (await this.#confirm(`add or update it on these ${candidates.length} repositories`) !== true) {
-      this.#say('Default-branch rulesets not added.');
-      return [];
-    }
+    return candidates;
+  }
+
+  // Adds or updates the Toolkit ruleset on each planned repository, read back after each write.
+  #applyProtection(candidates) {
     const results = [];
     for (const { row, requiredChecks, result } of candidates) {
       const existing = result.toolkit_ruleset ? result.toolkit_ruleset.id : null;
@@ -334,6 +377,18 @@ class GovernanceMaintenance {
       results.push({ repository_id: row.state.repository_id, result: fixed ? (existing ? 'updated' : 'added') : 'failed' });
     }
     return results;
+  }
+
+  // The finish path: the same list and writes as before, with no question (finish gives its yes).
+  #finishProtection(rows) {
+    const candidates = this.#planProtection(rows);
+    if (candidates.length === 0) return [];
+    this.#say(['These governed GitHub repositories need default-branch protection:', ...candidates.flatMap(({ row, result }) => [
+      `- ${row.slug} (${row.root})`,
+      ...GovernanceMaintenance.#protectionNotes(result).map(note => `  - ${note}`),
+    ])]);
+    this.#say(GovernanceMaintenance.#protectionTerms());
+    return this.#applyProtection(candidates);
   }
 
   #securityFor(row) {

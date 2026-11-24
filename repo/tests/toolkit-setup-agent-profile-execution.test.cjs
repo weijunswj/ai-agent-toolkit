@@ -63,7 +63,8 @@ test('broader-native execution reports Claude Code\'s own limit, not a one-layer
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
+  // The running Claude Code version is pinned (2.1.330), so the AGENTS.md entry id is the same on every computer.
+  const env = { ...isolatedHomeEnv(root), CLAUDE_CODE_EXECPATH: path.join(root, 'claude-code', '2.1.330', 'build', 'claude.exe') };
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-settings', 'keep'];
   const settings = path.join(root, '.claude', 'settings.json');
@@ -82,7 +83,8 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
+  // The running Claude Code version is pinned (2.1.330), so the AGENTS.md entry id is the same on every computer.
+  const env = { ...isolatedHomeEnv(root), CLAUDE_CODE_EXECPATH: path.join(root, 'claude-code', '2.1.330', 'build', 'claude.exe') };
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
   const settingsPath = path.join(root, '.claude', 'settings.json');
@@ -110,7 +112,7 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   const allKept = run(base, { env, timeout: 300000 });
   assert.equal(allKept.status, 0, allKept.stderr || allKept.stdout);
   assert.match(allKept.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| A\. Keep current \| B\. Turn on \|/);
-  assert.match(allKept.stdout, /\| Claude Code setting: Read AGENTS\.md too\? \| Off \(you turned it off\) \| A\. Keep current \| B\. Turn on \|/);
+  assert.match(allKept.stdout, /\| Claude Code setting: Read AGENTS\.md \(in all local repos\) too\? \| Off \(you turned it off\) \| A\. Keep current \| B\. Turn on \|/);
   assert.deepEqual(read(), { switchModelsOnFlag: false });
 });
 
@@ -118,7 +120,8 @@ test('All recommended applies each Claude Code setting row on its own, and an un
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
+  // The running Claude Code version is pinned (2.1.330), so the AGENTS.md entry id is the same on every computer.
+  const env = { ...isolatedHomeEnv(root), CLAUDE_CODE_EXECPATH: path.join(root, 'claude-code', '2.1.330', 'build', 'claude.exe') };
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
   const settingsPath = path.join(root, '.claude', 'settings.json');
@@ -152,7 +155,8 @@ test('each Claude Code setting row is answered on its own: Turn on one, Turn off
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
+  // The running Claude Code version is pinned (2.1.330), so the AGENTS.md entry id is the same on every computer.
+  const env = { ...isolatedHomeEnv(root), CLAUDE_CODE_EXECPATH: path.join(root, 'claude-code', '2.1.330', 'build', 'claude.exe') };
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native', '--claude-settings', 'keep'];
   const settingsPath = path.join(root, '.claude', 'settings.json');
@@ -247,7 +251,8 @@ test('a kept root-only profile becomes the safe root-only policy once current en
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
+  // The running Claude Code version is pinned (2.1.330), so the AGENTS.md entry id is the same on every computer.
+  const env = { ...isolatedHomeEnv(root), CLAUDE_CODE_EXECPATH: path.join(root, 'claude-code', '2.1.330', 'build', 'claude.exe') };
   const initial = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-topology', 'root-only', '--claude-plugin-behavior', 'instructions',
@@ -276,7 +281,8 @@ test('kept broader-native survives flag and piped execution without probes', () 
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
-  const env = isolatedHomeEnv(root);
+  // The running Claude Code version is pinned (2.1.330), so the AGENTS.md entry id is the same on every computer.
+  const env = { ...isolatedHomeEnv(root), CLAUDE_CODE_EXECPATH: path.join(root, 'claude-code', '2.1.330', 'build', 'claude.exe') };
   control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: profileRootOf(root) });
   const flagged = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,

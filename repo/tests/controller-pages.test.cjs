@@ -170,7 +170,7 @@ test('the design principles page binds above every skill, project line and brief
   assert.match(core, /The \[design principles\]\(controller\/principles\.md\) bind above every skill, project line and brief: they add, never relax\./);
   assert.match(core.split('\n## Pages\n')[1], /^These pages[^\n]*\n- \[Design principles\]\(controller\/principles\.md\) `[0-9a-f]{12}`: /);
   assert.match(page, /^- \*\*Binding:\*\* [^\n]*never relax them;[^\n]*A clash goes to the owner as a decision; a new principle needs an owner record/m);
-  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', 'Work runs where the controller runs']) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
+  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', "Work starts on the owner's computer"]) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
 });
 
 test('controllers close every thread or session they spawned once it is fully done, through the host contract', () => {
@@ -181,7 +181,9 @@ test('controllers close every thread or session they spawned once it is fully do
     'its output is recorded', 'its PRs are merged or closed', 'its final message was read in full and every item acted on',
     'its result was relayed and no owner test, card, question or decision is still owed',
     "Use your host's close action ([host contract](../docs/HOST-CONTRACT.md)); with none, record it retired (gates page)",
-    'Appointment authorises it (roles page)', "Never a scheduled task's home thread; idleness alone never counts",
+    'Appointment authorises it (roles page)',
+    "For a gate, record its session after the launch and its close after closing it: the sweep raises a finished gate's open session as due",
+    "Never a scheduled task's home thread; idleness alone never counts",
     'With no timers, re-check open ones at session start and each owner turn',
   ]) assert.ok(line.includes(phrase), phrase);
   // The principles bind every harness, so they name none; each host's mechanics live in the host contract.
@@ -193,21 +195,25 @@ test('controllers close every thread or session they spawned once it is fully do
     "never a scheduled task's home thread"]) assert.ok(section.includes(route), route);
 });
 
-test('work runs where the controller runs, and scheduled tasks prefer the cloud without a computer ban', () => {
+test('every controller starts work on the owner\'s computer, cloud only by the owner, and scheduled tasks keep the cloud', () => {
   const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
-  const line = page.split('\n').find(text => text.startsWith('- **Work runs where the controller runs:** ')) || '';
+  const line = page.split('\n').find(text => text.startsWith("- **Work starts on the owner's computer:** ")) || '';
   for (const phrase of [
-    'a cloud controller runs work in the cloud and a local one on its computer, unless a step needs the other side',
+    "every controller, wherever it runs, starts its sessions, lanes, gate runs and threads on the owner's computer",
+    'A cloud start needs the owner: they start it themselves or agree in chat to that named start',
+    'When the computer is busy or away the work waits and one owner line says so; it never falls back to the cloud',
     'Scheduled tasks prefer the cloud; new scheduled work joins an existing task first and stays a short prod',
   ]) assert.ok(line.includes(phrase), phrase);
-  assert.doesNotMatch(page, /no computer scheduled tasks|\*\*Cloud first:\*\*/);
+  // Cloud controllers used to start their work in the cloud (owner, 24 November: cloud costs too much usage).
+  assert.doesNotMatch(page, /Work runs where the controller runs|a cloud controller runs work in the cloud|no computer scheduled tasks|\*\*Cloud first:\*\*/);
 });
 
-test('lean children: one capped polish child, a stale check and automate-first in the global principles', () => {
+test('lean children: one capped polish child, the stale-work net and automate-first in the global principles', () => {
   const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(page, /^- \*\*Polish child:\*\* review Lows and small UAT nits are rows on one rolling Later polish child \(title starts `Polish`[^\n]*at most 8 rows; when full it ships as one batched PR and closes, and a fresh one opens\.$/m);
-  // The stale check runs from the governance session-start hook in the background; the controller closes what is finished and asks the owner only for a close that needs their OK.
-  assert.match(page, /^- \*\*Stale check:\*\* the governance session-start hook runs the stale check at most once a day per repository, in the background, as rows the controller answers\. The controller closes finished children itself and asks the owner only for a close that needs their OK \(a duplicate, an obsolete child or an owner-OK close\), in its next ask\.$/m);
+  // The stale-work net reaches the controller at turn end, never as a session-start check; the controller closes what is finished and asks the owner only for a close that needs their OK.
+  assert.ok(page.split('\n').includes("- **Stale-work net:** the sweep raises stale children as net findings; the turn-end owed check, where it runs, stops the controller's turn once per new one due. The controller closes finished children itself and asks the owner only for a close that needs their OK (a duplicate, an obsolete child or an owner-OK close), in its next ask."));
+  assert.doesNotMatch(page, /Stale check|session-start hook runs/);
   assert.doesNotMatch(page, /Daily stale sweep/);
   const global = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), 'utf8').replace(/\r\n/g, '\n');
   // Clear-cut rules go into code first; judgement stays with controllers (owner, 20 November).
@@ -226,7 +232,9 @@ test('the owner-post rule has one home: the principles page, read before every o
     'one point per task, or one line for a single task, each led by a bold task label, never a line saying nothing needs them',
     'Leave out the working detail of gates, helpers and other spawned work (probes, test counts, round-by-round findings, file lists) unless asked: it stays in their full reports and the evidence store',
     "This binds the controller's own posts to the owner, relays included",
-    "Asked with the native question method, a card holds only the short question and short options, the pick marked; the context, items and each pick's reason go above it as formatted text",
+    // The owner sees only an open card, not the text above it, so the card must stand alone (owner, 23 November).
+    'a card of the native question method holds a short question and short options that make sense with nothing else on screen',
+    'A question that needs context, items or each pick\'s reason goes as written text at the end of the closing message instead',
     // A one-line status cannot lead with three lines, so only asks, plans and explanations do.
     'Asks, plans and explanations lead with problem, fix and skip',
   ]) assert.ok(line.includes(phrase), phrase);
@@ -252,7 +260,7 @@ test('the owner-post rule has one home: the principles page, read before every o
   for (const rel of projects) {
     assert.doesNotMatch(read(rel), /tell the owner in one line what changed|tell the owner once which|and tell the owner; never|tell the owner once what waits|line, and tell the owner once\./i, rel);
   }
-  // Ask cards carry only the question and options; the context sits above them.
+  // Ask cards carry only a short question and options that make sense alone; any longer context goes in the written message, never inside the card.
   for (const rel of [...projects, 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md']) {
     assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen|three lines below|(?<!above )the card names|native change the card named|copy of the card and (?:the owner's )?answer/i, rel);
   }

@@ -138,7 +138,7 @@ function discoveryGh({ slug, repos }) {
   };
 }
 
-test('row 11: a new repository reuses the store another repository of the same owner already uses', t => {
+test('row 11: a store another repository of the same owner already uses is used only when the owner names it', t => {
   const ctx = scratch(t);
   const owner = 'example-owner';
   const repo = freshRepo(ctx, `${owner}/b`);
@@ -149,12 +149,14 @@ test('row 11: a new repository reuses the store another repository of the same o
   } });
   const found = new GovernanceDiscovery({ gh, registryOptions: ctx.registryOptions }).discover(repo);
   assert.equal(found.status, 'propose');
-  assert.equal(found.stores.recommended.repository, store);
-  assert.deepEqual(found.binding_draft.store, { kind: 'github', repository: store, branch: 'main', path: `state/${owner}/b/` }, 'its own folder in the shared store');
-  const plan = adopt.adoptionPlan(found);
-  assert.deepEqual(plan.store, { repository: store, create: false }, 'no new store is made');
-  const question = bank.governanceBankSpecs({ state: governance.governanceState(repo, ctx.registryOptions), adoption: plan }).find(spec => spec.id === 'evidence-store');
-  assert.equal(question.recommendation.value, 'keep', 'the bank recommends Keep current');
+  assert.equal(found.stores.recommended, null, 'never picked on its own');
+  assert.deepEqual(found.stores.alternatives.map(entry => entry.repository), [store], 'still listed, for the owner to name');
+  assert.deepEqual(adopt.adoptionPlan(found).store, { repository: `${owner}/TRANSPORT-b`, create: true }, 'the default is this repository\'s own store');
+  const named = adopt.adoptionPlan(found, { store });
+  assert.deepEqual(named.store, { repository: store, create: false, named: true }, 'named: no new store is made');
+  const row = bank.governanceBankSpecs({ state: governance.governanceState(repo, ctx.registryOptions), adoption: adopt.adoptionPlan(found) }).find(spec => spec.id === 'evidence-store');
+  assert.equal(row.report_only, true, 'a status row, never a question');
+  assert.match(row.recommended_text, /^None yet: Toolkit creates the private GitHub repository example-owner\/TRANSPORT-b /);
 });
 
 test('row 12: a store under another owner is never reused; turning on plans a new store under the repository\'s owner', t => {

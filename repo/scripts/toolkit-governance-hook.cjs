@@ -9,7 +9,9 @@
 //   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs),
 //                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs);
-//                     points an agent's own merge question (AskUserQuestion) at the merge card.
+//                     points an agent's own merge question (AskUserQuestion) at the merge card,
+//                     and refuses any other card that follows text written earlier in the same
+//                     turn or asks an over-long question (toolkit-claude-card-check.cjs).
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
 //   SessionStart      runs as a reader of the Toolkit checkout (toolkit-update-marker.cjs): it
@@ -93,10 +95,11 @@ function respondSteady(event, input, options) {
     if (event === 'UserPromptSubmit') {
       // Recording explicit merge authority is independent of answering governance. Only this live
       // prompt is ingested, never context Toolkit attaches to it.
+      // The host is this entry point's own (Claude Code), never a payload field.
       let approvalNote = '';
       try {
-        const count = (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
-        if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s).`;
+        const { count, note } = (options.mergeHold || mergeHold()).recordPromptNote(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' });
+        approvalNote = count ? `Toolkit recorded ${count} explicit merge approval(s).` : note;
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
       // Cloud override (Projects base-overrides list): the governance question is not asked in
       // cloud sessions, which cannot keep the owner's answer; nothing is held either way.
@@ -109,26 +112,33 @@ function respondSteady(event, input, options) {
     if (event === 'PreToolUse') {
       const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
+      let cardCheck = null;
       if (input.tool_name === 'AskUserQuestion') {
-        const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now };
+        const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' };
         // An agent's own merge question is pointed at the merge card; a reader failure shows it.
         let redirect = null;
         try { redirect = (options.mergeHold || mergeHold()).cardRedirect(input, cardOptions); } catch { /* shown: at worst a second tap */ }
         if (redirect) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: redirect.deny } };
+        // A card after text the owner cannot see, or with an over-long question, is refused
+        // (toolkit-claude-card-check.cjs); a check that cannot run shows the card.
+        try { cardCheck = require('./toolkit-claude-card-check.cjs').cardDecision(input, { pickerQuestion: gate.PICKER_QUESTION, mergeCardOf: toolInput => (options.mergeHold || mergeHold()).cardOf(toolInput) }); } catch { cardCheck = null; }
+        if (cardCheck && cardCheck.deny) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: cardCheck.deny } };
         // Notes an exact merge card so its answer can count; it refuses nothing.
         try { (options.mergeHold || mergeHold()).cardAsked(input, cardOptions); } catch { /* an unnoted card records nothing */ }
       }
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
-      // A cloud closure advisory (closure.systemMessage) shows only when nothing refuses the call.
-      return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : closure;
+      // A cloud closure advisory (closure.systemMessage) shows only when nothing refuses the call,
+      // and so does the card check's note that it could not run.
+      if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
+      return cardCheck && cardCheck.note && !closure.hookSpecificOutput ? { ...closure, systemMessage: [closure.systemMessage, cardCheck.note].filter(Boolean).join('\n') } : closure;
     }
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};
       const picked = new gate.PromptHold(options).picked({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolUseId: input.tool_use_id, toolResponse: input.tool_response });
       if (picked) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } };
-      const card = (options.mergeHold || mergeHold()).cardAnswered(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
+      const card = (options.mergeHold || mergeHold()).cardAnswered(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' });
       return card ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: card.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
@@ -140,7 +150,7 @@ function respondSteady(event, input, options) {
       // thread starts in /home/user); the governed rules come once for the ENABLED ones.
       // The whole text, this cloud line included, stays within the host's session-start limit.
       const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`${CLOUD_LINE}\n\n`, 'utf8');
-      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit, refresh: fresh, programmeDeps: options.programmeDeps });
+      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding, limit, refresh: fresh });
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else {
       // The catch-up moves the checkout first, so the governance line reads the moved tree.
@@ -226,7 +236,7 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 // (read-only ones, and the card, whose answer then counts for nothing without the tool gate's note)
 // is let through, as it was before the hook saw it. hooks.json matches the same split, with
 // onFailure: "block" only on this list, so a hook that cannot even start holds only these too.
-const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$/;
+const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|ScheduleWakeup|SendMessage|Workflow|mcp__.*)$/;
 
 function failed(event, input, gate) {
   // A failed PostToolUse records nothing, which leaves the repository waiting.
