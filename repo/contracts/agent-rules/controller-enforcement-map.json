@@ -270,7 +270,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Evidence, progress and finish](controller/evidence-and-finish.md)",
-      "rule_sha": "8118b9316a7c",
+      "rule_sha": "c506cde02918",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -697,7 +697,7 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Custody without ritual:**",
-      "rule_sha": "08a66ae170f4",
+      "rule_sha": "2134e3d61c6a",
       "covers": "In a Git store, toolkit-store.cjs save commits, pushes and fetches once as the read-back, and the shell hooks refuse a raw push to a bound store; which files to archive at gate end stays a judgement.",
       "enforced_by": [
         {

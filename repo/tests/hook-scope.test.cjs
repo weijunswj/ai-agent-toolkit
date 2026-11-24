@@ -117,9 +117,10 @@ test('a second command chained after the script, or a path that leaves its folde
 });
 
 test('a scope row for a hook no hooks.json runs any more fails until the row goes', t => {
-  // The shape of removing a hook (the handoff snapshot hook): its hooks.json entries go, its row stays.
+  // The shape of removing a hook: its hooks.json entries go, its row stays. Shown on a real hook that
+  // only Claude Code runs.
   const copy = realCopy(t);
-  const script = 'repo/scripts/toolkit-handoff-hook.cjs';
+  const script = 'repo/scripts/toolkit-github-footer-hook.cjs';
   assert.ok(copy.scope.hooks.some(item => item.script === script), `${script} has a row`);
   for (const rel of copy.scope.hook_files.claude) {
     const hooks = JSON.parse(fs.readFileSync(path.join(copy.root, ...rel.split('/')), 'utf8'));
