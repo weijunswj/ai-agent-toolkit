@@ -112,7 +112,7 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   const allKept = run(base, { env, timeout: 300000 });
   assert.equal(allKept.status, 0, allKept.stderr || allKept.stdout);
   assert.match(allKept.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| A\. Keep current \| B\. Turn on \|/);
-  assert.match(allKept.stdout, /\| Claude Code setting: Read AGENTS\.md too\? \| Off \(you turned it off\) \| A\. Keep current \| B\. Turn on \|/);
+  assert.match(allKept.stdout, /\| Claude Code setting: Read AGENTS\.md \(in all local repos\) too\? \| Off \(you turned it off\) \| A\. Keep current \| B\. Turn on \|/);
   assert.deepEqual(read(), { switchModelsOnFlag: false });
 });
 
