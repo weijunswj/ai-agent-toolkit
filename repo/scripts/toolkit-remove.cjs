@@ -2,7 +2,8 @@
 'use strict';
 
 // Remove Toolkit from this computer: its old scheduled tasks and task records, its global rules, the
-// app settings it set, its helper agent files and skill copies, and its own folder.
+// app settings it set, its helper agent files and skill copies (the n8n skills it copied included), its
+// Codex setup record and update reports, and its own folder.
 //
 // Earlier releases put scheduled tasks into Windows Task Scheduler for every repository they served;
 // Toolkit no longer does, and removing the plugin does not remove them. This command finds every task that carries Toolkit's
@@ -15,8 +16,9 @@
 //
 // It never touches a repository, the env store or any key, or anything the owner made. App settings
 // change only where Toolkit recorded its own value: Codex's project_doc_max_bytes line and helper
-// limit block in config.toml, and Claude Code's subagent limit in settings.json (backups first). The
-// other parts are in toolkit-remove-parts.cjs. The managed checkout and the rest of Toolkit's folder go
+// limit block in config.toml, and Claude Code's subagent limit in settings.json (backups first). Claude
+// Code's own settings that setup turned on (attribution, session messages, model switching, reading
+// AGENTS.md) stay as they are, and so does every plugin Toolkit did not install. The other parts are in toolkit-remove-parts.cjs. The managed checkout and the rest of Toolkit's folder go
 // last, and only once no Toolkit plugin is installed; the plan lists the plugin uninstall lines, which
 // the agent runs after the owner's OK. A task the owner changed by hand is kept unless it is named with
 // --include; a changed task with no marker, and a task of the owner's own that Toolkit only lists
@@ -291,7 +293,7 @@ const RESULT_WORDS = Object.freeze({ removed: 'removed', 'deleted-file': 'put ba
   absent: 'nothing to remove', held: 'left alone', failed: 'failed', unchanged: 'unchanged', skipped: 'left alone', 'opted-out': 'already removed by you' });
 const words = code => RESULT_WORDS[code] || String(code).replace(/-/g, ' ');
 
-const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), the Claude Code preferences you chose at setup (listed above when there are any), and every setting, agent, skill and file you made yourself.';
+const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), the Claude Code settings setup turned on (they stay as they are; listed above when there are any), other plugins, and every setting, agent, skill and file you made yourself.';
 
 // The plugin uninstall lines for each app that still has the Toolkit plugin, and the app screen to use
 // when its command line is not available.

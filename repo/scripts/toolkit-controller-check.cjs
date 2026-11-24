@@ -13,7 +13,9 @@
 //                                            chat updates Toolkit and rereads its rules on its own
 //   guidebook, instructions, memory, tasks   Claude Projects only
 //   programme, traces, stale                 only where the checkout's programme binding says
-//                                            governance is enabled; stale is the stale check, which the
+//                                            governance is enabled (for stale, the binding merged on
+//                                            origin's default branch, which the hook also reads); stale
+//                                            is the stale check, which the
 //                                            governance session-start hook starts in the background and
 //                                            a controller may run on demand: at most once per local date
 //                                            per repository (a stamp file in the Toolkit user-state
@@ -67,16 +69,16 @@ const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
 const COMPACT_LINES = 3;
-// The polish child's row cap, and the findings that fire when a child's PRs merged. Whether that
-// child is done is the controller's judgement against its DONE WHEN, so they are JUDGE? rows, never CLOSE?.
-const POLISH_CAP = 8;
+// The findings that fire when a child's PRs merged. Whether that child is done is the controller's
+// judgement against its DONE WHEN, so they are JUDGE? rows, never CLOSE?.
 const DONE_CODES = new Set(['READY_TO_CLOSE', 'TASK_MERGED_OPEN']);
 // Checks whose every detail line prints even in compact output: the stale rows are the day's one list
 // for the controller, and each row needs an answer.
 const UNCUT = new Set(['stale']);
-const DONE_WHEN = /^#{1,6} +DONE WHEN\b.*$/im;
 // The reconciler writes this line under a child's PR GRAPH while the controller keeps it open on purpose.
 const KEPT_OPEN = /^Kept open: /m;
+// Readers of a child page's checkbox rows, shared with the sweep's stale-work findings.
+const { POLISH_CAP, DONE_WHEN, sectionOf, polishRows, uncheckedRows, rowTicks } = require('../../skills/github-program-reconciler/scripts/programme-child-rows.cjs');
 const SCRIPTS = {
   guidebook: 'repo/scripts/toolkit-projects-guidebook.cjs',
   instructions: 'repo/scripts/toolkit-projects-instructions.cjs',
@@ -162,6 +164,12 @@ function readBinding(checkout) {
   try { return JSON.parse(fs.readFileSync(path.join(checkout, BINDING_REL), 'utf8').replace(/^﻿/, '')); } catch { return null; }
 }
 
+// The binding merged on origin's default branch with governance on, from this computer's cache, or
+// null (the governance state's own reader, which the session-start hook also uses).
+function defaultMergedBinding(checkout) {
+  try { return require('./toolkit-governance-state.cjs').mergedBinding(checkout); } catch { return null; }
+}
+
 // Exit 0 current, 1 needs a change, anything else could not run: the shape the Projects checkers and
 // the script-reference check share.
 function statusCheck(run, script, args, command) {
@@ -229,29 +237,6 @@ function checkTraces(run, repo, parents) {
   return { state, lines };
 }
 
-// The text under a heading, up to the next heading of the same or a higher level; null without it.
-function sectionOf(body, heading) {
-  const text = String(body || '').replace(/\r\n?/g, '\n');
-  const start = heading.exec(text);
-  if (!start) return null;
-  const level = /^#+/.exec(start[0])[0].length;
-  const rest = text.slice(start.index + start[0].length);
-  const end = new RegExp(`^#{1,${level}} `, 'm').exec(rest);
-  return { heading: start[0], text: end ? rest.slice(0, end.index) : rest };
-}
-
-// Polish rows are the checkboxes under the child's ROWS heading, else under DONE WHEN; the sweep
-// says which it counted, so a body in another shape is visible rather than silently miscounted.
-function polishRows(body) {
-  for (const heading of [/^#{1,6} +ROWS\b.*$/im, DONE_WHEN]) {
-    const found = sectionOf(body, heading);
-    if (!found) continue;
-    const rows = found.text.match(/^ {0,3}[-*+] \[[ xX]\] /gm) || [];
-    return { rows: rows.length, under: /ROWS/i.test(found.heading) ? 'ROWS' : 'DONE WHEN' };
-  }
-  return { rows: 0, under: 'no ROWS or DONE WHEN heading' };
-}
-
 // Why a child holds open work whatever its findings say, or null: unread, closed, kept open or with
 // an open sub-issue.
 function childHold(child) {
@@ -262,17 +247,11 @@ function childHold(child) {
   return summary && summary.total > summary.completed ? `${summary.total - summary.completed} open sub-issue(s)` : null;
 }
 
-// The unchecked DONE WHEN rows of a child, nested ones too.
-function uncheckedRows(child) {
-  const doneWhen = sectionOf(child.body, DONE_WHEN);
-  return doneWhen ? (doneWhen.text.match(/^[ \t]*[-*+] \[ \] /gm) || []).length : 0;
-}
-
 // Why an owner-only hold still needs the controller's judgement, or '': no DONE WHEN heading to read,
 // or an unchecked row under it.
 function ownerOnlyDoubt(child) {
   if (!sectionOf(child.body, DONE_WHEN)) return 'no DONE WHEN heading';
-  const unchecked = uncheckedRows(child);
+  const unchecked = uncheckedRows(child.body);
   return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : '';
 }
 
@@ -286,7 +265,7 @@ function heldBecause(finding, child) {
   if (finding.promised) return `hold lapsed at ${finding.due} (${finding.promised})`;
   const hold = childHold(child);
   if (hold) return hold;
-  const unchecked = uncheckedRows(child);
+  const unchecked = uncheckedRows(child.body);
   return unchecked ? `${unchecked} unchecked DONE WHEN row(s)` : null;
 }
 
@@ -304,60 +283,6 @@ function keptOpenStall(finding, child, now) {
   const at = since ? Date.parse(`${since[1]}T${since[2]}:00Z`) : NaN;
   if (Number.isFinite(at) && now.getTime() - at < hours * 3600000) return null;
   return `KEPT OPEN? #${finding.issue} kept open${since ? ` since ${since[1]} ${since[2]}Z` : ''} with every PR merged, and no lane has worked it for over ${hours} hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)`;
-}
-
-// What the stale check reads of a child page to see a merged PR whose rows stay unticked. A
-// default-deny reader over this subset of GitHub's Markdown, and nothing else:
-//   - lines split on LF only (CRLF counts as LF); no other character starts a line;
-//   - a row is `- [ ] ` or `- [x] ` (`*` or `+` for `-`, X in either case) with 0 to 3 spaces before
-//     it, under an ATX heading whose text starts `DONE WHEN` or `ROWS`, up to the next heading of the
-//     same or a higher level; fenced code (``` or ~~~, to its closing fence or the end) and an HTML
-//     comment block (a line starting `<!--`, to the line holding `-->`) hold no rows or headings;
-//   - a merged PR is a row of the one STATE block the sweep draws (one BEGIN STATE line, then one END
-//     STATE line) whose status cell starts MERGED and whose Merged SHA cell links a full commit.
-// Only a row in that subset counts as ticked, and only such a STATE row as merged: a tab or deeper
-// indent, a quote, another marker or check character, or any other shape is never read as either.
-const ROWS_HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t#]*$/;
-const CHECKBOX = /^ {0,3}[-*+] \[([ xX])\] /;
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
-const STATE_BEGIN = /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v\d+ .*-->$/;
-const STATE_END = /^<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->$/;
-const MERGED_ROW = /^\|.*\|#(\d+)\|MERGED(?: · [^|]*)?\|\[[0-9a-f]{7,40}\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/commit\/[0-9a-f]{40}\)\|$/;
-function rowTicks(body) {
-  const lines = String(body || '').replace(/\r\n/g, '\n').split('\n');
-  let fence = null, comment = false, section = 0, ticked = 0, unticked = 0;
-  const begins = [], ends = [];
-  lines.forEach((line, index) => {
-    if (fence) {
-      if (new RegExp(`^ {0,3}\\${fence[0]}{${fence.length},}[ \\t]*$`).test(line)) fence = null;
-      return;
-    }
-    if (comment) {
-      if (line.includes('-->')) comment = false;
-      return;
-    }
-    if (STATE_BEGIN.test(line)) begins.push(index);
-    if (STATE_END.test(line)) ends.push(index);
-    const open = FENCE_OPEN.exec(line);
-    if (open) { fence = open[1]; return; }
-    if (/^ {0,3}<!--/.test(line)) {
-      comment = !line.slice(line.indexOf('<!--') + 4).includes('-->');
-      return;
-    }
-    const heading = ROWS_HEADING.exec(line);
-    if (heading) {
-      if (section && heading[1].length <= section) section = 0;
-      if (/^(DONE WHEN|ROWS)\b/i.test(heading[2])) section = heading[1].length;
-      return;
-    }
-    const row = section ? CHECKBOX.exec(line) : null;
-    if (row && row[1] === ' ') unticked += 1;
-    else if (row) ticked += 1;
-  });
-  const merged = begins.length === 1 && ends.length === 1 && begins[0] < ends[0]
-    ? lines.slice(begins[0] + 1, ends[0]).map(line => MERGED_ROW.exec(line)).filter(Boolean).map(match => Number(match[1]))
-    : [];
-  return { ticked, unticked, merged: [...new Set(merged)].sort((a, b) => a - b) };
 }
 
 // The stamp's memory of unticked children it has already flagged: { "<issue>": { prs, flagged } }. An
@@ -543,15 +468,24 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'tasks') {
       if (!options.tasks.length) { skip(name, 'pass --task <kind>=<file> (each stored task prompt)'); continue; }
       outcome = checkTasks(run, options.tasks);
-    } else if (name === 'programme' || name === 'traces' || name === 'stale') {
+    } else if (name === 'stale') {
+      // The session-start hook starts this run from the merged binding (origin's default branch, as
+      // this computer cached it), so the run gates on that binding too: a worktree from before
+      // governance was on would otherwise skip with no stamp, and the hook would start it again.
+      if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
+      const merged = (deps.mergedBinding || defaultMergedBinding)(options.checkout);
+      if (!merged) { skip(name, 'governance off'); continue; }
+      const mergedRepo = options.repo || (typeof merged.repository === 'string' ? merged.repository : null);
+      if (!mergedRepo) { skip(name, 'pass --repo <owner/name>'); continue; }
+      const mergedParents = Array.isArray(merged.parents) ? merged.parents.filter(parent => Number.isInteger(parent.issue)) : [];
+      const stamp = deps.stamp || defaultStamp();
+      outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo: mergedRepo, parents: mergedParents, now });
+    } else if (name === 'programme' || name === 'traces') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       if (!binding) { skip(name, 'no programme binding in the checkout'); continue; }
       if (!governed) { skip(name, 'governance off'); continue; }
       if (name !== 'programme' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
-      if (name === 'stale') {
-        const stamp = deps.stamp || defaultStamp();
-        outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo, parents, now });
-      } else outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
+      outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
     } else if (name === 'ci') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       outcome = checkCi(run, options.checkout);

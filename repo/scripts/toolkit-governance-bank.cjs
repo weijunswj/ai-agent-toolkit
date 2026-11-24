@@ -195,7 +195,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
   if (appSet || appPart) {
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
-      text: appSet ? 'Its variable and secret are on GitHub' : 'toolkit governance check shows how to finish or replace it',
+      text: appSet ? 'Its variable and secret are on GitHub' : 'the governance check shows how to finish or replace it',
       change: appSet ? `To stop using it, delete ${APP_NAMES_ON_GITHUB} under Settings, Secrets and variables, Actions on GitHub; governance works without it` : '' }));
   } else if (state.state === 'DISABLED') {
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: 'Off (needs governance)', text: 'Nothing is made while governance is off' }));

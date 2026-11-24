@@ -219,7 +219,7 @@ test('setup names each governed repository the cloud sweep skips, one line per r
   assert.equal(lines.length, 3);
   assert.match(lines[0], /^Cloud sweep: me\/public-state is skipped because its programme state is on a public branch\. Move the state to a private evidence store[^]*until then run node "[^"]*programme\.cjs" refresh there by hand\./);
   assert.match(lines[1], /^Cloud sweep: me\/foreign is skipped because its evidence store other\/store belongs to another owner/);
-  assert.match(lines[2], /toolkit governance check in each governed repository/);
+  assert.match(lines[2], /ask your agent to check governance in each governed repository/);
   assert.equal(lines.some(line => line.includes('me/fine')), false);
   assert.deepEqual(cloudSweepSkipLines({ bindings: () => [bindings[2]] }), [lines[2]]);
   assert.deepEqual(cloudSweepSkipLines({ bindings: () => [] }), []);
