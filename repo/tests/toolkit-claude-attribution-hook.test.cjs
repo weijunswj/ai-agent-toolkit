@@ -51,7 +51,7 @@ test('A23: the fallback screen is broader than the guard, never narrower', () =>
 
 test('A23: the hook stays registered without onFailure block, so a hook that cannot start never stops other shell commands', () => {
   const claude = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8'));
-  const shell = claude.hooks.PreToolUse.find(group => group.matcher === 'Bash|PowerShell');
+  const shell = claude.hooks.PreToolUse.find(group => group.matcher === 'Bash|PowerShell|Monitor|mcp__terminal__run_in_terminal');
   assert.equal(shell.hooks.length, 1);
   assert.equal(Object.hasOwn(shell.hooks[0], 'onFailure') ? shell.hooks[0].onFailure : 'continue', 'continue');
 });

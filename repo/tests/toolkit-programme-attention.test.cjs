@@ -361,38 +361,7 @@ test('E2: validation refuses a finding with an unknown code, field, state or a f
 
 // ---- E3. Delivery -------------------------------------------------------------------------------
 
-test('E3: the session-start line shows open findings every time, clear once after each change, and never says clear unchecked', () => {
-  const dir = tmp();
-  let now = '2026-10-28T10:00:00.000Z';
-  const deps = { attentionDir: dir, now: () => now };
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: not checked on this computer yet', refresh: true, age: null });
-  const write = list => cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
-  const finding = (issue, findingState = 'new') => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', issue, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue, head: null, state: findingState, first_seen: now, changed_at: now });
-  write([finding(470)]);
-  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new, 0 acknowledged\. Run node "[^"]*programme\.cjs" attention/);
-  write([finding(470, 'acknowledged')]);
-  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 0 new, 1 acknowledged/, 'acknowledged never hides');
-  assert.match(cache.sessionAttention('acme/app', deps).line, /1 acknowledged/, 'and again next session');
-  write([finding(470, 'resolved')]);
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: clear', refresh: false, age: null });
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: null, refresh: false, age: null }, 'then silent');
-  // A second finding comes and goes: clear shows again after that change too.
-  write([finding(470, 'resolved'), finding(471)]);
-  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new/);
-  write([finding(470, 'resolved'), finding(471, 'resolved')]);
-  assert.equal(cache.sessionAttention('acme/app', deps).line, 'Attention: clear', 'clear after every change, not only the first');
-  assert.equal(cache.sessionAttention('acme/app', deps).line, null);
-  now = '2026-10-28T13:00:00.000Z';
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: null, refresh: true, age: '3 h' }, 'an old cache asks for a refresh even when silent');
-  write([finding(472)]);
-  now = '2026-10-28T16:00:00.000Z';
-  const stale = cache.sessionAttention('acme/app', deps);
-  assert.match(stale.line, /^Attention: 1 new, 0 acknowledged \(as of 3 h ago\)\. Run node "[^"]*programme\.cjs" attention/);
-  assert.doesNotMatch(stale.line, /started/, 'the cache never claims a refresh started');
-  assert.equal(stale.refresh, true);
-});
-
-test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLED repository only, with no network call', () => {
+test('E3: sessionLine appends Checkpoint lines for an ENABLED repository only, with no attention line, no background start and no network call', () => {
   const root = tmp();
   const sessionsDir = tmp();
   const attentionDir = tmp();
@@ -402,24 +371,13 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   const programmeDeps = { attentionDir, sessionsDir, home: tmp(), mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.push(folder), now: () => now };
   // The repository's state as decided, in place of reading it.
   const evaluate = (stateValue, deps = programmeDeps) => gate.sessionLine(root, { stateReader: () => stateValue, programmeDeps: deps });
-  assert.match(evaluate(enabled), /Toolkit governance: ENABLED[^]*Attention: not checked on this computer yet; a refresh has started in the background\./);
-  assert.deepEqual(started, [root], 'one background refresh, started by the trigger');
-  // Within 15 minutes no second start, and the line does not claim one.
-  now = '2026-10-28T10:10:00.000Z';
-  const again = evaluate(enabled);
-  assert.match(again, /Attention: not checked on this computer yet\./);
-  assert.doesNotMatch(again, /refresh has started/);
-  assert.deepEqual(started, [root], 'throttled');
-  now = '2026-10-28T10:20:00.000Z';
-  assert.match(evaluate(enabled), /refresh has started/);
-  assert.equal(started.length, 2);
-  // Offline (no injected starter): the refresh never starts and the line never says it did.
-  const offline = evaluate(enabled, { ...programmeDeps, startRefresh: undefined, environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } });
-  assert.match(offline, /Attention: not checked on this computer yet\./);
-  assert.doesNotMatch(offline, /refresh has started/);
-  for (const off of [{ state: 'DISABLED', rule: 'M2', root }, { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: false, root }]) {
-    assert.doesNotMatch(evaluate(off), /Attention:/, `${off.state} ${off.rule}: no line`);
-  }
+  // Due findings reach the controller at turn end: session start shows no attention line and starts no refresh.
+  const first = evaluate(enabled);
+  assert.match(first, /^Toolkit governance: ENABLED/);
+  assert.doesNotMatch(first, /Attention:|refresh has started/);
+  now = '2026-10-28T13:00:00.000Z';
+  assert.doesNotMatch(evaluate(enabled), /Attention:/);
+  assert.deepEqual(started, [], 'no background refresh from session start');
   // A session here whose last turn-end record failed.
   const hash = checkpoint.sessionHash('exec-a');
   checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: 'g1-a1', repo_root: root, bound_at: 'x' }, { sessionsDir });
@@ -447,119 +405,12 @@ test('E3: many failed Checkpoint lines are counted, not listed, so the session l
   assert.equal(gate.SESSION_TEXT_LIMIT, 10000);
   assert.ok(Buffer.byteLength(line, 'utf8') <= gate.SESSION_TEXT_LIMIT, `${Buffer.byteLength(line, 'utf8')} bytes`);
   assert.equal(line.split(rules).length, 2, 'the whole governed rules text, once');
-  assert.match(line, /^Toolkit governance: ENABLED[^]*Attention: /);
+  assert.match(line, /^Toolkit governance: ENABLED/);
+  assert.doesNotMatch(line, /Attention:/);
   const listed = (line.match(/Checkpoint: last turn's record failed/g) || []).length;
   const more = Number((/Checkpoint: (\d+) more sessions here also failed their last turn's record \(left out to keep this text within the host's session-start limit\)/.exec(line) || [])[1]);
   assert.ok(listed > 0, 'the first ones are still listed');
   assert.equal(listed + more, 60, 'every failed session is listed or counted');
-});
-
-// The stale check runs from the governance session-start hook (a silent safety net for a missed close
-// or a duplicate child): the line comes from this computer's stamp, the run starts in the background at
-// most once a day per repository, and nothing shows or starts with governance off.
-const STALE_NOW = '2026-11-22T10:00:00.000Z';
-const staleToday = (iso = STALE_NOW) => { const time = new Date(iso); return `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}-${String(time.getDate()).padStart(2, '0')}`; };
-const STALE_ROWS = [
-  'JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)',
-  'OWNER OK? #40 Task 40: PR #940 merged, agent UAT PASSED at bbbbbbb; put "reply ok to close" in your next ask to the owner',
-  'FOLD? #20 new under #7 with no Nearest child: line',
-  'POLISH FULL #44: 8 rows (ROWS): ship it as one PR, then open a fresh one',
-];
-function staleWorld({ stamp = undefined, now = STALE_NOW, environment = {}, inject = true } = {}) {
-  const root = tmp();
-  const home = tmp();
-  // Stamps are given keyed by repository; each goes to that repository's own stamp file.
-  for (const [repository, record] of Object.entries(stamp || {})) cache.writeStaleStamp(repository, record, { home });
-  const started = { refresh: [], stale: [] };
-  let clock = now;
-  const deps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.refresh.push(folder), now: () => clock, environment,
-    ...(inject ? { startStaleSweep: folder => started.stale.push(folder) } : {}) };
-  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
-  const evaluate = (value = enabled, registryOptions = {}) => gate.sessionLine(root, { stateReader: () => value, programmeDeps: deps, registryOptions });
-  return { root, deps, started, evaluate, enabled, setNow: value => { clock = value; } };
-}
-
-test('red: an ENABLED repository with stale rows today gets one stale-check line whose action starts Controller:, and starts no run', () => {
-  const world = staleWorld({ stamp: { 'acme/app': { date: staleToday(), at: STALE_NOW, rows: STALE_ROWS } } });
-  const text = world.evaluate();
-  const line = /Stale check [^\n]*?Controller: answer each this turn: [^\n]*?next ask to the owner\./.exec(text)?.[0];
-  assert.ok(line, text);
-  assert.match(line, new RegExp(`^Stale check ${staleToday()}: 4 rows to answer \\(JUDGE\\? 1, OWNER OK\\? 1, FOLD\\? 1, POLISH 1\\)\\. Run node "[^"]*toolkit-controller-check\\.cjs" --checkout "[^"]+" --skip toolkit,guidebook,instructions,memory,tasks,programme,traces,ci,footer,refs for the rows`));
-  assert.match(line, /close each child you judge done yourself/);
-  assert.doesNotMatch(text, /CLOSE LIST|post (?:it )?to the owner/);
-  assert.deepEqual(world.started.stale, [], 'today\'s run already happened');
-  // The stamp file is found without case.
-  assert.match(staleWorld({ stamp: { 'Acme/App': { date: staleToday(), at: STALE_NOW, rows: STALE_ROWS.slice(0, 1) } } }).evaluate(), /Stale check [^:]+: 1 row to answer \(JUDGE\? 1\)/);
-});
-
-test('governance off, or programme records not bound, gives no stale-check line and starts nothing', () => {
-  const world = staleWorld({ stamp: { 'acme/app': { date: staleToday(), at: STALE_NOW, rows: STALE_ROWS } } });
-  for (const off of [{ state: 'DISABLED', rule: 'M2', root: world.root }, { state: 'DISABLED', rule: 'S1', root: world.root }, { ...world.enabled, programme_records_bind: false }]) {
-    assert.doesNotMatch(world.evaluate(off), /Stale check/, `${off.state} ${off.rule}`);
-  }
-  const fresh = staleWorld();
-  for (const off of [{ state: 'DISABLED', rule: 'M2', root: fresh.root }, { ...fresh.enabled, programme_records_bind: false }]) fresh.evaluate(off);
-  assert.deepEqual(fresh.started.stale, []);
-});
-
-test('red: with no stamp or an older one the stale check starts in the background once per 15 minutes, never offline or in a test registry without an injected starter', () => {
-  const world = staleWorld();
-  const first = world.evaluate();
-  assert.doesNotMatch(first, /Stale check/, 'nothing to show before the run');
-  assert.deepEqual(world.started.stale, [world.root]);
-  world.setNow('2026-11-22T10:10:00.000Z');
-  world.evaluate();
-  assert.deepEqual(world.started.stale, [world.root], 'throttled within 15 minutes');
-  world.setNow('2026-11-22T10:20:00.000Z');
-  world.evaluate();
-  assert.equal(world.started.stale.length, 2);
-  // Yesterday's stamp counts as no run today.
-  const yesterday = staleWorld({ stamp: { 'acme/app': { date: '2026-11-20', at: '2026-11-20T09:00:00.000Z', rows: STALE_ROWS } } });
-  assert.doesNotMatch(yesterday.evaluate(), /Stale check/);
-  assert.equal(yesterday.started.stale.length, 1);
-  // The refresh and the stale check are throttled apart.
-  assert.equal(world.started.refresh.length >= 1, true);
-  // Offline or a test registry with no injected starter: no start is claimed, so no real run starts.
-  for (const [environment, registryOptions] of [[{ TOOLKIT_GOVERNANCE_OFFLINE: '1' }, {}], [{}, { testOnly: true }]]) {
-    const offline = staleWorld({ inject: false, environment });
-    offline.evaluate(offline.enabled, registryOptions);
-    assert.equal(fs.existsSync(`${cache.cacheFile('acme/app', offline.deps)}.stale-started`), false, JSON.stringify(environment));
-  }
-  assert.equal(fs.existsSync(`${cache.cacheFile('acme/app', world.deps)}.stale-started`), true, 'an allowed start is claimed in its own file');
-  assert.equal(fs.existsSync(`${cache.cacheFile('acme/app', world.deps)}.started`), true, 'apart from the refresh claim');
-});
-
-test('red: a stale check that ran today with no rows is silent, and a recorded failure names the read and the retry', () => {
-  const quiet = staleWorld({ stamp: { 'acme/app': { date: staleToday(), at: STALE_NOW, rows: [] } } });
-  assert.doesNotMatch(quiet.evaluate(), /Stale check/);
-  assert.deepEqual(quiet.started.stale, []);
-  const failing = staleWorld({ stamp: { 'acme/app': { date: '2026-11-20', at: '2026-11-20T09:00:00.000Z', rows: [], failed: { at: '2026-11-22T09:30:00.000Z', check: 'sub-issues' } } } });
-  const text = failing.evaluate();
-  assert.match(text, /Stale check: could not read the parents' sub-issues on GitHub at 2026-11-22 09:30Z, so it has not run since 2026-11-20\. Controller: check this computer's gh sign-in \(gh auth status\), then run node "[^"]*toolkit-controller-check\.cjs" [^\n]*? and read its error; it retries at the next session start\./);
-  assert.doesNotMatch(text, /could not run\b/);
-  assert.equal(failing.started.stale.length, 1, 'a failed day retries');
-  // A failure with an unknown check word or a bad time shows nothing rather than guessing.
-  assert.doesNotMatch(staleWorld({ stamp: { 'acme/app': { failed: { at: 'soon', check: 'sub-issues' } } } }).evaluate(), /Stale check:/);
-  assert.doesNotMatch(staleWorld({ stamp: { 'acme/app': { failed: { at: STALE_NOW, check: 'HTTP 401 Bad credentials' } } } }).evaluate(), /Stale check:/);
-});
-
-test('red: the stale-check line keeps the session text within the host limit, shrinking to its short form before Checkpoint lines drop and never cutting the rules', () => {
-  const rows = Array.from({ length: 40 }, (_, i) => `JUDGE? #${100 + i} PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)`);
-  const world = staleWorld({ stamp: { 'acme/app': { date: staleToday(), at: STALE_NOW, rows } } });
-  const rules = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
-  assert.match(world.evaluate(), /Stale check [^:]+: 40 rows to answer \(JUDGE\? 40\)\. Run /, 'full form when it fits');
-  for (let index = 0; index < 60; index += 1) {
-    const hash = checkpoint.sessionHash(`stale-exec-${index}`);
-    checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: `g1-${index}`, repo_root: world.root, bound_at: 'x' }, { sessionsDir: world.deps.sessionsDir });
-    checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir: world.deps.sessionsDir });
-  }
-  const line = world.evaluate();
-  assert.ok(Buffer.byteLength(line, 'utf8') <= gate.SESSION_TEXT_LIMIT, `${Buffer.byteLength(line, 'utf8')} bytes`);
-  assert.equal(line.split(rules).length, 2, 'the whole governed rules text, once');
-  assert.match(line, /Stale check [^:]+: 40 rows to answer; run node "[^"]*toolkit-controller-check\.cjs" [^\n]*?\. Controller: answer each this turn\./, 'short form kept');
-  const listed = (line.match(/Checkpoint: last turn's record failed/g) || []).length;
-  const more = Number((/Checkpoint: (\d+) more sessions here also failed/.exec(line) || [])[1]);
-  assert.equal(listed + more, 60, 'every failed session is still listed or counted');
 });
 
 test('E3: sessionLine never reads the retired Windows task registry, whatever an old sweep task recorded', () => {
@@ -627,9 +478,9 @@ test('E3: refresh and attention write this computer\'s cache, and a cloud surfac
   fx.github.addIssue(470);
   fx.run(['refresh']);
   const written = cache.readCache('acme/app', { attentionDir: fx.attentionDir });
-  assert.equal(written.line, 'Attention: 1 new, 0 acknowledged');
   assert.equal(written.repository, 'acme/app');
-  assert.equal(Object.keys(written).includes('findings'), false, 'no finding text in the cache');
+  assert.ok(Array.isArray(written.net));
+  assert.deepEqual(Object.keys(written).sort(), ['as_of', 'complete', 'net', 'repository', 'schema'], 'no line, counts or finding text in the cache');
   const block = fx.github.issues.get(421).body;
   assert.match(block, /AI-AGENT-TOOLKIT:programme-state:BEGIN CURRENT[^]*\*\*Attention: 1 new, 0 acknowledged\*\*[^]*END CURRENT/);
 });
@@ -820,7 +671,7 @@ test('N3: a dispose reason goes when its finding drops off the list, and stays w
   assert.deepEqual(doc.private.attention_notes, { [recent]: 'recent reason' }, 'its reason went with it; the listed one kept its reason');
 });
 
-test('a folder at the throttle path never stops session-start refreshes', () => {
+test('a folder at the throttle path never stops background refreshes', () => {
   const attentionDir = tmp();
   const deps = { attentionDir, now: () => '2026-10-28T10:00:00.000Z' };
   fs.mkdirSync(`${cache.cacheFile('acme/app', deps)}.started`, { recursive: true });
@@ -935,7 +786,7 @@ test('every reported finding carries a next step, and a stuck sweep is a finding
   assert.deepEqual(state.validateParent({ ...state.newParent({ repository: 'acme/app', parentIssue: 421 }), attention: stuck }), []);
 });
 
-test('every session-start problem line names who acts and when', () => {
+test('every session-start problem line names who acts and when, and an attention cache adds no line', () => {
   const root = tmp();
   const home = tmp();
   const attentionDir = tmp();
@@ -944,26 +795,14 @@ test('every session-start problem line names who acts and when', () => {
   const programmeDeps = { attentionDir, sessionsDir, home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
   const evaluate = () => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
-  cache.writeCache('acme/app', { line: 'Attention: 2 new, 0 acknowledged', counts: { new: 2, acknowledged: 0 }, digest: 'd1', complete: true }, { attentionDir, now: () => now.toISOString() });
+  cache.writeCache('acme/app', { complete: true, net: [{ id: 'abcdefabcdef', code: 'TASK_IDLE', issue: 4, kind: null, state: 'new', changed_at: '2026-10-30T00:00:00.000Z', due: null }] }, { attentionDir, now: () => now.toISOString() });
   const hash = checkpoint.sessionHash('exec-b');
   checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: 'g1-a1', repo_root: root, bound_at: 'x' }, { sessionsDir });
   checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir });
   const line = evaluate();
-  for (const [key, action] of Object.entries(gate.FINDING_ACTIONS)) if (key !== 'queue') assert.ok(line.includes(action), `${action} in ${line}`);
-  assert.ok(!line.includes(gate.FINDING_ACTIONS.queue), 'the queue action is only for a queue-only line');
-  assert.match(line, /Attention: 2 new[^]*Run node "[^"]*programme\.cjs" attention for the list\. Controller: answer each new or overdue finding this turn/);
-
-  // Only work-queue findings open: the action names the queue step and never offers an ack, which
-  // a work-queue finding refuses.
-  const queue = { count: 2, oldest: { issue: 835, code: 'TASK_IDLE', since: '2026-11-01T00:00:00.000Z', next: state.FINDING_CODES.TASK_IDLE.next_action } };
-  cache.writeCache('acme/app', { line: 'Attention: 2 new, 0 acknowledged, 2 in the work queue', counts: { new: 2, acknowledged: 0 }, digest: 'd2', complete: true, queue }, { attentionDir, now: () => now.toISOString() });
-  const queued = evaluate();
-  assert.ok(queued.includes(gate.FINDING_ACTIONS.queue), queued);
-  assert.ok(!queued.includes(gate.FINDING_ACTIONS.attention), queued);
-  assert.doesNotMatch(gate.FINDING_ACTIONS.queue, /\back\b/);
-  // One open finding outside the queue brings the full action back.
-  cache.writeCache('acme/app', { line: 'Attention: 3 new, 0 acknowledged, 2 in the work queue', counts: { new: 3, acknowledged: 0 }, digest: 'd3', complete: true, queue }, { attentionDir, now: () => now.toISOString() });
-  assert.ok(evaluate().includes(gate.FINDING_ACTIONS.attention));
+  assert.deepEqual(Object.keys(gate.FINDING_ACTIONS), ['checkpoint']);
+  assert.ok(line.includes(gate.FINDING_ACTIONS.checkpoint), line);
+  assert.doesNotMatch(line, /Attention:|answer each new or overdue finding/);
 });
 
 test('work queue: a disposed stalled-task finding that is still seen stays disposed', () => {
@@ -983,35 +822,23 @@ test('work queue: an older acknowledged stalled-task finding still counts on CUR
   assert.match(body, /\*\*Attention: 0 new, 1 acknowledged, 1 in the work queue\*\* · Holds: 0 · /);
 });
 
-test('E3: the session-start line names the longest-stalled work-queue task and its next step', () => {
-  const dir = tmp();
-  const now = '2026-11-13T10:00:00.000Z';
-  const deps = { attentionDir: dir, now: () => now };
-  const entry = (code, issue, changed) => ({ id: state.findingId('reconcile', code, issue, ''), source: 'reconcile', code, issue, head: null, state: 'new', first_seen: changed, changed_at: changed });
-  const list = [entry('TASK_IDLE', 835, '2026-11-13T06:00:00.000Z'), entry('TASK_MERGED_OPEN', 877, '2026-11-13T00:03:00.000Z'), entry('NEEDS_PLACEMENT', 470, '2026-11-13T09:00:00.000Z')];
-  const [oldest] = state.workQueue(list);
-  cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true,
-    queue: { count: 2, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } }, deps);
-  const line = cache.sessionAttention('acme/app', deps).line;
-  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run node "[^"]*programme\.cjs" attention for the list$/);
-  // A cache from before this field, or with a malformed one, shows the plain line.
-  cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
-  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Run node "[^"]*programme\.cjs" attention/);
-  for (const bad of [{ count: 0, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'x' } }, { count: 1, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'a\nb' } }, { count: 1, oldest: { issue: 1, code: 'lower', since: now, next: 'x' } }]) {
-    assert.equal(cache.queueText(bad), null, JSON.stringify(bad));
-  }
-});
-
-test('E3: attention writes the longest-stalled work-queue task into this computer\'s cache, and no free text', () => {
+test('E4: attention writes the open net findings into the cache for the turn-end owed check, oldest first, IDs and times only', () => {
   const fx = fixture();
   fx.run(['refresh']);
-  const at = '2026-11-13T00:03:00.000Z';
-  fx.store.mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, attention: [...(doc.attention || []),
-    { id: state.findingId('reconcile', 'TASK_MERGED_OPEN', 423, ''), source: 'reconcile', code: 'TASK_MERGED_OPEN', issue: 423, head: null, state: 'new', first_seen: at, changed_at: at }] }) });
+  const older = '2026-11-12T00:00:00.000Z';
+  const newer = '2026-11-13T00:03:00.000Z';
+  const merged = { id: state.findingId('reconcile', 'TASK_MERGED_OPEN', 423, ''), source: 'reconcile', code: 'TASK_MERGED_OPEN', issue: 423, head: null, state: 'new', first_seen: newer, changed_at: newer };
+  const close = { id: state.findingId('reconcile', 'CLOSE_DUE', 423, '', 'g1-423-a1'), source: 'reconcile', code: 'CLOSE_DUE', issue: 423, head: null, kind: 'g1-423-a1', state: 'acknowledged', first_seen: older, changed_at: older, due: newer };
+  const notNet = { id: state.findingId('inventory', 'INVENTORY_INCOMPLETE', null, ''), source: 'inventory', code: 'INVENTORY_INCOMPLETE', issue: null, head: null, state: 'new', first_seen: older, changed_at: older };
+  assert.equal(state.NET_CODES.has(notNet.code), false);
+  fx.store.mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, attention: [...(doc.attention || []), merged, close, notNet] }) });
   fx.run(['attention']);
   const written = cache.readCache('acme/app', { attentionDir: fx.attentionDir });
-  assert.deepEqual(written.queue, { count: 1, oldest: { issue: 423, code: 'TASK_MERGED_OPEN', since: at, next: state.FINDING_CODES.TASK_MERGED_OPEN.next_action } });
-  assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN flagged 2026-11-13 00:03Z\); next step: judge/);
+  const mine = written.net.filter(entry => [merged.id, close.id, notNet.id].includes(entry.id));
+  assert.deepEqual(mine, [
+    { id: close.id, code: 'CLOSE_DUE', issue: 423, kind: 'g1-423-a1', state: 'acknowledged', changed_at: older, due: newer },
+    { id: merged.id, code: 'TASK_MERGED_OPEN', issue: 423, kind: null, state: 'new', changed_at: newer, due: null },
+  ]);
 });
 
 // ---- Owner waits --------------------------------------------------------------------------------
@@ -1077,10 +904,6 @@ test('programme.cjs hints name the runnable command: the managed checkout\'s cop
   fs.writeFileSync(managed, '');
   const expected = `node "${checkout.replace(/\\/g, '/')}/skills/github-program-reconciler/scripts/programme.cjs" attention`;
   assert.equal(userState.programmeCommand('attention', { userHome: home }), expected);
-  // The session-start attention line takes the same command from the same home.
-  const deps = { attentionDir: tmp(), home, now: () => '2026-11-20T00:00:00.000Z' };
-  cache.writeCache('acme/app', { line: 'Attention: 1 new, 2 acknowledged', counts: { new: 1, acknowledged: 2 }, digest: 'd', complete: true }, deps);
-  assert.equal(cache.sessionAttention('acme/app', deps).line, `Attention: 1 new, 2 acknowledged. Run ${expected} for the list`);
 });
 
 // Text kept on GitHub or in the evidence store is read on other computers, so it keeps a portable
@@ -1121,7 +944,7 @@ test('red: in a cloud session a store that answers 403 or 404 says the check wai
     });
     const cloud = fx.run(['attention'], { transport: refused, environment: { CLAUDE_CODE_REMOTE: 'true' } }, { json: false });
     assert.equal(cloud.code, 1, `${status}: unknown, never clear`);
-    assert.match(cloud.result, new RegExp(`^Attention: unknown \\(STATE_STORE_UNVERIFIED: The state store acme/state-store is not reachable from this cloud session \\(${status}\\), so nothing was read or written\\. The check waits for the owner's computer: the next session start there reads the store\\.\\)\\n$`), status);
+    assert.match(cloud.result, new RegExp(`^Attention: unknown \\(STATE_STORE_UNVERIFIED: The state store acme/state-store is not reachable from this cloud session \\(${status}\\), so nothing was read or written\\. The check waits for the owner's computer: the next refresh there reads the store\\.\\)\\n$`), status);
     assert.doesNotMatch(cloud.result, /Choose a private repository/);
     const computer = fx.run(['attention'], { transport: refused, environment: {} }, { json: false });
     assert.match(computer.result, new RegExp(`could not be read \\(${status}\\)\\. Choose a private repository you can write to`), `${status}: a computer keeps the store advice`);
@@ -1132,56 +955,4 @@ test('red: in a cloud session a store that answers 403 or 404 says the check wai
     request: (method, endpoint, ...rest) => (method === 'GET' && endpoint === 'repos/acme/state-store' ? { status: 200, json: { private: false, permissions: { push: true } } } : fx.github.request(method, endpoint, ...rest)),
   });
   assert.match(fx.run(['attention'], { transport: open, environment: { CLAUDE_CODE_REMOTE: 'true' } }, { json: false }).result, /because it is not private\. Choose a private repository/);
-});
-
-// The stale-check stamp is written to a temporary file and renamed over the stamp, so a reader never
-// sees a half-written file; a write straight to the stamp fails this test.
-test('red: the stale-check stamp is written to a temporary file in its folder, then renamed over the stamp', t => {
-  const home = tmp();
-  const file = cache.staleStampFile('acme/app', { home });
-  cache.writeStaleStamp('acme/app', { date: '2026-11-21', at: '2026-11-21T01:00:00Z', rows: [] }, { home });
-  const writes = [];
-  const renames = [];
-  const write = fs.writeFileSync;
-  const rename = fs.renameSync;
-  t.mock.method(fs, 'writeFileSync', (target, ...rest) => { writes.push(String(target)); return write(target, ...rest); });
-  t.mock.method(fs, 'renameSync', (from, to) => {
-    renames.push([String(from), String(to)]);
-    assert.equal(JSON.parse(fs.readFileSync(to, 'utf8')).date, '2026-11-21', 'until the rename, a reader still sees the last whole stamp');
-    return rename(from, to);
-  });
-  cache.writeStaleStamp('acme/app', { date: '2026-11-22', at: '2026-11-22T01:00:00Z', rows: ['FOLD? #20 new under #7 with no Nearest child: line'] }, { home });
-  assert.equal(writes.length, 1);
-  assert.notEqual(writes[0], file, 'never written straight to the stamp');
-  assert.equal(path.dirname(writes[0]), path.dirname(file), 'the temporary file sits beside the stamp, so the rename stays on one disk');
-  assert.deepEqual(renames, [[writes[0], file]]);
-  assert.equal(fs.existsSync(writes[0]), false);
-  assert.equal(cache.readStaleStamp('acme/app', { home }).date, '2026-11-22');
-});
-
-// The one shared stamp from before stamps were per repository is removed by the first stamp write;
-// nothing else in the user-state folder is touched.
-test('red: the first stale-check stamp write removes the old shared stale-sweep.json and nothing else', () => {
-  const home = tmp();
-  const userState = path.join(home, '.ai-agent-toolkit', 'user-state');
-  fs.mkdirSync(userState, { recursive: true });
-  fs.writeFileSync(path.join(userState, 'stale-sweep.json'), JSON.stringify({ date: '2026-11-20', rows: [] }));
-  fs.writeFileSync(path.join(userState, 'stale-sweep.json.keep'), 'not the old stamp');
-  cache.writeStaleStamp('acme/app', { date: '2026-11-22', at: '2026-11-22T01:00:00Z', rows: [] }, { home });
-  assert.equal(fs.existsSync(path.join(userState, 'stale-sweep.json')), false);
-  assert.equal(fs.existsSync(path.join(userState, 'stale-sweep.json.keep')), true);
-  assert.equal(cache.readStaleStamp('acme/app', { home }).date, '2026-11-22');
-  // Already gone: the next write still succeeds.
-  cache.writeStaleStamp('acme/other', { date: '2026-11-22', at: '2026-11-22T01:00:00Z', rows: [] }, { home });
-  assert.equal(cache.readStaleStamp('acme/other', { home }).date, '2026-11-22');
-});
-
-test('red: the session-start stale-check line counts KEPT OPEN? and UNTICKED? rows by kind', () => {
-  const rows = [
-    'KEPT OPEN? #12 kept open since 2026-11-22 12:33Z with every PR merged, and no lane has worked it for over 6 hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)',
-    'UNTICKED? #13 PR #900 merged, but none of its 4 DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)',
-    'JUDGE? #14 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)',
-  ];
-  const world = staleWorld({ stamp: { 'acme/app': { date: staleToday(), at: STALE_NOW, rows } } });
-  assert.match(world.evaluate(), new RegExp(`Stale check ${staleToday()}: 3 rows to answer \\(JUDGE\\? 1, KEPT OPEN\\? 1, UNTICKED\\? 1\\)\\.`));
 });

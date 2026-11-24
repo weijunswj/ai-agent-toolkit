@@ -540,7 +540,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --refresh /mnt/project-files/toolkit/web-controller-projects` every run, whatever the other checks say',
     'an old clone prints `SKILL COPY FAILED STALE_CHECKOUT <head7>, main <tip7>` and writes nothing', '`GUIDEBOOK CURRENT <Version> toolkit <x.y.z>, main <commit7>`',
     '`GUIDEBOOK REFRESHED <old> -> <new>, main <commit7>` and any `BLOCK CHANGED <version>`', 'Then run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --card`',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,stale,ci,guidebook`', 'adding `--repo example-owner/example-repo` when step 9a applies',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,ci,guidebook`', 'adding `--repo example-owner/example-repo` when step 9a applies',
     '`CONTROLLER CHECK: clear ...`: write "**Controller check:** clear".',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"SKILL CARD OUTDATED: saved <old>, main <new>, text <fp8> | " when `--card` printed it, unless memory has a "skill card" line with the same text <fp8>',
     '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
@@ -884,7 +884,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'When a recurring task replaces an older one, delete the older one',
     'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
     // Rows of the base overrides list and the cloud hook table: they name rules and hooks, not task paths.
-    'Task auto-merge switch is the project line', 'The hourly programme sweep refreshes programme pages', '`toolkit-governance-hook.cjs` (merge hold) |', '`toolkit-github-footer-hook.cjs` |', '`toolkit-programme-checkpoint-hook.cjs` |',
+    'Task auto-merge switch is the project line', 'The hourly programme sweep refreshes programme pages', '`toolkit-governance-hook.cjs` (merge hold) |', '`toolkit-github-footer-hook.cjs` |', '`toolkit-programme-checkpoint-hook.cjs` |', '`toolkit-owed-check-hook.cjs` |',
     // Lines about other things that happen to use one of the verbs: repos, setup, GitHub reads,
     // shared checkouts, Remote Control, the instructions sync and the repo map.
     // These endings create only a receipt for the current run, never a task or schedule.
@@ -1158,8 +1158,8 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.match(page, /add it to a lane's next slice or its area's open child, or ask the owner/);
   assert.match(core, /extend\/reopen its area's child \(leftovers too\), else create\/attach a native child/);
   for (const text of [page, core]) assert.doesNotMatch(text, /a tracked child|a follow-up child starts|extend\/reopen an owner/);
-  // The stale check left the daily check-in: the governance session-start hook runs it, so the check-in has no
-  // sweep, close list, stamp or list of children to close. Its own controller check skips it (below).
+  // The daily check-in has no stale sweep, close list, stamp or list of children to close: the stale-work
+  // net findings reach the controller at turn end.
   const projects = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const daily = fs.readFileSync(path.join(projects, 'tasks', 'daily-check-in.md'), 'utf8');
   const nudge = fs.readFileSync(path.join(projects, 'tasks', 'hourly-nudge.md'), 'utf8');
@@ -1174,11 +1174,12 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.ok(firstLine.startsWith('- First line: what changed or is stuck, starting with any prefixes in this fixed order: CONTEXT RESET DUE, '), firstLine);
   assert.ok(firstLine.endsWith('NEEDS SETUP. A run with nothing changed or stuck posts no first line to the owner.'), firstLine);
   assert.doesNotMatch(daily, /Fold check:/);
-  // The nudge's step 9 names the governance session-start hook for the stale check.
-  assert.match(nudge, /the governance session-start hook runs the stale check, and the daily check-in the decision traces and CI drift/);
-  // The controller check's stale check runs only from the governance session-start hook: every Projects call skips it.
-  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,stale,ci,guidebook`/);
-  assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`/);
+  // The nudge's step 9 names where the checks it skips run, and no session-start stale check.
+  assert.match(nudge, /step 5b runs the programme check, and the daily check-in the decision traces and CI drift/);
+  assert.doesNotMatch(nudge, /stale check/i);
+  // The controller check has no stale check, so no Projects call names one.
+  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,ci,guidebook`/);
+  assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,footer,refs`/);
   const ownerAsks = fs.readFileSync(path.join(projects, 'reference', 'owner-asks.md'), 'utf8');
   assert.match(ownerAsks, /\*\*Owner UAT comes after agent UAT\.\*\* Ask the owner for UAT only once every agent UAT step at that build passed[^\n]*lists only the steps no tool reaches[^\n]*links the agent UAT evidence/);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
@@ -1265,7 +1266,7 @@ test('rendered daily check-ins run workflow health, and the decision trace and C
   const text = rendered('daily-check-in');
   const step = text.slice(text.indexOf('11b. TOOL STEP (shell, GitHub): CHECKERS'), text.indexOf('12. Promises'));
   for (const phrase of ['the hourly controller check skips them', 'R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,stale,footer,refs`',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,footer,refs`',
     '"TRACE GAPS: <its counts> | "', '--repair --out <file>', 'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', '"CI GAPS: <n> | "']) {
     assert.ok(step.includes(phrase), phrase);
   }
