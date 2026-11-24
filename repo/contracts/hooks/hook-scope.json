@@ -69,13 +69,6 @@
     },
     {
       "harness": "claude",
-      "script": "repo/scripts/toolkit-handoff-hook.cjs",
-      "rules": "harness-only",
-      "reason": "Refreshes the Claude desktop controller's handoff snapshot.",
-      "events": { "PostToolUse": "After a tool that may change memory or instruction files; its stamps allow one check a minute and one refresh every ten minutes. The handoff snapshot is being removed (#1435)." }
-    },
-    {
-      "harness": "claude",
       "script": "repo/scripts/toolkit-owed-check-hook.cjs",
       "rules": "harness-only",
       "reason": "The controller's turn-end nudge for owed findings, gate records and finished side sessions: a records job, not a hard rule.",
