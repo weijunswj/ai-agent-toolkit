@@ -3785,6 +3785,7 @@ module.exports = {
   recordHookSkip,
   clearHookSkips,
   updateReportDir,
+  isUpdateReportPath,
   cleanupUpdateReports,
   sanitizeOutputMessage,
   openUpdateReport,

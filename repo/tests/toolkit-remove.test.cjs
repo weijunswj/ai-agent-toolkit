@@ -422,8 +422,8 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.equal(plan.nothing, false);
   assert.deepEqual(plan.plugins, ['claude-code']);
   assert.match(text, /Claude Code subagent limit:\n- ~\/\.claude\/settings\.json: the subagent limit CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: removed/);
-  assert.match(text, /Claude Code preferences you chose at setup:\n- ~\/\.claude\/settings\.json: No AI attribution in commits and pull requests \(attribution\): kept, set at setup and kept as your own/);
-  assert.match(text, /Not touched: [^\n]*the Claude Code preferences you chose at setup/);
+  assert.match(text, /Claude Code settings left as they are:\n- ~\/\.claude\/settings\.json: No AI attribution in commits and pull requests \(attribution\): kept, set at setup; a Claude Code setting, so it stays as it is/);
+  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on/);
   assert.match(text, /Codex helper limit:\n- ~\/\.codex\/config\.toml: Toolkit's helper limit block: removed \(toolkit-managed-v2, 2 helpers; Codex may then use its own higher default/);
   assert.match(text, /- ~\/\.claude\/agents\/toolkit-g0\.md: removed\n- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
   assert.doesNotMatch(text, /my-reviewer|my-skill/);
@@ -555,6 +555,146 @@ test('full removal: a part that cannot be read is held and the rest of the plan 
   const broken = { key: 'broken', title: 'Broken part', plan() { throw new Error('unreadable'); }, apply() { throw new Error('must not run'); } };
   const plan = new removal.ToolkitRemoval({ home, parts: [broken] }).plan();
   assert.match(removal.describePlan(plan).join('\n'), /Broken part:\n- Broken part: left alone, could not be read \(unreadable\)/);
+});
+
+// ---- What Toolkit added after the first removal: Codex's setup record, the update reports, the
+// recovery records' label, Claude Code's own settings and the n8n Skills plugin left as they are ----
+const { CodexSetupJournal } = require('../scripts/setup-codex-toolkit-plugin.cjs');
+
+// A home with Codex's setup journal in the given state ('completed', an unfinished step, or unreadable
+// bytes), Toolkit's update reports beside a file of the owner's in a temp folder, and a removal over
+// just those parts.
+function recordsHome(t, { journal = 'completed', installed = { 'claude-code': false, codex: false } } = {}) {
+  const home = s.tempHome(t);
+  const environment = { CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') };
+  const journalFile = new CodexSetupJournal(environment.CODEX_HOME).path;
+  fs.mkdirSync(environment.CODEX_HOME, { recursive: true });
+  if (journal !== null) fs.writeFileSync(journalFile, journal === 'unreadable' ? '{not json' : JSON.stringify({ status: journal, step: 'marketplace-add' }));
+  const reportDir = path.join(home, 'AppData', 'Local', 'Temp', 'ai-agent-toolkit', 'update-reports');
+  fs.mkdirSync(reportDir, { recursive: true });
+  for (const name of ['toolkit-update-20261120-101500.md', 'toolkit-update-20261120-101500-2.md']) fs.writeFileSync(path.join(reportDir, name), '# report\n');
+  const isReport = file => require('../scripts/toolkit-local-bridge.cjs').isUpdateReportPath(file, { reportDir });
+  const list = [new parts.CodexSetupJournalPart({ environment, home }), new parts.UpdateReportsPart({ environment, home, reportDir, isReport, plugins: () => installed })];
+  const make = (options = {}) => new removal.ToolkitRemoval({ home, parts: list, plugins: () => installed, ...options });
+  return { home, environment, journalFile, reportDir, installed, make };
+}
+
+const itemsOf = (plan, key) => plan.parts.find(part => part.key === key)?.items || [];
+
+// One row per scope and state: [journal state, --app, plan action for the journal ('none' when not listed)].
+const JOURNAL_ROWS = [
+  ['completed', 'codex', 'remove'], ['completed', 'all', 'remove'], ['completed', 'claude-code', 'none'],
+  ['in-progress', 'codex', 'keep'], ['in-progress', 'all', 'keep'], ['unreadable', 'all', 'keep'], [null, 'all', 'none'],
+];
+for (const [journal, app, expected] of JOURNAL_ROWS) {
+  test(`Codex setup record: a ${journal === null ? 'missing' : journal} journal with --app ${app} is ${expected === 'none' ? 'not listed' : expected === 'remove' ? 'removed' : 'kept as evidence'}`, t => {
+    const h = recordsHome(t, { journal });
+    const before = journal === null ? null : fs.readFileSync(h.journalFile);
+    const plan = h.make({ app }).plan();
+    const items = itemsOf(plan, 'codex_setup_journal');
+    assert.deepEqual(items.map(item => item.action), expected === 'none' ? [] : [expected]);
+    const text = removal.describePlan(plan).join('\n');
+    if (expected === 'remove') assert.match(text, /Codex setup record:\n- ~\/\.codex\/ai-agent-toolkit-setup-journal\.json: removed \(its last setup step finished/);
+    if (expected === 'keep') assert.match(text, /ai-agent-toolkit-setup-journal\.json: kept, it records a setup step that did not finish or cannot be read; kept as the evidence of what was attempted/);
+    const result = h.make({ app }).apply(plan.code);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (expected === 'remove') assert.equal(fs.existsSync(h.journalFile), false);
+    else if (before) assert.deepEqual(fs.readFileSync(h.journalFile), before, 'the journal stays byte for byte');
+    assert.equal(h.make({ app }).plan().parts.some(part => part.items.some(item => item.action === 'remove' && part.key === 'codex_setup_journal')), false, 'a second plan has no journal to remove');
+  });
+}
+
+test('Codex setup record: a step that starts after the plan keeps the journal', t => {
+  const h = recordsHome(t);
+  const part = new parts.CodexSetupJournalPart({ environment: h.environment, home: h.home });
+  const planned = part.plan();
+  fs.writeFileSync(h.journalFile, JSON.stringify({ status: 'in-progress', step: 'plugin-add' }));
+  assert.deepEqual(part.apply(planned).map(item => item.result), ['kept']);
+  assert.ok(fs.existsSync(h.journalFile));
+});
+
+// [another app keeps Toolkit, a plugin still installed at apply, expected report result].
+const REPORT_ROWS = [
+  ['all apps, no plugin left', { app: 'all', installed: {} }, 'removed'],
+  ['all apps, a plugin still installed', { app: 'all', installed: { 'claude-code': true } }, 'kept'],
+  ['Codex only, while Claude Code keeps Toolkit', { app: 'codex', installed: { 'claude-code': true } }, 'not listed'],
+  ['Codex only, no other app keeps Toolkit', { app: 'codex', installed: {} }, 'removed'],
+];
+for (const [name, { app, installed }, expected] of REPORT_ROWS) {
+  test(`update reports: ${name}: ${expected}`, t => {
+    const h = recordsHome(t, { installed: { 'claude-code': false, codex: false, ...installed } });
+    const plan = h.make({ app }).plan();
+    const items = itemsOf(plan, 'update_reports');
+    assert.deepEqual(items.map(item => item.action), expected === 'not listed' ? [] : ['remove']);
+    if (items.length) assert.match(removal.describePlan(plan).join('\n'), /Toolkit update reports:\n- ~\/AppData\/Local\/Temp\/ai-agent-toolkit\/update-reports: removed \(Toolkit's update report files, once no Toolkit plugin is installed/);
+    const result = h.make({ app }).apply(plan.code);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const left = fs.existsSync(h.reportDir) ? fs.readdirSync(h.reportDir).sort() : null;
+    if (expected === 'removed') {
+      assert.equal(left, null, 'the folder goes once empty');
+      assert.equal(fs.existsSync(path.dirname(h.reportDir)), false, 'and its ai-agent-toolkit parent');
+    } else assert.equal(left.length, 2, 'the reports stay');
+    if (expected === 'kept') assert.match(removal.describeResult(result).join('\n'), /update-reports: kept \(the Claude Code plugin is still installed and writes its reports there\)/);
+  });
+}
+
+test('update reports: a file that is not a Toolkit report stays, with its folder', t => {
+  const h = recordsHome(t);
+  fs.writeFileSync(path.join(h.reportDir, 'my-notes.md'), 'mine\n');
+  const plan = h.make().plan();
+  const result = h.make().apply(plan.code);
+  assert.deepEqual(fs.readdirSync(h.reportDir), ['my-notes.md']);
+  assert.match(removal.describeResult(result).join('\n'), /update-reports: kept \(it still holds files that are not Toolkit reports\)/);
+});
+
+test('the default parts include the Codex setup record and the update reports, before the Toolkit folder', () => {
+  const keys = parts.defaultParts({ environment: { CLAUDE_CONFIG_DIR: '/x/.claude', CODEX_HOME: '/x/.codex' }, home: '/x' }).map(part => part.key);
+  assert.ok(keys.includes('codex_setup_journal'));
+  assert.ok(keys.indexOf('update_reports') < keys.indexOf('toolkit_folder'));
+  assert.equal(keys.at(-1), 'toolkit_folder');
+});
+
+test('the Toolkit folder: recovery records are kept as evidence, never called someone else\'s file', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  fs.mkdirSync(path.join(folder, 'recovery-identities'), { recursive: true });
+  fs.writeFileSync(path.join(folder, 'recovery-identities', 'r.json'), '{}');
+  const part = new parts.ToolkitFolderPart({ home, plugins: () => ({}) });
+  const items = part.plan();
+  assert.deepEqual(items, [{ what: '~/.ai-agent-toolkit/recovery-identities', action: 'keep', detail: 'the records of outside resources checked before a live change; kept as evidence' }]);
+  part.apply(items);
+  assert.ok(fs.existsSync(path.join(folder, 'recovery-identities', 'r.json')));
+});
+
+test('Claude Code settings setup turned on stay byte for byte, and the n8n Skills plugin gets no step', t => {
+  const h = fullHome(t);
+  const settingsFile = path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json');
+  const { ClaudeUserSettings } = require('../scripts/toolkit-claude-user-settings.cjs');
+  const control = path.join(h.home, '.ai-agent-toolkit', 'agent-control');
+  const settings = new ClaudeUserSettings({ environment: h.environment, controlRoot: control });
+  settings.apply('enable');
+  // Setup's subagent limit is Toolkit's own value, not a Claude Code setting the owner keeps: it is the
+  // one settings write removal makes. Taken off first so the file can be compared byte for byte.
+  assert.equal(h.depth.apply('disable').changed, true);
+  const set = settings.inspect().filter(entry => entry.state === 'toolkit-value').map(entry => entry.id);
+  assert.ok(set.length >= 2, `setup turned on ${set.join(', ')}`);
+  // The n8n Skills plugin as setup turned it off; Toolkit no longer manages it, so removal leaves it so.
+  const pluginsFile = path.join(h.environment.CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
+  fs.mkdirSync(path.dirname(pluginsFile), { recursive: true });
+  fs.writeFileSync(pluginsFile, JSON.stringify({ plugins: { 'n8n-skills@n8n-io': [{ scope: 'user' }] } }));
+  const before = { settings: fs.readFileSync(settingsFile), plugins: fs.readFileSync(pluginsFile) };
+  const plan = h.make().plan();
+  const text = removal.describePlan(plan).join('\n');
+  assert.match(text, /Claude Code settings left as they are:\n- ~\/\.claude\/settings\.json: [^\n]*: kept, set at setup; a Claude Code setting, so it stays as it is; edit settings\.json to change it/);
+  for (const id of set) assert.match(text, new RegExp(`\\(${id}\\): kept, set at setup`), id);
+  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on \(they stay as they are[^\n]*other plugins/);
+  assert.doesNotMatch(text, /n8n-skills@|plugin enable|preferences you chose/);
+  assert.match(text, /Skill folders Toolkit copied:\n- ~\/\.claude\/skills\/n8n-[^\n]+: removed/, 'the copied n8n skills go');
+  const result = h.make().apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(fs.readFileSync(settingsFile), before.settings, 'settings.json is byte for byte as it was');
+  assert.deepEqual(fs.readFileSync(pluginsFile), before.plugins, 'the n8n Skills plugin is left as it is');
+  assert.equal(fs.readdirSync(path.join(h.home, '.claude', 'skills')).some(name => name.startsWith('n8n-')), false);
 });
 
 test('plugin state reads the Claude Code registry and the Codex config and cache', t => {

@@ -30,6 +30,12 @@ const FOLDER_ENTRIES = Object.freeze(['source', 'current', 'user-state', 'agent-
 // Backup folders inside Toolkit's own entries that stay with the rest of the backups.
 const KEPT_INSIDE = Object.freeze({ 'agent-control': ['backups'] });
 const KEPT_ENTRIES = Object.freeze(['env', 'backups']);
+// What each kept entry is, as the plan says it. Anything else found there is not Toolkit's.
+const KEPT_LABELS = Object.freeze({
+  env: 'the list of your keys; the keys themselves stay in the credential store',
+  backups: 'copies of the files Toolkit changed, including this removal',
+  'recovery-identities': 'the records of outside resources checked before a live change; kept as evidence',
+});
 
 const safe = (error) => String(error?.message || error || 'error').replace(/[\r\n]+/g, ' ').slice(0, 300);
 const display = (home, file) => {
@@ -73,11 +79,12 @@ class ClaudeDepthPart {
   }
 }
 
-// The Claude Code preferences setup turned on (no AI attribution, session messages, model switching,
-// reading AGENTS.md). Listed, never changed: they are choices the owner made at setup, and turning
-// attribution back on would put trailers back in commits. The listing says how to change one by hand.
+// The Claude Code settings setup turned on (no AI attribution, session messages, model switching,
+// reading AGENTS.md). Listed, never changed: they are Claude Code's own settings, which removal leaves
+// exactly as they are, and turning attribution back on would put trailers back in commits. The
+// listing says how to change one by hand.
 class ClaudeUserSettingsPart {
-  key = 'claude_preferences'; title = 'Claude Code preferences you chose at setup'; app = 'claude-code';
+  key = 'claude_preferences'; title = 'Claude Code settings left as they are'; app = 'claude-code';
   #settings; #file;
   constructor({ environment = process.env, home = os.homedir(), settings } = {}) {
     if (settings) this.#settings = settings;
@@ -89,9 +96,76 @@ class ClaudeUserSettingsPart {
   }
   plan() {
     return this.#settings.inspect().filter(entry => entry.state === 'toolkit-value' || (entry.state === 'off-value' && entry.toolkit))
-      .map(entry => ({ what: `${this.#file}: ${entry.label} (${entry.id})`, action: 'keep', detail: 'set at setup and kept as your own; edit settings.json to change it' }));
+      .map(entry => ({ what: `${this.#file}: ${entry.label} (${entry.id})`, action: 'keep', detail: "set at setup; a Claude Code setting, so it stays as it is; edit settings.json to change it" }));
   }
   apply() { return []; }
+}
+
+// Codex setup's journal (setup-codex-toolkit-plugin.cjs), its record of each plugin step it ran. One
+// whose last step finished goes. One that records an unfinished or unreadable step stays: it is the
+// evidence of what was attempted, and setup reads it so it never retries that step blindly.
+class CodexSetupJournalPart {
+  key = 'codex_setup_journal'; title = 'Codex setup record'; app = 'codex';
+  #home; #journal;
+  constructor({ environment = process.env, home = os.homedir(), journal } = {}) {
+    this.#home = home;
+    this.#journal = journal || new (require('./setup-codex-toolkit-plugin.cjs').CodexSetupJournal)(codexHomeDir(environment, home));
+  }
+  #state() {
+    if (!fs.existsSync(this.#journal.path)) return 'absent';
+    return this.#journal.unresolved() ? 'unfinished' : 'finished';
+  }
+  plan() {
+    const what = display(this.#home, this.#journal.path);
+    const state = this.#state();
+    if (state === 'finished') return [{ what, action: 'remove', detail: "its last setup step finished, so nothing needs it" }];
+    if (state === 'unfinished') return [{ what, action: 'keep', detail: 'it records a setup step that did not finish or cannot be read; kept as the evidence of what was attempted' }];
+    return [];
+  }
+  apply(items) {
+    return items.filter(item => item.action === 'remove').map(item => attempt(item, () => {
+      // Read again just before removal: a step that started after the plan keeps the journal.
+      const state = this.#state();
+      if (state === 'absent') return { result: 'already gone' };
+      if (state === 'unfinished') return { result: 'kept', reason: 'a setup step started after the plan; it is the evidence of what was attempted' };
+      fs.rmSync(this.#journal.path, { force: true });
+      return { result: 'removed' };
+    }));
+  }
+}
+
+// The update reports the bridge writes to the temp folder (toolkit-local-bridge.cjs). Only files with
+// the bridge's report name go; the folder goes once empty, and its ai-agent-toolkit parent too. Like
+// the Toolkit folder, it waits while a Toolkit plugin is installed, because the plugin writes there.
+class UpdateReportsPart {
+  key = 'update_reports'; title = 'Toolkit update reports'; app = 'shared';
+  #home; #dir; #isReport; #plugins;
+  constructor({ environment = process.env, home = os.homedir(), reportDir, isReport, plugins } = {}) {
+    this.#home = home;
+    const bridge = reportDir && isReport ? null : require('./toolkit-local-bridge.cjs');
+    this.#dir = path.resolve(reportDir || bridge.updateReportDir());
+    this.#isReport = isReport || (file => bridge.isUpdateReportPath(file, { reportDir: this.#dir }));
+    this.#plugins = plugins || (() => pluginState({ environment, home }));
+  }
+  #reports() {
+    let names = [];
+    try { names = fs.readdirSync(this.#dir); } catch { return []; }
+    return names.map(name => path.join(this.#dir, name)).filter(file => this.#isReport(file));
+  }
+  plan() {
+    if (!fs.existsSync(this.#dir)) return [];
+    return [{ what: display(this.#home, this.#dir), action: 'remove', detail: "Toolkit's update report files, once no Toolkit plugin is installed; any other file there stays" }];
+  }
+  apply(items) {
+    return items.filter(item => item.action === 'remove').map(item => attempt(item, () => {
+      const installed = Object.entries(this.#plugins()).filter(([, on]) => on).map(([host]) => PLUGIN_STEPS[host].app);
+      if (installed.length) return { result: 'kept', reason: `the ${installed.join(' and ')} plugin is still installed and writes its reports there` };
+      if (!fs.existsSync(this.#dir)) return { result: 'already gone' };
+      for (const file of this.#reports()) fs.rmSync(file, { force: true });
+      for (const dir of [this.#dir, path.dirname(this.#dir)]) { try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { break; } }
+      return fs.existsSync(this.#dir) ? { result: 'kept', reason: 'it still holds files that are not Toolkit reports' } : { result: 'removed' };
+    }));
+  }
 }
 
 // Toolkit's helper-capacity block in Codex's config.toml.
@@ -415,7 +489,7 @@ class ToolkitFolderPart {
       ...going.map(name => ({ what: display(this.#home, path.join(this.#root, name)), action: 'remove',
         ...(KEPT_INSIDE[name] ? { detail: `its ${KEPT_INSIDE[name].join(', ')} folder stays` } : {}) })),
       ...kept.map(name => ({ what: display(this.#home, path.join(this.#root, name)), action: 'keep',
-        detail: name === 'env' ? 'the list of your keys; the keys themselves stay in the credential store' : name === 'backups' || KEPT_INSIDE[name] ? 'copies of the files Toolkit changed, including this removal' : 'not a Toolkit file' })),
+        detail: KEPT_LABELS[name] || (KEPT_INSIDE[name] ? KEPT_LABELS.backups : 'not a Toolkit file') })),
     ];
   }
   // Runs last. Entries a removal step wrote after the plan (such as the global rules record) go too,
@@ -450,8 +524,8 @@ function removeExcept(target, keep) {
 // the folder last.
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
   return [new ReinstallNotePart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
-    new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
-    new SkillCopiesPart({ environment, home }), new ToolkitFolderPart({ home, environment })];
+    new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new CodexSetupJournalPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
+    new SkillCopiesPart({ environment, home }), new UpdateReportsPart({ environment, home }), new ToolkitFolderPart({ home, environment })];
 }
 
-module.exports = { ReinstallNotePart, CodexHookStatePart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
+module.exports = { ReinstallNotePart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, KEPT_LABELS, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };

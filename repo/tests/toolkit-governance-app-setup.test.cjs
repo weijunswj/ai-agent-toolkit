@@ -113,7 +113,7 @@ test('agents and pipes are refused before anything is read', async t => {
 test('an App already on the repository, or no Enter, changes nothing', async t => {
   const existing = owner(t, { gh: fakeGh({ names: [app.APP.secret] }) });
   assert.equal(await setup.main(['--repo', SLUG], existing.deps), 1);
-  assert.match(existing.said.join('\n'), /already holds part of an App setup.*toolkit governance check/s);
+  assert.match(existing.said.join('\n'), /already holds part of an App setup.*ask your agent to check governance/s);
   assert.deepEqual(existing.asked, [], 'it stops before asking');
   const declined = owner(t, { answers: [false] });
   assert.equal(await setup.main(['--repo', SLUG], declined.deps), 1);

@@ -422,6 +422,40 @@ test('a task page over 4,000 characters and a PR page over 3,000 raise BODY_OVER
   assert.ok(f.reconciler().run().findings.some(entry => entry.code === 'BODY_OVER_BUDGET' && entry.issue === 806), 'a settled page over budget still raises it');
 });
 
+// A merged or closed PR keeps the body it was approved with, so its over-budget finding is no work:
+// the next complete pass resolves it, while an open PR and a task page over budget still count.
+test('a PR page over budget that merges or closes has its BODY_OVER_BUDGET resolved; open PRs and task pages keep theirs', () => {
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], bodies: { 806: `## Plan\n\n${'p'.repeat(4200)}\n`, 807: '## Plan\n\nShort.\n' } });
+  f.github.addPr(900, { head: SHA_A, branch: 'feature', body: `${'w'.repeat(3100)}\n\nRefs #806` });
+  f.github.addPr(901, { head: SHA_A, branch: 'other', body: `${'v'.repeat(3100)}\n\nRefs #807` });
+  f.github.addPr(902, { head: SHA_A, branch: 'third', body: `${'u'.repeat(3100)}\n\nRefs #807` });
+  f.reconciler().run({ apply: true });
+  const open = () => f.store.read('parent', 421).doc.attention.filter(entry => entry.code === 'BODY_OVER_BUDGET' && ['new', 'acknowledged'].includes(entry.state)).map(entry => entry.issue).sort((a, b) => a - b);
+  assert.deepEqual(open(), [806, 900, 901, 902]);
+  const pr900 = f.github.prs.get(900);
+  Object.assign(pr900, { state: 'MERGED', merged: true, mergedAt: '2026-11-02T00:00:00Z' });
+  f.github.prs.get(901).state = 'CLOSED';
+  f.reconciler().run({ apply: true });
+  assert.deepEqual(open(), [806, 902], 'the merged and the closed PR resolve; the task page and the open PR stay');
+  f.reconciler().run({ apply: true });
+  assert.deepEqual(open(), [806, 902], 'a resolved closed-PR finding does not come back');
+});
+
+// Only a PR page that is no longer open resolves this way: an open PR the pass no longer draws and a
+// closed task page the pass no longer reads keep their findings.
+test('an open PR no longer drawn and an unread closed task page keep their BODY_OVER_BUDGET', () => {
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }, { issue: 808, class: 'COMMITTED', order: 3 }], bodies: { 806: '## Plan\n\nShort.\n', 807: '## Plan\n\nShort.\n', 808: `## Plan\n\n${'q'.repeat(4200)}\n` } });
+  f.github.addPr(903, { head: SHA_A, branch: 'fourth', body: `${'t'.repeat(3100)}\n\nRefs #807` });
+  f.reconciler().run({ apply: true });
+  const open = () => f.store.read('parent', 421).doc.attention.filter(entry => entry.code === 'BODY_OVER_BUDGET' && ['new', 'acknowledged'].includes(entry.state)).map(entry => entry.issue).sort((a, b) => a - b);
+  assert.deepEqual(open(), [808, 903]);
+  f.github.prs.get(903).body = 't'.repeat(3100);
+  f.github.issues.get(808).state = 'closed';
+  f.store.mutate('parent', 421, { writer, change: doc => ({ ...doc, outcomes: doc.outcomes.filter(outcome => outcome.issue !== 808) }) });
+  f.reconciler().run({ apply: true });
+  assert.deepEqual(open(), [808, 903], 'the open PR and the closed task page keep their findings');
+});
+
 test('a frozen closed page whose task moved under another parent gets its new PATH once, then stays frozen', () => {
   const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], closed: [806] });
   const parentDoc = () => f.store.read('parent', 421).doc;
