@@ -319,6 +319,7 @@ test('O-15 a top-level controller is stopped the same in the desktop app and a p
     const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'cli-session-3', transcript_path: live.transcript, cwd: live.work, stop_hook_active: false });
     const run = childProcess.spawnSync(process.execPath, [HOOK], { input, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
     assert.equal(run.status, 0, run.stderr);
+    assert.notEqual(run.stdout.trim(), '', `${shape.name}: the hook process printed nothing, so it did not stop the turn`);
     const output = JSON.parse(run.stdout);
     assert.equal(output.decision, 'block', shape.name);
     assert.match(output.reason, /TASK_IDLE on #7/, shape.name);
