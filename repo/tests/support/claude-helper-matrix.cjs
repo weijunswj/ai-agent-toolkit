@@ -105,8 +105,8 @@ function runHook(context, event, { environment = {}, hook = AGENT_HOOK, args = [
 
 const launch = (name, extra = {}) => ({ tool_input: { subagent_type: name, description: 'matrix', prompt: 'Reply OK', ...extra } });
 const G0 = 'toolkit-g0-helper', G1 = 'toolkit-g1-helper';
-// A gate run refuses any agent off the selected stack's helper route; with no readable brief the stack is not known.
-const OFF_ROUTE = /helper route/;
+// A gate run refuses any agent not shown cheaper than the lead (with no transcript, the lead's route is not known).
+const GATE_REFUSED = /in a gate run (?:a helper must be|no helper runs at max)/;
 // A session no Toolkit launcher started: no launcher marker.
 const NO_GATE = Object.freeze({ TOOLKIT_GATE_ROLE: '' });
 const MISMATCH = /does not match the one rendered from the selected stack/;
@@ -165,13 +165,13 @@ const HOOK_CASES = [
   ['A14', 'project copy between the working directory and the root differs', launch(G1), 'deny', /the project copy .*packages.* does not match/,
     { setup: c => { projectCopy(['packages'], G1, t => t.replace('maxTurns: 60', 'maxTurns: 99'))(c); fs.mkdirSync(path.join(c.repo, 'packages', 'app'), { recursive: true }); },
       cwd: c => path.join(c.repo, 'packages', 'app') }],
-  ['A14', 'plugin-scoped agent with a Toolkit name', launch(`some-plugin:${G0}`), 'deny', OFF_ROUTE],
+  ['A14', 'plugin-scoped agent with a Toolkit name', launch(`some-plugin:${G0}`), 'deny', GATE_REFUSED],
   ['A15', 'a helper launches another agent', { agent_id: 'helper-1', agent_type: G1, ...launch(G0) }, 'deny', /a helper cannot launch another agent/],
   ['A15', 'a G2 session launches a helper', launch(G0), 'deny', /G2 review sessions launch no helpers/, { environment: { TOOLKIT_GATE_ROLE: 'G2' } }],
-  ['A17', 'built-in Explore agent', launch('Explore'), 'deny', OFF_ROUTE],
-  ['A17', 'built-in general-purpose agent', launch('general-purpose'), 'deny', OFF_ROUTE],
-  ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /the default agent launch cannot be checked against a helper route/],
-  ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', OFF_ROUTE,
+  ['A17', 'built-in Explore agent', launch('Explore'), 'deny', GATE_REFUSED],
+  ['A17', 'built-in general-purpose agent', launch('general-purpose'), 'deny', GATE_REFUSED],
+  ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /this default \(general-purpose\) launch's route or the lead's own cannot be told/],
+  ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', GATE_REFUSED,
     { setup: configureTopology('broader-native') }],
   ['A18', 'ungoverned folder, lead launches a cheaper agent after the skill', launch('general-purpose', { model: 'haiku' }), 'pass', null, { ...READ, cwd: c => c.plain }],
   ['A18', 'ungoverned folder, lead launches an agent with no model: it would run on the lead route, so the person is asked', launch('general-purpose'), 'ask', NOT_CHEAPER, { ...READ, cwd: c => c.plain }],
@@ -186,7 +186,7 @@ const HOOK_CASES = [
     { environment: NO_GATE, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
-  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', OFF_ROUTE],
+  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', GATE_REFUSED],
   ['A22', 'DISABLED repository is ungoverned: the lead launches a cheaper agent after the skill', launch('general-purpose', { model: 'haiku' }), 'pass', null, { ...READ, cwd: c => c.declined }],
   ['A22', 'UNDECIDED repository counts as off: the governance gate lets the launch through', launch(G0), 'pass', null,
     { cwd: c => c.undecided, gate: true }],
@@ -203,8 +203,8 @@ const HOOK_CASES = [
   ['A27', 'outside a gate run, a user agent with model inherit', launch('matrix-reader'), 'ask', NOT_CHEAPER, { ...READ, setup: userAgent('matrix-reader', 'inherit') }],
   ['A27', 'outside a gate run, a project agent with no model outranks a user agent that pins sonnet', launch('matrix-reader'), 'ask', NOT_CHEAPER,
     { ...READ, setup: c => { userAgent('matrix-reader', 'sonnet')(c); projectAgent('matrix-reader', null)(c); } }],
-  ['A27', 'a gate lead starts Explore on the stack helper route', launch('Explore', { model: 'haiku', effort: 'xhigh' }), 'pass', null, { transcript: 'gate-brief' }],
-  ['A27', 'a gate lead starts general-purpose off the stack helper route', launch('general-purpose', { model: 'haiku', effort: 'high' }), 'deny', /helper route of the owner-claude stack/, { transcript: 'gate-brief' }],
+  ['A27', 'a gate lead starts a cheaper Explore', launch('Explore', { model: 'haiku', effort: 'high' }), 'pass', null, { transcript: 'gate-brief' }],
+  ['A27', 'a gate lead starts general-purpose on its own route: refused, not asked', launch('general-purpose'), 'deny', /not cheaper than the lead's opus-5\.5\/high/, { transcript: 'gate-brief' }],
 ];
 
 // How every other row is proved. Hook rows above are listed by the test, not here.

@@ -64,6 +64,9 @@ const SKILL_REASON = 'Toolkit: read the agent-cost-control skill before starting
 const NOT_CHEAPER_REASON = (type, target, caller) => `Toolkit: this ${type} would run on ${target}, not cheaper than this agent's ${caller}. Allow only if the cost is worth it; otherwise deny and the agent retries on a cheaper model.`;
 const MAX_REASON = type => `Toolkit: this ${type} would run at max effort, which spends tokens without regard to cost. Allow only if it is worth it.`;
 const COULD_NOT_CHECK = "Toolkit could not tell this launch's route or this agent's own, so it cannot show the launch is cheaper. Allow only if you expect it to be.";
+const GATE_NOT_CHEAPER_REASON = (type, target, lead) => `Toolkit: in a gate run a helper must be cheaper than the lead; this ${type} would run on ${target}, not cheaper than the lead's ${lead}. Set a cheaper model and effort on the call, or do the work yourself.`;
+const GATE_MAX_REASON = type => `Toolkit: in a gate run no helper runs at max effort; this ${type} would. Set a lower effort, or do the work yourself.`;
+const GATE_UNKNOWN_REASON = type => `Toolkit: in a gate run a helper must be shown cheaper than the lead, and this ${type} launch's route or the lead's own cannot be told. Set model and effort on the call, or do the work yourself.`;
 
 const decide = permissionDecision => reason => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision, permissionDecisionReason: reason } });
 const deny = decide('deny');
@@ -237,31 +240,54 @@ function targetRoute(input, { environment = process.env, managedAgentsDirectory:
 
 const routeText = route => route.effort === 'default' ? `${route.model} at its default effort` : `${route.model}/${route.effort}`;
 
-// The hook output for a main-session launch outside a gate run: {} (no decision), a refusal until
-// the skill is read, or Claude Code's permission prompt. `options.tail` supplies the transcript
-// slice ({ entries, complete }, or null when it cannot be read) instead of reading it.
-function costDecision(input, { environment = process.env, managedAgentsDirectory: managed = managedAgentsDirectory(), tail } = {}) {
+// The cost test for one launch: { verdict, shown, target, caller } where verdict is `cheaper`,
+// `skill` (the skill was not read; only when `requireSkill`), `unknown` (a route cannot be worked
+// out), `max` or `not-cheaper`. `tail` supplies the transcript slice ({ entries, complete }, or null
+// when it cannot be read) instead of reading it.
+function costVerdict(input, { environment = process.env, managedAgentsDirectory: managed = managedAgentsDirectory(), tail, requireSkill = true } = {}) {
   const args = input && input.tool_input;
-  if (!isPlain(args)) return ask(COULD_NOT_CHECK);
+  if (!isPlain(args)) return { verdict: 'unknown', shown: 'agent' };
   const env = environment || {};
   const type = typeof args.subagent_type === 'string' && args.subagent_type !== '' ? args.subagent_type : null;
   const transcript = tail !== undefined ? tail : readTail(input.transcript_path, TAIL_BYTES);
-  if (!transcript) return ask(COULD_NOT_CHECK);
+  if (!transcript) return { verdict: 'unknown', shown: shownType(type) };
   // The Toolkit helper presets pin a cheap route in their own files; the cost test below still runs.
-  if (!(type !== null && Object.hasOwn(HELPER_ROLES, type)) && !skillLoadedSinceCompaction(transcript, SKILL)) return deny(SKILL_REASON);
+  if (requireSkill && !(type !== null && Object.hasOwn(HELPER_ROLES, type)) && !skillLoadedSinceCompaction(transcript, SKILL)) return { verdict: 'skill', shown: shownType(type) };
   const served = servedRoute(transcript.entries);
   const level = isPlain(input.effort) ? effortLevel(input.effort.level) : null;
   const caller = { model: served.model, effort: level || effortLevel(env.CLAUDE_EFFORT) || served.effort };
   const target = targetRoute(input, { environment: env, managedAgentsDirectory: managed, caller });
-  const ranks = { caller: familyRank(modelName(caller.model)), target: familyRank(target.model) };
-  if (ranks.caller === null || ranks.target === null || target.effort === null) return ask(COULD_NOT_CHECK);
   const shown = target.fork ? 'fork' : shownType(type);
-  if (target.effort === 'max') return ask(MAX_REASON(shown));
-  if (ranks.target < ranks.caller) return {};
   const callerEffort = effortLevel(caller.effort);
-  if (ranks.target === ranks.caller && callerEffort && target.effort !== 'default' && EFFORT_RANK[target.effort] < EFFORT_RANK[callerEffort]) return {};
-  return ask(NOT_CHEAPER_REASON(shown, routeText(target), routeText({ model: modelName(caller.model), effort: callerEffort || 'unknown effort' })));
+  const out = verdict => ({ verdict, shown, target, caller: { model: modelName(caller.model), effort: callerEffort || 'unknown effort' } });
+  const ranks = { caller: familyRank(modelName(caller.model)), target: familyRank(target.model) };
+  if (ranks.caller === null || ranks.target === null || target.effort === null) return out('unknown');
+  if (target.effort === 'max') return out('max');
+  if (ranks.target < ranks.caller) return out('cheaper');
+  if (ranks.target === ranks.caller && callerEffort && target.effort !== 'default' && EFFORT_RANK[target.effort] < EFFORT_RANK[callerEffort]) return out('cheaper');
+  return out('not-cheaper');
 }
 
-module.exports = Object.freeze({ costDecision, targetRoute, readFrontMatter, modelName, familyRank, routeText, shownType,
-  SKILL_REASON, NOT_CHEAPER_REASON, MAX_REASON, COULD_NOT_CHECK });
+// The hook output for a main-session launch outside a gate run: {} (no decision), a refusal until
+// the skill is read, or Claude Code's permission prompt.
+function costDecision(input, options = {}) {
+  const result = costVerdict(input, options);
+  if (result.verdict === 'cheaper') return {};
+  if (result.verdict === 'skill') return deny(SKILL_REASON);
+  if (result.verdict === 'max') return ask(MAX_REASON(result.shown));
+  if (result.verdict === 'not-cheaper') return ask(NOT_CHEAPER_REASON(result.shown, routeText(result.target), routeText(result.caller)));
+  return ask(COULD_NOT_CHECK);
+}
+
+// The same test for a gate lead's launch: {} or a one-line refusal, never a prompt, so an unattended
+// gate never waits on an approval (owner decision on #1466). No skill read is required here.
+function gateCostDecision(input, options = {}) {
+  const result = costVerdict(input, { ...options, requireSkill: false });
+  if (result.verdict === 'cheaper') return {};
+  if (result.verdict === 'max') return deny(GATE_MAX_REASON(result.shown));
+  if (result.verdict === 'not-cheaper') return deny(GATE_NOT_CHEAPER_REASON(result.shown, routeText(result.target), routeText(result.caller)));
+  return deny(GATE_UNKNOWN_REASON(result.shown));
+}
+
+module.exports = Object.freeze({ costDecision, gateCostDecision, costVerdict, targetRoute, readFrontMatter, modelName, familyRank, routeText, shownType,
+  SKILL_REASON, NOT_CHEAPER_REASON, MAX_REASON, COULD_NOT_CHECK, GATE_NOT_CHEAPER_REASON, GATE_MAX_REASON, GATE_UNKNOWN_REASON });

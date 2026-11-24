@@ -96,7 +96,7 @@ Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helpe
 | Helper definitions | Markdown agent files rendered from the pinned stack, looked up as Claude Code loads them: managed folder, project folders up to the repository root, user folder (a matrix row covers the order) |
 | Depth | Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` plus the hook's refusal of any launch from a helper (a matrix row) |
 | Cost outside gate runs | A main-session launch is refused until the agent read `agent-cost-control`, runs with no prompt only when strictly cheaper than the agent, and asks otherwise (`toolkit-claude-agent-route.cjs`; the outside-gate-run rows of the launch matrix) |
-| Gate-run routes | A gate lead may start any agent on a helper route of the selected stack; any other model or effort is refused (the gate-run rows of the launch matrix) |
+| Gate-run cost | A gate lead may start any agent strictly cheaper than itself; anything else is refused with one line, never asked (the gate-run rows of the launch matrix) |
 | Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (the matrix's live rows) |
 | Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (a matrix row); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
 

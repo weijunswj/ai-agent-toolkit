@@ -185,7 +185,7 @@ test('the prompt names both routes in plain words and never echoes odd caller te
   } finally { scratch.remove(); }
 });
 
-test('the agent hook: cost check outside gate runs, helper routes in gate runs, one layer for subagents', () => {
+test('the agent hook: asks outside gate runs, refuses in gate runs, one layer for subagents', () => {
   const scratch = new Scratch();
   const control = path.join(scratch.base, 'control');
   fs.mkdirSync(control);
@@ -198,21 +198,23 @@ test('the agent hook: cost check outside gate runs, helper routes in gate runs, 
     assert.deepEqual(call({ tool_input: launch('Explore', { model: 'haiku' }) }), {});
     assert.deepEqual(call({ tool_name: 'Read' }), {}, 'other tools are untouched');
     assert.match(reason(call({ agent_id: 'sub-1', tool_input: launch('general-purpose', { model: 'haiku' }) })), /one layer only/, 'a subagent caller keeps one layer');
-    // A gate run: the brief names the stack, so any agent on its helper route passes and nothing else.
+    // A gate run: the same cost test against the lead, but anything not cheaper is refused, never asked.
     scratch.entries([{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } }, said('claude-opus-5-5', 'high')]);
     const gate = { TOOLKIT_GATE_ROLE: 'G1' };
-    assert.deepEqual(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, gate), {});
-    assert.deepEqual(call({ tool_input: launch('general-purpose', { model: 'haiku', effort: 'xhigh' }) }, gate), {});
-    for (const off of [launch('Explore'), launch('Explore', { model: 'haiku' }), launch('Explore', { model: 'haiku', effort: 'high' }), launch('general-purpose', { model: 'sonnet', effort: 'xhigh' }), launch('fork')]) {
+    for (const cheaper of [launch('Explore', { model: 'haiku' }), launch('Explore', { model: 'haiku', effort: 'xhigh' }), launch('general-purpose', { model: 'sonnet', effort: 'xhigh' }), launch(undefined, { model: 'opus', effort: 'medium' })]) {
+      assert.deepEqual(call({ tool_input: cheaper }, gate), {}, JSON.stringify(cheaper));
+    }
+    for (const off of [launch('Explore'), launch('general-purpose'), launch(undefined, { model: 'opus', effort: 'high' }), launch(undefined, { model: 'haiku', effort: 'max' }), launch('fork'), launch('some-plugin:reviewer')]) {
       assert.equal(decisionOf(call({ tool_input: off }, gate)), 'deny', JSON.stringify(off));
     }
-    assert.match(reason(call({ tool_input: launch('Explore', { model: 'haiku' }) }, gate)), /helper route of the owner-claude stack \(haiku-5\.5\/xhigh\)/);
-    assert.equal(decisionOf(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, { ...gate, CLAUDE_CODE_EFFORT_LEVEL: 'low' })), 'deny', 'an effort override is off the route');
+    assert.equal(reason(call({ tool_input: launch('general-purpose') }, gate)), route.GATE_NOT_CHEAPER_REASON('general-purpose', 'opus-5.5/high', 'opus-5.5/high'));
+    assert.match(reason(call({ tool_input: launch(undefined, { model: 'haiku', effort: 'max' }) }, gate)), /no helper runs at max effort/);
+    assert.equal(decisionOf(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'low' }) }, { ...gate, CLAUDE_CODE_EFFORT_LEVEL: 'max' })), 'deny', 'an effort override at max is refused');
     assert.match(reason(call({ agent_id: 'h1', tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, gate)), /a helper cannot launch another agent/);
     assert.match(reason(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, { TOOLKIT_GATE_ROLE: 'G2' })), /G2 review sessions launch no helpers/);
-    // Without a readable brief the gate's stack is not known, so only the Toolkit helpers can be checked.
+    // Without a readable transcript the lead's route is not known, so the launch is refused.
     fs.rmSync(scratch.transcript);
-    assert.match(reason(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, gate)), /stack is not known/);
+    assert.match(reason(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, gate)), /cannot be told/);
   } finally { scratch.remove(); }
 });
 

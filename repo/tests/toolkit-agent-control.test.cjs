@@ -243,7 +243,7 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
     // Same boundary, intact modules: the helper-route policy decides.
     const intact = call(null, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} }, gate);
     assert.equal(intact.status, 0, intact.stderr);
-    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /cannot be checked against a helper route/);
+    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /in a gate run a helper must be shown cheaper than the lead/);
     const outside = call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });
     assert.equal(JSON.parse(outside.stdout).hookSpecificOutput.permissionDecision, 'ask', 'ungoverned work is asked, not refused, by a broken install');
     const nested = JSON.parse(call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} }).stdout);

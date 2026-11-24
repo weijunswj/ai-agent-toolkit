@@ -1,10 +1,9 @@
 'use strict';
 
 // Claude Code helper policy for Toolkit gate runs. Only the main session (the G0 or G1 lead) may
-// launch a helper, and every helper runs on a helper route of the selected stack: a Toolkit
-// helper (toolkit-g0-helper, toolkit-g1-helper) whose definition byte-matches the one rendered
-// from the stack, or any other agent whose call or definition sets that route's model and effort
-// (owner decision on #1466; the stack is the one the session's brief names).
+// launch a helper. A Toolkit helper (toolkit-g0-helper, toolkit-g1-helper) must byte-match the
+// definition rendered from the selected stack; any other agent runs only when strictly cheaper than
+// the lead (toolkit-claude-agent-route.cjs), and is refused otherwise (owner decisions on #1466).
 // Everything else is refused with a plain reason. An allowed launch returns no hook
 // decision, so Claude Code's own permissions still apply.
 //
@@ -23,8 +22,6 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 // Loaded only when a helper launch is decided, so other hook decisions stay light.
 const helperAgents = () => require('./toolkit-claude-helper-agents.cjs');
 const agentRoute = () => require('./toolkit-claude-agent-route.cjs');
-const gateRoute = () => require('./toolkit-gate-route.cjs');
-const HELPER_ROUTES = Object.freeze(['DISCOVERY_HELPER', 'BUILDER_HELPER']);
 const HELPER_ROLES = Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([role, spec]) => [spec.name, role])));
 const ROUTE_FIELDS = Object.freeze(['model', 'effort', 'reasoning_effort', 'provider', 'model_provider']);
 const TRANSITION_FIELDS = Object.freeze(['resume', 'fork', 'fork_context', 'fork_turns', 'session_id', 'sessionID']);
@@ -121,32 +118,13 @@ class ClaudeNamedHelperPolicy {
     return null;
   }
 
-  // A gate lead may start any agent for separable work, but only on one of the selected stack's
-  // helper routes (DISCOVERY_HELPER or BUILDER_HELPER), with the route set on the call or pinned in
-  // the agent's file. The stack is the one the session's brief names; without one only the Toolkit
-  // helpers, whose files name their stack, can be checked.
-  #stackRouteDecision(args, input) {
-    const requested = typeof args.subagent_type === 'string' && args.subagent_type ? args.subagent_type : null;
-    const route = agentRoute();
-    const shown = requested === null ? 'default agent' : route.shownType(requested);
-    if (requested === 'fork') return deny('a fork runs on this session\'s own route, not a helper route. Start a fresh agent on a helper route instead.');
+  // A gate lead may start any other agent for separable work under the same cost test as any agent
+  // (owner decisions on #1466): it runs only when strictly cheaper than the lead, and anything else is
+  // refused with one line, never asked, so an unattended gate never waits on an approval.
+  #gateCostDecision(args, input) {
     const transition = TRANSITION_FIELDS.filter(field => Object.hasOwn(args, field));
     if (transition.length) return deny(`helper launches cannot resume or fork a session (${transition.join(', ')}); launch a fresh helper.`);
-    const modelOverride = this.#modelOverride();
-    if (modelOverride) return deny(modelOverride);
-    const gate = gateRoute().evaluate({ input, environment: this.#environment });
-    const stack = gate.pin && gate.pin.profile;
-    const registry = stack ? gateRoute().loadRegistry() : null;
-    const routes = stack ? HELPER_ROUTES.map(member => registry.profiles[stack]?.routes?.[member]).filter(Boolean) : [];
-    if (!routes.length) return deny(`this gate run's stack is not known (its brief has no readable Route line), so the ${shown} launch cannot be checked against a helper route. Use toolkit-g0-helper or toolkit-g1-helper.`);
-    const target = route.targetRoute(input, { environment: this.#environment, managedAgentsDirectory: this.#managedDirectory });
-    // CLAUDE_CODE_EFFORT_LEVEL may outrank the call's effort (the docs do not say), so it must be
-    // unset or equal to the route's effort, as for the Toolkit helpers.
-    const level = String(this.#environment.CLAUDE_CODE_EFFORT_LEVEL ?? '').trim();
-    if (routes.some(pin => target.model === gateRoute().registryModel(pin.model) && target.effort === pin.reasoning && (!level || level === pin.reasoning))) return {};
-    const listed = [...new Set(routes.map(pin => `${pin.model}/${pin.reasoning}`))].join(' or ');
-    const would = target.model ? route.routeText(target) : target.source === 'inherits' ? 'this session\'s own route, since it sets no model' : 'a route this hook cannot tell';
-    return deny(`in a Toolkit gate run every helper runs on a helper route of the ${stack} stack (${listed}); this ${shown} would run on ${would}. Set model and effort on the call to that route, or use toolkit-g0-helper or toolkit-g1-helper.`);
+    return agentRoute().gateCostDecision(input, { environment: this.#environment, managedAgentsDirectory: this.#managedDirectory });
   }
 
   decide(input, governance) {
@@ -158,7 +136,7 @@ class ClaudeNamedHelperPolicy {
     const requested = args.subagent_type;
     // Own keys only: inherited names such as `constructor` or `__proto__` are not helpers.
     const role = typeof requested === 'string' && Object.hasOwn(HELPER_ROLES, requested) ? HELPER_ROLES[requested] : undefined;
-    if (!role) return this.#stackRouteDecision(args, input);
+    if (!role) return this.#gateCostDecision(args, input);
     const route = ROUTE_FIELDS.filter(field => Object.hasOwn(args, field));
     if (route.length) return deny(`helper launches cannot override ${route.join(', ')}; the helper definition sets the model and effort.`);
     const transition = TRANSITION_FIELDS.filter(field => Object.hasOwn(args, field));

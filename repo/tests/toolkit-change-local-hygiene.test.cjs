@@ -22,11 +22,11 @@ test('generic change-local hygiene law is in the global rules and the controller
 });
 
 test('current Claude hook cannot steer an agent to the retired direct launcher', () => {
-  // The hook delegates its gate-run refusals to the helper-route policy; neither may steer to the retired launcher.
-  const hook = read('repo/scripts/toolkit-claude-agent-hook.cjs') + read('repo/scripts/toolkit-claude-helper-policy.cjs');
+  // The hook delegates its gate-run refusals to the helper policy and the cost check; none may steer to the retired launcher.
+  const hook = read('repo/scripts/toolkit-claude-agent-hook.cjs') + read('repo/scripts/toolkit-claude-helper-policy.cjs') + read('repo/scripts/toolkit-claude-agent-route.cjs');
   assert.doesNotMatch(hook, /Use repo\/scripts\/toolkit-agent-control\.cjs launch/);
-  assert.match(hook, /every helper runs on a helper route of the/);
-  const stale = hook.replace('every helper runs on a helper route of the',
+  assert.match(hook, /in a gate run a helper must be cheaper than the lead/);
+  const stale = hook.replace('in a gate run a helper must be cheaper than the lead',
     'Use repo/scripts/toolkit-agent-control.cjs launch');
   assert.match(stale, /Use repo\/scripts\/toolkit-agent-control\.cjs launch/,
     'mutation demonstrates that the forbidden old steering would be detected');

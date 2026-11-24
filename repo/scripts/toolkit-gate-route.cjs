@@ -36,15 +36,15 @@
 // tools stay open so it can report), refuses a verdict or a G1 pull request body whose stamp is not
 // the session's own, and the merge train finder reads the stamps (stampStatus). A verdict is read
 // only where the finder counts one, the first line of a published comment, so reads and quotes of
-// verdict lines pass. A helper's call (agent_id) is checked against its helper pin, never the gate's.
+// verdict lines pass. A helper's call (agent_id) is not checked against the gate's pin: the agent hook
+// checked its route when it started (it must be cheaper than the lead).
 //
 // Accepted gaps, written down as the hook design playbook asks: the brief is the launcher's text, so
 // a brief that names no gate is not checked (the Projects skill requires the Gate line); a stamp is
 // text, so a session the hook does not run in, or a body the hook cannot read (a shell variable, a
 // file written in the same command), can carry any stamp (the finder trusts only the line, and RISKY
 // pull requests need a verified or attested one); after /clear the transcript starts again without the brief; until the
-// transcript has its first assistant entry only effort is checked; a helper's model is not in its
-// hook input, so only its effort is checked, and G2 subagents have no helper pin to check.
+// transcript has its first assistant entry only effort is checked.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -194,17 +194,11 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
     return refuse(gate, `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin.`);
   }
   const level = input.effort && typeof input.effort === 'object' ? input.effort.level : null;
-  // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but the
-  // helper's own effort: it is checked against the profile's helper pin, never the gate's. Only the
-  // hook input counts here, since the session environment is the gate's. G2 and design challenge
-  // have no helper pin (gate rules: G2 has no helpers), so their subagents are not checked; the gate
-  // could start one only while on its own pin, since an off-pin gate's Agent call is refused.
-  if (typeof input.agent_id === 'string' && input.agent_id) {
-    const helper = ROLE_MEMBER[gate] && gate !== 'DESIGN_CHALLENGE' ? `${ROLE_MEMBER[gate]}_HELPER` : null;
-    const helperPin = helper ? pinFor(registry, profile, helper) : null;
-    if (helperPin && EFFORTS.includes(level) && level !== helperPin.effort) return refuse(gate, `this ${gate} helper runs on effort ${level}, but the ${profile}/${helper} pin is ${helperPin.model}/${helperPin.effort}. Start the helper again with its pinned model and effort set in its agent file; you may still report this.`);
-    return { gate, helper: true, stamp: null };
-  }
+  // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but runs
+  // on the helper's own route, which the agent hook checked when it started (cheaper than the lead;
+  // owner decision on #1466), so it is never held to the gate's pin. The gate could start one only
+  // while on its own pin, since an off-pin gate's Agent call is refused.
+  if (typeof input.agent_id === 'string' && input.agent_id) return { gate, helper: true, stamp: null };
   if (!transcript && file) read = { ...read, ...readTranscript(file, { brief: false, served: true }), brief: read.brief };
   const effort = [level, environment.CLAUDE_EFFORT, read.effort].find(value => EFFORTS.includes(value)) || null;
   const model = read.model ? registryModel(read.model) : (typeof input.model === 'string' ? registryModel(input.model) : null);
