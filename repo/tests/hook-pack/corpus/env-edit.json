@@ -1,0 +1,153 @@
+{
+  "schema": "toolkit-hook-pack/v1",
+  "family": "env-edit",
+  "rows": [
+    {
+      "id": "ENV.read-edit-file",
+      "source": "env edit lost-keys incident, 23 Nov: agents must not open the edit file",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Read", "tool_input": { "file_path": "{home}/.ai-agent-toolkit/env/edit/env-edit-0123456789abcdef.env" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.write-edit-file",
+      "source": "env edit lost-keys incident, 23 Nov: agents must not change the edit file",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Write", "tool_input": { "file_path": "{home}/.ai-agent-toolkit/env/edit/env-edit-0123456789abcdef.env", "content": "X1_TEST_KEY=value\n" } },
+      "fixture": { "repo": { "governance": "disabled", "branch": "feature" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.edit-edit-file",
+      "source": "env edit lost-keys incident, 23 Nov: agents must not change the edit file",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Edit", "tool_input": { "file_path": "{home}/.ai-agent-toolkit/env/edit/env-edit-0123456789abcdef.env", "old_string": "a", "new_string": "b" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.grep-env-folder",
+      "source": "env edit G0 plan: a search there reaches the edit file",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Grep", "tool_input": { "pattern": "TOKEN", "path": "{home}/.ai-agent-toolkit/env", "output_mode": "content" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.glob-edit-folder",
+      "source": "env edit G0 plan: listing the edit folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Glob", "tool_input": { "pattern": "{home}/.ai-agent-toolkit/env/edit/*" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.bash-cat-edit-file",
+      "source": "env edit G0 plan: shell reads of the edit file",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "cat ~/.ai-agent-toolkit/env/edit/env-edit-0123456789abcdef.env" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.powershell-list-edit-folder",
+      "source": "env edit G0 plan: shell listing of the edit folder",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "Get-ChildItem (Join-Path $HOME '.ai-agent-toolkit' 'env' 'edit') | Get-Content" } },
+      "fixture": { "repo": { "governance": "disabled", "branch": "feature" } },
+      "expect": { "decision": "deny", "reason": "toolkit-claude-env-edit-hook" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.read-manifest",
+      "source": "env edit G0 plan: the manifest holds names only",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Read", "tool_input": { "file_path": "{home}/.ai-agent-toolkit/env/manifest.json" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.bash-env-edit-command",
+      "source": "env edit G0 plan: the agent starts edit",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "node \"{home}/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs\" edit" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.powershell-env-apply-command",
+      "source": "env edit G0 plan: the agent runs apply after done",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "node \"{home}/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs\" apply" } },
+      "fixture": { "repo": { "governance": "disabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.bash-env-status-plain-folder",
+      "source": "env edit G0 plan: names-only status",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "node \"{home}/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs\" status" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.edit-doc-naming-folder",
+      "source": "hook design: text being written is never read",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Edit", "tool_input": { "file_path": "{work}/README.md", "old_string": "x", "new_string": "Never open ~/.ai-agent-toolkit/env/edit/env-edit-0123456789abcdef.env" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { "README.md": "x\n" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.grep-folder-text",
+      "source": "hook design: Grep's search text is not a path",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Grep", "tool_input": { "pattern": "\\.ai-agent-toolkit/env/edit", "path": "{work}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.monitor-env-status",
+      "source": "G2 round 1 L2: a must-pass row on every shell tool name",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Monitor", "tool_input": { "command": "node \"{home}/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs\" status", "description": "env status" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ENV.bash-grep-managed-checkout",
+      "source": "hook design: daily reads near the pattern",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "grep -rn EDIT_FILE \"{home}/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts\" | head -5; ls ~/.ai-agent-toolkit" } },
+      "fixture": { "repo": { "governance": "disabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    }
+  ]
+}

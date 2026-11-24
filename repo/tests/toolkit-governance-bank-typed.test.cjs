@@ -20,7 +20,7 @@ const governanceApp = require(path.join(scripts, 'toolkit-governance-app.cjs'));
 const SESSION = 'session-card-1';
 const SLUG = 'toolkit-test-fixture/card';
 
-function fixture(t, { quiet = false } = {}) {
+function fixture(t, { quiet = false, taskPrs = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-card-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
@@ -31,6 +31,7 @@ function fixture(t, { quiet = false } = {}) {
     parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
     store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
     required_checks: ['validate'],
+    ...(taskPrs ? { task_prs: taskPrs } : {}),
   }, null, 2)}\n`;
   fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), text);
   recordMerged(repo, { registryPath, text });
@@ -99,15 +100,11 @@ test('after the table the bank lists what it does by default, then one reply lin
   // questions: each line says what the answer does by default, or that it is bound.
   assert.equal(tail[0], [
     'Nothing to answer here:',
-    '- Merge trains: On. Bound in the merged programme file.',
+    '- Set in .github/toolkit-programme.json: evidence store toolkit-test-fixture/store, parent #1, required check validate, merge trains on. To change them, edit that file in a pull request and merge it.',
     '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
-    '- Evidence store: toolkit-test-fixture/store. Bound in the merged programme file.',
-    '- Parent issue: #1. Bound in the merged programme file.',
-    '- Required checks: validate. Bound in the merged programme file.',
-    '- Governance App: Not checked. After your answer, Toolkit gives you one command to run yourself in your own PowerShell or terminal: you click Create on GitHub, and it saves the App\'s Client ID and key on this repository. The governance jobs on GitHub need it to open pull requests; everything else works without it.',
+    '- Governance App: Not checked. After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests.',
     '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
     '- Toolkit permissions (Claude Code): Outdated: 2 missing, 1 old. After your answer, Toolkit gives you one command to run yourself that brings Claude Code\'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter.',
-    'To change anything bound in the merged programme file, edit .github/toolkit-programme.json in a pull request and merge it.',
   ].join('\n'));
   assert.doesNotMatch(out, /More on|Status \(nothing to answer\)|The permissions row covers/);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
@@ -120,6 +117,63 @@ test('after the table the bank lists what it does by default, then one reply lin
   assert.doesNotMatch(explained.out, /\*\*(Verification|Selected):\*\*/, 'explain leaves out what only a filled-in bank needs');
   agentsLast(explained.out);
   assert.ok(new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch), 'the owner\'s next own message still answers the bank');
+});
+
+// The owner's own run, 23 Nov: another session's read of GitHub timed out while this bank was being
+// built. That read keeps the cached binding and adds refresh_error (refreshBindingCache), so the merge
+// trains read that came later saw a stale binding and the bank printed "Off. Bound in the merged
+// programme file" for a binding with no merge_train key (on). Here the stale mark lands between the
+// bank's reads, the same way.
+test('a read that fails while the bank is built never shows as a bound value', async t => {
+  const ctx = fixture(t, { quiet: true, taskPrs: { auto_merge: 'after-gates' } });
+  const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
+  const stateDirectory = path.dirname(ctx.registryOptions.registryPath);
+  const identity = governance.readIdentity(ctx.repo);
+  ctx.cli = { ...QUIET, permissionsChecker: () => {
+    cache.writeCache(stateDirectory, { ...cache.readBindingCache(identity, stateDirectory), refresh_error: 'read-timed-out' });
+    return QUIET.permissionsChecker();
+  } };
+  const { code, out } = await run(ctx, ['setup']);
+  assert.equal(code, 0, out);
+  assert.match(out, /^\| 1\.2 \| Task auto-merge \| On \| A\. Keep current \| B\. Off \|$/m);
+  assert.match(out, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parent #1, required check validate, merge trains on\. To change them, edit that file in a pull request and merge it\.$/m);
+  assert.doesNotMatch(out, /Merge trains: Off|merge trains off|Bound in the merged programme file/);
+});
+
+// When the one read the bank's rows come from is itself stale, the values it shows are what this
+// computer last read, and the line says so and why; with no binding read at all it shows none.
+test('a stale read says plainly that GitHub could not be read and why; no read shows no bound values', () => {
+  const { governanceBankSpecs, renderGovernanceBank } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+  const merged = { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled', parents: [{ issue: 421 }, { issue: 7 }],
+    store: { repository: 'toolkit-test-fixture/store' }, required_checks: ['validate', 'gate'], ci_shards: { answer: 'yes' } };
+  const state = { state: 'ENABLED', repository: SLUG, root: '/x' };
+  const stale = renderGovernanceBank(governanceBankSpecs({ state, merged, train: 'off', mergedRead: { fresh: false, refresh_error: 'read-timed-out' } }));
+  assert.match(stale, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parents #421, #7, required checks validate, gate, merge trains off, parallel CI shards yes\. GitHub could not be read just now \(read-timed-out\), so these are the values this computer last read\. To change them, edit that file in a pull request and merge it\.$/m);
+  const fresh = renderGovernanceBank(governanceBankSpecs({ state, merged: { ...merged, required_checks: [], ci_shards: { answer: 'never' } }, train: 'on', mergedRead: { fresh: true, refresh_error: null } }));
+  assert.match(fresh, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parents #421, #7, no required checks, merge trains on, parallel CI shards never \(not asked again\)\. To change them, edit that file in a pull request and merge it\.$/m);
+  const unread = renderGovernanceBank(governanceBankSpecs({ state, merged: null, mergedRead: { fresh: false, refresh_error: 'read-timed-out' } }));
+  assert.match(unread, /^- Programme file: Could not be read\. This computer could not read the merged \.github\/toolkit-programme\.json just now \(read-timed-out\), so what it sets is not shown\. Type toolkit governance again in a moment\.$/m);
+  assert.doesNotMatch(unread, /Set in|Merge trains|merge trains/, 'no value is shown for a binding that was not read');
+});
+
+test('with nothing left to do the block is one line for the programme file and one short line per item; explain 1.1 has the App removal', async t => {
+  const ctx = fixture(t, { quiet: true });
+  const { out } = await run(ctx, ['setup']);
+  const tail = out.slice(out.lastIndexOf('|') + 1).trim().split(/\n\s*\n/);
+  assert.equal(tail[0], [
+    'Nothing to answer here:',
+    '- Set in .github/toolkit-programme.json: evidence store toolkit-test-fixture/store, parent #1, required check validate, merge trains on. To change them, edit that file in a pull request and merge it.',
+    '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
+    '- Governance App: Set up. Say "explain 1.1" for how to stop using it.',
+    '- Toolkit permissions (Claude Code): Up to date.',
+  ].join('\n'));
+  assert.doesNotMatch(out, /TOOLKIT_GOVERNANCE_APP|Secrets and variables/, 'the App removal steps wait for explain');
+  const reference = /Bank reference: (\S+)/.exec(out)[1];
+  const explained = await run(ctx, ['setup', '--answers', `${reference}: explain 1.1`]);
+  assert.equal(explained.code, 0);
+  assert.match(explained.out, /^### 1\.1 GitHub governance$/m);
+  assert.match(explained.out, new RegExp(`^\\*\\*Governance App:\\*\\* To stop using it, delete the ${governanceApp.APP.variable} variable and the ${governanceApp.APP.secret} secret under Settings, Secrets and variables, Actions on GitHub; governance works without it\\.$`, 'm'));
+  agentsLast(explained.out);
 });
 
 test('a question card that carries bank rows is not Toolkit\'s: it runs, and its taps record nothing', async t => {
@@ -157,6 +211,21 @@ async function reply(ctx, reference, answer) {
   return run(ctx, ['setup', '--answers', `${reference}: ${answer}`, '--ticket', ticket]);
 }
 const noBank = out => assert.doesNotMatch(out, /Bank reference|^\| 1\.1 \|/m, 'the bank is not shown again');
+
+// Owner decision INT-TK421-1263 (24 Nov): the App setup stays the owner's, as one line to paste into
+// PowerShell with nothing to choose; their other steps are the Enters it asks for and Create and Install.
+test('an answer that takes the App default gives exactly one PowerShell line for it, with nothing to choose', async t => {
+  const ctx = fixture(t, { quiet: true });
+  ctx.cli = { ...QUIET, appReader: args => ({ ok: true, value: { total_count: 0, [/\/actions\/(variables|secrets)\?/.exec(args[0])[1]]: [] } }) };
+  const shown = await run(ctx, ['setup']);
+  assert.match(shown.out, /^- Governance App: Not set up\. After your answer, Toolkit gives you one line to paste into PowerShell /m);
+  const answered = await reply(ctx, /Bank reference: (\S+)/.exec(shown.out)[1], KEEP);
+  assert.equal(answered.code, 0, answered.out + answered.err);
+  assert.match(answered.out, /^Governance App: paste this one line into PowerShell and press Enter\. It saves the App's Client ID and key on toolkit-test-fixture\/card\. It asks for Enter before it opens GitHub and again before it checks the installation; on GitHub you click Create, then Install\. It runs only outside an agent, so the App's private key never passes through one\.$/m);
+  const blocks = [...answered.out.matchAll(/^```\n([\s\S]*?)\n```$/gm)].map(match => match[1]);
+  assert.deepEqual(blocks, [`node "${path.join(scripts, 'toolkit-governance-app-setup.cjs')}" --repo toolkit-test-fixture/card --store toolkit-test-fixture/store`]);
+  assert.doesNotMatch(answered.out, /with gh signed in|<Client ID>|\.pem/);
+});
 // Keeps both questions as they are.
 const KEEP = '1.1=A, 1.2=A';
 
@@ -254,7 +323,7 @@ test('questions are numbered without gaps, status rows have none, and an answer 
   for (const id of ['governance', 'evidence-store', 'parent-issue', 'required-checks', 'governance-app', 'permission-blocks']) assert.equal(refs(undecided)[id], '', `${id} is a status row`);
   const shown = renderGovernanceBank(undecided);
   assert.match(shown, /^# Toolkit governance choices - 1 question across 1 section$/m);
-  assert.match(shown, /^- Evidence store: TRANSPORT-card\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply; reply no store to keep governance off\.$/m);
+  assert.match(shown, /^- Evidence store: TRANSPORT-card\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply\.$/m);
   assert.doesNotMatch(shown, /Status \(nothing to answer\)|Already set|\| 1\.2 \|/);
   assert.equal(parseBankAnswer('all recommended', undecided, { requireBankReference: false }).governance, 'on');
   assert.equal(parseBankAnswer('1.1=A', undecided, { requireBankReference: false }).governance, 'on', 'any answer to this bank turns governance on');
@@ -440,6 +509,28 @@ test('typing toolkit governance while a bank is open asks for the bank afresh, n
 // summary. Now setup reads once more with a longer limit and shows the bank when that read works; when
 // it fails too, the owner gets one line to type the command again and the agent is told to show no
 // status. An answer still writes nothing on an unread binding.
+// Owner test 2, 23 Nov: GitHub could not be read in a repository with no decision yet, so the state
+// was UNAVAILABLE, and the bank printed "GitHub governance: undefined" with a turn-on row for a state
+// it could not know. It reads once more, then gives the same line to type it again as an unread binding.
+test('a repository whose governance cannot be read gets one more read, then the line to type it again, never a bank', async t => {
+  const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
+  const ctx = fixture(t);
+  const stateDir = path.dirname(ctx.registryOptions.registryPath);
+  const identity = governance.readIdentity(ctx.repo);
+  const unread = { ...cache.readBindingCache(identity, stateDir), status: 'absent', text: null, bytes_sha256: null, refresh_error: 'read-timed-out' };
+  let reads = 0;
+  ctx.cli = { refresh: () => { reads += 1; cache.writeCache(stateDir, unread); return { refreshed: false, error: 'read-timed-out' }; } };
+  ctx.cli.refresh();
+  reads = 0;
+  assert.equal(governance.governanceState(ctx.repo, ctx.registryOptions).state, 'UNAVAILABLE');
+  const shown = await run(ctx, ['setup']);
+  assert.equal(reads, 2, 'one more read after the failed one');
+  assert.equal(shown.code, 1);
+  assert.doesNotMatch(shown.out, /undefined|Bank reference|Your answer turns it on/);
+  assert.match(shown.out, /^The governance question bank could not be shown because GitHub could not be read just now.*Type toolkit governance again in a moment\.$/m);
+  agentsLast(shown.out);
+});
+
 test('a fresh session whose binding read fails just now gets the bank or a line to type it again, never a status', async t => {
   const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
   for (const recovers of [true, false]) {

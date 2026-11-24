@@ -90,7 +90,7 @@ const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace']);
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace', '--queue']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
@@ -155,6 +155,7 @@ function parseArgs(argv) {
     needs(!Object.keys(args).some(key=>!['command','pr','issue','body-file','dry-run','force-another','json','repo-root'].includes(key)), 'Unsupported closing-comment option.');
   } else needs(args.pr === undefined && args['body-file'] === undefined && !args['force-another'], 'Closing comment options belong only to closing-comment.');
   if (command === 'show') needs(!(args.parent && args.issue !== undefined), 'show takes --parent or --issue <n>, not both.');
+  needs(!args.queue || (command === 'show' && args.issue === undefined && !args['include-private'] && !args.session), 'show --queue lists the queue of the parent and takes only --parent, --json and --repo-root.');
   if (command === 'claim') {
     needs(Boolean(args.parent) !== (args.issue !== undefined), 'claim needs --issue <n> --lane or --parent.');
     needs(args.role === undefined, 'Gates are not claimed: the controller runs assign --issue <n> --role <gate> --assignment <id>.');
@@ -449,6 +450,23 @@ function outcomeFor(parentDoc, issue) {
   return outcome;
 }
 
+// Why each queued task sits where it does (state.explainQueue), from the parent and children's
+// documents as they stand now. Read-only: nothing is written.
+function queueOf(context) {
+  const parentDoc = readParent(context);
+  const snapshot = context.store.readSnapshot();
+  const children = new Map(parentDoc.outcomes.map(outcome => [outcome.issue, context.store.snapshotDoc(snapshot, 'child', outcome.issue).doc]));
+  return { repository: context.repository, parent_issue: parentDoc.parent_issue, revision: parentDoc.revision, queue: state.explainQueue(parentDoc, children) };
+}
+
+function formatQueue(result) {
+  const { rows, cycles } = result.queue;
+  const lines = [`Queue of #${result.parent_issue} (state revision ${result.revision}), in work order: priority, then quick wins (size S), then other work, then tasks marked last; a task follows the tasks it waits for (after).`,
+    ...(rows.length ? rows.map(row => `${row.place}. #${row.issue} · ${row.step} · ${row.why}`) : ['No queued tasks.']),
+    ...cycles.map(loop => `Loop (after set aside, DEPENDENCY_CYCLE): ${loop.map(number => `#${number}`).join(', ')}`)];
+  return `${lines.join('\n')}\n`;
+}
+
 // The tasks waiting on the owner (state.ownerWaits), from the children's documents as they stand
 // now; nothing is stored. A child that cannot be read makes the list unknown, never short.
 function ownerWaitsOf(context, parentDoc) {
@@ -514,16 +532,14 @@ function showAttention(parentDoc, args, deps) {
   return { line: stored.line, counts: stored.counts, as_of: stored.as_of };
 }
 
-// This computer's attention cache, for the session-start line. Tests that bring their own GitHub
-// (an origin URL) write it only to a folder they name.
+// This computer's attention cache, for the turn-end owed check: the open net findings, oldest first,
+// IDs, codes and times only. Tests that bring their own GitHub (an origin URL) write it only to a
+// folder they name.
 function cacheAttention(context, parentDoc, complete, deps = {}) {
   if (!parentDoc || (deps.originUrl && !deps.attentionDir)) return;
-  // The longest-stalled work-queue task, so session start names it: its number, code, when it was
-  // flagged and the Toolkit's own next step for that code (no text from GitHub).
-  const [oldest] = state.workQueue(parentDoc.attention);
-  attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention, nowText(deps)), counts: state.attentionCounts(parentDoc.attention),
-    digest: state.attentionDigest(parentDoc.attention), complete,
-    queue: oldest ? { count: state.workQueue(parentDoc.attention).length, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } : null }, deps);
+  const net = state.openFindings(parentDoc.attention).filter(entry => state.NET_CODES.has(entry.code)).reverse().slice(0, attentionCache.NET_LIMIT)
+    .map(entry => ({ id: entry.id, code: entry.code, issue: entry.issue ?? null, kind: state.KIND_CODES.has(entry.code) ? entry.kind ?? null : null, state: entry.state, changed_at: entry.changed_at, due: entry.due ?? null }));
+  attentionCache.writeCache(context.repository, { complete, net }, deps);
 }
 
 const TERMINAL = ['DONE', 'RETIRED'];
@@ -651,15 +667,6 @@ function redact(doc) {
   if (copy.gate?.session_id) copy.gate.session_id = '(redacted)';
   return copy;
 }
-
-// The lane waits a gate-start write dropped (blockers starting `Queued`), listed in its result so a
-// blocker dropped by mistake shows the same turn.
-function laneWaitDrops(before, next) {
-  if (!before || !next) return [];
-  const kept = new Set(next.blockers || []);
-  return (before.blockers || []).filter(text => state.isLaneWait(text) && !kept.has(text));
-}
-const dropsResult = dropped => (dropped.length ? { dropped_lane_waits: dropped } : {});
 
 function writeResult(kind, number, result, writer) {
   return { document: `${kind === 'parent' ? 'parent' : 'issue'}-${number}.json`, outcome: result.outcome, revision: result.doc?.revision ?? null,
@@ -929,7 +936,7 @@ const commands = {
         log({ ...entry, results: [...entry.results, failed].slice(-holderOrder.MAX_OPS), stopped_at: nowText(deps) });
         return { mode: 'apply', ...summary, outcome: 'STOPPED', results, next_action: `Stopped at write ${at + 1} (${op.command}): ${failed.code}. Report this to the controller; a run of the same order continues from this write.` };
       }
-      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE', ...(result?.dropped_lane_waits ? { dropped_lane_waits: result.dropped_lane_waits } : {}) };
+      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE' };
       results.push(ran);
       done.add(at);
       log({ ...entry, done: [...done].sort((a, b) => a - b), results: [...entry.results, ran].slice(-holderOrder.MAX_OPS), by });
@@ -971,6 +978,7 @@ const commands = {
   dispose(args, context, deps = {}) { return answer(args, context, deps, 'disposed'); },
 
   show(args, context) {
+    if (args.queue) return queueOf(context);
     const kind = args.issue ? 'child' : 'parent';
     const { doc, sha } = context.store.read(kind, args.issue || context.binding.parent_issue);
     if (!doc) throw new ProgrammeError('STATE_MISSING', `No state document for #${args.issue || context.binding.parent_issue}.`);
@@ -1050,18 +1058,16 @@ const commands = {
     // An assignment already issued (a repeated order) is not a new gate start.
     if (current?.gate?.assignment?.id !== args.assignment) refuseUnstartedAgentUat(context, parentDoc, args.role);
     const files = context.store.listJournals(args.issue);
-    let dropped = [];
     let sessionsDropped = [];
     const result = context.store.mutate('child', args.issue, {
       writer, parentDoc, create: () => state.newChild({ repository: context.repository, outcome }),
       change: doc => {
         const next = state.assignGate(doc, { assignment: args.assignment, role: args.role, supersede: Boolean(args.supersede), reason: args.reason || null, now: nowText(deps) });
-        dropped = laneWaitDrops(doc, next);
         sessionsDropped = gateSessionDrops(doc, next);
         return next && markJournalsSeen(next, files);
       },
     });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...gateDropsResult(sessionsDropped), attention };
+    return { ...writeResult('child', args.issue, result, writer), ...gateDropsResult(sessionsDropped), attention };
   },
 
   reopen(args, context, deps = {}) {
@@ -1071,15 +1077,13 @@ const commands = {
     const gate = context.store.read('child', args.issue).doc?.gate;
     if (gate?.state === 'RETIRED') refuseUnstartedAgentUat(context, parentDoc, gate.role);
     const files = context.store.listJournals(args.issue);
-    let dropped = [];
     let sessionsDropped = [];
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => {
       const next = state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null, now: nowText(deps) });
-      dropped = laneWaitDrops(doc, next);
       sessionsDropped = gateSessionDrops(doc, next);
       return markJournalsSeen(next, files);
     } });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...gateDropsResult(sessionsDropped) };
+    return { ...writeResult('child', args.issue, result, writer), ...gateDropsResult(sessionsDropped) };
   },
 
   // The controller records a gate's host session after the launch, or its close after archiving it.
@@ -1124,7 +1128,6 @@ const commands = {
     const writer = requireParentHolder(context, parentDoc);
     const attention = args.consume ? showAttention(parentDoc, args, deps) : null;
     let change;
-    let dropped = [];
     if (args.record) {
       change = doc => state.recordReturn(doc, { returnId: args.record, assignment: args.assignment, atHead: args['at-head'] || null });
     } else {
@@ -1132,14 +1135,10 @@ const commands = {
       const head = child && args.verdict === 'ACCEPT' && child.gate.role === 'G1' ? liveHead(context, child) : undefined;
       const review = child && child.gate.role === 'G2' && ['ACCEPT', 'REOPEN'].includes(args.verdict) ? g2Review(context, child, args.consume) : undefined;
       const now = nowText(deps);
-      change = doc => {
-        const next = state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head, review, reason: args.reason ?? null, now });
-        dropped = laneWaitDrops(doc, next);
-        return next;
-      };
+      change = doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head, review, reason: args.reason ?? null, now });
     }
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...(attention ? { attention } : {}) };
+    return { ...writeResult('child', args.issue, result, writer), ...(attention ? { attention } : {}) };
   },
 
   // An executor binds its own session to the controller's current assignment and opens its journal.
@@ -1631,6 +1630,7 @@ function finish(args, deps, out, opened = null) {
   if (pass && !args.json) out.write(formatReport(result));
   else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
   else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
+  else if (args.command === 'show' && args.queue && !args.json) out.write(formatQueue(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
   if (pass) return result.holds.length ? 1 : 0;
   return 0;

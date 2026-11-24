@@ -39,15 +39,15 @@ function exercise(store, calls) {
   assert.equal(back.get('X1_TEST_STORE_ONE'), one);
   assert.equal(back.get('X1_TEST_STORE_TWO'), two);
   assert.equal(back.get('X1_TEST_STORE_THREE'), three);
-  assert.equal(store.remove('X1_TEST_STORE_THREE'), true);
+  assert.equal(store.removeForEditSave('X1_TEST_STORE_THREE'), true);
   assert.equal(back.has('X1_TEST_STORE_ABSENT'), false);
   assert.deepEqual(store.list(), ['X1_TEST_STORE_ONE', 'X1_TEST_STORE_TWO']);
   const longest = 'x'.repeat(2560);
   store.writeAll(new Map([['X1_TEST_STORE_LONG', longest]]));
   assert.equal(store.read('X1_TEST_STORE_LONG'), longest);
   assert.throws(() => store.writeAll(new Map([['X1_TEST_STORE_LONG', 'x'.repeat(2561)]])), /value too long \(max 2560 bytes\)/);
-  for (const name of ['X1_TEST_STORE_ONE', 'X1_TEST_STORE_TWO', 'X1_TEST_STORE_LONG']) assert.equal(store.remove(name), true);
-  assert.equal(store.remove('X1_TEST_STORE_ONE'), false);
+  for (const name of ['X1_TEST_STORE_ONE', 'X1_TEST_STORE_TWO', 'X1_TEST_STORE_LONG']) assert.equal(store.removeForEditSave(name), true);
+  assert.equal(store.removeForEditSave('X1_TEST_STORE_ONE'), false);
   assert.equal(store.read('X1_TEST_STORE_ONE'), undefined);
   assert.deepEqual(store.list(), []);
   for (const call of calls) {
@@ -60,7 +60,7 @@ test('Windows Credential Manager: write, read, list, size limit, delete, nothing
   const prefix = `ai-agent-toolkit-test/${crypto.randomBytes(6).toString('hex')}`;
   const calls = [];
   const store = new WindowsCredentialStore({ prefix, spawn: recordingSpawn(calls) });
-  t.after(() => { for (const name of store.list()) store.remove(name); });
+  t.after(() => { for (const name of store.list()) store.removeForEditSave(name); });
   assert.equal(store.backend, 'Windows Credential Manager');
   exercise(store, calls);
   const listed = spawnSync('cmdkey', ['/list'], { encoding: 'utf8' });
@@ -72,7 +72,7 @@ test('Windows Credential Manager works with only the variables Codex gives a hea
   const value = dummy();
   const driver = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-store-'));
   t.after(() => {
-    for (const name of new WindowsCredentialStore({ prefix }).list()) new WindowsCredentialStore({ prefix }).remove(name);
+    for (const name of new WindowsCredentialStore({ prefix }).list()) new WindowsCredentialStore({ prefix }).removeForEditSave(name);
     fs.rmSync(driver, { recursive: true, force: true });
   });
   new WindowsCredentialStore({ prefix }).writeAll(new Map([['X1_TEST_STORE_CORE', value]]));

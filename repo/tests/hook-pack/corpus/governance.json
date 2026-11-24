@@ -119,72 +119,6 @@
       "status": "pass"
     },
     {
-      "id": "GOV.stale-check-line-enabled",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"stale_rows":["JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)"]},
-      "expect": {"decision":"allow","context_contains":["1 row to answer (JUDGE? 1)","Controller: answer each this turn: close each child you judge done yourself"],"context_excludes":["CLOSE LIST"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-line-new-kinds",
-      "source": "stale check rows for a kept-open child that stalls and for a merged PR whose rows stay unticked: the session-start line counts them by kind",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"stale_rows":["KEPT OPEN? #12 kept open since 2026-11-22 12:33Z with every PR merged, and no lane has worked it for over 6 hours: hand its next slice to a lane, close it if it is done, or dispose of the finding with a reason (TASK_MERGED_OPEN)","UNTICKED? #13 PR #900 merged, but none of its 4 DONE WHEN or ROWS checkbox row(s) is ticked: tick each row a merged PR delivered (the stale check counts and judges by them)"]},
-      "expect": {"decision":"allow","context_contains":["2 rows to answer (KEPT OPEN? 1, UNTICKED? 1)"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-silent-disabled",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"disabled"},"stale_rows":["JUDGE? #12 PR merged: check its DONE WHEN, then close it yourself or keep it open (READY_TO_CLOSE)"]},
-      "expect": {"decision":"allow","context_excludes":["row to answer","Stale check"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-cloud-waits",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true},
-      "expect": {"decision":"allow","context_contains":["Toolkit governance (cloud session)","Attention and stale check: not read in this cloud session (a cloud session does not read the programme store); both run at the next session start on the owner's computer."],"context_excludes":["row to answer"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-cloud-stamp",
-      "source": "stale check from the governance session-start hook: the line shows from the stamp only with governance on, and a cloud session says the check waits for the owner's computer",
-      "kind": "state",
-      "hosts": ["claude"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"stale_rows":["FOLD? #20 new under #1 with no Nearest child: line"]},
-      "expect": {"decision":"allow","context_contains":["1 row to answer (FOLD? 1)"],"context_excludes":["Attention and stale check: not read"]},
-      "status": "pass"
-    },
-    {
-      "id": "GOV.stale-check-cloud-cache-no-stamp",
-      "source": "PR 1442 G2 L6: a cloud session with the attention cache but no stale-check stamp for today said nothing about the stale check",
-      "kind": "state",
-      "hosts": ["claude"],
-      "event": "SessionStart",
-      "payload": {"source":"startup"},
-      "fixture": {"repo":{"governance":"enabled"},"closure_cloud":true,"attention_line":"Attention: 1 new, 0 acknowledged"},
-      "expect": {"decision":"allow","context_contains":["Attention: 1 new, 0 acknowledged","Stale check: not run in this cloud session; it runs at the next session start on the owner's computer."],"context_excludes":["Attention and stale check: not read"]},
-      "status": "pass"
-    },
-    {
       "id": "GOV.rules-cloud-disabled-child-none",
       "source": "plug-and-play S1: a cloud session above a disabled repository gets no governed rules",
       "kind": "benign",
@@ -430,7 +364,7 @@
     {
       "id": "D4.claude-explore-outside-gate-run",
       "source": "PR 705 hooks cut-down G0, D4 (owner chose \"Narrow it\", 1 Nov 2026): the helper-launch hook refused launches the rules allow outside gate work",
-      "kind": "benign",
+      "kind": "hostile",
       "hosts": [
         "claude"
       ],
@@ -449,7 +383,8 @@
         }
       },
       "expect": {
-        "decision": "allow"
+        "decision": "ask",
+        "reason": "toolkit-claude-agent-hook"
       },
       "status": "pass"
     },
@@ -1409,6 +1344,49 @@
       "status": "pass"
     },
     {
+      "id": "GOV.question-offers-only-yes-no-later",
+      "source": "owner test, 23 Nov: refresh governance in an undecided repository; the question passed on the enable and disable commands to the owner",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"Fix the failing test."},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["Reply yes, no or later. Nothing waits on your answer, and Toolkit asks again next session."],"context_excludes":["Reply `toolkit governance enable`"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.non-answer-reply-not-quoted-back",
+      "source": "owner test, 23 Nov: the agent quoted the owner's non-answer reply back and offered the answer commands",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Fix the failing test."},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"What does that mean?"},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["Do not ask the governance question again or quote their message back; if you mention it, say in plain words only that no governance answer was recorded.","Never show the user these commands or ask them to type one."]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.bank-phrase-first-message-one-ask",
+      "source": "owner test 2, 23 Nov: refresh governance as the chat's first message showed the session question card and then the bank",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"refresh governance"},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_excludes":["Turn on GitHub governance (issues, records, evidence store) for this repository?"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.answer-script-outside-its-ticket-command",
       "source": "ask once, never freeze: the answer script runs only as the exact command given with the reply",
       "kind": "hostile",
@@ -1478,6 +1456,96 @@
       "payload": {"tool_name":"Bash","tool_input":{"command":"git status"},"effort":{"level":"medium"}},
       "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nReview PR 5.\nGate: G2\nRoute: owner-claude opus opus-5.5/xhigh\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"medium"}]},
       "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.text-then-card",
+      "source": "#1467 S8: 7 of 8 controller cards on 22-23 Nov came after text the owner could not see, since the app shows only the open card",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The build failed on two tests; here is what I found."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.text-then-tools-then-card",
+      "source": "#1467 S8: text earlier in the turn stays hidden behind the card even after tool calls",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail. Checking why."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Bash","input":{"command":"npm test"}}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"2 failed"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.long-question",
+      "source": "#1467 S8 (old L5): a card holds only a short question; the context goes above it or into the options",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"The reader refuses two shapes and the docs describe a third one that no longer exists, so should I fix the reader first or update the docs first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.first-in-turn",
+      "source": "#1467 S8 control: a card that is the turn's first visible output is shown",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"The reader refuses two shapes."},{"label":"Docs first","description":"The docs name a third one."}]}]}},
+      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"fixture"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.tools-then-card",
+      "source": "#1467 S8 control: a card after tool calls only, with no text, is shown",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"  "},{"type":"tool_use","id":"toolu_a","name":"Bash","input":{"command":"npm test"}}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"2 failed"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.text-previous-turn",
+      "source": "#1467 S8 control: text from an earlier turn, which the owner has seen, does not hold the card",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail; details above."}]}},{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Go ahead and pick one."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.text-in-subagent-only",
+      "source": "#1467 S8 control: a subagent's own text (a sidechain entry) is not text the owner was meant to see, so it does not hold the card",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Agent","input":{"prompt":"Find the failing tests."}}]}},{"type":"user","isSidechain":true,"message":{"role":"user","content":"Find the failing tests."}},{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail in the reader."}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"Two tests fail in the reader."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.no-transcript",
+      "source": "#1467 S8 fail-open: with no transcript to read the card is shown, with a note that the check could not run",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"enabled"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.merge-card-after-text",
+      "source": "#1467 S8 control: Toolkit's exact merge card names the pull request and head itself, so text before it does not hold it",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true,"transcript":[{"type":"user","message":{"role":"user","content":"Please land PR 5."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"PR 5 is green and reviewed; asking for the merge."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"allow"},
       "status": "pass"
     },
     {
@@ -1628,21 +1696,21 @@
       "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
       "kind": "benign",
       "hosts": ["claude"],
-      "note": "a G1 helper on its BUILDER_HELPER pin (xhigh) inside a high G1 runs",
+      "note": "a G1 helper at xhigh inside a high G1 runs: the agent hook checked its route when it started",
       "payload": {"tool_name":"Bash","tool_input":{"command":"git log -1"},"effort":{"level":"xhigh"},"agent_id":"a1b2c3","agent_type":"Explore"},
       "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nBuild it.\nGate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
       "expect": {"decision":"allow"},
       "status": "pass"
     },
     {
-      "id": "GATEROUTE.g1-helper-off-pin-refused",
+      "id": "GATEROUTE.g1-helper-other-effort-runs",
       "source": "G2 review of the gate route check, 15 Nov 2026: false blocks of the coordinator's Route form, gate helpers and verdict reads",
-      "kind": "hostile",
+      "kind": "benign",
       "hosts": ["claude"],
-      "note": "a G1 helper at medium, off its BUILDER_HELPER pin, is refused",
+      "note": "a G1 helper at medium inside a high G1 runs: helpers are not held to a stack route, the agent hook checked it is cheaper than the lead when it started",
       "payload": {"tool_name":"Bash","tool_input":{"command":"git log -1"},"effort":{"level":"medium"},"agent_id":"a1b2c3","agent_type":"Explore"},
       "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","isMeta":true,"message":{"role":"user","content":"<session-context>project rules</session-context>\n<relay from=\"coordinator\" session=\"s\" reason=\"spawn\">\n  <note>\nBuild it.\nGate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n  </note>\n</relay>"}},{"type":"assistant","message":{"model":"claude-opus-5-5"},"effort":"high"}]},
-      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "expect": {"decision":"allow"},
       "status": "pass"
     },
     {
@@ -1763,6 +1831,617 @@
       "status": "pass",
       "note": "The pack turns session-start refresh off, so the cause read here is the offline or not-recorded phrase; the cloud side-by-side read and read-timed-out are covered by toolkit-governance-cause.test.cjs and a live probe."
     },
+    {
+      "id": "GOV.owed-check-finding-due-blocks",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-same-list-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "state",
+      "steps": [
+        {
+          "event": "Stop",
+          "payload": {
+            "stop_hook_active": false
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-owed-check-hook"
+          }
+        }
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "note": "The second turn end sees the same list, so it passes.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-stop-hook-active-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": true
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-gate-session-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "gate_role": "G1",
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-not-controller-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs attention"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-nothing-owed-silent",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 1,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-finished-side-session-blocks",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "desktop_sessions": [
+          {
+            "isArchived": false,
+            "prs": [
+              {
+                "prNumber": 5,
+                "state": "MERGED"
+              }
+            ],
+            "postTurnSummary": {
+              "status_category": "completed",
+              "needs_action": ""
+            },
+            "postTurnSummaryFor": "u1",
+            "lastAssistantUuid": "u1",
+            "lastTurnEdgeAt": 2,
+            "latestUserFrameAt": 1
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-renamed-field-fails-open",
+      "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "desktop_sessions": [
+          {
+            "prs": [
+              {
+                "prNumber": 5,
+                "state": "MERGED"
+              }
+            ],
+            "postTurnSummary": {
+              "status_category": "completed",
+              "needs_action": ""
+            },
+            "postTurnSummaryFor": "u1",
+            "lastAssistantUuid": "u1",
+            "lastTurnEdgeAt": 2,
+            "latestUserFrameAt": 1,
+            "archived": false
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "note": "A desktop session file in an unknown format is a one-time note, never a block.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.session-start-governance-only",
+      "source": "session start shows the governance status only: due programme findings reach the controller at turn end, so no attention or stale-check line and no background job at session start",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 9,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit governance: ENABLED for this repository."
+        ],
+        "context_excludes": [
+          "Attention:",
+          "Stale check",
+          "toolkit-controller-check"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.session-start-governance-only-cloud",
+      "source": "session start shows the governance status only: due programme findings reach the controller at turn end, so no attention or stale-check line and no background job at session start",
+      "kind": "state",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "closure_cloud": true,
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 9,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit governance (cloud session)"
+        ],
+        "context_excludes": [
+          "Attention",
+          "Stale check",
+          "stale check"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.session-start-error-notice",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a crash in that check must say so and name the rules file instead of printing nothing",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "fault": {"type":"throw-module","file":"repo/scripts/toolkit-governance-gate.cjs"},
+      "expect": {"decision":"allow","context_contains":["Toolkit couldn't load the governance check at this session start","toolkit-governed-rules.md"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-resume",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a resumed session gets them again",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"resume"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-compact",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; compaction drops earlier context, so the compact start gives them again",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"compact"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-subfolder",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a session started in a subfolder still gets them",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{work}/docs"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n","docs/README.md":"# Docs\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-linked-worktree",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a session started in a linked worktree still gets them",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{trees}/lane"},
+      "fixture": {"repo":{"governance":"enabled","worktrees":["lane"]},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {"id":"C1.no-skill-general-purpose","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"haiku"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C2.no-skill-plain-folder","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"Explore"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C3.skill-before-compaction","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"haiku"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C4.raise-model","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"opus"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"ok"}]},"effort":"medium"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C5.raise-effort-same-tier","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"reviewer"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"ok"}]},"effort":"medium"}],"files":{".claude/agents/reviewer.md":"---\nname: reviewer\ndescription: Hook pack agent.\nmodel: sonnet\neffort: high\n---\n\nReply OK.\n"}},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C6.unknown-caller-raise","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"opus"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"user","message":{"role":"user","content":"<command-name>/agent-cost-control</command-name>\n<command-message>agent-cost-control</command-message>"}}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"No assistant entry yet, so the caller route is not known."},
+    {"id":"C6b.raise-call-effort","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"sonnet","effort":"high"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"ok"}]},"effort":"medium"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C9.inherit-equal","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"The 23 Nov 2026 shape: an Opus chat starts general-purpose with no model."},
+    {"id":"C10.same-model-same-effort","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"sonnet","effort":"medium"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"ok"}]},"effort":"medium"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C11.fork-equal","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"fork"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C12.cheaper-model-at-max","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"haiku","effort":"max"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"C13.owner-example-up-tier","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"sonnet","effort":"low"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[{"type":"text","text":"ok"}]},"effort":"xhigh"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"Owner example: Sonnet low from Haiku xhigh asks."},
+    {"id":"C14.unknown-target","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"some-plugin:reviewer"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"No copy of the plugin agent on disk, so its route is not known."},
+    {"id":"C15.explore-inherits","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"Explore"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M1.general-purpose-no-model-plain","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M3.default-agent-no-model","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M4.plan-no-model","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"Plan"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M5.claude-catch-all-no-model","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"claude"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M7.fork-with-model","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"fork","model":"haiku"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"A fork runs on the caller route; a model on the call does not apply to it."},
+    {"id":"M8.project-agent-model-inherit","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"reviewer"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{".claude/agents/reviewer.md":"---\nname: reviewer\ndescription: Hook pack agent.\nmodel: inherit\n---\n\nReply OK.\n"}},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M9.project-agent-no-model-field","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"reviewer"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{".claude/agents/reviewer.md":"---\nname: reviewer\ndescription: Hook pack agent.\n---\n\nReply OK.\n"}},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M10.task-alias-general-purpose","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Task","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M11.user-agent-model-inherit","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"helper-x"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{"../home/.claude/agents/helper-x.md":"---\nname: helper-x\ndescription: Hook pack agent.\nmodel: inherit\n---\n\nReply OK.\n"}},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M12.plugin-agent-inherit","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"review-kit:code-reviewer"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{"../home/.claude/plugins/marketplaces/m/plugins/review-kit/agents/code-reviewer.md":"---\nname: code-reviewer\ndescription: Hook pack agent.\nmodel: inherit\n---\n\nReply OK.\n"}},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"M13.no-transcript","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"haiku"}},"fixture":{"repo":{"governance":"none","branch":"feature"}},"expect":{"decision":"ask","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"No transcript to read the skill or the caller route from: the hook asks, never passes silently."},
+    {"id":"P2.cheaper-after-skill","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"haiku"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"P3.helper-preset-no-skill","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"toolkit-g0-helper"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{"../home/.claude/agents/toolkit-g0-helper.md":"---\nname: toolkit-g0-helper\ndescription: Hook pack agent.\nmodel: claude-haiku-5-5\neffort: xhigh\n---\n\nReply OK.\n"}},"expect":{"decision":"allow"},"status":"pass","note":"A Toolkit helper preset needs no skill read; its pinned Haiku route is cheaper than Opus."},
+    {"id":"P4.owner-example-1","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"checker"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{".claude/agents/other.md":"---\nname: checker\ndescription: Hook pack agent.\nmodel: haiku\neffort: xhigh\n---\n\nReply OK.\n"}},"expect":{"decision":"allow"},"status":"pass","note":"Owner example: Haiku xhigh from Opus high runs."},
+    {"id":"P4b.owner-example-2","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"haiku","effort":"xhigh"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"ok"}]},"effort":"low"}]},"expect":{"decision":"allow"},"status":"pass","note":"Owner example: Haiku xhigh from Sonnet low runs."},
+    {"id":"P4c.same-tier-lower-effort","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"opus","effort":"medium"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"P5b.plugin-agent-pinned-cheaper","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"review-kit:code-reviewer"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"files":{"../home/.claude/plugins/marketplaces/m/plugins/review-kit/agents/code-reviewer.md":"---\nname: code-reviewer\ndescription: Hook pack agent.\nmodel: sonnet\n---\n\nReply OK.\n"}},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"P6.typed-skill","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"haiku"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"user","message":{"role":"user","content":"<command-name>/agent-cost-control</command-name>\n<command-message>agent-cost-control</command-message>"}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"P7.own-model-builtin","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"claude-code-guide"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"P7b.web-fetch-builtin","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"web-fetch"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"P9.non-agent-tool","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Bash","tool_input":{"command":"git status"}},"fixture":{"repo":{"governance":"none","branch":"feature"}},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"GR1.gate-lead-cheaper-family","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"Explore","model":"haiku","effort":"xhigh"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"GR2.gate-lead-mid-family","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"sonnet","effort":"xhigh"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"GR3.gate-lead-same-family-lower-effort","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"opus","effort":"medium"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"allow"},"status":"pass"},
+    {"id":"GR4.gate-lead-inherits","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"The same launch outside a gate run asks (C9); in a gate run it is refused so the gate never waits."},
+    {"id":"GR5.gate-lead-same-route","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"opus","effort":"high"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"GR6.gate-lead-max-effort","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","model":"haiku","effort":"max"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"GR7.gate-lead-unknown-agent","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"some-plugin:reviewer"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"GR8.gate-lead-fork","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"fork"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"GR9.gate-helper-launches","source":"Gate helpers by cost (owner decisions 24 Nov 2026): in a gate run a lead may start any agent strictly cheaper than itself; anything else is refused, never asked","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"Explore","model":"haiku","effort":"low"},"agent_id":"helper-1","agent_type":"toolkit-g1-helper"},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
+    {"id":"GR10.gate-preset-lead-route-unknown","source":"G2 of the subagent cost check (24 Nov 2026): in a gate run the Toolkit helper presets pass the cost test against the lead too (owner decision on #1466)","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"subagent_type":"toolkit-g1-helper","description":"hook pack","prompt":"Reply OK"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}}],"toolkit_helpers":"owner-claude"},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass","note":"The lead has no assistant entry yet, so the preset cannot be shown cheaper than it and is refused."},
+    {"id":"GR11.gate-preset-under-opus-lead-runs","source":"G2 of the subagent cost check (24 Nov 2026): in a gate run the Toolkit helper presets pass the cost test against the lead too (owner decision on #1466)","kind":"benign","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"subagent_type":"toolkit-g1-helper","description":"hook pack","prompt":"Reply OK"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"gate_role":"G1","transcript":[{"type":"user","message":{"role":"user","content":"Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it."}},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}],"toolkit_helpers":"owner-claude"},"expect":{"decision":"allow"},"status":"pass"},
     {
       "id": "GATE-LAUNCH.g2-title-no-gate-line",
       "source": "#1467 S4 (23 Nov 2026): two G2 launches without Gate or Route lines failed only at their first tool, and 13 G2 starts needed a manual effort raise",

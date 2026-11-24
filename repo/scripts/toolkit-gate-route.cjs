@@ -36,20 +36,21 @@
 // tools stay open so it can report), refuses a verdict or a G1 pull request body whose stamp is not
 // the session's own, and the merge train finder reads the stamps (stampStatus). A verdict is read
 // only where the finder counts one, the first line of a published comment, so reads and quotes of
-// verdict lines pass. A helper's call (agent_id) is checked against its helper pin, never the gate's.
+// verdict lines pass. A helper's call (agent_id) is not checked against the gate's pin: the agent hook
+// checked its route when it started (it must be cheaper than the lead).
 //
 // Accepted gaps, written down as the hook design playbook asks: the brief is the launcher's text, so
 // a brief that names no gate is not checked (the Projects skill requires the Gate line); a stamp is
 // text, so a session the hook does not run in, or a body the hook cannot read (a shell variable, a
 // file written in the same command), can carry any stamp (the finder trusts only the line, and RISKY
 // pull requests need a verified or attested one); after /clear the transcript starts again without the brief; until the
-// transcript has its first assistant entry only effort is checked; a helper's model is not in its
-// hook input, so only its effort is checked, and G2 subagents have no helper pin to check.
+// transcript has its first assistant entry only effort is checked.
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const transcriptHead = require('./toolkit-transcript-head.cjs');
+const transcriptTail = require('./toolkit-transcript-tail.cjs');
 
 const REGISTRY_PATH = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
 const EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -148,23 +149,10 @@ function entryText(entry) {
 // part a caller does not need yet.
 function readTranscript(file, parts = { brief: true, served: true }) {
   const out = { brief: null, model: null, effort: null };
-  let size;
-  try { size = fs.statSync(file).size; } catch { return out; }
-  const parse = line => { try { return JSON.parse(line); } catch { return null; } };
+  try { fs.statSync(file); } catch { return out; }
   if (parts.brief) out.brief = entryText(transcriptHead.firstUserEntry(file, entry => entryText(entry) !== null));
   if (!parts.served) return out;
-  const start = Math.max(0, size - TAIL_BYTES);
-  const lines = transcriptHead.readSlice(file, start, size - start).split('\n');
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const entry = parse(lines[index]);
-    if (!entry || entry.type !== 'assistant' || entry.isSidechain) continue;
-    const model = entry.message && entry.message.model;
-    if (typeof model !== 'string' || !model || model.startsWith('<')) continue;
-    out.model = model;
-    out.effort = EFFORTS.includes(entry.effort) ? entry.effort : null;
-    break;
-  }
-  return out;
+  return { ...out, ...transcriptTail.servedRoute(transcriptTail.readTail(file, TAIL_BYTES)?.entries) };
 }
 
 const refuse = (gate, reason) => ({ gate, deny: `Toolkit gate route check: ${reason}` });
@@ -220,17 +208,11 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   const { profile, member } = checked.pin;
   const pin = { model: checked.pin.model, effort: checked.pin.effort };
   const level = input.effort && typeof input.effort === 'object' ? input.effort.level : null;
-  // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but the
-  // helper's own effort: it is checked against the profile's helper pin, never the gate's. Only the
-  // hook input counts here, since the session environment is the gate's. G2 and design challenge
-  // have no helper pin (gate rules: G2 has no helpers), so their subagents are not checked; the gate
-  // could start one only while on its own pin, since an off-pin gate's Agent call is refused.
-  if (typeof input.agent_id === 'string' && input.agent_id) {
-    const helper = ROLE_MEMBER[gate] && gate !== 'DESIGN_CHALLENGE' ? `${ROLE_MEMBER[gate]}_HELPER` : null;
-    const helperPin = helper ? pinFor(registry, profile, helper) : null;
-    if (helperPin && EFFORTS.includes(level) && level !== helperPin.effort) return refuse(gate, `this ${gate} helper runs on effort ${level}, but the ${profile}/${helper} pin is ${helperPin.model}/${helperPin.effort}. Start the helper again with its pinned model and effort set in its agent file; you may still report this.`);
-    return { gate, helper: true, stamp: null };
-  }
+  // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but runs
+  // on the helper's own route, which the agent hook checked when it started (cheaper than the lead;
+  // owner decision on #1466), so it is never held to the gate's pin. The gate could start one only
+  // while on its own pin, since an off-pin gate's Agent call is refused.
+  if (typeof input.agent_id === 'string' && input.agent_id) return { gate, helper: true, stamp: null };
   if (!transcript && file) read = { ...read, ...readTranscript(file, { brief: false, served: true }), brief: read.brief };
   const effort = [level, environment.CLAUDE_EFFORT, read.effort].find(value => EFFORTS.includes(value)) || null;
   const model = read.model ? registryModel(read.model) : (typeof input.model === 'string' ? registryModel(input.model) : null);
@@ -247,7 +229,7 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
 // more (no device session, connector or card).
 const REPORT_TOOLS = /^(?:mcp__hearthbot__(?:post_message|edit_message|react|unreact|update_progress_checklist|request_decision|close_decision|message_coordinator|message_thread|no_reply_needed|read_thread|read_messages_by_id|read_project_chat|list_threads|rename_thread|show_helpline_card|stop_remote_control)|mcp__claude-code-remote__get_session)$/;
 const STATE_CHANGING = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|ScheduleWakeup|SendMessage|Workflow|mcp__.*)$/;
-const SHELL = /^(?:Bash|PowerShell)$/;
+const { SHELL_TOOLS: SHELL } = require('./toolkit-shell-call.cjs');
 // A verdict where the train finder counts one: the first line of a published comment.
 const VERDICT_FIRST = /^[ \t\r\n]*Toolkit-G2: (?:PASS|FAIL) [0-9a-f]{40} tier=(?:LIGHT|NORMAL|RISKY)/;
 

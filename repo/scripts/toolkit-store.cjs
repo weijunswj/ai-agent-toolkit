@@ -830,7 +830,7 @@ function rememberHandoff(deps, record) {
     const file = handoffStateFile(deps);
     (deps.fs || nodeFs).mkdirSync(path.dirname(file), { recursive: true });
     (deps.fs || nodeFs).writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  } catch { /* the stale check is the backstop */ }
+  } catch { /* the handoff check (toolkit-store.cjs handoff --check) is the backstop */ }
 }
 
 // A handoff run plans at most this many times when the store moves under it: once, then once again
