@@ -283,7 +283,12 @@ test('action: a dropped lease release keeps the stop code and warns in the run l
   const failing = () => ({ status: 2, stdout: '', stderr: `${unreleased}\nGH_FAILED: Writing state/x/sweep-lease.json failed (502): Bad gateway\n` });
   const parsed = action().runRefresh({ root: ROOT, env: minted, spawn: failing });
   assert.deepEqual([parsed.code, parsed.http, parsed.unreleased], ['GH_FAILED', '502', true]);
-  assert.equal(action().failureLine(parsed), 'Programme Sweep failed (GH_FAILED, HTTP 502). Open this workflow run and toolkit governance check for the cause.');
+  // The stop code and status are pinned here; what to do next is the action's own failure text,
+  // whose wording the neighbouring failed-pass test owns.
+  const lead = 'Programme Sweep failed. ';
+  assert.ok(action().GENERAL_FAILURE.startsWith(lead));
+  const named = `Programme Sweep failed (GH_FAILED, HTTP 502). ${action().GENERAL_FAILURE.slice(lead.length)}`;
+  assert.equal(action().failureLine(parsed), named);
   const signIn = action().runRefresh({ root: ROOT, env: minted, spawn: () => ({ status: 2, stdout: '', stderr: `${unreleased}\nGH_AUTH: gh is not signed in\n` }) });
   assert.equal(signIn.code, 'GH_AUTH', 'a sign-in failure still reads as one');
   const clean = action().runRefresh({ root: ROOT, env: minted, spawn: () => ({ status: 0, stdout: '{\n  "metrics": "Sweep: requests=1"\n}\n', stderr: '' }) });
@@ -297,7 +302,7 @@ test('action: a dropped lease release keeps the stop code and warns in the run l
   // A failed pass whose release also failed: red, named by its own code, and the warning too.
   const failed = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'GH_FAILED', http: '502', unreleased: true, report: null }) });
   assert.equal(failed.code, 1);
-  assert.deepEqual(failed.failures, ['Programme Sweep failed (GH_FAILED, HTTP 502). Open this workflow run and toolkit governance check for the cause.']);
+  assert.deepEqual(failed.failures, [named]);
   assert.deepEqual(failed.warnings, [action().NOTICES.unreleased]);
 });
 
