@@ -287,6 +287,24 @@ test('a row may expect ask, per host too, and any other decision is still refuse
   for (const decision of ['maybe', 'Ask']) assert.match(pack.rowErrors(row({ expect: { decision } })).join('\n'), /decision must be allow, deny or ask/, decision);
 });
 
+test('a fixture may render the Toolkit helpers for a named stack, from the plugin copy under test', t => {
+  assert.deepEqual(pack.rowErrors(row({ fixture: { toolkit_helpers: 'owner-claude' } })), []);
+  for (const value of [true, 'Owner Claude', '', 7]) assert.match(pack.rowErrors(row({ fixture: { toolkit_helpers: value } })).join('\n'), /fixture\.toolkit_helpers names the stack/, String(value));
+  // The helpers are rendered by the copy's own renderer, so they match its registry bytes, and are
+  // dated before the session so the hook does not read them as changed since it started.
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'toolkit-pack-helpers-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const fixture = new pack.Fixture(dir, {});
+  fixture.installToolkitHelpers(path.resolve(__dirname, '..', '..'), 'owner-claude');
+  const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
+  for (const role of ['G0', 'G1']) {
+    const { file, text } = ClaudeHelperAgentRenderer.fromRepository('owner-claude').render(role);
+    const written = path.join(dir, 'home', '.claude', 'agents', file);
+    assert.equal(fs.readFileSync(written, 'utf8'), text, role);
+    assert.ok(fs.statSync(written).mtimeMs < Date.now() - 30 * 60 * 1000, `${role} is dated before the session`);
+  }
+});
+
 test('a refusal only because a hook failed meets a row only when the row names it', () => {
   const deny = { decision: 'deny', problems: [], failed: [] };
   const hostile = row({ kind: 'hostile', expect: { decision: 'deny' } });

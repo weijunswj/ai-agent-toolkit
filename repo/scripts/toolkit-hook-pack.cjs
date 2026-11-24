@@ -159,7 +159,7 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'handoff', 'handoff_off', 'stale_rows', 'attention_line', 'toolkit_helpers'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.handoff_off !== undefined && !['env', 'file'].includes(fixture.handoff_off)) errors.push('fixture.handoff_off is env or file');
   if (fixture.handoff !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.handoff || typeof fixture.handoff !== 'object' || Array.isArray(fixture.handoff)
     || Object.keys(fixture.handoff).some(key => !['session', 'memory'].includes(key)) || !['new', 'checked'].includes(fixture.handoff.session) || !['moved', 'nul', 'unchanged', 'deleted', 'stale'].includes(fixture.handoff.memory)
@@ -208,6 +208,7 @@ function fixtureErrors(fixture) {
     }
   }
   if (fixture.transcript !== undefined && !Array.isArray(fixture.transcript)) errors.push('fixture.transcript lists transcript entries');
+  if (fixture.toolkit_helpers !== undefined && (typeof fixture.toolkit_helpers !== 'string' || !/^[a-z0-9-]+$/.test(fixture.toolkit_helpers))) errors.push('fixture.toolkit_helpers names the stack the Toolkit helper definitions are rendered for');
   if (fixture.files !== undefined && (typeof fixture.files !== 'object' || Array.isArray(fixture.files))) errors.push('fixture.files maps paths in the working folder to their text');
   return errors;
 }
@@ -480,6 +481,22 @@ class Fixture {
     if (spec.handoff) this.#handoff(spec);
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
+  }
+
+  // Writes toolkit-g0-helper and toolkit-g1-helper into the home's Claude agents folder exactly as the
+  // plugin copy under test renders them for `stack` (so line endings and registry bytes match that
+  // copy), dated an hour back so they are older than the session transcript.
+  installToolkitHelpers(pluginRoot, stack) {
+    const { ClaudeHelperAgentRenderer } = require(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-claude-helper-agents.cjs'));
+    const renderer = ClaudeHelperAgentRenderer.fromRepository(stack, pluginRoot);
+    const dir = path.join(this.home, '.claude', 'agents');
+    fs.mkdirSync(dir, { recursive: true });
+    const earlier = new Date(Date.now() - 3600 * 1000);
+    for (const role of ['G0', 'G1']) {
+      const { file, text } = renderer.render(role);
+      fs.writeFileSync(path.join(dir, file), text);
+      fs.utimesSync(path.join(dir, file), earlier, earlier);
+    }
   }
 
   #git(cwd, args) { return git(cwd, args, { env: this.env }); }
@@ -907,6 +924,7 @@ async function runOnHost(row, host, fixture, roots) {
     if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
   }
   const pluginRoot = roots.forFault(row.fault);
+  if (row.fixture?.toolkit_helpers) fixture.installToolkitHelpers(pluginRoot, row.fixture.toolkit_helpers);
   const event = row.event || 'PreToolUse';
   const payload = { session_id: HOOK_SESSION_ID, transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload, pluginRoot) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
@@ -1198,5 +1216,5 @@ if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
   CORPUS_REL, FAULTS, HOSTS, KINDS, KNOWN_BAD_DAYS, SCHEMA,
-  agedKnownBad, expectationChanges, selectRows, explainedRows, combineDecisions, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  Fixture, agedKnownBad, expectationChanges, selectRows, explainedRows, combineDecisions, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });
