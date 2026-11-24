@@ -186,7 +186,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/` in the Toolkit repo: this SKILL.md plus the `reference/` and `tasks/` files beside it. The coordinator reads it only from the library copy (**Guidebook copy**); changes go into Toolkit through a PR, never into the copy.
-- Watch every Toolkit-enabled feature, especially this skill; suggest improvements/settings to the owner, never change them yourself. The managed block carries this to threads.
+- Never change Toolkit features or their settings yourself. The managed block carries this to threads.
 - After a Toolkit release changes this skill or its block, the guidebook refresh brings both here; apply a changed block as **Guidebook copy** says.
 - Keep this skill generic. User details go in memory or claude.ai preferences, never here. Toolkit rules go to `CONTROLLER.md` or the governed rules.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2), set by `bump-version.cjs --next` with the PR's Toolkit bump and the re-bump run.
