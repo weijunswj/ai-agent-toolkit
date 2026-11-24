@@ -92,6 +92,30 @@ test('a command that is not a node script in the repository fails', t => {
   has(check(root, { trackedFiles: [CLAUDE_HOOKS, CODEX_HOOKS] }), /"bash ~\/stop\.sh" is not a node script in the repository/);
 });
 
+test('a second command chained after the script, or a path that leaves its folder, is not a node script in the repository', t => {
+  const copy = realCopy(t);
+  const rel = copy.scope.hook_files.claude[0];
+  const hooks = JSON.parse(fs.readFileSync(path.join(copy.root, ...rel.split('/')), 'utf8'));
+  const stop = hooks.hooks.Stop[0].hooks.find(hook => hook.command.includes('toolkit-owed-check-hook.cjs'));
+  stop.command += ' && node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs"';
+  write(copy.root, rel, JSON.stringify(hooks));
+  has(runReal(copy), /toolkit-owed-check-hook\.cjs" && node .* is not a node script in the repository/);
+
+  const tails = [' && node x.cjs', '; node x.cjs', ' | node x.cjs', ' $(node x.cjs)', ' `node x.cjs`', ' --flag=$(id)', ' > out.txt'];
+  for (const tail of tails) {
+    const root = tempRoot(t, 'chain');
+    write(root, CLAUDE_HOOKS, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "\${PLUGIN_ROOT}/repo/scripts/a.cjs"${tail}` }] }] } }));
+    write(root, CODEX_HOOKS, JSON.stringify({ hooks: {} }));
+    write(root, 'repo/scripts/a.cjs', "'use strict';\n");
+    write(root, SCOPE, JSON.stringify({ schema: 'toolkit-hook-scope/v1', hook_files: { claude: [CLAUDE_HOOKS], codex: [CODEX_HOOKS] }, vocabulary: realScope().vocabulary, hard_rules: [{ id: 'merge-hold', rule: 'x' }], hooks: [row('claude', 'repo/scripts/a.cjs', ['Stop'])], modules: [], known_open: [] }));
+    has(check(root, { trackedFiles: [CLAUDE_HOOKS, CODEX_HOOKS], baseScope: null }), /is not a node script in the repository/);
+  }
+  const files = { 'repo/scripts/a.cjs': "'use strict';\n" };
+  const run = fixture(t, { claude: { Stop: ['repo/scripts/./a.cjs'] }, files, scope: { hooks: [row('claude', 'repo/scripts/a.cjs', ['Stop'])] } });
+  assert.deepEqual(run({ baseScope: null }).errors, [], 'a ./ in the path names the same script');
+  has(fixture(t, { claude: { Stop: ['repo/../../outside.cjs'] }, files })(), /is not a node script in the repository/);
+});
+
 test('an entry on an event its row does not list, or a listed event with no why_event line, fails', t => {
   const files = { 'repo/scripts/a.cjs': "'use strict';\n" };
   has(fixture(t, { claude: { PreToolUse: ['repo/scripts/a.cjs'], Stop: ['repo/scripts/a.cjs'] }, files, scope: { hooks: [row('claude', 'repo/scripts/a.cjs', ['PreToolUse'])] } })(), /on Stop, an event its claude row does not list and justify/);
@@ -157,8 +181,14 @@ test('vocabulary counts tool names, environment names, output fields and harness
     ['const remote = process.env.CLAUDE_CODE_REMOTE;', /CLAUDE_CODE_REMOTE/],
     ["const keys = ['CODEX_HOME'];", /CODEX_HOME/],
     ['const out = { hookSpecificOutput: {} };', /hookSpecificOutput/],
-    ["if (host === 'codex') x();", /=== 'codex'/],
-    ["switch (host) { case 'claude': break; }", /=== 'claude'/],
+    ['const remote = process.env?.CLAUDE_CODE_REMOTE;', /CLAUDE_CODE_REMOTE/],
+    ["if (host === 'codex') x();", /'codex'/],
+    ["switch (host) { case 'claude': break; }", /'claude'/],
+    ['const deadline = ({ claude: 7500, codex: 50000 })[host];', /'claude' at line 2, 'codex' at line 2/],
+    ["const isClaude = ['claude'].includes(host);", /'claude'/],
+    ["const CODEX = 'codex'; if (host === CODEX) x();", /'codex'/],
+    ['const tools = { Bash: 1 };', /Bash/],
+    ['const shell = /^Bash\\b/.test(name);', /Bash/],
     ['const reason = `${"Write"}`;', /Write/],
   ];
   for (const [line, pattern] of cases) has(sharedLib(t, `'use strict';\n${line}\n`)(), pattern);
@@ -195,7 +225,8 @@ test('a clean known_open item fails, in the real hook files and in a fixture', t
   }
   write(copy.root, 'repo/scripts/toolkit-claude-checkpoint-hook.cjs', "'use strict';\n");
   for (const item of scope.hooks) if (item.harness === 'claude' && item.script.endsWith('toolkit-programme-checkpoint-hook.cjs')) item.script = 'repo/scripts/toolkit-claude-checkpoint-hook.cjs';
-  has(runReal(copy, scope), new RegExp(`known_open item ${id.replace(/[.]/g, '\\.')} is already clean: remove it from the list`));
+  const result = runReal(copy, scope);
+  assert.ok(result.errors.includes(`known_open item ${id} is already clean: remove it from the list`), result.errors.join('\n'));
 
   const open = { id: 'vocabulary:repo/scripts/lib.cjs', terms: ['Bash'], owner: '#1474 S1' };
   has(sharedLib(t, "'use strict';\n", undefined, { known_open: [open] })(), /known_open item vocabulary:repo\/scripts\/lib\.cjs is already clean/);

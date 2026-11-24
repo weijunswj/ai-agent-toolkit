@@ -34,9 +34,10 @@ const SCHEMA = 'toolkit-hook-scope/v1';
 const MODULE_KINDS = Object.freeze(['policy', 'library']);
 const SCRIPT_EXTENSIONS = Object.freeze(['.cjs', '.js', '.mjs']);
 const KEYWORDS_BEFORE_REGEX = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
-const EQUALITY = new Set(['===', '!==', '==', '!=']);
-// A tool name inside a regular expression counts only as a whole alternative: /^(?:Bash|Monitor)$/.
-const REGEX_ITEM = /(?<=^|[(|:^])([A-Za-z_][A-Za-z0-9_]*)(?=$|[|)$])/g;
+// A tool name inside a regular expression counts as a whole alternative or a whole word:
+// /^(?:Bash|Monitor)$/, /^Bash\b/, /\bBash\b/.
+const REGEX_ITEM = /(?<=^|[(|:^]|\\b)([A-Za-z_][A-Za-z0-9_]*)(?=$|[|)$]|\\b)/g;
+const MEMBER = new Set(['.', '?.']);
 
 const posix = rel => rel.split(path.sep).join('/');
 const isText = value => typeof value === 'string' && value.trim() !== '';
@@ -259,9 +260,10 @@ function graph(root, entries, stops = new Set(), dynamic = new Map()) {
 // Vocabulary: the harness facts a policy or library module must not hold.
 
 // Returns a map of each term found to the first line it is on. Terms: a tool name as a whole string
-// literal or a whole regular-expression alternative; an environment name read as a member (process.env.CLAUDE_X)
-// or as a string (a constant that only starts with the prefix is not one); a hook output field; and
-// a comparison with, or `case` of, a harness name (`=== 'codex'`).
+// literal, an object key ({ Bash: 1 }) or a whole regular-expression alternative or word (/^Bash\b/);
+// an environment name read as a member (process.env.CLAUDE_X, env?.CLAUDE_X) or as a string (a
+// constant that only starts with the prefix is not one); a hook output field; and a harness name as a
+// whole string or an object key (`'codex'`), however it is then compared or looked up.
 function vocabularyOf(source, vocabulary) {
   const tokens = tokenize(source);
   const tools = new Set(vocabulary.tool_names);
@@ -272,11 +274,14 @@ function vocabularyOf(source, vocabulary) {
   const add = (term, token) => { if (!found.has(term)) found.set(term, source.slice(0, token.at).split('\n').length); };
   tokens.forEach((token, k) => {
     const literal = token.type === 'string' || (token.type === 'template' && !token.expressions);
-    if (literal && tools.has(token.value)) add(token.value, token);
+    // An object key counts for a PascalCase or snake_case tool name and a harness name; a bare
+    // lowercase word such as `shell:` is Node's spawn option far more often than Codex's tool.
+    const key = token.type === 'ident' && tokens[k + 1]?.value === ':' && ['{', ','].includes(tokens[k - 1]?.value);
+    if ((literal || (key && /^[A-Z]|_/.test(token.value))) && tools.has(token.value)) add(token.value, token);
     if (token.type === 'regex') for (const match of token.value.matchAll(REGEX_ITEM)) if (tools.has(match[1])) add(match[1], token);
-    if (((token.type === 'ident' && tokens[k - 1]?.value === '.') || literal) && env.test(token.value)) add(token.value, token);
+    if (((token.type === 'ident' && MEMBER.has(tokens[k - 1]?.value)) || literal) && env.test(token.value)) add(token.value, token);
     if ((token.type === 'ident' || literal) && fields.has(token.value)) add(token.value, token);
-    if (literal && harnesses.has(token.value) && (EQUALITY.has(tokens[k + 1]?.value) || EQUALITY.has(tokens[k - 1]?.value) || tokens[k - 1]?.value === 'case')) add(`=== '${token.value}'`, token);
+    if ((literal || key) && harnesses.has(token.value)) add(`'${token.value}'`, token);
   });
   return new Map([...found].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
@@ -295,9 +300,12 @@ function hookEntries(root, rel) {
     for (const group of Array.isArray(groups) ? groups : []) {
       for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) {
         const command = String(hook?.command ?? '');
-        const match = /^node\s+"\$\{[A-Z_]+\}\/((?:repo|skills)\/[^"\s]+)"(?:\s|$)/.exec(command);
-        if (!match) { errors.push(`${rel} ${event}: "${command}" is not a node script in the repository, so it has no scope row`); continue; }
-        entries.push({ event, script: match[1], file: rel });
+        // One node script under the plugin root, then only plain argument words: a second command
+        // (&&, ;, |, $(...), a backtick, a redirect) would run something no row names.
+        const match = /^node\s+"\$\{[A-Z_]+\}\/([^"\s]+)"((?:\s+[A-Za-z0-9_.,:=/@+-]+)*)\s*$/.exec(command);
+        const script = match ? path.posix.normalize(match[1]) : '';
+        if (!match || !/^(?:repo|skills)\//.test(script)) { errors.push(`${rel} ${event}: "${command}" is not a node script in the repository, so it has no scope row`); continue; }
+        entries.push({ event, script, file: rel });
       }
     }
   }
