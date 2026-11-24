@@ -1,5 +1,25 @@
 # Toolkit Changelog
 
+## 3.172.0
+
+### Changed
+
+- **Work starts on the owner's computer:** every controller, cloud or local, now starts its sessions, lanes, gate runs and threads on the owner's computer. A cloud start needs the owner to start it or agree to it in chat. When the computer is busy or away, the work waits and the controller says so in one line; nothing falls back to the cloud. Scheduled tasks that already run in the cloud are unchanged.
+- **Projects runs local first:** the Projects skill's "Cloud first" rule is now "Local first", new projects get `remote_control` as their gate placement, and the managed project instructions say the same. Steps only a cloud thread can do (the guidebook copy into the project library, its after-merge fast refresh) ask the user first; the hourly nudge still refreshes the copy on its own.
+- **Device evidence:** a local Remote Control thread archives its evidence to the transport store itself, and uses the shared folder only when it cannot reach the store.
+- The leftover scan and the session-start check name an older `N8N-AGENT-RULES-ADAPTER` block in `AGENTS.md` as a leftover in every governance state; where governance is on, governance cleanup removes it with the other Toolkit copies.
+
+### Removed
+
+- The n8n block Toolkit could add to a repository's `AGENTS.md` is retired, with its installer and its Claude and Gemini snippet copies: the global rules that setup installs carry the n8n Safety Router section in every session, so a repository needs no copy.
+
+### Fixed
+
+- A programme refresh on a computer leaves the sweep lease to a cloud Programme Sweep that is queued or running its refresh job, and says "The cloud sweep picks this up". Back-to-back refreshes after the controller's own writes, each capped at 300 requests, used to re-take the lease within seconds, so the cloud's full-budget pass never ran and new pull requests were missing from task graphs. When GitHub cannot say whether a cloud sweep runs, the refresh runs as usual and says so in one line.
+- The programme sweep after a merge refreshes the board again. A pass whose lease release met a race on the evidence store branch used to drop the release without a word, so the lease stayed live for up to twenty minutes and every sweep started for the next merge logged "queued" and ended green with nothing refreshed. The release now reads again and tries up to three times, with a short pause before each new try; one that never lands puts a "lease not released" warning in the run log, and the next sweep reports that pass as stopped. A failed pass still names its own stop code when that warning comes first.
+- A cloud sweep that meets another sweep's lease waits for it, checking every minute for up to 30 minutes, then runs its pass with the time left. A run that never gets the lease fails instead of ending green, and starts one more run at once.
+- `toolkit governance status` reads the merged binding once more with a longer budget when the first read ran out of time, so one slow fetch of a large default branch no longer holds every programme command.
+
 ## 3.171.0
 
 ### Added

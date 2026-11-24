@@ -191,7 +191,7 @@ test('a generated-sync change is refused for hand-written edits, a source file, 
 test('the sync outputs the carry trusts are exactly the files the two syncs write', () => {
   assert.deepEqual([...carry.OUTPUTS.keys()].sort(), [
     'CLAUDE.md', 'README.md',
-    'skills/n8n-environment-setup/references/n8n-safety-rules.md', 'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md',
+    'skills/n8n-environment-setup/references/n8n-safety-rules.md',
     'skills/n8n-safety-router/n8n-safety-rules.md', 'skills/n8n-workflow-transport/references/n8n-safety-rules.md',
     'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
   ]);
