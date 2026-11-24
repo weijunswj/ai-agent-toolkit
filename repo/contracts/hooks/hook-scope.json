@@ -82,6 +82,13 @@
       "events": { "Stop": "Turn end: owed work is only certain once the agent stops, and a nudge then still reaches the controller before the owner's next turn." }
     },
     {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-claude-env-edit-hook.cjs",
+      "rules": "harness-only",
+      "reason": "Keeps the env edit file's real key values out of the chat by refusing Claude Code tool calls on that folder. No hard rule on the closed list covers reading it, so making it one for every harness is an owner decision.",
+      "events": { "PreToolUse": "Before a file or shell tool runs: a read, search or listing of the env edit folder would put every key value in the chat, so it is refused before it happens." }
+    },
+    {
       "harness": "codex",
       "script": "repo/scripts/toolkit-codex-session-start.cjs",
       "rules": "harness-only",
