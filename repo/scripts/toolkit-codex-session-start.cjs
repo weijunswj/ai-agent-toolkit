@@ -60,7 +60,9 @@ function readHookInput() {
 // governance question) and returns the session's lines: the local default-branch catch-up's line
 // when it moved or could not move (toolkit-repo-catchup.cjs, from this start's fresh read), then
 // one line stating this repository's governance state; nothing outside a repository.
-// SessionStart cannot block, so a failure here only drops a line.
+// SessionStart cannot block. A failed catch-up only drops its line; a failed governance check gives
+// one line naming the governed rules file inside a repository (toolkit-governance-unavailable.cjs),
+// since the governed rules arrive only through it.
 function sessionLines(input, dependencies) {
   try {
     const gate = dependencies.gate || require('./toolkit-governance-gate.cjs');
@@ -70,9 +72,13 @@ function sessionLines(input, dependencies) {
     try { caughtUp = (dependencies.catchUp || require('./toolkit-repo-catchup.cjs')).catchUp(fresh); } catch { caughtUp = null; }
     let governance = null;
     // Codex always sends the session's cwd; without one there is no repository to describe.
-    try { governance = input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null; } catch { governance = null; }
+    try { governance = input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null; } catch (error) { governance = unavailableLine(input, error); }
     return [caughtUp, governance].filter(Boolean);
-  } catch { return []; }
+  } catch (error) { return [unavailableLine(input, error)].filter(Boolean); }
+}
+
+function unavailableLine(input, error) {
+  try { return require('./toolkit-governance-unavailable.cjs').sessionStartLine(input && input.cwd, error); } catch { return ''; }
 }
 
 function main(argv = process.argv.slice(2), dependencies = {}) {

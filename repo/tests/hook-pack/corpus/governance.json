@@ -2340,6 +2340,62 @@
       },
       "status": "pass"
     },
+    {
+      "id": "GOV.session-start-error-notice",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a crash in that check must say so and name the rules file instead of printing nothing",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "fault": {"type":"throw-module","file":"repo/scripts/toolkit-governance-gate.cjs"},
+      "expect": {"decision":"allow","context_contains":["Toolkit couldn't load the governance check at this session start","toolkit-governed-rules.md"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-resume",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a resumed session gets them again",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"resume"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-compact",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; compaction drops earlier context, so the compact start gives them again",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "event": "SessionStart",
+      "payload": {"source":"compact"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-subfolder",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a session started in a subfolder still gets them",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{work}/docs"},
+      "fixture": {"repo":{"governance":"enabled"},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n","docs/README.md":"# Docs\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.rules-enabled-linked-worktree",
+      "source": "plug-and-play parity: a governed repository gets its rules only from the session-start check; a session started in a linked worktree still gets them",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup","cwd":"{trees}/lane"},
+      "fixture": {"repo":{"governance":"enabled","worktrees":["lane"]},"files":{"AGENTS.md":"# Repository rules\n\nOnly this repository's own rules.\n"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository.","# Toolkit-Governed Repository Rules"]},
+      "status": "pass"
+    },
     {"id":"C1.no-skill-general-purpose","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"haiku"}},"fixture":{"repo":{"governance":"enabled","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
     {"id":"C2.no-skill-plain-folder","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"Explore"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},
     {"id":"C3.skill-before-compaction","source":"Subagent cost check (owner decision 24 Nov 2026): a launch runs unasked only when strictly cheaper than its caller, after the agent-cost-control skill is read","kind":"hostile","hosts":["claude"],"payload":{"tool_name":"Agent","tool_input":{"description":"hook pack","prompt":"Reply OK","subagent_type":"general-purpose","model":"haiku"}},"fixture":{"repo":{"governance":"none","branch":"feature"},"transcript":[{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_pack","name":"Skill","input":{"skill":"ai-agent-toolkit:agent-cost-control"}}]},"effort":"high"},{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"},{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}]},"effort":"high"}]},"expect":{"decision":"deny","reason":"toolkit-claude-agent-hook"},"status":"pass"},

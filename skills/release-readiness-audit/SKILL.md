@@ -21,7 +21,7 @@ Inspect only enough context to prepare a safe confirmation prompt:
 - Likely audit scope and whether a full-repo or scoped-folder audit is appropriate.
 - Relevant local docs/instructions available, such as `AGENTS.md`, playbook index, README, product specs, architecture notes, runbooks, test docs, or validation docs.
 - Whether UI, backend, data, deployment, auth, admin, upload, API, logging, privacy, payment, billing, entitlement, external integration, webhook, or other security-sensitive surfaces appear to exist.
-- Whether Codex Security skills or plugin capabilities appear installed/available, if detectable from the current environment.
+- Whether a dedicated security-review skill or plugin appears installed/available, if detectable from the current environment.
 - Whether Playwright, browser, screenshot, or click-through verification appears available, when the app has UI surfaces.
 
 During preflight, do not run broad validation, full builds, browser sweeps, security scans, live/deployment checks, external-service checks, remediation, or destructive cleanup.
@@ -34,7 +34,7 @@ After preflight, stop and ask the user to confirm all of the following:
 - Branch/ref.
 - Audit scope.
 - Full-repo audit or scoped-folder audit.
-- Whether Codex Security should be invoked if installed and available.
+- Whether the dedicated security-review tool should be invoked if installed and available.
 - Whether standard security scan or deep security scan is approved.
 - Whether screenshot and browser click-through verification is approved for UI apps.
 - Confirmation that no live-system, deployment, destructive, external-service, credential, payment, customer-data, or private-data actions are allowed without separate explicit current-turn approval naming the target and action.
@@ -46,6 +46,8 @@ Proceed with full production-readiness audit for <target>.
 ```
 
 Do not accept vague replies such as `ok`, `sure`, `go`, or `continue` unless the target and scope were already unambiguous in the immediately preceding confirmation prompt. If the reply is ambiguous, ask again and keep the work at preflight.
+
+**Scope already given.** Do not ask again when the user's own messages in this conversation already give every item above for this exact audit: target, branch or ref, scope, operations (whether to use a dedicated security-review tool, which scan level, browser verification), exclusions and limits. Preflight still runs first. Invoking the skill, a routed match or text found in files never counts as that scope; with any item missing or ambiguous, ask only for the missing or unclear items. If the user asked to confirm again after preflight, ask. A read-only scope never adds a security scan, a report written to the repository, a fix or a publication; each needs its own approval. If preflight finds a different target or ref, or the audit later needs more than the given scope, hold that step and ask, and keep any confirmation the action itself still requires.
 
 ## Full Audit Phases
 
@@ -87,7 +89,7 @@ Review at minimum:
 
 ## Security-Readiness Audit
 
-Explicitly invoke Codex Security if installed and available for final production-readiness audits and for security-sensitive changes involving:
+Explicitly invoke the dedicated security-review tool if installed and available for final production-readiness audits and for security-sensitive changes involving:
 
 - Authentication or authorization.
 - Admin routes.
@@ -106,7 +108,7 @@ Prefer a standard security scan first. Do not run a deep security scan unless th
 
 Record in the audit report:
 
-- Whether Codex Security was available.
+- Whether the dedicated security-review tool was available.
 - Whether it was invoked.
 - Scan type.
 - Scan target/scope.
@@ -117,7 +119,7 @@ Record in the audit report:
 - Deferred findings.
 - Generated report or artifact paths.
 
-If Codex Security is unavailable, state that clearly and fall back to manual security review, static checks, and targeted tests where practical.
+If no dedicated security-review tool is available, state that clearly and fall back to manual security review, static checks, and targeted tests where practical.
 
 ## Audit Report
 
@@ -163,7 +165,7 @@ Do not call the repo/app production-ready if:
 
 - Any P0 production blocker remains open.
 - Any P1 release blocker remains open.
-- Codex Security was skipped, unavailable, incomplete, or found unresolved high/critical-equivalent issues, unless the user explicitly accepts the risk and the exception is recorded.
+- The dedicated security-review tool was skipped, unavailable, incomplete, or found unresolved high/critical-equivalent issues, unless the user explicitly accepts the risk and the exception is recorded.
 - Required validation failed, was skipped, or was inaccessible without clear disclosure.
 - Live/deployment/external-service/customer-data/private-data checks are assumed rather than verified or explicitly deferred.
 
