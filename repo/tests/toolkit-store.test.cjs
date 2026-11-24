@@ -242,17 +242,81 @@ test('the command line refuses unknown commands, flags and messages, and the fla
     ['status', '--force'], ['status', '--store', 'a', '--store', 'b'], ['move', '--store', 'x', '--from', 'a', '--message', 'm'], ['delete-merged-branch', '--store', 'x'], ['sync', '--path', 'a']]) {
     assert.equal(store.main(argv, { stdout: () => {}, stderr: () => {} }), 2, argv.join(' '));
   }
-  assert.deepEqual(store.COMMANDS, ['status', 'sync', 'save', 'move', 'merge-branch', 'delete-merged-branch', 'handoff']);
+  assert.deepEqual(store.COMMANDS, ['status', 'sync', 'save', 'move', 'merge-branch', 'delete-merged-branch']);
   assert.deepEqual(store.VALUE_FLAGS, {
     status: ['--store', '--repo-root'], sync: ['--store', '--repo-root'], save: ['--store', '--repo-root', '--path', '--message'],
     move: ['--store', '--repo-root', '--from', '--to', '--message'], 'merge-branch': ['--store', '--repo-root', '--branch', '--message'],
     'delete-merged-branch': ['--store', '--repo-root', '--branch'],
-    handoff: ['--store', '--out', '--repo-root', '--memory', '--instructions', '--file', '--baseline'],
   });
   const flags = [...fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--name-only', '--verify', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--unshallow', '--objects', '--batch-check=%(objecttype) %(objectname)', '--ignore-unmatch'].includes(flag)).sort(),
-    ['--baseline', '--branch', '--check', '--confirm-removals', '--file', '--from', '--instructions', '--json', '--memory', '--message', '--out', '--path', '--replace-memory', '--repo-root', '--reseed', '--store', '--to'], 'every caller flag is in the pinned table');
+  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--name-only', '--verify', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
+    ['--branch', '--from', '--json', '--message', '--path', '--repo-root', '--store', '--to'], 'every caller flag is in the pinned table');
   assert.equal(store.mergedStoreBinding(os.tmpdir()).ok, false);
+});
+
+test('the retired handoff snapshot command is refused as unknown, with nothing run or written', t => {
+  // An empty folder outside any repository, so nothing could be written into a real checkout.
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-store-handoff-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  for (const argv of [['handoff', '--store', 'x'], ['handoff', '--check', '--store', 'x', '--repo-root', 'y'], ['handoff', '--out', 'x', '--replace-memory', '--memory', 'm']]) {
+    const err = [];
+    const run = [];
+    assert.equal(store.main(argv, { cwd, stdout: () => {}, stderr: text => err.push(text), run: (...args) => { run.push(args); return { status: 1 }; } }), 2, argv.join(' '));
+    assert.match(err.join(''), /^Stopped: unknown command "handoff"\./, argv.join(' '));
+    assert.deepEqual(run, [], 'no Git call is made');
+    assert.deepEqual(fs.readdirSync(cwd), [], 'nothing is written');
+  }
+});
+
+// The store's deletion rule has no exception: save, move and merge-branch never delete a file, and a
+// deletion in a staged change, a commit the remote lacks or a merge is refused. A file in the retired
+// handoff snapshot's memory area, with that folder's manifest listing it as removed (either manifest
+// version), is refused like any other file.
+test('every deletion is refused by save, move and merge-branch, a retired snapshot memory file included', t => {
+  const w = world(t);
+  const SNAPSHOT = 'evidence/handoff/owner/repo';
+  const manifest = (schema, removed) => `${JSON.stringify({ schema, files: [], removed: removed ? [{ path: 'memory/note.md', removed_at: '2026-11-21T18:07:00.000Z' }] : [] }, null, 2)}\n`;
+  git(w.other, 'pull', '--quiet', '--no-rebase', 'origin', 'main');
+  fs.mkdirSync(path.join(w.other, ...SNAPSHOT.split('/'), 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(w.other, ...SNAPSHOT.split('/'), 'memory', 'note.md'), 'note\n');
+  fs.writeFileSync(path.join(w.other, ...SNAPSHOT.split('/'), 'manifest.json'), manifest('toolkit.handoff-snapshot.v2', false));
+  git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'old snapshot'); git(w.other, 'push', '--quiet', 'origin', 'main');
+  git(w.dir, 'pull', '--quiet', '--ff-only', 'origin', 'main');
+  const seeded = w.remoteTip();
+  // One deletion, as a commit in `dir` (the checkout) or `other` (a store branch).
+  const deletions = {
+    plain: dir => { fs.rmSync(path.join(dir, 'archives', 'old', 'kept.md')); return 'archives/old/kept.md'; },
+    'snapshot v1': dir => { fs.rmSync(path.join(dir, ...SNAPSHOT.split('/'), 'memory', 'note.md')); fs.writeFileSync(path.join(dir, ...SNAPSHOT.split('/'), 'manifest.json'), manifest('toolkit.handoff-snapshot.v1', true)); return `${SNAPSHOT}/memory/note.md`; },
+    'snapshot v2': dir => { fs.rmSync(path.join(dir, ...SNAPSHOT.split('/'), 'memory', 'note.md')); fs.writeFileSync(path.join(dir, ...SNAPSHOT.split('/'), 'manifest.json'), manifest('toolkit.handoff-snapshot.v2', true)); return `${SNAPSHOT}/memory/note.md`; },
+  };
+  const commands = {
+    save: () => { w.write('archives/after.md', 'after\n'); return ['save', '--path', 'archives/after.md', '--message', 'after']; },
+    move: () => ['move', '--from', 'loose.json', '--to', 'archives/loose/loose.json', '--message', 'tidy'],
+    'merge-branch': () => ['merge-branch', '--branch', 'drop', '--message', 'merge drop'],
+  };
+  for (const [command, argv] of Object.entries(commands)) {
+    for (const [kind, remove] of Object.entries(deletions)) {
+      const label = `${command} / ${kind}`;
+      let file;
+      if (command === 'merge-branch') {
+        git(w.other, 'checkout', '--quiet', '-B', 'drop', 'origin/main');
+        file = remove(w.other);
+        git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'drop'); git(w.other, 'push', '--quiet', '--force', 'origin', 'drop');
+        git(w.other, 'checkout', '--quiet', 'main');
+      } else {
+        file = remove(w.dir);
+        git(w.dir, 'add', '-A'); git(w.dir, 'commit', '--quiet', '-m', 'drop');
+      }
+      const run = w.act(argv());
+      assert.equal(run.code, 1, `${label}: ${JSON.stringify(run.result)}`);
+      assert.ok(run.result.stopped.includes(`${file} would be deleted or changed away`), `${label}: ${run.result.stopped}`);
+      assert.equal(w.remoteTip(), seeded, `${label}: nothing reaches the store`);
+      assert.ok(w.remoteHas(file), `${label}: the file stays in the store`);
+      assert.ok(!fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD')), `${label}: no half-done merge`);
+      git(w.dir, 'reset', '--quiet', '--hard', 'origin/main');
+      fs.rmSync(path.join(w.dir, 'archives', 'after.md'), { force: true });
+    }
+  }
 });
 
 // ---- G2 round 1 findings: each test below reproduces one finding and holds the fix ---------------

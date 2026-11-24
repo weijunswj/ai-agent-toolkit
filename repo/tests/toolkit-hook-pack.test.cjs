@@ -138,37 +138,20 @@ test('a row with a wrong shape is refused with the reason', () => {
     [row({ extra: true }), /unknown key extra/],
     [row({ host_session: 'arbitrary' }), /host_session must be one of/],
     [row({ fixture: { gate_role: 'G3' } }), /gate_role is one of G0, G1, G2/],
-    [row({ fixture: { handoff_off: 'yes' } }), /handoff_off is env or file/],
     [row({ postcondition: 'handoff-maybe' }), /unknown postcondition/],
+    // The retired handoff snapshot's fixture keys and postconditions are refused like any unknown one.
+    [row({ fixture: { handoff_off: 'file' } }), /fixture has unknown key handoff_off/],
+    [row({ fixture: { repo: { governance: 'enabled' }, handoff: { session: 'checked', memory: 'moved' } } }), /fixture has unknown key handoff/],
+    ...['no-handoff-write', 'handoff-write', 'handoff-refresh', 'no-handoff-refresh'].map(postcondition => [row({ postcondition }), /unknown postcondition/]),
     [row({ fixture: { repo: { governance: 'enabled', cached_binding_store: true } } }), /cached_binding_store needs governance undecided/],
     [row({ fixture: { repo: { governance: 'enabled', owner: 'someone' } } }), /owner needs governance undecided/],
     [row({ fixture: { repo: { governance: 'enabled', nested_worktrees: ['lane'] } } }), /nested_worktrees lists \{ branch, commits \} objects/],
     [row({ fixture: { repo: { governance: 'enabled', nested_worktrees: [{ branch: 'lane', commits: [{}] }] } } }), /nested_worktrees lists/],
   ];
-  assert.deepEqual(pack.rowErrors(row({ fixture: { handoff_off: 'file' }, postcondition: 'no-handoff-write' })), []);
   assert.deepEqual(pack.rowErrors(row({ fixture: { gate_role: 'G1', repo: { governance: 'undecided', owner: 'someone', cached_binding_store: true, nested_worktrees: [{ branch: 'lane', commits: [{ files: {} }] }] } } })), []);
   for (const [bad, reason] of cases) assert.match(pack.rowErrors(bad).join('\n'), reason, JSON.stringify(bad));
   const parsed = pack.parseCorpusFile(JSON.stringify({ schema: pack.SCHEMA, family: 'other', rows: [] }), 'push.json');
   assert.match(parsed.errors.join('\n'), /family must be "push"/);
-});
-
-test('handoff fixtures are two known shapes on an enabled repository, run on claude alone, and their postconditions need one', () => {
-  const enabled = { repo: { governance: 'enabled' } };
-  const shape = { session: 'checked', memory: 'moved' };
-  assert.deepEqual(pack.rowErrors(row({ fixture: { ...enabled, handoff: shape }, postcondition: 'handoff-refresh' })), []);
-  assert.deepEqual(pack.rowErrors(row({ fixture: { ...enabled, handoff: { session: 'new', memory: 'unchanged' } }, postcondition: 'no-handoff-refresh' })), []);
-  for (const fixture of [
-    { handoff: shape },
-    { repo: { governance: 'undecided' }, handoff: shape },
-    { ...enabled, handoff: { session: 'stale', memory: 'moved' } },
-    { ...enabled, handoff: { session: 'new', memory: 'deleted' } },
-    { ...enabled, handoff: { session: 'new' } },
-    { ...enabled, handoff: { ...shape, extra: true } },
-    { ...enabled, handoff: null },
-    { ...enabled, handoff: [] },
-  ]) assert.match(pack.rowErrors(row({ fixture })).join('\n'), /fixture\.handoff needs an enabled repository/, JSON.stringify(fixture));
-  assert.match(pack.rowErrors(row({ hosts: ['claude', 'codex'], fixture: { ...enabled, handoff: shape } })).join('\n'), /runs on claude alone/);
-  assert.match(pack.rowErrors(row({ postcondition: 'no-handoff-refresh' })).join('\n'), /no-handoff-refresh needs a handoff fixture/);
 });
 
 test('matchers read as the hosts read them: none matches all, a plain list exactly, anything else as a pattern', () => {
