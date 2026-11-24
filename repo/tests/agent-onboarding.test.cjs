@@ -55,7 +55,9 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(contract, /`repo\/contracts\/\*\*` holds the machine contracts \(schemas, policies, fixtures, templates, agent-rule sources\)/);
   assert.match(contract, /`repo\/source-watch\/provenance\/\*\*\/SOURCE-LOCK\.json` holds only active third-party pins/);
   assert.match(contract, /One direct canonical tree: new skills go under `skills\/\*\*` after Skill Creation Center review, everything else under `repo\/\*\*`\./);
-  assert.match(contract, /`skills\/\*\*` is the canonical copyable product surface/);
+  assert.match(contract, /`skills\/\*\*` is the canonical product surface/);
+  assert.match(contract, /Toolkit's own skills ship in the plugin and are not for copying/);
+  assert.doesNotMatch(contract, /canonical copyable product surface/);
 
   assert.match(sourceOfTruth, /Direct canonical content lives in `skills\/\*\*` and `repo\/\*\*`; there is no second project or publisher tree\./);
   assert.match(sourceOfTruth, /Active third-party provenance under `repo\/source-watch\/provenance\/\*\*`\./);

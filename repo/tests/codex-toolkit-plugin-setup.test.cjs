@@ -1026,8 +1026,9 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /SessionStart/);
   assert.match(bridgeDoc, /Real Codex Host UAT/i);
   assert.match(bridgeDoc, /list the branches/i);
-  assert.match(bridgeDoc, /proceed without Toolkit repo-local rules/i);
-  assert.match(bridgeDoc, /alter a managed block/i);
+  assert.match(bridgeDoc, /lists the branches without asking about repository rules/i);
+  assert.match(bridgeDoc, /session start shows one leftover note for it/i);
+  assert.doesNotMatch(bridgeDoc, /proceed without Toolkit repo-local rules/i);
 });
 
 test('Codex Toolkit --write succeeds when plugin add installs then times out', () => {

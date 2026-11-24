@@ -1,10 +1,11 @@
 {
-  "schema": "toolkit-controller-enforcement-map/v1",
-  "description": "What enforces each controller rule (repo/CONTROLLER.md and its pages): a hook, a script, a CI check or the programme reconciler, each with the test that proves it and one line on which part of the rule it covers, or instruction-only with the reason. Checked by repo/scripts/check-controller-enforcement-map.cjs.",
+  "schema": "toolkit-controller-enforcement-map/v2",
+  "description": "What enforces each controller rule (repo/CONTROLLER.md, its pages and the gate rules): a hook, a script, a CI check or the programme reconciler, each with the test that proves it and one line on which part of the rule it covers, or instruction-only with its basis (judgement, host-gap or planned) and reason. Each row holds rule_sha, the hash of its rule line, so an edited rule fails the check until its row is reviewed. Checked by repo/scripts/check-controller-enforcement-map.cjs.",
   "rows": [
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**GitHub governance**",
+      "rule_sha": "d7ea4b2f9290",
       "covers": "Governance state decides on or off only from the merged programme file, and the governance hook holds work in a repository whose answer is not yet decided.",
       "enforced_by": [
         {
@@ -22,11 +23,16 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Bind one canonical repo, programme, release",
-      "instruction_only": "Choosing the repository, release and one owning builder is a controller judgement; no code can tell which builder owns an outcome."
+      "rule_sha": "eda0b10d7efb",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Choosing the repository, release and one owning builder is a controller judgement; no code can tell which builder owns an outcome."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Repository fence:**",
+      "rule_sha": "4139d7383a26",
       "covers": "The merge hold refuses a merge without the owner's OK. The rest of the fence (binding the named repository, no cross-repository authority) is instruction-only.",
       "enforced_by": [
         {
@@ -39,16 +45,27 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Task intake:**",
-      "instruction_only": "Vetting feedback and choosing to extend, reopen or create a child is a judgement; the reconciler records children but does not decide them."
+      "rule_sha": "c06f8716fb4a",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Vetting feedback and choosing to extend, reopen or create a child stay a judgement; the Nearest child line on a new child is code-checkable.",
+        "planned": "#1225 N1: a CHILD_NO_NEAREST finding checks the Nearest child line."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Keep in-flight gates on their admitted Controller revision",
-      "instruction_only": "No launcher records the controller revision a gate was admitted on, so nothing can compare it."
+      "rule_sha": "25e328f5f209",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "No launcher records the controller revision a gate was admitted on, so nothing can compare it.",
+        "planned": "#1265 L4: assign records the CONTROLLER.md blob a gate was admitted on, and handover flags a changed blob."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Preserve every commitment, in flight or queued",
+      "rule_sha": "6d9513fcb390",
       "covers": "The reconciler works out each child's group (in flight or queued) and sorts the queue in work order; it does not keep owners or commitments.",
       "enforced_by": [
         {
@@ -61,6 +78,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Work queue:**",
+      "rule_sha": "0f5fd4d91aab",
       "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for tasks in flight that nothing is moving, refuses to acknowledge them and lists them first, and keeps the QUEUED band in work order (priority, size S, all other work, marked last, dependencies held). Each task's priority and size are the controller's judgement.",
       "enforced_by": [
         {
@@ -73,21 +91,34 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Batch small fixes:**",
-      "instruction_only": "Whether a fix is small and which slice it joins is a judgement made before any branch exists."
+      "rule_sha": "2fe93067b063",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a fix is small and which slice it joins is a judgement made before any branch exists."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Change-local hygiene law",
-      "instruction_only": "A test pins the wording, but which routes and files are obsolete is a review judgement no check can make."
+      "rule_sha": "2b069477e917",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "A test pins the wording, but which routes and files are obsolete is a review judgement no check can make."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Verify before claiming:**",
-      "instruction_only": "Whether a close, done, supersede or status claim matches its sources is a judgement over issue text, comments and code; no script can read that meaning."
+      "rule_sha": "743c76bb293d",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a close, done, supersede or status claim matches its sources is a judgement over issue text, comments and code; no script can read that meaning."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "On \"you are taking over as controller for <repo>\"",
+      "rule_sha": "ca0ca011131c",
       "covers": "The reconciler's takeover claim stops the old writer before its next write. The capability check and the journey are instruction-only.",
       "enforced_by": [
         {
@@ -100,26 +131,43 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Beneath explicit owner authority and platform instructions",
-      "instruction_only": "Instruction precedence and what a session loads are read by the agent; no hook sees which instructions it followed."
+      "rule_sha": "99292b9aa6ec",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Instruction precedence and what a session loads are read by the agent; no hook sees which instructions it followed."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "An authorised in-gate refresh reads changed sources",
-      "instruction_only": "The refresh notice and the choice not to restart happen inside the session; nothing outside it can check them."
+      "rule_sha": "ac78b077075b",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "The refresh notice and the choice not to restart happen inside the session; nothing outside it can check them."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Substantive returns include programme/release/child/role",
-      "instruction_only": "What a return says is free text read by the controller; no schema checks it."
+      "rule_sha": "cb4a814678ea",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "What a return says is free text read by the controller; no schema checks it."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Routines/executors send findings and owner asks to the controller",
-      "instruction_only": "Where a routine or executor sends a finding or owner ask is a judgement per message; the owner-post rule lives on the principles page."
+      "rule_sha": "9252661e929c",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Where a routine or executor sends a finding or owner ask is a judgement per message; the owner-post rule lives on the principles page."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Findings are the controller's work:**",
+      "rule_sha": "b59c83ffdc25",
       "covers": "The reconciler keeps each programme finding with its controller next action until it is answered, and the Projects daily check-in turns failing tasks, PRs that need a step and long-missing project tasks into first-line prefixes the coordinator must act on. Judging the action and deadline for any other finding is the controller's. The escape-list script writes one checked line for each bug found after merge and refuses a malformed line or one holding a local path, secret or personal data; deciding that a bug is an escape stays the controller's.",
       "enforced_by": [
         {
@@ -142,11 +190,17 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Record standing authority's owner/provenance",
-      "instruction_only": "Native host controls hold standing authority; Toolkit code records none of it and cannot see uncertain effects."
+      "rule_sha": "451086ee32a5",
+      "instruction_only": {
+        "basis": "host-gap",
+        "why": "Native host controls hold standing authority; Toolkit code records none of it and cannot see uncertain effects.",
+        "probe": "Check whether the host now exposes its permission grants to a hook or a command Toolkit can read (Claude Code permission settings, Codex approvals); if it does, record and compare them."
+      }
     },
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Standing approvals:**",
+      "rule_sha": "a2e78bf41a34",
       "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Deletions, keys and other irreversible steps are instruction-only.",
       "enforced_by": [
         {
@@ -164,6 +218,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Transport stores:**",
+      "rule_sha": "759d9397ef55",
       "covers": "The merge hold lets merges into an evidence store through without asking. Secret scans and the sole-copy rule are instruction-only.",
       "enforced_by": [
         {
@@ -176,6 +231,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "These pages are part of this file",
+      "rule_sha": "cda3c2ccd2d2",
       "covers": "The pages check fails when a page is missing, unlisted, out of step with its hash or has a rule with two homes.",
       "enforced_by": [
         {
@@ -188,6 +244,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Roles and routes](controller/roles-and-routes.md)",
+      "rule_sha": "99c49ae8cd63",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -200,6 +257,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Gates](controller/gates.md)",
+      "rule_sha": "58ceccd4ccd5",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -212,6 +270,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Evidence, progress and finish](controller/evidence-and-finish.md)",
+      "rule_sha": "8118b9316a7c",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -224,6 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
+      "rule_sha": "8275bd1a2d26",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -236,21 +296,34 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Binding:**",
-      "instruction_only": "Ranking the principles above skills and briefs is a reading order; no check can tell when a brief relaxes one."
+      "rule_sha": "c0e93a596f66",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Ranking the principles above skills and briefs is a reading order; no check can tell when a brief relaxes one."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Development base:**",
-      "instruction_only": "A pointer to the global Development Principles, which the controller applies by judgement in plans, reviews and merges."
+      "rule_sha": "69990c1afb3e",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "A pointer to the global Development Principles, which the controller applies by judgement in plans, reviews and merges."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Governance owns its part:**",
-      "instruction_only": "A pointer that keeps governance-owned principles out of this page; the governance checks enforce those themselves."
+      "rule_sha": "32296c780e7e",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "A pointer that keeps governance-owned principles out of this page; the governance checks enforce those themselves."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Owner-only acts:**",
+      "rule_sha": "adef1cd2386d",
       "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Branch deletes and permission edits sit in the global rules and are instruction-only.",
       "enforced_by": [
         {
@@ -268,11 +341,20 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Git hygiene:**",
-      "instruction_only": "No force-push, no history rewrite and the owner's commit identity are applied by judgement; the global floor's attribution ban has its own guard."
+      "rule_sha": "887118c3cca2",
+      "covers": "The attribution hook refuses a force push in a governed or guarded repository and to an evidence store, and AI attribution in commits; no history rewrite elsewhere and the owner's commit identity stay instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-attribution-guard.cjs",
+          "test": "repo/tests/toolkit-attribution-guard.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Polish child:**",
+      "rule_sha": "1c4a06ffbf7d",
       "covers": "The programme sweep raises POLISH_CAP for a polish child at 8 rows, above 8 rows or with two open. Filing a Low as a row, and fixing a one-line Low in the PR, stay judgement.",
       "enforced_by": [
         {
@@ -285,6 +367,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Stale-work net:**",
+      "rule_sha": "d3185fb924a3",
       "covers": "The programme sweep raises the net findings (finished children to judge, owner-OK closes, unexplained new children, closed parents with open children, unticked rows and full polish children), and in Claude Code the turn-end owed check stops the controller's turn once for each new one due. Judging done, obsolete children and folding the owner's OK into the next ask stay judgement.",
       "enforced_by": [
         {
@@ -302,41 +385,72 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Controller is the brain:**",
-      "instruction_only": "How the controller gets a capability it lacks is a per-harness judgement."
+      "rule_sha": "b5be688c3985",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "How the controller gets a capability it lacks is a per-harness judgement."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Local base:**",
-      "instruction_only": "Spotting a clash between a harness skill and the local rules is a reading judgement."
+      "rule_sha": "42abcec63104",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Spotting a clash between a harness skill and the local rules is a reading judgement."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Work starts on the owner's computer:**",
-      "instruction_only": "Whether the owner started or agreed to a cloud start is read from the chat, and no Toolkit check reads a session start's target yet. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
+      "rule_sha": "067c0d5f983f",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether the owner started or agreed to a cloud start is read from the chat, and no Toolkit check reads a session start's target yet. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Finish fast:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; batch size and lane use are controller calls."
+      "rule_sha": "93822f215822",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Batch size and lane use stay a judgement; stacking a ready pull request onto an open merge train is code-decidable.",
+        "planned": "#1030 S1: the train finder stacks onto an open train by default, and a separate build needs a reason."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Plain owner posts:**",
-      "instruction_only": "What the owner needs, what counts as working detail and the wording of each post and card are judged per post; no check reads posts."
+      "rule_sha": "ed3980b1d58e",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "The wording of each post and card stays a judgement; a card after text the owner cannot see and an over-long card question are code-decidable.",
+        "planned": "#1467 S8: the Claude governance hook refuses a question card after text in the same turn, or with a question over 120 characters."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Free first:**",
-      "instruction_only": "Choosing plans and review routes is an owner-set limit, not something code can check."
+      "rule_sha": "e5b0825d90ba",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Choosing plans and review routes is an owner-set limit, not something code can check."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Host-local talk:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; what counts as an unasked mention is a wording call."
+      "rule_sha": "b8d642efdd9c",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "A design principle the controller applies by judgement in plans, reviews and merges; what counts as an unasked mention is a wording call."
+      }
     },
     {
       "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
+      "rule_sha": "a38738045dd0",
       "covers": "Gate assignments: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. In Claude Code the turn-end owed check stops the controller's turn once for each new CLOSE_DUE, each finished side session the desktop app shows unarchived, and each gate launch or archive with no gate-session record. Sessions on other hosts, and whether the final message was read in full and acted on, stay instruction text.",
       "enforced_by": [
         {
@@ -354,6 +468,7 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Resolve DISCOVERY, DISCOVERY_HELPER, BUILDER",
+      "rule_sha": "a6ac00c723e0",
       "covers": "Stack selection resolves each role and the reviewer set only from the pinned registry, with no default or fallback.",
       "enforced_by": [
         {
@@ -366,16 +481,27 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Launch every gate with model and effort pinned explicitly",
-      "instruction_only": "Gates start from Projects threads, Remote Control or a person; no Toolkit launcher starts them, so there is nothing to hook a route check to."
+      "rule_sha": "106056efbda9",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "The governance PreToolUse hook sees start_session, so a gate launch can be checked when it starts; until then only the gate's own route check refuses it at its first effect.",
+        "planned": "#1265 S4: the governance hook refuses a gate brief without Gate, Route and Assignment lines on start_session, and prints the effort and gate-session record lines after start."
+      }
     },
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "One gatekeeper per lane",
-      "instruction_only": "A gatekeeper is a session the controller opens by hand; no Toolkit launcher starts it, so its tier cannot be checked."
+      "rule_sha": "7b8a63ded6ec",
+      "instruction_only": {
+        "basis": "host-gap",
+        "why": "Gatekeepers are not used on Claude Code; on Projects or Codex no Toolkit launcher starts the gatekeeper, so its tier cannot be checked there.",
+        "probe": "When Projects or Codex gatekeepers are used, test whether that host runs Toolkit's hooks on the gatekeeper's launch call or session start; if it does, check its tier there."
+      }
     },
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "**Merge-train lanes:**",
+      "rule_sha": "b4803ccad707",
       "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. The lane's model tier and skipping G0 and G1 stay instruction-only.",
       "enforced_by": [
         {
@@ -388,6 +514,7 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Subagents are helpers, never gates",
+      "rule_sha": "9137eee0301d",
       "covers": "The helper guard checks a helper launch against its pinned route and refuses one that would launch another agent, when a host hook calls it; the depth setting keeps spawn depth at one. Reading run logs is instruction-only.",
       "enforced_by": [
         {
@@ -405,11 +532,17 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Service tier is the controller",
-      "instruction_only": "The service tier is chosen in the host when a session starts; Toolkit has no setting to check."
+      "rule_sha": "df28e5dbce1f",
+      "instruction_only": {
+        "basis": "host-gap",
+        "why": "The service tier is chosen in the host when a session starts; Toolkit has no setting to check.",
+        "probe": "Check whether start_session or the host's session metadata gains a service-tier field a hook can read."
+      }
     },
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "G2 begins after builder readiness",
+      "rule_sha": "a1d84758d40d",
       "covers": "Stack selection resolves the full reviewer set from the same selection. When G2 starts, fresh contexts and independence are instruction-only.",
       "enforced_by": [
         {
@@ -422,11 +555,16 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "The owner may address G0/G1 directly",
-      "instruction_only": "Whether a relay is faithful and which input is stale is read by the gate; no record carries it."
+      "rule_sha": "e14984bd07b5",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a relay is faithful and which input is stale is read by the gate; no record carries it."
+      }
     },
     {
       "file": "repo/controller/gates.md",
       "rule": "Gate states: ACTIVE, WAITING_OWNER",
+      "rule_sha": "de32ed8d6c4c",
       "covers": "The reconciler records each child's gate state from its checkpoints and flags a stale or competing one. Reusing a session and consuming a return once are instruction-only.",
       "enforced_by": [
         {
@@ -439,6 +577,7 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "At admission split acceptance",
+      "rule_sha": "cf1bdb632e1b",
       "covers": "The auto-merge check needs a UAT line on the pull request, and the reconciler records UAT retained, partial or full. Deciding which steps need owner UAT is instruction-only.",
       "enforced_by": [
         {
@@ -456,11 +595,16 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "**Models before building:**",
-      "instruction_only": "Whether a feature needs an invariant model is a G0 judgement that G2 checks by reading."
+      "rule_sha": "1d76021bd530",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a feature needs an invariant model is a G0 judgement that G2 checks by reading."
+      }
     },
     {
       "file": "repo/controller/gates.md",
       "rule": "**Scope confirmation:**",
+      "rule_sha": "7427cc916b8a",
       "covers": "The decision history reads the SCOPE-CONFIRMED tag as the owner's confirmation of a child's scope. Asking the owner is instruction-only.",
       "enforced_by": [
         {
@@ -473,26 +617,53 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "G2 tests scope, execution, security and evidence",
-      "instruction_only": "Rating findings is the reviewer's judgement; counting rounds and filing follow-ups is the controller's."
+      "rule_sha": "1f07044bcbc2",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Rating findings stays the reviewer's judgement; counting review rounds per pull request is code-decidable.",
+        "planned": "#1030 L3: the train finder counts Toolkit-G2 verdicts per pull request and prints the round, and the cap rule on a third."
+      }
     },
     {
       "file": "repo/controller/gates.md",
       "rule": "For new/changed human-facing work",
-      "instruction_only": "Readable text is judged by G1 and G2; the plain-reference check covers only issue and PR references in docs."
+      "rule_sha": "712f15077138",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Readable text is judged by G1 and G2; the plain-reference check covers only issue and PR references in docs."
+      }
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Executors publish concise authorised progress",
-      "instruction_only": "No Toolkit code publishes progress with conditional writes and readback; the programme checkpoint script writes only a local journal."
+      "rule_sha": "e9099e3530b3",
+      "covers": "Evidence store writes go through toolkit-store.cjs save, which pushes the bound branch with a plain fast-forward push and reads it back with one fetch; the shell hooks refuse a raw push to a bound store. Minimal edits and readback for pull request and issue text stay instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-attribution-guard.cjs",
+          "test": "repo/tests/toolkit-store-push-guard.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-store.cjs",
+          "test": "repo/tests/toolkit-store.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Finish authorised work before stopping",
-      "instruction_only": "Whether work is finished is a judgement at the end of each turn."
+      "rule_sha": "d341eb53c333",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether work is finished is a judgement at the end of each turn."
+      }
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Reuse the user-selected private evidence store",
+      "rule_sha": "a685719986c5",
       "covers": "Governance discovery lists the owner's existing private evidence stores before proposing a new one, and a name alone selects nothing. Verifying access through the backend is instruction-only.",
       "enforced_by": [
         {
@@ -505,16 +676,35 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Custody without ritual:**",
-      "instruction_only": "Which files to archive and when is a judgement at gate end; the push and fetch use plain Git."
+      "rule_sha": "08a66ae170f4",
+      "covers": "In a Git store, toolkit-store.cjs save commits, pushes and fetches once as the read-back, and the shell hooks refuse a raw push to a bound store; which files to archive at gate end stays a judgement.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-attribution-guard.cjs",
+          "test": "repo/tests/toolkit-store-push-guard.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-store.cjs",
+          "test": "repo/tests/toolkit-store.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Scratch follows the global rules",
-      "instruction_only": "The workspace residue report lists worktrees and branches that are safe to remove by this rule's tests, but nothing runs it automatically or stops a forced removal."
+      "rule_sha": "2b9f444a5bbc",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Which worktrees and branches are safe to remove follows this rule's tests in the workspace residue report; removing them after a lane lands is code-decidable but not yet run by any step.",
+        "planned": "#1225 S7: the merge train's land step prints the lane's safe removal lines, and the daily net raises WORKSPACE_RESIDUE for ready worktrees over a day old."
+      }
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Merge trains:**",
+      "rule_sha": "988f735fa734",
       "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head, a RISKY member with no owner OK, or a member whose live UAT line is missing, invalid or stricter than the manifest's. Its eject command takes a boarded member off a pushed train with recorded reverts only, which verify accepts exactly, and land refuses while an ejected pull request still points into the train. Verify, catchup and eject also refuse a train whose tree differs from a fresh build of its members on main, so no train merged onto the main land checked undoes merged work; governance's up-to-date check (P6) makes GitHub refuse a merge onto any other main. Choosing which PRs ride together and running the merge stay instruction-only.",
       "enforced_by": [
         {
@@ -552,17 +742,402 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Promises:**",
-      "instruction_only": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them."
+      "rule_sha": "08035b9d44b1",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them.",
+        "planned": "#1225 L2: a structured promise with a trigger (PR merged, PASS, version) and a PROMISE_DUE sweep finding."
+      }
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Findings:**",
-      "instruction_only": "Which action fits a finding, and when a repeat or missed deadline needs the owner, is a judgement per finding; the check-in prefixes and programme attention that feed it are mapped on the core rule."
+      "rule_sha": "8799b3187677",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Which action fits a finding, and when a repeat or missed deadline needs the owner, is a judgement per finding; the check-in prefixes and programme attention that feed it are mapped on the core rule.",
+        "planned": "#1225 S2: a turn-end check blocks once on findings due (new for 4 hours or acknowledged past due)."
+      }
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Native coverage: Codex/Claude Code on real selected paths",
-      "instruction_only": "The rule itself says host qualification is not implemented. Install health checks only that installed copies, hooks and helper files are current, not the listed host behaviours."
+      "rule_sha": "112ae30e916f",
+      "instruction_only": {
+        "basis": "host-gap",
+        "why": "The rule itself says host qualification is not implemented. Install health checks only that installed copies, hooks and helper files are current, not the listed host behaviours.",
+        "probe": "Run the real-host qualification matrix on each selected host; move this row to enforced when a qualification run records a result Toolkit checks."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**G0 Discovery** runs for every new task",
+      "rule_sha": "7eb144c3e39e",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a task is new or a fix inside an already-discovered task, and how short discovery may be, is a planning judgement."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**G1 Builder** starts in a fresh session",
+      "rule_sha": "ff927175ecbb",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Who owns an outcome, whether a fix is in scope and the builder's own diff self-check happen inside the builder's session."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Review** follows the tier",
+      "rule_sha": "151d44670e6c",
+      "covers": "The risk-tier script tags a change by its paths, and the train finder boards a pull request only with a G2 PASS for its head, at no lower tier than its paths give; which reviewers run stays the controller's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-risk-tier.cjs",
+          "test": "repo/tests/toolkit-risk-tier.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train-finder.cjs",
+          "test": "repo/tests/toolkit-merge-train-finder.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "are fine where the reader needs them",
+      "rule_sha": "c2329d2dcfb8",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "A wording allowance; there is nothing to check."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "Fresh executor contexts are mandatory between G0 and G1",
+      "rule_sha": "6c24b59086c2",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a switch, compaction or replacement needs a fresh executor is read per run; no host record says when renewal is due."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "There are no handover packets.",
+      "rule_sha": "507c2d1ca360",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Keeping work recoverable (pushed branches, current pull requests, posted decisions) is a habit checked by reading; the programme handover command records it but cannot judge it."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "A gate works in the primary checkout unless it needs its own worktree",
+      "rule_sha": "924a92031cbd",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a gate needs its own worktree is a per-gate call; removal after merge is covered by the scratch rule's row."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Design policy:**",
+      "rule_sha": "2466fd5661c6",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether behaviour has a cohesive owner object and honest effect order is a design review judgement."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Invariant models:**",
+      "rule_sha": "4a01cf26a8b1",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a feature needs a written model and closure matrix is a G0 judgement that G2 checks by reading."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Input readers:**",
+      "rule_sha": "fe26636d552c",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a reader is default-deny over its stated subset is a review reading; the hostile-input helper is a test tool, not a check."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Deployment branches:**",
+      "rule_sha": "a817e68bec80",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a repository has its own convention is read from that repository, and a branch name grants nothing, so a wrong name costs only a rename."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Shipping floor:**",
+      "rule_sha": "8e3fe5ee58a9",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Which work is a ship blocker and which is post-ship is a judgement per change."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "G1 checks the actual user or operator surface for clarity",
+      "rule_sha": "9f392e7656a3",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Clear and safe text is judged by G1 and G2 reading it."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "owed agent UAT starts at once",
+      "rule_sha": "3e5598cc0c85",
+      "covers": "The pull request body pre-flight refuses an OWNER_TEST_NEEDED body without one `Agent UAT: PASSED (<evidence>)` line; starting agent UAT at once, in parallel with the lane, stays the controller's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-pr-body.cjs",
+          "test": "repo/tests/toolkit-pr-body.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Owner test after merge:**",
+      "rule_sha": "2607289ad34a",
+      "covers": "The merge check accepts an OWNER_TEST_NEEDED line, so owner UAT never holds a merge; recording UAT PENDING on each Refs task at merge stays the controller's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-auto-merge-eligible.cjs",
+          "test": "repo/tests/toolkit-auto-merge-eligible.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**One real-host round per release:**",
+      "rule_sha": "8d3dd73ab7d4",
+      "instruction_only": {
+        "basis": "host-gap",
+        "why": "CI cannot drive a fresh chat on an installed build, so the real-host smoke and qualification matrix run by hand once per release batch.",
+        "probe": "Test whether a host offers a scripted fresh-chat run on the installed plugin (for example a headless Claude Code run with the installed build and its hooks) that can replay the smoke rows, with a positive control refusal in the same run."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "A new SHA alone does not invalidate UAT",
+      "rule_sha": "563632a15d0a",
+      "covers": "The programme state records UAT_RETAINED, UAT_PARTIAL_REQUIRED and UAT_FULL_REQUIRED, bound to a head; the impact evidence is the controller's.",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/toolkit-programme-state.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "G2 starts after the working result",
+      "rule_sha": "99bcd328c711",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Coverage, adversarial depth and rating findings are the reviewers' judgement; the train finder reads only each verdict's first line and route stamps."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**No-weakening proof:**",
+      "rule_sha": "4e59ddeac88b",
+      "covers": "For hooks, the pack's expectation check fails a pull request that removes, lowers or changes a row without a Pack changes reason; for other guard code the base-on-head run is the reviewer's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-hook-pack.cjs",
+          "test": "repo/tests/toolkit-hook-pack.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Early returns keep the guards:**",
+      "rule_sha": "e61db17691d8",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether an early return skips a generic guard is a code review reading."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "Before the first fix of a security finding",
+      "rule_sha": "00bc77a3fdd2",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Listing every route to one invariant is a reviewer and builder analysis."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "After a G2 PASS, a delta G2 runs",
+      "rule_sha": "a2febd3edd92",
+      "covers": "The train finder boards a pull request only with a PASS for its current head or a scripted carry, so an edit after a PASS needs a new verdict; whether an edit is RISKY or changes reviewed behaviour stays the reviewer's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train-finder.cjs",
+          "test": "repo/tests/toolkit-merge-train-finder.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Scripted carry (owner OK):**",
+      "rule_sha": "e3f1ffb13114",
+      "covers": "The review carry script accepts a carry only in its exact cases (a body-only FAIL with its Carry line, the shard bot's manifest refresh, sync outputs only), with the same files, green checks and valid UAT and Bump lines.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-review-carry.cjs",
+          "test": "repo/tests/toolkit-review-carry.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "Correction rechecks use fresh contexts",
+      "rule_sha": "4324348b5b5b",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Which reviewers recheck, what a fix reaches and when a family closure record holds are reviewer judgements."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Scope lock:**",
+      "rule_sha": "5b4d64bf7dbf",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a finding is on code no fix touched, and whether it is a proved High, is the reviewer's judgement."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Round cap:**",
+      "rule_sha": "91151fc30e94",
+      "instruction_only": {
+        "basis": "planned",
+        "why": "Whether a finding is a proved High stays a judgement; counting Toolkit-G2 verdicts per pull request is code-decidable.",
+        "planned": "#1030 L3: the train finder counts Toolkit-G2 verdicts per pull request and prints the round, and the cap rule on a third."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "A hook change follows",
+      "rule_sha": "95c279673964",
+      "covers": "CI runs the hook pack on Linux and Windows on the exact head, and its expectation check needs a Pack changes reason for each removed, lowered or changed row; the revert proof is the builder's and the real-host smoke the controller's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-hook-pack.cjs",
+          "test": "repo/tests/toolkit-hook-pack.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "Gate models and effort come only from an explicitly selected stack registry",
+      "rule_sha": "9eb6d38a61e3",
+      "covers": "The gate route check reads each gate's pin from the selected stack registry and refuses a gate session off it; adopting a newer registry stays the controller's.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-gate-route.cjs",
+          "test": "repo/tests/toolkit-gate-route.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "Model and effort follow launch ownership",
+      "rule_sha": "156e7b1e4d28",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "Whether a session was opened by a human or launched by automation is read from the launch; the route check applies only to launcher-marked gate sessions."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "**Route proof:**",
+      "rule_sha": "dc49d66ebba6",
+      "covers": "The gate route check reads the host's launch record and refuses a gate session whose model or effort is inherited, missing or off its pin, and refuses a verdict or builder body with the wrong Route stamp.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-gate-route.cjs",
+          "test": "repo/tests/toolkit-gate-route.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "Keep model, effort, tier and route out of portable task prompts",
+      "rule_sha": "f3f935a06451",
+      "instruction_only": {
+        "basis": "judgement",
+        "why": "What a portable prompt needs and whether two builders' files are disjoint are judged per brief."
+      }
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "`task_prs.auto_merge` is the only switch",
+      "rule_sha": "ac313e6dd284",
+      "covers": "The merge hold reads task auto-merge only from a fresh, enabled, merged binding, and honours no label or per-app answer the binding does not hold.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-merge-hold.cjs",
+          "test": "repo/tests/toolkit-merge-hold.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "With On, the controller, in a session the owner started, merges when",
+      "rule_sha": "b6e53cd081d5",
+      "covers": "The auto-merge eligibility check exits non-zero for a head whose scope or UAT line does not qualify, and the merge hold checks the scope before a standing merge; recording G2 PASS and the other conditions stays the controller's.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-auto-merge-eligible.cjs",
+          "test": "repo/tests/toolkit-auto-merge-eligible.test.cjs"
+        },
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-merge-hold.cjs",
+          "test": "repo/tests/toolkit-merge-hold.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/contracts/agent-rules/gate-rules.md",
+      "rule": "That check exits 1 for bindings and their schemas/readers",
+      "rule_sha": "86fb224ebb9e",
+      "covers": "The auto-merge eligibility check exits 1 for every listed path family and for a major bump, so those wait for the owner's typed merge.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-auto-merge-eligible.cjs",
+          "test": "repo/tests/toolkit-auto-merge-eligible.test.cjs"
+        }
+      ]
     }
   ]
 }
