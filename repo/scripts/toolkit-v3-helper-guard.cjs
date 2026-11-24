@@ -7,6 +7,7 @@
 const compiler = require('./toolkit-gate-contract-compiler.cjs');
 const { types: utilTypes } = require('node:util');
 const { CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
+const { HELPER_ROUTES } = require('./toolkit-claude-helper-spec.cjs');
 
 const ROUTE_FIELDS = Object.freeze(['provider', 'model', 'reasoning']);
 const CALLER_ROUTES = Object.freeze({ G0: 'DISCOVERY', G1: 'BUILDER' });
@@ -280,7 +281,9 @@ class HelperRouteGuard {
         deny('HELPER_ROLE_MISMATCH', { expected: helperRole, requested: invocation.helper_role, observed: before.routing.helper_role });
       }
       const resolved = selectedProfile;
-      const expectedRoute = resolved.routes[helperRole];
+      // Helper routes live in the helper spec, keyed by the stack's lead provider.
+      const provider = resolved.routes && resolved.routes.DISCOVERY && resolved.routes.DISCOVERY.provider;
+      const expectedRoute = typeof provider === 'string' && Object.hasOwn(HELPER_ROUTES, provider) ? HELPER_ROUTES[provider] : null;
       if (!expectedRoute) deny('HELPER_ROUTE_UNAVAILABLE', { profile_id: resolved.profile_id, helper_role: helperRole });
 
       routeMismatch(before.routing.effective_route, expectedRoute, 'effective_route');

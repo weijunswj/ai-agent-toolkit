@@ -2,6 +2,8 @@
 
 const crypto = require('node:crypto');
 const { types: utilTypes } = require('node:util');
+// Loaded on use: the helper spec holds the helper route (helper routes left the stack registry).
+const helperSpec = () => require('./toolkit-claude-helper-spec.cjs');
 
 const GATE_ERROR_CODE = 'GATE_CONTRACT_IR_INVALID';
 
@@ -334,7 +336,7 @@ function planV3Delegation(input, decisionInput) {
   if (!value.tasks.length && value.substantial && value.exception === null) fail('substantial direct work requires a brief exception');
   if (value.tasks.length && value.exception !== null) fail('delegation and whole-work exception conflict');
   return canonicalize({ stage: value.stage, action: value.tasks.length ? 'DELEGATE_SUITABLE_LEAVES' : 'DIRECT_WORK',
-    helpers: value.tasks.map(task => ({ ...task, role, route: decision.selection.routes[role], depth: 1, may_delegate: false })),
+    helpers: value.tasks.map(task => ({ ...task, role, route: helperSpec().helperRoute(decision.selection.routes.DISCOVERY.provider), depth: 1, may_delegate: false })),
     exception: value.exception, authority: 'PLAN_ONLY_NATIVE_PERMISSION_REQUIRED', lead_owns: ['reasoning', 'architecture', 'decisive_proof', 'integration', 'uat_readiness', 'final_quality'] });
 }
 

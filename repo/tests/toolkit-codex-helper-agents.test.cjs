@@ -222,14 +222,16 @@ test('a registry change makes the helpers stale; refresh backs up the exact old 
   const f = fixture(t);
   f.defs().refresh({ stack: 'owner-gpt' });
   const before = read(path.join(f.agents, FILE.G1));
-  f.editRegistry(value => { value.profiles['owner-gpt'].routes.BUILDER_HELPER.reasoning = 'high'; });
+  // Any registry change moves the digest the files record; the helper route itself comes from the helper spec.
+  f.editRegistry(value => { value.profiles['owner-gpt'].routes.BUILDER.reasoning = 'xhigh'; });
   const check = f.defs().check();
   assert.equal(check.status, 'stale');
   assert.equal(check.files.find(file => file.file === FILE.G1).state, 'update');
   const result = f.defs().refresh();
   assert.equal(result.status, 'updated');
   assert.equal(read(path.join(result.backup_dir, FILE.G1)), before);
-  assert.match(read(path.join(f.agents, FILE.G1)), /^model_reasoning_effort = "high"$/m);
+  assert.notEqual(read(path.join(f.agents, FILE.G1)), before);
+  assert.match(read(path.join(f.agents, FILE.G1)), /^model_reasoning_effort = "max"$/m, 'the helper route is the helper spec\'s, not the edited lead route');
   assert.equal(f.defs().check().status, 'current');
 });
 
