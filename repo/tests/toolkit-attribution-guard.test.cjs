@@ -297,7 +297,7 @@ test('the Claude Code hook refuses with exit 2 and a deny decision, and passes e
 
 test('both plugins route shell commands to the attribution check', () => {
   const claude = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8'));
-  const bash = claude.hooks.PreToolUse.find((group) => group.matcher === 'Bash|PowerShell');
+  const bash = claude.hooks.PreToolUse.find((group) => group.matcher === 'Bash|PowerShell|Monitor|mcp__terminal__run_in_terminal');
   assert.equal(bash.hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-attribution-hook.cjs"');
   const codex = JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   assert.ok(new RegExp(codex.hooks.PreToolUse[0].matcher).test('Bash'));

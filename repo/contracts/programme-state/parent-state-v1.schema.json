@@ -38,14 +38,17 @@
         "properties": {
           "issue": { "type": "integer", "minimum": 1 },
           "label": { "type": "string", "minLength": 1 },
-          "class": { "enum": ["COMMITTED", "OPTIONAL", "COMPLETED", "RETIRED", "CORE", "HARDENING", "LATER"], "description": "What the owner decided: committed, optional, completed or retired. Now and Later are worked out from the task's PR and gate, never stored. CORE, HARDENING and LATER are older names kept only for migration: read as COMMITTED and sorted like any other task, reported as CLASS_LEGACY with a migration patch, and never added by a write." },
+          "class": { "enum": ["COMMITTED", "OPTIONAL", "COMPLETED", "RETIRED", "CORE", "HARDENING", "LATER"], "description": "What the owner decided: committed, optional, completed or retired. The graph band (in flight or queued) is worked out from the task's PR, gate and blockers, never stored. CORE, HARDENING and LATER are older names kept only for migration: read as COMMITTED and sorted like any other task, reported as CLASS_LEGACY with a migration patch, and never added by a write." },
           "parent": { "type": ["integer", "null"], "minimum": 1, "description": "Expected native parent: the programme parent or another outcome. Null means no native parent is expected." },
-          "order": { "type": "integer", "minimum": 0, "description": "The priority: the Programme Graph and native sub-issue order sort open outcomes by group (Now, Later, Optional), then order, lowest first, then issue number, so the top Later outcome starts next. The controller sets it so Later reads priority tier, then size (quickest first), with the picked batch first. Outcomes pinned with last follow every other open outcome. Finished outcomes sort by completion time." },
+          "order": { "type": "integer", "minimum": 0, "description": "The hand order and tie-break: the Programme Graph and native sub-issue order put tasks in flight first, each band by order, then one queue in work order (priority, then size S, then all other work, then last or class OPTIONAL), each step by order, lowest first, then issue number, with after moving a task below what it waits for. Finished outcomes sort by completion time." },
           "lane": { "type": "string", "minLength": 1 },
           "owner_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
           "name": { "type": "string", "minLength": 1, "description": "The task name shown in the Task column. Without it, the issue title is shown without a leading code or release." },
           "description": { "type": "string", "minLength": 1, "description": "One short line saying what the task is supposed to achieve. Shown on the task page." },
-          "last": { "const": true, "description": "Pins an open outcome after every unpinned open outcome in the Programme Graph and native sub-issue order, whatever its order, so outcomes added later still sort before it. Pinned outcomes sort among themselves by group, then order, then issue number. Leave it out for an ordinary outcome." }
+          "last": { "const": true, "description": "Marks a queued outcome to go last: it joins the last step of the queue with optional outcomes, after every other queued outcome whatever its order, so outcomes added later still sort before it. Leave it out for an ordinary outcome; it cannot go with priority." },
+          "priority": { "enum": ["P0", "P1"], "description": "Priority work: the first step of the queue, P0 before P1, then size S, M, L, unsized. Leave it out for normal work; it cannot go with last or class OPTIONAL." },
+          "size": { "enum": ["S", "M", "L"], "description": "The controller's size judgement after evaluating the task; no rule derives it. Size S puts a task that is not priority or last in the quick step of the queue; an unsized task counts as all other work." },
+          "after": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 }, "description": "Hard dependencies: catalogued tasks, never the task itself, that this task waits for. A queued task moves to just after its last queued prerequisite; one in flight, finished or not queued is already met. Tasks that wait for each other in a loop keep their place and raise DEPENDENCY_CYCLE." }
         }
       }
     },
@@ -80,9 +83,9 @@
         "type": "object", "additionalProperties": false,
         "required": ["key", "kind", "group", "title", "comment_id", "login", "digest", "state"],
         "properties": {
-          "key": { "type": "string", "pattern": "^(graph-(retired|completed|optional|later|now)-[1-9][0-9]*|note-[0-9a-f]{12}-[1-9][0-9]*)$" },
+          "key": { "type": "string", "pattern": "^(graph-(retired|completed|queued|now|optional|later)-[1-9][0-9]*|note-[0-9a-f]{12}-[1-9][0-9]*)$" },
           "kind": { "enum": ["graph", "note"] },
-          "group": { "enum": ["RETIRED", "COMPLETED", "OPTIONAL", "LATER", "NOW", null] },
+          "group": { "enum": ["RETIRED", "COMPLETED", "QUEUED", "NOW", "OPTIONAL", "LATER", null], "description": "The graph group: RETIRED, COMPLETED, QUEUED or NOW. OPTIONAL and LATER parts are from before the one queue; a parent that still lists one keeps it and redraws it empty." },
           "copy": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Notes only: SHA-256 of the whole page saved to the private store (page-copies) before the marked text could move." },
           "title": { "type": "string", "minLength": 1, "maxLength": 200 },
           "comment_id": { "type": ["integer", "null"], "minimum": 1 },
@@ -99,6 +102,7 @@
             "else": { "not": { "required": ["copy"] }, "properties": { "key": { "pattern": "^graph-" }, "group": { "type": "string" }, "state": { "enum": ["pending", "moved"] } } } },
           {"if": {"properties": {"group": {"const": "RETIRED"}}}, "then": {"properties": {"key": {"pattern": "^graph-retired-"}}}},
           {"if": {"properties": {"group": {"const": "COMPLETED"}}}, "then": {"properties": {"key": {"pattern": "^graph-completed-"}}}},
+          {"if": {"properties": {"group": {"const": "QUEUED"}}}, "then": {"properties": {"key": {"pattern": "^graph-queued-"}}}},
           {"if": {"properties": {"group": {"const": "OPTIONAL"}}}, "then": {"properties": {"key": {"pattern": "^graph-optional-"}}}},
           {"if": {"properties": {"group": {"const": "LATER"}}}, "then": {"properties": {"key": {"pattern": "^graph-later-"}}}},
           {"if": {"properties": {"group": {"const": "NOW"}}}, "then": {"properties": {"key": {"pattern": "^graph-now-"}}}}
@@ -116,7 +120,7 @@
         "properties": {
           "id": { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "First 12 hex characters of sha256 of source|code|issue|head, with |kind appended for closing findings." },
           "source": { "enum": ["reconcile", "inventory"] },
-          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "CLOSING_COMMENT_MISSING", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "PAGE_LAYOUT_HELD", "BODY_NEAR_LIMIT", "BODY_OVER_BUDGET", "ARCHIVE_COMMENT_UNTRUSTED", "ARCHIVE_SECTION_UNSAFE", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "TASK_IDLE", "BATCH_NEXT", "TASK_MERGED_OPEN", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL", "SWEEP_TASK_UNREADABLE", "STATE_BRANCH_BUSY", "GRAPHQL_REFUSED", "SWEEP_STUCK", "CLOUD_LAYOUT_STALE", "CHILD_NOT_NATIVE", "BLOCKS_MISSING", "BLOCK_BEHIND", "PR_NAV_MISSING", "NEXT_ACTION_STALE", "QUEUED_BUT_MOVING", "AGENT_UAT_UNSTARTED"], "description": "The fixed runtime code table; older readers refuse new codes." },
+          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "CLOSING_COMMENT_MISSING", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "PAGE_LAYOUT_HELD", "BODY_NEAR_LIMIT", "BODY_OVER_BUDGET", "ARCHIVE_COMMENT_UNTRUSTED", "ARCHIVE_SECTION_UNSAFE", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "TASK_IDLE", "TASK_MERGED_OPEN", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DEPENDENCY_CYCLE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL", "SWEEP_TASK_UNREADABLE", "STATE_BRANCH_BUSY", "GRAPHQL_REFUSED", "SWEEP_STUCK", "CLOUD_LAYOUT_STALE", "CHILD_NOT_NATIVE", "BLOCKS_MISSING", "BLOCK_BEHIND", "PR_NAV_MISSING", "NEXT_ACTION_STALE", "AGENT_UAT_UNSTARTED", "OWNER_OK_CLOSE", "CHILD_NO_NEAREST", "POLISH_CAP", "ROWS_UNTICKED", "CLOSE_DUE"], "description": "The fixed runtime code table; older readers refuse new codes." },
           "issue": { "type": ["integer", "null"], "minimum": 1 },
           "head": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
           "kind": { "enum": ["pr", "issue"] },
@@ -161,7 +165,7 @@
       "required": ["issue", "key", "comment_id", "login", "before", "digest"],
       "properties": {
         "issue": { "type": "integer", "minimum": 1 },
-        "key": { "type": "string", "pattern": "^(graph-(retired|completed|optional|later|now)-[1-9][0-9]*|note-[0-9a-f]{12}-[1-9][0-9]*)$" },
+        "key": { "type": "string", "pattern": "^(graph-(retired|completed|queued|now|optional|later)-[1-9][0-9]*|note-[0-9a-f]{12}-[1-9][0-9]*)$" },
         "comment_id": { "type": ["integer", "null"], "minimum": 1 },
         "login": { "type": "string", "minLength": 1 },
         "before": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },

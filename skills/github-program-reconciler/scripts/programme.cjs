@@ -78,7 +78,7 @@ const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
 const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
 const { SweepRequests, passCap } = require('./programme-sweep.cjs');
-const { SweepLease } = require('./programme-sweep-lease.cjs');
+const { SweepLease, RELEASE_TRIES } = require('./programme-sweep-lease.cjs');
 // Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
 const { ReadCache } = require('./programme-read-cache.cjs');
@@ -89,10 +89,10 @@ const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = r
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session'];
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace', '--queue']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -155,6 +155,7 @@ function parseArgs(argv) {
     needs(!Object.keys(args).some(key=>!['command','pr','issue','body-file','dry-run','force-another','json','repo-root'].includes(key)), 'Unsupported closing-comment option.');
   } else needs(args.pr === undefined && args['body-file'] === undefined && !args['force-another'], 'Closing comment options belong only to closing-comment.');
   if (command === 'show') needs(!(args.parent && args.issue !== undefined), 'show takes --parent or --issue <n>, not both.');
+  needs(!args.queue || (command === 'show' && args.issue === undefined && !args['include-private'] && !args.session), 'show --queue lists the queue of the parent and takes only --parent, --json and --repo-root.');
   if (command === 'claim') {
     needs(Boolean(args.parent) !== (args.issue !== undefined), 'claim needs --issue <n> --lane or --parent.');
     needs(args.role === undefined, 'Gates are not claimed: the controller runs assign --issue <n> --role <gate> --assignment <id>.');
@@ -166,6 +167,9 @@ function parseArgs(argv) {
     needs(args.issue !== undefined && args.role && args.assignment, 'assign needs --issue <n>, --role G0|G1|G2 and --assignment <id>.');
     needs(!args.reason || args.supersede, '--reason goes with --supersede on assign.');
   }
+  if (command === 'gate-session') {
+    needs(args.issue !== undefined && args.assignment && (Boolean(args.host) !== Boolean(args.closed)), 'gate-session needs --issue <n>, --assignment <id> and either --host <host> [--host-session <id>] (after the launch) or --closed (after the close).');
+  } else needs(!args.closed && !args.replace && args.host === undefined && args['host-session'] === undefined, '--host, --host-session, --closed and --replace go with gate-session.');
   if (command === 'reopen' || command === 'interrupt') needs(args.issue !== undefined && args.reason, `${command} needs --issue <n> and --reason <text>.`);
   if (command === 'return') {
     needs(args.issue !== undefined && Boolean(args.record) !== Boolean(args.consume), 'return needs --issue <n> and either --record <id> --assignment <id> or --consume <id> --verdict ACCEPT|REOPEN|WAITING_OWNER.');
@@ -194,7 +198,7 @@ function parseArgs(argv) {
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent' || args.command === 'migrate-state') return Boolean(args.apply);
-  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive'].includes(args.command);
+  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive', 'gate-session'].includes(args.command);
 }
 
 function toolkitVersion(file = VERSION_FILE) {
@@ -432,10 +436,35 @@ function refuseUnstartedAgentUat(context, parentDoc, role) {
   throw new ProgrammeError('AGENT_UAT_UNSTARTED', `${role} not assigned: the agent UAT of ${named} has not started. Controller: start it now in its own lane, in parallel with the gate lane, and record its start (update --issue <n> --patch with private.agent_uat state STARTED, at_head <the full head> and where it runs), then assign again; or dispose --finding ${waiting.map(entry => entry.id).join(' / ')} --reason <why>. A started agent UAT never blocks.`);
 }
 
+// The gate session entries an assign or reopen pushed out past the list's limit.
+function gateSessionDrops(before, after) {
+  if (!after) return [];
+  const kept = new Set((after.private?.gate_sessions || []).map(entry => entry.assignment));
+  return (before?.private?.gate_sessions || []).map(entry => entry.assignment).filter(id => !kept.has(id));
+}
+const gateDropsResult = dropped => (dropped.length ? { dropped_gate_sessions: dropped, gate_sessions_note: `The gate session list keeps the newest ${state.GATE_SESSIONS_LIMIT}: ${dropped.join(', ')} left it, and their CLOSE_DUE findings resolve. Archive any of their sessions still open.` } : {});
+
 function outcomeFor(parentDoc, issue) {
   const outcome = parentDoc.outcomes.find(entry => entry.issue === issue);
   if (!outcome) throw usage(`#${issue} is not in the outcome catalogue of #${parentDoc.parent_issue}.`);
   return outcome;
+}
+
+// Why each queued task sits where it does (state.explainQueue), from the parent and children's
+// documents as they stand now. Read-only: nothing is written.
+function queueOf(context) {
+  const parentDoc = readParent(context);
+  const snapshot = context.store.readSnapshot();
+  const children = new Map(parentDoc.outcomes.map(outcome => [outcome.issue, context.store.snapshotDoc(snapshot, 'child', outcome.issue).doc]));
+  return { repository: context.repository, parent_issue: parentDoc.parent_issue, revision: parentDoc.revision, queue: state.explainQueue(parentDoc, children) };
+}
+
+function formatQueue(result) {
+  const { rows, cycles } = result.queue;
+  const lines = [`Queue of #${result.parent_issue} (state revision ${result.revision}), in work order: priority, then quick wins (size S), then other work, then tasks marked last; a task follows the tasks it waits for (after).`,
+    ...(rows.length ? rows.map(row => `${row.place}. #${row.issue} · ${row.step} · ${row.why}`) : ['No queued tasks.']),
+    ...cycles.map(loop => `Loop (after set aside, DEPENDENCY_CYCLE): ${loop.map(number => `#${number}`).join(', ')}`)];
+  return `${lines.join('\n')}\n`;
 }
 
 // The tasks waiting on the owner (state.ownerWaits), from the children's documents as they stand
@@ -503,16 +532,14 @@ function showAttention(parentDoc, args, deps) {
   return { line: stored.line, counts: stored.counts, as_of: stored.as_of };
 }
 
-// This computer's attention cache, for the session-start line. Tests that bring their own GitHub
-// (an origin URL) write it only to a folder they name.
+// This computer's attention cache, for the turn-end owed check: the open net findings, oldest first,
+// IDs, codes and times only. Tests that bring their own GitHub (an origin URL) write it only to a
+// folder they name.
 function cacheAttention(context, parentDoc, complete, deps = {}) {
   if (!parentDoc || (deps.originUrl && !deps.attentionDir)) return;
-  // The longest-stalled work-queue task, so session start names it: its number, code, when it was
-  // flagged and the Toolkit's own next step for that code (no text from GitHub).
-  const [oldest] = state.workQueue(parentDoc.attention);
-  attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention, nowText(deps)), counts: state.attentionCounts(parentDoc.attention),
-    digest: state.attentionDigest(parentDoc.attention), complete,
-    queue: oldest ? { count: state.workQueue(parentDoc.attention).length, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } : null }, deps);
+  const net = state.openFindings(parentDoc.attention).filter(entry => state.NET_CODES.has(entry.code)).reverse().slice(0, attentionCache.NET_LIMIT)
+    .map(entry => ({ id: entry.id, code: entry.code, issue: entry.issue ?? null, kind: state.KIND_CODES.has(entry.code) ? entry.kind ?? null : null, state: entry.state, changed_at: entry.changed_at, due: entry.due ?? null }));
+  attentionCache.writeCache(context.repository, { complete, net }, deps);
 }
 
 const TERMINAL = ['DONE', 'RETIRED'];
@@ -640,15 +667,6 @@ function redact(doc) {
   if (copy.gate?.session_id) copy.gate.session_id = '(redacted)';
   return copy;
 }
-
-// The lane waits a gate-start write dropped (blockers starting `Queued`), listed in its result so a
-// blocker dropped by mistake shows the same turn.
-function laneWaitDrops(before, next) {
-  if (!before || !next) return [];
-  const kept = new Set(next.blockers || []);
-  return (before.blockers || []).filter(text => state.isLaneWait(text) && !kept.has(text));
-}
-const dropsResult = dropped => (dropped.length ? { dropped_lane_waits: dropped } : {});
 
 function writeResult(kind, number, result, writer) {
   return { document: `${kind === 'parent' ? 'parent' : 'issue'}-${number}.json`, outcome: result.outcome, revision: result.doc?.revision ?? null,
@@ -815,12 +833,18 @@ const commands = {
     cacheAttention(context, parentDoc, true, deps);
     // Work-queue findings lead, longest-stalled first; the rest stay newest first.
     const listed = [...state.workQueue(parentDoc.attention), ...state.openFindings(parentDoc.attention).filter(entry => !state.WORK_QUEUE_CODES.has(entry.code))];
+    const closeDue = parentDoc.private?.close_due || {};
     const open = listed.map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
+      ...(entry.kind ? { kind: entry.kind } : {}),
+      // A close-due finding names its gate's host session, from the parent's private part only.
+      ...(entry.code === 'CLOSE_DUE' ? { host: closeDue[entry.id]?.host ?? null, session: closeDue[entry.id]?.session ?? null } : {}),
       first_seen: entry.first_seen, changed_at: entry.changed_at, next_action: state.FINDING_CODES[entry.code].next_action,
       ...(entry.due ? { due: entry.due, overdue: state.ackOverdue(entry, Date.parse(nowText(deps))) } : {}),
       ...(entry.due && parentDoc.private?.attention_notes?.[entry.id] ? { promised: parentDoc.private.attention_notes[entry.id] } : {}),
       ...(entry.diagnostics ? { diagnostics: entry.diagnostics } : {}) }));
-    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open, ...ownerWaitsOf(context, parentDoc) };
+    // The stale-work net's callout: net findings unanswered for 4 hours (new that long, or past due).
+    const callout = state.netCallout(parentDoc.attention, nowText(deps));
+    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open, callout: { count: callout.count, entries: callout.entries }, ...ownerWaitsOf(context, parentDoc) };
   },
 
   // The documents in the private store, moved to the public state branch. The dry run writes nothing;
@@ -912,7 +936,7 @@ const commands = {
         log({ ...entry, results: [...entry.results, failed].slice(-holderOrder.MAX_OPS), stopped_at: nowText(deps) });
         return { mode: 'apply', ...summary, outcome: 'STOPPED', results, next_action: `Stopped at write ${at + 1} (${op.command}): ${failed.code}. Report this to the controller; a run of the same order continues from this write.` };
       }
-      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE', ...(result?.dropped_lane_waits ? { dropped_lane_waits: result.dropped_lane_waits } : {}) };
+      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE' };
       results.push(ran);
       done.add(at);
       log({ ...entry, done: [...done].sort((a, b) => a - b), results: [...entry.results, ran].slice(-holderOrder.MAX_OPS), by });
@@ -954,6 +978,7 @@ const commands = {
   dispose(args, context, deps = {}) { return answer(args, context, deps, 'disposed'); },
 
   show(args, context) {
+    if (args.queue) return queueOf(context);
     const kind = args.issue ? 'child' : 'parent';
     const { doc, sha } = context.store.read(kind, args.issue || context.binding.parent_issue);
     if (!doc) throw new ProgrammeError('STATE_MISSING', `No state document for #${args.issue || context.binding.parent_issue}.`);
@@ -1033,32 +1058,49 @@ const commands = {
     // An assignment already issued (a repeated order) is not a new gate start.
     if (current?.gate?.assignment?.id !== args.assignment) refuseUnstartedAgentUat(context, parentDoc, args.role);
     const files = context.store.listJournals(args.issue);
-    let dropped = [];
+    let sessionsDropped = [];
     const result = context.store.mutate('child', args.issue, {
       writer, parentDoc, create: () => state.newChild({ repository: context.repository, outcome }),
       change: doc => {
-        const next = state.assignGate(doc, { assignment: args.assignment, role: args.role, supersede: Boolean(args.supersede), reason: args.reason || null });
-        dropped = laneWaitDrops(doc, next);
+        const next = state.assignGate(doc, { assignment: args.assignment, role: args.role, supersede: Boolean(args.supersede), reason: args.reason || null, now: nowText(deps) });
+        sessionsDropped = gateSessionDrops(doc, next);
         return next && markJournalsSeen(next, files);
       },
     });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), attention };
+    return { ...writeResult('child', args.issue, result, writer), ...gateDropsResult(sessionsDropped), attention };
   },
 
-  reopen(args, context) {
+  reopen(args, context, deps = {}) {
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
     // Reopening an accepted gate opens a new assignment of its role; sending a return back does not.
     const gate = context.store.read('child', args.issue).doc?.gate;
     if (gate?.state === 'RETIRED') refuseUnstartedAgentUat(context, parentDoc, gate.role);
     const files = context.store.listJournals(args.issue);
-    let dropped = [];
+    let sessionsDropped = [];
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => {
-      const next = state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null });
-      dropped = laneWaitDrops(doc, next);
+      const next = state.reopenGate(doc, { reason: args.reason, assignment: args.assignment || null, now: nowText(deps) });
+      sessionsDropped = gateSessionDrops(doc, next);
       return markJournalsSeen(next, files);
     } });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped) };
+    return { ...writeResult('child', args.issue, result, writer), ...gateDropsResult(sessionsDropped) };
+  },
+
+  // The controller records a gate's host session after the launch, or its close after archiving it.
+  // Same writers as assign: the parent's holder, or the lane holding this child.
+  'gate-session'(args, context, deps = {}) {
+    const parentDoc = readParent(context);
+    const outcome = outcomeFor(parentDoc, args.issue);
+    const writer = requireGateWriter(context, parentDoc, context.store.read('child', args.issue).doc, outcome);
+    // The calling session's own desktop ID is never in state, so it is added here: the controller
+    // runs this command, and a gate is never the session that records it.
+    const ownHostSession = (deps.environment || process.env).CLAUDE_CODE_HOST_SESSION_ID;
+    const controllerSessions = [parentDoc.fence?.holder_session, writer.session, ownHostSession, ...(Array.isArray(parentDoc.private?.retired_holders) ? parentDoc.private.retired_holders : [])];
+    const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.recordGateSession(doc, {
+      assignment: args.assignment, host: args.host || null, session: args['host-session'] || null, closed: Boolean(args.closed),
+      replace: Boolean(args.replace), reason: args.reason || null, now: nowText(deps), controllerSessions }) });
+    return { ...writeResult('child', args.issue, result, writer),
+      next_action: args.closed ? 'Controller: the next pass resolves its CLOSE_DUE finding' : 'Controller: once the gate is finished and its report stored, archive its session and run gate-session --closed' };
   },
 
   interrupt(args, context) {
@@ -1086,7 +1128,6 @@ const commands = {
     const writer = requireParentHolder(context, parentDoc);
     const attention = args.consume ? showAttention(parentDoc, args, deps) : null;
     let change;
-    let dropped = [];
     if (args.record) {
       change = doc => state.recordReturn(doc, { returnId: args.record, assignment: args.assignment, atHead: args['at-head'] || null });
     } else {
@@ -1094,14 +1135,10 @@ const commands = {
       const head = child && args.verdict === 'ACCEPT' && child.gate.role === 'G1' ? liveHead(context, child) : undefined;
       const review = child && child.gate.role === 'G2' && ['ACCEPT', 'REOPEN'].includes(args.verdict) ? g2Review(context, child, args.consume) : undefined;
       const now = nowText(deps);
-      change = doc => {
-        const next = state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head, review, reason: args.reason ?? null, now });
-        dropped = laneWaitDrops(doc, next);
-        return next;
-      };
+      change = doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head, review, reason: args.reason ?? null, now });
     }
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
-    return { ...writeResult('child', args.issue, result, writer), ...dropsResult(dropped), ...(attention ? { attention } : {}) };
+    return { ...writeResult('child', args.issue, result, writer), ...(attention ? { attention } : {}) };
   },
 
   // An executor binds its own session to the controller's current assignment and opens its journal.
@@ -1165,7 +1202,7 @@ function formatReport(report) {
     `Repository ${report.repository}, parent #${report.parent_issue}; state store ${report.store.repository} ${report.store.branch} ${report.store.path} (parent revision ${report.parent_revision ?? 'none'})`,
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
-  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${finding.kind ? ` ${finding.kind === 'pr' ? 'PR' : 'issue'}` : ''} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
+  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${state.kindText(finding)} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
   if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
@@ -1278,6 +1315,9 @@ function formatAttention(result) {
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
+  // Stale-work net findings nobody answered for 4 hours lead: answer each this turn.
+  if (result.callout?.count) lines.push('', `Unanswered over ${state.NET_CALLOUT_HOURS} h (${result.callout.count}): answer each this turn`,
+    ...result.callout.entries.map(entry => `- ${entry.id} ${entry.code} ${entry.ref}: ${entry.state === 'overdue' ? `promise overdue ${entry.hours} h` : `new for ${entry.hours} h`}`), '');
   // Work-queue findings first: each is a task on the graph that needs the controller's next step now.
   const queue = result.findings.filter(entry => state.WORK_QUEUE_CODES.has(entry.code));
   if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id}${entry.state === 'acknowledged' ? ' acknowledged' : ''} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
@@ -1286,7 +1326,8 @@ function formatAttention(result) {
     wait.pr ? `PR #${wait.pr}` : null, wait.head ? wait.head.slice(0, 7) : null].filter(Boolean).join(' · ')}`), '');
   else if (result.owner_waits_unknown) lines.push(...(queue.length ? [] : ['']), `Owner waits: unknown (${result.owner_waits_unknown})`, '');
   for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
-    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${state.kindText(entry)}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    if (entry.code === 'CLOSE_DUE') lines.push(`  Session: ${entry.session ? `${entry.host} ${entry.session}` : `${entry.host || 'host not recorded'}, no session ID recorded: find it by the assignment ID or title`}`);
     if (entry.due) lines.push(`  ${entry.overdue ? 'OVERDUE: the step promised by' : 'Promised by'} ${entry.due}${entry.promised ? `: ${entry.promised}` : ''}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));
   }
@@ -1342,6 +1383,8 @@ function runPasses(args, deps, out) {
   const context = openContext(args, passDeps);
   context.pass = pass;
   context.requests = requests;
+  // Tests pass a pause that does not sleep; the lease waits for real otherwise.
+  context.leasePause = typeof deps.leasePause === 'function' ? deps.leasePause : null;
   const environment = deps.environment || process.env;
   const host = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1' ? 'cloud' : 'computer';
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
@@ -1401,6 +1444,19 @@ function runPasses(args, deps, out) {
         context.sweepNotes = pass.metrics = measure ? notes : null;
         // The read copy belongs to the lock's owner, like the notes beside it.
         context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
+        // A computer refresh leaves the lease to a cloud sweep that is queued or at work, so the
+        // cloud's full-budget pass completes instead of losing the lease to back-to-back computer
+        // passes; that pass reads this computer's change too.
+        if (requests && host === 'computer') {
+          const cloud = cloudSweepAtWork(context);
+          if (cloud.run) {
+            out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason: 'the cloud sweep picks this up', cloud_run: cloud.run }, null, 2)}\n`
+              : `The cloud sweep picks this up: run ${cloud.run.id} is ${cloud.run.status}, so this refresh leaves the sweep lease to it and wrote nothing.\n`);
+            passes += 1;
+            break;
+          }
+          if (cloud.unread) (deps.stderr || process.stderr).write(`Cloud sweep check: the Actions read failed (${cloud.unread}), so this refresh runs as usual.\n`);
+        }
         if (requests) {
           const taken = takeLease(context, host, pass, progress);
           if (!taken) {
@@ -1426,7 +1482,7 @@ function runPasses(args, deps, out) {
           if (measure) notes.saveMetrics();
           // An error stop goes to the local note when this computer's lock still owns it; otherwise
           // (the cloud, or a lock another process took) the lease release carries it.
-          if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns() });
+          if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns(), stderr: deps.stderr || process.stderr });
         }
         if (paused) {
           out.write(args.json ? `${JSON.stringify({ outcome: 'PAUSED', reason: 'GitHub rate limit' }, null, 2)}\n` : 'Paused: GitHub\'s hourly limit is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.\n');
@@ -1470,6 +1526,34 @@ function busySweepText(busy) {
   return `Another sweep is running${where}, so this one wrote nothing. That sweep or the next one brings the board up to date; run refresh again after the lease ends if the board still looks out of date.`;
 }
 
+// The cloud Programme Sweep run that is queued, or running its refresh job, in the governed
+// repository: { run: { id, status } }, else { run: null }, with `unread` naming the HTTP status (or
+// "no reply") when GitHub could not say; the caller then runs as usual. No sweep workflow here (404)
+// is no run. A run still in progress past its refresh job is only its follow-up waiting, so its jobs
+// are read (a second request, only then) and it holds nothing back.
+const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
+const SWEEP_JOB = 'Refresh the programme';
+const RUN_WAITING = new Set(['queued', 'waiting', 'pending', 'requested']);
+function cloudSweepAtWork(context) {
+  const repository = context.binding.repository;
+  const read = route => {
+    try { return context.requests.request('GET', route); } catch (error) { if (state.STOPS_PASS.has(error.code)) throw error; return null; }
+  };
+  const unread = response => ({ run: null, unread: response?.status ? `HTTP ${response.status}` : 'no reply' });
+  const runs = read(`repos/${repository}/actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=10&exclude_pull_requests=true`);
+  if (runs?.status === 404) return { run: null };
+  if (runs?.status !== 200 || !Array.isArray(runs.json?.workflow_runs)) return unread(runs);
+  for (const run of runs.json.workflow_runs) {
+    if (!Number.isSafeInteger(run?.id)) continue;
+    if (RUN_WAITING.has(run.status)) return { run: { id: run.id, status: run.status } };
+    if (run.status !== 'in_progress') continue;
+    const jobs = read(`repos/${repository}/actions/runs/${run.id}/jobs?per_page=20`);
+    if (jobs?.status !== 200 || !Array.isArray(jobs.json?.jobs)) return unread(jobs);
+    if (jobs.json.jobs.some(job => job?.name === SWEEP_JOB && job.status !== 'completed')) return { run: { id: run.id, status: run.status } };
+  }
+  return { run: null };
+}
+
 // Takes the lease for one pass with its request budget. The predecessor's stop the state does
 // not hold yet comes from the lease, unless this computer's own note already reports it.
 function takeLease(context, host, pass, progress) {
@@ -1481,7 +1565,7 @@ function takeLease(context, host, pass, progress) {
   requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
   context.store.graphqlRefused = false;
   const store = typeof context.store.private === 'object' ? context.store.private : context.store;
-  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy });
+  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy, ...(context.leasePause ? { pause: context.leasePause } : {}) });
   context.busyLease = null;
   if (!lease.acquire(pass.started_at)) { context.busyLease = lease.busy; return false; }
   context.lease = lease;
@@ -1504,7 +1588,7 @@ function errorReason(error) {
 // Releases the lease with what this pass leaves for the next one: an error stop that no local note
 // holds is written here, so the next pass on either host reports it. A failed release only means
 // the lease expires on its own, by the pass's kill time.
-function releaseLease(context, pass, { error = null, noteHolds = false } = {}) {
+function releaseLease(context, pass, { error = null, noteHolds = false, stderr = process.stderr } = {}) {
   const lease = context.lease;
   context.lease = null;
   if (!lease) return;
@@ -1520,7 +1604,11 @@ function releaseLease(context, pass, { error = null, noteHolds = false } = {}) {
   } catch (releaseError) {
     // The pass's own error is the one reported; a release that fails after it leaves the lease to expire.
     if (!error && (!releaseError.code || ['STALE_WRITER', 'PASS_LOCK_LOST'].includes(releaseError.code))) throw releaseError;
+    lease.unreleased = lease.unreleased || { expires_at: null, failed: true };
   } finally { context.releasing = false; }
+  // A release that never landed keeps the next sweep waiting until the lease runs out: say so, in a
+  // fixed line, so the run that ends here is not taken for a clean one.
+  if (lease.unreleased) stderr.write(`Sweep lease: ${lease.unreleased.failed ? 'a GitHub request of the release failed' :`the release did not land after ${RELEASE_TRIES} tries`}, so the lease ends on its own at ${lease.unreleased.expires_at || 'its expiry'}; the next sweep waits for it and reports this pass as stopped.\n`);
 }
 
 function finish(args, deps, out, opened = null) {
@@ -1542,6 +1630,7 @@ function finish(args, deps, out, opened = null) {
   if (pass && !args.json) out.write(formatReport(result));
   else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
   else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
+  else if (args.command === 'show' && args.queue && !args.json) out.write(formatQueue(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
   if (pass) return result.holds.length ? 1 : 0;
   return 0;

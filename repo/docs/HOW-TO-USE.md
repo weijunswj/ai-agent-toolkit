@@ -81,7 +81,7 @@ Governance has one entry:
 
 - `toolkit governance`, `setup governance` or `refresh governance` (with or without `toolkit` in front): show this repository's governance question bank, in the same format as `setup toolkit`. It asks at most two questions: whether governance stays on or off (only where it is already decided; in a new repository your yes on the turn-on question decided it, so the answer turns governance on) and whether task auto-merge is on. Everything else is a status line under the table: what is set, or the Toolkit default your answer applies. Those defaults are parallel CI shards when the last green CI run took 10 minutes or more and the CI does not already split its tests (`shards=not-now` or `shards=never` in your reply skips them, `shards=yes` adds them anyway), the commands for Toolkit's permission blocks and the governance App when they are needed (you run them yourself), and, where governance is on and older setups left copies of the governed rules or playbooks, removing those copies in the working tree for one pull request you merge yourself. Reply `all recommended` or only your changes, such as `1.1=B`, in chat; no terminal step. Toolkit checks that the reply is your own message before it acts. Every change to governance, task auto-merge or parallel CI shards is one pull request for you to merge, and applies only after your merge. In a new repository the bank also names the evidence store, parent issue and required checks: the store is this repository's own private `TRANSPORT-<name>`, found or created when governance turns on (`store=<owner/name>` uses another private repository of yours instead, and `no store` keeps governance off), and the pull request holds only the programme file and the Toolkit CI checks.
 
-`toolkit governance enable` and `toolkit governance disable` are your answers to Toolkit's governance question. Each prepares a pull request for you to merge, and counts only while that question is open for this repository.
+When Toolkit asks whether to turn on governance, reply yes, no or later in your own words. Yes or no prepares a pull request for you to merge, and counts only while that question is open for this repository.
 
 ### Evidence Store
 
@@ -272,7 +272,7 @@ Policy layering stays portable:
 Templates are canonical material. Review them before copying into a consumer repo and update the owning `skills/**` or `repo/contracts/**` surface directly.
 
 - [Generic agent rule templates](../../skills/repository-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
-- [n8n agent rules](../../skills/n8n-safety-router/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
+- [n8n agent rules](../../skills/n8n-safety-router/) contain the full n8n operating ruleset; the global rules carry its short n8n section, so a repository needs no n8n block.
 - [n8n local setup](../../skills/n8n-environment-setup/references/n8n/local-setup.md), [production Cloudflare Tunnel self-hosting](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md), and [Hostinger Coolify VPS n8n](../../skills/n8n-environment-setup/references/n8n/hostinger-vps.md) contain the full local dev, local/CGNAT production, and hosted n8n setup guides.
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify setup, SSH preflight, maintenance, and incident response. Use it before the hosted n8n guide when Coolify is not already running.
 - n8n work with AI agents uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API.
@@ -284,7 +284,7 @@ Templates are canonical material. Review them before copying into a consumer rep
 
 Managed template outputs are intentional. `node repo/scripts/sync-agent-instruction-shims.cjs --write` updates canonical agent-rule templates and root instruction shims from `repo/contracts/agent-rules/`. Other skill templates are maintained directly in their skill folders.
 
-For n8n work, install or load `skills/n8n-safety-router`. The optional adapter installer can detect n8n repositories and preview patches to active instruction files, but it must be run with `--dry-run` first. Before running it with `--write`, pause, name the current target file and operation, explain the write, and ask for explicit current-turn approval. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
+For n8n work, install or load `skills/n8n-safety-router`. The global rules that setup installs carry its short n8n section, so no repository instruction file needs an n8n block; an older one in `AGENTS.md` is a leftover. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 
@@ -293,7 +293,6 @@ n8n helper templates may write scoped local outputs after they are copied into a
 Use:
 
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional Codex n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
@@ -308,7 +307,6 @@ Use:
 
 - [Claude Code shim template](../../skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional Claude n8n adapter](../../skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
@@ -321,7 +319,6 @@ Claude Code n8n work uses the [official n8n Skills](https://github.com/n8n-io/sk
 Use:
 
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional OpenCode n8n adapter](../../skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)
@@ -334,7 +331,6 @@ OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is plat
 Use:
 
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
-- [optional Antigravity 2 n8n adapter](../../skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-environment-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-environment-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md)

@@ -118,21 +118,6 @@
     {
       "skill": "n8n-safety-router",
       "term": "Toolkit",
-      "count": 3
-    },
-    {
-      "skill": "n8n-safety-router",
-      "term": "Claude",
-      "count": 5
-    },
-    {
-      "skill": "n8n-safety-router",
-      "term": "Gemini",
-      "count": 3
-    },
-    {
-      "skill": "n8n-safety-router",
-      "term": "Antigravity",
       "count": 1
     }
   ]
