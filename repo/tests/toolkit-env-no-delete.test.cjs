@@ -638,6 +638,8 @@ test('an older tab saved as UTF-16 is kept byte for byte and still named, with n
   assert.ok(fs.readFileSync(older).equals(before), 'the UTF-16 file is unchanged');
   assert.match(status.stdout, /An older Toolkit env tab was not saved/);
   assert.equal(h.store.removes, 0);
+});
+
 // Line breaks some editor honours beyond CRLF and LF, from the shared hostile inputs, plus VT and FF.
 const { BREAKS } = require('./support/hostile-inputs.cjs');
 const STRAY_BREAKS = { ...Object.fromEntries(Object.entries(BREAKS).filter(([name]) => name !== 'crlf')), vt: String.fromCodePoint(0x0b), ff: String.fromCodePoint(0x0c) };
