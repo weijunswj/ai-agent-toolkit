@@ -1,11 +1,9 @@
 'use strict';
 
-// The one Toolkit helper specification. Every helper definition renders from it: the saved
-// Claude Code and Codex agents (toolkit-claude-helper-agents.cjs, toolkit-codex-helper-agents.cjs)
-// and a launcher's session `--agents` definition (toolkit-v3-native-helper-adapter.cjs). The
-// helpers' model and effort live here too, one route per provider (owner decision on #1466: helper
-// routes left the stack registry, which keeps only gate lead and reviewer routes). The selected
-// stack decides only the provider, from its lead route.
+// The one Claude Code helper specification. Both Claude definition sources render
+// from it: the saved user agent (toolkit-claude-helper-agents.cjs) and a launcher's
+// session `--agents` definition (toolkit-v3-native-helper-adapter.cjs). Model and
+// effort are not here; they come only from the selected stack registry route.
 
 const os = require('node:os');
 const path = require('node:path');
@@ -17,7 +15,7 @@ function claudeUserAgentsDirectory(environment = process.env) {
 
 const ROLES = Object.freeze({
   G0: Object.freeze({
-    name: 'toolkit-g0-helper', title: 'Toolkit planning helper (G0)',
+    name: 'toolkit-g0-helper', registryRole: 'DISCOVERY_HELPER', title: 'Toolkit planning helper (G0)',
     tools: ['Read', 'Glob', 'Grep'], disallowed: ['Agent', 'Task', 'Bash', 'PowerShell', 'Write', 'Edit', 'NotebookEdit'], maxTurns: 50,
     description: 'Leaf read-only evidence helper for the Toolkit planning (G0) subagent role. Use for bounded, separable evidence gathering (source or dependency inventories, bounded file and configuration inspection, or factual answers with exact provenance) when a G0 or G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. Never for implementation, tests, decisions or delegation.',
     scope: [
@@ -29,7 +27,7 @@ const ROLES = Object.freeze({
     output: ['status: complete, blocked or limit-reached', 'observations: one claim each, with path and line range or the pattern and root that produced it', 'unknowns: what could not be determined, and why', 'limits_used: turns and reads consumed', 'blocker: the exact fact, if any'],
   }),
   G1: Object.freeze({
-    name: 'toolkit-g1-helper', title: 'Toolkit build helper (G1)',
+    name: 'toolkit-g1-helper', registryRole: 'BUILDER_HELPER', title: 'Toolkit build helper (G1)',
     tools: ['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write'], disallowed: ['Agent', 'Task'], maxTurns: 60,
     description: 'Leaf bounded implementation or validation helper for the Toolkit build (G1) subagent role. Use for independent, separable implementation or testing within explicitly named files and commands when the G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. The caller integrates and validates; this helper never owns the Core, publishes or declares acceptance.',
     scope: [
@@ -44,19 +42,6 @@ const ROLES = Object.freeze({
 });
 
 const HELPER_NAMES = Object.freeze(Object.values(ROLES).map(spec => spec.name));
-
-// The helpers' route on each provider: the cheapest route that does their bounded work (the
-// values the stack registry held until helper routes left it). Both roles share one route.
-const HELPER_ROUTES = Object.freeze({
-  anthropic: Object.freeze({ provider: 'anthropic', model: 'haiku-5.5', reasoning: 'xhigh' }),
-  openai: Object.freeze({ provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' }),
-});
-
-// The helper route for a provider (the selected stack's lead provider).
-function helperRoute(provider) {
-  if (typeof provider !== 'string' || !Object.hasOwn(HELPER_ROUTES, provider)) throw Object.assign(new Error('HELPER_ROUTE_PROVIDER_UNSUPPORTED'), { code: 'HELPER_ROUTE_PROVIDER_UNSUPPORTED' });
-  return HELPER_ROUTES[provider];
-}
 
 function roleSpec(role) {
   const spec = ROLES[role];
@@ -90,4 +75,4 @@ function roleInstructions(spec) {
   ].join('\n');
 }
 
-module.exports = Object.freeze({ ROLES, HELPER_NAMES, HELPER_ROUTES, helperRoute, roleSpec, roleInstructions, claudeUserAgentsDirectory });
+module.exports = Object.freeze({ ROLES, HELPER_NAMES, roleSpec, roleInstructions, claudeUserAgentsDirectory });

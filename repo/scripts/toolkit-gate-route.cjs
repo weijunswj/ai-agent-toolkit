@@ -93,7 +93,7 @@ function membersOf(registry, profile) {
   const stack = profileOf(registry, profile);
   if (!stack) return '';
   const ids = (stack.reviewers || []).map(entry => entry.reviewer_id);
-  const roles = Object.keys(stack.routes || {});
+  const roles = Object.keys(stack.routes || {}).filter(name => !name.endsWith('_HELPER'));
   return ` Its members: ${[...roles, ...(ids.length ? [`REVIEWER (${ids.join(', ')})`] : [])].join(', ')}.`;
 }
 

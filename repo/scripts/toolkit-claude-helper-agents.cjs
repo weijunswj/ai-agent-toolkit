@@ -18,7 +18,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { StackRegistrySnapshot, CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
 const { claudeNativeModel } = require('./toolkit-v3-native-helper-adapter.cjs');
-const { ROLES, roleSpec, roleInstructions, helperRoute, claudeUserAgentsDirectory } = require('./toolkit-claude-helper-spec.cjs');
+const { ROLES, roleSpec, roleInstructions, claudeUserAgentsDirectory } = require('./toolkit-claude-helper-spec.cjs');
 
 const MARKER = '<!-- ai-agent-toolkit:generated claude-helper-agent v1 -->';
 const REGISTRY_REL = 'repo/contracts/controller-kernel/stack-registry-v3.json';
@@ -61,8 +61,7 @@ class ClaudeHelperAgentRenderer {
 
   render(role) {
     const spec = roleSpec(role);
-    // The stack decides only the provider; the helper spec holds the route.
-    const route = helperRoute(this.#binding.role('DISCOVERY').route.provider);
+    const { route } = this.#binding.role(spec.registryRole);
     const model = claudeNativeModel(route);
     const selection = this.#binding.selection;
     const text = [
@@ -82,8 +81,8 @@ class ClaudeHelperAgentRenderer {
       `# ${spec.title}`,
       '',
       '## Binding',
-      `- Rendered from the Toolkit helper spec for the explicitly selected stack \`${selection.profile_id}\` (stack registry \`${this.#reference.path}\`, SHA-256 \`${this.#binding.sourceDigest}\`), role ${role}: ${route.provider} \`${route.model}\` at \`${route.reasoning}\` effort, native model \`${model}\`.`,
-      '- The helper spec is the only source of this model and effort; the stack sets only the provider. If this file and the helper spec disagree, the helper spec governs: report the difference and stop. Run `setup toolkit` to refresh this file.',
+      `- Rendered from the Toolkit stack registry \`${this.#reference.path}\` (SHA-256 \`${this.#binding.sourceDigest}\`) for the explicitly selected stack \`${selection.profile_id}\`, role ${role}.Subagent (\`${spec.registryRole}\`): ${route.provider} \`${route.model}\` at \`${route.reasoning}\` effort, native model \`${model}\`.`,
+      '- The registry is the only source of this model and effort. If this file and the registry disagree, the registry governs: report the difference and stop. Run `setup toolkit` to refresh this file.',
       '- This file grants no permission, scope or execution authority. Native permissions, the caller\'s assignment and Toolkit hooks still apply.',
       '',
       roleInstructions(spec),

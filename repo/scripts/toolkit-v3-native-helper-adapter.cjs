@@ -24,7 +24,6 @@ const { types } = require('node:util');
 const compiler = require('./toolkit-gate-contract-compiler.cjs');
 const { HOST_ENTRIES, createHelperRouteGuard } = require('./toolkit-v3-helper-guard.cjs');
 const { CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
-const { helperRoute } = require('./toolkit-claude-helper-spec.cjs');
 const { CODEX_SPAWN_MATCHER, CODEX_HELPER_HOOK_MATCHER, CodexHookMatcher, defineCodexDialect,
   verifyCodexHelperRegistration } = require('./toolkit-v3-native-helper-adapter-codex.cjs');
 const { defineClaudeDialect } = require('./toolkit-v3-native-helper-adapter-claude.cjs');
@@ -88,10 +87,8 @@ function renderNativeHelperDefinition(host, callerRole, captured) {
   if (!['G0', 'G1'].includes(callerRole) || !DIALECTS[host]) fail('NATIVE_HELPER_DEFINITION_SELECTION_INVALID');
   const dialect = HostDialect.for(host);
   const binding = new CapturedStackBinding(captured), selection = binding.selection;
-  // The helper_role names are launch-protocol labels; the route comes from the helper spec for the
-  // stack's lead provider, since helper routes left the stack registry.
   const helperRole = callerRole === 'G0' ? 'DISCOVERY_HELPER' : 'BUILDER_HELPER';
-  const route = helperRoute(binding.role('DISCOVERY').route.provider);
+  const route = binding.role(helperRole).route;
   if (!dialect.supports(route)) fail('NATIVE_HELPER_ROUTE_UNSUPPORTED');
   const name = 'toolkit-' + callerRole.toLowerCase() + '-helper';
   const native = dialect.nativeDefinition(name, route, callerRole);

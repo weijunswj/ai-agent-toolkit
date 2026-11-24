@@ -30,7 +30,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { StackRegistrySnapshot, CapturedStackBinding } = require('./toolkit-stack-selection.cjs');
 const { HostDialect } = require('./toolkit-v3-native-helper-adapter.cjs');
-const { ROLES, roleSpec, roleInstructions, helperRoute } = require('./toolkit-claude-helper-spec.cjs');
+const { ROLES, roleSpec, roleInstructions } = require('./toolkit-claude-helper-spec.cjs');
 
 const MARKER = '# ai-agent-toolkit:generated codex-helper-agent v1';
 const REGISTRY_REL = 'repo/contracts/controller-kernel/stack-registry-v3.json';
@@ -88,8 +88,7 @@ class CodexHelperAgentRenderer {
 
   render(role) {
     const spec = roleSpec(role);
-    // The stack decides only the provider; the helper spec holds the route.
-    const route = helperRoute(this.#binding.role('DISCOVERY').route.provider);
+    const { route } = this.#binding.role(spec.registryRole);
     // Codex can only route a helper to its own provider; a custom agent file cannot change the provider.
     if (!HostDialect.for('codex').supports(route)) fail('CODEX_NATIVE_ROUTE_UNSUPPORTED');
     const selection = this.#binding.selection;
@@ -97,8 +96,8 @@ class CodexHelperAgentRenderer {
       `# ${spec.title}`,
       '',
       '## Binding',
-      `- Rendered from the Toolkit helper spec for the explicitly selected stack \`${selection.profile_id}\` (stack registry \`${this.#reference.path}\`, SHA-256 \`${this.#binding.sourceDigest}\`), role ${role}: ${route.provider} \`${route.model}\` at \`${route.reasoning}\` effort.`,
-      '- The helper spec is the only source of this model and effort; the stack sets only the provider. If this file and the helper spec disagree, the helper spec governs: report the difference and stop. Run `setup toolkit` to refresh this file.',
+      `- Rendered from the Toolkit stack registry \`${this.#reference.path}\` (SHA-256 \`${this.#binding.sourceDigest}\`) for the explicitly selected stack \`${selection.profile_id}\`, role ${role}.Subagent (\`${spec.registryRole}\`): ${route.provider} \`${route.model}\` at \`${route.reasoning}\` effort.`,
+      '- The registry is the only source of this model and effort. If this file and the registry disagree, the registry governs: report the difference and stop. Run `setup toolkit` to refresh this file.',
       '- This file grants no permission, scope or execution authority. Native permissions, the caller\'s assignment and Toolkit hooks still apply.',
       '',
       roleInstructions(spec),
