@@ -3526,6 +3526,14 @@ class RetiredHandoffState {
   #stateDirectory; #home;
   constructor({ stateDirectory, home }) { this.#stateDirectory = stateDirectory; this.#home = home; }
 
+  // This computer's own folders. A user-state folder that cannot be resolved skips the clean-up, so a
+  // session start never fails on it.
+  static atSessionStart() {
+    let state;
+    try { state = new RetiredHandoffState({ stateDirectory: require('./toolkit-user-state.cjs').userStateDirectory(), home: os.homedir() }); } catch { return; }
+    state.remove();
+  }
+
   remove() {
     for (const [name, kind] of RETIRED_HANDOFF_STATE) this.#removeIf(path.join(this.#stateDirectory, name), kind);
     this.#removeIf(path.join(this.#home, '.toolkit-handoff-off'), 'empty file');
@@ -3697,7 +3705,7 @@ class LocalBridgeRun {
     const args = this.#args = parseArgs(this.#argv);
     const isolated = this.#isolatedProjectCommand(args);
     if (isolated) return isolated;
-    if (args.hook) new RetiredHandoffState({ stateDirectory: require('./toolkit-user-state.cjs').userStateDirectory(), home: os.homedir() }).remove();
+    if (args.hook) RetiredHandoffState.atSessionStart();
     if (this.#uninstalledClaudeCopy(args)) return { status: 0, audit: null };
     assertReconciliationCommandArgs(args);
     const hubPath = this.#hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');

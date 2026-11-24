@@ -28,4 +28,4 @@ These pages are part of this file: their rules bind like the rules above and wer
 - [Design principles](controller/principles.md) `1334dc439350`: on adoption and before every plan, review, merge decision or owner post.
 - [Roles and routes](controller/roles-and-routes.md) `a2d8915ebcf1`: before resolving a route or launching, relaying or reviewing a gate, helper or merge-train lane.
 - [Gates](controller/gates.md) `3132f9e623d4`: before admitting, running, accepting, reviewing or retiring a gate, and for human-facing text.
-- [Evidence, progress and finish](controller/evidence-and-finish.md) `9e0382043f18`: before merging, storing evidence, cleaning up, recording a promise, acting on a finding or finishing.
+- [Evidence, progress and finish](controller/evidence-and-finish.md) `815d68ec525e`: before merging, storing evidence, cleaning up, recording a promise, acting on a finding or finishing.
