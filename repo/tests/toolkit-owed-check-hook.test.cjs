@@ -257,3 +257,27 @@ test('O-12 the attention cache keeps well-formed net entries and refuses a malfo
   assert.deepEqual(cache.readCache('acme/app', { home: dir }).net, [good]);
   assert.equal(fs.readFileSync(cache.cacheFile('acme/app', { home: dir }), 'utf8').includes('free text'), false);
 });
+
+test('O-13 a block from an attention cache over an hour old says how old it is', t => {
+  const fx = fixture(t).controller().writeTranscript().desktop();
+  const entry = { id: 'aaaaaaaaaaaa', issue: 7, kind: null, due: null, code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 8 * HOUR) };
+  cache.writeCache(fx.repository, { complete: true, net: [entry] }, { home: fx.home, now: () => iso(NOW - 3 * HOUR) });
+  assert.match(fx.run().output.reason, /Findings due \(1, from the attention cache as of 3 h ago\):/);
+  // A fresh cache adds nothing.
+  const fresh = fixture(t).controller().writeTranscript().desktop().net([entry]);
+  assert.match(fresh.run().output.reason, /Findings due \(1\):/);
+});
+
+test('O-14 when its memory file cannot be saved, the check notes the owed entries and never stops the turn', t => {
+  const fx = fixture(t).controller().writeTranscript().desktop().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) }]);
+  // A plain file where the memory folder goes (in the fixture's own temp home) makes every save fail.
+  const folder = path.join(fx.home, '.ai-agent-toolkit', 'user-state');
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'owed-check'), 'not a folder');
+  for (let turn = 0; turn < 2; turn += 1) {
+    const result = fx.run();
+    assert.equal(result.outcome, 'NO_MEMORY');
+    assert.equal(result.output.decision, undefined);
+    assert.match(result.output.systemMessage, /1 entries owed, but its memory file could not be saved, so the turn was not stopped/);
+  }
+});

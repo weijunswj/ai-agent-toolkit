@@ -256,12 +256,14 @@ const SECTIONS = Object.freeze({
   closed: { title: 'Archived gate sessions with no close record', step: command => `Record each: ${command(`gate-session ${CLOSED}`)}.` },
 });
 
-function reasonText(items, notes, command) {
+function reasonText(items, notes, command, cacheAge = null) {
   const lines = ['Toolkit owed check: this turn leaves work owed. Do it now, or say in your reply why it waits.'];
   for (const [section, spec] of Object.entries(SECTIONS)) {
     const rows = items.filter(item => item.section === section);
     if (!rows.length) continue;
-    lines.push('', `${spec.title} (${rows.length}):`, ...rows.slice(0, LIST_LIMIT).map(item => `- ${item.text}`));
+    // Findings come from the attention cache; an old cache may list findings already answered.
+    const asOf = cacheAge && (section === 'findings' || section === 'close') ? `, from the attention cache as of ${cacheAge} ago` : '';
+    lines.push('', `${spec.title} (${rows.length}${asOf}):`, ...rows.slice(0, LIST_LIMIT).map(item => `- ${item.text}`));
     if (rows.length > LIST_LIMIT) lines.push(`- and ${rows.length - LIST_LIMIT} more`);
     lines.push(spec.step(command));
   }
@@ -343,9 +345,15 @@ function check(input, deps = {}) {
   const noteDigest = sha(owed.notes.join('\n'));
   const added = keys.some(key => !shown.has(key));
   const notesChanged = owed.notes.length > 0 && previous?.notes !== noteDigest;
-  writeState(file, { keys, notes: noteDigest });
+  const remembered = writeState(file, { keys, notes: noteDigest });
+  // Without its memory this check would stop every later turn with the same list, so it only notes.
+  if (added && !remembered) {
+    return { outcome: 'NO_MEMORY', output: { systemMessage: `Toolkit owed check: ${owed.items.length} entries owed, but its memory file could not be saved, so the turn was not stopped. Run ${owed.command('attention')} for the findings.` } };
+  }
   if (added) {
-    return { outcome: 'BLOCK', output: { decision: 'block', reason: reasonText(owed.items, owed.notes, owed.command) } };
+    const ageMs = cache ? (deps.nowMs ?? Date.now()) - Date.parse(cache.as_of) : 0;
+    const cacheAge = ageMs > cacheModule.STALE_MS ? cacheModule.ageText(ageMs) : null;
+    return { outcome: 'BLOCK', output: { decision: 'block', reason: reasonText(owed.items, owed.notes, owed.command, cacheAge) } };
   }
   if (notesChanged) {
     return { outcome: 'NOTE', output: { systemMessage: owed.notes.map(note => `Toolkit could not read everything for the owed check: ${note}.`).join('\n') } };
