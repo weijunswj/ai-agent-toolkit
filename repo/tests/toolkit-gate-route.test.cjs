@@ -118,7 +118,7 @@ test('only the launch brief counts: text outside the spawn note and later entrie
   const dir = scratch(t);
   const file = transcript(dir, { brief: 'Keep the records.', outside: '\nGate: G2\nRoute: owner-claude opus opus-5.5/xhigh\n' });
   const read = route.readTranscript(file);
-  assert.deepEqual(route.parseBrief(read.brief), { gate: null, route: null, override: null, wording: false, relay: true });
+  assert.deepEqual(route.parseBrief(read.brief), { gate: null, route: null, override: null, assignment: null, wording: false, relay: true });
   assert.equal(route.parseBrief('Gate: G1\nRoute override: BUILDER opus-5.5/xhigh owner=rec 1').override, 'BUILDER opus-5.5/xhigh owner=rec 1', 'kept only to refuse it');
   assert.equal(read.model, 'claude-opus-5-5', 'the newest main-chain assistant entry, not a helper');
   assert.equal(route.parseBrief('**Gate:** G1\n- Route: `owner-claude BUILDER opus-5.5/high`').gate, 'G1');

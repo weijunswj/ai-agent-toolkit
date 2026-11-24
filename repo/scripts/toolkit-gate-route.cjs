@@ -108,10 +108,11 @@ function pinFor(registry, profile, member) {
 
 const LINE = name => new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?(?:\\*\\*)?${name}:(?:\\*\\*)?[ \\t]*(.*?)[ \\t]*$`, 'i');
 
-// The Gate and Route lines of a brief, and the retired Route override line's text (kept only so the
-// check can refuse it). Each is the first such line.
+// The Gate, Route and Assignment lines of a brief, and the retired Route override line's text (kept
+// only so the check can refuse it). Each is the first such line; the Assignment line is kept as
+// written, for the launch check.
 function parseBrief(text) {
-  const out = { gate: null, route: null, override: null, wording: false, relay: false };
+  const out = { gate: null, route: null, override: null, assignment: null, wording: false, relay: false };
   if (typeof text !== 'string') return out;
   const spawn = /<relay\b[^>]*\breason="spawn"[^>]*>[\s\S]*?<note>([\s\S]*?)<\/note>/.exec(text);
   out.relay = Boolean(spawn);
@@ -131,6 +132,7 @@ function parseBrief(text) {
   const reviewClass = first('Review class');
   out.wording = reviewClass !== null && reviewClass.toLowerCase().replace(/[`*]/g, '').trim() === 'wording-only';
   out.override = first('Route override');
+  out.assignment = first('Assignment');
   return out;
 }
 
@@ -155,6 +157,32 @@ function readTranscript(file, parts = { brief: true, served: true }) {
 
 const refuse = (gate, reason) => ({ gate, deny: `Toolkit gate route check: ${reason}` });
 
+// A gate brief's Route line read against the stack registry: { problem } saying what is wrong and the
+// fix, or { pin: { profile, member, model, effort }, registry } for the route the gate must run on.
+// The session's own route check (evaluate) and the Claude Code launch check
+// (toolkit-claude-gate-launch-hook.cjs) both call it, so a brief refused at launch is the brief the
+// started session would refuse. The registry loads only once the lines are well formed.
+function checkBriefRoute(registry, gate, brief) {
+  if (brief.override !== null) return { problem: `the brief's Route override line "${brief.override}" is retired: every gate runs on its stack-registry pin. Launch it again without that line, on the pin.` };
+  if (!brief.route) return { problem: `this ${gate} brief has no Route line, so nothing says which pin to check. Launch it again with one line \`Route: <profile> <member> <model>/<effort>\` copied from the stack registry, with model and effort pinned in the launch call.` };
+  if (brief.route.malformed !== undefined) return { problem: `the brief's Route line "${brief.route.malformed}" is not \`Route: <profile> <member> <model>/<effort>\`. Launch it again with that line.` };
+  registry = registry || loadRegistry();
+  const { profile } = brief.route;
+  const named = resolveMember(registry, profile, brief.route.member);
+  if (named.problem) return { problem: named.problem };
+  const { member } = named;
+  const pinned = pinFor(registry, profile, member);
+  if (!pinned) return { problem: `the stack registry has no route ${profile}/${brief.route.member}.${membersOf(registry, profile)} Launch again with \`Route: <profile> <member> <model>/<effort>\` naming one of them.` };
+  if (gate === 'G2' ? !pinned.reviewer : pinned.reviewer || ROLE_MEMBER[gate] !== member) return { problem: `${profile}/${member} is not the ${gate} route${gate === 'G2' ? ' (a G2 names a reviewer id)' : ` (${ROLE_MEMBER[gate]})`}. Launch it again on the right route.` };
+  if (gate === 'G2' && brief.wording && brief.route.model === pinned.model && brief.route.effort === WORDING_EFFORT) {
+    return { pin: { profile, member, model: pinned.model, effort: WORDING_EFFORT }, registry };
+  }
+  if (brief.route.model !== pinned.model || brief.route.effort !== pinned.effort) {
+    return { problem: `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin.` };
+  }
+  return { pin: { profile, member, model: pinned.model, effort: pinned.effort }, registry };
+}
+
 // The session's route decision: { gate: null, stamp: 'Route: UNVERIFIED' } for a session that is not
 // a gate; { gate, deny } for one that must not run; { gate, stamp, proof, pin } for one on its route.
 function evaluate({ input = {}, environment = process.env, registry, transcript } = {}) {
@@ -173,26 +201,12 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   if (marked && gate && marked !== gate) return refuse(marked, `the launcher marked this session ${marked} but its brief says Gate: ${gate}. Launch it again with one role.`);
   gate = marked || gate;
   if (!gate) return { gate: null, stamp: 'Route: UNVERIFIED' };
-  if (brief.override !== null) return refuse(gate, `the brief's Route override line "${brief.override}" is retired: every gate runs on its stack-registry pin. Launch it again without that line, on the pin.`);
-  if (!brief.route) {
-    if (marked && !brief.gate) return { gate, stamp: 'Route: UNVERIFIED' };
-    return refuse(gate, `this ${gate} brief has no Route line, so nothing says which pin to check. Launch it again with one line \`Route: <profile> <member> <model>/<effort>\` copied from the stack registry, with model and effort pinned in the launch call.`);
-  }
-  if (brief.route.malformed !== undefined) return refuse(gate, `the brief's Route line "${brief.route.malformed}" is not \`Route: <profile> <member> <model>/<effort>\`. Launch it again with that line.`);
-  registry = registry || loadRegistry();
-  const { profile } = brief.route;
-  const named = resolveMember(registry, profile, brief.route.member);
-  if (named.problem) return refuse(gate, named.problem);
-  const { member } = named;
-  const pinned = pinFor(registry, profile, member);
-  if (!pinned) return refuse(gate, `the stack registry has no route ${profile}/${brief.route.member}.${membersOf(registry, profile)} Launch again with \`Route: <profile> <member> <model>/<effort>\` naming one of them.`);
-  if (gate === 'G2' ? !pinned.reviewer : pinned.reviewer || ROLE_MEMBER[gate] !== member) return refuse(gate, `${profile}/${member} is not the ${gate} route${gate === 'G2' ? ' (a G2 names a reviewer id)' : ` (${ROLE_MEMBER[gate]})`}. Launch it again on the right route.`);
-  let pin = { model: pinned.model, effort: pinned.effort };
-  if (gate === 'G2' && brief.wording && brief.route.model === pinned.model && brief.route.effort === WORDING_EFFORT) {
-    pin = { model: pinned.model, effort: WORDING_EFFORT };
-  } else if (brief.route.model !== pinned.model || brief.route.effort !== pinned.effort) {
-    return refuse(gate, `the brief's Route line asks for ${brief.route.model}/${brief.route.effort}, but the ${profile}/${member} pin is ${pinned.model}/${pinned.effort}. Launch it again on the pin.`);
-  }
+  if (brief.override === null && !brief.route && marked && !brief.gate) return { gate, stamp: 'Route: UNVERIFIED' };
+  const checked = checkBriefRoute(registry, gate, brief);
+  if (checked.problem) return refuse(gate, checked.problem);
+  registry = checked.registry;
+  const { profile, member } = checked.pin;
+  const pin = { model: checked.pin.model, effort: checked.pin.effort };
   const level = input.effort && typeof input.effort === 'object' ? input.effort.level : null;
   // A helper's call (the host sets agent_id inside a subagent) carries the gate's transcript but runs
   // on the helper's own route, which the agent hook checked when it started (cheaper than the lead;
@@ -385,4 +399,4 @@ function main(argv = process.argv.slice(2), environment = process.env, write = t
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ WORDING_EFFORT, evaluate, loadRegistry, main, parseBrief, preToolUse, readTranscript, registryModel, stampLines, stampStatus });
+module.exports = Object.freeze({ EFFORTS, ROLE_MEMBER, WORDING_EFFORT, checkBriefRoute, evaluate, loadRegistry, main, membersOf, parseBrief, pinFor, preToolUse, readTranscript, registryModel, stampLines, stampStatus });
