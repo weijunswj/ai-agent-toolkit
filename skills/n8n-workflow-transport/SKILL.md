@@ -28,7 +28,7 @@ Apply `n8n-safety-router` first for the full n8n operating contract. A generated
 
 - Treat these scripts as review-required templates, not trusted runtime code.
 - Follow `n8n-safety-router` for [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
-- Do not run live n8n import/export from this toolkit repo.
+- Do not run live n8n import/export from this repository.
 - Do not run live n8n import/export in CI.
 - Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
 - Keep consumer-repo workflow JSON unpublished (inactive) unless the user explicitly confirms publishing in the target live instance. In n8n 2.x a workflow counts as unpublished only when `active` is false and no published version (`activeVersionId`) is set; anything else, including a missing state, counts as live.
@@ -72,7 +72,7 @@ Stop and ask again if approval does not name the target repo; live approval does
 - `templates/helper-scripts/sanitizer/`: sanitizer helper scripts.
 - `templates/helper-scripts/import-export-sync/`: import/export, validation, compare, prepare, and sync helper scripts.
 
-In consumer repos, install the import/export sync helper folder under `n8n-workflows/scripts/` when Toolkit creates or manages `n8n-workflows/`. These scripts are manual helpers only; they must not run automatically.
+In consumer repos, install the import/export sync helper folder under `n8n-workflows/scripts/` whenever `n8n-workflows/` is created or managed. These scripts are manual helpers only; they must not run automatically.
 
 ## Output
 

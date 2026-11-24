@@ -728,8 +728,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /When a non-gate thread's output falls short \(a missed check, a wrong fact, a shallow review\), restart that work on the next step up/);
   // The skill itself keeps gate sessions and the helpers a G0 or G1 lead launches off the ladder.
   const costSkill = fs.readFileSync(path.join(__dirname, '../../skills/agent-cost-control/SKILL.md'), 'utf8');
-  assert.match(costSkill, /\*\*Gates are outside the ladder\.\*\* G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin\./);
-  assert.match(costSkill, /Gate sessions \(G0, G1, G2, reviewers\) and the helpers a G0 or G1 lead launches follow their gate rules'/);
+  assert.match(costSkill, /\*\*Planning, build and review sessions are outside the ladder\.\*\* Those sessions, their reviewers and the helpers a planning or build lead launches keep the models, effort and routes that the repository's own workflow rules pin\./);
+  assert.match(costSkill, /Planning, build and review sessions \(including reviewers\) and the helpers a planning or build lead launches follow the repository's own workflow rules for fresh context and recoverable work/);
   assert.match(costSkill, /A task changes at its next rebuild; a non-gate thread is restarted on the new step\./);
   // Only host settings that are confirmed are named.
   assert.doesNotMatch(costSkill, /default_subagent_reasoning_effort/);

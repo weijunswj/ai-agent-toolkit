@@ -9,7 +9,7 @@ description: Use when reviewing an implementation plan to compare low-cost manag
 
 Use this skill before implementation momentum turns common platform work into custom code. The goal is to cut scope and reduce security risk by choosing managed or owner-hosted foundations where they are low-cost enough to justify the integration work.
 
-Also use this skill to define an upgrade watch for selected providers: what usage limits matter, what signals Codex should inspect later, what warning threshold should trigger a suggestion, and what owner approval is required before any paid plan change.
+Also use this skill to define an upgrade watch for selected providers: what usage limits matter, what signals the agent should inspect later, what warning threshold should trigger a suggestion, and what owner approval is required before any paid plan change.
 
 Do not run a full provider search for every ordinary feature. Use this skill when the task introduces or materially changes a foundation primitive, or when the user asks to reduce build scope, compare managed options, choose low-cost foundations, or define upgrade triggers. Foundation primitives include auth, accounts, backend APIs, databases, workflow automation, CRM/contact records, forms, email, storage, admin dashboards, billing, queues, scheduled jobs, webhooks, search, analytics, traffic/security monitoring, or abuse prevention. Do not interrupt small follow-up implementation tasks after the foundation decision is already recorded.
 
@@ -47,7 +47,7 @@ Keep the review practical: recommend building from scratch only when product con
 6. Define the upgrade watch for any selected provider:
    - Expected starting usage and near-term scale assumption.
    - Official limit or pricing page that must be verified before commitment.
-   - Read-only usage source Codex can inspect later, such as provider dashboard export, API usage endpoint, billing alert, application metrics, Coolify/VPS resource report, logs, or database/storage stats.
+   - Read-only usage source the agent can inspect later, such as provider dashboard export, API usage endpoint, billing alert, application metrics, Coolify/VPS resource report, logs, or database/storage stats.
    - Warning and failure thresholds, such as 70-80 percent of a quota for warning and 90-95 percent for urgent review, adjusted to the provider and workload.
    - Owner action required: optimize, clean up, archive/export, reduce abuse, split workloads, or approve an upgrade.
 7. Keep private secrets server-side. Public client keys are acceptable only when backed by provider rules, scoped policies, and quota controls.

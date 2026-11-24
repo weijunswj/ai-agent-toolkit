@@ -1,34 +1,57 @@
 #!/usr/bin/env node
 'use strict';
 
-// The controller rules are repo/CONTROLLER.md plus the pages its Pages section lists. The map at
+// The controller rules are repo/CONTROLLER.md plus the pages its Pages section lists, and the gate
+// rules (repo/contracts/agent-rules/gate-rules.md). The map at
 // repo/contracts/agent-rules/controller-enforcement-map.json says, for each rule, what enforces it
 // (a hook, a script, a CI check or the programme reconciler, each with the test that proves it, and
 // one line on which part of the rule they cover) or that it is instruction-only and why. The map lives outside the rules files, so they gain no bytes.
 //
-// A rule is one non-empty line under a `##` or `###` heading of a controller file: a bullet or a
+// The failure it prevents: a rule edited into something code could check, or a host that gains the
+// feature a reason said was missing, while the row still says instruction-only. So every row holds
+// `rule_sha`, the first 12 hex of the SHA-256 of its rule line: an edited line fails here until a
+// person re-reads the row (enforce it, or keep the reason) and sets the new hash the error prints.
+// An instruction-only row says why, as { basis, why } with one of three bases:
+//   - judgement: no code can decide it (`why` says what the judgement is);
+//   - host-gap: a host lacks what code would need (`why` names the missing capability, `probe` says
+//     how to test whether the host has it now); `--list host-gap` prints them for a hooks, host
+//     contract or setup review;
+//   - planned: code can decide it and the automation is not built yet (`planned` names the slice).
+//
+// A rule is one non-empty line under a `##` or `###` heading of a rules file: a bullet or a
 // paragraph. A fenced block or a `####` line inside a section also counts as rule lines, so it
 // needs a row too; that fails closed. A map row finds its rule by `rule`, a phrase that must appear in exactly one rule line
 // of its `file`. This check fails when:
 //   - a rule line has no row, or more than one row;
 //   - a row's phrase matches no rule line, or more than one;
+//   - a row's `rule_sha` is missing or is not the hash of its rule line as it reads now;
 //   - a row has both or neither of `enforced_by` and `instruction_only`, or an enforced row has no
 //     `covers` line;
+//   - an instruction-only row has an unknown basis, no `why`, a host-gap with no `probe`, a planned
+//     row with no `planned` line, or a field its basis does not use;
 //   - an enforcer names an unknown kind, a path that is not a file inside the repository, a test
 //     that is not, or a test that never names the enforcer's file (with its extension).
 // It reads files only and writes nothing.
 //
-// Usage: node repo/scripts/check-controller-enforcement-map.cjs [--root <dir>]
+// Usage: node repo/scripts/check-controller-enforcement-map.cjs [--root <dir>] [--list judgement|host-gap|planned]
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { CORE, PAGES_DIR, listedPages } = require('./sync-controller-pages.cjs');
 
 const MAP = 'repo/contracts/agent-rules/controller-enforcement-map.json';
-const SCHEMA = 'toolkit-controller-enforcement-map/v1';
+const GATE_RULES = 'repo/contracts/agent-rules/gate-rules.md';
+const SCHEMA = 'toolkit-controller-enforcement-map/v2';
 const KINDS = Object.freeze(['hook', 'script', 'ci', 'reconciler']);
-const ROW_KEYS = Object.freeze(['file', 'rule', 'covers', 'enforced_by', 'instruction_only']);
+const ROW_KEYS = Object.freeze(['file', 'rule', 'rule_sha', 'covers', 'enforced_by', 'instruction_only']);
 const ENFORCER_KEYS = Object.freeze(['kind', 'path', 'test']);
+// Each basis and the one extra field it needs, beside `why`.
+const BASES = Object.freeze({ judgement: null, 'host-gap': 'probe', planned: 'planned' });
+const REASON_KEYS = Object.freeze(['basis', 'why', 'probe', 'planned']);
+
+// The hash a row records for its rule line.
+const ruleSha = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
 
 const normalise = text => text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
 const full = (root, rel) => path.join(root, ...rel.split('/'));
@@ -36,11 +59,22 @@ const short = text => (text.length > 80 ? `${text.slice(0, 77)}...` : text);
 const isText = value => typeof value === 'string' && value.trim() !== '';
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-// The controller files in the order the core lists them.
+// The controller files in the order the core lists them, then the gate rules.
 function controllerFiles(root) {
   const { errors, entries } = listedPages(normalise(fs.readFileSync(full(root, CORE), 'utf8')));
   if (errors.length) return { errors, files: [] };
-  return { errors: [], files: [CORE, ...entries.map(entry => `${PAGES_DIR}/${entry.file}`)] };
+  return { errors: [], files: [CORE, ...entries.map(entry => `${PAGES_DIR}/${entry.file}`), GATE_RULES] };
+}
+
+// The problems with an instruction-only reason.
+function checkReason(where, reason, errors) {
+  if (!isRecord(reason)) { errors.push(`${where}: "instruction_only" must be { "basis", "why" } with basis ${Object.keys(BASES).join(', ')}`); return; }
+  for (const key of Object.keys(reason)) if (!REASON_KEYS.includes(key)) errors.push(`${where}: unknown instruction_only key "${key}"`);
+  if (!Object.hasOwn(BASES, reason.basis)) { errors.push(`${where}: instruction_only basis must be one of ${Object.keys(BASES).join(', ')}`); return; }
+  if (!isText(reason.why)) errors.push(`${where}: instruction_only needs a "why" line`);
+  const extra = BASES[reason.basis];
+  if (extra && !isText(reason[extra])) errors.push(`${where}: a ${reason.basis} row needs a "${extra}" line${extra === 'probe' ? ' saying how to test whether the host has the capability now' : ' naming the slice that builds it'}`);
+  for (const key of ['probe', 'planned']) if (key !== extra && reason[key] !== undefined) errors.push(`${where}: a ${reason.basis} row has no "${key}" line`);
 }
 
 // Every non-empty line under a `##` or `###` heading. The title and the text before the first such
@@ -96,10 +130,15 @@ function check(root = path.resolve(__dirname, '..', '..')) {
     const matches = rules.filter(rule => rule.file === row.file && rule.text.includes(row.rule));
     if (matches.length === 0) errors.push(`${where}: matches no rule in ${row.file}`);
     else if (matches.length > 1) errors.push(`${where}: matches ${matches.length} rules in ${row.file} (lines ${matches.map(rule => rule.line).join(', ')}); use a longer phrase`);
-    else matches[0].rows.push(index + 1);
+    else {
+      matches[0].rows.push(index + 1);
+      const sha = ruleSha(matches[0].text);
+      if (row.rule_sha === undefined) errors.push(`${where}: needs "rule_sha": "${sha}", the hash of ${row.file}:${matches[0].line}, once its enforcers or reason are checked against that line`);
+      else if (row.rule_sha !== sha) errors.push(`${where}: rule line ${row.file}:${matches[0].line} changed since this row was reviewed; check its enforcers or reason still hold for the new text (enforce it where code can now decide it), then set "rule_sha": "${sha}"`);
+    }
     const enforced = row.enforced_by !== undefined, instructed = row.instruction_only !== undefined;
     if (enforced === instructed) errors.push(`${where}: needs exactly one of "enforced_by" and "instruction_only"`);
-    if (instructed && !isText(row.instruction_only)) errors.push(`${where}: "instruction_only" must say why in one line`);
+    if (instructed) checkReason(where, row.instruction_only, errors);
     if (instructed && row.covers !== undefined) errors.push(`${where}: an instruction-only row has no "covers" line`);
     if (enforced && !isText(row.covers)) errors.push(`${where}: an enforced row needs a "covers" line saying which part of the rule its enforcers act on`);
     if (enforced) {
@@ -112,24 +151,35 @@ function check(root = path.resolve(__dirname, '..', '..')) {
     if (rule.rows.length === 0) errors.push(`rule with no map row: ${label}`);
     if (rule.rows.length > 1) errors.push(`rule with ${rule.rows.length} map rows (${rule.rows.join(', ')}): ${label}`);
   }
-  return { errors, rules: rules.length, rows: map.rows.length };
+  return { errors, rules: rules.length, rows: map.rows.length, map };
 }
 
-function run(argv = process.argv.slice(2)) {
+const USAGE = `Usage: node repo/scripts/check-controller-enforcement-map.cjs [--root <dir>] [--list ${Object.keys(BASES).join('|')}]\n`;
+
+function run(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr } = {}) {
   let root = path.resolve(__dirname, '..', '..');
+  let list = null;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--root' && argv[index + 1]) root = path.resolve(argv[(index += 1)]);
-    else { process.stderr.write('Usage: node repo/scripts/check-controller-enforcement-map.cjs [--root <dir>]\n'); return 2; }
+    else if (argv[index] === '--list' && Object.hasOwn(BASES, argv[index + 1] || '')) list = argv[(index += 1)];
+    else { err.write(USAGE); return 2; }
   }
   const result = check(root);
   if (result.errors.length) {
-    process.stderr.write(`Controller enforcement map check failed:\n${result.errors.map(error => `- ${error}`).join('\n')}\n`);
+    err.write(`Controller enforcement map check failed:\n${result.errors.map(error => `- ${error}`).join('\n')}\n`);
     return 1;
   }
-  process.stdout.write(`Controller enforcement map check passed: ${result.rules} rules, ${result.rows} rows.\n`);
+  if (list) {
+    // The rows of one basis, for a review that should re-test them (host-gap for a hooks, host
+    // contract or setup change).
+    const rows = result.map.rows.filter(row => isRecord(row.instruction_only) && row.instruction_only.basis === list);
+    out.write(`${rows.length} ${list} row(s):\n${rows.map(row => `- ${row.file}: "${row.rule}"\n  why: ${row.instruction_only.why}${BASES[list] ? `\n  ${BASES[list]}: ${row.instruction_only[BASES[list]]}` : ''}`).join('\n')}\n`);
+    return 0;
+  }
+  out.write(`Controller enforcement map check passed: ${result.rules} rules, ${result.rows} rows.\n`);
   return 0;
 }
 
 if (require.main === module) process.exitCode = run();
 
-module.exports = Object.freeze({ KINDS, MAP, SCHEMA, check, ruleLines, run });
+module.exports = Object.freeze({ BASES, GATE_RULES, KINDS, MAP, SCHEMA, check, ruleLines, ruleSha, run });

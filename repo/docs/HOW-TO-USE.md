@@ -174,7 +174,7 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 ### Antigravity 2
 
-Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target.
+Antigravity receives portable Toolkit skills only. There is no native Antigravity plugin or bridge sync target. For now that skills copy is all Antigravity gets, apart from the global rules when setup runs with `--antigravity-global-rules`: no plugin, no hooks, no Toolkit-only skills (so no `toolkit-playbooks`) and no governed rules, also in a governed repository. Its sessions follow the repository's own `AGENTS.md`. A plugin route may come later.
 
 When Antigravity is installed, `setup toolkit` asks "Copy Toolkit's skills into Antigravity?". Choosing it copies the portable skills and the official n8n skills into Antigravity's global skills folder (`~/.gemini/config/skills`). After that, each Claude Code or Codex session start refreshes Toolkit's copies from the managed checkout once Toolkit has updated (an unchanged Toolkit costs it two small file reads), and setup shows the answer as Keep current; a later answer can remove only Toolkit's copies. Folders you copied yourself are never changed. Start a new Antigravity session after a refresh to load the changed skills.
 
@@ -271,7 +271,7 @@ Policy layering stays portable:
 
 Templates are canonical material. Review them before copying into a consumer repo and update the owning `skills/**` or `repo/contracts/**` surface directly.
 
-- [Generic agent rule templates](../../skills/repository-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
+- [Repository agent rules](../../skills/repository-agent-rules/) holds the one-line `CLAUDE.md` shim template only; the rules themselves come from the installed Toolkit.
 - [n8n agent rules](../../skills/n8n-safety-router/) contain the full n8n operating ruleset; the global rules carry its short n8n section, so a repository needs no n8n block.
 - [n8n local setup](../../skills/n8n-environment-setup/references/n8n/local-setup.md), [production Cloudflare Tunnel self-hosting](../../skills/n8n-environment-setup/references/n8n/production-cloudflare-tunnel.md), and [Hostinger Coolify VPS n8n](../../skills/n8n-environment-setup/references/n8n/hostinger-vps.md) contain the full local dev, local/CGNAT production, and hosted n8n setup guides.
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify setup, SSH preflight, maintenance, and incident response. Use it before the hosted n8n guide when Coolify is not already running.

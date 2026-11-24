@@ -1,5 +1,30 @@
 # Toolkit Changelog
 
+## 3.176.0
+
+### Added
+
+- The controller enforcement map now also covers the gate rules, and each row carries the hash of its rule line: an edited controller or gate rule fails the map check until its row is reviewed and the hash updated.
+- An instruction-only row now says its basis: judgement (no code can decide it), host-gap (the host lacks the event, with a line saying how to test for it now) or planned (with the slice that builds it). `--list host-gap` prints the host-gap rows for a hooks or setup review.
+
+### Fixed
+
+- Seven out-of-date reasons in the map: three rules a hook or script already enforces are now mapped to it, and four reasons now name the slice or host gap that applies.
+- `toolkit governance check` no longer asks for a governed rules block back. Before governance is decided, a `TOOLKIT-GOVERNED-RULES` block (current, older or edited) or an older `GLOBAL-AGENTS.MD-TEMPLATE` block in `AGENTS.md` is now reported as a leftover copy that is not followed, with the cleanup offered once governance is on, instead of "refresh it to the TOOLKIT-GOVERNED-RULES block through a pull request" or "a refresh asks first". Broken markers are still reported.
+- The disabled-governance rules line says any governed block in `AGENTS.md` is an old copy and is not followed.
+- Playbooks and skills no longer point at Toolkit copies that plug and play removed from repositories. The safety-gates and git-completion playbooks name the evidence-store line of the Toolkit-governed rules instead of a managed `AGENTS.md`; the model-safety-flags playbook says to add an `Authorised context` section to the repository's own `AGENTS.md`; the controller bootstrap names the gate rules' fresh-context triggers; the secure CI/CD prompt points to the repository's own test-sharding guide; and the playbooks README says the plugin installs it, with no copy-by-hand step. A test keeps any skill from naming those old copies as live sources.
+- Docs describe plug and play: a governed repository holds only its programme file, CI checks and dependency-update files, while the rules and playbooks come from the installed Toolkit; no doc says a governed rules block may still belong in `AGENTS.md`; the agent routing table lists `toolkit-playbooks`; the safety matrix names the cleanup route for leftover copies; and the source-of-truth contract says Toolkit's own skills ship in the plugin and are not for copying.
+- Antigravity's docs say it gets only the portable skills copied into its skills folder for now: no plugin, hooks, Toolkit-only skills or governed rules.
+- The real Codex host check in the bridge doc matches today's session start: no question about repository rules, and one leftover note for an old rules block.
+- `release-readiness-audit` no longer asks for scope again when the request already gives a full read-only scope (the target, that nothing is changed, and what to report); it starts the audit.
+- When the session-start governance check crashes inside a repository, Claude Code and Codex now get one line saying so, with the error's kind (never its message), the path of the Toolkit-governed rules file to read if the repository is governed, and `setup toolkit` to repair the plugin. Before, the session started with no rules and no notice. Outside a repository it still says nothing, and session start never blocks.
+- The skill-routing source says governance comes from the installed Toolkit, never from a block in `AGENTS.md`.
+
+### Changed
+
+- The portable skills no longer name Toolkit terms or a coding app in their main instructions, so they read the same in any agent. App-specific and Toolkit-specific details moved to a reference file in each skill (`agent-cost-control`, `n8n-environment-setup`, `secure-ci-cd`, `windows-local-dev-services`), and the rest were reworded (`external-operation-preflight`, `frontend-art-direction`, `host-observability`, `managed-app-foundation-review`, `n8n-workflow-transport`, `release-readiness-audit`, `skill-product-review`). The Hostinger maintainer skill keeps its Codex name, now recorded as an app it depends on.
+- `agent-cost-control` calls the planning, build and review sessions by those names and a merge train a batch merge; they stay outside the model ladder as before.
+
 ## 3.175.0 (A turn-end owed check for the controller in Claude Code)
 
 ### Added

@@ -6,7 +6,7 @@ Use this when a task may affect live systems, credentials, secrets, customer/pri
 
 Before a risky action, verify that explicit approval is bound to the exact action and remains valid; request fresh approval when the scope does not cover the action or is revoked, expired, or unresolved.
 
-The evidence-store line in the managed `AGENTS.md` is the standing approval for that store: writes, deletions and merges there need no further approval.
+The evidence-store line of the Toolkit-governed rules is the standing approval for that store: writes, deletions and merges there need no further approval.
 
 Toolkit no longer creates, updates or starts scheduled tasks on a computer: the cloud runs the programme sweep, footer cleaning and shard timings. No standing approval covers a Windows task command. Removing Toolkit's old tasks goes through `remove toolkit`, whose plan the owner confirms.
 

@@ -1,6 +1,6 @@
 ---
 name: agent-cost-control
-description: Use before starting any subagent, helper agent or spawned thread, and when setting up or reviewing any scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much. Picks the cheapest model tier and effort that can do the job, records every raise with its reason, and keeps long-running threads short by rotating them with handoff files. Coding gates and their helpers keep their pinned routes.
+description: Use before starting any subagent, helper agent or spawned thread, and when setting up or reviewing any scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much. Picks the cheapest model tier and effort that can do the job, records every raise with its reason, and keeps long-running threads short by rotating them with handoff files. Planning, build and review sessions and their helpers keep the routes their own workflow rules pin.
 ---
 
 # Agent Cost Control
@@ -13,12 +13,12 @@ Every automation and every non-gate worker starts on the cheapest model and effo
 | --- | --- | --- | --- |
 | 1 | Small | medium | Checks, sweeps, reminders, status reads, record keeping, anything someone verifies before acting on it |
 | 2 | Mid | medium | Summaries across many sources, triage, drafting, routine non-gate helper work, tasks that drive automatic changes elsewhere |
-| 3 | Top | high | Verdicts people act on without rechecking: vets, reviews, licence or security calls, controller decisions |
+| 3 | Top | high | Verdicts people act on without rechecking: vets, reviews, licence or security calls, decisions of the coordinating session |
 
 - **Medium is the floor.** Never pick the lowest effort a host offers; it skips checks on multi-step work. Where "medium" does not exist, use the closest setting above the lowest.
 - **Set both, every time:** the model tier and the effort, in the place the host reads them (table below). A host with no effort setting gets the model alone and a note in the task saying "effort: not settable here", which the agent setting it up also lists in its report (Output) as a host limit, not a gap.
-- **Gates are outside the ladder.** G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin.
-- **A merge-train lane is on the ladder.** Building, verifying and landing a merge train is mechanical and needs no G0 or G1: step 1 (small, medium). It never resolves a conflict or edits code; it ejects the member and that member's builder fixes it.
+- **Planning, build and review sessions are outside the ladder.** Those sessions, their reviewers and the helpers a planning or build lead launches keep the models, effort and routes that the repository's own workflow rules pin.
+- **A batch-merge lane is on the ladder.** Building, verifying and landing a batch merge is mechanical and needs no planning or build session: step 1 (small, medium). It never resolves a conflict or edits code; it ejects the member and that member's builder fixes it.
 - **A gatekeeper is on the ladder.** A session that only starts gate runs, waits and relays their reports is no gate: it runs at step 2 (mid, medium), never the small tier, and a raise needs its written reason.
 
 ## Before you start a subagent
@@ -36,8 +36,8 @@ Read this before starting any subagent, helper agent or spawned thread: once per
 ## Raising and lowering
 
 - A step up needs one written reason, kept where the setting lives (the task prompt, the brief, the agent file or the workflow notes): it missed a check or got a fact wrong at the lower step (name the run); its output is a verdict people act on without rechecking; it carries security, licence, money or irreversible effects; or its input is too large or ambiguous for the smaller model (say what).
-- **Raise straight away when output falls short.** When a controller sees a missed check, a wrong fact or a shallow review, it proposes the next step up at once, naming the task or thread, the run that fell short and the new model or effort. A task changes at its next rebuild; a non-gate thread is restarted on the new step.
-- **Raises survive rebuilds.** Record each raise beside the task's record (`raised <tier>/<effort> <YYYY-MM-DD>: <reason>`). A rebuild or template update uses the higher of the template and the recorded raise, for model and effort separately, and never lowers it; only the owner or the controller removes a raise.
+- **Raise straight away when output falls short.** When the coordinating session sees a missed check, a wrong fact or a shallow review, it proposes the next step up at once, naming the task or thread, the run that fell short and the new model or effort. A task changes at its next rebuild; a non-gate thread is restarted on the new step.
+- **Raises survive rebuilds.** Record each raise beside the task's record (`raised <tier>/<effort> <YYYY-MM-DD>: <reason>`). A rebuild or template update uses the higher of the template and the recorded raise, for model and effort separately, and never lowers it; only the owner or the coordinating session removes a raise.
 - **Step down** after about a week of clean runs at a raised step with no reason left: try one step lower.
 
 ## Where the setting lives
@@ -46,23 +46,22 @@ Model names change often: confirm the current names in the host before using the
 
 | Host | Small / Mid / Top | Model | Effort |
 | --- | --- | --- | --- |
-| Claude (Projects threads and tasks, Claude Code, routines) | Haiku / Sonnet / Opus | The thread or session model; a routine's model selector; a subagent file's `model` field | `/effort` or the session effort; a subagent file's `effort` field (levels depend on the model) |
-| Codex | the account's small, standard and top models | `model` in config, or the automation's model menu | `model_reasoning_effort` (levels depend on the model) |
-| OpenCode and other multi-vendor harnesses | the vendor's small, mid and top models | the agent's `model` (`provider/model`) | the model variant where the vendor offers one (`provider/model#variant`) |
 | n8n nodes, CI steps and other workflow model calls | the vendor's small, mid and top models | the node or step setting | the node or step setting; the reason for a raise goes in its notes or a comment beside it |
+
+Host-specific model and effort settings and closing notes: [references/host-models.md](references/host-models.md).
 
 A task that fires into a thread or session it is bound to runs on that thread's model and effort, not on what a task panel shows as its default. Start that thread on the task's tier, and check the served model in the run's own record.
 
 ## Threads and sessions
 
-These apply to non-gate work. Gate sessions (G0, G1, G2, reviewers) and the helpers a G0 or G1 lead launches follow their gate rules' fresh-context and recoverable-work rules instead.
+These apply to non-gate work. Planning, build and review sessions (including reviewers) and the helpers a planning or build lead launches follow the repository's own workflow rules for fresh context and recoverable work instead.
 
 - **One job per thread or session.** A finished thread is never reused for new work, even on the same topic: start a new one and link the old one.
-- **Rotate long-lived workers automatically** (integrators, review runners, record keepers): after each milestone (a merge, a release, a finished review round), when the thread shows its context was summarised, or, where the host reports context use, when it passes about 40% of the window. The old thread writes a short handoff file (state, open items, ids, next step, under about 2 KB) where the next one can read it, the controller starts a fresh thread on the same tier with a brief that points to that file, and the old one closes once its output is saved and relayed.
+- **Rotate long-lived workers automatically** (integrators, review runners, record keepers): after each milestone (a merge, a release, a finished review round), when the thread shows its context was summarised, or, where the host reports context use, when it passes about 40% of the window. The old thread writes a short handoff file (state, open items, ids, next step, under about 2 KB) where the next one can read it, the coordinating session starts a fresh thread on the same tier with a brief that points to that file, and the old one closes once its output is saved and relayed.
 - **Task home threads** are rebuilt with their task, never closed while the task fires into them: start the new home thread and task first, then delete the old task.
-- **Never rotate the controller's own thread.** In plain chats the user starts a fresh chat now and then.
+- **Never rotate the coordinating session's own thread.** In plain chats the user starts a fresh chat now and then.
 - **Briefs point to files.** Link plans, handoffs and reports by path; never paste history or earlier thread text.
-- **Closing:** a work thread closes as soon as its output is saved and relayed and nothing is open for it. A chat reply thread closes after 6 hours with no new messages, unless it holds an owner question or decision with no answer. A task's home thread is never closed while its task fires into it. Host skills (for Claude Projects, `web-controller-projects`) say which pass does the closing.
+- **Closing:** a work thread closes as soon as its output is saved and relayed and nothing is open for it. A chat reply thread closes after 6 hours with no new messages, unless it holds an owner question or decision with no answer. A task's home thread is never closed while its task fires into it. Host skills, where a host has them, say which pass does the closing.
 
 ## Output
 

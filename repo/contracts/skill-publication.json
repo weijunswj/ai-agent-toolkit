@@ -32,7 +32,10 @@
     },
     "codex-ssh-hostinger-coolify-setup-maintainer": {
       "class": "portable",
-      "reason": "Runs and maintains a Hostinger VPS with Coolify; its app name stays in the baseline until the rename and split land."
+      "reason": "Runs and maintains a Hostinger VPS with Coolify over SSH.",
+      "depends_on_app": {
+        "Codex": "Its steps are written for a Codex session that holds the SSH connection to the server."
+      }
     },
     "controller-bootstrap": {
       "class": "toolkit",
@@ -113,174 +116,9 @@
   },
   "baseline": [
     {
-      "skill": "agent-cost-control",
-      "term": "controller",
-      "count": 6
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "G0",
-      "count": 5
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "G1",
-      "count": 5
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "G2",
-      "count": 2
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "coding gate",
-      "count": 1
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "gate rule",
-      "count": 2
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "merge train",
-      "count": 1
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "Codex",
-      "count": 1
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "Claude",
-      "count": 3
-    },
-    {
-      "skill": "agent-cost-control",
-      "term": "OpenCode",
-      "count": 1
-    },
-    {
-      "skill": "codex-ssh-hostinger-coolify-setup-maintainer",
-      "term": "Codex",
-      "count": 5
-    },
-    {
-      "skill": "external-operation-preflight",
-      "term": "Toolkit",
-      "count": 1
-    },
-    {
-      "skill": "frontend-art-direction",
-      "term": "Toolkit",
-      "count": 1
-    },
-    {
-      "skill": "frontend-art-direction",
-      "term": "Claude",
-      "count": 2
-    },
-    {
-      "skill": "host-observability",
-      "term": "Toolkit",
-      "count": 1
-    },
-    {
-      "skill": "managed-app-foundation-review",
-      "term": "Codex",
-      "count": 2
-    },
-    {
-      "skill": "n8n-environment-setup",
-      "term": "Toolkit",
-      "count": 7
-    },
-    {
-      "skill": "n8n-environment-setup",
-      "term": "governed",
-      "count": 1
-    },
-    {
-      "skill": "n8n-environment-setup",
-      "term": "Codex",
-      "count": 2
-    },
-    {
-      "skill": "n8n-environment-setup",
-      "term": "Claude",
-      "count": 2
-    },
-    {
-      "skill": "n8n-environment-setup",
-      "term": "Gemini",
-      "count": 2
-    },
-    {
-      "skill": "n8n-environment-setup",
-      "term": "Antigravity",
-      "count": 5
-    },
-    {
       "skill": "n8n-safety-router",
       "term": "Toolkit",
       "count": 1
-    },
-    {
-      "skill": "n8n-workflow-transport",
-      "term": "Toolkit",
-      "count": 2
-    },
-    {
-      "skill": "release-readiness-audit",
-      "term": "Codex",
-      "count": 6
-    },
-    {
-      "skill": "secure-ci-cd",
-      "term": "Toolkit",
-      "count": 11
-    },
-    {
-      "skill": "secure-ci-cd",
-      "term": "programme",
-      "count": 1
-    },
-    {
-      "skill": "secure-ci-cd",
-      "term": "governance",
-      "count": 3
-    },
-    {
-      "skill": "secure-ci-cd",
-      "term": "governed",
-      "count": 4
-    },
-    {
-      "skill": "secure-ci-cd",
-      "term": "Codex",
-      "count": 1
-    },
-    {
-      "skill": "secure-ci-cd",
-      "term": "Claude",
-      "count": 2
-    },
-    {
-      "skill": "skill-product-review",
-      "term": "Toolkit",
-      "count": 4
-    },
-    {
-      "skill": "windows-local-dev-services",
-      "term": "Codex",
-      "count": 5
-    },
-    {
-      "skill": "windows-local-dev-services",
-      "term": "Claude",
-      "count": 7
     }
   ]
 }
