@@ -58,8 +58,10 @@ class FakeGitHub {
 
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
 
-  addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [], labels = [] } = {}) {
-    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, labels, updated_at: this.tick() };
+  // An issue opened 30 days before the clock unless createdAt says otherwise.
+  addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [], labels = [], createdAt = null } = {}) {
+    const updated = this.tick();
+    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, labels, created_at: createdAt || new Date(this.clock - 30 * 24 * 3600 * 1000).toISOString(), updated_at: updated };
     if (state === 'closed') issue.closed_at = this.tick();
     this.issues.set(number, issue);
     if (parent) this.link(parent, number);
@@ -107,7 +109,7 @@ class FakeGitHub {
     if (issue.state === 'closed' && !issue.closed_at) issue.closed_at = issue.updated_at;
     return {
       number: issue.number, id: issue.id, url: `https://api.github.com/repos/${this.repository}/issues/${issue.number}`, title: issue.title, body: issue.body, state: issue.state, state_reason: issue.state_reason || null, closed_at: issue.closed_at || null,
-      updated_at: issue.updated_at, comments: [...this.comments.values()].filter(comment => comment.issue === issue.number).length,
+      created_at: issue.created_at, updated_at: issue.updated_at, comments: [...this.comments.values()].filter(comment => comment.issue === issue.number).length,
       parent_issue_url: issue.parent ? `https://api.github.com/repos/${this.repository}/issues/${issue.parent}` : null,
       issue_dependencies_summary: { total_blocked_by: issue.blockedBy.length },
       sub_issues_summary: { total: issue.subs.length, completed: issue.subs.filter(n => this.issues.get(n)?.state === 'closed').length },

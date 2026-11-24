@@ -436,10 +436,11 @@ test('a parent over its 10,000-character budget raises BODY_OVER_BUDGET with siz
 test('BODY_OVER_BUDGET is a known size code in runtime and schema', () => {
   assert.equal(state.FINDING_CODES.BODY_OVER_BUDGET.source, 'reconcile');
   assert.deepEqual(state.PAGE_BUDGETS, { parent: 10000, child: 4000, pr: 3000 });
-  assert.equal(state.pageBudgetFinding(421, 'x'.repeat(9999), state.PAGE_BUDGETS.parent), null);
-  const over = state.pageBudgetFinding(421, 'x'.repeat(10000), state.PAGE_BUDGETS.parent);
+  // Raised only at 5 per cent over the budget (the stale-work net's noise trim), aiming under the budget itself.
+  assert.equal(state.pageBudgetFinding(421, 'x'.repeat(10499), state.PAGE_BUDGETS.parent), null);
+  const over = state.pageBudgetFinding(421, 'x'.repeat(10500), state.PAGE_BUDGETS.parent);
   assert.equal(over.code, 'BODY_OVER_BUDGET');
-  assert.equal(over.diagnostics.required_reduction, 1);
+  assert.equal(over.diagnostics.required_reduction, 501);
   const Ajv2020 = require('ajv/dist/2020');
   const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'), 'utf8'));
   const validate = new Ajv2020({ strict: false, allErrors: true }).compile(schema);
