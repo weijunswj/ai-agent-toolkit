@@ -70,6 +70,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "^(?:Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Grep|Glob|LS|Bash|PowerShell|Monitor)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-env-edit-hook.cjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
