@@ -22,14 +22,15 @@ P1. **Project memory on.** Have the owner turn it on only if the coordinator can
 
 P2. **Device folder and keep-awake** (only when work runs locally).
 - Use the named device and repo folder, else ask once. Have a read-only local Remote Control thread verify the checkout and default branch.
-- When any gate runs on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.
+- When any gate runs on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named: set it in the controller settings (`toolkit-controller-settings.cjs set --folder`) and save the line their `render` gives.
 - Verify Toolkit is installed and current there through the supported read-only check. Installation or refresh remains subject to existing approvals and native permissions; preserve every `stopped by owner` entry.
 - Have the owner enable the desktop app's keep-awake for Remote Control if that setting is unreachable (Settings > Claude Code). Closing the lid still sleeps it. Save device and folder to memory.
 
 P3. **Project instructions, project lines and lanes.**
 - A local rc thread renders `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit main, saves the block to the shared folder and reads it back.
 - Draft only project facts: repos, transport, device/folder, work placement, owner-granted approvals and project-specific roles. Never copy base rules into those lines.
-- Write `- Lanes: <n> working lanes (owner, <date>)` only when the owner gives a number. Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.
+- The lanes, stack profile and gate placement lines come from the controller settings (`toolkit-projects-instructions.cjs --render --settings <file>` prints them after the block). Change lanes only when the owner gives a number. Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.
+- Lint the project lines (`toolkit-owner-lines.cjs check --block projects --settings <file>`), offer its fixes to the owner in one question, and apply only the ones they tap.
 - Block first, one blank line, project lines after; preserve and deduplicate existing owner text below it. Follow `reference/instructions-sync.md`: saved and read-back copy first, markers verified, conflicts held, final saved instructions read back. Record the block's Toolkit version.
 
 P4. **Daily check-in and hourly nudge.**

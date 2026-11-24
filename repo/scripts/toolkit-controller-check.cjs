@@ -14,6 +14,10 @@
 //   guidebook, instructions, memory, tasks   Claude Projects only
 //   programme, traces                        only where the checkout's programme binding says
 //                                            governance is enabled
+//   owner-lines                              any controller given --owner-lines <file>: the owner's own
+//                                            lines in its instructions or memory, linted against the
+//                                            controller settings (--settings) and, on a Projects host,
+//                                            Toolkit's block (toolkit-owner-lines.cjs check)
 //   ci, footer, refs                         any controller (refs checks this Toolkit copy: no
 //                                            permission row or document names a retired or missing
 //                                            script)
@@ -29,7 +33,7 @@
 // Usage: node repo/scripts/toolkit-controller-check.cjs [--host projects|chat] [--checkout <dir>]
 //          [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>]
 //          [--task <kind>=<prompt file>]... [--since <ISO time>] [--skip <name,...>]
-//          [--handoff <folder>] [--expand] [--json]
+//          [--handoff <folder>] [--owner-lines <file>] [--settings <file>] [--expand] [--json]
 //   --checkout       a checkout of the controlled repository (CI check-up and the programme binding)
 //   --repo           the GitHub repository for the footer scan (default: the binding's repository)
 //   --guidebook      the Projects library copy of the skill (default on a Projects host:
@@ -40,6 +44,8 @@
 //   --since          footer scan start (default: 26 hours ago)
 //   --skip           checks the caller already ran elsewhere
 //   --handoff        the store checkout (or other folder) that holds the controller handoff snapshot
+//   --owner-lines    a file of the owner's own lines to lint (instructions, CLAUDE.md, AGENTS.md or memory)
+//   --settings       the controller settings file (evidence/controller/<owner>/<repo>/settings.json)
 //   --expand         every line of every check, passed and skipped ones included (default: one
 //                    line when clear; otherwise each check that needs attention or could not run,
 //                    with up to 3 detail lines and a count of the rest; programme findings are
@@ -54,7 +60,7 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const LIBRARY = '/mnt/project-files/toolkit/web-controller-projects';
 const BINDING_REL = '.github/toolkit-programme.json';
-const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'handoff', 'programme', 'traces', 'ci', 'footer', 'refs'];
+const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'handoff', 'owner-lines', 'programme', 'traces', 'ci', 'footer', 'refs'];
 // Check names --skip still accepts after the check was removed, so a stored Claude Projects task
 // prompt written before the removal still runs. Remove a name once the daily check-in has rewritten
 // every stored prompt that passes it.
@@ -67,6 +73,7 @@ const SCRIPTS = {
   guidebook: 'repo/scripts/toolkit-projects-guidebook.cjs',
   instructions: 'repo/scripts/toolkit-projects-instructions.cjs',
   tasks: 'repo/scripts/toolkit-projects-tasks.cjs',
+  ownerLines: 'repo/scripts/toolkit-owner-lines.cjs',
   programme: 'skills/github-program-reconciler/scripts/programme.cjs',
   traces: 'skills/github-program-reconciler/scripts/decision-trace-audit.cjs',
   ci: 'skills/secure-ci-cd/scripts/ci-checkup.cjs',
@@ -74,10 +81,10 @@ const SCRIPTS = {
   refs: 'repo/scripts/check-script-references.cjs',
   handoff: 'repo/scripts/toolkit-store.cjs',
 };
-const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--handoff <folder>] [--json]';
+const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--handoff <folder>] [--owner-lines <file>] [--settings <file>] [--json]';
 
 function parseArgs(argv) {
-  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, handoff: null, skip: new Set(), json: false, expand: false };
+  const options = { host: null, checkout: null, repo: null, guidebook: null, instructions: null, memory: null, tasks: [], since: null, handoff: null, 'owner-lines': null, settings: null, skip: new Set(), json: false, expand: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -106,7 +113,7 @@ function parseArgs(argv) {
         if (!CHECKS.includes(name)) throw new Error(`--skip names unknown check ${name}`);
         options.skip.add(name);
       }
-    } else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff'].includes(arg)) options[arg.slice(2)] = value();
+    } else if (['--checkout', '--guidebook', '--instructions', '--memory', '--handoff', '--owner-lines', '--settings'].includes(arg)) options[arg.slice(2)] = value();
     else throw new Error(`unknown argument ${arg}`);
   }
   return options;
@@ -271,6 +278,10 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'handoff') {
       if (!options.handoff || !options.checkout) { skip(name, 'pass --handoff <folder holding the snapshot> and --checkout <dir>'); continue; }
       outcome = statusCheck(run, SCRIPTS.handoff, ['handoff', '--check', '--store', options.handoff, '--repo-root', options.checkout], `toolkit-store.cjs handoff --store ${options.handoff} --repo-root ${options.checkout}`);
+    } else if (name === 'owner-lines') {
+      if (!options['owner-lines']) { skip(name, 'pass --owner-lines <file> (the owner\'s own lines, saved), with --settings <file> once there are controller settings'); continue; }
+      const args = ['check', '--file', options['owner-lines'], ...(options.settings ? ['--settings', options.settings] : []), ...(host === 'projects' ? ['--block', 'projects'] : [])];
+      outcome = statusCheck(run, SCRIPTS.ownerLines, args, `toolkit-owner-lines.cjs ${args.join(' ')}`);
     } else outcome = statusCheck(run, SCRIPTS.refs, [], 'check-script-references.cjs');
     checks.push({ name, ...outcome });
   }
