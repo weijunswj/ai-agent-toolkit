@@ -45,7 +45,7 @@
 //   --skip           checks the caller already ran elsewhere
 //   --handoff        the store checkout (or other folder) that holds the controller handoff snapshot
 //   --owner-lines    a file of the owner's own lines to lint (instructions, CLAUDE.md, AGENTS.md or memory)
-//   --settings       the controller settings file (evidence/controller/<owner>/<repo>/settings.json)
+//   --settings       the controller settings file (state/<owner>/<repo>/controller-settings.json)
 //   --expand         every line of every check, passed and skipped ones included (default: one
 //                    line when clear; otherwise each check that needs attention or could not run,
 //                    with up to 3 detail lines and a count of the rest; programme findings are

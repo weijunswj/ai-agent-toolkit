@@ -19,7 +19,7 @@
 // session (TOOLKIT_GATE_ROLE set) is refused. Helpers never run it (a written rule: a helper process
 // cannot be told apart from its lead's). `show` and `render` only read. Every write is read back.
 //
-// The file lives in the evidence store at evidence/controller/<owner>/<repo>/settings.json and is
+// The file lives in the evidence store at state/<owner>/<repo>/controller-settings.json and is
 // saved there with `toolkit-store.cjs save`, as `set` prints; nothing here pushes. The reader is
 // default-deny: any key, type or character outside the stated forms makes the whole file unreadable,
 // and nothing is rendered from it.
@@ -114,7 +114,7 @@ function renderLines(settings) {
 // The path in the evidence store this repository's settings are saved at.
 function storePath(repository) {
   const [owner, name] = repository.split('/');
-  return `evidence/controller/${owner}/${name}/settings.json`;
+  return `state/${owner}/${name}/controller-settings.json`;
 }
 
 class ControllerSettings {

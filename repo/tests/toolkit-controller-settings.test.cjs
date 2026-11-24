@@ -47,7 +47,7 @@ test('row 1: changing live lanes from 1 to 2 changes the rendered project lines 
   const changed = set(file, ['--live-lanes', '2', '--owner-said', 'lanes 2'], { now: () => new Date('2026-11-26T09:00:00.000Z') });
   assert.equal(changed.code, 0, changed.err);
   assert.match(changed.out, /^Changed and read back: live_lanes\.$/m);
-  assert.match(changed.out, /Save it to the evidence store at evidence\/controller\/example-owner\/example-repo\/settings\.json with toolkit-store\.cjs save/);
+  assert.match(changed.out, /Save it to the evidence store at state\/example-owner\/example-repo\/controller-settings\.json with toolkit-store\.cjs save/);
   const two = JSON.parse(cli(settingsModule.main, ['render', '--file', file, '--json']).out);
   assert.equal(two.gate_route, 'GATE ROUTE: profile owner-claude lanes 2 placement remote_control G2=cloud folder C:\\work\\example-repo');
   assert.equal(two.project_lines[0], '- Lanes: 2 working lanes (owner, 2026-11-26)');
