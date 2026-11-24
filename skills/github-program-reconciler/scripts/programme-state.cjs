@@ -38,6 +38,15 @@ function archiveTools() {
 function drift() {
   return require('./programme-drift.cjs');
 }
+// Checkbox-row readers of a task page, for the stale-work net in reconcile passes.
+function childRows() {
+  return require('./programme-child-rows.cjs');
+}
+// A merged task's detail says how many DONE WHEN rows are still unchecked, for the controller's judgement.
+function uncheckedNote(body) {
+  const count = childRows().uncheckedRows(body);
+  return count ? `; ${count} unchecked DONE WHEN row${count === 1 ? '' : 's'}` : '';
+}
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
@@ -368,7 +377,13 @@ const FINDING_ID = /^[0-9a-f]{12}$/;
 const ATTENTION_KEEP = 200;
 const ATTENTION_LIMIT = 500;
 // Codes whose finding speaks for one PR head; a new head is a new finding.
-const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED']);
+const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED', 'OWNER_OK_CLOSE']);
+// A row may also carry, for the stale-work net (one lifecycle for every check of work left undone):
+//   net: true          a stale-work net member: one unanswered for NET_CALLOUT_HOURS is called out to the
+//                      controller (netCallout); every work-queue code is a member too;
+//   ack_max_hours: n   the longest acknowledgement it takes (default ACK_DUE_MAX_HOURS);
+//   no_dispose: true   it clears only when its work is done or acknowledged, never by a reasoned dispose,
+//                      since a dispose would let that work hang.
 const FINDING_CODES = Object.freeze({
   // reconcile source: what the reconciler reports but never changes itself.
   ISSUE_MISSING: { source: 'reconcile', next_action: 'Controller: fix or remove the catalogue entry; the issue cannot be read or is a pull request' },
@@ -377,7 +392,7 @@ const FINDING_CODES = Object.freeze({
   DEPENDENCY_IMPLIES_PARENT: { source: 'reconcile', next_action: 'Controller: set the native parent on purpose; a dependency never sets one' },
   PR_HEAD_MOVED: { source: 'reconcile', next_action: 'Controller: re-check review and UAT at the new head before accepting' },
   CHECKS_RED: { source: 'reconcile', next_action: 'Controller: have the builder fix the failing checks' },
-  READY_TO_CLOSE: { source: 'reconcile', next_action: 'Controller: close the issue as completed if every criterion is met' },
+  READY_TO_CLOSE: { source: 'reconcile', net: true, next_action:'Controller: close the issue as completed if every criterion is met' },
   CHILD_STATE_CONFLICT: { source: 'reconcile', next_action: 'Controller: bring the state document and the issue in line' },
   CLOSED_WITHOUT_ACCEPTANCE: { source: 'reconcile', next_action: 'Controller: record G2 and UAT, or confirm the close' },
   CHILD_REOPENED: { source: 'reconcile', next_action: 'Controller: confirm the restored task lifecycle' },
@@ -388,7 +403,7 @@ const FINDING_CODES = Object.freeze({
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   PAGE_LAYOUT_HELD: { source: 'reconcile', next_action: 'Controller: fix what the finding names on the task page (an unclosed code block, a section that appears twice, an unknown marker or a secret-shaped value); until then its blocks are updated where they are and its text is not moved' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  BODY_OVER_BUDGET: { source: 'reconcile', next_action: 'Controller: the page is over its budget (parent 10,000, task 4,000, PR 3,000 characters). Parent or task page: queue a holder order with a `mark-archive` write that puts one `## Archive` line above the old hand-written text, so the next sweep moves it (and, once moved, removes link lines nothing uses). PR page: its builder trims the description to the CHANGE shape' },
+  BODY_OVER_BUDGET: { source: 'reconcile', next_action: 'Controller: the page is 5 per cent or more over its budget (parent 10,000, task 4,000, PR 3,000 characters). Parent or task page: queue a holder order with a `mark-archive` write that puts one `## Archive` line above the old hand-written text, so the next sweep moves it (and, once moved, removes link lines nothing uses). PR page: its builder trims the description to the CHANGE shape' },
   ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
@@ -420,9 +435,14 @@ const FINDING_CODES = Object.freeze({
   BLOCK_BEHIND: { source: 'reconcile', next_action: 'Controller: this open task page shows an older state than the stored one and nothing redraws it; settle any effect left in flight (the pass report names it), then run refresh' },
   PR_NAV_MISSING: { source: 'reconcile', next_action: 'Controller: this open task PR has no readable PATH block and nothing redraws it; repair or remove the broken markers on the PR page, then run refresh' },
   NEXT_ACTION_STALE: { source: 'reconcile', next_action: "Controller: the task's next action was set before its latest merge or close; set the next step with update --patch" },
+  // Stale-work net rows read from the task pages and owner waits the pass already holds.
+  OWNER_OK_CLOSE: { source: 'reconcile', net: true, no_dispose: true, next_action: 'Controller: the task\'s PR merged, its agent UAT PASSED, no gate is open and every DONE WHEN row is ticked, so only the owner\'s OK to close is left: put "reply ok to close" for it in your next ask to the owner and ack this finding, then close the task with its closing comment on the owner\'s OK' },
+  CHILD_NO_NEAREST: { source: 'reconcile', net: true, next_action: 'Controller: this task opened in the last 7 days with no `Nearest child:` line. Check it duplicates no open task: add the line naming the closest open task and why it does not fit, put a duplicate in your next ask to the owner to fold, or dispose with the reason it is a new area' },
+  POLISH_CAP: { source: 'reconcile', net: true, no_dispose: true, next_action: 'Controller: the polish task is full (8 rows) or over its cap (more rows, or more than one polish task open): ship it as one PR and open a fresh one, or move rows out until it is under the cap and only one polish task is open' },
+  ROWS_UNTICKED: { source: 'reconcile', net: true, next_action: 'Controller: a PR on this task merged, but none of its DONE WHEN or ROWS checkbox rows is ticked: tick each row a merged PR delivered, so the done-when read counts them' },
   // inventory source: open issues and registered parents.
   NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
-  CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', next_action: 'Controller: reopen the parent, or move or close its open descendants' },
+  CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', net: true, next_action: 'Controller: reopen the parent, or move or close its open descendants' },
   INVENTORY_INCOMPLETE: { source: 'inventory', next_action: 'Controller: run programme.cjs attention --refresh again; this run could not read every open issue' },
   ATTENTION_FULL: { source: 'inventory', next_action: 'Controller: answer or dispose open findings; no new finding is recorded until there are fewer than 500' },
 });
@@ -431,6 +451,13 @@ const FINDING_CODES = Object.freeze({
 // they list first, and a disposed one resolves when its condition clears so a later stall is new.
 // A code joins it with `queue: true` in its FINDING_CODES row.
 const WORK_QUEUE_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].queue === true));
+// The stale-work net: rows marked `net: true`, and every work-queue code.
+const NET_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].net === true || WORK_QUEUE_CODES.has(code)));
+// A net finding new for this long, or acknowledged past its due time, is called out to the controller.
+const NET_CALLOUT_HOURS = 4;
+// A task opened within this many days with no `Nearest child:` line raises CHILD_NO_NEAREST; older
+// tasks are left alone, so turning the check on does not flag every old task at once.
+const NEAREST_WINDOW_DAYS = 7;
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
@@ -448,8 +475,11 @@ const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT', 'BODY_OVER_BUDGET'];
 // Page budgets in characters, checked by the run itself: well under GitHub's limit, so a page stays
 // quick to read. Over budget the page is still written and BODY_OVER_BUDGET names its largest parts.
 const PAGE_BUDGETS = Object.freeze({ parent: 10000, child: 4000, pr: 3000 });
+// BODY_OVER_BUDGET is raised only at 5 per cent over (parent 500, task 200, PR 150 characters), so a
+// page a few characters over raises nothing; the hard-limit codes keep their own thresholds.
+const budgetMargin = budget => Math.ceil(budget / 20);
 function pageBudgetFinding(number, body, budget) {
-  return body.length < budget ? null
+  return body.length < budget + budgetMargin(budget) ? null
     : { code: 'BODY_OVER_BUDGET', issue: number, diagnostics: bodySizeDiagnostics(body, budget), detail: `The page is ${body.length} characters, over its ${budget}-character budget` };
 }
 const PAGE_CODES = SIZE_CODES;
@@ -763,6 +793,11 @@ function answerFinding(doc, { id, state, reason = null, next = null, due = null,
   if (state === 'acknowledged' && WORK_QUEUE_CODES.has(entry.code)) {
     throw new ProgrammeError('QUEUE_FINDING_NEEDS_ACTION', `Finding ${id} (${entry.code}) is on the work queue: act on it (${FINDING_CODES[entry.code].next_action}), or dispose --finding ${id} --reason <text>. It clears by itself once the task moves.`);
   }
+  const row = FINDING_CODES[entry.code] || {};
+  const maxHours = row.ack_max_hours ?? ACK_DUE_MAX_HOURS;
+  if (state === 'disposed' && row.no_dispose === true) {
+    throw new ProgrammeError('FINDING_NO_DISPOSE', `Finding ${id} (${entry.code}) is never disposed: a reasoned dispose would leave its work hanging. It clears once the work is done (${row.next_action}); or ack --finding ${id} --next <step> with a due time at most ${maxHours} hours ahead.`);
+  }
   if (state === 'disposed' && (!isText(reason) || reason.length > ATTENTION_NOTE_LIMIT)) {
     throw new ProgrammeError('USAGE', `dispose needs --reason <text> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
   }
@@ -771,9 +806,9 @@ function answerFinding(doc, { id, state, reason = null, next = null, due = null,
     if (!isText(next) || next.length > ATTENTION_NOTE_LIMIT) throw new ProgrammeError('USAGE', `ack needs --next <the step you will take> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
     const time = Date.parse(now);
     if (due !== null && !DUE_TIME.test(String(due))) throw new ProgrammeError('USAGE', 'ack --due must be an ISO 8601 date and time with Z or an offset, for example 2026-11-14T09:00:00Z.');
-    dueAt = due === null ? time + ACK_DUE_HOURS * HOUR_MS : Date.parse(due);
-    if (Number.isNaN(dueAt) || dueAt <= time || dueAt > time + ACK_DUE_MAX_HOURS * HOUR_MS) {
-      throw new ProgrammeError('USAGE', `ack --due must be a date and time after now and at most ${ACK_DUE_MAX_HOURS} hours ahead; a longer wait is a tracked task, or dispose with a reason.`);
+    dueAt = due === null ? time + Math.min(ACK_DUE_HOURS, maxHours) * HOUR_MS : Date.parse(due);
+    if (Number.isNaN(dueAt) || dueAt <= time || dueAt > time + maxHours * HOUR_MS) {
+      throw new ProgrammeError('USAGE', `ack --due must be a date and time after now and at most ${maxHours} hours ahead for ${entry.code}; a longer wait is a tracked task${row.no_dispose ? '' : ', or dispose with a reason'}.`);
     }
   }
   // An acknowledgement past its due time is answered again as if new: the missed step needs a new one.
@@ -809,6 +844,26 @@ function attentionLine(attention, now = new Date().toISOString()) {
   const waiting = waitingFindings(attention, now).filter(entry => !WORK_QUEUE_CODES.has(entry.code)).length;
   const queue = workQueue(attention).length;
   return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged${queue ? `, ${queue} in the work queue` : ''}${waiting ? `, ${waiting} waiting on you` : ''}` : 'Attention: clear';
+}
+
+// The stale-work net's callout at a time: every open net finding new for NET_CALLOUT_HOURS or more, or
+// whose acknowledgement passed its due time (at once, even after a pass stored it as new again).
+// Returns { count, entries, oldest }: entries oldest first, each { id, ref, code, state, hours } with
+// the whole hours since it was raised or fell due; `oldest` is the first three. Pure: the session-start
+// line runs it on the cached entries and the current time, with no network read.
+function netCallout(findings, now) {
+  const time = typeof now === 'number' ? now : Date.parse(now);
+  const entries = [];
+  for (const entry of Array.isArray(findings) ? findings : []) {
+    if (!entry || !NET_CODES.has(entry.code) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
+    const overdue = ackOverdue(entry, time);
+    const since = overdue ? ackDue(entry) : Date.parse(entry.changed_at);
+    if (!Number.isFinite(since) || (!overdue && (entry.state !== 'new' || time - since < NET_CALLOUT_HOURS * HOUR_MS))) continue;
+    entries.push({ id: entry.id, ref: isInt(entry.issue, 1) ? `#${entry.issue}` : '-', code: entry.code, state: overdue ? 'overdue' : 'new', hours: Math.max(0, Math.floor((time - since) / HOUR_MS)), since });
+  }
+  entries.sort((a, b) => a.since - b.since || String(a.id).localeCompare(String(b.id)));
+  const out = entries.map(({ since, ...rest }) => rest);
+  return { count: out.length, entries: out, oldest: out.slice(0, 3) };
 }
 
 // Open work-queue findings, oldest first: the longest-stalled task leads.
@@ -4498,7 +4553,7 @@ class ProgrammeGraphReader {
     return {
       complete,
       number: issue.number, id: issue.id, state: issue.state, state_reason: issue.state_reason || null,
-      title: issue.title, body: issue.body || '', updated_at: issue.updated_at, closed_at: issue.closed_at || null,
+      title: issue.title, body: issue.body || '', created_at: issue.created_at || null, updated_at: issue.updated_at, closed_at: issue.closed_at || null,
       is_pull_request: Boolean(issue.pull_request),
       parent: parentFromUrl(issue.parent_issue_url, this.repository),
       blocked_by_total: issue.issue_dependencies_summary?.total_blocked_by ?? 0,
@@ -5872,7 +5927,7 @@ class Reconciler {
       const blocked = blocker ? `; blocked by #${blocker} (moving), but unchanged for over ${BLOCKED_SKIP_DAYS} days`
         : listed ? `; its state lists a blocker, but it has not changed for over ${BLOCKED_SKIP_DAYS} days` : '';
       findings.push(merged
-        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${waited} hour${waited === 1 ? '' : 's'})${keptNote}${blocked}` }
+        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${waited} hour${waited === 1 ? '' : 's'})${keptNote}${blocked}${uncheckedNote(observed.issues.get(outcome.issue)?.body)}` }
         : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}${blocked}` });
     }
   }
@@ -5921,6 +5976,51 @@ class Reconciler {
       const pr = uatPr(doc);
       findings.push({ code: 'AGENT_UAT_UNSTARTED', issue: outcome.issue, head,
         detail: `landed, and its agent UAT on ${pr ? `PR #${pr}` : `head ${shortSha(head)}`} has not started. Controller: start it now in its own lane, in parallel with the gate lane, and record its start (update --issue ${outcome.issue} --patch with private.agent_uat state STARTED, at_head ${head} and where it runs); until then a new G0 or G1 assignment is refused. Or dispose with a reason` });
+    }
+  }
+
+  // Stale-work net rows read from what the pass already holds (task pages, documents, owner waits),
+  // each raised while its condition holds and resolved on the first complete pass where it is gone:
+  //   OWNER_OK_CLOSE   an open task whose PR merged, whose only owner wait is a UAT after the agent's UAT
+  //                    PASSED, with no gate open (gate_live false), no `Kept open:` mark, no open
+  //                    sub-issue and a DONE WHEN with every row ticked; bound to the UAT's head;
+  //   CHILD_NO_NEAREST an open task opened in the last NEAREST_WINDOW_DAYS with no `Nearest child:` line;
+  //   POLISH_CAP       an open task titled `Polish...` with POLISH_CAP rows or more, or any open one while
+  //                    two or more are open;
+  //   ROWS_UNTICKED    an open task with a merged PR and DONE WHEN or ROWS checkbox rows, none ticked.
+  // A task the pass did not read is left as it stands (the attention fold holds its findings).
+  diffStaleNet(parent, docs, observed, only, findings) {
+    const rows = childRows();
+    const now = Date.parse(this.now());
+    const inScope = number => !(only && number !== only) && !(this.scope && !this.scope.has(number));
+    const open = parent.outcomes.map(outcome => ({ outcome, issue: observed.issues.get(outcome.issue), doc: docs.get(outcome.issue) }))
+      .filter(row => row.issue && !row.issue.is_pull_request && row.issue.state === 'open');
+    const waits = new Map(ownerWaits(parent, docs).map(wait => [wait.issue, wait]));
+    const polish = open.filter(row => /^Polish\b/i.test(row.issue.title || ''));
+    for (const { outcome, issue, doc } of open) {
+      if (!inScope(outcome.issue)) continue;
+      const body = String(issue.body || '').replace(/\r\n?/g, '\n');
+      const wait = waits.get(outcome.issue);
+      if (wait && wait.agent_uat === 'PASSED' && !wait.after && wait.gate_live === false && wait.pr_state === 'MERGED' && doc && !keptOpen(doc)
+        && !issue.open_sub_issues && rows.sectionOf(body, rows.DONE_WHEN) && !rows.uncheckedRows(body)) {
+        const head = isSha(wait.uat_head) ? wait.uat_head : wait.head;
+        findings.push({ code: 'OWNER_OK_CLOSE', issue: outcome.issue, head, detail: `${wait.pr ? `PR #${wait.pr} merged, ` : ''}agent UAT PASSED${head ? ` at ${shortSha(head)}` : ''}, no gate open and every DONE WHEN row ticked: only the owner's OK to close is left` });
+      }
+      const created = Date.parse(issue.created_at || '');
+      if (Number.isFinite(created) && now - created < NEAREST_WINDOW_DAYS * 24 * HOUR_MS && !/Nearest child:/.test(body)) {
+        findings.push({ code: 'CHILD_NO_NEAREST', issue: outcome.issue, detail: `opened ${new Date(created).toISOString().slice(0, 16)}Z with no \`Nearest child:\` line` });
+      }
+      if (polish.some(row => row.outcome.issue === outcome.issue)) {
+        const { rows: count, under } = rows.polishRows(body);
+        const state = count > rows.POLISH_CAP ? 'over cap' : count === rows.POLISH_CAP ? 'full' : null;
+        const several = polish.length > 1 ? `${polish.length} polish tasks open (${polish.map(row => `#${row.outcome.issue}`).join(', ')})` : null;
+        if (state || several) findings.push({ code: 'POLISH_CAP', issue: outcome.issue, detail: [state ? `${state}: ${count} rows (${under}), cap ${rows.POLISH_CAP}` : null, several].filter(Boolean).join('; ') });
+      }
+      const merged = [...new Set([doc?.pr, ...(doc?.prs || [])].filter(pr => pr?.state === 'MERGED' && isInt(pr.number, 1)).map(pr => pr.number))];
+      const ticks = rows.rowTicks(body);
+      if (merged.length && !ticks.ticked && ticks.unticked) {
+        findings.push({ code: 'ROWS_UNTICKED', issue: outcome.issue, detail: `PR ${merged.map(number => `#${number}`).join(', ')} merged, but none of its ${ticks.unticked} DONE WHEN or ROWS checkbox row(s) is ticked` });
+      }
     }
   }
 
@@ -6092,7 +6192,11 @@ class Reconciler {
       effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
-    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
+    // A close as completed that already has its closing story after the close needs no confirming: the
+    // story is the closer's account. The comments are the ones this pass already read for the task.
+    const story = issue?.closed_at && (observed.comments.get(issueNumber) || []).length
+      && require('./closing-comments.cjs').marked(observed.comments.get(issueNumber), { closed_at: issue.closed_at }, require('./closing-comments.cjs').STORY);
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired) && !acceptanceLogged(desired) && !story) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
@@ -6146,7 +6250,7 @@ class Reconciler {
         const openSubs = issue.open_sub_issues > 0 || (observed.subIssues.get(issueNumber) || []).some(sub => observed.issues.get(sub.number)?.state !== 'closed');
         const closable = accepted && CLOSABLE_UAT.includes(uat) && reviewSettled && Boolean(pr.base) && pr.base === pr.default_branch && !openSubs;
         findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, closable, uat, review,
-          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
+          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}${uncheckedNote(issue.body)}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
         findings.push({ code: 'PR_HEAD_MOVED', issue: issueNumber, head: pr.head, detail: `candidate ${shortSha(desired.candidate.head)}, PR #${pr.number} head ${shortSha(pr.head)}; review and UAT evidence at the old head is STALE_HEAD` });
@@ -6925,6 +7029,7 @@ class Reconciler {
     this.diffQueuedMoving(parent, projected, observed, only, findings);
     this.diffBatch(parent, desiredDocs, observed, only, findings);
     this.diffAgentUat(parent, desiredDocs, observed, only, findings);
+    this.diffStaleNet(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
@@ -8183,7 +8288,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, isLaneWait, stampChild, BATCH_TAIL_HOURS, BATCH_NEXT_HOURS, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue, NET_CODES, NET_CALLOUT_HOURS, NEAREST_WINDOW_DAYS, netCallout,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });
