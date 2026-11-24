@@ -13,6 +13,8 @@ const SCRIPT = path.join(ROOT, 'repo/scripts/toolkit-projects-instructions.cjs')
 const BODY = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
 const run = args => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
 const owner = () => new ProjectsInstructions({ root: ROOT });
+// An older published block: different text under an older marker version.
+const olderBlock = () => renderBlock({ ...owner().expectedBlock(), version: '0.0.0', body: `${owner().expectedBlock().body.trimEnd()}\n- A line a newer block dropped.` });
 
 function fixture(t, text) {
   const tempRoot = path.join(ROOT, '.tmp');
@@ -62,9 +64,9 @@ test('a current block below project text is misplaced; worse states win over mis
   const outside = renderBlock({ source: 'other', name: 'OTHER', version: '1.0.0', body: 'private owner text' });
   check(t, `private prefix\r\n${outside}\n${owner().render()}\nprivate suffix`, 'misplaced', 1);
   check(t, `- Project line.\n\n${owner().render()}\n`, 'misplaced', 1);
-  check(t, `- Project line.\n${renderBlock({ ...owner().expectedBlock(), version: '0.0.0' })}`, 'outdated', 1);
+  check(t, `- Project line.\n${olderBlock()}`, 'outdated', 1);
   check(t, `- Project line.\n${owner().render().replace('- Roles:', '- Edited roles:')}`, 'edited', 1);
-  check(t, `- Project line.\n${renderBlock({ ...owner().expectedBlock(), version: '0.0.0' })}`, 'declined', 0,
+  check(t, `- Project line.\n${olderBlock()}`, 'declined', 0,
     ['--declined', owner().expectedBlock().version]);
 });
 
@@ -151,9 +153,24 @@ test('CRLF copies remain current', t => {
   check(t, `${owner().render()}\n`.replace(/\n/g, '\r\n'), 'current', 0);
 });
 
-test('an intact older version or different source body is outdated', t => {
+// 19 Nov: main's block text was unchanged and only its marker moved (toolkit=3.150.1 -> 3.151.1), yet the
+// check said outdated and the coordinator re-applied the same block. A marker version alone is current; a
+// hand edit (a body no longer matching its own digest) is still edited, and an old v1 marker still outdated.
+test('the same block text under an older or newer marker version is current, at the top or misplaced', t => {
   const expected = owner().expectedBlock();
-  check(t, renderBlock({ ...expected, version: '0.0.0' }), 'outdated', 1);
+  for (const version of ['3.150.1', '99.0.0']) {
+    check(t, renderBlock({ ...expected, version }), 'current', 0);
+    check(t, `${renderBlock({ ...expected, version })}\n`.replace(/\n/g, '\r\n'), 'current', 0);
+    check(t, `- Project line.\n${renderBlock({ ...expected, version })}`, 'misplaced', 1);
+  }
+  check(t, renderBlock({ ...expected, version: '3.150.1' }).replace(/sha256=[0-9a-f]{12}/, 'sha256=000000000000'), 'edited', 1);
+  check(t, `<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN PROJECT-INSTRUCTIONS v1 -->\n${expected.body.trimEnd()}\n`
+    + '<!-- AI-AGENT-TOOLKIT:claude-projects:END PROJECT-INSTRUCTIONS -->', 'outdated', 1);
+});
+
+test('an intact older block or different source body is outdated', t => {
+  const expected = owner().expectedBlock();
+  check(t, olderBlock(), 'outdated', 1);
   check(t, renderBlock({ ...expected, body: 'Previously published body.' }), 'outdated', 1);
   check(t, '<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN PROJECT-INSTRUCTIONS v1 -->\nOld body.\n'
     + '<!-- AI-AGENT-TOOLKIT:claude-projects:END PROJECT-INSTRUCTIONS -->', 'outdated', 1);
@@ -181,7 +198,7 @@ test('malformed, mismatched, nested and duplicate marker pairs fail closed', t =
 
 test('declined current source version suppresses only outdated and a newer version is offered', t => {
   const expected = owner().expectedBlock();
-  const outdated = renderBlock({ ...expected, version: '0.0.0' });
+  const outdated = olderBlock();
   const declined = ['--declined', expected.version];
   check(t, outdated, 'declined', 0, declined);
   check(t, outdated, 'outdated', 1, ['--declined', '0.0.0']);
@@ -232,12 +249,14 @@ test('source body, measured without the two marker lines, stays under 6200 CRLF 
   assert.doesNotMatch(text, /[^\x00-\x7f]/);
 });
 
-test('rendered instructions run cloud first and leave device facts and review caps to project lines', () => {
+test('rendered instructions start work on the device, cloud only by the owner, and leave device facts and review caps to project lines', () => {
   const source = fs.readFileSync(BODY, 'utf8');
   const rendered = owner().render();
   for (const text of [source, rendered]) {
     const lanes = text.split(/\r?\n/).find(line => line.startsWith('- Lanes:'));
-    assert.ok(lanes.includes('cloud first, the device only for work that needs it, and owner usage limits apply.'));
+    assert.ok(lanes.includes('local rc first, cloud only when the owner starts or OKs it, no fallback (work waits); owner usage limits apply.'));
+    assert.ok(text.includes('ask the owner for a cloud thread to run `toolkit-projects-guidebook.cjs --out <folder>` from fresh `main`'));
+    assert.doesNotMatch(text, /cloud first/);
     assert.doesNotMatch(text, /Hybrid by default|serial review|one gate device/);
     assert.ok(text.includes('devices, folders, device-only work, review caps, transport store'));
     assert.ok(text.includes('below this block.'));

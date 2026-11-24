@@ -88,13 +88,22 @@ function findBlocks(text) {
   return { blocks, errors };
 }
 
+// Whether a found block holds the expected block's text: same source, name and body (line endings and
+// trailing blank lines aside), whatever its marker's version or digest say.
+function sameText(found, expected) {
+  return Boolean(found) && found.source === expected.source && found.name === expected.name
+    && normalizeBody(found.body) === normalizeBody(expected.body);
+}
+
 // current: identical to the expected block. tampered: the body no longer matches its own
 // digest (edited by hand). stale: an older version, an older format or a different body.
-function blockState(found, expected) {
+// anyVersion: for a reader that applies a block only for its text, the same text under another
+// Toolkit version's marker is current too, so a release that leaves the text alone changes nothing.
+function blockState(found, expected, { anyVersion = false } = {}) {
   if (!found) return 'absent';
   if (found.format >= 2 && found.digest !== bodyDigest(found.body)) return 'tampered';
-  if (found.format === FORMAT && found.source === expected.source && found.version === expected.version
-    && normalizeBody(found.body) === normalizeBody(expected.body)) return 'current';
+  if (found.format === FORMAT && (anyVersion || found.version === expected.version)
+    && found.source === expected.source && normalizeBody(found.body) === normalizeBody(expected.body)) return 'current';
   return 'stale';
 }
 
@@ -139,4 +148,4 @@ function removeBlock(text, name) {
   return block ? removeRange(text, block.start, block.end) : text;
 }
 
-module.exports = Object.freeze({ FORMAT, bodyDigest, beginLine, endLine, renderBlock, findBlocks, blockState, upsertBlock, removeBlock, normalizeBody });
+module.exports = Object.freeze({ FORMAT, bodyDigest, beginLine, endLine, renderBlock, findBlocks, blockState, sameText, upsertBlock, removeBlock, normalizeBody });

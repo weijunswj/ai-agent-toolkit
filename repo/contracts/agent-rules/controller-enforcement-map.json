@@ -311,8 +311,8 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Work runs where the controller runs:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether a step needs the other side of the controller's own type is a routing call. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
+      "rule": "**Work starts on the owner's computer:**",
+      "instruction_only": "Whether the owner started or agreed to a cloud start is read from the chat, and no Toolkit check reads a session start's target yet. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
     },
     {
       "file": "repo/controller/principles.md",
@@ -337,7 +337,14 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
-      "instruction_only": "Whether a thread or session is fully done is a judgement per session, and no host gives Toolkit a list of the sessions a controller started; the Projects hourly pass (RESOLVE DUE) is itself instruction text."
+      "covers": "Gate assignments only: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. Other sessions, and whether the final message was read in full and acted on, stay instruction text.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/programme-close-due.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/roles-and-routes.md",

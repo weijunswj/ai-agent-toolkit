@@ -10,7 +10,8 @@
 //                  that left the snapshot: path, sha256, modified, removed_at, source) and the stamp
 //                  (taken_at, toolkit version, the repository's default-branch commit); the stamp is
 //                  outside the compare
-//   README.md      what the folder is and how to get a removed file back (fixed text)
+//   README.md      what the folder is, how to get a removed file back, and the reading order for a
+//                  successor (from the manifest)
 //   MEMORY.md      the memory folder's index; memory/ its other files
 //   files/         the saved instructions (instructions.<ext>) and each named working file
 // Every source is secret-scanned before anything is written; one finding refuses the whole run.
@@ -78,13 +79,24 @@ const FOLDER_RECORDS = 'handoff-folders';
 // ignoreBOM keeps a byte-order mark in the copy, so the copy's sha256 is the one its manifest row records.
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const NAME = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
-const README = repository => `# Controller handoff snapshot: ${repository}\n\n`
-  + 'Written by `toolkit-store.cjs handoff`; never edit it by hand.\n\n'
-  + '- `manifest.json`: the current file set, each with its sha256 and source; the removed memory files, each with when it was removed (`removed_at`); and the stamp: when it was taken (`taken_at`), the Toolkit version and the repository\'s default-branch commit.\n'
-  + '- `MEMORY.md` and `memory/`: a mirror of the controller\'s memory folder: a memory file deleted there is deleted here.\n'
-  + '- `files/`: the saved instructions and the named working files.\n\n'
-  + 'In an evidence store, a removed file stays in the store\'s Git history: `git log --diff-filter=D -- <this folder>/memory/` lists the removals, and `git show <commit>^:<path>` prints the last copy. In a folder written with `--out` (no Git), a removal is final.\n\n'
-  + 'Evidence, not authority: where it differs from current state, current state wins.\n';
+// The README names the reading order for a successor from the manifest's rows: the memory index
+// (when the snapshot holds one), then the saved instructions, then the named working files.
+function README(repository, files = []) {
+  const saved = files.map(row => row.path).filter(name => name.startsWith('files/')).sort();
+  const instructions = saved.filter(name => name.startsWith('files/instructions.'));
+  const working = saved.filter(name => !instructions.includes(name));
+  const order = [...(files.some(row => row.path === 'MEMORY.md') ? ['`MEMORY.md`, the memory index, then the `memory/` topic files it names.'] : []),
+    ...instructions.map(name => `\`${name}\`, the saved instructions.`),
+    ...(working.length ? [`The named working files: ${working.map(name => `\`${name}\``).join(', ')}.`] : [])];
+  return `# Controller handoff snapshot: ${repository}\n\n`
+    + 'Written by `toolkit-store.cjs handoff`; never edit it by hand.\n\n'
+    + '- `manifest.json`: the current file set, each with its sha256 and source; the removed memory files, each with when it was removed (`removed_at`); and the stamp: when it was taken (`taken_at`), the Toolkit version and the repository\'s default-branch commit.\n'
+    + '- `MEMORY.md` and `memory/`: a mirror of the controller\'s memory folder: a memory file deleted there is deleted here.\n'
+    + '- `files/`: the saved instructions and the named working files.\n\n'
+    + `## Read in this order\n\n${order.map((step, index) => `${index + 1}. ${step}`).join('\n')}\n\n`
+    + 'In an evidence store, a removed file stays in the store\'s Git history: `git log --diff-filter=D -- <this folder>/memory/` lists the removals, and `git show <commit>^:<path>` prints the last copy. In a folder written with `--out` (no Git), a removal is final.\n\n'
+    + 'Evidence, not authority: where it differs from current state, current state wins.\n';
+}
 
 class HandoffError extends Error {
   constructor(stopped, next) { super(`Stopped: ${stopped} Next: ${next}`); this.stopped = stopped; this.next = next; }
@@ -153,6 +165,9 @@ function readText(fs, file) {
     bytes = fs.readFileSync(file);
     modified = Number.isFinite(stat.mtimeMs) ? new Date(stat.mtimeMs).toISOString() : null;
   } catch (error) { if (error instanceof HandoffError) throw error; return null; }
+  // A NUL byte decodes as UTF-8, but the store's save refuses it as binary (toolkit-store.cjs), so a
+  // copy holding one would be written, refused at the save and undone on every run.
+  if (bytes.includes(0)) throw new HandoffError(`${file} holds a NUL byte (binary).`, 'leave it out of the snapshot.');
   try { return { text: UTF8.decode(bytes), sha256: sha256(bytes), modified }; } catch { throw new HandoffError(`${file} is not UTF-8 text.`, 'leave it out of the snapshot.'); }
 }
 
@@ -527,7 +542,7 @@ function write(base, { folder, manifest, writes, deletes = [] }, repository, { f
   try {
     for (const entry of writes) put(entry.path, entry.text);
     for (const rel of deletes) { const file = target(rel); keep(file); fs.rmSync(file, { force: true }); }
-    put('README.md', README(repository));
+    put('README.md', README(repository, manifest.files));
     put('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
   } catch (error) { undo(); throw error; }
   function undo() {

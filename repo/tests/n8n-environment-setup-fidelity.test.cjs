@@ -56,7 +56,7 @@ test('n8n local setup retains its canonical runtime references and safety bounda
     assert.doesNotMatch(text, /(?:sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})/);
   }
   const skill = read('SKILL.md');
-  const rulesAdapter = fs.readFileSync(path.join(repoRoot, 'skills', 'n8n-safety-router', 'adapters', 'AGENTS.n8n-brief.template.md'), 'utf8');
+  const rulesAdapter = fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'agent-rules', 'n8n-safety-router-adapter.md'), 'utf8');
   assert.match(rulesAdapter, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, or production actions without explicit current-turn approval/i);
   assert.match(skill, /Keep tokens, API keys, webhook secrets, tunnel tokens, `.env` values/i);
 });
