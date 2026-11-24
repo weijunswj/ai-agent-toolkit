@@ -78,7 +78,7 @@ const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
 const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
 const { SweepRequests, passCap } = require('./programme-sweep.cjs');
-const { SweepLease } = require('./programme-sweep-lease.cjs');
+const { SweepLease, RELEASE_TRIES } = require('./programme-sweep-lease.cjs');
 // Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
 const { ReadCache } = require('./programme-read-cache.cjs');
@@ -1347,6 +1347,8 @@ function runPasses(args, deps, out) {
   const context = openContext(args, passDeps);
   context.pass = pass;
   context.requests = requests;
+  // Tests pass a pause that does not sleep; the lease waits for real otherwise.
+  context.leasePause = typeof deps.leasePause === 'function' ? deps.leasePause : null;
   const environment = deps.environment || process.env;
   const host = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1' ? 'cloud' : 'computer';
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
@@ -1406,6 +1408,19 @@ function runPasses(args, deps, out) {
         context.sweepNotes = pass.metrics = measure ? notes : null;
         // The read copy belongs to the lock's owner, like the notes beside it.
         context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
+        // A computer refresh leaves the lease to a cloud sweep that is queued or at work, so the
+        // cloud's full-budget pass completes instead of losing the lease to back-to-back computer
+        // passes; that pass reads this computer's change too.
+        if (requests && host === 'computer') {
+          const cloud = cloudSweepAtWork(context);
+          if (cloud.run) {
+            out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason: 'the cloud sweep picks this up', cloud_run: cloud.run }, null, 2)}\n`
+              : `The cloud sweep picks this up: run ${cloud.run.id} is ${cloud.run.status}, so this refresh leaves the sweep lease to it and wrote nothing.\n`);
+            passes += 1;
+            break;
+          }
+          if (cloud.unread) (deps.stderr || process.stderr).write(`Cloud sweep check: the Actions read failed (${cloud.unread}), so this refresh runs as usual.\n`);
+        }
         if (requests) {
           const taken = takeLease(context, host, pass, progress);
           if (!taken) {
@@ -1431,7 +1446,7 @@ function runPasses(args, deps, out) {
           if (measure) notes.saveMetrics();
           // An error stop goes to the local note when this computer's lock still owns it; otherwise
           // (the cloud, or a lock another process took) the lease release carries it.
-          if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns() });
+          if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns(), stderr: deps.stderr || process.stderr });
         }
         if (paused) {
           out.write(args.json ? `${JSON.stringify({ outcome: 'PAUSED', reason: 'GitHub rate limit' }, null, 2)}\n` : 'Paused: GitHub\'s hourly limit is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.\n');
@@ -1475,6 +1490,34 @@ function busySweepText(busy) {
   return `Another sweep is running${where}, so this one wrote nothing. That sweep or the next one brings the board up to date; run refresh again after the lease ends if the board still looks out of date.`;
 }
 
+// The cloud Programme Sweep run that is queued, or running its refresh job, in the governed
+// repository: { run: { id, status } }, else { run: null }, with `unread` naming the HTTP status (or
+// "no reply") when GitHub could not say; the caller then runs as usual. No sweep workflow here (404)
+// is no run. A run still in progress past its refresh job is only its follow-up waiting, so its jobs
+// are read (a second request, only then) and it holds nothing back.
+const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
+const SWEEP_JOB = 'Refresh the programme';
+const RUN_WAITING = new Set(['queued', 'waiting', 'pending', 'requested']);
+function cloudSweepAtWork(context) {
+  const repository = context.binding.repository;
+  const read = route => {
+    try { return context.requests.request('GET', route); } catch (error) { if (state.STOPS_PASS.has(error.code)) throw error; return null; }
+  };
+  const unread = response => ({ run: null, unread: response?.status ? `HTTP ${response.status}` : 'no reply' });
+  const runs = read(`repos/${repository}/actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=10&exclude_pull_requests=true`);
+  if (runs?.status === 404) return { run: null };
+  if (runs?.status !== 200 || !Array.isArray(runs.json?.workflow_runs)) return unread(runs);
+  for (const run of runs.json.workflow_runs) {
+    if (!Number.isSafeInteger(run?.id)) continue;
+    if (RUN_WAITING.has(run.status)) return { run: { id: run.id, status: run.status } };
+    if (run.status !== 'in_progress') continue;
+    const jobs = read(`repos/${repository}/actions/runs/${run.id}/jobs?per_page=20`);
+    if (jobs?.status !== 200 || !Array.isArray(jobs.json?.jobs)) return unread(jobs);
+    if (jobs.json.jobs.some(job => job?.name === SWEEP_JOB && job.status !== 'completed')) return { run: { id: run.id, status: run.status } };
+  }
+  return { run: null };
+}
+
 // Takes the lease for one pass with its request budget. The predecessor's stop the state does
 // not hold yet comes from the lease, unless this computer's own note already reports it.
 function takeLease(context, host, pass, progress) {
@@ -1486,7 +1529,7 @@ function takeLease(context, host, pass, progress) {
   requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
   context.store.graphqlRefused = false;
   const store = typeof context.store.private === 'object' ? context.store.private : context.store;
-  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy });
+  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy, ...(context.leasePause ? { pause: context.leasePause } : {}) });
   context.busyLease = null;
   if (!lease.acquire(pass.started_at)) { context.busyLease = lease.busy; return false; }
   context.lease = lease;
@@ -1509,7 +1552,7 @@ function errorReason(error) {
 // Releases the lease with what this pass leaves for the next one: an error stop that no local note
 // holds is written here, so the next pass on either host reports it. A failed release only means
 // the lease expires on its own, by the pass's kill time.
-function releaseLease(context, pass, { error = null, noteHolds = false } = {}) {
+function releaseLease(context, pass, { error = null, noteHolds = false, stderr = process.stderr } = {}) {
   const lease = context.lease;
   context.lease = null;
   if (!lease) return;
@@ -1525,7 +1568,11 @@ function releaseLease(context, pass, { error = null, noteHolds = false } = {}) {
   } catch (releaseError) {
     // The pass's own error is the one reported; a release that fails after it leaves the lease to expire.
     if (!error && (!releaseError.code || ['STALE_WRITER', 'PASS_LOCK_LOST'].includes(releaseError.code))) throw releaseError;
+    lease.unreleased = lease.unreleased || { expires_at: null, failed: true };
   } finally { context.releasing = false; }
+  // A release that never landed keeps the next sweep waiting until the lease runs out: say so, in a
+  // fixed line, so the run that ends here is not taken for a clean one.
+  if (lease.unreleased) stderr.write(`Sweep lease: ${lease.unreleased.failed ? 'a GitHub request of the release failed' :`the release did not land after ${RELEASE_TRIES} tries`}, so the lease ends on its own at ${lease.unreleased.expires_at || 'its expiry'}; the next sweep waits for it and reports this pass as stopped.\n`);
 }
 
 function finish(args, deps, out, opened = null) {

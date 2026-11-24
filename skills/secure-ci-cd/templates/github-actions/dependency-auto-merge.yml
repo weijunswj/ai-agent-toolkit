@@ -88,7 +88,7 @@ jobs:
           fi
           required="$(gh api "repos/$REPOSITORY/rules/branches/$DEFAULT_BRANCH" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]] | length')" || required=0
           if [ "${required:-0}" -lt 1 ]; then
-            flag "no active ruleset on $DEFAULT_BRANCH requires a status check, so auto-merge could merge untested code; add a ruleset with required checks (toolkit governance check names it)"; exit 0
+            flag "no active ruleset on $DEFAULT_BRANCH requires a status check, so auto-merge could merge untested code; add a ruleset with required checks (the governance check, toolkit-governance.cjs check, names it)"; exit 0
           fi
           if [ "$MAINTAINER_CHANGES" = "true" ]; then flag "the package's maintainers changed"; exit 0; fi
           case "$ECOSYSTEM" in

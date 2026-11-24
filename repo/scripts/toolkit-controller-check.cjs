@@ -13,7 +13,9 @@
 //                                            chat updates Toolkit and rereads its rules on its own
 //   guidebook, instructions, memory, tasks   Claude Projects only
 //   programme, traces, stale                 only where the checkout's programme binding says
-//                                            governance is enabled; stale is the stale check, which the
+//                                            governance is enabled (for stale, the binding merged on
+//                                            origin's default branch, which the hook also reads); stale
+//                                            is the stale check, which the
 //                                            governance session-start hook starts in the background and
 //                                            a controller may run on demand: at most once per local date
 //                                            per repository (a stamp file in the Toolkit user-state
@@ -160,6 +162,12 @@ const why = result => result.error || linesOf(result.stderr).at(-1) || linesOf(r
 function readBinding(checkout) {
   if (!checkout) return null;
   try { return JSON.parse(fs.readFileSync(path.join(checkout, BINDING_REL), 'utf8').replace(/^﻿/, '')); } catch { return null; }
+}
+
+// The binding merged on origin's default branch with governance on, from this computer's cache, or
+// null (the governance state's own reader, which the session-start hook also uses).
+function defaultMergedBinding(checkout) {
+  try { return require('./toolkit-governance-state.cjs').mergedBinding(checkout); } catch { return null; }
 }
 
 // Exit 0 current, 1 needs a change, anything else could not run: the shape the Projects checkers and
@@ -460,15 +468,24 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'tasks') {
       if (!options.tasks.length) { skip(name, 'pass --task <kind>=<file> (each stored task prompt)'); continue; }
       outcome = checkTasks(run, options.tasks);
-    } else if (name === 'programme' || name === 'traces' || name === 'stale') {
+    } else if (name === 'stale') {
+      // The session-start hook starts this run from the merged binding (origin's default branch, as
+      // this computer cached it), so the run gates on that binding too: a worktree from before
+      // governance was on would otherwise skip with no stamp, and the hook would start it again.
+      if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
+      const merged = (deps.mergedBinding || defaultMergedBinding)(options.checkout);
+      if (!merged) { skip(name, 'governance off'); continue; }
+      const mergedRepo = options.repo || (typeof merged.repository === 'string' ? merged.repository : null);
+      if (!mergedRepo) { skip(name, 'pass --repo <owner/name>'); continue; }
+      const mergedParents = Array.isArray(merged.parents) ? merged.parents.filter(parent => Number.isInteger(parent.issue)) : [];
+      const stamp = deps.stamp || defaultStamp();
+      outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo: mergedRepo, parents: mergedParents, now });
+    } else if (name === 'programme' || name === 'traces') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       if (!binding) { skip(name, 'no programme binding in the checkout'); continue; }
       if (!governed) { skip(name, 'governance off'); continue; }
       if (name !== 'programme' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
-      if (name === 'stale') {
-        const stamp = deps.stamp || defaultStamp();
-        outcome = checkStale({ run, gh: deps.gh || defaultGh, stamp, checkout: options.checkout, repo, parents, now });
-      } else outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
+      outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
     } else if (name === 'ci') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       outcome = checkCi(run, options.checkout);
