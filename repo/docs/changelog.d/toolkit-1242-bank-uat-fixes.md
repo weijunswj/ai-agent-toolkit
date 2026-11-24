@@ -10,3 +10,4 @@
 ### Changed
 
 - **Shorter "Nothing to answer here" list:** what the merged programme file sets is one line (for example "Set in .github/toolkit-programme.json: evidence store owner/TRANSPORT-name, the parent issue, required check validate, merge trains on"), with how to change it said once. The other rows are one short line each: parallel CI shards already in your CI name the workflow, up-to-date permissions say only "Up to date", and a set-up governance App says to type "explain 1.1", which now holds the steps to stop using it.
+- **Setup's AGENTS.md question says it covers every repository:** the Claude Code setting row now reads "Read AGENTS.md (in all local repos) too?", so it no longer looks like a choice for one repository. What it does is unchanged.
