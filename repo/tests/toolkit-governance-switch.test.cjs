@@ -104,12 +104,10 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
     assert.doesNotMatch(result.out, /\| (1\.[3-9]|2\.\d) \|/, 'status rows sit below the table and carry no number');
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup is a Toolkit default.
-    assert.match(result.out, /^- Merge trains: On\. Bound in the merged programme file\.$/m);
     assert.match(result.out, /^- Parallel CI shards: Not now \(Toolkit default\) \(CI time unknown\)\. /m);
     assert.match(result.out, /^- Toolkit instruction copies: 1 file left \(Toolkit default: clean up\)\. /m);
     assert.match(result.out, /^- Toolkit permissions \(Claude Code\): Outdated: 6 missing\. After your answer, Toolkit gives you one command to run yourself /m);
-    assert.match(result.out, /^- Evidence store: toolkit-test-fixture\/store\. Bound in the merged programme file\.\n- Parent issue: #1\. Bound in the merged programme file\.\n- Required checks: validate\. Bound in the merged programme file\.$/m);
-    assert.match(result.out, /^To change anything bound in the merged programme file, edit \.github\/toolkit-programme\.json in a pull request and merge it\.$/m);
+    assert.match(result.out, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parent #1, required check validate, merge trains on\. To change them, edit that file in a pull request and merge it\.$/m);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
     assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.1=B\./m);
     assert.doesNotMatch(result.out, /could not note this bank/);
@@ -257,10 +255,10 @@ test('merge trains are not asked: a governed bank shows the stored switch as bou
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 13, url: `https://github.com/${SLUG}/pull/13`, head: 'a'.repeat(40) }; } };
   startOwnerSession(ctx);
-  assert.match((await run(ctx, ['setup'])).out, /^- Merge trains: On\. Bound in the merged programme file\.$/m, 'no key reads as on');
+  assert.match((await run(ctx, ['setup'])).out, /^- Set in \.github\/toolkit-programme\.json: .*, merge trains on\. /m, 'no key reads as on');
   ctx.merge(bindingText({ task_prs: { auto_merge: 'off', merge_train: 'off' } }));
   startOwnerSession(ctx);
-  assert.match((await run(ctx, ['setup'])).out, /^- Merge trains: Off\. Bound in the merged programme file\.$/m);
+  assert.match((await run(ctx, ['setup'])).out, /^- Set in \.github\/toolkit-programme\.json: .*, merge trains off\. /m);
   const answered = await answerBank(ctx, '1.2=B', { switchTransport });
   assert.equal(answered.code, 0, answered.err);
   assert.deepEqual(calls.at(-1)[3], { auto_merge: 'after-gates' }, 'only task auto-merge changes');

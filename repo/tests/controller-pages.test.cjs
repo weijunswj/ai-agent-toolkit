@@ -208,11 +208,12 @@ test('every controller starts work on the owner\'s computer, cloud only by the o
   assert.doesNotMatch(page, /Work runs where the controller runs|a cloud controller runs work in the cloud|no computer scheduled tasks|\*\*Cloud first:\*\*/);
 });
 
-test('lean children: one capped polish child, a stale check and automate-first in the global principles', () => {
+test('lean children: one capped polish child, the stale-work net and automate-first in the global principles', () => {
   const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(page, /^- \*\*Polish child:\*\* review Lows and small UAT nits are rows on one rolling Later polish child \(title starts `Polish`[^\n]*at most 8 rows; when full it ships as one batched PR and closes, and a fresh one opens\.$/m);
-  // The stale check runs from the governance session-start hook in the background; the controller closes what is finished and asks the owner only for a close that needs their OK.
-  assert.match(page, /^- \*\*Stale check:\*\* the governance session-start hook runs the stale check at most once a day per repository, in the background, as rows the controller answers\. The controller closes finished children itself and asks the owner only for a close that needs their OK \(a duplicate, an obsolete child or an owner-OK close\), in its next ask\.$/m);
+  // The stale-work net reaches the controller at turn end, never as a session-start check; the controller closes what is finished and asks the owner only for a close that needs their OK.
+  assert.ok(page.split('\n').includes("- **Stale-work net:** the sweep raises stale children as net findings; the turn-end owed check, where it runs, stops the controller's turn once per new one due. The controller closes finished children itself and asks the owner only for a close that needs their OK (a duplicate, an obsolete child or an owner-OK close), in its next ask."));
+  assert.doesNotMatch(page, /Stale check|session-start hook runs/);
   assert.doesNotMatch(page, /Daily stale sweep/);
   const global = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), 'utf8').replace(/\r\n/g, '\n');
   // Clear-cut rules go into code first; judgement stays with controllers (owner, 20 November).

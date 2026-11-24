@@ -263,7 +263,7 @@ test('bank: not now writes nothing and checks again; shards=never records the an
   // A merged not-now is the default again; a merged never or yes is only a status line.
   ctx.merge(bindingText({ ci_shards: { answer: 'not-now' } }));
   assert.match((await run(ctx, ['setup'])).out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\./m);
-  for (const [merged, line] of [['never', /^- Parallel CI shards: Never ask\. Bound in the merged programme file/m], ['yes', /^- Parallel CI shards: Yes\. Bound in the merged programme file/m]]) {
+  for (const [merged, line] of [['never', /^- Set in \.github\/toolkit-programme\.json: .*, parallel CI shards never \(not asked again\)\. /m], ['yes', /^- Set in \.github\/toolkit-programme\.json: .*, parallel CI shards yes\. /m]]) {
     ctx.merge(bindingText({ ci_shards: { answer: merged } }));
     let estimated = 0;
     const shown = await run(ctx, ['setup'], { estimate: () => { estimated += 1; return null; } });
