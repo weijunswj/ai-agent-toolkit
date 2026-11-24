@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "8275bd1a2d26",
+      "rule_sha": "46ed6d45bf39",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -446,6 +446,19 @@
         "basis": "judgement",
         "why": "A design principle the controller applies by judgement in plans, reviews and merges; what counts as an unasked mention is a wording call."
       }
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Hook creation:**",
+      "rule_sha": "05ecf2ab06b8",
+      "covers": "CI refuses a hooks.json with no harness, a hook command with no scope row or with a second command chained after its script, a hook on an event its row does not name and justify, a row naming a hard rule off the closed list, a script serving two harnesses, a module two harnesses load with no policy or library row or holding a harness's tool names, environment names or output fields, a require it cannot follow, and a known-open list that grows or keeps a clean item. Whether a rule really is a hard rule stays a controller and review judgement.",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/check-hook-scope.cjs",
+          "test": "repo/tests/hook-scope.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/principles.md",

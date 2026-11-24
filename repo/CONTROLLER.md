@@ -25,7 +25,7 @@ Record standing authority's owner/provenance, repository/destination, purpose, o
 - **Transport stores:** an evidence (transport) store is agent-managed with full standing permission, as the governed rules set out.
 ## Pages
 These pages are part of this file: their rules bind like the rules above and were moved here word for word. Read every page on adoption, and the matching page again before its step. The hash is each page's content hash (`node repo/scripts/sync-controller-pages.cjs --write`), so a page change changes this file's blob.
-- [Design principles](controller/principles.md) `1334dc439350`: on adoption and before every plan, review, merge decision or owner post.
+- [Design principles](controller/principles.md) `7e0ecacf9090`: on adoption and before every plan, review, merge decision or owner post.
 - [Roles and routes](controller/roles-and-routes.md) `20e461bd54fe`: before resolving a route or launching, relaying or reviewing a gate, helper or merge-train lane.
 - [Gates](controller/gates.md) `3132f9e623d4`: before admitting, running, accepting, reviewing or retiring a gate, and for human-facing text.
 - [Evidence, progress and finish](controller/evidence-and-finish.md) `9e0382043f18`: before merging, storing evidence, cleaning up, recording a promise, acting on a finding or finishing.
