@@ -550,13 +550,21 @@ test('a background start that fails later never throws or prints, and each check
 // The real background start of the stale check, with only its two GitHub reads stubbed (a preload in the
 // started process answers `programme.cjs attention` and `gh api`): it must start the check for this
 // checkout and land the stamp in the file the session-start line reads. Every other test injects the
-// starter, so a broken start (a dropped --checkout) would leave the net silently off.
+// starter, so a broken start (a dropped --checkout) would leave the net silently off. The run gates on
+// the binding merged on origin's default branch, as the hook does, so this checkout has that binding
+// cached on the computer and none in its working tree (a worktree from before governance was on).
 test('red: the real stale-check start runs the check for its checkout and writes the stamp the session-start line reads', async () => {
   const home = tmp();
   const dir = tmp();
   const checkout = tmp();
-  fs.mkdirSync(path.join(checkout, '.github'));
-  fs.writeFileSync(path.join(checkout, '.github', 'toolkit-programme.json'), JSON.stringify({ repository: 'acme/app', governance: 'enabled', parents: [{ issue: 7 }] }));
+  const git = (...args) => { const result = spawnSync('git', args, { cwd: checkout, encoding: 'utf8' }); assert.equal(result.status, 0, result.stderr); return result.stdout.trim(); };
+  git('init', '--quiet', '--initial-branch=main');
+  git('remote', 'add', 'origin', 'https://github.com/acme/app.git');
+  git('-c', 'user.name=Stale test', '-c', 'user.email=stale@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'base');
+  require('./support/merge-train-fixture.cjs').mergedBinding(checkout, git('rev-parse', 'HEAD'), { userHome: home, testOnly: true }, {
+    schema: 'toolkit.programme-binding.v2', repository: 'acme/app', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'INT-7-' }],
+    store: { kind: 'github', repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' }, required_checks: ['validate'],
+  });
   const preload = path.join(dir, 'stub-github-reads.cjs');
   fs.writeFileSync(preload, `const cp = require('node:child_process');
 const real = cp.spawnSync;

@@ -18,7 +18,6 @@ const STAMP_FILES = new Set([
   'skills/n8n-safety-router/n8n-safety-rules.md',
   'skills/n8n-environment-setup/references/n8n-safety-rules.md',
   'skills/n8n-workflow-transport/references/n8n-safety-rules.md',
-  'skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md',
   'repo/docs/published-surface-audit-baseline.json', PROJECTS_SKILL_REL_PATH,
 ]);
 const SHA = /^[0-9a-f]{40}$/;

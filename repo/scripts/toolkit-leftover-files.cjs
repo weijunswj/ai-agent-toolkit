@@ -11,7 +11,7 @@
 //   - a file that is byte for byte a copy Toolkit shipped, now or earlier (playbook-history.json),
 //     line endings aside.
 // A repository whose governance is on gets its governed rules and playbooks from the installed
-// Toolkit, so only those instruction copies are listed there; its checks and workflow copies are in
+// Toolkit, so only those instruction copies (and the retired n8n adapter block) are listed there; its checks and workflow copies are in
 // use and shown as kept. The repository's programme file is its on/off decision, so it is always kept.
 // A one-line CLAUDE.md is listed only when AGENTS.md has nothing of its own left without the listed
 // blocks; otherwise it loads the repository's own rules and is kept.
@@ -35,8 +35,11 @@ const VENDORED_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=
 const LIMIT = 1024 * 1024;
 const SCANNED_STATES = Object.freeze({ DISABLED: 'governance off', UNDECIDED: 'no governance decision', ENABLED: 'governance on' });
 // The Toolkit blocks that copied governed rules into a repository. Only these are leftovers where
-// governance is on; any other block there (an n8n adapter, say) is in use.
+// governance is on; any other block there is in use.
 const GOVERNED_COPY_BLOCKS = Object.freeze(['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE', 'ANTIGRAVITY.BOOTSTRAP']);
+// The n8n adapter block older setups copied into AGENTS.md. The global rules carry the n8n rules now,
+// so it is a leftover in every governance state.
+const RETIRED_COPY_BLOCKS = Object.freeze(['N8N-AGENT-RULES-ADAPTER']);
 const HISTORY = path.resolve(__dirname, '..', 'contracts', 'agent-rules', 'playbook-history.json');
 const IN_USE = 'governance is on, so it is in use';
 const BROKEN = "its Toolkit markers are broken, so Toolkit cannot tell its text from the rest; fixing them by hand is the owner's choice";
@@ -170,7 +173,7 @@ class LeftoverScan {
       // With broken markers no block in the file is proven: where one ends cannot be told, so the
       // whole file stays until the owner fixes the markers by hand.
       if (parsed.errors.length) { result.unproven.push({ file, reason: BROKEN }); continue; }
-      const listed = parsed.blocks.filter(block => !result.governed || GOVERNED_COPY_BLOCKS.includes(block.name));
+      const listed = parsed.blocks.filter(block => !result.governed || GOVERNED_COPY_BLOCKS.includes(block.name) || RETIRED_COPY_BLOCKS.includes(block.name));
       const empties = listed.length > 0 && !ownText(read.text, listed.map(block => block.name));
       for (const block of listed) {
         const edited = block.format >= 2 && block.digest !== blocks.bodyDigest(block.body);

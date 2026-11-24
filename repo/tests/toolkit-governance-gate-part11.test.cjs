@@ -19,7 +19,9 @@ test('hook wiring: both Claude copies send prompts and tools to the hook, with o
     assert.equal(rest.hooks[0].onFailure, undefined);
     assert.equal(tool.matcher, `^${claudeHook.STATE_CHANGING_TOOLS.source.slice(1, -1)}$`, file);
     // Claude Code tests a matcher with these characters as an unanchored regex, so each carries its own anchors.
-    for (const name of ['Bash', 'PowerShell', 'Monitor', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'TaskStop', 'EnterWorktree', 'CronCreate', 'CronDelete', 'RemoteTrigger', 'SendMessage', 'Workflow', 'mcp__github__create_pull_request']) {
+    // Every prompt-delivering tool the merge hold reads is among them, so a hook that cannot start
+    // holds a brief or scheduled prompt that could plant a merge approval.
+    for (const name of ['Bash', 'PowerShell', 'Monitor', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'TaskStop', 'EnterWorktree', 'CronCreate', 'CronDelete', 'RemoteTrigger', 'ScheduleWakeup', 'SendMessage', 'Workflow', 'mcp__github__create_pull_request', ...require('../scripts/toolkit-merge-hold.cjs').PROMPT_TOOLS]) {
       assert.match(name, new RegExp(tool.matcher), name);
       assert.doesNotMatch(name, new RegExp(rest.matcher), name);
     }
