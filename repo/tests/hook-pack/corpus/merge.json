@@ -3559,6 +3559,39 @@
       "status": "pass"
     },
     {
+      "id": "MERGE.claude-reopened-after-restarts-card-tap",
+      "source": "the user's Claude Code chat the app reopens again after each PC restart keeps counting a tap on the merge card",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"compact"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.claude-reopened-start-record-lost",
+      "source": "a Claude Code chat reopened with no start mark for its id records no approval and says exactly why and where to approve",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow","context_contains":["at a later start of this chat, Toolkit's record of how it started was missing or could not be read","Approve it in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub.","Do not ask the user to type it again in this chat."],"context_excludes":["Toolkit recorded"]}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.claude-fork-typed",
       "source": "a forked Claude Code chat (a new id the start hook does not mark) records no typed approval and says so",
       "kind": "hostile",

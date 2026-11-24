@@ -238,10 +238,10 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   assert.ok(asksIn(raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'l1' })));
   assert.doesNotMatch(pending(later, 'l1'), /is pending/);
   assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
-  // Only the newest few hundred session marks are kept.
-  const folder = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER);
+  // Recent session marks are kept past the newest few hundred (the age and cap rules are tested with
+  // the merge card), so this run keeps its mark however many sessions start after it.
   for (let index = 0; index < 260; index += 1) start(`many-${index}`, 'startup');
-  assert.ok(fs.readdirSync(folder).length <= 256);
+  assert.notEqual(new gate.SessionEpochs({ registryOptions: ctx.options }).get('l1'), null);
 });
 
 test('an unrelated chat cannot invalidate this run\'s accepted answer', t => {
