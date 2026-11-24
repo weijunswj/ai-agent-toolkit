@@ -4,7 +4,12 @@
 // to count them by hand. It only reads: it never pushes, merges, comments or writes to GitHub, and
 // writes one manifest file that `toolkit-merge-train.cjs build` takes as it is.
 //
-//   node repo/scripts/toolkit-merge-train.cjs find --out <manifest> [--live <file>] [--json]
+//   node repo/scripts/toolkit-merge-train.cjs find --out <manifest> [--pr <n,n,...>] [--live <file>] [--json]
+//
+// --pr names the pull requests to consider (the owner-approved members): only those are judged,
+// with every check below, and the ready ones are written, oldest first up to the cap; a named one
+// that is not ready, or not open here, is listed with its reason and left out. Without it, every open
+// pull request is judged and the oldest ready ones board.
 //
 // Ready means, at the pull request's current head:
 //   - it is open, not a draft, and based on the default branch;
@@ -28,8 +33,12 @@
 // the verdict and the higher of the verdict's tier and the tier the repository's risk-tier list
 // (toolkit-risk-tier.cjs) gives the changed files, so a verdict can never lower a tier; then the
 // bump level, UAT line, closing lines and any `Pack changes` lines from the body. It never fills
-// `owner_ok`, so a RISKY member keeps the owner's merge card. With fewer than two ready, it writes
-// nothing and says to merge the one alone.
+// `owner_ok`, so a RISKY member keeps the owner's merge card.
+// Trains stack by default: when a train pull request is open (its body holds the merge-train member
+// table), the manifest gets `onto: { pr, branch, head }` for the newest train at the end of a chain
+// (one no other open train is stacked on), and build stacks the members onto that head, so one bump
+// and one owner ask cover them all; one ready pull request then stacks too. With no open train and
+// fewer than two ready, it writes nothing and says to merge the one alone.
 //
 // --live reads every GitHub fact from a JSON file instead of `gh api` (REST):
 //   { "default_branch": "main",
@@ -126,14 +135,18 @@ function missingChecks(runs, required) {
   });
 }
 
-// The `Pack changes` lines under that heading, up to the next heading.
+// The body lines that end a Pack changes section even with no heading between: member bodies put
+// their UAT, Bump, closing and route lines and the programme-state block straight after it.
+const PACK_END = /^(?:#{1,6} |UAT:|Agent UAT:|Bump:|Route:|Tier:|(?:Refs|Closes|Fixes|Resolves) |<!--)/;
+
+// The `Pack changes` lines under that heading, up to the next heading or body line that ends it.
 function packChanges(body) {
   const lines = String(body || '').split(/\r?\n/);
   const start = lines.findIndex(line => /^#{2,3} Pack changes\s*$/.test(line));
   if (start < 0) return [];
   const out = [];
   for (const line of lines.slice(start + 1)) {
-    if (/^#{1,6} /.test(line)) break;
+    if (PACK_END.test(line.trim())) break;
     if (line.trim()) out.push(line.trim());
   }
   return out;
@@ -215,6 +228,49 @@ function reviewFor(pull, facts, verdict, files, uatState, byFiles, tiers) {
   return { verdict: null, tier: byFiles, g2: `scripted carry (${isShard ? 'shard-timings' : 'generated-sync'}), no G2`, route: { scripted: true } };
 }
 
+// The open train pull requests: { pr, branch, base, head }, oldest first. A train is a pull request
+// from this repository (its head repository is `repository`) whose body holds the merge-train member
+// table; a fork's pull request with such a body is not a train here.
+function openTrains(pulls, repository) {
+  const here = String(repository || '').toLowerCase();
+  return pulls.filter(pull => here && String(pull.head && pull.head.repo && pull.head.repo.full_name || '').toLowerCase() === here && mergeTrainMembers(pull.body))
+    .map(pull => ({ pr: pull.number, branch: pull.head && pull.head.ref, base: pull.base && pull.base.ref, head: pull.head && pull.head.sha }))
+    .sort((a, b) => a.pr - b.pr);
+}
+
+// The trains reached by stacking on `branch`, directly or through other stacked trains.
+function stackedOn(trains, branch) {
+  const reached = new Set([branch]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const entry of trains) {
+      if (entry.branch && !reached.has(entry.branch) && reached.has(entry.base)) { reached.add(entry.branch); grew = true; }
+    }
+  }
+  reached.delete(branch);
+  return trains.filter(entry => reached.has(entry.branch));
+}
+
+// The train new members stack onto: the newest open train no other open train is stacked on, and
+// the other chain ends, if any. { tip: null } when no train is open.
+function stackTip(trains) {
+  const bases = new Set(trains.map(entry => entry.base));
+  const ends = trains.filter(entry => !bases.has(entry.branch));
+  const tip = ends.length ? ends[ends.length - 1] : (trains[trains.length - 1] || null);
+  return { tip, others: ends.filter(entry => entry !== tip) };
+}
+
+// Open trains read from GitHub (or a --live file in find's format): for build's open-train check.
+function readOpenTrains(cwd, repository, liveFile) {
+  const slug = repository || governance.remoteSlug(governance.readIdentity(cwd).remote);
+  const facts = liveFile ? new LiveFacts(liveFile) : new GitHubFacts(slug);
+  return openTrains(facts.pulls(), slug);
+}
+
+const PLAIN_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const SHA40 = /^[0-9a-f]{40}$/;
+
 // `maxMembers` is the train's own cap (toolkit-merge-train.cjs).
 function find(cwd, options, maxMembers) {
   const repository = governance.remoteSlug(governance.readIdentity(cwd).remote);
@@ -224,27 +280,44 @@ function find(cwd, options, maxMembers) {
   const facts = options.live ? new LiveFacts(options.live) : new GitHubFacts(repository);
   const branch = facts.defaultBranch();
   const pulls = facts.pulls().slice().sort((a, b) => a.number - b.number);
-  const held = new Set(pulls.flatMap(pull => mergeTrainMembers(pull.body) || []));
+  const trains = openTrains(pulls, repository);
+  const held = new Set(pulls.filter(pull => trains.some(entry => entry.pr === pull.number)).flatMap(pull => mergeTrainMembers(pull.body)));
+  const { tip, others } = stackTip(trains);
+  if (tip && (!PLAIN_REF.test(tip.branch || '') || tip.branch.includes('..') || !SHA40.test(tip.head || ''))) {
+    throw new Error(`open train #${tip.pr} has no readable head branch and SHA, so nothing can stack onto it; read it again`);
+  }
   const tiers = riskTier.loadConfig(governance.findGitRoot(cwd)).config;
   const registry = gateRoute.loadRegistry();
   const ready = [];
   const skipped = [];
+  const named = options.prs ? new Set(options.prs) : null;
   for (const pull of pulls) {
-    if (mergeTrainMembers(pull.body)) continue; // a train pull request itself
+    if (named && !named.has(pull.number)) continue; // only the named pull requests are judged
+    if (mergeTrainMembers(pull.body)) { if (named) skipped.push(`#${pull.number}: a train pull request, not a member`); continue; }
     const outcome = judge(pull, facts, { required, branch, held, tiers, registry });
     if (outcome.member) ready.push(outcome.member);
     else skipped.push(`#${pull.number}: ${outcome.skip}`);
   }
+  for (const number of named ? [...named].sort((a, b) => a - b) : []) {
+    if (!pulls.some(pull => pull.number === number)) skipped.push(`#${number}: not an open pull request here`);
+  }
   const members = ready.slice(0, maxMembers);
   const later = ready.slice(maxMembers).map(member => `#${member.pr}`);
-  if (members.length < 2) {
+  if (!members.length || (members.length < 2 && !tip)) {
     return { ok: true, written: false, ready: members.map(member => `#${member.pr}`), skipped,
       next: members.length ? [`merge #${members[0].pr} alone: one ready pull request makes no train`] : [] };
   }
   if (!options.out) throw new Error('--out is required');
-  fs.writeFileSync(options.out, `${JSON.stringify({ repository, members }, null, 2)}\n`);
+  const onto = tip ? { pr: tip.pr, branch: tip.branch, head: tip.head } : undefined;
+  fs.writeFileSync(options.out, `${JSON.stringify({ repository, ...(onto ? { onto } : {}), members }, null, 2)}\n`);
+  const next = [];
+  if (onto) {
+    next.push(`stack ${members.map(member => `#${member.pr}`).join(', ')} onto train #${onto.pr} (${onto.branch} at ${onto.head.slice(0, 12)}): fetch it, then build takes onto from this manifest`);
+    if (others.length) next.push(`${others.map(entry => `#${entry.pr}`).join(', ')} ${others.length > 1 ? 'are' : 'is'} also open on a chain of its own: this train stacks onto the newest, #${onto.pr}`);
+  }
+  if (later.length) next.push(`board the next train with ${later.join(', ')}`);
   return { ok: true, written: true, out: options.out, ready: members.map(member => `#${member.pr}`), skipped,
-    next: later.length ? [`board the next train with ${later.join(', ')}`] : [] };
+    ...(onto ? { onto } : {}), next };
 }
 
-module.exports = { VERDICT, find, missingChecks, packChanges, verdictFor };
+module.exports = { VERDICT, find, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };

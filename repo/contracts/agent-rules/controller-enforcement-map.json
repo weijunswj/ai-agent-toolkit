@@ -244,7 +244,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Roles and routes](controller/roles-and-routes.md)",
-      "rule_sha": "99c49ae8cd63",
+      "rule_sha": "cb9fec89cdfb",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -482,11 +482,19 @@
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Launch every gate with model and effort pinned explicitly",
       "rule_sha": "106056efbda9",
-      "instruction_only": {
-        "basis": "planned",
-        "why": "The governance PreToolUse hook sees start_session, so a gate launch can be checked when it starts; until then only the gate's own route check refuses it at its first effect.",
-        "planned": "#1265 S4: the governance hook refuses a gate brief without Gate, Route and Assignment lines on start_session, and prints the effort and gate-session record lines after start."
-      }
+      "covers": "On Claude Code, the gate launch hook refuses a start_session gate brief without valid Gate, Route and Assignment lines or with an unpinned model or effort, and after a capped start prints the effort raise and record steps; the started session's route check refuses an off-pin gate. Projects threads and starts by a person stay instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-claude-gate-launch-hook.cjs",
+          "test": "repo/tests/toolkit-claude-gate-launch-hook.test.cjs"
+        },
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-gate-route.cjs",
+          "test": "repo/tests/toolkit-gate-route.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/roles-and-routes.md",
@@ -501,8 +509,8 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "**Merge-train lanes:**",
-      "rule_sha": "b4803ccad707",
-      "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. The lane's model tier and skipping G0 and G1 stay instruction-only.",
+      "rule_sha": "c34c408f6806",
+      "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. For route owner, land prints the merge step: ask in a plain message, then the agent runs the exact merge so the merge guard shows its card. The lane's model tier, skipping G0 and G1, and following that step stay instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
@@ -705,7 +713,7 @@
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Merge trains:**",
       "rule_sha": "988f735fa734",
-      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head, a RISKY member with no owner OK, or a member whose live UAT line is missing, invalid or stricter than the manifest's. Its eject command takes a boarded member off a pushed train with recorded reverts only, which verify accepts exactly, and land refuses while an ejected pull request still points into the train. Verify, catchup and eject also refuse a train whose tree differs from a fresh build of its members on main, so no train merged onto the main land checked undoes merged work; governance's up-to-date check (P6) makes GitHub refuse a merge onto any other main. Choosing which PRs ride together and running the merge stay instruction-only.",
+      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head, a RISKY member with no owner OK, or a member whose live UAT line is missing, invalid or stricter than the manifest's. Its eject command takes a boarded member off a pushed train with recorded reverts only, which verify accepts exactly, and land refuses while an ejected pull request still points into the train. Verify, catchup and eject also refuse a train whose tree differs from a fresh build of its members on main, so no train merged onto the main land checked undoes merged work; governance's up-to-date check (P6) makes GitHub refuse a merge onto any other main. Stacking is the script's default: find writes onto while a train pull request is open, and build on main refuses beside an open train unless --separate gives a reason; a ready land lists the closing stories, sessions and worktrees owed after the merge. Choosing which PRs ride together, posting those stories and running the merge stay instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
@@ -736,6 +744,16 @@
           "kind": "script",
           "path": "repo/scripts/toolkit-merge-train.cjs",
           "test": "repo/tests/toolkit-merge-train-closure-late.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train-stack.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train-finder.cjs",
+          "test": "repo/tests/toolkit-merge-train-finder.test.cjs"
         }
       ]
     },

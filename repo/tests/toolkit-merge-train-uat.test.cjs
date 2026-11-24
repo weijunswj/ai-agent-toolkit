@@ -56,6 +56,11 @@ test('land refuses a member whose live UAT line is missing, invalid or stricter 
       assert.equal(landing.ok, true, JSON.stringify(landing));
       // The train line keeps the manifest's line when it is the stricter one.
       assert.match(train.body(value), new RegExp(`^UAT: ${row.lands} `, 'm'));
+      // A member whose owner test is owed keeps its sessions after the merge.
+      const sessions = landing.steps.find(line => line.startsWith('sessions: '));
+      assert.equal(sessions, row.lands === 'OWNER_TEST_NEEDED'
+        ? "sessions: archive this train's lane and the finished gate sessions of #2; keep #1's until the owner test passes"
+        : "sessions: archive this train's lane and the finished gate sessions of #1, #2");
     });
   }
   // Untouched: the boarded manifest still lands at the same facts.
