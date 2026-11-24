@@ -1088,7 +1088,10 @@ const commands = {
     const parentDoc = readParent(context);
     const outcome = outcomeFor(parentDoc, args.issue);
     const writer = requireGateWriter(context, parentDoc, context.store.read('child', args.issue).doc, outcome);
-    const controllerSessions = [parentDoc.fence?.holder_session, writer.session, ...(Array.isArray(parentDoc.private?.retired_holders) ? parentDoc.private.retired_holders : [])];
+    // The calling session's own desktop ID is never in state, so it is added here: the controller
+    // runs this command, and a gate is never the session that records it.
+    const ownHostSession = (deps.environment || process.env).CLAUDE_CODE_HOST_SESSION_ID;
+    const controllerSessions = [parentDoc.fence?.holder_session, writer.session, ownHostSession, ...(Array.isArray(parentDoc.private?.retired_holders) ? parentDoc.private.retired_holders : [])];
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.recordGateSession(doc, {
       assignment: args.assignment, host: args.host || null, session: args['host-session'] || null, closed: Boolean(args.closed),
       replace: Boolean(args.replace), reason: args.reason || null, now: nowText(deps), controllerSessions }) });

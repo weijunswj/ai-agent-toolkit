@@ -1140,7 +1140,8 @@ function closeDueOf(doc) {
 // The controller records a gate's host session after launching it (host, and session when the host
 // gives one), or its close (`closed`). Re-recording the same values or a second close is a no-op
 // (null); other values need `replace` with a reason. The controller's own sessions (the parent's
-// holder and its earlier holders, `controllerSessions`) are never recorded as a gate's.
+// holder, its earlier holders and the calling session's own host ID, `controllerSessions`) are
+// never recorded as a gate's.
 function recordGateSession(doc, { assignment, host = null, session = null, closed = false, replace = false, reason = null, now = null, controllerSessions = [] } = {}) {
   if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'gate-session needs --assignment <id>.');
   if (Boolean(closed) === Boolean(host)) throw new ProgrammeError('USAGE', 'gate-session needs exactly one of --host <host> (after the launch) or --closed (after the close).');
