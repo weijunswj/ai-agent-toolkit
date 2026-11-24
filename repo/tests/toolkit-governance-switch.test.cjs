@@ -346,6 +346,25 @@ test('the bank turns governance off without the terminal, and a chat answer need
   assert.match(unanswered.out, /answer was not read.*Nothing was written\./);
 });
 
+// 1460 G2 L2: turning governance back on from off gave no App line at all, while a first turn-on does.
+test('turning governance back on from off gives the App line, and staying off gives none', async t => {
+  const ctx = fixture(t);
+  fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), bindingText());
+  recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
+  const proposal = { repository: SLUG, number: 6, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/6`, state: 'open', answer: 'yes' };
+  let open = [];
+  const proposalTransport = { list: () => open, publish: () => { open = [proposal]; return proposal; }, read: () => proposal };
+  const shown = await run(ctx, ['setup']);
+  assert.match(shown.out, /^- Governance App: Not checked\. Nothing is made while governance is off\. If your answer turns it back on, Toolkit then gives you one line to paste into PowerShell/m);
+  const kept = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=A'], proposalTransport });
+  assert.equal(kept.code, 0, kept.err);
+  assert.doesNotMatch(kept.out, /toolkit-governance-app-setup\.cjs|Governance App: paste/, 'staying off gives no App line');
+  const on = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=B'], proposalTransport });
+  assert.equal(on.code, 0, on.err + on.out);
+  assert.match(on.out, /^Governance App: paste this one line into PowerShell and press Enter\./m);
+  assert.match(on.out, new RegExp(`toolkit-governance-app-setup\\.cjs" --repo ${SLUG} --store toolkit-test-fixture/store`));
+});
+
 // A gh stand-in for the transport: answers each `gh api` call from `routes` and records writes.
 function fakeGh(routes) {
   const calls = [];

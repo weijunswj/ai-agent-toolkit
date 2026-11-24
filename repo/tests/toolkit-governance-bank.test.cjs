@@ -100,7 +100,7 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   assert.ok(shown.includes(after), shown);
   assert.equal(shown.split(after).length, 2, 'named once');
   assert.match(shown, /default-branch protection[^|]*ruleset that blocks force pushes[^|]*security settings/);
-  assert.match(shown, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\. To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\. Say "explain 1\.1" for the full text of a row\.$/m);
+  assert.match(shown, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\. To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\. A plain yes, no or later works too: yes is all recommended, later keeps governance off the same way, and no prepares one pull request that turns governance off\. Say "explain 1\.1" for the full text of a row\.$/m);
   // A failed GitHub read of the store and parent issue is one plain line, with no internal note.
   const blocked = bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, adoption: { blocked: "couldn't check governance; ordinary work continues" } }));
   assert.match(blocked, /^- Store and parent issue: Not checked yet\. GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing\. Type toolkit governance again in a moment\.$/m);

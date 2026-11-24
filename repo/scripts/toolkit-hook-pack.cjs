@@ -188,7 +188,7 @@ function fixtureErrors(fixture) {
         : fixture.repo.governance !== 'undecided' || fixture.repo.name !== 'evidence' || fixture.repo.owner !== undefined)) errors.push('fixture.evidence_merge needs a parent or evidence store repository, a supported binding and metadata result');
   }
   if (fixture.owner_session !== undefined && fixture.owner_session !== true) errors.push('fixture.owner_session is true or left out');
-  if (fixture.bank_open !== undefined && (fixture.bank_open !== true || fixture.owner_session !== true || fixture.repo?.governance !== 'enabled')) errors.push('fixture.bank_open needs owner_session and an enabled repository, and is true or left out');
+  if (fixture.bank_open !== undefined && (![true, 'used'].includes(fixture.bank_open) || fixture.owner_session !== true || fixture.repo?.governance !== 'enabled')) errors.push('fixture.bank_open needs owner_session and an enabled repository, and is true, used or left out');
   if (fixture.gate_role !== undefined && !GATE_ROLES.includes(fixture.gate_role)) errors.push(`fixture.gate_role is one of ${GATE_ROLES.join(', ')}`);
   const repo = fixture.repo;
   if (repo !== undefined) {
@@ -487,7 +487,7 @@ class Fixture {
       delete this.env.TOOLKIT_GOVERNANCE_OFFLINE;
     }
     if (spec.owner_session) this.#ownerSession();
-    if (spec.bank_open) this.#bankOpen();
+    if (spec.bank_open) this.#bankOpen(spec.bank_open === 'used');
     if (spec.handoff) this.#handoff(spec);
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
@@ -737,14 +737,15 @@ cp.spawnSync = function(file, args, options) {
   }
 
   // A governance question bank this session was shown and has not answered, as `setup` notes it.
-  #bankOpen() {
+  // `used`: an answer to that bank was already used, and it was noted again for the next own message.
+  #bankOpen(used = false) {
     const registryOptions = { registryPath: path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
     const scripts = path.join(ROOT, 'repo', 'scripts');
     const state = require(path.join(scripts, 'toolkit-governance-state.cjs')).governanceState(this.work, registryOptions);
     const epochs = new (require(path.join(scripts, 'toolkit-governance-gate.cjs')).SessionEpochs)({ registryOptions });
     const { BankTickets } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
     const noted = new BankTickets({ registryOptions }).shown('hook-pack', { epoch: epochs.get('hook-pack'), repositoryMark: epochs.repository(state.repository_id),
-      repositoryId: state.repository_id, root: state.root, bankReference: 'ABCD-EFGH-JKMN-PQRS' });
+      repositoryId: state.repository_id, root: state.root, bankReference: 'ABCD-EFGH-JKMN-PQRS', used });
     if (!noted) throw new Error('the fixture bank could not be noted');
   }
 

@@ -156,6 +156,50 @@ test('no changes nothing, and a refresh with a row still unset asks the one ques
   assert.match(String(refresh.error?.message), /Setup question bank requires an answer/);
 });
 
+// One run with stdin piped in (not a terminal), in a child process so its stdin is real; returns what it printed
+// and the settings it wrote. The child reads the same temporary folders through the environment.
+function pipedRun(input) {
+  const { spawnSync } = require('node:child_process');
+  const code = [
+    `const core = require(${JSON.stringify(require.resolve('../scripts/setup-toolkit-core.cjs'))});`,
+    `const { ClaudeUserSettings } = require(${JSON.stringify(require.resolve('../scripts/toolkit-claude-user-settings.cjs'))});`,
+    `const { ClaudeSubagentDepthSetting } = require(${JSON.stringify(require.resolve('../scripts/toolkit-claude-subagent-depth.cjs'))});`,
+    'const base = core.documentationFixtureState();',
+    "const current = { ...base, antigravity: { installed: false, copies: false }, agentProfile: { supported: true, topology: 'root-only' }, claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect(), claudePluginInstall: { installed: true, enabled: true, recordCurrent: true, version: '1.0.0', runningRoot: base.managed.currentPath }, nativePlugin: { status: 'fresh', manifest_version: '1.0.0' } };",
+    "const args = core.parseArgs(['--execute', '--profile', 'auto-main', '--host', 'claude-code']);",
+    "let written = '';",
+    "core.answerSetupQuestionBank(args, current, { isTTY: false, write(text) { written += text; return true; } })",
+    "  .then((result) => { core.applyClaudeSubagentDepth(args); core.applyClaudeUserSettings(args); process.stdout.write(JSON.stringify({ written, source: result.answer_source })); })",
+    "  .catch((error) => { process.stdout.write(JSON.stringify({ error: error.message })); });",
+  ].join('\n');
+  const run = spawnSync(process.execPath, ['-e', code], { input, encoding: 'utf8', env: process.env, timeout: 60000 });
+  return JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('{"')));
+}
+
+test('with every setting already set, setup asks nothing and keeps them; a piped change still applies', async (t) => {
+  const home = claudeHome(t);
+  applyAnswers((await answer(['yes'])).args);
+  const before = home.read();
+  const run = await answer([]);
+  assert.equal(run.prompts.length, 0, 'no question in a terminal');
+  assert.equal(run.result.answer_source, 'nothing to approve');
+  assert.match(run.written, /Toolkit setup - no questions: every setting already has a value\n/);
+  assert.match(run.written, /Every setting already has a value, so setup asks nothing and keeps them all as they are\. To change one, reply with its number and choice, for example 3\.5=B/);
+  assert.doesNotMatch(run.written, /a yes changes nothing|Apply Toolkit's defaults|Reply yes to apply/);
+  applyAnswers(run.args);
+  assert.deepEqual(home.read(), before, 'nothing changed');
+
+  const empty = pipedRun('');
+  assert.equal(empty.error, undefined, 'an empty pipe keeps every row');
+  assert.equal(empty.source, 'nothing to approve');
+  assert.deepEqual(home.read(), before);
+  const reference = /Bank reference: (\S+)/.exec(empty.written)[1];
+  const change = pipedRun(`${reference}: 3.5=off\n`);
+  assert.equal(change.source, 'user-approved listed changes only');
+  assert.equal(agentsMd(home.read()), undefined, 'the piped change turned 3.5 off');
+  assert.equal(stateOf('agents-md'), STATES.OWNER_OFF);
+});
+
 test('the setup skill keeps the bank relay rule as its own short rule', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
   const section = skill.split(/^## /m).find((part) => part.startsWith('Relay the question bank\n'));

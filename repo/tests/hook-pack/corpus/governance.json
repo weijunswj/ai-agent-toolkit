@@ -1203,6 +1203,79 @@
       "status": "pass"
     },
     {
+      "id": "CMD.bank-reply-after-a-used-answer-is-not-framed-as-open",
+      "source": "#1363 UAT-L5 (owner UAT, 20 Nov 2026): after an answer the bank used, the next reply was framed as the first since the bank was shown, and the agent called the kept answer still open",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "UserPromptSubmit",
+      "payload": {
+        "prompt": "ok"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "bank_open": "used"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "was used; that answer is done, not open.",
+          "setup --answers \"ABCD-EFGH-JKMN-PQRS: ANSWER\" --ticket "
+        ],
+        "context_excludes": [
+          "was shown or Toolkit asked them to reply again"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.question-text-names-the-repository-store",
+      "source": "1460 G2 L4: the question named a TRANSPORT-<repository name> placeholder, not the store; the text form now names it (the card stays generic)",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "steps": [
+        {
+          "event": "SessionStart",
+          "payload": {
+            "source": "startup"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ],
+      "event": "UserPromptSubmit",
+      "payload": {
+        "prompt": "Prepare this work."
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "for this repository? Records and evidence go to this repository's own private TRANSPORT-"
+        ],
+        "context_excludes": [
+          "own private TRANSPORT-<repository name> store on GitHub, found or created."
+        ]
+      },
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
+    },
+    {
       "id": "CMD.toolkit-governance-check-is-not-a-command",
       "source": "owner 14 Nov 2026: the governance tools are run by agents, setup and CI, not typed",
       "kind": "benign",

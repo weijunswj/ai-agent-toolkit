@@ -63,6 +63,10 @@ const GOVERNANCE_REF = '1.1';
 const APP_NAMES_ON_GITHUB = (({ variable, secret }) => `the ${variable} variable and the ${secret} secret`)(require('./toolkit-governance-app.cjs').APP);
 // The line after a reply that could not be used, asking for the reply again.
 const REPLY_AGAIN = 'Reply again with all recommended or only your changes, such as 1.1=B.';
+// After an answer the bank already used, a reply it cannot read (a bare ok or thanks) loses nothing: it
+// says so, and how to change one more row.
+const ANSWER_USED = 'Your earlier answer to this bank was already used, and this reply changes nothing. Nothing more was written.';
+const CHANGE_ANOTHER = 'To change a row, reply with only that change, such as 1.1=B.';
 
 // The app each permission row belongs to; every app keeps its own permission lines.
 const APP_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
@@ -223,7 +227,9 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
       text: !appSet ? 'the governance check shows how to finish or replace it' : decided ? `Say "explain ${GOVERNANCE_REF}" for how to stop using it` : appStop }));
   } else if (state.state === 'DISABLED') {
-    specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: 'Off (needs governance)', text: 'Nothing is made while governance is off' }));
+    // Turning governance back on gives the same one line as a first turn-on; staying off gives none.
+    specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
+      text: 'Nothing is made while governance is off. If your answer turns it back on, Toolkit then gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub' }), app_setup: true });
   } else {
     specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
       text: 'After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests' }), app_setup: true });
@@ -269,7 +275,7 @@ function replyLine(specs) {
   const explain = first ? first.presentation.question_ref : '1.1';
   const overrides = [specs.some(spec => spec.shards_default) ? 'shards=' : '', specs.some(spec => spec.id === 'evidence-store' && !spec.bound) ? 'store=' : ''].filter(Boolean);
   const extra = overrides.length ? ` Add ${overrides.join(' or ')} only to change that default.` : '';
-  if (specs.some(spec => spec.turns_on)) return `Reply all recommended to turn governance on as shown, or only your changes such as ${example}.${extra} To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session. Say "explain ${explain}" for the full text of a row.`;
+  if (specs.some(spec => spec.turns_on)) return `Reply all recommended to turn governance on as shown, or only your changes such as ${example}.${extra} To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session. A plain yes, no or later works too: yes is all recommended, later keeps governance off the same way, and no prepares one pull request that turns governance off. Say "explain ${explain}" for the full text of a row.`;
   return `Reply all recommended, or only your changes such as ${example}. Rows you leave out stay as they are; each change is a pull request you merge.${extra} Say "explain ${explain}" for the full text of a row.`;
 }
 
@@ -374,8 +380,13 @@ function bankExtras(text) {
 // permissionBlocks, ciShards?, instructionCopies?, store }, or { noStore: true }. Questions left out
 // stay as they are; each status row's Toolkit default applies unless an override changes it.
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
-  const extras = bankExtras(text);
   const turnsOn = specs.some(spec => spec.id === 'governance' && spec.turns_on);
+  // Where the bank is the turn-on question itself (no card came first), it takes the card's plain
+  // answers too: yes is all recommended, later is no store, and no is the owner's off decision.
+  const plain = turnsOn ? plainAnswer(text, specs, requireBankReference) : null;
+  if (plain === 'later') return { noStore: true, later: true };
+  if (plain === 'no') return { governance: 'off', taskAutoMerge: 'keep', store: null, governanceApp: 'keep', permissionBlocks: 'keep' };
+  const extras = bankExtras(plain === 'yes' ? text.replace(/(yes)\s*\.?\s*$/i, 'all recommended') : text);
   const questions = specs.filter(spec => !spec.report_only);
   // Overrides alone change no question: every question keeps its current value, which is also what
   // the bank recommends for each of them.
@@ -389,7 +400,7 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
     if (error.code === 'QUESTION_BANK_UNKNOWN_ROW') throw new Error(`This bank has no row ${error.question_ref}.`);
     throw error;
   }
-  if (!parsed) throw new Error(`Governance question bank answer was not read.${turnsOn ? ' Reply no store to keep governance off.' : ''}`);
+  if (!parsed) throw Object.assign(new Error(`Governance question bank answer was not read.${turnsOn ? ' Reply no store to keep governance off.' : ''}`), { code: 'BANK_ANSWER_UNREAD' });
   bank.assertQuestionBankAnswerBinding(parsed, specs, 'Governance');
   if (extras.noStore) {
     if (!turnsOn) throw new Error('No store applies only where your answer would turn governance on.');
@@ -423,6 +434,16 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
     ...(shardsRow ? { ciShards: onAfter ? extras.shards || shardsRow.shards_default : 'not-now' } : {}),
     ...(copies ? { instructionCopies: onAfter && governed ? 'clean' : 'keep' } : {}),
   };
+}
+
+// A plain yes, no or later on its own (after the bank reference where one is required), or null.
+const PLAIN = /^\s*(?:([0-9A-Za-z-]{16,19})\s*:\s*)?(yes|no|later)\s*\.?\s*$/i;
+function plainAnswer(text, specs, requireBankReference) {
+  const match = PLAIN.exec(String(text || ''));
+  if (!match) return null;
+  if (requireBankReference && !match[1]) return null;
+  if (match[1] && bank.normalizeBankReference(match[1]) !== specs[0]?.presentation.bank_reference) return null;
+  return match[2].toLowerCase();
 }
 
 // ---- bank tickets -------------------------------------------------------------------------------
@@ -474,12 +495,12 @@ class BankTickets {
 
   // Notes that this run of the session was shown this bank. A newer bank replaces an older one and
   // drops any live ticket of the session, so a ticket always answers the bank shown last.
-  // `rows` are the shown rows' digests (rowDigests).
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, rows = {} }) {
+  // `rows` are the shown rows' digests (rowDigests); `used` notes that an answer to it was already used.
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, rows = {}, used = false }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
     data.shown[sessionId] = {
-      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, rows, at: this.#now().toISOString(),
+      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, rows, ...(used ? { used: true } : {}), at: this.#now().toISOString(),
     };
     delete data.tickets[sessionId];
     this.#save(data);
@@ -508,7 +529,7 @@ class BankTickets {
     if (!this.#fresh(entry) || entry.epoch !== epoch) return null;
     const ticket = crypto.randomBytes(16).toString('hex');
     delete data.shown[sessionId];
-    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, rows: entry.rows || {}, at: this.#now().toISOString() };
+    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, rows: entry.rows || {}, ...(entry.used === true ? { used: true } : {}), at: this.#now().toISOString() };
     this.#save(data);
     return ticket;
   }
@@ -517,9 +538,10 @@ class BankTickets {
   // the bank again for the same run, repository mark and repository, so the owner's next own message
   // answers it the same way, with a new one-use ticket, and the bank is not shown again. `bankReference`
   // and `rows` name the bank that reply now answers (a changed bank's, once its changed rows were named).
-  rearm(sessionId, entry, { bankReference: reference, rows }) {
+  // `used` is true once an answer to it was used, and stays true for the replies after it.
+  rearm(sessionId, entry, { bankReference: reference, rows, used = false }) {
     if (!entry || typeof entry !== 'object') return false;
-    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, rows });
+    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, rows, used: used || entry.used === true });
   }
 
   // Ends the shown note without a ticket (the reply could not count).
@@ -555,7 +577,9 @@ class BankTickets {
 // anything that may answer the bank is sent as it is, and the command prints what was wrong.
 function bankTicketContext(entry, ticket) {
   return [
-    `Toolkit governance: the user's message above is their first since governance bank ${entry.bank_reference} was shown or Toolkit asked them to reply again. It may answer it, or be ordinary work. Read what they mean first.`,
+    entry.used === true
+      ? `Toolkit governance: the user's message above is their first since their answer to governance bank ${entry.bank_reference} was used; that answer is done, not open. This message may change another row, or be ordinary work. Read what they mean first.`
+      : `Toolkit governance: the user's message above is their first since governance bank ${entry.bank_reference} was shown or Toolkit asked them to reply again. It may answer it, or be ordinary work. Read what they mean first.`,
     `- If it may answer the bank in any way: only where its rows and choices are plain (all recommended, changes such as 1.2=B, no store, store=<owner/name> or shards=<yes|not-now|never>, in any words) put it in that form. Send anything else exactly as typed (a bare yes or ok, an unknown row, two choices for one row, explain 1.4, anything unclear), leaving out only quotes, $, % and backticks. Tell them "Sending: <answer> (bank ${entry.bank_reference})" and run exactly this once, with it in place of ANSWER:`,
     `  node "${script()}" setup --answers "${entry.bank_reference}: ANSWER" --ticket ${ticket}`,
     '- Toolkit checks it and prints what was wrong or what it did; do what its Agents line says. Never show the bank again yourself and never ask them to reply in another form.',
@@ -606,6 +630,6 @@ function bankExplainCommand(text) {
 }
 
 module.exports = Object.freeze({
-  APP_NAMES, BANK_HOST, TICKETS_BASENAME, REPLY_AGAIN, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
+  APP_NAMES, BANK_HOST, TICKETS_BASENAME, REPLY_AGAIN, ANSWER_USED, CHANGE_ANOTHER, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
   agentsAfterAnswer, explainText, explainRequest, explainParts, rowDigests, changedRows, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand,
 });

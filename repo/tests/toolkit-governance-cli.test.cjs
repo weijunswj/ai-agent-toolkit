@@ -197,17 +197,60 @@ test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   assert.equal(fs.existsSync(ctx.registryPath), false);
 });
 
-test('H-06 (unit): anything but yes writes nothing and keeps the repository UNDECIDED', async (t) => {
+test('H-06 (unit): the terminal no is the answer itself: no second Enter, and nothing decides until its pull request merges', async (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  for (const answer of ['', 'y', 'enable', 'no', 'yes please']) {
-    const result = await run(ctx, repo, ['disable'], { answer });
-    assert.equal(result.code, 1, JSON.stringify(answer));
-    assert.match(result.stdout, /Nothing was written/);
-  }
+  // No GitHub here, so the one off pull request cannot be published: exit 2, nothing decided locally.
+  const result = await run(ctx, repo, ['disable'], { answer: 'no' });
+  assert.equal(result.code, 2);
+  assert.deepEqual(result.asked, [], 'no Enter is asked');
+  assert.match(result.stderr, /Proposal publication is unverified[\s\S]*No local governance decision was written/);
+  assert.match(result.stderr, /The owner's no stays pending for this run/);
   assert.equal(fs.existsSync(ctx.registryPath), false);
   const status = await run(ctx, repo, ['status', '--json']);
   assert.equal(JSON.parse(status.stdout).state, 'UNDECIDED');
+});
+
+test('one off route: the terminal no, the card No and the bank Turn off make the same one off pull request', async (t) => {
+  const published = {};
+  const proposalFor = answer => ({ repository: 'example-owner/example-repo', number: 9, head: 'b'.repeat(40), url: 'https://github.com/example-owner/example-repo/pull/9', state: 'open', answer });
+  const fixture = () => {
+    const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
+    writeGoverned(repo);
+    enable(ctx, repo);
+    let open = [];
+    const transport = { list: () => open, read: () => open[0], canWrite: () => true,
+      publish(repository, binding, files) { open = [proposalFor(binding.governance === 'disabled' ? 'no' : 'yes')]; transport.calls.push({ repository, binding, files }); return open[0]; }, calls: [] };
+    const stdout = sink(), stderr = sink();
+    const replies = [];
+    const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' }, interactive: true,
+      ask: async () => replies.shift() || '', confirm: async () => { throw new Error('a second Enter was asked'); }, stdout, stderr,
+      proposalTransport: transport, discoveryGh: () => ({ ok: false, reason: 'offline' }), refresh: () => ({ refreshed: false, error: 'offline' }),
+      rulesetReader: PROTECTED, protectionReader: BRANCH_PROTECTED, securityReader: SECURE });
+    return { ctx, repo, cli, transport, stdout, stderr, replies };
+  };
+  // The owner's own terminal.
+  const terminal = fixture();
+  assert.equal(await terminal.cli.main(['disable']), 0, terminal.stderr.text() + terminal.stdout.text());
+  published.terminal = terminal.transport.calls;
+  // The card's No: the gate records it for the host session, and its agent publishes that run.
+  const card = fixture();
+  const { GovernanceProposals } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
+  const { run: cardRun } = new GovernanceProposals({ registryOptions: { registryPath: card.ctx.registryPath, testOnly: true } }).request(card.repo, 'no', { sessionId: 'host-session', epoch: 'c'.repeat(32) });
+  assert.equal(await card.cli.main(['publish', '--run', cardRun]), 0, card.stderr.text() + card.stdout.text());
+  published.card = card.transport.calls;
+  // The bank's Turn off, answered in the owner's terminal.
+  const bank = fixture();
+  bank.replies.push('1.1=B');
+  assert.equal(await bank.cli.main(['setup']), 0, bank.stderr.text() + bank.stdout.text());
+  published.bank = bank.transport.calls;
+  for (const [route, calls] of Object.entries(published)) {
+    assert.equal(calls.length, 1, `${route}: one pull request`);
+    assert.deepEqual(calls[0].binding, { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }, route);
+  }
+  assert.deepEqual(published.card, published.terminal);
+  assert.deepEqual(published.bank, published.terminal);
+  for (const route of [terminal, card, bank]) assert.match(route.stdout.text(), /pull\/9/);
 });
 
 test('interactive no publishes the off proposal without a laptop decision, decline is an alias, and enable opens the bank', async t => {
@@ -405,7 +448,7 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   // A merged binding decides, so a local disable is refused; a merged disabled turns it off everywhere.
   const refusedDisable = await run(ctx, stale, ['disable']);
   assert.equal(refusedDisable.code, 2);
-  assert.match(refusedDisable.stdout, /pending|not published/i);
+  assert.match(refusedDisable.stderr, /pending|not published/i);
   recordMerged(stale, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }) });
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);

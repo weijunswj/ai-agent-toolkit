@@ -209,12 +209,14 @@ function removeKilledFetchLock(git, root, tracking, started) {
 }
 
 // Why a refresh kept the last read, in plain words for `status`, or null when there is nothing to say.
+// It holds every code refreshBindingCache returns; 'refresh-failed' comes only from the side-by-side
+// session-start read, which `status` never runs.
 const REFRESH_REASONS = Object.freeze({
   'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c, GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, or GIT_SSH or GIT_SSH_COMMAND for an ssh origin), so the merged binding was not read. A GIT_SSH or GIT_SSH_COMMAND set for good (Plink or TortoiseGit) keeps every refresh of an ssh origin held, and turns queued offline are then dropped unwritten after seven days; an https origin is read normally',
   'remote-unreachable': 'GitHub could not be reached (offline?)',
   'fetch-failed': 'the default branch could not be fetched',
   'read-timed-out': 'a read of GitHub ran out of time (a slow network or a busy computer); it is read again next time',
-  'refresh-failed': 'the read stopped with an unexpected error',
+  'identity-invalid': "this repository's origin could not be read",
   'default-branch-unknown': 'the remote did not say which branch is its default',
   'ref-moved': 'the default branch moved while it was read; it is read again next time',
   'hooks-unguarded': 'Toolkit could not prepare its empty hooks folder, so it did not fetch',

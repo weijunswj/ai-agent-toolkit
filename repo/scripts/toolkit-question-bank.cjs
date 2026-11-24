@@ -622,8 +622,9 @@ const KEPT_REASONS = Object.freeze({
   unreadable: 'Setup could not read this setting, so it writes nothing.',
 });
 // The one approval question, saying how many settings a yes would set. It makes sense on its own on a native question card.
+// With none left there is no question (setup asks nothing), so it is never asked for zero.
 function approvalQuestion(pending) {
-  if (!pending) return "Apply Toolkit's defaults to the Claude Code settings that have no value yet? None is left, so a yes changes nothing. Your own values and offs stay.";
+  if (!pending) throw new Error('Setup has no approval question when every setting already has a value.');
   const one = pending === 1;
   return `Apply Toolkit's default${one ? '' : 's'} to the ${pending} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
 }
@@ -663,10 +664,11 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
   const pending = pendingDefaults(specs).length;
   const rows = answerable(specs);
   const flagged = rows.filter((spec) => spec.selected).length;
-  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting' : `1 question: ${approvalQuestion(pending)}`;
+  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting'
+    : pending ? `1 question: ${approvalQuestion(pending)}` : 'no questions: every setting already has a value';
   const summary = flagged === rows.length ? 'Your setup flags answer every setting, so setup asks nothing and applies them as shown.'
     : [pending ? `Setup applies the Toolkit default to ${pending} setting${pending === 1 ? '' : 's'} not set yet and keeps every other setting as it is.`
-      : 'Every setting already has a value, so a yes keeps them all as they are.',
+      : `Every setting already has a value, so setup asks nothing and keeps them all as they are. ${NOTHING_PENDING_CHANGE}`,
     ...(flagged ? [`${flagged} setting${flagged === 1 ? ' is' : 's are'} set by your setup flags, and the reply cannot change ${flagged === 1 ? 'it' : 'them'}.`] : [])].join(' ');
   const lines = [
     markdown ? `# Toolkit setup - ${title}` : `Toolkit setup - ${title}`,
@@ -693,6 +695,8 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
   return lines;
 }
 
+// How to change one row when setup asks nothing (every setting already has a value).
+const NOTHING_PENDING_CHANGE = 'To change one, reply with its number and choice, for example 3.5=B (on and off work too).';
 // The reply line under the bank: the approval question for the same count of pending settings, then the reply grammar.
 const strongDefaultReply = (pending) => `${approvalQuestion(pending)} Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.`;
 

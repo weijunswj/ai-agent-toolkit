@@ -50,7 +50,7 @@ test('adding a GitHub origin brings the question once on both hosts, and a "no" 
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     const first = say('no');
     assert.equal(first.action, 'pass', 'nothing is held on either host');
-    assert.equal(noticeOf(first.context), gate.QUESTION.join('\n'));
+    assert.equal(noticeOf(first.context), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
     assert.equal(first.context.includes(JSON.stringify(gate.PICKER_INPUT)), host === 'claude');
     assert.equal(replyTicket(first), undefined, 'a pre-question no gets no ticket');
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'a pre-question no cannot answer');
@@ -168,7 +168,7 @@ for (const picker of [false, true]) {
         cwd: f.cwd, prompt: projects.wake('yes', { now: f.now }), sessionId: 'owner',
       });
       assert.equal(initial.action, 'pass', failure);
-      assert.equal(noticeOf(initial.context), gate.QUESTION.join('\n'));
+      assert.equal(noticeOf(initial.context), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
       if (picker) {
         assert.match(initial.notice, /Pick an answer/);
         assert.ok(initial.context.includes(JSON.stringify(gate.PICKER_INPUT)), 'the same governance card');

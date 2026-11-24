@@ -181,6 +181,11 @@ function ensureSecurityFiles(root, writer = null) {
 // governance pull request, which decides nothing until the owner merges it.
 function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
   const made = [];
+  // A named store that is this repository itself is refused first, for that reason, before any local
+  // write or anything made on GitHub (the binding would refuse it only after the parent issue).
+  if (plan.store.named && plan.store.repository.toLowerCase() === plan.repository.toLowerCase()) {
+    throw new AdoptError(`${plan.store.repository} is this repository itself, so it was not used as the evidence store: the store must be a separate private repository.`, made);
+  }
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
   try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; } catch (error) { error.made = made; throw error; }

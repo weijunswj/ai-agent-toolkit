@@ -292,11 +292,14 @@ test('kept broader-native survives flag and piped execution without probes', () 
   assert.match(flagged.stdout, /Selected topology: broader-native/);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.BROADER_NATIVE);
   clearLogs(setupRepo);
-  // Piped: the bank is shown first, then answered yes with its displayed reference.
+  // Piped: every setting already has a value after the first run, so the bank asks nothing and an
+  // empty pipe runs setup through; a yes with its displayed reference still works.
   const pipedArgv = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions'];
   const shown = run(pipedArgv, { env, timeout: 300000, input: '' });
-  assert.equal(shown.status, 23, shown.stderr || shown.stdout);
+  assert.equal(shown.status, 0, shown.stderr || shown.stdout);
+  assert.match(shown.stdout, /no questions: every setting already has a value/);
+  assert.match(shown.stdout, /Selected topology: broader-native/);
   clearLogs(setupRepo);
   const piped = run(pipedArgv, { env, timeout: 300000, input: `${displayedBankReference(shown.stdout)}: yes\n` });
   assert.equal(piped.status, 0, piped.stderr || piped.stdout);

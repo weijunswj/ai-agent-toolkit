@@ -2329,8 +2329,10 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
 // apart from the table form.
 const isStrongDefaultBank = (specs) => specs.some((spec) => spec.strong_default);
 function renderStrongDefaultSetupBank(specs, markdown) {
-  // With every setting answered by a flag there is nothing to reply, so the reply line is left out.
-  const reply = answerable(specs).every((spec) => spec.selected) ? [] : [strongDefaultReply(pendingDefaults(specs).length), ''];
+  // With every setting answered by a flag, or every setting already set, there is no question, so the reply line
+  // is left out (the bank's own summary says how to change one row).
+  const pending = pendingDefaults(specs).length;
+  const reply = answerable(specs).every((spec) => spec.selected) || !pending ? [] : [strongDefaultReply(pending), ''];
   return [QUESTION_BANK_BEGIN, ...renderStrongDefaultBank(specs, { markdown }), '', EXPLAIN_HINT, '', ...reply, QUESTION_BANK_COMPLETE, ''].join('\n');
 }
 
@@ -2897,7 +2899,9 @@ async function promptForStrongDefaultAnswer(specs, rl, fixed) {
 
 // Claude Code setup: one approval question over strong-default rows (toolkit-question-bank.cjs). A refresh asks
 // only when a row has no value yet; otherwise it keeps every row as it is, with no bank. A no writes nothing.
-// The rows' own states decide a refresh, so this path saves no question shapes.
+// Setup asks nothing either when every row already has a value: it shows the tables, takes a piped change such
+// as 3.5=off if one is sent, and otherwise keeps every row as it is. The rows' own states decide a refresh, so
+// this path saves no question shapes.
 async function answerStrongDefaultBank(args, current, options = {}) {
   const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const specs = setupQuestionSpecs(args, current);
@@ -2935,6 +2939,24 @@ async function answerStrongDefaultBank(args, current, options = {}) {
     answerSource = 'user-approved yes-recommended';
     for (const spec of open) assignChoice(args, spec.key, spec.recommended);
     console.log('--yes-recommended selected; setup will apply the Setup applies column before writing.');
+  } else if (open.length && !pending.length) {
+    // Nothing to approve, so no question: a terminal is not prompted, and a piped reply counts only when the
+    // owner sent a change (an empty one keeps every row as it is).
+    answerSource = 'nothing to approve';
+    if (!isTTY) {
+      fromStdin = true;
+      const piped = await readNonInteractiveStdin();
+      if (piped.split(/\r?\n/).filter((line) => line.trim()).length > 1) throw new Error('Setup question bank received unexpected extra non-empty input.');
+      if (piped.trim()) {
+        answer = parseStrongDefaultAnswer(piped, specs, { fixed });
+        if (!answer) throw new Error('Setup did not read that change: reply with the bank reference and a change such as 3.5=off.');
+        answerSource = { 'apply-defaults': 'user-approved defaults', 'changes-only': 'user-approved listed changes only', declined: 'user declined' }[answer.mode];
+      }
+    }
+    if (!answer) {
+      for (const spec of open) assignChoice(args, spec.key, spec.recommended);
+      console.log('Every setting already has a value, so setup asked nothing and keeps them all as they are.');
+    }
   } else if (open.length) {
     if (isTTY) {
       const rl = options.createReadlineInterface ? options.createReadlineInterface() : readline.createInterface({ input: process.stdin, output: process.stdout });

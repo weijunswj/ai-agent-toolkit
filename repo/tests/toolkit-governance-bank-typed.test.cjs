@@ -429,6 +429,35 @@ test('explain needs no ticket before or after an answer, and an unknown row afte
   assert.doesNotMatch(bare.out, /Nothing changed|### /);
 });
 
+// #1363 F1-L2 and UAT-L5: after an answer the bank used, a bare "ok" read as a lost answer ("was not
+// read ... Reply again"), and the next reply was framed as answering a bank still open.
+test('after a used answer, a bare ok is told the answer was used, and the next reply is not framed as still open', async t => {
+  const ctx = fixture(t, { quiet: true });
+  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
+  const before = await reply(ctx, reference, 'ok');
+  assert.match(before.out, /^Governance question bank answer was not read\. Nothing was written\.$/m, 'before any answer, an unread reply still says so');
+  const done = await reply(ctx, reference, KEEP);
+  assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m);
+  const noted = tickets(ctx).pendingFor(SESSION, epochOf(ctx));
+  assert.equal(noted.used, true, 'the used answer is noted with the open bank');
+  const context = require(path.join(scripts, "toolkit-governance-bank.cjs")).bankTicketContext(noted, "a".repeat(32));
+  assert.match(context, /since their answer to governance bank \S+ was used; that answer is done, not open\./);
+  assert.doesNotMatch(context, /was shown or Toolkit asked them to reply again/);
+  for (const ack of ['ok', 'thanks']) {
+    const after = await reply(ctx, reference, ack);
+    assert.equal(after.code, 0, after.err);
+    assert.match(after.out, /^Your earlier answer to this bank was already used, and this reply changes nothing\. Nothing more was written\.$/m, ack);
+    assert.match(after.out, /^To change a row, reply with only that change, such as 1\.1=B\.$/m);
+    assert.doesNotMatch(after.out, /was not read|Reply again/, ack);
+    noBank(after.out);
+    agentsLast(after.out);
+    assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx)).used, true, `${ack}: still noted as used`);
+  }
+  // A real error after a used answer is still named.
+  const unknown = await reply(ctx, reference, '1.9=A');
+  assert.match(unknown.out, /^This bank has no row 1\.9\. Nothing was written\.$/m);
+});
+
 // G2 of 19 Nov: an answer that opens the shards pull request turns that row into a status row, so
 // every later question moves up one number. The ticketless explain then printed another row under
 // the number the owner saw (explain 1.4 gave the next row, and a row still on screen did not exist).
@@ -568,5 +597,30 @@ test('a fresh session whose binding read fails just now gets the bank or a line 
     assert.equal(answered.code, 1);
     assert.match(answered.out, /^Nothing changed, and this answer was not used: GitHub could not be read just now/m);
     assert.doesNotMatch(answered.out, /toolkit-governance\.cjs"? status/);
+  }
+});
+
+// #1381 L3 and L4: the unread line always said "just now ... in a moment", even for a cause a retry
+// cannot fix, and a read-only explain was told its "answer was not used".
+test('an unread bank names a lasting cause, and a read-only explain is not told an answer was unused', async t => {
+  const cache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
+  for (const [error, lasting] of [['remote-redirected', true], ['hooks-unguarded', true], ['cache-unwritable', true], ['read-timed-out', false]]) {
+    const ctx = fixture(t);
+    const stateDir = path.dirname(ctx.registryOptions.registryPath);
+    const good = cache.readBindingCache(governance.readIdentity(ctx.repo), stateDir);
+    ctx.cli = { refresh: () => { cache.writeCache(stateDir, { ...good, refresh_error: error }); return { refreshed: false, error }; } };
+    const shown = await run(ctx, ['setup']);
+    assert.equal(shown.code, 1, error);
+    if (lasting) {
+      assert.match(shown.out, new RegExp(`^The governance question bank could not be shown because the settings merged for this repository could not be read: ${cache.refreshReason(error).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\. Nothing changed\\. This does not clear on its own: fix that, then type toolkit governance again\\.$`, 'm'), error);
+      assert.doesNotMatch(shown.out, /in a moment/, error);
+    } else assert.match(shown.out, /^The governance question bank could not be shown because GitHub could not be read just now.*in a moment\.$/m, error);
+    agentsLast(shown.out);
+    for (const explain of ['explain 1.1', 'ABCD-EFGH-JKMN-PQRS: explain 1.2']) {
+      const read = await run(ctx, ['setup', '--answers', explain]);
+      assert.equal(read.code, 1, `${error} ${explain}`);
+      assert.match(read.out, /^This row cannot be explained yet: GitHub could not be read just now/m, explain);
+      assert.doesNotMatch(read.out, /answer was not used/, explain);
+    }
   }
 });

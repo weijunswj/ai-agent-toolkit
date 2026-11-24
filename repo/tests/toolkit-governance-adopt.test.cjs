@@ -96,7 +96,7 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(root); },
-    proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
+    proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [{ ...proposal, answer: binding.governance === 'disabled' ? 'no' : 'yes' }]; return open[0]; }, read: () => open[0] || proposal },
     cloudWorkflows: (cwd, options) => { cloud.push(options); return { files: {}, warning: null }; },
     ...(estimate ? { ciEstimator: () => estimate } : {}),
   });
@@ -170,6 +170,39 @@ test('answering no store makes nothing: no pull request, store or parent issue, 
   assert.equal(mixed.published.length, 0);
 });
 
+// 1485 G2 L3: where the bank is the turn-on question (no card came first), it refused the card's plain
+// yes, no and later, so a no waited for the next session's card. Now yes is all recommended, later is
+// no store, and no makes the one off pull request.
+test('the turn-on bank takes a plain yes, no or later', async t => {
+  const shown = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: [''] });
+  assert.match(shown.out, /A plain yes, no or later works too: yes is all recommended, later keeps governance off the same way, and no prepares one pull request that turns governance off\./);
+  const yesGitHub = fakeGitHub();
+  const yes = await run(fixture(t), ['setup'], yesGitHub, { interactive: true, answers: ['Yes.'] });
+  assert.equal(yes.code, 0, yes.err + yes.out);
+  assert.equal(yes.published.length, 1);
+  assert.equal(yes.published[0].binding.governance, 'enabled');
+  assert.deepEqual(yesGitHub.calls, [['create', STORE], ['put', STORE, 'archives/README.md'], ['issue', SLUG, yesGitHub.calls[2][2]]], 'the same as all recommended');
+  const laterGitHub = fakeGitHub();
+  const laterCtx = fixture(t);
+  const later = await run(laterCtx, ['setup'], laterGitHub, { interactive: true, answers: ['later'] });
+  assert.equal(later.code, 0, later.err + later.out);
+  assert.match(later.out, /^Later: nothing was written, and governance stays off\. Toolkit asks again next session\.$/m);
+  assert.deepEqual(laterGitHub.calls, []);
+  assert.equal(later.published.length, 0);
+  const noGitHub = fakeGitHub();
+  const noCtx = fixture(t);
+  const no = await run(noCtx, ['setup'], noGitHub, { interactive: true, answers: ['no'] });
+  assert.equal(no.code, 0, no.err + no.out);
+  assert.deepEqual(noGitHub.calls, [], 'no store or parent issue for an off decision');
+  assert.equal(no.published.length, 1);
+  assert.deepEqual(no.published[0].binding, { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' });
+  assert.equal(require(path.join(scripts, 'toolkit-governance-state.cjs')).governanceState(noCtx.repo, noCtx.registryOptions).state, 'UNDECIDED', 'nothing decides until it merges');
+  // Anything more than the plain word is read as an ordinary bank answer.
+  const unclear = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['no thanks', ''] });
+  assert.match(unclear.out, /Governance question bank answer was not read/);
+  assert.equal(unclear.published.length, 0);
+});
+
 test('a failed step stops with what was made, and answering again reuses it instead of making a second one', async t => {
   const ctx = fixture(t);
   const github = fakeGitHub({ failIssue: true });
@@ -228,6 +261,18 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   assert.match(refused.out, /toolkit-test-fixture\/public-one was not used as the evidence store, because/);
   assert.deepEqual(open.calls, []);
   assert.equal(refused.published.length, 0);
+  // The task repository itself, even private and laid out like a store, is refused for that reason
+  // before any parent issue is made (1460 G2 L1: main made parent #7 first, then gave the wrong reason).
+  const itself = fakeGitHub({ repos: { [SLUG]: { private: true, dirs: ['state'] } } });
+  const selfCtx = fixture(t);
+  const self = await run(selfCtx, ['setup'], itself, { interactive: true, answers: [`store=${SLUG.toUpperCase()}`] });
+  assert.notEqual(self.code, 0);
+  assert.match(self.out, /^TOOLKIT-TEST-FIXTURE\/FRESH is this repository itself, so it was not used as the evidence store: the store must be a separate private repository\. No pull request was prepared\.$/m);
+  assert.match(self.out, /^Nothing was made on GitHub\.$/m);
+  assert.doesNotMatch(self.out, /not ready/);
+  assert.deepEqual(itself.calls, [], 'no parent issue, store or file');
+  assert.equal(self.published.length, 0);
+  assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'plain-text.json')), false, 'no local write either');
   // A malformed name is refused as unreadable, nothing written.
   const bad = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['store=not a repo', ''] });
   assert.match(bad.out, /store= needs a repository as owner\/name/);
