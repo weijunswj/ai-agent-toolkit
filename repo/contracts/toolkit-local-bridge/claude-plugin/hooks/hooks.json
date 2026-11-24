@@ -41,7 +41,7 @@
         ]
       },
       {
-        "matcher": "Bash|PowerShell",
+        "matcher": "Bash|PowerShell|Monitor|mcp__terminal__run_in_terminal",
         "hooks": [
           {
             "type": "command",
@@ -120,6 +120,11 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-owed-check-hook.cjs\"",
             "timeout": 30
           }
         ]
