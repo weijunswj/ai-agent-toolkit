@@ -2,8 +2,9 @@
 
 // Claude Code helper policy for Toolkit gate runs. Only the main session (the G0 or G1 lead) may
 // launch a helper. A Toolkit helper (toolkit-g0-helper, toolkit-g1-helper) must byte-match the
-// definition rendered from the selected stack; any other agent runs only when strictly cheaper than
-// the lead (toolkit-claude-agent-route.cjs), and is refused otherwise (owner decisions on #1466).
+// definition rendered from the selected stack. Every agent, the Toolkit helpers included, runs only
+// when strictly cheaper than the lead (toolkit-claude-agent-route.cjs), and is refused otherwise
+// (owner decisions on #1466).
 // Everything else is refused with a plain reason. An allowed launch returns no hook
 // decision, so Claude Code's own permissions still apply.
 //
@@ -151,7 +152,8 @@ class ClaudeNamedHelperPolicy {
       // Claude Code reads agent files when a session starts, so a file rewritten since then runs
       // with the settings this session loaded, not the ones on disk.
       if (changedSinceSessionStart(loaded.file, input)) return deny('Helper settings changed after this session started. Start a new session to use them.');
-      return {};
+      // A preset also passes the cost test against the lead, like any agent (owner decision on #1466).
+      return agentRoute().gateCostDecision(input, { environment: this.#environment, managedAgentsDirectory: this.#managedDirectory });
     }
     if (this.#managedDirectory && samePath(path.dirname(loaded.file), this.#managedDirectory)) {
       return deny(`the managed copy ${loaded.file} does not match the one rendered from the selected stack. Toolkit does not change managed files; ask whoever manages this computer's Claude Code settings to update or remove it.`);

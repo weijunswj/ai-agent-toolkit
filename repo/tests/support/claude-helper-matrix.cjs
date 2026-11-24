@@ -127,12 +127,15 @@ const agentText = (name, model) => `---\nname: ${name}\ndescription: Matrix agen
 const NOT_CHEAPER = /not cheaper than this agent's opus-5\.5\/high/;
 const SKILL_FIRST = /read the agent-cost-control skill before starting a subagent/;
 // Transcripts a case can name in its `transcript` option: the lead read agent-cost-control and served
-// on Opus high, the same without the skill read, and a G1 gate brief on the owner-claude stack.
+// on Opus high, the same without the skill read, a G1 gate brief on the owner-claude stack, and the same
+// brief with a lead that served on Haiku xhigh.
 const said = { type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' };
 const TRANSCRIPTS = Object.freeze({
   'skill-opus': [{ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'toolu_m', name: 'Skill', input: { skill: 'ai-agent-toolkit:agent-cost-control' } }] }, effort: 'high' }, said],
   'opus-no-skill': [said],
   'gate-brief': [{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } }, said],
+  'gate-brief-haiku-lead': [{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } },
+    { type: 'assistant', message: { model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'xhigh' }],
 });
 const READ = Object.freeze({ environment: NO_GATE, transcript: 'skill-opus' });
 const configureTopology = topology => c => require(path.join(SCRIPTS, 'toolkit-agent-control.cjs'))
@@ -142,16 +145,16 @@ const configureTopology = topology => c => require(path.join(SCRIPTS, 'toolkit-a
 // `setup(context)`, `cwd(context)`, `transcript` (a TRANSCRIPTS name), `brokenHook` (the decision module fails to load), `gate` (the
 // governance hook's PreToolUse event runs instead of the agent hook), `needsBirthtime`.
 const HOOK_CASES = [
-  ['A1', 'G0 lead launches toolkit-g0-helper, definition current', launch(G0), 'pass'],
-  ['A2', 'G1 lead launches toolkit-g1-helper, definition current', launch(G1), 'pass'],
-  ['A2', 'broader-native profile without a launcher binding: the Toolkit helper is allowed', launch(G1), 'pass', null, { setup: configureTopology('broader-native') }],
+  ['A1', 'G0 lead launches toolkit-g0-helper, definition current', launch(G0), 'pass', null, { transcript: 'gate-brief' }],
+  ['A2', 'G1 lead launches toolkit-g1-helper, definition current', launch(G1), 'pass', null, { transcript: 'gate-brief' }],
+  ['A2', 'broader-native profile without a launcher binding: the Toolkit helper is allowed', launch(G1), 'pass', null, { setup: configureTopology('broader-native'), transcript: 'gate-brief' }],
   ['A3', 'definition edited to another model', launch(G1), 'deny', MISMATCH, { setup: editDefinition(G1, /^model: .*$/m, 'model: claude-opus-5-5') }],
   ['A4', 'definition edited to another effort', launch(G0), 'deny', MISMATCH, { setup: editDefinition(G0, /^effort: .*$/m, 'effort: low') }],
   ['A5', 'CLAUDE_CODE_SUBAGENT_MODEL set', launch(G0), 'deny', /CLAUDE_CODE_SUBAGENT_MODEL is set/, { environment: { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-opus-5-5' } }],
   ['A5', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1', launch(G0), 'deny', /CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set/, { environment: { CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
   ['A5', 'CLAUDE_CODE_EFFORT_LEVEL differs from the helper effort', launch(G0), 'deny', /CLAUDE_CODE_EFFORT_LEVEL is set to low/, { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } }],
-  ['A5', 'CLAUDE_CODE_EFFORT_LEVEL equals the helper effort', launch(G0), 'pass', null, { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'xhigh' } }],
-  ['A6', 'call omits model and effort; the definition supplies them', launch(G1), 'pass'],
+  ['A5', 'CLAUDE_CODE_EFFORT_LEVEL equals the helper effort', launch(G0), 'pass', null, { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'xhigh' }, transcript: 'gate-brief' }],
+  ['A6', 'call omits model and effort; the definition supplies them', launch(G1), 'pass', null, { transcript: 'gate-brief' }],
   ['A7', 'call carries a model', launch(G1, { model: 'opus' }), 'deny', /cannot override model/],
   ['A7', 'call carries an effort', launch(G1, { effort: 'low' }), 'deny', /cannot override effort/],
   ['A7', 'call carries a provider', launch(G1, { provider: 'bedrock' }), 'deny', /cannot override provider/],
@@ -160,7 +163,7 @@ const HOOK_CASES = [
   ['A12', 'definition rewritten after the session started', launch(G0), 'deny', /changed after this session started/, { needsBirthtime: true }],
   ['A13', 'resume an earlier helper', launch(G1, { resume: 'agent-1' }), 'deny', /cannot resume or fork/],
   ['A13', 'fork the conversation', launch(G1, { fork_context: true }), 'deny', /cannot resume or fork/],
-  ['A14', 'Task alias with a current definition', { tool_name: 'Task', ...launch(G1) }, 'pass'],
+  ['A14', 'Task alias with a current definition', { tool_name: 'Task', ...launch(G1) }, 'pass', null, { transcript: 'gate-brief' }],
   ['A14', 'project copy at the repository root differs', launch(G0), 'deny', /the project copy .* does not match/, { setup: projectCopy([], G0, t => t.replace('maxTurns: 50', 'maxTurns: 99')) }],
   ['A14', 'project copy between the working directory and the root differs', launch(G1), 'deny', /the project copy .*packages.* does not match/,
     { setup: c => { projectCopy(['packages'], G1, t => t.replace('maxTurns: 60', 'maxTurns: 99'))(c); fs.mkdirSync(path.join(c.repo, 'packages', 'app'), { recursive: true }); },
@@ -203,6 +206,8 @@ const HOOK_CASES = [
   ['A27', 'outside a gate run, a user agent with model inherit', launch('matrix-reader'), 'ask', NOT_CHEAPER, { ...READ, setup: userAgent('matrix-reader', 'inherit') }],
   ['A27', 'outside a gate run, a project agent with no model outranks a user agent that pins sonnet', launch('matrix-reader'), 'ask', NOT_CHEAPER,
     { ...READ, setup: c => { userAgent('matrix-reader', 'sonnet')(c); projectAgent('matrix-reader', null)(c); } }],
+  ['A27', 'a gate lead on the helper route starts toolkit-g1-helper: not cheaper, so refused', launch(G1), 'deny', /not cheaper than the lead's haiku-5\.5\/xhigh/, { transcript: 'gate-brief-haiku-lead' }],
+  ['A27', 'a gate lead whose transcript cannot be read starts toolkit-g1-helper: refused', launch(G1), 'deny', /cannot be told/],
   ['A27', 'a gate lead starts a cheaper Explore', launch('Explore', { model: 'haiku', effort: 'high' }), 'pass', null, { transcript: 'gate-brief' }],
   ['A27', 'a gate lead starts general-purpose on its own route: refused, not asked', launch('general-purpose'), 'deny', /not cheaper than the lead's opus-5\.5\/high/, { transcript: 'gate-brief' }],
 ];
@@ -231,7 +236,9 @@ function runHookCase(context, [row, name, event, expected, pattern, options = {}
     const cwd = options.cwd ? options.cwd(context) : context.repo;
     let input = { ...event, cwd };
     if (options.transcript) {
-      const file = path.join(context.base, 'lead.jsonl');
+      // A fresh file per case: the hook compares helper files with the transcript's creation time,
+      // and Windows can give a recreated file of the same name its old creation time.
+      const file = path.join(context.base, `lead-${process.hrtime.bigint()}.jsonl`);
       fs.writeFileSync(file, `${TRANSCRIPTS[options.transcript].map(entry => JSON.stringify(entry)).join('\n')}\n`);
       input = { ...input, transcript_path: file };
     }

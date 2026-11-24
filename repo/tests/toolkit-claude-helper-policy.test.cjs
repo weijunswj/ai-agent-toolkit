@@ -11,7 +11,7 @@ const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const { governedRepo } = require('../scripts/toolkit-governed-repo.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
-const { managedAgentsDirectory } = require('../scripts/toolkit-claude-helper-policy.cjs');
+const { changedSinceSessionStart, managedAgentsDirectory } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const { governedHome, makeGoverned, recordAbsent } = require('./toolkit-governed-fixture-support.cjs');
 
 
@@ -22,7 +22,8 @@ function scratch(t) {
 }
 
 // A governed repository, a Claude config directory with the rendered helpers, an empty control root and
-// the lead's transcript (it read agent-cost-control and serves on Opus high), given to calls outside a gate run.
+// the lead's transcript (it read agent-cost-control and serves on Opus high) for calls outside a gate
+// run, and a fresh gate lead transcript for each call in one.
 // `environment` is a Toolkit gate run (a launcher marker, a G1 lead), the only session the helper-route
 // policy applies to; `open` is any other session.
 function fixture(t, { install = true } = {}) {
@@ -37,11 +38,20 @@ function fixture(t, { install = true } = {}) {
   const transcript = path.join(dir, 'lead.jsonl');
   fs.writeFileSync(transcript, [{ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 't', name: 'Skill', input: { skill: 'agent-cost-control' } }] }, effort: 'high' },
     { type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' }].map(entry => JSON.stringify(entry)).join('\n') + '\n');
+  // A gate run's lead (Opus high on its brief's route), written fresh for each call so it is never
+  // older than a helper file a test rewrote; a call that names its own transcript keeps it.
+  let leads = 0;
+  const gateLead = () => {
+    const file = path.join(dir, `gate-lead-${leads += 1}.jsonl`);
+    fs.writeFileSync(file, [{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } },
+      { type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' }].map(entry => JSON.stringify(entry)).join('\n') + '\n');
+    return file;
+  };
   const open = { CLAUDE_CONFIG_DIR: configDir };
   const environment = { ...open, TOOLKIT_GATE_ROLE: 'G1' };
-  const decide = (input, env = environment) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: repo, ...(env.TOOLKIT_GATE_ROLE ? {} : { transcript_path: transcript }), ...input },
+  const decide = (input, env = environment) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: repo, transcript_path: env.TOOLKIT_GATE_ROLE ? gateLead() : transcript, ...input },
     { root: controlRoot, environment: env, helper_policy: { toolkitRoot: ROOT } });
-  return { dir, repo, plain, configDir, controlRoot, environment, open, decide };
+  return { dir, repo, plain, configDir, controlRoot, environment, open, decide, gateLead };
 }
 
 const denied = output => output?.hookSpecificOutput?.permissionDecision === 'deny';
@@ -161,7 +171,7 @@ test('in governed work a main session started with --agent is the lead; only an 
   // agent_type without agent_id: a --agent main session, judged like any lead launch.
   assert.deepEqual(f.decide({ agent_type: 'security-reviewer', tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }), {});
   assert.match(reason(f.decide({ agent_type: 'security-reviewer', tool_input: { subagent_type: 'general-purpose' } })),
-    /this general-purpose launch's route or the lead's own cannot be told/);
+    GATE_REFUSED);
   for (const caller of [{ agent_id: 'a1', agent_type: 'toolkit-g1-helper' }, { agent_id: 'a2' }]) {
     const output = f.decide({ ...caller, tool_input: { subagent_type: 'toolkit-g0-helper' } });
     assert.equal(reason(output), 'Toolkit: a helper cannot launch another agent. Only the main session launches helpers.', JSON.stringify(caller));
@@ -175,8 +185,8 @@ test('in governed work the matching Toolkit helpers are allowed and other launch
     assert.deepEqual(f.decide({ tool_name: 'Task', tool_input: { subagent_type: name, prompt: 'y' } }), {}, `${name} via Task`);
   }
   const cases = [
-    [{ tool_input: { subagent_type: 'general-purpose' } }, /this general-purpose launch's route or the lead's own cannot be told/],
-    [{ tool_input: { prompt: 'y' } }, /this default \(general-purpose\) launch's route or the lead's own cannot be told/],
+    [{ tool_input: { subagent_type: 'general-purpose' } }, /this general-purpose would run on opus-5\.5\/high, not cheaper than the lead's opus-5\.5\/high/],
+    [{ tool_input: { prompt: 'y' } }, /this default \(general-purpose\) would run on opus-5\.5\/high/],
     // Inherited object keys are not helper names.
     [{ tool_input: { subagent_type: 'constructor' } }, /this constructor launch's route/],
     [{ tool_input: { subagent_type: '__proto__' } }, /this __proto__ launch's route/],
@@ -230,7 +240,7 @@ test('environment variables that would change the helper model or effort are ref
 test('A14: definitions are looked up the way Claude Code loads them: managed first, then every project folder from the working directory up, then the user folder', t => {
   const f = fixture(t);
   const managed = path.join(f.dir, 'managed', '.claude', 'agents');
-  const decide = (input, cwd = f.repo) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd, ...input },
+  const decide = (input, cwd = f.repo) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd, transcript_path: f.gateLead(), ...input },
     { root: f.controlRoot, environment: f.environment, helper_policy: { toolkitRoot: ROOT, managedAgentsDirectory: managed } });
   const launch = { tool_input: { subagent_type: 'toolkit-g1-helper', prompt: 'y' } };
   const original = fs.readFileSync(path.join(f.configDir, 'agents', 'toolkit-g1-helper.md'), 'utf8');
@@ -262,7 +272,8 @@ test('a helper file rewritten after the session started is refused until a new s
   const f = fixture(t);
   const file = path.join(f.configDir, 'agents', 'toolkit-g0-helper.md');
   const transcript = path.join(f.configDir, 'session.jsonl');
-  fs.writeFileSync(transcript, '{}\n');
+  // The lead served on Opus high, so the helper also passes the gate-run cost test.
+  fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' }) + '\n');
   const started = fs.statSync(transcript).birthtimeMs;
   if (!started) return t.skip('this file system reports no creation time');
   const input = { transcript_path: transcript, tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } };
@@ -272,7 +283,7 @@ test('a helper file rewritten after the session started is refused until a new s
   const output = f.decide(input);
   assert.ok(denied(output));
   assert.match(reason(output), /Helper settings changed after this session started\. Start a new session to use them\./);
-  assert.deepEqual(f.decide({ tool_input: input.tool_input }), {}, 'without a transcript the check makes no claim');
+  assert.equal(changedSinceSessionStart(file, { tool_input: input.tool_input }), false, 'without a transcript the check makes no claim');
 });
 
 test('a helper definition that does not byte-match the selected-stack rendering is refused, including a project override', t => {

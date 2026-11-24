@@ -104,9 +104,13 @@ function readFrontMatter(text) {
   const lines = block.split('\n');
   const found = {};
   for (let index = 0; index < lines.length; index += 1) {
+    // A quoted key is the same key to YAML, and `key:value` with no space is no key at all, so
+    // either reading is uncertain here.
+    if (/^["'](?:name|model|effort)["'][ \t]*:/.test(lines[index])) return null;
     const match = /^(name|model|effort)[ \t]*:(.*)$/.exec(lines[index]);
     if (!match) continue;
     const [, key, raw] = match;
+    if (raw !== '' && !/^[ \t]/.test(raw)) return null;
     if (Object.hasOwn(found, key)) return null;
     const read = scalar(raw);
     if (read.unreadable) return null;
@@ -262,7 +266,9 @@ function costVerdict(input, { environment = process.env, managedAgentsDirectory:
   const out = verdict => ({ verdict, shown, target, caller: { model: modelName(caller.model), effort: callerEffort || 'unknown effort' } });
   const ranks = { caller: familyRank(modelName(caller.model)), target: familyRank(target.model) };
   if (ranks.caller === null || ranks.target === null || target.effort === null) return out('unknown');
-  if (target.effort === 'max') return out('max');
+  // A launch that sets no effort may serve the caller's own effort even on another model, so under a
+  // max-effort caller it counts as max.
+  if (target.effort === 'max' || (target.effort === 'default' && callerEffort === 'max')) return out('max');
   if (ranks.target < ranks.caller) return out('cheaper');
   if (ranks.target === ranks.caller && callerEffort && target.effort !== 'default' && EFFORT_RANK[target.effort] < EFFORT_RANK[callerEffort]) return out('cheaper');
   return out('not-cheaper');

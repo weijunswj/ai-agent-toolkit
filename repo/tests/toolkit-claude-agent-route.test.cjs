@@ -145,6 +145,8 @@ const COSTS = [
   ['a cheaper model at max effort', launch(undefined, { model: 'haiku', effort: 'max' }), caller('opus-5-5', 'high'), 'max'],
   ['an agent file at max effort', launch('reviewer'), caller('opus-5-5', 'high'), 'max', { files: { 'repo/.claude/agents/reviewer.md': definition('reviewer', 'haiku', 'max') } }],
   ['a CLAUDE_CODE_EFFORT_LEVEL of max', launch(undefined, { model: 'haiku' }), caller('opus-5-5', 'high'), 'max', { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'max' } }],
+  ['a lower family with no effort under a max-effort caller may serve max', launch(undefined, { model: 'haiku' }), caller('opus-5-5', 'max'), 'max'],
+  ['a lower family with its effort set under a max-effort caller', launch(undefined, { model: 'haiku', effort: 'high' }), caller('opus-5-5', 'max'), 'pass'],
   ['an unknown target', launch('some-plugin:reviewer'), caller('opus-5-5', 'high'), 'unknown'],
   ['a model the ladder does not list', launch(undefined, { model: 'gpt-6' }), caller('opus-5-5', 'high'), 'unknown'],
   ['no caller route yet', launch(undefined, { model: 'opus' }), [typed('agent-cost-control')], 'unknown'],
@@ -190,6 +192,11 @@ test('the agent hook: asks outside gate runs, refuses in gate runs, one layer fo
   const control = path.join(scratch.base, 'control');
   fs.mkdirSync(control);
   try {
+    // A Toolkit helper exactly as setup renders it, written before any transcript so it is not
+    // newer than the session.
+    const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
+    const rendered = ClaudeHelperAgentRenderer.fromRepository('owner-claude').render('G1');
+    scratch.write(`config/agents/${rendered.file}`, rendered.text);
     const call = (input, extra = {}) => hook.decision({ ...scratch.input(launch('general-purpose')), ...input }, { environment: { ...scratch.environment(), AI_AGENT_TOOLKIT_CONTROL_ROOT: control, ...extra }, root: control, agent_route: { managedAgentsDirectory: scratch.managed },
       helper_policy: { managedAgentsDirectory: scratch.managed } });
     scratch.entries(caller('opus-5-5', 'high'));
@@ -211,6 +218,14 @@ test('the agent hook: asks outside gate runs, refuses in gate runs, one layer fo
     assert.match(reason(call({ tool_input: launch(undefined, { model: 'haiku', effort: 'max' }) }, gate)), /no helper runs at max effort/);
     assert.equal(decisionOf(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'low' }) }, { ...gate, CLAUDE_CODE_EFFORT_LEVEL: 'max' })), 'deny', 'an effort override at max is refused');
     assert.match(reason(call({ agent_id: 'h1', tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, gate)), /a helper cannot launch another agent/);
+    // The Toolkit preset passes its file check and then the same cost test: it runs under an Opus
+    // high lead, and is refused under a lead already on its route or at max effort.
+    assert.deepEqual(call({ tool_input: launch('toolkit-g1-helper') }, gate), {});
+    scratch.entries([{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } }, said('claude-haiku-5-5', 'xhigh')]);
+    assert.equal(reason(call({ tool_input: launch('toolkit-g1-helper') }, gate)), route.GATE_NOT_CHEAPER_REASON('toolkit-g1-helper', 'haiku-5.5/xhigh', 'haiku-5.5/xhigh'));
+    scratch.entries([{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } }, said('claude-opus-5-5', 'max')]);
+    assert.match(reason(call({ tool_input: launch(undefined, { model: 'haiku' }) }, gate)), /no helper runs at max effort/, 'an unset effort under a max lead counts as max');
+    assert.deepEqual(call({ tool_input: launch(undefined, { model: 'haiku', effort: 'high' }) }, gate), {});
     assert.match(reason(call({ tool_input: launch('Explore', { model: 'haiku', effort: 'xhigh' }) }, { TOOLKIT_GATE_ROLE: 'G2' })), /G2 review sessions launch no helpers/);
     // Without a readable transcript the lead's route is not known, so the launch is refused.
     fs.rmSync(scratch.transcript);
@@ -263,6 +278,9 @@ test('the front-matter reader reads only plain name, model and effort lines', ()
     ['an anchor', definition('a', '&m haiku')],
     ['an unclosed quote', definition('a', '"haiku')],
     ['a lone carriage return', definition('a', 'inherit\rmodel: haiku')],
+    ['a quoted model key', '---\nname: a\n"model": opus\neffort: low\n---\n'],
+    ['a single-quoted effort key', '---\nname: a\nmodel: haiku\n\'effort\': low\n---\n'],
+    ['a model key with no space after the colon', '---\nname: a\nmodel:haiku\n---\n'],
     ['not text', null],
   ]) assert.equal(readFrontMatter(text), null, why);
 });
