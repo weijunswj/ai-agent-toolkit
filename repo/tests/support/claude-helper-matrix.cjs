@@ -1,6 +1,6 @@
 'use strict';
 
-// The Claude Code launch matrix (rows A1-A26): one table for the in-process test
+// The Claude Code launch matrix (rows A1-A27): one table for the in-process test
 // (repo/tests/toolkit-claude-helper-matrix.test.cjs) and the native qualification run
 // (repo/tests/qualification/claude-helper-matrix.live.cjs). Row IDs are stable so a review can
 // tick them. Each row says how it is proved:
@@ -72,6 +72,8 @@ class ClaudeMatrixContext {
 
   // Puts the rendered helpers back and removes anything a row added.
   reset() {
+    const rendered = new Set(Object.values(this.definitions).map(({ file }) => file));
+    for (const file of fs.readdirSync(this.agentsDir)) if (!rendered.has(file)) fs.rmSync(path.join(this.agentsDir, file), { recursive: true, force: true });
     for (const { file, text } of Object.values(this.definitions)) fs.writeFileSync(path.join(this.agentsDir, file), text);
     fs.rmSync(path.join(this.repo, '.claude'), { recursive: true, force: true });
     fs.rmSync(path.join(this.repo, 'packages'), { recursive: true, force: true });
@@ -103,7 +105,8 @@ function runHook(context, event, { environment = {}, hook = AGENT_HOOK, args = [
 
 const launch = (name, extra = {}) => ({ tool_input: { subagent_type: name, description: 'matrix', prompt: 'Reply OK', ...extra } });
 const G0 = 'toolkit-g0-helper', G1 = 'toolkit-g1-helper';
-const NOT_ALLOWED = /allows only the toolkit-g0-helper and toolkit-g1-helper agents/;
+// A gate run refuses any agent not shown cheaper than the lead (with no transcript, the lead's route is not known).
+const GATE_REFUSED = /in a gate run (?:a helper must be|no helper runs at max)/;
 // A session no Toolkit launcher started: no launcher marker.
 const NO_GATE = Object.freeze({ TOOLKIT_GATE_ROLE: '' });
 const MISMATCH = /does not match the one rendered from the selected stack/;
@@ -113,23 +116,45 @@ const projectCopy = (folder, name, change) => c => {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.md`), change(fs.readFileSync(c.definitionFile(name), 'utf8')));
 };
+// A definition with this front-matter name and model line (none when model is null), in the user folder or a project folder.
+const userAgent = (name, model) => c => fs.writeFileSync(path.join(c.agentsDir, `${name}.md`), agentText(name, model));
+const projectAgent = (name, model) => c => {
+  const dir = path.join(c.repo, '.claude', 'agents');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.md`), agentText(name, model));
+};
+const agentText = (name, model) => `---\nname: ${name}\ndescription: Matrix agent.\n${model ? `model: ${model}\n` : ''}---\n\nReply OK.\n`;
+const NOT_CHEAPER = /not cheaper than this agent's opus-5\.5\/high/;
+const SKILL_FIRST = /read the agent-cost-control skill before starting a subagent/;
+// Transcripts a case can name in its `transcript` option: the lead read agent-cost-control and served
+// on Opus high, the same without the skill read, a G1 gate brief on the owner-claude stack, and the same
+// brief with a lead that served on Haiku xhigh.
+const said = { type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'high' };
+const TRANSCRIPTS = Object.freeze({
+  'skill-opus': [{ type: 'assistant', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'toolu_m', name: 'Skill', input: { skill: 'ai-agent-toolkit:agent-cost-control' } }] }, effort: 'high' }, said],
+  'opus-no-skill': [said],
+  'gate-brief': [{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } }, said],
+  'gate-brief-haiku-lead': [{ type: 'user', message: { role: 'user', content: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\n\nBuild it.' } },
+    { type: 'assistant', message: { model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'ok' }] }, effort: 'xhigh' }],
+});
+const READ = Object.freeze({ environment: NO_GATE, transcript: 'skill-opus' });
 const configureTopology = topology => c => require(path.join(SCRIPTS, 'toolkit-agent-control.cjs'))
   .configureProfile('claude-code', { topology, capacity_mode: 'root-only' }, { root: c.controlRoot });
 
 // One entry per hook case: [row, case, event, expected, reason pattern, options]. Options: `environment`,
-// `setup(context)`, `cwd(context)`, `brokenHook` (the decision module fails to load), `gate` (the
+// `setup(context)`, `cwd(context)`, `transcript` (a TRANSCRIPTS name), `brokenHook` (the decision module fails to load), `gate` (the
 // governance hook's PreToolUse event runs instead of the agent hook), `needsBirthtime`.
 const HOOK_CASES = [
-  ['A1', 'G0 lead launches toolkit-g0-helper, definition current', launch(G0), 'pass'],
-  ['A2', 'G1 lead launches toolkit-g1-helper, definition current', launch(G1), 'pass'],
-  ['A2', 'broader-native profile without a launcher binding: the Toolkit helper is allowed', launch(G1), 'pass', null, { setup: configureTopology('broader-native') }],
+  ['A1', 'G0 lead launches toolkit-g0-helper, definition current', launch(G0), 'pass', null, { transcript: 'gate-brief' }],
+  ['A2', 'G1 lead launches toolkit-g1-helper, definition current', launch(G1), 'pass', null, { transcript: 'gate-brief' }],
+  ['A2', 'broader-native profile without a launcher binding: the Toolkit helper is allowed', launch(G1), 'pass', null, { setup: configureTopology('broader-native'), transcript: 'gate-brief' }],
   ['A3', 'definition edited to another model', launch(G1), 'deny', MISMATCH, { setup: editDefinition(G1, /^model: .*$/m, 'model: claude-opus-5-5') }],
   ['A4', 'definition edited to another effort', launch(G0), 'deny', MISMATCH, { setup: editDefinition(G0, /^effort: .*$/m, 'effort: low') }],
   ['A5', 'CLAUDE_CODE_SUBAGENT_MODEL set', launch(G0), 'deny', /CLAUDE_CODE_SUBAGENT_MODEL is set/, { environment: { CLAUDE_CODE_SUBAGENT_MODEL: 'claude-opus-5-5' } }],
   ['A5', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1', launch(G0), 'deny', /CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set/, { environment: { CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
   ['A5', 'CLAUDE_CODE_EFFORT_LEVEL differs from the helper effort', launch(G0), 'deny', /CLAUDE_CODE_EFFORT_LEVEL is set to low/, { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'low' } }],
-  ['A5', 'CLAUDE_CODE_EFFORT_LEVEL equals the helper effort', launch(G0), 'pass', null, { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'xhigh' } }],
-  ['A6', 'call omits model and effort; the definition supplies them', launch(G1), 'pass'],
+  ['A5', 'CLAUDE_CODE_EFFORT_LEVEL equals the helper effort', launch(G0), 'pass', null, { environment: { CLAUDE_CODE_EFFORT_LEVEL: 'xhigh' }, transcript: 'gate-brief' }],
+  ['A6', 'call omits model and effort; the definition supplies them', launch(G1), 'pass', null, { transcript: 'gate-brief' }],
   ['A7', 'call carries a model', launch(G1, { model: 'opus' }), 'deny', /cannot override model/],
   ['A7', 'call carries an effort', launch(G1, { effort: 'low' }), 'deny', /cannot override effort/],
   ['A7', 'call carries a provider', launch(G1, { provider: 'bedrock' }), 'deny', /cannot override provider/],
@@ -138,34 +163,53 @@ const HOOK_CASES = [
   ['A12', 'definition rewritten after the session started', launch(G0), 'deny', /changed after this session started/, { needsBirthtime: true }],
   ['A13', 'resume an earlier helper', launch(G1, { resume: 'agent-1' }), 'deny', /cannot resume or fork/],
   ['A13', 'fork the conversation', launch(G1, { fork_context: true }), 'deny', /cannot resume or fork/],
-  ['A14', 'Task alias with a current definition', { tool_name: 'Task', ...launch(G1) }, 'pass'],
+  ['A14', 'Task alias with a current definition', { tool_name: 'Task', ...launch(G1) }, 'pass', null, { transcript: 'gate-brief' }],
   ['A14', 'project copy at the repository root differs', launch(G0), 'deny', /the project copy .* does not match/, { setup: projectCopy([], G0, t => t.replace('maxTurns: 50', 'maxTurns: 99')) }],
   ['A14', 'project copy between the working directory and the root differs', launch(G1), 'deny', /the project copy .*packages.* does not match/,
     { setup: c => { projectCopy(['packages'], G1, t => t.replace('maxTurns: 60', 'maxTurns: 99'))(c); fs.mkdirSync(path.join(c.repo, 'packages', 'app'), { recursive: true }); },
       cwd: c => path.join(c.repo, 'packages', 'app') }],
-  ['A14', 'plugin-scoped agent with a Toolkit name', launch(`some-plugin:${G0}`), 'deny', NOT_ALLOWED],
+  ['A14', 'plugin-scoped agent with a Toolkit name', launch(`some-plugin:${G0}`), 'deny', GATE_REFUSED],
   ['A15', 'a helper launches another agent', { agent_id: 'helper-1', agent_type: G1, ...launch(G0) }, 'deny', /a helper cannot launch another agent/],
   ['A15', 'a G2 session launches a helper', launch(G0), 'deny', /G2 review sessions launch no helpers/, { environment: { TOOLKIT_GATE_ROLE: 'G2' } }],
-  ['A17', 'built-in Explore agent', launch('Explore'), 'deny', NOT_ALLOWED],
-  ['A17', 'built-in general-purpose agent', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /requested: the default agent/],
-  ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED,
+  ['A17', 'built-in Explore agent', launch('Explore'), 'deny', GATE_REFUSED],
+  ['A17', 'built-in general-purpose agent', launch('general-purpose'), 'deny', GATE_REFUSED],
+  ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /this default \(general-purpose\) launch's route or the lead's own cannot be told/],
+  ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', GATE_REFUSED,
     { setup: configureTopology('broader-native') }],
-  ['A18', 'ungoverned folder, lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.plain, environment: NO_GATE }],
+  ['A18', 'ungoverned folder, lead launches a cheaper agent after the skill', launch('general-purpose', { model: 'haiku' }), 'pass', null, { ...READ, cwd: c => c.plain }],
+  ['A18', 'ungoverned folder, lead launches an agent with no model: it would run on the lead route, so the person is asked', launch('general-purpose'), 'ask', NOT_CHEAPER, { ...READ, cwd: c => c.plain }],
+  ['A18', 'ungoverned folder, lead has not read the skill', launch('general-purpose', { model: 'haiku' }), 'deny', SKILL_FIRST, { environment: NO_GATE, transcript: 'opus-no-skill', cwd: c => c.plain }],
   ['A18', 'ungoverned folder, a subagent launches another agent', { agent_id: 'sub-1', ...launch('general-purpose') }, 'deny', /one layer only/, { cwd: c => c.plain, environment: NO_GATE }],
   ['A18', 'ungoverned folder, broader native behaviour chosen', { agent_id: 'sub-1', ...launch('general-purpose') }, 'pass', null,
     { cwd: c => c.plain, setup: configureTopology('broader-native'), environment: NO_GATE }],
-  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent', launch('Explore'), 'pass', null, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a cheaper built-in agent', launch('Explore', { model: 'haiku' }), 'pass', null, READ],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent with no model', launch('Explore'), 'ask', NOT_CHEAPER, READ],
   ['A18', 'ENABLED repository outside a gate run, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/, { environment: NO_GATE }],
   ['A18', 'ENABLED repository outside a gate run, broader native chosen, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/,
     { environment: NO_GATE, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
-  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined, environment: NO_GATE }],
+  ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', GATE_REFUSED],
+  ['A22', 'DISABLED repository is ungoverned: the lead launches a cheaper agent after the skill', launch('general-purpose', { model: 'haiku' }), 'pass', null, { ...READ, cwd: c => c.declined }],
   ['A22', 'UNDECIDED repository counts as off: the governance gate lets the launch through', launch(G0), 'pass', null,
     { cwd: c => c.undecided, gate: true }],
   ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],
+  ['A27', 'outside a gate run, general-purpose with no model and CLAUDE_CODE_SUBAGENT_MODEL=haiku is cheaper', launch('general-purpose'), 'pass', null,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
+  ['A27', 'outside a gate run, Explore with only CLAUDE_CODE_SUBAGENT_MODEL set still inherits', launch('Explore'), 'ask', NOT_CHEAPER,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku' } }],
+  ['A27', 'outside a gate run, Explore with the model variable forced', launch('Explore'), 'pass', null,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
+  ['A27', 'outside a gate run, a fork with the model variable forced still runs on the lead route', launch('fork'), 'ask', /this fork would run on opus-5\.5\/high/,
+    { ...READ, cwd: c => c.plain, environment: { TOOLKIT_GATE_ROLE: '', CLAUDE_CODE_SUBAGENT_MODEL: 'haiku', CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' } }],
+  ['A27', 'outside a gate run, a user agent that pins sonnet', launch('matrix-reader'), 'pass', null, { ...READ, setup: userAgent('matrix-reader', 'sonnet') }],
+  ['A27', 'outside a gate run, a user agent with model inherit', launch('matrix-reader'), 'ask', NOT_CHEAPER, { ...READ, setup: userAgent('matrix-reader', 'inherit') }],
+  ['A27', 'outside a gate run, a project agent with no model outranks a user agent that pins sonnet', launch('matrix-reader'), 'ask', NOT_CHEAPER,
+    { ...READ, setup: c => { userAgent('matrix-reader', 'sonnet')(c); projectAgent('matrix-reader', null)(c); } }],
+  ['A27', 'a gate lead on the helper route starts toolkit-g1-helper: not cheaper, so refused', launch(G1), 'deny', /not cheaper than the lead's haiku-5\.5\/xhigh/, { transcript: 'gate-brief-haiku-lead' }],
+  ['A27', 'a gate lead whose transcript cannot be read starts toolkit-g1-helper: refused', launch(G1), 'deny', /cannot be told/],
+  ['A27', 'a gate lead starts a cheaper Explore', launch('Explore', { model: 'haiku', effort: 'high' }), 'pass', null, { transcript: 'gate-brief' }],
+  ['A27', 'a gate lead starts general-purpose on its own route: refused, not asked', launch('general-purpose'), 'deny', /not cheaper than the lead's opus-5\.5\/high/, { transcript: 'gate-brief' }],
 ];
 
 // How every other row is proved. Hook rows above are listed by the test, not here.
@@ -182,7 +226,7 @@ const OTHER_ROWS = Object.freeze({
 });
 // Rows whose hook case exists but whose full proof also needs a live run.
 const LIVE_TOO = Object.freeze(['A1', 'A2', 'A6', 'A7', 'A14']);
-const ROW_IDS = Object.freeze(Array.from({ length: 26 }, (_, i) => `A${i + 1}`));
+const ROW_IDS = Object.freeze(Array.from({ length: 27 }, (_, i) => `A${i + 1}`));
 
 // Runs one hook case in `context` and returns its verdict; the context is reset afterwards. `hook`
 // is the hook command file to run, such as the copy an installed plugin uses.
@@ -191,6 +235,13 @@ function runHookCase(context, [row, name, event, expected, pattern, options = {}
     options.setup?.(context);
     const cwd = options.cwd ? options.cwd(context) : context.repo;
     let input = { ...event, cwd };
+    if (options.transcript) {
+      // A fresh file per case: the hook compares helper files with the transcript's creation time,
+      // and Windows can give a recreated file of the same name its old creation time.
+      const file = path.join(context.base, `lead-${process.hrtime.bigint()}.jsonl`);
+      fs.writeFileSync(file, `${TRANSCRIPTS[options.transcript].map(entry => JSON.stringify(entry)).join('\n')}\n`);
+      input = { ...input, transcript_path: file };
+    }
     if (options.needsBirthtime) {
       const transcript = path.join(context.base, 'session.jsonl');
       fs.writeFileSync(transcript, '{}\n');
