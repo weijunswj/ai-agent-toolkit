@@ -34,6 +34,8 @@ function world({ results = {}, binding = GOVERNED, library = true, hub = null, g
     run(script, args, options) { calls.push({ script, args, options }); return { stderr: '', error: null, ...(results[script] || CLEAN[script]) }; },
     exists: () => library,
     readBinding: checkout => (checkout ? binding : null),
+    // The merged binding (the stale check's gate): the same binding when it has governance on.
+    mergedBinding: checkout => (checkout && binding?.governance === 'enabled' ? binding : null),
     readHubState: () => hub,
     git(cwd, args) { calls.push({ git: args, cwd }); return { stderr: '', error: null, ...(git ? git(args) : { status: 1, stdout: '' }) }; },
     gh(args) { calls.push({ gh: args }); return { stderr: '', error: null, ...(gh ? gh(args) : { status: 4, stdout: '', stderr: 'gh not stubbed' }) }; },
@@ -413,6 +415,7 @@ test('red: two repositories whose stale checks overlap each keep their own stamp
       run: () => ({ status: 0, stdout: attention, stderr: '', error: null }),
       exists: () => true,
       readBinding: () => ({ repository, governance: 'enabled', parents: [{ issue: 7 }] }),
+      mergedBinding: () => ({ repository, governance: 'enabled', parents: [{ issue: 7 }] }),
       readHubState: () => null,
       gh: () => { during(); return { status: 0, stdout: child, stderr: '', error: null }; },
       now: () => NOW,
@@ -436,6 +439,26 @@ test('the stale check runs only with governance on and a repository, and --skip 
   assert.deepEqual(norepo.checks.find(check => check.name === 'stale').lines, ['pass --repo <owner/name>']);
   const skipped = run(['--host', 'chat', '--checkout', '/repo', '--skip', 'stale']);
   assert.equal(skipped.calls.some(call => call.gh), false);
+});
+
+// The session-start hook starts the stale run when the merged binding (origin's default branch, cached
+// on this computer) has governance on, so the run gates on that binding too. Reading the working tree,
+// a worktree from before governance was on skipped with no stamp and no failure record, and the hook
+// started it again every 15 minutes.
+test('red: the stale check gates on the merged binding the hook starts it from, not the working tree', () => {
+  const attention = { [SCRIPTS.programme]: { status: 1, stdout: JSON.stringify({ line: 'Attention: clear', findings: [], owner_waits: [] }) } };
+  const before = world({ binding: null, stamps: {}, results: attention, gh: () => ({ status: 0, stdout: JSON.stringify(issue(60)) }) });
+  before.deps.mergedBinding = checkout => (checkout === '/repo' ? GOVERNED : null);
+  const ran = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo', '--skip', staleOnlySkip]), before.deps).checks.find(check => check.name === 'stale');
+  assert.equal(ran.state, 'ok', JSON.stringify(ran));
+  assert.equal(before.written.length, 1, 'the day is stamped, so the hook starts nothing more today');
+  assert.equal(Object.keys(before.written[0])[0], 'acme/app');
+  // A working tree that says enabled while the merged binding does not runs nothing.
+  const unmerged = world({ stamps: {}, results: attention });
+  unmerged.deps.mergedBinding = () => null;
+  const held = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo', '--skip', staleOnlySkip]), unmerged.deps).checks.find(check => check.name === 'stale');
+  assert.deepEqual(held, { name: 'stale', state: 'skipped', lines: ['governance off'] });
+  assert.equal(unmerged.calls.some(call => call.gh), false);
 });
 
 // Owner-OK closes: a merged PR whose only owed step is the owner's UAT after the agent's UAT PASSED

@@ -262,11 +262,18 @@ test('hold: without a fresh yes, or in a session the user did not start, the typ
   merged(ctx, YES, { ageMs: 25 * 60 * 60 * 1000 });
   assert.match(decide(ctx, bash(ctx, command, session)).deny, notApproved, 'a stale read');
   merged(ctx, YES);
-  assert.match(decide(ctx, bash(ctx, command, 'never-started')).deny, notApproved, 'no session-start mark');
-  assert.match(decide(ctx, bash(ctx, command, session), { TOOLKIT_GATE_ROLE: 'G1' }).deny, notApproved, 'a gate session');
-  assert.match(decide(ctx, bash(ctx, command, session), { TOOLKIT_HOST_SESSION: 'parent' }).deny, notApproved, 'started by another session');
+  // A chat that cannot record a typed approval says so, and does not ask for one there (#1233).
+  const cannotRecord = /no unused approval is recorded for owner\/a#7 from the last day, so this merge is refused, and this chat cannot record one: [^.]+\.[\s\S]*Do not ask the user to type it again in this chat/;
+  for (const [deny, why] of [
+    [decide(ctx, bash(ctx, command, 'never-started')).deny, 'no session-start mark'],
+    [decide(ctx, bash(ctx, command, session), { TOOLKIT_GATE_ROLE: 'G1' }).deny, 'a gate session'],
+    [decide(ctx, bash(ctx, command, session), { TOOLKIT_HOST_SESSION: 'parent' }).deny, 'started by another session'],
+  ]) {
+    assert.match(deny, cannotRecord, why);
+    assert.doesNotMatch(deny, /Ask the user to type/, why);
+  }
   gate.startSession({ session_id: 'resumed', source: 'resume', cwd: ctx.repo }, { registryOptions: ctx.registryOptions });
-  assert.match(decide(ctx, bash(ctx, command, 'resumed')).deny, notApproved, 'a resumed run');
+  assert.match(decide(ctx, bash(ctx, command, 'resumed')).deny, cannotRecord, 'a resumed run with no user-started origin');
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'the user\'s own fresh session still passes');
 });
 
@@ -430,7 +437,11 @@ if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnosti
   assert.equal(epochs.resumed(session), true);
   const command = `gh pr merge 7 --merge --match-head-commit ${ctx.head}`;
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'same-id user resume keeps standing authority');
-  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 8' }, options), 0, 'bare prompt rules still reject resumed runs');
+  // The user's own chat, reopened by the app, takes the typed line from the hook's own host (#1233);
+  // a caller that names no host keeps refusing it.
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 8' }, { ...options, host: null }), 0, 'no host, no resumed approval');
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 8' }, options), 1, 'the reopened chat records the typed line');
+  new hold.MergeApprovals(options).drop('owner/a', 8);
   start(session, 'resume');
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'another reconnect keeps origin');
   assert.equal(hold.check(bash(ctx, command, session), ctx.repo, options).eligible, true);
@@ -483,6 +494,120 @@ if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnosti
   assert.equal(stale.autoMergeOn, false, 'a stale read switches nothing on');
   assert.equal(stale.bindingFresh, false);
   assert.equal(stale.reason, 'binding-not-fresh');
+});
+
+// The #1233 closure matrix: one row per session state, read through the typed line, the card,
+// the card offer in a refusal and the standing answer, with the hook entry's own host. Only the
+// owner's fresh chat (S1) and the owner's chat the app reopened (S2) take an approval.
+if (HOST === 'claude-code') test('closure matrix: typed, card, offer and standing by session state', t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const registryOptions = ctx.registryOptions;
+  const start = (id, source, environment = {}, host = 'claude-code') => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment, host });
+  const legacy = id => {
+    const file = path.join(path.dirname(registryOptions.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete mark.origin;
+    fs.writeFileSync(file, JSON.stringify(mark));
+  };
+  const rows = [
+    { id: 'S1', setup: id => start(id, 'startup'), records: true },
+    { id: 'S2', setup: id => { start(id, 'startup'); start(id, 'resume'); }, records: true },
+    { id: 'S3a', setup: id => { start(id, 'startup'); start(id, 'resume', { [gate.HOST_SESSION_VARIABLE]: id }); }, reason: 'resume-from-session-shell' },
+    { id: 'S3b', setup: id => { start(id, 'startup'); start(id, 'resume', { [gate.HOST_SESSION_VARIABLE]: id }); start(id, 'resume'); }, reason: 'resume-from-session-shell' },
+    { id: 'S4a', setup: id => start(id, 'resume'), reason: 'resumed-without-user-started-origin' },
+    { id: 'S4b', setup: id => { start(id, 'startup', { TOOLKIT_GATE_ROLE: 'G1' }); start(id, 'resume'); }, reason: 'resumed-without-user-started-origin' },
+    { id: 'S5', setup: id => start(id, 'fork'), reason: 'fork' },
+    { id: 'S6', setup: id => start(id, 'startup'), environment: { TOOLKIT_GATE_ROLE: 'G1' }, reason: 'launcher-marker' },
+    { id: 'S7', setup: id => start(id, 'startup'), environment: { [gate.HOST_SESSION_VARIABLE]: 'another-session' }, reason: 'host-session-mismatch' },
+    { id: 'S8a', setup: () => {}, reason: 'no-session-mark' },
+    { id: 'S8b', setup: id => { start(id, 'startup'); legacy(id); start(id, 'resume'); }, reason: 'resumed-without-user-started-origin' },
+    { id: 'S9a', setup: id => { start(id, 'startup', {}, 'codex'); start(id, 'resume', {}, 'codex'); }, hookHost: 'codex', reason: 'resume-needs-typed-merge' },
+    { id: 'S9b', setup: id => { start(id, 'startup'); start(id, 'resume'); }, hookHost: null, reason: 'resume-needs-typed-merge' },
+  ];
+  for (const row of rows) {
+    const id = `matrix-${row.id}`;
+    row.setup(id);
+    const environment = row.environment || {};
+    const hookHost = row.hookHost === undefined ? 'claude' : row.hookHost;
+    const options = { registryOptions, environment, host: hookHost };
+    // Typed: the line counts only where the session may approve; elsewhere the note says why.
+    const typed = hold.recordPromptNote({ cwd: ctx.repo, session_id: id, prompt: 'merge 7' }, options);
+    assert.equal(typed.count, row.records ? 1 : 0, `${row.id} typed`);
+    if (row.records) assert.equal(typed.note, '', `${row.id} no note`);
+    else {
+      assert.match(typed.note, /read a merge approval for owner\/a#7 in this message but did not record it/, row.id);
+      assert.match(typed.note, /in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub/, row.id);
+      assert.match(typed.note, /Do not ask the user to type it again in this chat/, row.id);
+    }
+    new hold.MergeApprovals({ registryOptions }).drop('owner/a', 7);
+    // Card: the exact card is noted for its answer only where a tap could count.
+    const card = { cwd: ctx.repo, session_id: id, tool_name: 'AskUserQuestion', tool_use_id: `toolu_${row.id}`, tool_input: hold.mergeCard('owner/a', 7, ctx.authority) };
+    assert.equal(hold.cardAsked(card, options), Boolean(row.records) && hookHost === 'claude', `${row.id} card noted`);
+    // Offer: a merge-rules head refuses; the refusal leads with the card only where a tap counts.
+    const refusal = hold.decide(bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.authority}`, id), { registryOptions, environment, host: hookHost === null ? 'claude' : hookHost }).deny;
+    const offered = refusal.includes(`"question":"Merge owner/a#7 at ${ctx.authority.slice(0, 7)}?"`);
+    // S9b is the null-host guard for the typed route and cards; the merge itself always runs with the hook's host.
+    assert.equal(offered, Boolean(row.records) || row.id === 'S9b', `${row.id} card offered`);
+    if (!row.records && row.id !== 'S9b') {
+      assert.match(refusal, /this chat cannot record one/, row.id);
+      assert.doesNotMatch(refusal, /Ask the user to type/, row.id);
+      assert.match(refusal, /Do not ask the user to type it again in this chat/, row.id);
+    }
+    // Standing: the same session rule.
+    const standing = hold.standingAnswer(bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, id), ctx.repo, { registryOptions, environment, host: hookHost === null ? 'claude' : hookHost });
+    if (row.id !== 'S9b') assert.equal(standing.eligible, Boolean(row.records), `${row.id} standing`);
+    if (row.reason && row.id !== 'S9b') assert.equal(standing.reason, row.reason, `${row.id} standing reason`);
+  }
+});
+
+// The reopened-chat rule is for Claude Code on this computer only: a cloud session
+// (CLAUDE_CODE_REMOTE=true) reads typed lines as before, so a resumed cloud session records none
+// and gets no note, through the real hook entry too; a fresh cloud startup still records.
+if (HOST === 'claude-code') test('closure matrix, cloud: a resumed cloud session records no typed line, as before', t => {
+  const ctx = context(t, HOST);
+  const registryOptions = ctx.registryOptions;
+  const cloud = { CLAUDE_CODE_REMOTE: 'true' };
+  const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
+  const start = (id, source) => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment: cloud, host: 'claude-code' });
+  const found = () => new hold.MergeApprovals({ registryOptions }).find('owner/a', 7);
+  for (const [row, setup, records] of [
+    ['S11a fresh cloud startup', id => start(id, 'startup'), true],
+    ['S11b resumed cloud session', id => { start(id, 'startup'); start(id, 'resume'); }, false],
+  ]) {
+    const id = `cloud-${row.slice(0, 4)}`;
+    setup(id);
+    const typed = hold.recordPromptNote({ cwd: ctx.repo, session_id: id, prompt: 'merge 7' }, { registryOptions, environment: cloud, host: 'claude' });
+    assert.equal(typed.count, records ? 1 : 0, row);
+    assert.equal(typed.note, '', `${row}: no note in a cloud session`);
+    new hold.MergeApprovals({ registryOptions }).drop('owner/a', 7);
+    const said = claudeHook.respond('UserPromptSubmit', { cwd: ctx.repo, session_id: id, prompt: 'merge 7' }, { registryOptions, environment: cloud });
+    assert.equal(Boolean(found()), records, `${row} through the hook`);
+    assert.doesNotMatch(JSON.stringify(said), /did not record it/, `${row}: no note through the hook`);
+    new hold.MergeApprovals({ registryOptions }).drop('owner/a', 7);
+  }
+});
+
+// D9: in a chat that cannot approve, the refusal names that chat's reason, not the binding's; in
+// the owner's reopened chat the binding's reason stays and the card comes first (the PR 1454 shape).
+if (HOST === 'claude-code') test('a refusal leads with the chat reason where the chat cannot approve, and offers the card where it can', t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES, { ageMs: 25 * 60 * 60 * 1000 });
+  const registryOptions = ctx.registryOptions;
+  const start = (id, source, environment = {}) => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { registryOptions, environment, host: 'claude-code' });
+  start('revoked', 'startup');
+  start('revoked', 'resume', { [gate.HOST_SESSION_VARIABLE]: 'revoked' });
+  start('reopened', 'startup');
+  start('reopened', 'resume');
+  const merge = id => hold.decide(bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, id), { registryOptions, environment: {}, host: 'claude' }).deny;
+  const revoked = merge('revoked');
+  assert.match(revoked, /this chat cannot record one: a resume carried the host-session variable/);
+  assert.doesNotMatch(revoked, /binding is missing, invalid or not fresh/, 'the binding is not why this chat cannot approve');
+  assert.doesNotMatch(revoked, /Merge owner\/a#7 at/);
+  const reopened = merge('reopened');
+  assert.match(reopened, /^Toolkit: Toolkit's merge card is how the user approves this merge/);
+  assert.match(reopened, /"question":"Merge owner\/a#7 at /);
+  assert.match(reopened, /binding is missing, invalid or not fresh/);
 });
 
 test('hold: with yes, a head that changes the merge rules, or one this computer cannot read, waits for a typed merge', (t) => {
