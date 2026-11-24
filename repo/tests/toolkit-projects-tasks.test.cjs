@@ -530,11 +530,13 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.equal((nudge.match(/git clone/g) || []).length, 1);
   const guidebook = nudge.split('\n').find(line => line.startsWith('9. TOOL STEP (shell): Guidebook and controller check'));
   for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
-    '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
+    "with step 4a's fresh clone TK (clone it as step 4a says if this shell has none)",
     '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,stale,ci,handoff`', 'adding `--repo example-owner/example-repo` when step 9a applies',
     '`CONTROLLER CHECK: clear ...`: write "**Guidebook:** current" and "**Controller check:** clear", and read no further',
     '`node TK/repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects`', 'the same with `--check` in place of `--out`',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
+  const stuck = nudge.split('\n').find(line => line.startsWith('4a. TOOL STEP (shell): Stuck chats'));
+  assert.ok(stuck.includes('`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone, which steps 9 and 10 reuse)'), 'the first TK use clones it');
   assert.ok(nudge.includes('9a. Repository for step 9\'s controller check: it scans example-owner/example-repo for leftover footers, with no checkout'), 'no repository checkout hourly');
   assert.ok(nudge.includes('"SKILL COPY FAILED: <reason> | ", "CONTROLLER CHECK: <n> | "'), 'first-line prefix');
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
@@ -892,10 +894,13 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '**Programme attention before gates, finality and settling.**',
     // The guidebook refresh rewrites the library copy of the skill and the block file; it touches no task.
     '**Read it every turn**', '**One refresh, three routes.**', 'refreshes a stale or changed copy itself', 'start a cloud thread for the refresh at once', 'The daily check-in is the backstop',
-    '**BLOCK CHANGED:**', '**Missing folder:**', '`SKILL COPY FAILED`: start one fresh refresh thread', 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
+    '**BLOCK CHANGED:**', '**Missing folder:**', "`SKILL COPY FAILED`: with the user's OK, start one fresh refresh thread", 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
     '9. the guidebook:', 'coordinator: refresh the guidebook', 'the guidebook refresh brings both here', '- Projects guidebook:', "Read the guidebook's `VERSION`",
     'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. TOOL STEP (shell): Guidebook and controller check (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',
     '**Refresh routes, a missing folder and `SKILL COPY FAILED`:**', '# Web Controller for Claude Projects: guidebook refresh', '## Refreshing the guidebook copy',
+    // The tool thread's only writes, and an unswapped pointer run's guidebook fallback: a guidebook refresh and the swap label, no task path.
+    'read-only apart from the writes its steps name (the guidebook copy refresh', 'A line that ends "Until the swap: ..." comes from an unswapped pointer',
+    'End that line with " Until the swap: if the guidebook copy has no tasks/ping-run.md',
   ];
   const unguarded = [];
   for (const rel of files) {
@@ -1551,7 +1556,7 @@ test('ping rules: each invariant and matrix row is pinned in the file that state
     ['I3 one post, one fallback message', 'tasks/ping.md', 'Post exactly one line in this thread'],
     ['I3 fallback only on a failed post', 'tasks/ping.md', 'If that post fails, send the same line once as a message to the coordinator.'],
     ['I4 the ping reads only its run folder', 'tasks/ping.md', "Read nothing but this task's run folder, change nothing else"],
-    ['I5 the tool thread changes nothing', 'reference/recurring-tasks.md', 'That thread runs them read-only and replies once; it writes no receipt, memory, binding line, task or project setting.'],
+    ['I5 the tool thread changes nothing', 'reference/recurring-tasks.md', 'That thread runs them read-only apart from the writes its steps name (the guidebook copy refresh and the programme sweep), and replies once; it writes no receipt, memory, binding line, task or project setting.'],
     ['I5 the home thread as tool thread', 'reference/periodic-runs.md', 'it writes no receipt, memory, task or setting'],
     ['I6 nobody resolves a home thread', 'reference/periodic-runs.md', 'Never resolve the home thread or list it as a resolve candidate'],
     ['I7 stopped by owner is outside every path', 'SKILL.md', 'is outside every automatic path in this skill, its references and task prompts'],
@@ -1596,4 +1601,51 @@ test('every Toolkit scheduled task keeps the handoff refresh out of its session 
   }
   const hook = fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-handoff-hook.cjs'), 'utf8');
   assert.ok(hook.includes("'.toolkit-handoff-off'"), 'the hook reads the file the prompts create');
+});
+
+// A checklist step that runs `TK/...` or `--checkout R` before the step that clones it fails when run
+// literally (the hourly nudge's stuck check once used TK two steps before its clone).
+test('every Toolkit checklist clones TK and R before their first use', () => {
+  for (const name of ['hourly-nudge.md', 'daily-check-in.md']) {
+    const text = fs.readFileSync(path.join(TASKS, name), 'utf8');
+    const made = text.indexOf('https://github.com/{{toolkit_repo}} TK');
+    assert.ok(made > 0, `${name}: clones TK`);
+    for (const use of [/\bTK\//, /git -C TK\b/]) {
+      const at = text.search(use);
+      if (at >= 0) assert.ok(at > made, `${name}: ${use} after the TK clone`);
+    }
+    const first = text.indexOf('--checkout R');
+    if (first >= 0) assert.ok(first > text.indexOf('R is TK when'), `${name}: R defined before --checkout R`);
+  }
+});
+
+// An unswapped pointer's first run can meet a guidebook copy from before pings (no tasks/ping-run.md)
+// while its project additions are still in its stored prompt, so the line it posts says how to run it.
+// Only [pointer] lines carry this: the stored ping, and so every swapped task, is unchanged.
+test('ping transition: an unswapped pointer run tells the coordinator to refresh an old guidebook and where its additions are', () => {
+  for (const kind of PINGED) {
+    const loaded = tasks().expand(kind, params(kind));
+    assert.ok(loaded.includes('pointer, swap to ping | ", after any COORDINATOR BEHIND prefix.'), `${kind}: prefix order`);
+    assert.ok(loaded.includes('the project additions in the stored prompt are the coordinator\'s for this run, not yours'), `${kind}: the run ignores its old additions`);
+    assert.ok(loaded.includes('if the guidebook copy has no tasks/ping-run.md, refresh it first'), `${kind}: old guidebook falls back to a refresh`);
+    assert.ok(loaded.includes(`--additions-from ${kind} <stored prompt>`), `${kind}: this run's additions come from the stored prompt`);
+    const stored = findBlocks(pingOf(kind)).blocks[0].body;
+    assert.doesNotMatch(stored, /Until the swap|COORDINATOR BEHIND prefix\./, `${kind}: the stored ping is unchanged`);
+    assert.equal(tasks().check(kind, pingOf(kind)).state, 'current', `${kind}: a swapped ping still checks current`);
+  }
+});
+
+// Ping run wording (polish rows from the ping review): the tool thread's only writes, the fresh-fallback
+// tool thread, the setup step's session and the tier-gap check for tool steps run in another thread.
+test('ping run wording: tool-thread writes, fresh-fallback thread, setup session and tier gap read are stated', () => {
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const at = rel => fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n');
+  const writes = 'read-only apart from the writes its steps name (the guidebook copy refresh and the programme sweep)';
+  for (const rel of ['tasks/ping-run.md', 'reference/recurring-tasks.md', 'reference/periodic-runs.md']) assert.ok(at(rel).includes(writes), `${rel}: tool-thread writes`);
+  for (const rel of ['tasks/ping-run.md', 'reference/recurring-tasks.md']) assert.ok(at(rel).includes('a fresh-fallback task has no home thread'), `${rel}: fresh-fallback tool thread`);
+  const daily = at('tasks/daily-check-in.md');
+  assert.ok(daily.includes('13. Setup advice (report-only, under **Setup:**): your own (the coordinator\'s) model and effort from get_session'), 'daily step 13 session');
+  assert.ok(daily.includes('When its tool steps run in another thread (one its project additions name, or any thread for a fresh-fallback task), no reply there carries its served settings: list it under **Tasks:** as "<task name>: model and effort unverified (tool steps run in <thread name>)", no gap.'), 'daily step 8 tier gap');
+  const recurring = at('reference/recurring-tasks.md');
+  assert.doesNotMatch(recurring, /move from full prompt to pointer|not a current pointer/, 'recurring-tasks: no pointer leftovers for Toolkit tasks');
 });

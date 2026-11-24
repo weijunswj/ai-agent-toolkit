@@ -854,7 +854,7 @@ function ticketCommand(text, sessionId, tickets) {
 
 // The question as the user reads it. Nothing waits on the answer.
 const QUESTION = [
-  'Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Turn on GitHub governance (issues, records, evidence store) for this repository?',
+  "Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Turn on GitHub governance (issues, records, evidence store) for this repository? Records and evidence go to this repository's own private TRANSPORT-<repository name> store on GitHub, found or created.",
   'Reply `toolkit governance enable` or `toolkit governance disable` as a message, or just say yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.',
 ];
 
@@ -869,7 +869,7 @@ function questionText(verdict) {
 const PICKER_QUESTION = 'Turn on GitHub governance (issues, records, evidence store) for this repository?';
 const PICKER_HEADER = 'Governance';
 const PICKER_OPTIONS = Object.freeze([
-  Object.freeze({ label: 'Yes', description: 'Prepare a repository on decision through a pull request; missing setup choices follow.' }),
+  Object.freeze({ label: 'Yes', description: "Keep records and evidence in this repository's own private TRANSPORT-<repository name> store on GitHub, found or created; one more question follows." }),
   Object.freeze({ label: 'No', description: 'Prepare a repository off decision through a pull request; the coding rules still apply.' }),
   Object.freeze({ label: 'Later', description: 'Nothing is recorded, and Toolkit asks again next session.' }),
 ]);
@@ -933,7 +933,7 @@ const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click 
 const LATER_CONTEXT = 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
 // The user's yes: show the governance question bank, exactly as `toolkit governance` does.
 function enableContext() {
-  return `The user answered yes to turning on Toolkit's GitHub governance. Nothing is written yet: the governance question bank comes next, and its one setup pull request is made by Toolkit's own script. Build nothing by hand (no programme file, rules files, parent issue or evidence store), and run no other governance subcommand. ${require('./toolkit-commands.cjs').bankGuide()} Its governance row recommends Turn on, so \`all recommended\` turns it on.`;
+  return `The user answered yes to turning on Toolkit's GitHub governance. Nothing is written yet: the governance question bank comes next, and its one setup pull request is made by Toolkit's own script. Build nothing by hand (no programme file, rules files, parent issue or evidence store), and run no other governance subcommand. ${require('./toolkit-commands.cjs').bankGuide()} The bank asks only what is left, and the user's answer to it turns governance on; \`no store\` keeps it off.`;
 }
 const ANSWERED_CONTEXT = 'Toolkit: the user answered the governance question. Its proposal is pending; governance stays as merged on the default branch.';
 
@@ -1824,6 +1824,11 @@ const CLOUD_PROGRAMME_WAITS = Object.freeze({
   full: "Attention and stale check: not read in this cloud session (a cloud session does not read the programme store); both run at the next session start on the owner's computer. Controller: check them from a session on the owner's computer before closing or planning children.",
   short: "Attention and stale check: wait for the owner's computer.",
 });
+// With the attention cache but no stamp for today, the stale check alone waits.
+const CLOUD_STALE_WAITS = Object.freeze({
+  full: "Stale check: not run in this cloud session; it runs at the next session start on the owner's computer. Controller: check it from a session on the owner's computer before closing or planning children.",
+  short: "Stale check: waits for the owner's computer.",
+});
 function cloudProgrammeLines(state, registryOptions = {}, deps = {}) {
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
@@ -1835,10 +1840,13 @@ function cloudProgrammeLines(state, registryOptions = {}, deps = {}) {
       const attention = cache.sessionAttention(binding.repository, deps);
       if (attention.line) lines.push({ full: `${attention.line}.${attention.open ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`, short: null });
     }
-    const stale = staleStampLine(staleStampFor(binding.repository, deps), state.root, deps);
+    const stamp = staleStampFor(binding.repository, deps);
+    const stale = staleStampLine(stamp, state.root, deps);
     if (stale) lines.push(stale);
-    // No attention cache and no stale line to show: say where the check runs, never stay silent.
+    // No attention cache and no stale line to show: say where the check runs, never stay silent. With
+    // the cache but no stamp for today, say so for the stale check alone (today's empty stamp is clear).
     if (!cached && !stale) lines.push(CLOUD_PROGRAMME_WAITS);
+    else if (!stale && stamp?.date !== staleLocalDate(new Date(Date.parse((deps.now || (() => new Date().toISOString()))())))) lines.push(CLOUD_STALE_WAITS);
     return lines;
   } catch { return []; }
 }

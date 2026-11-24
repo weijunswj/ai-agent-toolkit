@@ -16,10 +16,11 @@ const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
 const { BankTickets } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+const governanceApp = require(path.join(scripts, 'toolkit-governance-app.cjs'));
 const SESSION = 'session-card-1';
 const SLUG = 'toolkit-test-fixture/card';
 
-function fixture(t) {
+function fixture(t, { quiet = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-card-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
@@ -35,8 +36,19 @@ function fixture(t) {
   recordMerged(repo, { registryPath, text });
   const registryOptions = { registryPath, testOnly: true };
   new gate.SessionEpochs({ registryOptions }).start(SESSION, 'startup', governance.governanceState(repo, registryOptions).repository_id);
-  return { repo, registryOptions };
+  if (!quiet) return { repo, registryOptions };
+  // Nothing left for the Toolkit defaults to do: no instruction copies, permissions current, the App set up.
+  const copy = fs.readFileSync(path.join(repo, 'AGENTS.md'), 'utf8');
+  fs.rmSync(path.join(repo, 'AGENTS.md'));
+  return { repo, registryOptions, cli: QUIET, copy };
 }
+const QUIET = Object.freeze({
+  permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }),
+  appReader: args => {
+    const kind = /\/actions\/(variables|secrets)\?/.exec(args[0])[1];
+    return { ok: true, value: { total_count: 1, [kind]: [{ name: kind === 'variables' ? governanceApp.APP.variable : governanceApp.APP.secret }] } };
+  },
+});
 
 async function run(ctx, argv, { interactive = false, answers = [] } = {}) {
   let out = ''; let err = '';
@@ -60,13 +72,16 @@ function agentsLast(out) {
   for (const paragraph of paragraphs.slice(0, -1)) assert.doesNotMatch(paragraph, /\bAgents\b|AskUserQuestion|\{"questions"/, 'no agent instruction outside it');
 }
 
-test('the bank is one typed list with every row, answered in one line, and names no card', async t => {
+test('the bank is one typed list of its two questions, answered in one line, and names no card', async t => {
   const ctx = fixture(t);
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, 'a shown bank is not a failure');
   assert.doesNotMatch(shown.out, /```|AskUserQuestion|\{"questions"|question card|tap/i);
-  for (const row of ['1.1', '1.2', '1.3', '1.4', '2.1']) assert.match(shown.out, new RegExp(`^\\| ${row.replace('.', '\\.')} \\|`, 'm'), `row ${row} is in the one list`);
-  assert.match(shown.out, /^Reply all recommended, or only your changes such as 1\.2=B\. Rows you leave out stay as they are; each change is a pull request you merge\. Say "explain 1\.4" for the full text of a row\.$/m);
+  assert.match(shown.out, /^# Toolkit governance choices - 2 questions across 1 section$/m);
+  assert.match(shown.out, /^\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|$/m);
+  assert.match(shown.out, /^\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|$/m);
+  assert.doesNotMatch(shown.out, /^\| (1\.[3-9]|2\.\d) \|/m, 'no other question');
+  assert.match(shown.out, /^Reply all recommended, or only your changes such as 1\.1=B\. Rows you leave out stay as they are; each change is a pull request you merge\. Add shards= only to change that default\. Say "explain 1\.1" for the full text of a row\.$/m);
   assert.match(shown.out, /Agents: this line is for you alone\. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop\..*never show this bank again after they reply\./);
   agentsLast(shown.out);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
@@ -75,30 +90,32 @@ test('the bank is one typed list with every row, answered in one line, and names
   assert.deepEqual(Object.keys(pending).sort(), ['at', 'bank_reference', 'epoch', 'repository_id', 'repository_mark', 'root', 'rows'], 'no card state is kept');
 });
 
-test('after the table the bank has one reply line and its Agents line; the shards details are in explain 1.4', async t => {
+test('after the table the bank lists what it does by default, then one reply line and its Agents line', async t => {
   const ctx = fixture(t);
   const { out } = await run(ctx, ['setup']);
   const tail = out.slice(out.lastIndexOf('|') + 1).trim().split(/\n\s*\n/);
   assert.equal(tail.length, 3, 'only the rows with nothing to answer, the reply line and the Agents line follow the table');
-  // Rows with nothing to answer are not in the table: they are listed as already set, with how to change each.
+  // Merge trains, parallel CI shards, the App, the instruction copies and the permissions are no
+  // questions: each line says what the answer does by default, or that it is bound.
   assert.equal(tail[0], [
-    'Already set, nothing to answer here:',
+    'Nothing to answer here:',
+    '- Merge trains: On. Bound in the merged programme file.',
+    '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
     '- Evidence store: toolkit-test-fixture/store. Bound in the merged programme file.',
     '- Parent issue: #1. Bound in the merged programme file.',
     '- Required checks: validate. Bound in the merged programme file.',
+    '- Governance App: Not checked. After your answer, Toolkit gives you one command to run yourself in your own PowerShell or terminal: you click Create on GitHub, and it saves the App\'s Client ID and key on this repository. The governance jobs on GitHub need it to open pull requests; everything else works without it.',
+    '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
+    '- Toolkit permissions (Claude Code): Outdated: 2 missing, 1 old. After your answer, Toolkit gives you one command to run yourself that brings Claude Code\'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter.',
     'To change anything bound in the merged programme file, edit .github/toolkit-programme.json in a pull request and merge it.',
   ].join('\n'));
-  assert.doesNotMatch(out, /^\| \d\.\d+ \| (Evidence store|Parent issue|Required checks) \|/m);
-  assert.match(out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI time unknown\) \|/);
-  assert.doesNotMatch(out, /1\.4 asks|More on 1\.4|Status \(nothing to answer\)|The permissions row covers/);
+  assert.doesNotMatch(out, /More on|Status \(nothing to answer\)|The permissions row covers/);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
   const reference = /Bank reference: (\S+)/.exec(out)[1];
-  const ticket = new BankTickets({ registryOptions: ctx.registryOptions }).issue(SESSION, epoch);
-  const explained = await run(ctx, ['setup', '--answers', `${reference}: explain 1.4`, '--ticket', ticket]);
+  const explained = await run(ctx, ['setup', '--answers', `${reference}: explain 1.2`]);
   assert.equal(explained.code, 0);
-  assert.match(explained.out, /^### 1\.4 Parallel CI shards$/m);
-  assert.match(explained.out, /^\*\*What this controls:\*\* Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
-  assert.match(explained.out, /^\*\*More:\*\* Yes adds a first shard list .*Yes is recommended when the last green CI run took 10 minutes or more\. Minutes: unknown, because no green CI run could be read\. Each shard adds a minute or two of setup, which a private repository pays for\.$/m);
+  assert.match(explained.out, /^### 1\.2 Task auto-merge$/m);
+  assert.match(explained.out, /^\*\*What this controls:\*\* Whether finished task pull requests merge once their review, checks and testing pass\. It applies only while governance is on\.$/m);
   assert.doesNotMatch(explained.out, /^\| 1\.1 \|/m, 'explain shows one row, never the bank');
   assert.doesNotMatch(explained.out, /\*\*(Verification|Selected):\*\*/, 'explain leaves out what only a filled-in bank needs');
   agentsLast(explained.out);
@@ -140,24 +157,23 @@ async function reply(ctx, reference, answer) {
   return run(ctx, ['setup', '--answers', `${reference}: ${answer}`, '--ticket', ticket]);
 }
 const noBank = out => assert.doesNotMatch(out, /Bank reference|^\| 1\.1 \|/m, 'the bank is not shown again');
-// Leaves the permissions row (recommended Update in this fixture) as it is.
-const KEEP = '1.5=A, 2.1=A';
+// Keeps both questions as they are.
+const KEEP = '1.1=A, 1.2=A';
 
 test('a reply that cannot be used gets one line, never the bank, and the owner\'s next own message still answers it', async t => {
-  const ctx = fixture(t);
+  const ctx = fixture(t, { quiet: true });
   const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
   for (const [answer, line] of [
     ['yes please', /^Governance question bank answer was not read\. Nothing was written\.$/m],
     ['1.12=A', /^This bank has no row 1\.12\. Nothing was written\.$/m],
-    // The evidence store is already set here, so it is no question and has no number: the six
-    // questions of section 1 end at 1.6.
-    ['1.7=A', /^This bank has no row 1\.7\. Nothing was written\.$/m],
+    // A governed repository is asked two questions, so section 1 ends at 1.2.
+    ['1.3=A', /^This bank has no row 1\.3\. Nothing was written\.$/m],
     ['explain 1.12', /^This bank has no row 1\.12\.$/m],
   ]) {
     const wrong = await reply(ctx, reference, answer);
     assert.equal(wrong.code, 0, `${answer}: waiting for the owner is not a failure`);
     assert.match(wrong.out, line, answer);
-    assert.match(wrong.out, /^Reply again with all recommended or only your changes, such as 1\.2=B\.$/m);
+    assert.match(wrong.out, /^Reply again with all recommended or only your changes, such as 1\.1=B\.$/m);
     assert.equal(wrong.out.match(/only your changes/g).length, 1, `${answer}: the reply instruction is said once`);
     noBank(wrong.out);
     agentsLast(wrong.out);
@@ -166,7 +182,7 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
   const done = await reply(ctx, reference, KEEP);
   assert.equal(done.code, 0, done.err);
   assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m);
-  assert.doesNotMatch(done.out, /Parallel CI shards/, 'a row left out says nothing');
+  assert.doesNotMatch(done.out, /Parallel CI shards/, 'a default that does nothing says nothing');
   noBank(done.out);
   agentsLast(done.out);
   // A used answer keeps the bank open for the owner's next own message (owner test of 19 Nov), with a
@@ -180,7 +196,7 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
 });
 
 test('a reply after the state changed names only the changed rows, and the owner\'s next own message answers the new state', async t => {
-  const ctx = fixture(t);
+  const ctx = fixture(t, { quiet: true });
   const binding = path.join(ctx.repo, '.github', 'toolkit-programme.json');
   const merge = text => { fs.writeFileSync(binding, text); recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath, text }); };
   // Task auto-merge turning on moves no number, so the reply names that row alone.
@@ -195,14 +211,21 @@ test('a reply after the state changed names only the changed rows, and the owner
   const current = JSON.parse((await run(ctx, ['setup', '--json'])).out).bank_reference;
   const done = await reply(ctx, current, KEEP);
   assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m, 'the next own message answers the bank as it is now');
-  // The shards question turning into a status row moves the App row from 1.5 to 1.4, so a reply to
-  // the bank shown before is never read against the new numbers.
+  // A default the answer applies is part of what was shown: a status row that changed stops the answer too.
   reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
   merge(fs.readFileSync(binding, 'utf8').replace(/\n\}\n$/, ',\n  "ci_shards": { "answer": "never" }\n}\n'));
+  const status = await reply(ctx, reference, KEEP);
+  assert.equal(status.code, 0, status.err);
+  assert.deepEqual(status.out.match(/^.* changed: now .*$/gm), ['Parallel CI shards changed: now Never ask, with nothing to answer.']);
+  noBank(status.out);
+  // A row that appears since (instruction copies left again) means only a new bank can be answered.
+  reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
+  fs.writeFileSync(path.join(ctx.repo, 'AGENTS.md'), ctx.copy);
   const moved = await reply(ctx, reference, KEEP);
   assert.equal(moved.code, 0, moved.err);
   assert.match(moved.out, /^The governance bank changed since it was shown \(rows were added, taken away or numbered differently\), so the answer was not used and nothing was written\. Type toolkit governance to see the new bank\.$/m);
   assert.doesNotMatch(moved.out, / changed: now /);
+  assert.ok(fs.existsSync(path.join(ctx.repo, 'AGENTS.md')), 'nothing was cleaned up');
   noBank(moved.out);
 });
 
@@ -219,57 +242,46 @@ test('re-arming keeps the run, the repository mark and the repository of the ban
   assert.equal(tickets(ctx).rearm(SESSION, null, { bankReference: 'x', rows: {} }), false, 'nothing is noted without a spent ticket entry');
 });
 
-test('questions are numbered without gaps whichever questions are asked, status rows have none, and rows left out stay as they are', () => {
+test('questions are numbered without gaps, status rows have none, and an answer applies the Toolkit defaults it showed', () => {
   const { governanceBankSpecs, renderGovernanceBank, parseBankAnswer, rowDigests, changedRows } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
   const state = { state: 'UNDECIDED', repository: SLUG, root: '/x' };
-  const adoption = storeChoice => ({ repository: SLUG, store: { repository: 'toolkit-test-fixture/TRANSPORT-card', create: !storeChoice }, found_store: storeChoice ? 'toolkit-test-fixture/evidence' : null,
-    store_name: 'TRANSPORT-card', store_choice: storeChoice, parent: { issue: null, create: true }, checks: [], visibility: 'private', unknown: [] });
+  const adoption = { repository: SLUG, store: { repository: 'toolkit-test-fixture/TRANSPORT-card', create: true }, found_store: null,
+    store_name: 'TRANSPORT-card', parent: { issue: null, create: true }, checks: [], visibility: 'private', unknown: [] };
   const refs = specs => Object.fromEntries(specs.map(spec => [spec.id, spec.presentation.question_ref]));
-  const asQuestion = refs(governanceBankSpecs({ state, adoption: adoption(true) }));
-  const asStatus = refs(governanceBankSpecs({ state, adoption: adoption(false) }));
-  assert.equal(asQuestion['evidence-store'], '1.4');
-  assert.equal(asQuestion['governance-app'], '1.5');
-  assert.equal(asStatus['evidence-store'], '', 'a status row has no number');
-  assert.equal(asStatus['governance-app'], '1.4', 'the next question takes the number the store left free');
-  // A reply to the bank shown before a number moved is never applied as it was: 1.5=A meant the App
-  // row there, and the store, which was 1.4, is now a status row.
-  const before = rowDigests(governanceBankSpecs({ state, adoption: adoption(true) }));
-  assert.equal(changedRows(before, governanceBankSpecs({ state, adoption: adoption(true) })).length, 0, 'the same bank changed nothing');
-  assert.equal(changedRows(before, governanceBankSpecs({ state, adoption: adoption(false) })), null);
-  // A store found for a new repository is reused by default: Keep current is recommended, and a new
-  // store is only the other choice.
-  const store = governanceBankSpecs({ state, adoption: adoption(true) }).find(spec => spec.id === 'evidence-store');
-  assert.equal(store.recommended, 'keep');
-  assert.equal(store.presentation.recommended_choice_ref, 'A');
-  assert.deepEqual(store.choices.map(choice => `${choice.presentation_ref}. ${choice.label}`), ['A. Keep current', 'B. Create a new private store']);
-  const shown = renderGovernanceBank(governanceBankSpecs({ state, adoption: adoption(false) }));
-  assert.match(shown, /^# Toolkit governance choices - 5 questions across 2 sections$/m);
-  assert.match(shown, /^Nothing to answer here:\n- Evidence store: None yet\. Toolkit creates a private TRANSPORT-card when governance turns on\.$/m);
-  assert.doesNotMatch(shown, /Status \(nothing to answer\)|Already set|\| 1\.5 \|/);
-  // Governed: the instruction copies question follows the App question (1.4), and held it is a status
-  // row with no number.
+  // Not decided yet: the answer itself turns governance on, so task auto-merge is the one question.
+  const undecided = governanceBankSpecs({ state, adoption });
+  assert.deepEqual(Object.entries(refs(undecided)).filter(([, ref]) => ref), [['task-auto-merge', '1.1']]);
+  for (const id of ['governance', 'evidence-store', 'parent-issue', 'required-checks', 'governance-app', 'permission-blocks']) assert.equal(refs(undecided)[id], '', `${id} is a status row`);
+  const shown = renderGovernanceBank(undecided);
+  assert.match(shown, /^# Toolkit governance choices - 1 question across 1 section$/m);
+  assert.match(shown, /^- Evidence store: TRANSPORT-card\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply; reply no store to keep governance off\.$/m);
+  assert.doesNotMatch(shown, /Status \(nothing to answer\)|Already set|\| 1\.2 \|/);
+  assert.equal(parseBankAnswer('all recommended', undecided, { requireBankReference: false }).governance, 'on');
+  assert.equal(parseBankAnswer('1.1=A', undecided, { requireBankReference: false }).governance, 'on', 'any answer to this bank turns governance on');
+  assert.deepEqual(parseBankAnswer('no store', undecided, { requireBankReference: false }), { noStore: true });
+  // Governed: governance and task auto-merge are the two questions; the copies are a status row.
   const governed = { state: 'ENABLED', repository: SLUG, root: '/x' };
   const withCopies = governanceBankSpecs({ state: governed, copies: { files: 2 } });
-  assert.deepEqual(withCopies.filter(spec => !spec.report_only).map(spec => spec.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1']);
-  assert.equal(refs(withCopies)['instruction-copies'], '1.5');
-  assert.deepEqual(Object.values(refs(governanceBankSpecs({ state: governed, copies: { files: 2, held: 'a cloud workflow copy is older' } }))).filter(Boolean), ['1.1', '1.2', '1.3', '1.4', '2.1']);
-  const chosen = parseBankAnswer('1.5=B', withCopies, { requireBankReference: false });
-  assert.equal(chosen.instructionCopies, 'clean');
-  assert.equal(chosen.governance, 'keep');
-  // A reply naming some rows changes only those: here turning on is recommended, yet 1.5=A leaves
-  // governance as it is. Only all recommended takes every recommendation.
-  const undecided = governanceBankSpecs({ state, adoption: adoption(true) });
-  assert.equal(undecided.find(spec => spec.id === 'governance').recommended, 'on');
-  assert.deepEqual(parseBankAnswer('1.5=A', undecided, { requireBankReference: false }), { governance: 'keep', taskAutoMerge: 'keep', mergeTrain: 'keep', governanceApp: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep' });
-  assert.equal(parseBankAnswer('all recommended', undecided, { requireBankReference: false }).governance, 'on');
+  assert.deepEqual(withCopies.filter(spec => !spec.report_only).map(spec => `${spec.presentation.question_ref} ${spec.id}`), ['1.1 governance', '1.2 task-auto-merge']);
+  assert.equal(refs(withCopies)['instruction-copies'], '');
+  // Rows left out stay as they are; the defaults the bank showed (clean up the copies, give the App
+  // and permissions commands) come with any answer that keeps governance on.
+  assert.deepEqual(parseBankAnswer('1.2=B', withCopies, { requireBankReference: false }),
+    { governance: 'keep', taskAutoMerge: 'on', store: null, governanceApp: 'setup', permissionBlocks: 'keep', instructionCopies: 'clean' });
+  assert.equal(parseBankAnswer('1.1=B', withCopies, { requireBankReference: false }).instructionCopies, 'keep', 'turning off keeps the copies');
+  assert.equal(parseBankAnswer('1.1=A', governanceBankSpecs({ state: governed, copies: { files: 2, held: 'a cloud workflow copy is older', step: 'Refresh it first.' } }), { requireBankReference: false }).instructionCopies, undefined, 'held: nothing is cleaned');
+  // A reply to a bank whose numbers moved is never applied as it was.
+  const before = rowDigests(withCopies);
+  assert.equal(changedRows(before, governanceBankSpecs({ state: governed, copies: { files: 2 } })).length, 0, 'the same bank changed nothing');
+  assert.equal(changedRows(rowDigests(undecided), withCopies), null);
 });
 
 test('in the owner\'s own terminal a reply that cannot be used gets one line and the question again, without the bank', async t => {
-  const ctx = fixture(t);
-  const result = await run(ctx, ['setup'], { interactive: true, answers: ['1.7=A', 'explain 1.2', KEEP] });
+  const ctx = fixture(t, { quiet: true });
+  const result = await run(ctx, ['setup'], { interactive: true, answers: ['1.3=A', 'explain 1.2', KEEP] });
   assert.equal(result.code, 0, result.err);
   assert.equal(result.out.split('Bank reference:').length, 2, 'the bank is printed once');
-  assert.match(result.out, /^This bank has no row 1\.7\. Nothing was written\. Reply again with all recommended or only your changes, such as 1\.2=B\.$/m);
+  assert.match(result.out, /^This bank has no row 1\.3\. Nothing was written\. Reply again with all recommended or only your changes, such as 1\.1=B\.$/m);
   assert.match(result.out, /^### 1\.2 Task auto-merge$/m);
   assert.match(result.out, /^Nothing changed: every answer keeps things as they are\.$/m);
   const gaveUp = await run(ctx, ['setup'], { interactive: true, answers: Array(10).fill('maybe') });
@@ -318,7 +330,7 @@ test('commands name the managed Toolkit checkout when this computer records one,
 // after an answer; the bank stays open for the owner's next own message after an answer, so an
 // unknown row then gets only its own line; an answer still needs the one-use ticket.
 test('explain needs no ticket before or after an answer, and an unknown row after an answer says only that', async t => {
-  const ctx = fixture(t);
+  const ctx = fixture(t, { quiet: true });
   const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
   const shown = tickets(ctx).pendingFor(SESSION, epochOf(ctx));
   const owed = out => out.trim().split(/\n\s*\n/).slice(0, -1).join('\n\n');
@@ -330,12 +342,12 @@ test('explain needs no ticket before or after an answer, and an unknown row afte
     noBank(result.out);
     agentsLast(result.out);
   };
-  await explain(`${reference}: explain 1.4`, /^### 1\.4 Parallel CI shards$/m);
+  await explain(`${reference}: explain 1.2`, /^### 1\.2 Task auto-merge$/m);
   assert.deepEqual(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), shown, 'an explain leaves the shown bank as it was');
   const done = await reply(ctx, reference, KEEP);
   assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m);
-  await explain(`${reference}: explain 1.4`, /^### 1\.4 Parallel CI shards$/m);
-  await explain('explain 1.2', /^### 1\.2 /m);
+  await explain(`${reference}: explain 1.2`, /^### 1\.2 Task auto-merge$/m);
+  await explain('explain 1.1', /^### 1\.1 /m);
   await explain(`${reference}: explain 1.9`, /^This bank has no row 1\.9\.$/m);
   const unknown = await reply(ctx, reference, '1.9=A');
   assert.equal(unknown.code, 0, unknown.err);
@@ -343,7 +355,7 @@ test('explain needs no ticket before or after an answer, and an unknown row afte
   assert.doesNotMatch(owed(unknown.out), /ticket|used|spent/i, 'an unknown row names no ticket');
   noBank(unknown.out);
   // Anything but an explain still needs the owner's live ticket, and writes nothing without it.
-  const bare = await run(ctx, ['setup', '--answers', `${reference}: 1.4=A`]);
+  const bare = await run(ctx, ['setup', '--answers', `${reference}: 1.2=A`]);
   assert.equal(bare.code, 2);
   assert.doesNotMatch(bare.out, /Nothing changed|### /);
 });
@@ -353,33 +365,23 @@ test('explain needs no ticket before or after an answer, and an unknown row afte
 // the number the owner saw (explain 1.4 gave the next row, and a row still on screen did not exist).
 // It reads the bank the owner was shown: a bank numbered differently is named as changed, never
 // explained by its new numbers; the ticket path refuses the next answer the same way.
-test('explain after an answer that renumbers the bank names the change, never another row', async t => {
+test('explain after an answer that changes the bank\'s rows names the change, never another row', async t => {
+  // The default answer cleans up the instruction copies, so their status row goes: the bank the owner
+  // was shown no longer exists, and explain names that, never a row by the new bank.
   const ctx = fixture(t);
-  const open = [];
-  ctx.cli = {
-    ciEstimator: () => ({ minutes: 25, workflow: 'CI' }), ciReaders: () => ({ ok: true }),
-    switchTransport: {
-      openCiShards: () => open,
-      publishCiShards() { const pr = { number: 5, url: `https://github.com/${SLUG}/pull/5`, head: 'a'.repeat(40) }; open.push(pr); return pr; },
-      publishSwitch: () => ({ number: 6, url: `https://github.com/${SLUG}/pull/6`, head: 'b'.repeat(40) }),
-    },
-  };
   const shown = await run(ctx, ['setup']);
   const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
-  const seen = row => (new RegExp(`^\\| ${row.replace('.', '\\.')} \\| ([^|]+?) \\|`, 'm').exec(shown.out) || [])[1];
-  assert.equal(seen('1.4'), 'Parallel CI shards');
-  const later = ['1.5', '1.6'].filter(seen);
-  assert.ok(later.length, 'a row follows the shards row');
-  const answered = await reply(ctx, reference, '1.4=B');
+  assert.match(shown.out, /^- Toolkit instruction copies: 1 file left/m);
+  const answered = await reply(ctx, reference, KEEP);
   assert.equal(answered.code, 0, answered.err);
-  assert.equal(open.length, 1, 'the answer opened the shards pull request');
+  assert.ok(!fs.existsSync(path.join(ctx.repo, 'AGENTS.md')), 'the answer cleaned up the copy');
   const moved = JSON.parse((await run(ctx, ['setup', '--json'])).out);
-  assert.notEqual(moved.bank_reference, reference, 'the bank is numbered differently now');
-  for (const row of ['1.4', ...later]) {
+  assert.notEqual(moved.bank_reference, reference, 'the bank has other rows now');
+  for (const row of ['1.1', '1.2']) {
     const result = await run(ctx, ['setup', '--answers', `${reference}: explain ${row}`]);
     assert.equal(result.code, 0, result.err);
     assert.match(result.out, /^The governance bank changed since it was shown \(rows were added, taken away or numbered differently\), so row \d\.\d as shown is not explained here and nothing was written\. Type toolkit governance to see the new bank\.$/m, `explain ${row}`);
-    assert.doesNotMatch(result.out, /^### |This bank has no row/m, `explain ${row} prints no row by the new numbers`);
+    assert.doesNotMatch(result.out, /^### |This bank has no row/m, `explain ${row} prints no row by the new bank`);
     agentsLast(result.out);
     // Without the reference in the command, the session's noted bank is the one the owner saw.
     const bare = await run(ctx, ['setup', '--answers', `explain ${row}`]);
@@ -395,12 +397,12 @@ test('explain after a row changed in place names the change, then the row', asyn
   const ctx = fixture(t);
   const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
   ctx.cli = { permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) };
-  const result = await run(ctx, ['setup', '--answers', `${reference}: explain 1.4`]);
+  const result = await run(ctx, ['setup', '--answers', `${reference}: explain 1.2`]);
   assert.equal(result.code, 0, result.err);
   const [first, changed] = result.out.trim().split('\n');
   assert.equal(first, 'The governance state changed since that bank was shown; the numbers still mean the same rows.');
-  assert.match(changed, /^2\.1 Toolkit permissions \(Claude Code\) changed: now Up to date, recommended A\. Keep current\.$/);
-  assert.match(result.out, /^### 1\.4 Parallel CI shards$/m);
+  assert.equal(changed, 'Toolkit permissions (Claude Code) changed: now Up to date, with nothing to answer.');
+  assert.match(result.out, /^### 1\.2 Task auto-merge$/m);
   agentsLast(result.out);
 });
 
@@ -412,9 +414,9 @@ test('explain after a row changed in place names the change, then the row', asyn
 test('typing toolkit governance while a bank is open asks for the bank afresh, never a reply ticket', async t => {
   const hook = require(path.join(scripts, 'toolkit-governance-hook.cjs'));
   const commands = require(path.join(scripts, 'toolkit-commands.cjs'));
-  const ctx = fixture(t);
+  const ctx = fixture(t, { quiet: true });
   const prompt = text => hook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: text, session_id: SESSION }, {
-    registryOptions: ctx.registryOptions, environment: { [gate.HOST_SESSION_VARIABLE]: SESSION }, mergeHold: { recordPrompt: () => 0 },
+    registryOptions: ctx.registryOptions, environment: { [gate.HOST_SESSION_VARIABLE]: SESSION }, mergeHold: { recordPromptNote: () => ({ count: 0, note: '' }) },
   }).hookSpecificOutput?.additionalContext || '';
   for (const phrase of ['toolkit governance', 'Governance setup.', 'refresh governance']) {
     const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
@@ -430,7 +432,7 @@ test('typing toolkit governance while a bank is open asks for the bank afresh, n
   assert.equal(prompt('toolkit governance'), commands.phraseContext('toolkit governance'));
   // Any other own message after a bank still gets its ticket.
   await run(ctx, ['setup']);
-  assert.match(prompt('1.4=A'), /--ticket [0-9a-f]{32}/);
+  assert.match(prompt('1.2=A'), /--ticket [0-9a-f]{32}/);
 });
 
 // #1373: a fresh session, no bank open yet. `setup` first reads the merged binding again; one failed

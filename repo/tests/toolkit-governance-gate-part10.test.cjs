@@ -213,6 +213,29 @@ test('red: a cloud session with the session\'s own attention cache and today\'s 
   assert.match(world.start(world.repo, {}), new RegExp(`Stale check ${today}: 1 row to answer`));
 });
 
+// With an attention cache but no stamp for today, the attention line alone left the stale check unsaid.
+test('red: a cloud session with an attention cache but no stamp for today says the stale check waits for the owner\'s computer', t => {
+  const world = cloudProgrammeWorld(t);
+  const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+  const now = new Date('2026-11-22T10:00:00.000Z');
+  cache.writeCache('example-owner/governed', { line: 'Attention: 1 new, 0 acknowledged', counts: { new: 1, acknowledged: 0 }, digest: 'd1', complete: true }, { ...world.programmeDeps, now: () => now.toISOString() });
+  const waits = /\n {2}Stale check: not run in this cloud session; it runs at the next session start on the owner's computer\. Controller: check it from a session on the owner's computer before closing or planning children\./;
+  const lineOf = text => text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
+  let repoLine = lineOf(world.start(world.repo));
+  assert.match(repoLine, /\n {2}Attention: 1 new, 0 acknowledged\./);
+  assert.match(repoLine, waits);
+  assert.doesNotMatch(repoLine, /Attention and stale check: not read/, 'the attention line is there, so only the stale check waits');
+  // A stamp from an earlier day is no stamp for today.
+  cache.writeStaleStamp('example-owner/governed', { date: '2026-11-20', at: '2026-11-20T09:00:00.000Z', rows: ['FOLD? #20 new under #1 with no Nearest child: line'] }, world.programmeDeps);
+  assert.match(lineOf(world.start(world.repo)), waits);
+  // Today's stamp with no rows is a clear check: nothing to say.
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  cache.writeStaleStamp('example-owner/governed', { date: today, at: now.toISOString(), rows: [] }, world.programmeDeps);
+  repoLine = lineOf(world.start(world.repo));
+  assert.doesNotMatch(repoLine, /Stale check/);
+  assert.deepEqual(world.started, { refresh: [], stale: [] });
+});
+
 test('a cloud session with no repository at or under its start folder gets no governance text', (t) => {
   const ctx = scratch(t);
   fs.mkdirSync(path.join(ctx.root, 'empty'));

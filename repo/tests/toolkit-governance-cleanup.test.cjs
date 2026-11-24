@@ -76,6 +76,36 @@ test('an AGENTS.md left with nothing of its own goes, with its one-line CLAUDE.m
   for (const file of ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md']) assert.equal(read(r.root, file), null, file);
 });
 
+// The global rules carry the n8n rules, so the n8n block older setups copied into AGENTS.md goes with
+// the other copies where governance is on: the owner's text stays byte for byte, a file that held only
+// the block goes with its one-line CLAUDE.md, and with governance off nothing changes.
+const N8N_BLOCK_V2 = require('../scripts/toolkit-managed-block.cjs').renderBlock({
+  source: 'repo/contracts/agent-rules/n8n-safety-router-adapter.md', name: 'N8N-AGENT-RULES-ADAPTER', version: '3.167.1',
+  body: '## n8n Safety Router\n\nUse the n8n Safety Router skill before any n8n work.',
+});
+const N8N_BLOCK_V1 = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->\n## n8n Safety Router\n\nLoad n8n-safety-router before n8n work.\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const N8N_OWN = '# Adopter rules\n\nKeep these exactly.\n';
+const N8N_CLEANUP_ROWS = [
+  ['v2 block beside own text, governance on', 'ENABLED', `${N8N_OWN}\n${N8N_BLOCK_V2}\n`, { 'AGENTS.md': N8N_OWN, 'CLAUDE.md': '@AGENTS.md\n' }],
+  ['v1 block beside own text, governance on', 'ENABLED', `${N8N_OWN}\n${N8N_BLOCK_V1}\n`, { 'AGENTS.md': N8N_OWN, 'CLAUDE.md': '@AGENTS.md\n' }],
+  ['block only, governance on', 'ENABLED', `${N8N_BLOCK_V2}\n`, { 'AGENTS.md': null, 'CLAUDE.md': null }],
+  ['v2 block beside own text, governance off', 'DISABLED', `${N8N_OWN}\n${N8N_BLOCK_V2}\n`, null],
+];
+for (const [label, state, agents, expected] of N8N_CLEANUP_ROWS) {
+  test(`the cleanup removes an older n8n block from AGENTS.md only where governance is on (${label})`, t => {
+    const r = repo(t, { 'AGENTS.md': agents, 'CLAUDE.md': '@AGENTS.md\n', '.github/toolkit-programme.json': BINDING }, state);
+    const done = cleanup.run({ root: r.root, write: true, governance: r.governance });
+    if (!expected) {
+      assert.equal(done.ok, false, label);
+      assert.equal(read(r.root, 'AGENTS.md'), agents, 'nothing changes with governance off');
+      return;
+    }
+    assert.equal(done.ok, true, done.lines.join('\n'));
+    for (const [file, text] of Object.entries(expected)) assert.equal(read(r.root, file), text, `${label}: ${file}`);
+    assert.deepEqual(cleanup.run({ root: r.root, write: false, governance: r.governance }).changes.filter(change => change.file === 'AGENTS.md'), [], 'a second run finds no n8n block');
+  });
+}
+
 test('only a governed repository is cleaned, and a broken or unreadable programme file stops it', t => {
   const off = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': BINDING }, 'DISABLED');
   const refused = cleanup.run({ root: off.root, write: true, governance: off.governance });
@@ -163,7 +193,7 @@ test('a sweep copy pinned to a Toolkit that does not know min_toolkit holds the 
   const row = specs.find(spec => spec.id === 'instruction-copies');
   assert.equal(row.report_only, true);
   assert.equal(row.current, '1 file left, cleanup held');
-  assert.match(row.recommended_text, /Not offered yet: .+ does not know min_toolkit.+\. Refresh them first$/);
+  assert.match(row.recommended_text, /Not removed yet: .+ does not know min_toolkit.+\. Refresh them first$/);
   assert.equal(bank.parseBankAnswer(`${bank.bankReference(specs)}: all recommended`, specs).instructionCopies, undefined);
 });
 
@@ -251,7 +281,7 @@ test('a governed block edited by hand is named in the preview, because those edi
 const V2_BINDING = `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/adopter', governance: 'enabled',
   parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }], store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
   required_checks: ['validate'], ci_shards: { answer: 'never' } }, null, 2)}\n`;
-const COPIES_ROW = /\| (1\.\d+) \| Toolkit instruction copies \| (\d+) files? to clean up \| A\. Keep current \| B\. Clean up \|/;
+const COPIES_ROW = /^- Toolkit instruction copies: (\d+) files? left \(Toolkit default: clean up\)\./m;
 
 // A governed fixture repository with `files` and a working-tree programme file `binding` (the merged
 // one stays version 2, so governance is on), and the owner's bank: cli(argv) and answer(reply).
@@ -291,62 +321,55 @@ function governedBank(t, files, binding = V2_BINDING) {
   return { repoDir, cli, answer };
 }
 
-test('refresh governance asks about the copies; Keep current is recommended and Clean up writes the cleanup', async t => {
+test('refresh governance shows the copies as a Toolkit default, and any answer that keeps governance on writes the cleanup', async t => {
   const own = '# Adopter rules\n';
   const { repoDir, cli, answer } = governedBank(t, { 'AGENTS.md': `${BLOCK}\n\n${own}`, 'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'] });
+  const shown = await cli(['setup']);
+  assert.equal(COPIES_ROW.exec(shown.out)?.[1], '2', shown.out);
+  assert.doesNotMatch(shown.out, /\| Toolkit instruction copies \|/, 'never a question');
 
-  const kept = await answer('all recommended');
-  const row = COPIES_ROW.exec(kept.shown.out);
-  assert.ok(row, kept.shown.out);
-  assert.equal(row[2], '2');
-  assert.equal(kept.code, 0, kept.err);
-  assert.equal(read(repoDir, 'docs/agent-playbooks/INDEX.md'), PLAYBOOKS['INDEX.md'], 'all recommended removes nothing');
-
-  const cleaned = await answer(`${row[1]}=B`);
+  const cleaned = await answer('1.2=A');
   assert.equal(cleaned.code, 0, cleaned.err);
   assert.equal(read(repoDir, 'AGENTS.md'), own, 'every byte outside the markers is kept');
   assert.equal(read(repoDir, 'docs/agent-playbooks/INDEX.md'), null);
   assert.equal(JSON.parse(read(repoDir, '.github/toolkit-programme.json')).min_toolkit, cleanup.MIN_TOOLKIT);
   assert.match(cleaned.out, /Changed in .*:\n- AGENTS\.md: remove the Toolkit block/);
   assert.match(cleaned.out, /one pull request for the owner to merge/);
-  assert.doesNotMatch((await cli(['setup'])).out, /Toolkit instruction copies \|/, 'nothing left to ask about');
+  assert.doesNotMatch((await cli(['setup'])).out, /Toolkit instruction copies/, 'nothing left to show');
 });
 
-// Broken markers never take the row away: the other copies are still offered. A programme file that
+// Broken markers never take the row away: the other copies are still cleaned. A programme file that
 // stops the cleanup after the scan shows as a status row naming why, never as nothing.
 test('the bank keeps the copies row beside broken markers, and names a programme file that stops the cleanup', async t => {
   const broken = governedBank(t, { 'AGENTS.md': BROKEN_AGENTS, 'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'] });
   const shown = await broken.cli(['setup']);
   assert.equal(shown.code, 0, shown.err);
-  assert.equal(COPIES_ROW.exec(shown.out)?.[2], '1', shown.out);
+  assert.equal(COPIES_ROW.exec(shown.out)?.[1], '1', shown.out);
 
   const v1 = '{\n  "schema": "toolkit.programme-binding.v1",\n  "repository": "toolkit-test-fixture/adopter",\n  "parent_issue": 1\n}\n';
   const old = governedBank(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n` }, v1);
   const status = await old.cli(['setup']);
   assert.equal(status.code, 0, status.err);
   assert.doesNotMatch(status.out, COPIES_ROW);
-  assert.match(status.out, /^- Toolkit instruction copies: 1 file left, cleanup cannot run\. Not offered yet: /m);
+  assert.match(status.out, /^- Toolkit instruction copies: 1 file left, cleanup cannot run\. Not removed yet: /m);
   const bank = require('../scripts/toolkit-governance-bank.cjs');
   const specs = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', merged: { store: { repository: 'owner/store' }, required_checks: [] },
     permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, copies: { files: 1, refused: 'the reason' } });
   const row = specs.find(spec => spec.id === 'instruction-copies');
-  assert.deepEqual([row.report_only, row.current, row.recommended_text], [true, '1 file left, cleanup cannot run', 'Not offered yet: the reason']);
+  assert.deepEqual([row.report_only, row.current, row.recommended_text], [true, '1 file left, cleanup cannot run', 'Not removed yet: the reason']);
 });
 
-// A Clean up answer whose write fails is not a success: the command exits 1 and says to check the
-// working tree.
-test('a Clean up answer whose write fails exits 1', async t => {
+// A cleanup whose write fails is not a success: the command exits 1 and says to check the working tree.
+test('a cleanup whose write fails exits 1', async t => {
   const { repoDir, answer } = governedBank(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, 'docs/agent-playbooks/INDEX.md': PLAYBOOKS['INDEX.md'] });
-  const shown = await answer('all recommended');
-  const row = COPIES_ROW.exec(shown.shown.out);
-  assert.ok(row, shown.shown.out);
   const rmSync = fs.rmSync;
   const target = path.resolve(repoDir, 'docs', 'agent-playbooks', 'INDEX.md');
   t.mock.method(fs, 'rmSync', (file, ...rest) => {
     if (path.resolve(String(file)) === target) throw Object.assign(new Error('refused by the test'), { code: 'EPERM' });
     return rmSync(file, ...rest);
   });
-  const failed = await answer(`${row[1]}=B`);
+  const failed = await answer('all recommended');
+  assert.ok(COPIES_ROW.exec(failed.shown.out), failed.shown.out);
   assert.equal(failed.code, 1, failed.out);
   assert.match(failed.out, /The instruction copies could not be cleaned up \(EPERM\)\. Check the working tree with git status before committing anything\./);
 });
