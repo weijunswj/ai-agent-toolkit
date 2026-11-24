@@ -281,7 +281,7 @@ test('the key is bound to the exact text, and link definitions that stay are cop
 
 // Active rows only: the page always moves RETIRED and older COMPLETED rows into archive comments,
 // and these tests count the note comments alone.
-const ACTIVE = ['OPTIONAL', 'LATER', 'NOW'];
+const ACTIVE = ['OPTIONAL', 'QUEUED', 'NOW'];
 
 // ---- The sweep --------------------------------------------------------------------------------
 

@@ -64,9 +64,9 @@
     },
     {
       "file": "repo/CONTROLLER.md",
-      "rule": "Preserve Now and Later commitments",
-      "rule_sha": "82f53dfa8ef5",
-      "covers": "The reconciler works out each child's group (Now, Later, optional) and the parent's order; it does not keep owners or commitments.",
+      "rule": "Preserve every commitment, in flight or queued",
+      "rule_sha": "6d9513fcb390",
+      "covers": "The reconciler works out each child's group (in flight or queued) and sorts the queue in work order; it does not keep owners or commitments.",
       "enforced_by": [
         {
           "kind": "reconciler",
@@ -78,8 +78,8 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Work queue:**",
-      "rule_sha": "c68195626188",
-      "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for NOW tasks nothing is moving, and BATCH_NEXT on the parent when no NOW task needs a gate lane while LATER has work (the batch is done or its next task can start); it refuses to acknowledge them and lists them first. Which tasks form the next batch, their sizes and the L half of the tail guard are the controller's judgement.",
+      "rule_sha": "0f5fd4d91aab",
+      "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for tasks in flight that nothing is moving, refuses to acknowledge them and lists them first, and keeps the QUEUED band in work order (priority, size S, all other work, marked last, dependencies held). Each task's priority and size are the controller's judgement.",
       "enforced_by": [
         {
           "kind": "reconciler",
