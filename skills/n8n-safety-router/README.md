@@ -1,5 +1,5 @@
 <!--
-Canonical Toolkit skill surface. Edit this skill folder directly.
+Canonical skill surface. Edit this skill folder directly.
 Source: skills/n8n-safety-router/README.md
 -->
 
