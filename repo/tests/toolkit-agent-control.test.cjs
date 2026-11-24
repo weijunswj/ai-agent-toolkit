@@ -139,11 +139,11 @@ test('Codex and Claude profile state is isolated', () => {
 });
 
 test('the Claude hook denies a default Agent launch in a gate run under root-only, retired direct and unbound broader-native profiles', async () => {
-  // A Toolkit launcher marks a gate run; outside one the main session launches any agent.
+  // A Toolkit launcher marks a gate run; outside one the cost check decides, and with no transcript it asks.
   const environment = { TOOLKIT_GATE_ROLE: 'G1' };
   const rootOnlyRoot = root();
   control.configureProfile('claude-code', rootOnly(), { root: rootOnlyRoot });
-  assert.deepEqual(hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot, environment: {} }), {}, 'no gate run');
+  assert.equal(hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot, environment: {} }).hookSpecificOutput.permissionDecision, 'ask', 'no gate run');
   const denied = hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot, environment }).hookSpecificOutput;
   assert.equal(denied.permissionDecision, 'deny');
   assert.doesNotMatch(denied.permissionDecisionReason, /toolkit-agent-control|launch-spec|direct/i);
@@ -236,15 +236,16 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
       assert.equal(output.permissionDecision, 'deny', tool);
       assert.match(output.permissionDecisionReason, /could not check this helper launch safely/);
     }
-    // The governed checkout outside a gate run: a broken install blocks nothing.
+    // The governed checkout outside a gate run: a broken install refuses nothing, but the cost check
+    // cannot show the launch is cheaper, so the person is asked.
     const ungated = call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} });
-    assert.deepEqual(JSON.parse(ungated.stdout), {}, 'no gate run');
-    // Same boundary, intact modules: the named-helper policy decides.
+    assert.equal(JSON.parse(ungated.stdout).hookSpecificOutput.permissionDecision, 'ask', 'no gate run');
+    // Same boundary, intact modules: the helper-route policy decides.
     const intact = call(null, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} }, gate);
     assert.equal(intact.status, 0, intact.stderr);
-    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
+    assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /in a gate run a helper must be shown cheaper than the lead/);
     const outside = call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });
-    assert.deepEqual(JSON.parse(outside.stdout), {}, 'ungoverned work is untouched by a broken install');
+    assert.equal(JSON.parse(outside.stdout).hookSpecificOutput.permissionDecision, 'ask', 'ungoverned work is asked, not refused, by a broken install');
     const nested = JSON.parse(call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} }).stdout);
     assert.equal(nested.hookSpecificOutput.permissionDecision, 'deny', 'a subagent launch stays refused when modules are missing');
     assert.match(nested.hookSpecificOutput.permissionDecisionReason, ONE_LAYER);
@@ -253,7 +254,7 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
     assert.equal(nestedIntact.status, 0, nestedIntact.stderr);
     assert.match(JSON.parse(nestedIntact.stdout).hookSpecificOutput.permissionDecisionReason, ONE_LAYER);
     const withoutPredicate = `${DECISION_MODULES},toolkit-governed-repo.cjs`;
-    assert.deepEqual(JSON.parse(call(withoutPredicate, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout), {}, 'no predicate and no launcher marker: no gate');
+    assert.equal(JSON.parse(call(withoutPredicate, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout).hookSpecificOutput.permissionDecision, 'ask', 'no predicate and no launcher marker: no gate, so the person is asked');
     // The module-failure path gives a subagent caller the same plain one-layer reason.
     const failedNested = JSON.parse(call(withoutPredicate, { tool_name: 'Agent', cwd: dir, agent_id: 'a1', tool_input: {} }).stdout).hookSpecificOutput;
     assert.equal(failedNested.permissionDecision, 'deny');

@@ -1,5 +1,43 @@
 # Toolkit Changelog
 
+## 3.178.0 (env edit keeps your typing: placeholders, notes in the file and one tab)
+
+### Changed
+
+- An empty `NAME=` line in `toolkit env edit` is a placeholder: it is skipped (nothing stored, a stored value kept), the other lines are applied, and the next tab shows it again. It no longer refuses the whole save.
+- The edit file says what happened to a refused save, or one that skipped an empty line: a status line at the top and a note for each line it is about, by line number and key name only.
+- Asking for your keys while an edit is open opens that same tab again, applying a waiting save first, instead of replacing it with a new file.
+
+### Fixed
+
+- A save in an older edit tab, such as one an editor brought back, no longer wipes what was typed there. The tab is kept with its editor copies, says it was not saved and which lines differ, and is deleted at the first "done" after a command has shown it. The 30-minute close applies a waiting save first and keeps a tab whose last save was refused.
+
+### Added
+
+- Claude Code, outside a Toolkit gate run: the agent hook refuses a main-session subagent launch until the agent has loaded the `agent-cost-control` skill in this chat (the Toolkit helper presets need no skill read), then runs it with no prompt only when it is strictly cheaper than the agent starting it: a lower model family at any effort short of max, or the same family at a lower effort. Every other launch gets Claude Code's own permission prompt naming both routes: the same route, a costlier family or effort, any max effort, a fork, a launch that inherits the agent's model, and a route the hook cannot work out (including when the check itself fails).
+- Claude Code, in a Toolkit gate run: a G0 or G1 lead may start any agent for separable work, not just the two Toolkit helpers, when it is strictly cheaper than the lead; the Toolkit helpers pass the same test after their file check. Anything else is refused with one line instead of asked, so an unattended gate never waits on an approval, and helpers still never start agents. A helper's own tool calls are no longer held to a stack helper effort.
+- The hook test pack reads a third decision, `ask` (the host shows its permission prompt), so rows can expect it.
+
+## 3.177.0 (env edit file is the only way to delete a key; Claude Code keeps agents out of the env edit folder)
+
+### Changed
+
+- `toolkit env edit` now applies each save exactly: a changed value is replaced, a new line is added and a deleted line removes its key on that save, with no question at "done". The file's `# Status:` line says which keys were removed, and "done" names any app entry that used one. A save that would remove every key is still refused; it now says to delete the last keys by hand in Windows Credential Manager.
+
+### Removed
+
+- `toolkit env remove NAME`. The edit file is the only way Toolkit deletes a key; no other command, and nothing else in Toolkit (setup, refresh, `remove toolkit`), deletes one. An edit opened by an earlier version that only marked deleted lines is applied from the file at "done".
+
+### Fixed
+
+- Tests can no longer reach the real key store: in a test run the store refuses the real `ai-agent-toolkit/env/` prefix before Windows PowerShell starts.
+- **Merge card after a PC restart:** the owner's Claude Code chat, reopened by the app, keeps its merge card however many other sessions started on this computer meanwhile. Toolkit now keeps each session's start record for 30 days after the chat last started or was reopened (up to 4,096 records) instead of only the newest 256, and a compaction or clear no longer overwrites a record it briefly cannot read.
+- **Exact reason when it cannot:** if any start of the chat found its start record missing or unreadable, the merge refusal and the typed-line note say so once the app reopens it, and name where to approve (a new chat on this computer, a direct Projects message, or the Merge button on GitHub). Before that, the standing task auto-merge note already warns.
+
+### Added
+
+- In Claude Code, a Toolkit hook refuses an agent's file reads, writes, searches and listings, and shell commands, that name the env edit folder, an edit file or the env folder as a whole, because the edit file holds your real key values. Reading the names-only manifest and running `toolkit env` commands still work.
+
 ## 3.176.0
 
 ### Added

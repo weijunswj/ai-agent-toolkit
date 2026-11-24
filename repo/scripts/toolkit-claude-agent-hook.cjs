@@ -8,6 +8,7 @@ const control = () => require('./toolkit-agent-control.cjs');
 const nativeAdapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 const governedRepo = () => require('./toolkit-governed-repo.cjs');
 const helperPolicy = () => require('./toolkit-claude-helper-policy.cjs');
+const agentRoute = () => require('./toolkit-claude-agent-route.cjs');
 
 // Normal-folder refusal for an agent launched by a subagent. It lives here, not in a decision
 // module, so the module-failure path can give the same plain reason.
@@ -54,16 +55,18 @@ function decision(input, options = {}) {
     }, authority_pins: authorityPins, context_observation: context,
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
-  // Outside a Toolkit gate run only one layer applies, in a governed repository too: the main
-  // session launches any agent with no decision, and a subagent never launches another unless the
-  // owner chose broader native behaviour outside governed repositories. A missing or unreadable
-  // profile reads as root-only, so the refusal stays. `agent_id` marks a subagent or teammate caller;
+  // Outside a Toolkit gate run only one layer applies, in a governed repository too: a subagent never
+  // launches another unless the owner chose broader native behaviour outside governed repositories,
+  // and a main-session launch goes through the cost check (toolkit-claude-agent-route.cjs): the
+  // agent-cost-control skill first, then no prompt only for a launch strictly cheaper than the
+  // caller, Claude Code's permission prompt otherwise. A missing or unreadable profile reads as root-only, so
+  // the refusal stays. `agent_id` marks a subagent or teammate caller;
   // `agent_type` alone also appears in a main session started with --agent.
   const environment = options.environment || process.env;
   const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
   const { readProfile, TOPOLOGIES } = control();
   if (!governance.governed || !gateRun(environment)) {
-    if (!input.agent_id) return {};
+    if (!input.agent_id) return agentRoute().costDecision(input, { environment, ...options.agent_route });
     return !governance.governed && readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
   }
   // The pinned binding path applies only when a launcher bound this session to a helper route
@@ -84,17 +87,22 @@ function decision(input, options = {}) {
   return new ClaudeNamedHelperPolicy({ environment, ...options.helper_policy }).decide(input, governance);
 }
 
+// Outside a gate run, a main-session launch the cost check could not decide goes to the person.
+const COULD_NOT_CHECK_ASK = Object.freeze({ hookSpecificOutput: Object.freeze({ hookEventName: 'PreToolUse', permissionDecision: 'ask',
+  permissionDecisionReason: "Toolkit could not tell this launch's route or this agent's own, so it cannot show the launch is cheaper. Allow only if you expect it to be." }) });
+
 const CHECK_FAILED_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ hookEventName: 'PreToolUse', permissionDecision: 'deny',
   permissionDecisionReason: 'Toolkit could not check this helper launch safely; do the work in this session.' }) });
 
 // After a decision failure, refuse only what a working hook could refuse: an Agent/Task call, or
 // one whose tool name is unreadable, in a gate run; elsewhere a subagent's call gets the plain
-// one-layer reason, since the profile that could lift it was not read.
+// one-layer reason, since the profile that could lift it was not read, and a main-session call gets
+// Claude Code's permission prompt, since the cost check could not show the launch is cheaper.
 function outputAfterFailure(input) {
   const toolName = String(input?.tool_name || input?.toolName || '');
   if (toolName && !/^(Agent|Task)$/.test(toolName)) return {};
   if (gateRun()) return toolName ? CHECK_FAILED_DENIAL : UNREADABLE_DENIAL;
-  return input?.agent_id ? ONE_LAYER_DENIAL : {};
+  return input?.agent_id ? ONE_LAYER_DENIAL : toolName ? COULD_NOT_CHECK_ASK : {};
 }
 
 // Optional qualification evidence: when a launcher sets TOOLKIT_HOOK_DECISION_LOG to an

@@ -43,7 +43,7 @@ test('names-only listing: the names-only listing returns names only, through a r
     return result;
   };
   const store = new WindowsCredentialStore({ prefix, spawn: slow });
-  t.after(() => { for (const name of store.list()) store.remove(name); });
+  t.after(() => { for (const name of store.list()) store.removeForEditSave(name); });
   store.writeAll(new Map([['X4_TEST_MARKER', value]]));
   const listing = new WindowsCredentialStore({ prefix, spawn: recording });
   const names = listing.list();

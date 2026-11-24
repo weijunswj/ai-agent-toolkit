@@ -99,11 +99,13 @@ Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helpe
 | Need | How Claude Code meets it |
 |---|---|
 | Hook event | `PreToolUse` with matcher `Agent\|Task`, from the plugin's `hooks.json` (the hook rows of the launch matrix in `repo/tests/support/claude-helper-matrix.cjs`) |
-| Blocking output | JSON `permissionDecision: "deny"` with a plain reason; an allowed launch returns no decision, so Claude Code's own permissions still apply |
-| Failure and timeout | The hook has `onFailure: "block"`; a decision module that fails becomes a deny in a Toolkit gate run (both are matrix rows) |
+| Blocking output | JSON `permissionDecision: "deny"` with a plain reason, or `"ask"` for Claude Code's own permission prompt; an allowed launch returns no decision, so Claude Code's own permissions still apply |
+| Failure and timeout | The hook has `onFailure: "block"`; a decision module that fails becomes a deny in a Toolkit gate run and a permission prompt for a main-session launch outside one (matrix and pack rows) |
 | Trust step | None: Claude Code has no separate trust step for plugin hooks. Setup checks that no setting turns hooks off and that the agent hook in the folder Claude Code runs refuses a test launch |
 | Helper definitions | Markdown agent files rendered from the pinned stack, looked up as Claude Code loads them: managed folder, project folders up to the repository root, user folder (a matrix row covers the order) |
 | Depth | Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` plus the hook's refusal of any launch from a helper (a matrix row) |
+| Cost outside gate runs | A main-session launch is refused until the agent read `agent-cost-control`, runs with no prompt only when strictly cheaper than the agent, and asks otherwise (`toolkit-claude-agent-route.cjs`; the outside-gate-run rows of the launch matrix) |
+| Gate-run cost | A gate lead may start any agent strictly cheaper than itself; anything else is refused with one line, never asked (the gate-run rows of the launch matrix) |
 | Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (the matrix's live rows) |
 | Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (a matrix row); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
 
