@@ -1,0 +1,159 @@
+{
+  "schema": "toolkit-hook-scope/v1",
+  "description": "Which harness each Toolkit hook belongs to, the hard rules it enforces and why it runs on each event; which shared modules are neutral policy or library code; and the mixing that existed when the rule landed (known_open, which only shrinks). Rule: repo/docs/agent-playbooks/hook-design.md, Harness-specific by default. Checked in this repository's CI by repo/scripts/check-hook-scope.cjs.",
+  "hook_files": {
+    "claude": [".claude-plugin/hooks/hooks.json", "repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json"],
+    "codex": [".codex-plugin/hooks/hooks.json", "repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json"]
+  },
+  "vocabulary": {
+    "tool_names": ["AskUserQuestion", "Agent", "Bash", "CronCreate", "CronDelete", "CronList", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "Grep", "LS", "Monitor", "MultiEdit", "NotebookEdit", "NotebookRead", "PowerShell", "Read", "RemoteTrigger", "ScheduleWakeup", "SendMessage", "Task", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "Write", "mcp__terminal__run_in_terminal", "apply_patch", "exec_command", "local_shell", "shell", "spawn_agent", "write_stdin"],
+    "env_prefixes": ["CLAUDE_", "CODEX_"],
+    "output_fields": ["hookSpecificOutput", "permissionDecision", "permissionDecisionReason", "additionalContext", "systemMessage"],
+    "harness_names": ["claude", "claude-code", "codex"]
+  },
+  "hard_rules": [
+    { "id": "merge-hold", "rule": "No merge without the owner's approval; merge text and closure checks." },
+    { "id": "push-floor", "rule": "No push to the default branch, no force push, no raw evidence-store push, no credential in a push or pull request." },
+    { "id": "issue-closure", "rule": "Closing words only when UAT allows them." },
+    { "id": "owner-only", "rule": "Agents never answer owner-only questions and never edit Toolkit user state." },
+    { "id": "gate-routes", "rule": "Coding gate sessions keep their route and stamp their verdicts." },
+    { "id": "helper-admission", "rule": "Helpers in gate runs are admitted on their route, one layer deep, and every subagent names a model or helper." }
+  ],
+  "hooks": [
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-local-bridge.cjs",
+      "rules": "harness-only",
+      "reason": "Updater, sync and install health for this computer: not a hard rule. Its hook-mode output is Claude Code's.",
+      "events": { "SessionStart": "Session start: a newer Toolkit is found and synced here, before later chats load their hooks (hooks load before this runs, so no event helps the current chat)." }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-governance-hook.cjs",
+      "rules": ["merge-hold", "push-floor", "issue-closure", "owner-only", "gate-routes"],
+      "events": {
+        "SessionStart": "Session start: this chat needs governance on or off and the governed rules before its first step, and again after compaction erases them.",
+        "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval, a governance answer or a typed command.",
+        "PreToolUse": "Before the tool runs: a merge, push, closure, owner-only answer, user-state edit or off-route gate write is refused before it happens.",
+        "PostToolUse": "Right after AskUserQuestion returns: the owner's tap on a Toolkit card is recorded from that card's own answer."
+      }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-claude-agent-hook.cjs",
+      "rules": ["helper-admission"],
+      "events": { "PreToolUse": "Before an Agent or Task launch: a gate helper off its route, a second layer or a launch naming no model is refused before it starts." }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-claude-attribution-hook.cjs",
+      "rules": ["push-floor"],
+      "events": { "PreToolUse": "Before a Bash or PowerShell call runs: AI attribution, a force push, a raw evidence-store push or a credential is stopped before the commit or push leaves." }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-programme-checkpoint-hook.cjs",
+      "rules": "harness-only",
+      "reason": "Gate custody journal and programme refresh mark: a records job, not a hard rule.",
+      "events": {
+        "PostToolUse": "Right after a shell or GitHub connector call: marks that this turn wrote to GitHub, from that call's own result.",
+        "Stop": "Turn end: the gate checkpoint journal and the programme refresh start can wait until the agent stops."
+      }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-github-footer-hook.cjs",
+      "rules": "harness-only",
+      "reason": "Cleans the cloud footer Claude Code adds to GitHub text; no other harness adds it.",
+      "events": { "PostToolUse": "Right after a shell or GitHub connector write returns: the footer GitHub sent back is cleaned from that write's own result." }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-handoff-hook.cjs",
+      "rules": "harness-only",
+      "reason": "Refreshes the Claude desktop controller's handoff snapshot.",
+      "events": { "PostToolUse": "After a tool that may change memory or instruction files; its stamps allow one check a minute and one refresh every ten minutes. The handoff snapshot is being removed (#1435)." }
+    },
+    {
+      "harness": "claude",
+      "script": "repo/scripts/toolkit-owed-check-hook.cjs",
+      "rules": "harness-only",
+      "reason": "The controller's turn-end nudge for owed findings, gate records and finished side sessions: a records job, not a hard rule.",
+      "events": { "Stop": "Turn end: owed work is only certain once the agent stops, and a nudge then still reaches the controller before the owner's next turn." }
+    },
+    {
+      "harness": "codex",
+      "script": "repo/scripts/toolkit-codex-session-start.cjs",
+      "rules": "harness-only",
+      "reason": "Codex's session start: runs the updater in-process and prints Codex's plain-text governance and catch-up lines.",
+      "events": { "SessionStart": "Session start: the update check and the governance on or off lines are needed before this chat's first step." }
+    },
+    {
+      "harness": "codex",
+      "script": "repo/scripts/toolkit-codex-helper-hook.cjs",
+      "rules": ["merge-hold", "push-floor", "issue-closure", "owner-only", "helper-admission"],
+      "events": {
+        "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval, a governance answer or a typed command.",
+        "PreToolUse": "Before the tool runs: a merge, push, closure, owner-only answer, user-state edit or off-route helper launch is refused before it happens."
+      }
+    },
+    {
+      "harness": "codex",
+      "script": "repo/scripts/toolkit-programme-checkpoint-hook.cjs",
+      "rules": "harness-only",
+      "reason": "Gate custody journal and programme refresh mark: a records job, not a hard rule.",
+      "events": {
+        "PostToolUse": "Right after a shell or GitHub connector call: marks that this turn wrote to GitHub, from that call's own result.",
+        "Stop": "Turn end: the gate checkpoint journal and the programme refresh start can wait until the agent stops."
+      }
+    }
+  ],
+  "modules": [
+    { "kind": "policy", "rules": ["merge-hold"], "reason": "The merge hold and the cloud merge-card taps it reads.", "paths": ["repo/scripts/toolkit-merge-hold.cjs", "repo/scripts/toolkit-projects-cloud.cjs"] },
+    { "kind": "policy", "rules": ["owner-only"], "reason": "Owner-only answers, user-state edits and the governance question.", "path": "repo/scripts/toolkit-governance-gate.cjs" },
+    { "kind": "policy", "rules": ["issue-closure"], "reason": "Closing references and UAT before a close.", "paths": ["repo/scripts/toolkit-issue-closure.cjs", "skills/github-program-reconciler/scripts/issue-closure.cjs"] },
+    { "kind": "policy", "rules": ["push-floor"], "reason": "Force push, evidence-store push and credential checks, and the credential formats they scan for.", "paths": ["repo/scripts/toolkit-attribution-guard.cjs", "repo/scripts/toolkit-push-check.cjs", "skills/secure-ci-cd/scripts/secret-patterns.cjs"] },
+    { "kind": "policy", "rules": ["helper-admission"], "reason": "Helper launch admission: the shared adapter core, its per-harness lanes, the helper specification and the gate contract it compiles.", "paths": ["repo/scripts/toolkit-v3-native-helper-adapter.cjs", "repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs", "repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs", "repo/scripts/toolkit-v3-helper-guard.cjs", "repo/scripts/toolkit-claude-helper-spec.cjs", "repo/scripts/toolkit-gate-contract-compiler.cjs", "repo/scripts/toolkit-stack-selection.cjs", "repo/scripts/toolkit-governed-repo.cjs"] },
+    { "kind": "library", "reason": "Reads a shell call or a typed command into plain words for the policy modules.", "paths": ["repo/scripts/toolkit-shell-call.cjs", "repo/scripts/toolkit-commands.cjs"] },
+    { "kind": "library", "reason": "Workflow YAML reader; `shell` here is the workflow step key, not a tool.", "path": "repo/scripts/toolkit-governance-protection.cjs", "not_vocabulary": { "shell": "The `shell` key of a workflow step, not a tool name." } },
+    { "kind": "library", "reason": "Governance state, binding, answers and repository-settings reads, the same for every harness.", "paths": ["repo/scripts/toolkit-governance-state.cjs", "repo/scripts/toolkit-governance-binding.cjs", "repo/scripts/toolkit-governance-bank.cjs", "repo/scripts/toolkit-governance-proposal.cjs", "repo/scripts/toolkit-governance-conformance.cjs", "repo/scripts/toolkit-governance-finish.cjs", "repo/scripts/toolkit-governance-refresh.cjs", "repo/scripts/toolkit-governance-app.cjs", "repo/scripts/toolkit-governance-ruleset.cjs", "repo/scripts/toolkit-governance-security.cjs", "repo/scripts/toolkit-question-bank.cjs", "repo/scripts/toolkit-repository-identity.cjs", "repo/scripts/toolkit-repo-catchup.cjs","repo/scripts/toolkit-auto-merge-eligible.cjs", "repo/scripts/toolkit-risk-tier.cjs", "repo/scripts/toolkit-version-at-merge.cjs", "repo/scripts/toolkit-ci-shards-offer.cjs", "repo/scripts/governed-test-shards.cjs", "repo/scripts/toolkit-cloud-workflows.cjs", "repo/scripts/toolkit-cloud-workflows-refresh.cjs", "repo/scripts/toolkit-cloud-workflows-render.cjs", "repo/scripts/toolkit-cloud-jobs.cjs", "repo/scripts/toolkit-projects-delivery.cjs"] },
+    { "kind": "library", "reason": "Programme state; `Agent` is the word in an \"Agent UAT owed\" line.", "path": "skills/github-program-reconciler/scripts/programme-state.cjs", "not_vocabulary": { "Agent": "The word in the \"Agent UAT owed\" line, not a tool name." } },
+    { "kind": "library", "reason": "Programme records, checkpoints, refresh marks and decision traces, the same for every harness.", "paths": ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs", "skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs", "skills/github-program-reconciler/scripts/programme-attention-cache.cjs", "skills/github-program-reconciler/scripts/resolve-executable.cjs", "skills/github-program-reconciler/scripts/programme-child-rows.cjs", "skills/github-program-reconciler/scripts/closing-comments.cjs", "skills/github-program-reconciler/scripts/decision-tags.cjs", "skills/github-program-reconciler/scripts/decision-trace-audit.cjs", "skills/github-program-reconciler/scripts/programme-drift.cjs", "skills/github-program-reconciler/scripts/programme-handover.cjs", "skills/github-program-reconciler/scripts/programme-page-archive.cjs", "skills/github-program-reconciler/scripts/programme-page-layout.cjs", "skills/github-program-reconciler/scripts/programme-read-cache.cjs", "skills/github-program-reconciler/scripts/decision-history.cjs", "skills/github-program-reconciler/scripts/programme-sweep-notes.cjs"] },
+    { "kind": "library", "reason": "Toolkit plumbing: version, paths, user state, update markers, managed blocks, the owner terminal and permission blocks.", "paths": ["repo/scripts/toolkit-version.cjs", "repo/scripts/toolkit-canonical-path.cjs", "repo/scripts/toolkit-user-state.cjs", "repo/scripts/toolkit-update-marker.cjs", "repo/scripts/toolkit-governance-unavailable.cjs","repo/scripts/toolkit-managed-block.cjs", "repo/scripts/owner-terminal.cjs", "repo/scripts/agent-host-markers.cjs", "repo/scripts/toolkit-permissions.cjs", "repo/scripts/toolkit-permissions-apply.cjs", "skills/secure-ci-cd/scripts/plain-text-check.cjs"] },
+    { "kind": "library", "reason": "Reads a session transcript's first lines; its Claude Code reading moves to the Claude dialect in #1474 S2 (the vocabulary check cannot see a transcript format).", "path": "repo/scripts/toolkit-transcript-head.cjs" },
+    { "kind": "library", "reason": "Finds and starts the Claude CLI for setup and review runs; no hook decision reads it.", "path": "repo/scripts/claude-process-launch.cjs" },
+    { "kind": "library", "reason": "Installers of the vendored plain-text and personal-data checks, read to compare a governed copy with its source.", "paths": ["skills/secure-ci-cd/scripts/install-plain-text-check.cjs", "skills/secure-ci-cd/scripts/install-personal-data-guard.cjs", "skills/secure-ci-cd/scripts/personal-data-guard.cjs"] }
+  ],
+  "boundaries": [
+    { "path": "repo/scripts/toolkit-local-bridge.cjs", "reason": "The updater: it keeps this computer's Toolkit, plugins and rules current for every harness, so its setup modules are harness-specific setup code, not hook decisions. Its own hook output is the two-harnesses item below until #1474 S5 gives Claude its own session-start entry over it." }
+  ],
+  "dynamic_requires": [
+    { "file": "repo/scripts/toolkit-cloud-workflows.cjs", "count": 1, "loads": ["repo/scripts/toolkit-cloud-workflows.cjs"], "reason": "Renders with the same file from the source checkout the copies are pinned to." },
+    { "file": "repo/scripts/toolkit-governance-conformance.cjs", "count": 1, "loads": ["skills/secure-ci-cd/scripts/install-plain-text-check.cjs"], "reason": "The plain-text check installer from the given Toolkit root." },
+    { "file": "repo/scripts/toolkit-governance-refresh.cjs", "count": 1, "loads": ["repo/scripts/toolkit-governance-state.cjs"], "reason": "Each worker thread runs refreshMergedBinding from the module it is given: the governance state module (tests pass a stand-in)." },
+    { "file": "repo/scripts/toolkit-cloud-workflows-refresh.cjs", "count": 1, "loads": ["skills/secure-ci-cd/scripts/install-plain-text-check.cjs", "skills/secure-ci-cd/scripts/install-personal-data-guard.cjs"], "reason": "The installer of each vendored check, from its VENDORED row." }
+  ],
+  "known_open": [
+    { "id": "two-harnesses:repo/scripts/toolkit-local-bridge.cjs", "owner": "#1474 S5 (a Claude session-start entry over the updater core)" },
+    { "id": "two-harnesses:repo/scripts/toolkit-programme-checkpoint-hook.cjs", "owner": "#1474 S5 (a Claude checkpoint entry; this file stays the Codex one until #1254)" },
+    { "id": "vocabulary:repo/scripts/toolkit-shell-call.cjs", "terms": ["'claude'", "'codex'", "Bash", "Monitor", "PowerShell", "exec_command", "local_shell", "mcp__terminal__run_in_terminal", "shell"], "owner": "#1474 S1 (Claude shell names and reading); #1254 (Codex shell names)" },
+    { "id": "vocabulary:skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs", "terms": ["Bash", "PowerShell", "exec_command", "local_shell", "shell"], "owner": "#1474 S1 (Claude shell names); #1254 (Codex shell names)" },
+    { "id": "vocabulary:repo/scripts/toolkit-governance-gate.cjs", "terms": ["'claude-code'", "AskUserQuestion", "CronCreate", "Edit", "Monitor", "MultiEdit", "NotebookEdit", "RemoteTrigger", "ScheduleWakeup", "Write", "apply_patch"], "owner": "#1474 S2 (Claude tool sets and card mode); #1254 (apply_patch)" },
+    { "id": "vocabulary:repo/scripts/toolkit-merge-hold.cjs", "terms": ["'claude'", "'claude-code'", "'codex'", "AskUserQuestion", "CLAUDE_CODE_REMOTE", "CronCreate", "RemoteTrigger", "ScheduleWakeup", "SendMessage"], "owner": "#1474 S3 (Claude deadline, resume rule, card and cloud flag); #1254 (Codex values)" },
+    { "id": "vocabulary:repo/scripts/toolkit-attribution-guard.cjs", "terms": ["hookSpecificOutput", "permissionDecision", "permissionDecisionReason"], "owner": "#1474 S3 (attribution split, neutral push decision); #1254 (the Codex call to the combined check)" },
+    { "id": "vocabulary:repo/scripts/toolkit-governance-state.cjs", "terms": ["'claude'", "'claude-code'", "'codex'"], "owner": "#1474 S3 (one Claude host id); #1254 (the Codex host id)" },
+    { "id": "vocabulary:repo/scripts/toolkit-v3-native-helper-adapter.cjs", "terms": ["'claude-code'", "'codex'", "hookSpecificOutput", "permissionDecision", "permissionDecisionReason"], "owner": "#1474 S4 (Claude output); #1254 (Codex output)" },
+    { "id": "vocabulary:repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs", "terms": ["'claude-code'", "Agent", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_EFFECTIVE_CONFIG_UNVERIFIED", "CLAUDE_EFFECTIVE_EFFORT_UNVERIFIED", "CLAUDE_MODEL_ALIAS_UNQUALIFIED", "CLAUDE_MODEL_SUBSTITUTION_UNQUALIFIED", "CLAUDE_NATIVE_ROUTE_UNSUPPORTED", "Task"], "owner": "#1474 S4 (Claude helper admission through the dialect)" },
+    { "id": "vocabulary:repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs", "terms": ["'codex'", "Agent", "CODEX_HOOK_REGISTRATION_UNVERIFIED", "CODEX_REQUIRED_HOOK_NOT_TRUSTED", "CODEX_TOOL_NAMESPACE_INVALID", "spawn_agent"], "owner": "#1254 (Codex helper lane)" },
+    { "id": "vocabulary:repo/scripts/toolkit-v3-helper-guard.cjs", "terms": ["'claude-code'", "'codex'", "Agent", "spawn_agent"], "owner": "#1474 S4 (Agent); #1254 (spawn_agent)" },
+    { "id": "vocabulary:repo/scripts/toolkit-claude-helper-spec.cjs", "terms": ["Agent", "Bash", "Edit", "Glob", "Grep", "NotebookEdit", "PowerShell", "Read", "Task", "Write"], "owner": "#1474 S4 (the Claude helper specification leaves the shared path)" },
+    { "id": "vocabulary:repo/scripts/toolkit-governance-binding.cjs", "terms": ["CLAUDE_CODE_REMOTE"], "owner": "#1474, no planned slice yet (found by the S0 require graph): the Claude cloud flag belongs in the Claude dialect" },
+    { "id": "vocabulary:skills/github-program-reconciler/scripts/programme-state.cjs", "terms": ["'claude-code'"], "owner": "#1474, no planned slice yet (found by the S0 require graph): the Claude Code session-id shape belongs in the Claude dialect" },
+    { "id": "vocabulary:repo/scripts/agent-host-markers.cjs", "terms": ["'claude-code'", "'codex'", "CLAUDE_CODE_ENTRYPOINT", "CODEX_CI", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_THREAD_ID"], "owner": "#1474, no planned slice yet (found by the S0 require graph); #1254 (Codex markers)" },
+    { "id": "vocabulary:repo/scripts/toolkit-permissions.cjs", "terms": ["'claude'", "'codex'", "Bash", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PowerShell"], "owner": "#1474, no planned slice yet (found by the S0 require graph): setup permission blocks reached from the hooks; #1254 (Codex blocks)" },
+    { "id": "vocabulary:repo/scripts/toolkit-permissions-apply.cjs", "terms": ["'claude'", "'codex'", "CODEX_HOME"], "owner": "#1474, no planned slice yet (found by the S0 require graph): setup permission blocks reached from the hooks; #1254 (Codex blocks)" },
+    { "id": "vocabulary:repo/scripts/toolkit-governance-bank.cjs", "terms": ["'claude'", "'codex'"], "owner": "#1474, no planned slice yet (found in G2 round 1): app names by harness; #1254 (Codex name)" },
+    { "id": "vocabulary:repo/scripts/toolkit-governance-conformance.cjs", "terms": ["'codex'"], "owner": "#1254 (the Codex hooks.json conformance row)" },
+    { "id": "vocabulary:repo/scripts/claude-process-launch.cjs", "terms": ["'claude'", "CLAUDE_CLI_PATH", "CLAUDE_TOOLKIT_CLAUDE_CLI"], "owner": "#1474, no planned slice yet (found in G2 round 1): the Claude CLI launcher sits on the shared path" }
+  ]
+}
