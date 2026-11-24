@@ -311,9 +311,10 @@ test('O-15 a top-level controller is stopped the same in the desktop app and a p
     assert.match(result.output.reason, new RegExp(`Gate launches with no gate-session record \\(1\\):\\n- G1 "Gate 1": session_id ${CHILD(1)}`), shape.name);
     assert.equal(/Finished side sessions, not archived/.test(result.output.reason), shape.side, shape.name);
     assert.doesNotMatch(result.output.reason, /could not read everything/, shape.name);
-    // The real hook process, with only the shape's host variables (none of this test run's own).
+    // The real hook process, with only the shape's host variables: none of this run's own Claude
+    // variables or launcher marks (the test runner's own settings, such as its clock offset, stay).
     const live = shape.setup(fixture(t).launch(1).writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(Date.now() - 5 * HOUR) }]));
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:CLAUDE|TOOLKIT_)/i.test(key)));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^CLAUDE/i.test(key) && !LAUNCHER_MARKERS.includes(key)));
     Object.assign(env, { HOME: live.home, USERPROFILE: live.home, LOCALAPPDATA: path.join(live.dir, 'local'), TOOLKIT_GOVERNANCE_OFFLINE: '1' }, shape.env);
     const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'cli-session-3', transcript_path: live.transcript, cwd: live.work, stop_hook_active: false });
     const run = childProcess.spawnSync(process.execPath, [HOOK], { input, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
