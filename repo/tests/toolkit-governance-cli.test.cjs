@@ -21,6 +21,7 @@ const plainTextInstaller = require(path.join(scripts, '..', '..', 'skills', 'sec
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const migration = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
+const bindingCache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 
@@ -83,7 +84,7 @@ const WORKFLOW = [
   '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          TEST_LEGS: ${{ toJSON(needs) }}', '        run: node repo/scripts/run-tests.cjs --verify-ci s', '',
 ].join('\n');
 
-async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE, securityWriter = null } = {}) {
+async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, refresh = () => ({ refreshed: false, error: 'offline' }), rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE, securityWriter = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -94,7 +95,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
     registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' },
     // Fixture origins do not exist: discovery and the status refresh never reach GitHub here.
     discoveryGh: () => ({ ok: false, reason: 'offline' }),
-    refresh: () => ({ refreshed: false, error: 'offline' }),
+    refresh,
     rulesetReader,
     protectionReader,
     securityReader,
@@ -161,6 +162,28 @@ function treeDigest(dir) {
   walk(dir);
   return out;
 }
+
+// On 23 Nov 2026 status gave read-timed-out after about 7 s: each git call of the binding read gets
+// 5 s, and the fetch of the default branch alone took 3.7 to 4.8 s on the controller's computer, so one
+// slow fetch held every controller programme command. A timed-out read is read once more with the
+// longer budget the bank already used; any other failure is not.
+test('status reads the merged binding once more with a longer budget when the first read ran out of time', async t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'status-timeout');
+  const budgets = [];
+  const slowThenFine = (cwd, budget) => { budgets.push(budget || null); return budgets.length === 1 ? { refreshed: false, error: 'read-timed-out' } : { refreshed: true, error: null }; };
+  const status = JSON.parse((await run(ctx, repo, ['status', '--json'], { refresh: slowThenFine })).stdout);
+  assert.deepEqual(budgets, [null, { timeout: 3 * bindingCache.GIT_TIMEOUT_MS }]);
+  assert.equal(status.refresh, undefined, 'the second read landed, so no held refresh is reported');
+  budgets.length = 0;
+  const stillSlow = (cwd, budget) => { budgets.push(budget || null); return { refreshed: false, error: 'read-timed-out' }; };
+  const held = JSON.parse((await run(ctx, repo, ['status', '--json'], { refresh: stillSlow })).stdout);
+  assert.equal(budgets.length, 2);
+  assert.deepEqual(held.refresh, { refreshed: false, reason: 'read-timed-out' });
+  budgets.length = 0;
+  const refused = (cwd, budget) => { budgets.push(budget || null); return { refreshed: false, error: 'remote-unreachable' }; };
+  await run(ctx, repo, ['status', '--json'], { refresh: refused });
+  assert.deepEqual(budgets, [null], 'only a read that ran out of time is read again');
+});
 
 test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   const ctx = scratch(t);

@@ -905,7 +905,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '**Programme attention before gates, finality and settling.**',
     // The guidebook refresh rewrites the library copy of the skill and the block file; it touches no task.
     '**Read it every turn**', '**One refresh, three routes.**', 'refreshes a stale or changed copy itself', 'start a cloud thread for the refresh at once', 'The daily check-in is the backstop',
-    '**BLOCK CHANGED:**', '**Missing folder:**', '`SKILL COPY FAILED`: start one fresh refresh thread', 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
+    '**BLOCK CHANGED:**', '**Missing folder:**', "`SKILL COPY FAILED`: with the user's OK, start one fresh refresh thread", 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
     '9. the guidebook:', 'coordinator: refresh the guidebook', 'the guidebook refresh brings both here', '- Projects guidebook:', "Read the guidebook's `VERSION`",
     'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. TOOL STEP (shell): Guidebook and controller check (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',
     '**Refresh routes, a missing folder and `SKILL COPY FAILED`:**', '# Web Controller for Claude Projects: guidebook refresh', '## Refreshing the guidebook copy',

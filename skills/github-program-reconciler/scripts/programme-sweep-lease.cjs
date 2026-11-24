@@ -23,6 +23,12 @@ const state = require('./programme-state.cjs');
 const TTL_MS = 20 * 60 * 1000;
 const RENEW_BEFORE_MS = 10 * 60 * 1000;
 const STREAK_FINDING = 3;
+// Reads and writes a release makes before it leaves the lease to run out, with a pause before each new
+// try that grows by RELEASE_PAUSE_MS, so a store branch that other writers are moving can settle.
+const RELEASE_TRIES = 3;
+const RELEASE_PAUSE_MS = 1000;
+const PAUSE_CELL = new Int32Array(new SharedArrayBuffer(4));
+const pauseFor = ms => { Atomics.wait(PAUSE_CELL, 0, 0, ms); };
 // The stuck rule the board shows: no pass has finished for STUCK_MS, and the passes in that time read
 // fewer than STUCK_READS tasks in all. The lease's history file keeps the passes of that window.
 const STUCK_MS = 6 * 60 * 60 * 1000;
@@ -34,9 +40,9 @@ const empty = repository => ({ schema: 'toolkit.programme-sweep-lease.v1', repos
 const lost = () => new state.ProgrammeError('PASS_LOCK_LOST', 'The sweep lease changed hands; this pass stopped.');
 
 class SweepLease {
-  constructor({ store, repository, host, endsBy, nowMs = Date.now, nonce = crypto.randomBytes(16).toString('hex') }) {
+  constructor({ store, repository, host, endsBy, nowMs = Date.now, nonce = crypto.randomBytes(16).toString('hex'), pause = pauseFor }) {
     if (!Number.isFinite(endsBy)) throw new TypeError('SweepLease needs endsBy, the time the pass is killed by.');
-    Object.assign(this, { store, repository, host, endsBy, nowMs, nonce });
+    Object.assign(this, { store, repository, host, endsBy, nowMs, nonce, pause });
     this.file = store.sweepRecordPath();
     this.held = null;
     this.acquired = false;
@@ -247,30 +253,42 @@ class SweepLease {
 
   // Release with what this pass leaves for the next. Only the holder releases, with compare-and-swap
   // on the version it reads now: its own state commit or a renewal whose reply was lost may have
-  // written it since, and another holder's record is left alone.
+  // written it since, and another holder's record is left alone. A write that meets a conflict while
+  // the record is still this holder's is a race on the store branch (the state commit and other
+  // writers move it) or a read that still serves the version before the state commit: it reads again
+  // and tries up to RELEASE_TRIES times, the held version first, so the next sweep is not kept
+  // waiting for the lease to run out. `unreleased` says a release that never landed, so the caller
+  // can say so; the next sweep then reports this pass as stopped once the lease ends.
   release({ changedSince = null, completeAt = null, complete, stop = null, reason = null, busy = false, graphqlRefused = false, read = 0, left = null, history = true }) {
     if (!this.acquired) return false;
     this.acquired = false;
     this.window = null;
+    this.unreleased = null;
     return this.writing(() => {
-      const { doc, sha } = this.current();
-      if (doc.holder?.nonce !== this.nonce) { this.held = null; return false; }
-      // A pass that ended with an error (a lost lock among them) writes only the lease itself.
-      if (history) this.recordPass({ read, left, complete: Boolean(complete) });
-      const next = structuredClone(doc);
-      next.holder = null;
-      if (changedSince) next.changed_since = changedSince;
-      if (complete) { next.last_complete_at = completeAt; next.stopped_passes = 0; next.reason = null; }
-      else { next.stopped_passes += 1; next.reason = reason; }
-      if (this.reportedStop) next.unreported = null;
-      // A stop the state could not hold (a busy branch, an error exit no local note holds) waits here.
-      if (stop) next.unreported = stop;
-      next.streaks = { busy: busy ? doc.streaks.busy + 1 : 0, graphql: graphqlRefused ? doc.streaks.graphql + 1 : 0 };
-      const released = this.put(next, sha, 'programme sweep: release the lease');
+      let recorded = false;
+      for (let attempt = 0; attempt < RELEASE_TRIES; attempt += 1) {
+        if (attempt) this.pause(RELEASE_PAUSE_MS * attempt);
+        const { doc, sha } = this.current();
+        if (doc.holder?.nonce !== this.nonce) { this.held = null; return false; }
+        // A pass that ended with an error (a lost lock among them) writes only the lease itself.
+        if (history && !recorded) { recorded = true; this.recordPass({ read, left, complete: Boolean(complete) }); }
+        const next = structuredClone(doc);
+        next.holder = null;
+        if (changedSince) next.changed_since = changedSince;
+        if (complete) { next.last_complete_at = completeAt; next.stopped_passes = 0; next.reason = null; }
+        else { next.stopped_passes += 1; next.reason = reason; }
+        if (this.reportedStop) next.unreported = null;
+        // A stop the state could not hold (a busy branch, an error exit no local note holds) waits here.
+        if (stop) next.unreported = stop;
+        next.streaks = { busy: busy ? doc.streaks.busy + 1 : 0, graphql: graphqlRefused ? doc.streaks.graphql + 1 : 0 };
+        const shas = [...new Set([this.held?.sha, sha].filter(Boolean))];
+        for (const candidate of shas) if (this.put(next, candidate, 'programme sweep: release the lease')) { this.held = null; return true; }
+      }
+      this.unreleased = { expires_at: this.held?.doc?.holder?.expires_at || null };
       this.held = null;
-      return released;
+      return false;
     });
   }
 }
 
-module.exports = { SweepLease, TTL_MS, RENEW_BEFORE_MS, STREAK_FINDING, STUCK_MS, STUCK_READS, HISTORY_LIMIT };
+module.exports = { SweepLease, TTL_MS, RENEW_BEFORE_MS, STREAK_FINDING, RELEASE_TRIES, STUCK_MS, STUCK_READS, HISTORY_LIMIT };

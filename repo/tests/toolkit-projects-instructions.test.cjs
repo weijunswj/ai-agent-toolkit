@@ -249,12 +249,14 @@ test('source body, measured without the two marker lines, stays under 6200 CRLF 
   assert.doesNotMatch(text, /[^\x00-\x7f]/);
 });
 
-test('rendered instructions run cloud first and leave device facts and review caps to project lines', () => {
+test('rendered instructions start work on the device, cloud only by the owner, and leave device facts and review caps to project lines', () => {
   const source = fs.readFileSync(BODY, 'utf8');
   const rendered = owner().render();
   for (const text of [source, rendered]) {
     const lanes = text.split(/\r?\n/).find(line => line.startsWith('- Lanes:'));
-    assert.ok(lanes.includes('cloud first, the device only for work that needs it, and owner usage limits apply.'));
+    assert.ok(lanes.includes('local rc first, cloud only when the owner starts or OKs it, no fallback (work waits); owner usage limits apply.'));
+    assert.ok(text.includes('ask the owner for a cloud thread to run `toolkit-projects-guidebook.cjs --out <folder>` from fresh `main`'));
+    assert.doesNotMatch(text, /cloud first/);
     assert.doesNotMatch(text, /Hybrid by default|serial review|one gate device/);
     assert.ok(text.includes('devices, folders, device-only work, review caps, transport store'));
     assert.ok(text.includes('below this block.'));
