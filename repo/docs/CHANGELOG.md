@@ -1,5 +1,22 @@
 # Toolkit Changelog
 
+## 3.180.0 (controller handoff snapshot removed)
+
+### Added
+
+- Toolkit's own CI now checks that every hook is harness-specific: each hooks.json command has a scope row naming its harness, the hard rules it enforces and why each event is the moment that matters, no script serves two harnesses, and modules both harnesses load hold no harness tool names, environment names or output fields. The mixing that exists today is listed as known open items that may only shrink.
+- The hook design playbook gains "Harness-specific by default": per-harness entries and dialects, hard rules written once in shared policy, and the event test for choosing when a hook runs.
+
+### Removed
+
+- The controller handoff snapshot is gone, with no replacement: the `toolkit-store.cjs handoff` command, its planner script, the Claude Code after-tool hook that refreshed it, the controller check's `handoff` row and `--handoff` flag, its hook test pack rows and fixtures, and every doc, skill and Projects line that pointed to it. A successor controller works from the GitHub records, the evidence store and Projects memory. `handoff` is now refused as an unknown store command and as an unknown `--skip` name.
+- The evidence store command deletes no file at all: a deletion in a save, a move, a merge or any commit it would push is refused, with no exception for snapshot memory files.
+- Toolkit's scheduled Projects task prompts no longer start with `touch ~/.toolkit-handoff-off`, and their controller check commands no longer skip `handoff`. The daily check-in reports the stored ping and pointer prompts as outdated until they are saved again.
+
+### Changed
+
+- Every session start, in Claude Code and Codex, removes what the snapshot left on the computer: `handoff-sessions/`, `handoff-folders/`, `handoff-refresh.json` and `handoff-refresh.lock` in Toolkit's user-state folder, and an empty `~/.toolkit-handoff-off`. Only those exact names of the kind the snapshot wrote are removed; a link, a file with content in the home folder or any other name is left alone, and nothing is printed.
+
 ## 3.179.0
 
 ### Changed
