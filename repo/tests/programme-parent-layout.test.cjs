@@ -21,7 +21,7 @@ test('graph columns: the task name, its child number, one status, what it waits 
   const f = renderScaleFixture(state);
   const graph = state.renderParentBlockBody(f.parent, f.children, f.issues);
   assert.ok(graph.split('\n').includes(HEADER), graph.slice(0, 600));
-  assert.doesNotMatch(graph, /Task Description|OPTIONAL|LATER · |\| PRs? /);
+  assert.doesNotMatch(graph, /Task Description|OPTIONAL|LATER|NOW · QUEUED|\| PRs? /);
   const rows = rowsOf(graph);
   assert.equal(rows.length, 72);
   for (const row of rows) {
@@ -30,7 +30,7 @@ test('graph columns: the task name, its child number, one status, what it waits 
     const issue = Number(/^#(\d+)$/.exec(cells[1])[1]);
     const child = f.children.get(issue);
     const status = child.lifecycle === 'DONE' ? 'COMPLETED' : child.lifecycle === 'RETIRED' ? 'RETIRED'
-      : child.lifecycle === 'ACTIVE' ? (child.blockers.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS') : 'LATER';
+      : child.lifecycle === 'ACTIVE' && !child.blockers.length ? 'NOW · IN PROGRESS' : 'QUEUED';
     assert.equal(cells[2], status, row);
     assert.match(cells[0], /^Programme task \d+/, 'the Task cell is the name alone; the number has its own column');
     for (const pr of [child.pr, ...child.prs]) assert.ok(!row.includes(`#${pr.number}`), `${row} names no PR`);
@@ -139,9 +139,9 @@ test('owner waits: one owner step per task feeds the board and the list, so the 
 });
 
 test('CURRENT never says a blocked task waits on the owner: a blocker is not an owner step', () => {
-  const f = ownerFixture({ 611: child => { child.blockers = ['waits for #612']; }, 612: child => { child.lifecycle = 'WAITING_OWNER'; } });
+  const f = ownerFixture({ 611: child => { child.blockers = ['waits for #612']; child.gate = { ...child.gate, role: 'G1', state: 'ACTIVE' }; }, 612: child => { child.lifecycle = 'WAITING_OWNER'; } });
   const current = state.renderCurrentBlockBody(f.parent, f.children, new Map(), '2026-11-18T00:00:00Z');
-  assert.match(current, /^- #611 [^\n]* · blocked: waits for #612$/m);
+  assert.match(current, /^- #611 [^\n]* · G1 · blocked: waits for #612$/m, 'a blocked task under a live gate is in flight');
   assert.doesNotMatch(current, /waiting on you: blocked/);
   assert.match(current, /^- #612 [^\n]* · waiting on you: your decision$/m);
 });
@@ -149,18 +149,18 @@ test('CURRENT never says a blocked task waits on the owner: a blocker is not an 
 test('a live gate outranks a listed blocker on the board, and its return puts the task back in the queue with no blocker write', () => {
   const f = ownerFixture({ 621: child => { child.lifecycle = 'PLANNED'; child.blockers = ['waits for PR 1098']; } });
   const status = () => f.cell(621)[2];
-  assert.equal(status(), 'LATER', 'planned with no PR');
+  assert.equal(status(), 'QUEUED', 'planned with no PR');
   f.children.set(621, state.assignGate(f.children.get(621), { assignment: 'a-621-g1', role: 'G1' }));
   assert.equal(status(), 'NOW · IN PROGRESS', 'an assigned gate is work in progress, blocker or not');
   assert.equal(f.cell(621)[3], 'G1, then Blocked: waits for PR 1098');
   f.children.get(621).gate.state = 'ACTIVE';
   assert.equal(status(), 'NOW · IN PROGRESS');
   f.children.set(621, state.recordReturn(f.children.get(621), { returnId: 'r-621-g1', assignment: 'a-621-g1' }));
-  assert.equal(status(), 'NOW · QUEUED', 'the return leaves the blocker standing');
+  assert.equal(status(), 'QUEUED', 'the return leaves the blocker standing');
   assert.equal(f.cell(621)[3], 'Blocked: waits for PR 1098');
   assert.deepEqual(f.children.get(621).blockers, ['waits for PR 1098'], 'no blocker was cleared');
   f.children.get(621).lifecycle = 'PLANNED';
-  assert.equal(status(), 'LATER', 'set back to planned with no PR');
+  assert.equal(status(), 'QUEUED', 'set back to planned with no PR');
 });
 
 // A lane wait is one blocker starting `Queued in NOW:`: the task waits only for a free gate lane.
@@ -184,7 +184,7 @@ test('assign drops the lane wait in the same write, keeps every other blocker, a
   Object.assign(f.parent.fence, { holder_session: writer.session, holder_prefix: writer.prefix });
   const step = (issue, change) => f.children.set(issue, change(f.children.get(issue)));
   const board = issue => `${f.cell(issue)[2]} | ${f.cell(issue)[3]}`;
-  assert.equal(board(641), `NOW · QUEUED | Blocked: ${LANE_WAIT}`, 'control: the lane wait queues the task');
+  assert.equal(board(641), `QUEUED | Blocked: ${LANE_WAIT}`, 'control: the lane wait queues the task');
   step(641, child => state.assignGate(child, { assignment: 'g2-641', role: 'G2' }));
   assert.deepEqual(f.children.get(641).blockers, [], 'assign dropped the lane wait');
   assert.equal(board(641), 'NOW · IN PROGRESS | G2');
@@ -254,13 +254,13 @@ test('a lane wait written after the gate ends, or around an interrupted gate, qu
   step(child => state.recordReturn(child, { returnId: 'g0-661.r1', assignment: 'g0-661' }));
   step(child => state.consumeReturn(child, { returnId: 'g0-661.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }));
   f.children.get(661).blockers = [LANE_WAIT];
-  assert.equal(f.cell(661)[2], 'NOW · QUEUED', 'the controller re-queued it after the gate');
+  assert.equal(f.cell(661)[2], 'QUEUED', 'the controller re-queued it after the gate');
   step(child => state.assignGate(child, { assignment: 'g1-661', role: 'G1' }));
   f.children.get(661).blockers = [LANE_WAIT];
   assert.equal(f.cell(661)[2], 'NOW · IN PROGRESS', 'a live gate outranks a wait written meanwhile');
   step(child => state.interruptGate(child, { reason: 'the thread stopped with no result' }));
   assert.deepEqual(f.children.get(661).blockers, [LANE_WAIT], 'interrupt never drops a blocker');
-  assert.equal(f.cell(661)[2], 'NOW · QUEUED', 'an interrupted gate is not live, so the task queues again');
+  assert.equal(f.cell(661)[2], 'QUEUED', 'an interrupted gate is not live, so the task queues again');
 });
 
 // The Projects route has no executor journals: the controller's holder orders open and end every
@@ -283,28 +283,28 @@ test('the gate route a Projects controller follows: each gate ends on its return
   step(child => state.assignGate(child, { assignment: 'g1-631', role: 'G1' }));
   assert.equal(board(), 'NOW · IN PROGRESS | G1, then Blocked: waits for train 76', 'an accepted G0 needs no supersede');
   close('g1-631', null);
-  assert.equal(board(), 'NOW · QUEUED | Blocked: waits for train 76', 'the recorded return ends the G1 on the board');
+  assert.equal(board(), 'QUEUED | Blocked: waits for train 76', 'the recorded return ends the G1 on the board');
   assert.throws(() => state.consumeReturn(f.children.get(631), { returnId: 'g1-631.r1', verdict: 'ACCEPT', writer, parentDoc: f.parent }), { code: 'EVIDENCE_STALE' }, 'a G1 is accepted only after a G2 PASS');
   assert.throws(() => state.assignGate(f.children.get(631), { assignment: 'g2-631', role: 'G2' }), { code: 'ASSIGNMENT_LIVE' }, 'the waiting G1 return is still live');
   step(child => state.assignGate(child, { assignment: 'g2-631', role: 'G2', supersede: true, reason: 'G2 follows G1' }));
   assert.equal(board(), 'NOW · IN PROGRESS | G2, then Blocked: waits for train 76');
   close('g2-631');
-  assert.equal(board(), 'NOW · QUEUED | Blocked: waits for train 76', 'the accepted G2 is no longer live');
+  assert.equal(board(), 'QUEUED | Blocked: waits for train 76', 'the accepted G2 is no longer live');
   assert.ok(state.completionAccepted(f.children.get(631)), 'an accepted G2 counts toward completion');
   step(child => state.assignGate(child, { assignment: 'g1-631-r2', role: 'G1' }));
   assert.equal(board(), 'NOW · IN PROGRESS | G1, then Blocked: waits for train 76', 'a rework round after a G2 needs no supersede');
   step(child => state.interruptGate(child, { reason: 'the thread stopped with no result' }));
-  assert.equal(board(), 'NOW · QUEUED | Blocked: waits for train 76', 'an interrupted gate is not live');
+  assert.equal(board(), 'QUEUED | Blocked: waits for train 76', 'an interrupted gate is not live');
 });
 
-test('CURRENT lists tasks in progress before queued ones, whatever their priority', () => {
+test('CURRENT lists only tasks in flight: a blocked task is queued, whatever its priority', () => {
   const outcomes = [{ issue: 2, class: 'COMMITTED', parent: 7, order: 0 }, { issue: 3, class: 'COMMITTED', parent: 7, order: 1 }];
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
   const doc = (outcome, changes) => ({ ...state.newChild({ repository: 'acme/app', outcome }), lifecycle: 'ACTIVE', ...changes });
   const children = new Map([[2, doc(outcomes[0], { blockers: ['waits for #3'] })], [3, doc(outcomes[1], {})]]);
   const listed = state.renderCurrentBlockBody(parent, children, new Map(), '2026-11-18T00:00:00Z').split('\n')
     .filter(line => /^- #\d+ /.test(line)).map(line => Number(/^- #(\d+) /.exec(line)[1]));
-  assert.deepEqual(listed, [3, 2]);
+  assert.deepEqual(listed, [3]);
 });
 
 // A task whose tracked task PR merged while its issue stays open reads `NOW · CLOSE CHECK`,
@@ -349,7 +349,7 @@ test('merged and waiting on the owner with a UAT owed: the status says merged an
   assert.equal(t.board(501), `${MERGED} | Owner: UAT on PR #3501`);
 });
 
-test('merged rows sort after NOW · IN PROGRESS and before NOW · QUEUED, and the order line names the band', () => {
+test('merged rows sort after NOW · IN PROGRESS and before QUEUED, and the order line names the band', () => {
   const t = mergedFixture();
   t.merge(500);
   t.f.children.get(503).blockers = ['waits for PR 1098'];
@@ -358,8 +358,8 @@ test('merged rows sort after NOW · IN PROGRESS and before NOW · QUEUED, and th
   const firstMerged = order.findIndex(issue => statusOf(issue) === MERGED);
   assert.ok(firstMerged > 0, 'a merged row is drawn after the rows in progress');
   assert.ok(order.slice(0, firstMerged).every(issue => statusOf(issue) === 'NOW · IN PROGRESS'), 'rows in progress lead');
-  assert.equal(statusOf(order[firstMerged + 1]), 'NOW · QUEUED', 'queued rows follow the merged band');
-  assert.match(t.graph(), /Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, NOW · QUEUED, LATER/);
+  assert.equal(statusOf(order[firstMerged + 1]), 'QUEUED', 'queued rows follow the merged band');
+  assert.match(t.graph(), /Order: NOW · IN PROGRESS, NOW · AGENT UAT, NOW · CLOSE CHECK, then QUEUED in work order/);
 });
 
 test('CURRENT agrees with the graph: a merged task reads merged, close check, not its returned gate', () => {
@@ -371,20 +371,20 @@ test('CURRENT agrees with the graph: a merged task reads merged, close check, no
   assert.doesNotMatch(line, /· G2/);
 });
 
-test('a listed blocker still queues a merged task, so lane waits on multi-slice tasks stay NOW · QUEUED', () => {
+test('a listed blocker still queues a merged task, so lane waits on multi-slice tasks stay QUEUED', () => {
   const t = mergedFixture();
   const wait = 'Queued in NOW: one child at a time; starts when the gate lane frees';
   t.merge(502, { blockers: [wait] });
-  assert.equal(t.board(502), `NOW · QUEUED | Blocked: ${wait}`);
-  assert.doesNotMatch(t.current().split('\n').find(text => text.startsWith('- #502 ')), /merged, close check/);
+  assert.equal(t.board(502), `QUEUED | Blocked: ${wait}`);
+  assert.equal(t.current().split('\n').find(text => text.startsWith('- #502 ')), undefined, 'a queued task leaves CURRENT');
 });
 
-test('a closed issue is COMPLETED and a task set back to planned is LATER, merged or not', () => {
+test('a closed issue is COMPLETED and a task set back to planned is QUEUED, merged or not', () => {
   const t = mergedFixture();
   t.merge(500, { lifecycle: 'DONE', completed_at: '2026-11-07T00:00:00Z' });
   t.merge(501, { lifecycle: 'PLANNED' });
   assert.equal(t.board(500), 'COMPLETED | -');
-  assert.equal(t.board(501), 'LATER | -');
+  assert.equal(t.board(501), 'QUEUED | -');
 });
 
 test('a task PR opened after the merge puts the task back in progress, tracked or as another claimant', () => {
@@ -422,7 +422,7 @@ test('a task whose tracked PR closed unmerged or that has no PR stays NOW · IN 
 test('rows with no merged task PR are unchanged', () => {
   const t = mergedFixture();
   assert.equal(t.board(500), 'NOW · IN PROGRESS | -');
-  assert.equal(t.board(510), 'LATER | -');
+  assert.equal(t.board(510), 'QUEUED | -');
   assert.equal(t.board(520), 'COMPLETED | -');
   assert.ok(!rowsOf(t.graph()).some(line => cellsOf(line)[2] === MERGED), 'the fixture draws no merged row until a PR merges');
 });
@@ -435,7 +435,8 @@ test('CURRENT is slim: in progress, one attention line with holds, no Start next
   const current = state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now);
   assert.doesNotMatch(current, /Start next|\*\*Work queue\*\*|\*\*Waiting on you\*\*|^- CHILD_REOPENED/m);
   assert.match(current, /^\*\*In progress\*\*$/m);
-  assert.match(current, /^- #500 Programme task 1: shared service behaviour/m);
+  assert.doesNotMatch(current, /^- #500 /m, 'a blocked task with no live gate is queued, so it leaves CURRENT');
+  assert.match(current, /^- #501 Programme task 2: shared service behaviour/m);
   assert.match(current, /^\*\*Attention: \d+ new, 0 acknowledged, 1 in the work queue, 106 waiting on you\*\* · Holds: 1 · Full list: `programme\.cjs attention`$/m);
   assert.ok(current.length < 1500, `CURRENT is ${current.length} characters`);
 });

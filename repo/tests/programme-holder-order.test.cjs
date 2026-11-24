@@ -341,8 +341,8 @@ test('a holder order that starts a gate drops the task\'s lane wait in that one 
   assert.match(skill, /^  - Status is worked out: [^\n]*a lane controller's `assign` on its own child drops them too/m);
   assert.match(skill, /^- `QUEUED_BUT_MOVING`: [^\n]*committed after the wait was written and after its last recorded gate ended/m);
   assert.match(skill, /`assign`, `reopen` and a consume `REOPEN` list each one they dropped \(`dropped_lane_waits`/);
-  assert.match(skill, /^- `QUEUED_BUT_MOVING`: A task shown `NOW · QUEUED` by lane waits alone/m);
-  assert.match(skill, /`TASK_IDLE`, `TASK_MERGED_OPEN`, `QUEUED_BUT_MOVING`, `BATCH_NEXT` and `AGENT_UAT_UNSTARTED` are its alarms/);
+  assert.match(skill, /^- `QUEUED_BUT_MOVING`: A task shown `QUEUED` by lane waits alone/m);
+  assert.match(skill, /`TASK_IDLE`, `TASK_MERGED_OPEN`, `QUEUED_BUT_MOVING` and `AGENT_UAT_UNSTARTED` are its alarms/);
 });
 
 test('a holder order records the owner\'s answer to a G0 question on the same return, with its reason, through the one return path', t => {

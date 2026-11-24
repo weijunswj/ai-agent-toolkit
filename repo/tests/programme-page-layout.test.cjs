@@ -212,7 +212,7 @@ for (const eol of ['\n', '\r\n']) for (const shape of ['four backticks', 'tildes
 }
 
 // Active groups only: RETIRED and older COMPLETED rows always move, so size alone moves these.
-const SIZE_GROUPS = ['OPTIONAL', 'LATER', 'NOW'];
+const SIZE_GROUPS = ['OPTIONAL', 'QUEUED', 'NOW'];
 
 test('B-T3: overflow chooses the shortest row prefix, terminal groups before trace and live groups', t => {
   const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
@@ -220,7 +220,7 @@ test('B-T3: overflow chooses the shortest row prefix, terminal groups before tra
   assert.ok(projected.body.length < 55000);
   assert.ok(projected.graphRows.length > 0);
   const groups = projected.archive.filter(part => part.kind === 'graph' && part.count).map(part => part.group);
-  assert.deepEqual(groups, ['LATER', 'NOW'].slice(0, groups.length), 'optional tasks show, and move, as LATER');
+  assert.deepEqual(groups, ['QUEUED', 'NOW'].slice(0, groups.length), 'optional tasks show, and move, as QUEUED');
   const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|[^|\n]*\|#\d+\|[^\n]*$/gm) || []);
   const kept = projected.body.match(/^\|[^|\n]*\|#\d+\|[^\n]*$/gm) || [];
   assert.equal(new Set([...kept, ...archived].map(row => /^\|[^|\n]*\|#(\d+)\|/.exec(row)[1])).size, 84);
@@ -229,7 +229,7 @@ test('B-T3: overflow chooses the shortest row prefix, terminal groups before tra
   // In this fixture the last removed row stays in the same archive part. Restoring it costs exactly
   // its line and newline; the count remains one digit, so the summary costs the same.
   assert.ok(projected.body.length + last.length + 1 >= 55000, 'one fewer row cannot restore the safe limit');
-  assert.match(projected.body, /\n\n\[LATER \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
+  assert.match(projected.body, /\n\n\[QUEUED \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
   t.diagnostic(JSON.stringify({ fixture: '84 rows', moved: projected.archive.filter(part => part.kind === 'graph').map(part => [part.group, part.count]), posts: projected.posts, body: projected.body.length }));
 });
 

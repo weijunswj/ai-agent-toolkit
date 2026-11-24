@@ -12,7 +12,7 @@ The normal coding workflow is **G0 Discuss/Discovery → G1 Builder, including U
 |---|---|
 | A milestone | Its agreed observable outcome, with evidence. A checkpoint is not completion. |
 | A Core release | The approved Core works in the agreed environment, is accepted, passes the review its tier requires, and is integrated and installed with custody and recovery working. |
-| The programme parent | Every committed Now and Later obligation is done or disposed of by the user. |
+| The programme parent | Every committed obligation, in flight or queued, is done or disposed of by the user. |
 
 Neither record neatness nor an optional idea is a hidden prerequisite for shipping, and no paper contract, synthetic replay or green CI substitutes for the usable result.
 
@@ -20,29 +20,30 @@ Neither record neatness nor an optional idea is a hidden prerequisite for shippi
 
 This contract replaces conflicting user-owned Toolkit process requirements for this programme, preserving higher-priority instructions, native permissions, secret handling and controls on consequential effects. A repository document never manufactures an owner approval a host recognises. Other repositories keep their own bindings. Old gate names describe historical work; never relabel an old review as the final G2, reset exhausted unsafe operations or erase a denial.
 
-## 3. Now and Later
+## 3. In flight and the queue
 
-Every open outcome is committed or optional, with one stable child issue per coherent outcome. Do not create container issues for the groups. Where an outcome sits is worked out from its progress, never set by hand, and Later is kept in priority order:
+Every open outcome is committed or optional, with one stable child issue per coherent outcome. Do not create container issues for the groups. Where an outcome sits is worked out from its progress, never set by hand:
 
 | Group | Meaning | Admission |
 |---|---|---|
-| NOW | In progress: an open release PR or an active gate, including work merged but still waiting on its UAT or review. The complete usable release currently approved, with its necessary security, privacy, integrity and recovery floor. | The user agrees the outcome; routine means are delegated. |
-| LATER | Committed and not in progress, in the user's priority order; the top one starts next. A planned release has a name, not a version number; the version is taken when it merges, and it does not change the group. | The user agrees new material capabilities and the priority order. |
+| In flight | In progress: an open release PR or an active gate, including work merged but still waiting on its UAT or close check. The complete usable release currently approved, with its necessary security, privacy, integrity and recovery floor. | The user agrees the outcome; routine means are delegated. |
+| Queued | Every other open outcome, in one queue in work order; the top one starts next as a lane frees. A planned release has a name, not a version number; the version is taken when it merges, and it does not change the group. | The user agrees new material capabilities and the order rules below. |
 
-Optional work the user keeps sorts after Later as OPTIONAL. Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
+Optional work the user keeps sits at the end of the queue with the tasks marked to go last. Committed work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
 
-### Work in batches
+### One queue in work order
 
-Work moves from Later to Now in batches. Lanes finish the Now batch first, then the controller reads all of Later and picks the next batch. Reading Later as a whole each time re-weighs priorities, lets related work be planned together and land as one merge train with one version bump, and keeps Now small enough that reviews never pile up.
+The queue is sorted on every sweep, from fields on the parent's task list, in four steps:
 
-**Ranking Later.** Priority comes first, then size, so quick wins go first within a priority:
+1. **Priority:** `priority` P0 or P1, P0 first; inside the step, size S, then M, then L, then unsized.
+2. **Quick wins:** `size` S.
+3. **All other work:** size M or L, or not sized.
+4. **Marked last:** `last: true`, or class OPTIONAL.
 
-| Tier | Meaning |
+| Priority | Meaning |
 |---|---|
 | P0 | The default branch is broken, a safety-floor or security gap, or data loss. |
 | P1 | The user asked for it now, or it blocks other committed work. |
-| P2 | Other committed work. |
-| P3 | Optional work (it already sorts after Later as OPTIONAL). |
 
 | Size | Meaning |
 |---|---|
@@ -50,27 +51,26 @@ Work moves from Later to Now in batches. Lanes finish the Now batch first, then 
 | M | One PR with a new mechanism, or a RISKY tier. |
 | L | Several slices. |
 
-The controller estimates the size at intake and the task's G0 confirms it. The existing `order` field stays the single sort key: the controller sets it so Later reads tier, then size, then age, and renumbers with one `update-parent` at intake and whenever a priority changes. A task pinned `last` still sorts after every other one.
+- **Size is a judgement:** the controller sets it after evaluating a task; no rule derives it, and an unsized task counts as all other work.
+- **Dependencies hold:** a task whose `after` names a queued task moves to just after the last task it waits for, across steps if need be. A task it waits for that is in flight, finished or not catalogued is already met. Tasks that wait for each other in a loop keep their place and raise `DEPENDENCY_CYCLE`.
+- **Ties:** inside a step, the hand-set `order`, then child issue number; tasks that share every sort key raise `ORDER_TIE`.
+- **Blocked tasks** keep their place in the queue with the blocker in Waiting on; lanes skip them until the blocker clears.
+- **Explain:** `programme.cjs show --queue` prints, read-only, each queued task's place, step and why.
 
-**When a batch is done.** No Now task still needs a gate lane: each one is merged or closed, on a merge train or waiting for a merge OK after its review passed at its head with no red required check, or waiting only on the user (UAT, a decision, a merge OK).
-
-**Picking the next batch.** Read all of Later. Take the highest tier that has work and fill the batch with its quickest tasks first (S, then M), adding same-area tasks that fit, then the next tier if room is left. A batch holds at most 6 PRs, one merge train's worth, and at most one L task, so it stays reviewable and lands as one train. The controller picks; the batch's G0 confirms sizes and slices, and related tasks may share one G0 plan. Set the picked tasks' `order` so they lead Later, and record the pick and its reason as one decision record on the parent. Lanes then start the batch's tasks from the top of Later.
-
-**Inside a batch.**
+**Lanes.** Each free lane starts the top unblocked task of the queue.
 
 - Lane order: first fix a red CI result or a failed G2, then run a G2 or recheck of a built PR, then any other step, first started first.
-- Any known wait (CI, review, the user) parks the task and names the wait on its child; the lane switches to the next task in the batch and returns when the wait clears. Lanes never start work from outside the batch while it runs.
-- Tail guard: once the rest of the batch is done, a task that is size L, or that has waited on something other than the user for more than a day, stops holding the batch. It stays Now and keeps its lane priority, and the next batch is picked.
-- Jumps: a P0 task joins the current batch at once. A small fix joins the lane's next slice. Any other new user ask goes to the top of the next batch unless the user says it is for now.
-- Rechecks of failed PRs come before new builds. From a PR's second G2 round only a proved High or a known material shipping-floor defect holds it; other open Mediums join their area's open Now child and Lows the polish child (gate rules' round cap). The merge train keeps its own lane and never waits.
+- Any known wait (CI, review, the user) parks the task and names the wait on its child; the lane takes the next task from the queue and returns when the wait clears.
+- Jumps: a new P0 task starts at once. A small fix joins the lane's next slice. Any other new user ask is placed in the queue by its priority and size.
+- Rechecks of failed PRs come before new builds. From a PR's second G2 round only a proved High or a known material shipping-floor defect holds it; other open Mediums join their area's open child and Lows the polish child (gate rules' round cap). The merge train keeps its own lane and never waits.
 
-**Lean children.** Reuse first is hard: a task or finding goes on its area's open child, and a new child needs a `Nearest child:` line naming the closest open child and why it does not fit. A one-line G2 Low in the PR's own files is fixed by the builder with the PR's next fix round; every other Low and small UAT nit is a row on the one rolling LATER polish child (title starts `Polish`, at most 8 rows), which ships as one batched PR when full and closes, and a fresh one opens. Where governance is on, the governance session-start hook runs the `stale` check of `toolkit-controller-check.cjs` at most once a day per repository, in the background, as rows the controller answers: children whose PRs merged for the controller to judge against their DONE WHEN (`JUDGE?`; it closes the ones it judges done itself), closes that need the owner's OK after agent UAT (`OWNER OK?`), unexplained new children (`FOLD?`), closed children holding open work (`MOVE?`), children kept open on purpose that nothing has worked for six hours (`KEPT OPEN?`), children with a merged PR and every checkbox row still unticked (`UNTICKED?`) and a full or over-cap polish child. The controller asks the owner only for a close that needs their OK (a duplicate, an obsolete child or an owner-OK close), in its next ask. Finished children leave the parent's native sub-issues on their own (the reconciler's `detach_finished_children`), with a back link kept on the graph.
+**Lean children.** Reuse first is hard: a task or finding goes on its area's open child, and a new child needs a `Nearest child:` line naming the closest open child and why it does not fit. A one-line G2 Low in the PR's own files is fixed by the builder with the PR's next fix round; every other Low and small UAT nit is a row on the one rolling polish child (title starts `Polish`, at most 8 rows), which ships as one batched PR when full and closes, and a fresh one opens. Where governance is on, the governance session-start hook runs the `stale` check of `toolkit-controller-check.cjs` at most once a day per repository, in the background, as rows the controller answers: children whose PRs merged for the controller to judge against their DONE WHEN (`JUDGE?`; it closes the ones it judges done itself), closes that need the owner's OK after agent UAT (`OWNER OK?`), unexplained new children (`FOLD?`), closed children holding open work (`MOVE?`), children kept open on purpose that nothing has worked for six hours (`KEPT OPEN?`), children with a merged PR and every checkbox row still unticked (`UNTICKED?`) and a full or over-cap polish child. The controller asks the owner only for a close that needs their OK (a duplicate, an obsolete child or an owner-OK close), in its next ask. Finished children leave the parent's native sub-issues on their own (the reconciler's `detach_finished_children`), with a back link kept on the graph.
 
-**What enforces it.** In a repository with an enabled programme, the reconciler raises the work-queue finding `BATCH_NEXT` on the parent when the graph has a Later task and no Now task needs a gate lane, after one quiet hour (only its first raise waits; once open or disposed it stays while its condition holds). A Now task needs none while it waits on the user, its open PR passed review at its current head with no red required check, every PR on it has merged or closed, or it has been still for a day (the tail guard). The finding is answered by starting the batch's next task or picking the next batch, or disposed with a reason, never acknowledged, and it clears by itself once a task takes a lane. Size and the L half of the tail guard stay the controller's judgement.
+**What enforces it.** In a repository with an enabled programme, the reconciler draws the tasks in flight on top and the queue below them in work order on every pass, and orders the native sub-issues the same way. Work-queue findings flag a task in flight that nothing moves (`TASK_IDLE`, `TASK_MERGED_OPEN`) or an owed agent UAT that has not started; each is answered by acting or disposed with a reason, never acknowledged. Priority, size and the hand order stay the controller's judgement.
 
 ## 4. Where the plan and milestones live
 
-The programme parent is the current index: the Core outcome, children, milestone order, acceptance, position, decisions and the sorted catalogue. Each child holds its acceptance, checklist, evidence, checkpoint, blockers and next action. Roles, milestones, commits and sessions create no issues; the default milestone is one coherent outcome child. After a material change, regenerate the parent in Now, then Later priority order, preserving concurrent edits or reporting a precise conflict.
+The programme parent is the current index: the Core outcome, children, milestone order, acceptance, position, decisions and the sorted catalogue. Each child holds its acceptance, checklist, evidence, checkpoint, blockers and next action. Roles, milestones, commits and sessions create no issues; the default milestone is one coherent outcome child. After a material change, regenerate the parent with the tasks in flight, then the queue in work order, preserving concurrent edits or reporting a precise conflict.
 
 The programme reconciler owns state, hierarchy, projections and CURRENT. Its acceptance: native relations match canonical state; dependencies never reparent; reclassification keeps identity and scope; graph and roadmap share one revision; child and PR data agree; stale projections are detected; history stays accurate; and G1 continuation creates no gate, duplicate child or false finality.
 
@@ -104,7 +104,7 @@ G2 starts after G1's working version is accepted; user UAT follows the merge. Re
 |---|---|
 | Current ship blocker (High or Medium) | The criterion or safety invariant broken, the failing test or trace proving it (an unproven Medium is a follow-up; an unproven High goes to the owner), and the smallest fix. |
 | Follow-up (Low) | The added protection and why acceptance still holds; kept out of the current release. A one-line Low in the PR's own files is fixed with the PR's next fix round; any other joins the polish child (section 3). |
-| Later or optional (Low) | The new outcome and its queue; never silently added to the Core. |
+| Queued or optional (Low) | The new outcome and its place in the queue; never silently added to the Core. |
 | Unsupported or duplicate | The evidence problem or the existing finding. |
 
 **Bounded adversarial security review.** G2 reviews against the section 5 frozen supported profile and the agreed invariants, and stays adversarial on every reachable path inside it. A security finding blocks Core when a plausible supported-path trace violates an existing acceptance or safety invariant, or proves critical required evidence absent; record the concrete setup, attacker capability, reproduction or trace, consequence and minimum correction. An unsupported arbitrary layout or extra execution surface does not by itself create Core scope, and a newly proposed environment, feature or threat goes to the owner for classification before adoption. A genuinely serious reachable issue found late still blocks, even when an earlier review missed it. When a finding demonstrates a family of related reachable bypasses, G1 inventories every material entrypoint for that invariant inside the frozen profile and fixes the family once, with positive and negative controls, rather than one bypass per cycle. The fresh recheck covers the fix commits, the corrected families and findings they close, dependent invariants and new real host evidence, and widens to the cumulative diff only where a fix changes code beyond those findings. It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded follow-up work, and it preserves any genuinely new security finding without manufacturing an extra gate.

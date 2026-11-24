@@ -426,10 +426,9 @@ for (const scoped of [false, true]) for (const row of [
     assert.equal(openStop(f).changed_at, refreshedAt);
     assert.equal(fs.existsSync(`${lockFile}.progress`), false);
     assert.ok(f.github.issues.get(421).body.includes(`- ${state.findingText(openStop(f))}`), 'CURRENT shows the later kill with its own full details');
-    // The other new finding is BATCH_NEXT: the one planned task has waited days with nothing in NOW.
     const open = f.store.read('parent', 421).doc.attention.filter(entry => entry.state === 'new').map(entry => entry.code).sort();
-    assert.deepEqual(open, ['BATCH_NEXT', 'PASS_STOPPED']);
-    assert.deepEqual(cliRun(f, lockFile, {}, ['attention', '--json']).report.counts, { new: 2, acknowledged: 0 });
+    assert.deepEqual(open, ['PASS_STOPPED'], 'a planned task waiting with nothing in flight raises nothing: it is queued');
+    assert.deepEqual(cliRun(f, lockFile, {}, ['attention', '--json']).report.counts, { new: 1, acknowledged: 0 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -640,7 +639,7 @@ test('A-T8: stopped-pass diagnostics are closed and validated in the reader and 
 const { pageFixture } = require('./support/programme-page-fixture.cjs');
 
 function slowRefresh(t, { count = 60, lockFile, version = '3.59.1', discussion = 741, extraIssues = 80, prs = 320 } = {}) {
-  const fx = pageFixture(state, { count, groups: ['LATER'], width: 5 });
+  const fx = pageFixture(state, { count, groups: ['QUEUED'], width: 5 });
   const dir = lockFile ? path.dirname(lockFile) : fs.mkdtempSync(path.join(os.tmpdir(), 'programme-sliced-'));
   if (!lockFile) t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = lockFile || path.join(dir, 'pass.lock');
@@ -764,7 +763,7 @@ function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true } = 
 }
 
 test('reads: the parent list replaces a read per child, and empty lists are not requested', t => {
-  const f = readFixture(t, { count: 6, groups: ['LATER'] });
+  const f = readFixture(t, { count: 6, groups: ['QUEUED'] });
   assert.equal(f.run().code, 0);
   const second = f.run();
   assert.equal(second.code, 0, JSON.stringify(second.report.holds));
@@ -878,7 +877,7 @@ test('reads: a child with a pending intent, or with no usable copy, is never reu
 });
 
 test('reads: the parent comments come from a bookmark that must account for every comment', t => {
-  // Optional tasks, so no BATCH_NEXT finding (planned work with nothing in NOW) changes the page draws counted here.
+  // Two queued optional tasks with nothing in flight.
   const f = readFixture(t, { count: 2, groups: ['OPTIONAL'] });
   for (let i = 0; i < 245; i++) f.github.addComment(12, { body: `Discussion ${i}` });
   // The fake clock gives each comment its own second; leave a gap wider than the bookmark overlap.
@@ -925,8 +924,8 @@ test('reads: a warm pass plans exactly what a pass with no copy plans', t => {
     reports.push(f.run().report, f.run().report);
     return reports.map(({ reads, metrics, ...report }) => report);
   };
-  const warm = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'LATER'] });
-  const cold = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'LATER'], cached: false });
+  const warm = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'QUEUED'] });
+  const cold = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'QUEUED'], cached: false });
   const [a, b] = [script(warm), script(cold)];
   assert.deepEqual(a, b);
   assert.equal(warm.page(), cold.page());

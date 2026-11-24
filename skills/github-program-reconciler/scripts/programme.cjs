@@ -90,7 +90,7 @@ const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--queue']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
@@ -155,6 +155,7 @@ function parseArgs(argv) {
     needs(!Object.keys(args).some(key=>!['command','pr','issue','body-file','dry-run','force-another','json','repo-root'].includes(key)), 'Unsupported closing-comment option.');
   } else needs(args.pr === undefined && args['body-file'] === undefined && !args['force-another'], 'Closing comment options belong only to closing-comment.');
   if (command === 'show') needs(!(args.parent && args.issue !== undefined), 'show takes --parent or --issue <n>, not both.');
+  needs(!args.queue || (command === 'show' && args.issue === undefined && !args['include-private'] && !args.session), 'show --queue lists the queue of the parent and takes only --parent, --json and --repo-root.');
   if (command === 'claim') {
     needs(Boolean(args.parent) !== (args.issue !== undefined), 'claim needs --issue <n> --lane or --parent.');
     needs(args.role === undefined, 'Gates are not claimed: the controller runs assign --issue <n> --role <gate> --assignment <id>.');
@@ -436,6 +437,23 @@ function outcomeFor(parentDoc, issue) {
   const outcome = parentDoc.outcomes.find(entry => entry.issue === issue);
   if (!outcome) throw usage(`#${issue} is not in the outcome catalogue of #${parentDoc.parent_issue}.`);
   return outcome;
+}
+
+// Why each queued task sits where it does (state.explainQueue), from the parent and children's
+// documents as they stand now. Read-only: nothing is written.
+function queueOf(context) {
+  const parentDoc = readParent(context);
+  const snapshot = context.store.readSnapshot();
+  const children = new Map(parentDoc.outcomes.map(outcome => [outcome.issue, context.store.snapshotDoc(snapshot, 'child', outcome.issue).doc]));
+  return { repository: context.repository, parent_issue: parentDoc.parent_issue, revision: parentDoc.revision, queue: state.explainQueue(parentDoc, children) };
+}
+
+function formatQueue(result) {
+  const { rows, cycles } = result.queue;
+  const lines = [`Queue of #${result.parent_issue} (state revision ${result.revision}), in work order: priority, then quick wins (size S), then other work, then tasks marked last; a task follows the tasks it waits for (after).`,
+    ...(rows.length ? rows.map(row => `${row.place}. #${row.issue} · ${row.step} · ${row.why}`) : ['No queued tasks.']),
+    ...cycles.map(loop => `Loop (after set aside, DEPENDENCY_CYCLE): ${loop.map(number => `#${number}`).join(', ')}`)];
+  return `${lines.join('\n')}\n`;
 }
 
 // The tasks waiting on the owner (state.ownerWaits), from the children's documents as they stand
@@ -954,6 +972,7 @@ const commands = {
   dispose(args, context, deps = {}) { return answer(args, context, deps, 'disposed'); },
 
   show(args, context) {
+    if (args.queue) return queueOf(context);
     const kind = args.issue ? 'child' : 'parent';
     const { doc, sha } = context.store.read(kind, args.issue || context.binding.parent_issue);
     if (!doc) throw new ProgrammeError('STATE_MISSING', `No state document for #${args.issue || context.binding.parent_issue}.`);
@@ -1542,6 +1561,7 @@ function finish(args, deps, out, opened = null) {
   if (pass && !args.json) out.write(formatReport(result));
   else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
   else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
+  else if (args.command === 'show' && args.queue && !args.json) out.write(formatQueue(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
   if (pass) return result.holds.length ? 1 : 0;
   return 0;
