@@ -2392,6 +2392,79 @@ function runSessionStartHook(cwd, home, syncSource = 'codex-plugin') {
 
 const DISABLED_LINE = 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n';
 
+// What the retired controller handoff snapshot left on a computer: its after-tool hook's session files
+// and lock, the store command's run record and per-computer folder records (all in Toolkit's user-state
+// folder), and the empty `~/.toolkit-handoff-off` a scheduled task's first step made.
+function plantRetiredHandoffState(home) {
+  const state = path.join(home, '.ai-agent-toolkit', 'user-state');
+  writeJson(path.join(state, 'handoff-sessions', '0123456789abcdef.json'), { started_at: 1, checked_at: 2, rows: [] });
+  writeJson(path.join(state, 'handoff-folders', 'record.json'), { files: [] });
+  writeJson(path.join(state, 'handoff-refresh.json'), { store: path.join(home, 'store'), repo_root: path.join(home, 'repo'), repository: 'acme/app' });
+  writeFile(path.join(state, 'handoff-refresh.lock'), '2026-11-21T18:07:00.000Z\n');
+  writeFile(path.join(home, '.toolkit-handoff-off'), '');
+  // Neighbours the clean-up never touches.
+  writeJson(path.join(state, 'keep.json'), { kept: true });
+  writeJson(path.join(state, 'handoff-sessions-notes', 'mine.json'), { kept: true });
+  writeFile(path.join(home, '.toolkit-handoff-off-notes'), '');
+  return state;
+}
+
+const RETIRED_HANDOFF_NAMES = ['handoff-sessions', 'handoff-folders', 'handoff-refresh.json', 'handoff-refresh.lock'];
+
+test('a session start removes what the retired handoff snapshot left, and nothing else', async (t) => {
+  const cases = {
+    'Claude Code installed copy': (home, cwd) => runSessionStartHook(cwd, home, 'claude-plugin'),
+    'Codex plugin': (home, cwd) => runSessionStartHook(cwd, home, 'codex-plugin'),
+    // A cloud session runs a synced copy that does no other session-start maintenance.
+    'Claude Code cloud session': (home, cwd) => run(['--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+      cwd, env: claudeHookEnv(home, { PATH: process.env.PATH, CLAUDE_CODE_REMOTE: 'true' })
+    })
+  };
+  for (const [name, start] of Object.entries(cases)) {
+    await t.test(name, () => {
+      const home = tmpRoot();
+      const cwd = tmpRoot();
+      t.after(() => { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(cwd, { recursive: true, force: true }); });
+      const state = plantRetiredHandoffState(home);
+      const result = start(home, cwd);
+      assert.equal(result.status, 0, result.stderr);
+      for (const retired of RETIRED_HANDOFF_NAMES) assert.equal(fs.existsSync(path.join(state, retired)), false, `${retired} is removed`);
+      assert.equal(fs.existsSync(path.join(home, '.toolkit-handoff-off')), false, 'the empty scheduled-session marker is removed');
+      assert.deepEqual(readJson(path.join(state, 'keep.json')), { kept: true });
+      assert.deepEqual(readJson(path.join(state, 'handoff-sessions-notes', 'mine.json')), { kept: true });
+      assert.equal(fs.existsSync(path.join(home, '.toolkit-handoff-off-notes')), true);
+      assert.doesNotMatch(`${result.stdout}${result.stderr}`, /handoff/i, 'the clean-up prints nothing');
+    });
+  }
+});
+
+test('the handoff clean-up leaves a non-empty marker and links alone, and never reaches through a link', (t) => {
+  const home = tmpRoot();
+  const cwd = tmpRoot();
+  const outside = tmpRoot();
+  t.after(() => { for (const dir of [home, cwd, outside]) fs.rmSync(dir, { recursive: true, force: true }); });
+  const state = path.join(home, '.ai-agent-toolkit', 'user-state');
+  writeJson(path.join(outside, 'sessions', 'theirs.json'), { theirs: true });
+  writeFile(path.join(outside, 'record.json'), '{}\n');
+  fs.mkdirSync(state, { recursive: true });
+  fs.symlinkSync(path.join(outside, 'sessions'), path.join(state, 'handoff-sessions'), 'junction');
+  let fileLink = true;
+  try { fs.symlinkSync(path.join(outside, 'record.json'), path.join(state, 'handoff-refresh.json'), 'file'); } catch { fileLink = false; /* no symlink right on this Windows account */ }
+  // A folder where a file name is expected, and a marker someone wrote text into.
+  writeJson(path.join(state, 'handoff-refresh.lock', 'inner.json'), { inner: true });
+  writeFile(path.join(home, '.toolkit-handoff-off'), 'my own notes\n');
+  const result = runSessionStartHook(cwd, home, 'claude-plugin');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readJson(path.join(outside, 'sessions', 'theirs.json')), { theirs: true }, 'nothing behind the folder link is removed');
+  assert.equal(fs.lstatSync(path.join(state, 'handoff-sessions')).isSymbolicLink() || fs.existsSync(path.join(state, 'handoff-sessions', 'theirs.json')), true, 'the folder link stays');
+  if (fileLink) {
+    assert.equal(fs.lstatSync(path.join(state, 'handoff-refresh.json')).isSymbolicLink(), true, 'the file link stays');
+    assert.equal(fs.readFileSync(path.join(outside, 'record.json'), 'utf8'), '{}\n');
+  }
+  assert.deepEqual(readJson(path.join(state, 'handoff-refresh.lock', 'inner.json')), { inner: true }, 'a folder under a file name stays');
+  assert.equal(fs.readFileSync(path.join(home, '.toolkit-handoff-off'), 'utf8'), 'my own notes\n', 'a marker with content stays');
+});
+
 test('SessionStart notice is silent outside Toolkit-managed git roots and writes nothing', async (t) => {
   const cases = {
     'non-git directory': (root) => writeFile(path.join(root, 'README.md'), '# notes\n'),
@@ -3438,11 +3511,9 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
     const card = { matcher: '^AskUserQuestion$', hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-governance-hook.cjs" --event PostToolUse`, timeout: 10 }] };
     // Claude Code also checks what GitHub sent back for the cloud route's "Generated by Claude Code" footer.
     const footer = { matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-github-footer-hook.cjs"`, timeout: 10 }] };
-    // Claude Code also starts the controller handoff refresh after any tool but a read-only one moves a remembered source.
-    const handoff = { matcher: require('../scripts/toolkit-handoff-hook.cjs').MATCHER, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-handoff-hook.cjs"`, timeout: 10 }] };
     // Claude Code also prints the effort and record steps after a gate start (toolkit-claude-gate-launch-hook.cjs).
     const launch = { matcher: '^mcp__ccd_session__start_session$', hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-claude-gate-launch-hook.cjs" --event PostToolUse`, timeout: 10 }] };
-    assert.deepEqual(hooks.hooks.PostToolUse, hooks === claudeHooks ? [card, checkpoint, footer, launch, handoff] : [checkpoint]);
+    assert.deepEqual(hooks.hooks.PostToolUse, hooks === claudeHooks ? [card, checkpoint, footer, launch] : [checkpoint]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
