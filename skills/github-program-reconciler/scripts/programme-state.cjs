@@ -1140,7 +1140,8 @@ function closeDueOf(doc) {
 // The controller records a gate's host session after launching it (host, and session when the host
 // gives one), or its close (`closed`). Re-recording the same values or a second close is a no-op
 // (null); other values need `replace` with a reason. The controller's own sessions (the parent's
-// holder and its earlier holders, `controllerSessions`) are never recorded as a gate's.
+// holder, its earlier holders and the calling session's own host ID, `controllerSessions`) are
+// never recorded as a gate's.
 function recordGateSession(doc, { assignment, host = null, session = null, closed = false, replace = false, reason = null, now = null, controllerSessions = [] } = {}) {
   if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'gate-session needs --assignment <id>.');
   if (Boolean(closed) === Boolean(host)) throw new ProgrammeError('USAGE', 'gate-session needs exactly one of --host <host> (after the launch) or --closed (after the close).');
@@ -6763,6 +6764,26 @@ class Reconciler {
     }
   }
 
+  // The PRs with an open BODY_OVER_BUDGET finding that are merged or closed now. Such a PR keeps the
+  // body it was approved with and is never drawn again (diffPrPages skips it), so a complete pass
+  // resolves the finding (apply's canResolveSize). Only a finding on a number that is neither a task
+  // or parent issue read this pass nor an open PR page is read, one page each; a failed read leaves
+  // the finding open for a later pass.
+  closedPrPages(parent, observed, only) {
+    const closed = new Set();
+    if (only) return closed;
+    for (const entry of parent.attention || []) {
+      if (entry.code !== 'BODY_OVER_BUDGET' || !OPEN_FINDING_STATES.includes(entry.state) || !isInt(entry.issue, 1)) continue;
+      if (closed.has(entry.issue) || observed.issues.has(entry.issue)) continue;
+      let page = observed.prPages?.get(entry.issue) || null;
+      if (!page) {
+        try { page = this.reader.issue(entry.issue); } catch (error) { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; page = null; }
+      }
+      if (page?.is_pull_request && page.state !== 'open') closed.add(entry.issue);
+    }
+    return closed;
+  }
+
   diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
     const blocks = this.renderAll(parent, children, observed.issues, observed.comments, this.passTitles(observed));
     const version = this.toolkitVersion || '0.0.0';
@@ -7201,7 +7222,8 @@ class Reconciler {
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     this.pass.planning();
     for (const effect of effects) effect.text = describeEffect(effect);
-    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), issueScoped: Boolean(only), children, observed, findings, effects, holds, resolutions, snapshot,
+    const closedPrs = this.closedPrPages(parent, observed, only);
+    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), issueScoped: Boolean(only), children, observed, findings, effects, holds, resolutions, snapshot, closedPrs,
       complete: !only && !parentOverride && (!inventory || inventory.complete) && (!observed.prGraph || observed.prGraph.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
         && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].filter(number => !this.scope || number === parent.parent_issue || this.scope.has(number)).every(number => Boolean(observed.issues.get(number)))
         // A queued pass is complete only when its changed list was whole and its queue ends empty.
@@ -7291,11 +7313,14 @@ class Reconciler {
     const settledChildren = new Map([...plan.children].filter(([,entry])=>entry.doc).map(([number,entry])=>[number,entry.doc]));
     const writtenChildren = new Set();
     const verifiedBodies = new Set();
+    // A merged or closed PR's over-budget finding resolves on a complete pass (closedPrPages); a
+    // stopped plan carries no set and resolves nothing.
+    const closedPrs = plan.closedPrs instanceof Set ? plan.closedPrs : new Set();
     const sizeIds = new Set([...(plan.parent.attention || []), ...plan.findings]
       .filter(entry => PAGE_CODES.includes(entry.code)).map(entry => findingId('reconcile', entry.code, entry.issue)));
     const canResolveSize = (entry, includeParent = false) => PAGE_CODES.includes(entry.code) && sizeIds.has(entry.id)
       && !plan.findings.some(finding => finding.code === entry.code && finding.issue === entry.issue)
-      && (verifiedBodies.has(entry.issue) || (includeParent && entry.issue === parentNumber)) && OPEN_FINDING_STATES.includes(entry.state);
+      && (verifiedBodies.has(entry.issue) || closedPrs.has(entry.issue) || (includeParent && entry.issue === parentNumber)) && OPEN_FINDING_STATES.includes(entry.state);
     // The parent fence is read again immediately before every state write and every GitHub change,
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
     // is settled by readback in the successor's next pass, never replayed.

@@ -1,5 +1,106 @@
 # Toolkit Changelog
 
+## 3.173.0 (A close-due finding for each finished gate session; One stale-work net in the programme sweep; The worktree residue report finishes on large checkouts and checks one worktree; Projects skill card only on real text changes)
+
+### Added
+
+- **Gate sessions are recorded.** `assign` and `reopen` open an entry for each new gate assignment in the task's private state, and the controller records the gate's host session right after the launch with `programme.cjs gate-session --issue <n> --assignment <id> --host <host> [--host-session <id>]`, then its close with `gate-session --closed`. Each host's value and where its session ID comes from are in the host contract (section 10). The command refuses the parent's holder, its earlier holders and the calling session's own desktop ID. Holder orders can carry `gate-session`.
+- **`CLOSE_DUE`.** The sweep raises one finding per finished gate assignment whose session is still open: no longer the live assignment and, for a G1, every PR it returned merged or closed with no UAT owed there (or the agent's UAT handed on). It is part of the stale-work net, is never disposed and is acknowledged for at most 72 hours. It resolves once the close is recorded. `programme.cjs attention` shows the host and session beside it; the session ID stays in private state and never reaches a page, a finding detail or the session-start cache.
+- **The stale-work net.** The programme sweep now raises the stale check's rows as attention findings, with the usual life (new, acknowledged with a due time, overdue): `OWNER_OK_CLOSE` for a task whose PR merged, whose agent UAT passed and with no gate open and every DONE WHEN row ticked, so only the owner's OK to close is left; `CHILD_NO_NEAREST` for a task opened in the last 7 days with no `Nearest child:` line; `POLISH_CAP` for a polish task at 8 rows or more, or while two are open; and `ROWS_UNTICKED` for a task with a merged PR while none of its DONE WHEN or ROWS checkboxes is ticked. A merged task's `READY_TO_CLOSE` and `TASK_MERGED_OPEN` details say how many DONE WHEN rows are still unchecked.
+- **Net findings cannot hang.** Each finding code says whether it is part of the net, its longest acknowledgement and whether it may be disposed. `OWNER_OK_CLOSE` and `POLISH_CAP` are never disposed (`FINDING_NO_DISPOSE` names the routes that clear them), and an acknowledgement past a code's cap is refused with that cap named.
+- **The 4-hour callout.** `programme.cjs attention` lists the net findings nobody answered for 4 hours (new for 4 hours, or acknowledged past their due time) first, under `Unanswered over 4 h (<n>)`; `--json` adds `callout`.
+- **One worktree at a time.** `workspace-residue-report.cjs --worktree <path>` checks only that worktree and, when it is ready to remove, prints the safe lines to run (`git worktree remove <path>`, then `git branch -d <branch>` when its branch is merged, is not a default branch and no other worktree holds it); otherwise it says why it is not ready. `--json` adds `remove_commands`. It never offers `--force` or `-D`, and host-made worktrees are still left to the host.
+- **Age.** Each worktree reports `age_hours`, and `--min-age-hours <n>` keeps a worktree made more recently than that out of the ready list.
+- `toolkit-projects-guidebook.cjs --card` prints one line on the owner's saved claude.ai copy of the Projects skill: `SKILL CARD OUTDATED: saved <old>, main <new>, text <fingerprint>`, `SKILL CARD CURRENT` or `SKILL CARD NOT SEEN`. It compares the text, leaving out the Version line, line endings and trailing whitespace, so a release that only restamps the Version line offers no card, and a declined card is remembered by its text fingerprint.
+- `toolkit-projects-guidebook.cjs --refresh <folder>`, the hourly nudge's every-run guidebook refresh: it refuses a clone that is not origin's main tip (`SKILL COPY FAILED STALE_CHECKOUT`), then prints `GUIDEBOOK CURRENT` or `GUIDEBOOK REFRESHED <old> -> <new>`.
+
+### Changed
+
+- The controller principle **Close what you spawn** asks for each gate's session to be recorded at launch and its close when closed, and the enforcement map now names the sweep as its check for gate assignments.
+- Update Toolkit on every computer that runs the sweep: an older Toolkit holds on a parent document carrying `CLOSE_DUE` (`attention[n].code is not a known finding code`) until it is updated.
+- `BODY_OVER_BUDGET` is raised only when a page is 5 per cent or more over its budget (500 characters for the parent, 200 for a task, 150 for a pull request), so a page a few characters over raises nothing.
+- `CLOSED_WITHOUT_ACCEPTANCE` is no longer raised for a task closed as completed that has its closing story after the close.
+- Update Toolkit on every computer that runs the sweep: an older Toolkit holds on a parent document carrying the new finding codes (`attention[n].code is not a known finding code`) until it is updated.
+- The report has a time budget (`--budget-ms`, default 60 seconds): worktrees it did not reach are listed as not checked, the report says it stopped, and `--json` carries `complete`. In text mode each worktree line is printed as soon as it is checked, so a checkout with many worktrees shows progress at once.
+- Setup and the Claude Code session start offer the Projects skill update card only when the saved text really differs; a Version-only difference says the copy matches Toolkit's text. Where the session has no `propose_skills` tool, the line says so plainly and nothing is asked.
+- The hourly nudge deletes any old Toolkit clone before cloning, runs the guidebook refresh and the skill card check every run, and deletes the clone at the end. The daily check-in uses the scripted card line instead of comparing Version lines by hand.
+- The guidebook refresh no longer reports `BLOCK CHANGED`, and the project-instructions check no longer reports the block outdated, when only the block's marker version or digest moved, so an identical block is not re-applied every release.
+- The Projects coordinator no longer watches Toolkit features to suggest improvements or settings to the owner; it still never changes Toolkit features or their settings itself.
+
+## 3.172.0
+
+### Changed
+
+- **Work starts on the owner's computer:** every controller, cloud or local, now starts its sessions, lanes, gate runs and threads on the owner's computer. A cloud start needs the owner to start it or agree to it in chat. When the computer is busy or away, the work waits and the controller says so in one line; nothing falls back to the cloud. Scheduled tasks that already run in the cloud are unchanged.
+- **Projects runs local first:** the Projects skill's "Cloud first" rule is now "Local first", new projects get `remote_control` as their gate placement, and the managed project instructions say the same. Steps only a cloud thread can do (the guidebook copy into the project library, its after-merge fast refresh) ask the user first; the hourly nudge still refreshes the copy on its own.
+- **Device evidence:** a local Remote Control thread archives its evidence to the transport store itself, and uses the shared folder only when it cannot reach the store.
+- The leftover scan and the session-start check name an older `N8N-AGENT-RULES-ADAPTER` block in `AGENTS.md` as a leftover in every governance state; where governance is on, governance cleanup removes it with the other Toolkit copies.
+
+### Removed
+
+- The n8n block Toolkit could add to a repository's `AGENTS.md` is retired, with its installer and its Claude and Gemini snippet copies: the global rules that setup installs carry the n8n Safety Router section in every session, so a repository needs no copy.
+
+### Fixed
+
+- A programme refresh on a computer leaves the sweep lease to a cloud Programme Sweep that is queued or running its refresh job, and says "The cloud sweep picks this up". Back-to-back refreshes after the controller's own writes, each capped at 300 requests, used to re-take the lease within seconds, so the cloud's full-budget pass never ran and new pull requests were missing from task graphs. When GitHub cannot say whether a cloud sweep runs, the refresh runs as usual and says so in one line.
+- The programme sweep after a merge refreshes the board again. A pass whose lease release met a race on the evidence store branch used to drop the release without a word, so the lease stayed live for up to twenty minutes and every sweep started for the next merge logged "queued" and ended green with nothing refreshed. The release now reads again and tries up to three times, with a short pause before each new try; one that never lands puts a "lease not released" warning in the run log, and the next sweep reports that pass as stopped. A failed pass still names its own stop code when that warning comes first.
+- A cloud sweep that meets another sweep's lease waits for it, checking every minute for up to 30 minutes, then runs its pass with the time left. A run that never gets the lease fails instead of ending green, and starts one more run at once.
+- `toolkit governance status` reads the merged binding once more with a longer budget when the first read ran out of time, so one slow fetch of a large default branch no longer holds every programme command.
+
+## 3.171.0
+
+### Added
+
+- **Remove Toolkit:** `remove toolkit` now also removes Codex setup's journal once its last step finished (an unfinished one stays as recovery evidence) and the update reports the bridge writes to the temp folder, once no Toolkit plugin is installed.
+
+### Changed
+
+- **Remove Toolkit:** the Claude Code settings setup turned on are listed as Claude Code's own settings, left exactly as they are, and the recovery records folder is kept as evidence instead of being called someone else's file. Removal never deletes a key from the credential store and has no step for other plugins.
+- **n8n skills:** setup only copies the official n8n skills; it no longer turns the n8n Skills plugin off in Claude Code or tells you to turn it off in Codex.
+- **Governance check:** no message or document tells you to type `toolkit governance check` any more. Owner-facing steps say to ask your agent to check governance; agent and workflow text names the script, `toolkit-governance.cjs check`.
+- **Repository files:** `repository-agent-rules` expects the one-line `@AGENTS.md` CLAUDE.md only where Claude Code would otherwise miss AGENTS.md: the repository has its own CLAUDE.md and the "Read AGENTS.md as well as CLAUDE.md" setting is off.
+
+### Fixed
+
+- The programme sweep now resolves a merged or closed pull request's over-budget page finding on its next complete pass. Such a pull request keeps the body it was approved with, so its finding no longer needs a dispose by hand. Open pull requests and task pages still count.
+- The background stale check now runs only when the binding merged on origin's default branch has governance on, the same binding the session-start hook reads before it starts the check. Before, a worktree made before governance was turned on skipped the check with no stamp, and the hook started it again every 15 minutes.
+- A cloud session that has an attention cache but no stale-check stamp for today now says the stale check waits for the owner's computer. Before, it said nothing about it.
+- The controller handoff snapshot now refuses a source file holding a NUL byte, as the store's save does, and the handoff hook starts no refresh for it. Before, every refresh wrote the file, stopped at the save and undid the write, so `--check` stayed STALE.
+- The handoff snapshot README now gives a successor a reading order: `MEMORY.md` first when the snapshot holds one, then the saved instructions, then the named working files.
+
+### Tests
+
+- New handoff tests cover the dot-name skip, the 5 MB cap, the undo removing a created file, `--check` with a named memory folder and Windows network-share paths.
+- A new hook pack row checks that a scheduled task's `touch ~/.toolkit-handoff-off` passes every guard on both hosts.
+- A new hook pack row checks that a memory file saved with a NUL byte starts no handoff refresh.
+
+## 3.170.0 (merge approvals in a reopened chat)
+
+### Added
+
+- **Reopened chats approve merges:** in Claude Code on this computer, a chat the user started and the app later reopened on the same session takes a typed `merge N` and a tap on the merge card again, as a fresh chat does. Launched, forked and shell-resumed chats, a resume that carried the host-session variable, Codex or unknown-app reconnects and resumed cloud sessions still record nothing. The host now comes from the hook entry point, never from a field in the event.
+- **No planted merge lines:** a session brief, a message to another session, a move to the cloud, a scheduled wakeup, a cron prompt, a remote routine or a scheduled task whose text holds a line Toolkit would read as the user's merge approval is refused, so an agent cannot approve a merge by writing the user's line into another chat. A side chat the user opens and types into still counts as theirs.
+
+### Changed
+
+- **Honest refusals:** when a chat cannot record a typed merge approval, the hook says so on the message that held it, with the reason and where to approve instead (a new chat, a direct Projects message or the Merge button on GitHub), and the merge refusal in that chat no longer asks the user to type the line again there.
+
+## 3.169.0
+
+### Changed
+
+- **Handoff snapshot mirrors the memory folder, deletes included:** a memory file deleted on this computer now leaves the controller handoff snapshot (`toolkit-store.cjs handoff`): its row becomes a removed row with the time it was removed, and its copy leaves the store's current files (Git history keeps it; the snapshot README says how to get it back). A file is removed only when this computer's last saved run (its folder record, kept in the Toolkit user-state folder) or the session's baseline held exactly the snapshot's content, so a stale, partial or other computer's copy never deletes a newer save. A removed file comes back only from different content saved more than 5 minutes after the removal, so a session still holding the old copy no longer brings it back. A clock behind the snapshot removes nothing (`clock=behind`).
+- **A computer changes only memory it has seen:** a run updates a stored memory file only when this computer's last saved run or this session held exactly the stored content. Otherwise the stored copy stays and the run and `--check` name it as `diverged=<files>`, so a second computer that has not synced can add new memory files but never replace or remove one. A manual `--reseed` run takes this copy for the diverged files; the after-tool hook never does.
+- **Two computers saving at once:** when a handoff save meets a store another computer just saved to, the merge keeps the store's snapshot folder whole (never one computer's manifest beside the other's files) and the run plans once more from it, so neither computer's save is lost or deleted and the store checkout keeps working. A snapshot copy that no row lists is removed only by a computer that held it, or by `--replace-memory`.
+- **Store deletions:** the store command still refuses every deletion, except the handoff snapshot's own removals of memory files its manifest lists as removed in the same commit.
+- **Manifest version 2:** the snapshot manifest is `toolkit.handoff-snapshot.v2` (adds the removed rows). This copy reads version 1 and writes version 2 on the next change; an older Toolkit copy reads version 2 as no snapshot.
+
+### Added
+
+- **`handoff --confirm-removals`:** a run that would remove more than max(10, a fifth of the memory rows) holds them and says `held_removals=<n>`; a manual run with this flag applies them.
+- **`handoff --memory <folder> --replace-memory`:** a manual run that makes the named folder the whole memory set: every memory row it lacks is removed and its copy of every other memory file wins.
+- **`handoff --check` fields:** `removed=`, `held_removals=`, `clock=behind`, `removed_here=` (removed files this copy holds with different content) and `diverged=` (memory files this computer never held at the stored content) and `unlisted=` (snapshot copies no row lists that this computer never held). A run whose save lost a race says `took_store=<folder>`.
+
 ## 3.168.0 (Governance asks two questions; Gate endings that can always be recorded)
 
 ### Changed

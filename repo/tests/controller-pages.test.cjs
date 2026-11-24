@@ -170,7 +170,7 @@ test('the design principles page binds above every skill, project line and brief
   assert.match(core, /The \[design principles\]\(controller\/principles\.md\) bind above every skill, project line and brief: they add, never relax\./);
   assert.match(core.split('\n## Pages\n')[1], /^These pages[^\n]*\n- \[Design principles\]\(controller\/principles\.md\) `[0-9a-f]{12}`: /);
   assert.match(page, /^- \*\*Binding:\*\* [^\n]*never relax them;[^\n]*A clash goes to the owner as a decision; a new principle needs an owner record/m);
-  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', 'Work runs where the controller runs']) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
+  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', "Work starts on the owner's computer"]) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
 });
 
 test('controllers close every thread or session they spawned once it is fully done, through the host contract', () => {
@@ -195,14 +195,17 @@ test('controllers close every thread or session they spawned once it is fully do
     "never a scheduled task's home thread"]) assert.ok(section.includes(route), route);
 });
 
-test('work runs where the controller runs, and scheduled tasks prefer the cloud without a computer ban', () => {
+test('every controller starts work on the owner\'s computer, cloud only by the owner, and scheduled tasks keep the cloud', () => {
   const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
-  const line = page.split('\n').find(text => text.startsWith('- **Work runs where the controller runs:** ')) || '';
+  const line = page.split('\n').find(text => text.startsWith("- **Work starts on the owner's computer:** ")) || '';
   for (const phrase of [
-    'a cloud controller runs work in the cloud and a local one on its computer, unless a step needs the other side',
+    "every controller, wherever it runs, starts its sessions, lanes, gate runs and threads on the owner's computer",
+    'A cloud start needs the owner: they start it themselves or agree in chat to that named start',
+    'When the computer is busy or away the work waits and one owner line says so; it never falls back to the cloud',
     'Scheduled tasks prefer the cloud; new scheduled work joins an existing task first and stays a short prod',
   ]) assert.ok(line.includes(phrase), phrase);
-  assert.doesNotMatch(page, /no computer scheduled tasks|\*\*Cloud first:\*\*/);
+  // Cloud controllers used to start their work in the cloud (owner, 24 November: cloud costs too much usage).
+  assert.doesNotMatch(page, /Work runs where the controller runs|a cloud controller runs work in the cloud|no computer scheduled tasks|\*\*Cloud first:\*\*/);
 });
 
 test('lean children: one capped polish child, the stale-work net and automate-first in the global principles', () => {

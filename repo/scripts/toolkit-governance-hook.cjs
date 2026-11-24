@@ -93,10 +93,11 @@ function respondSteady(event, input, options) {
     if (event === 'UserPromptSubmit') {
       // Recording explicit merge authority is independent of answering governance. Only this live
       // prompt is ingested, never context Toolkit attaches to it.
+      // The host is this entry point's own (Claude Code), never a payload field.
       let approvalNote = '';
       try {
-        const count = (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
-        if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s).`;
+        const { count, note } = (options.mergeHold || mergeHold()).recordPromptNote(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' });
+        approvalNote = count ? `Toolkit recorded ${count} explicit merge approval(s).` : note;
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
       // Cloud override (Projects base-overrides list): the governance question is not asked in
       // cloud sessions, which cannot keep the owner's answer; nothing is held either way.
@@ -110,7 +111,7 @@ function respondSteady(event, input, options) {
       const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
       if (input.tool_name === 'AskUserQuestion') {
-        const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now };
+        const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' };
         // An agent's own merge question is pointed at the merge card; a reader failure shows it.
         let redirect = null;
         try { redirect = (options.mergeHold || mergeHold()).cardRedirect(input, cardOptions); } catch { /* shown: at worst a second tap */ }
@@ -128,7 +129,7 @@ function respondSteady(event, input, options) {
       if (input.tool_name !== 'AskUserQuestion') return {};
       const picked = new gate.PromptHold(options).picked({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolUseId: input.tool_use_id, toolResponse: input.tool_response });
       if (picked) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } };
-      const card = (options.mergeHold || mergeHold()).cardAnswered(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
+      const card = (options.mergeHold || mergeHold()).cardAnswered(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' });
       return card ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: card.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
@@ -226,7 +227,7 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 // (read-only ones, and the card, whose answer then counts for nothing without the tool gate's note)
 // is let through, as it was before the hook saw it. hooks.json matches the same split, with
 // onFailure: "block" only on this list, so a hook that cannot even start holds only these too.
-const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$/;
+const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|ScheduleWakeup|SendMessage|Workflow|mcp__.*)$/;
 
 function failed(event, input, gate) {
   // A failed PostToolUse records nothing, which leaves the repository waiting.

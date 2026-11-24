@@ -239,6 +239,14 @@ test('C-2: the controller\'s own session is never recorded as a gate session', (
   const own = fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', '--host', 'codex-app', '--host-session', controller.session]);
   assert.equal(own.error?.code, 'ROLE_REFUSED');
   assert.match(own.error.message, /controller session/);
+  // The calling session's own desktop ID (never held in state) is refused too, and nothing is recorded.
+  const self = fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', '--host', 'claude-code', '--host-session', localId(9)], { environment: { CLAUDE_CODE_HOST_SESSION_ID: localId(9) } });
+  assert.equal(self.error?.code, 'ROLE_REFUSED');
+  assert.equal(self.error.message.includes(localId(9)), false, 'the refusal never prints the ID');
+  assert.equal(fx.child(30).private.gate_sessions[0].session, null);
+  // Another session's ID is still recorded from the same calling session.
+  assert.equal(fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', '--host', 'claude-code', '--host-session', localId(8)], { environment: { CLAUDE_CODE_HOST_SESSION_ID: localId(9) } }).error, null);
+  assert.equal(fx.child(30).private.gate_sessions[0].session, localId(8));
 });
 
 test('C-2: G8, a lane that does not hold the child is refused; G11 a holder order runs gate-session', () => {

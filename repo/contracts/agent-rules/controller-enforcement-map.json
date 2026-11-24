@@ -311,8 +311,8 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Work runs where the controller runs:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether a step needs the other side of the controller's own type is a routing call. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
+      "rule": "**Work starts on the owner's computer:**",
+      "instruction_only": "Whether the owner started or agreed to a cloud start is read from the chat, and no Toolkit check reads a session start's target yet. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
     },
     {
       "file": "repo/controller/principles.md",

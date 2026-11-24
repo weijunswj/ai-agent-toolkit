@@ -37,6 +37,8 @@ function sources(t) {
 }
 
 const NOW = () => new Date('2026-11-21T13:00:00Z');
+// Sets a file's modified time, as a synced memory copy keeps the time each file was saved.
+const touch = (file, iso) => fs.utimesSync(file, new Date(iso), new Date(iso));
 
 test('handoff saves the per-repository snapshot with its manifest, then sends nothing when nothing changed', t => {
   const w = world(t);
@@ -64,14 +66,15 @@ test('handoff saves the per-repository snapshot with its manifest, then sends no
   assert.equal(w.remoteTip(), tip);
   assert.equal(pushes(w.calls).length, pushed, 'an unchanged snapshot pushes nothing');
 
-  // One changed memory file is saved; a file missing here is unknown, so its copy and row stay.
+  // One changed memory file is saved; a file this computer saved and then deleted leaves the mirror.
   s.put('memory/MEMORY.md', '# Memory\n- queue: #2\n');
+  touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T12:00:00Z');
   fs.rmSync(path.join(s.memory, 'owner-rules.md'));
   const changed = w.act(['handoff', '--repo-root', s.repo], { handoffState: s.state, now: NOW });
   assert.equal(changed.result.handoff, 'SAVED');
   assert.match(w.remoteFile(`${FOLDER}/MEMORY.md`), /queue: #2/);
-  assert.ok(w.remoteHas(`${FOLDER}/memory/owner-rules.md`), 'nothing is deleted');
-  assert.ok(JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).files.some(row => row.path === 'memory/owner-rules.md'));
+  assert.ok(!w.remoteHas(`${FOLDER}/memory/owner-rules.md`), 'the deleted file leaves the store tip');
+  assert.ok(JSON.parse(w.remoteFile(`${FOLDER}/manifest.json`)).removed.some(row => row.path === 'memory/owner-rules.md'));
 });
 
 test('a snapshot an earlier run could not push is sent by the next run, never reported unchanged', t => {
@@ -306,8 +309,6 @@ test('the controller check runs the handoff check only with its inputs, and the 
 // ---- after-tool hook ------------------------------------------------------------------------------
 
 const MINUTE = 60 * 1000;
-// Sets a file's modified time, as a synced memory copy keeps the time each file was saved.
-const touch = (file, iso) => fs.utimesSync(file, new Date(iso), new Date(iso));
 // A memory folder whose files were saved at different times (real modified times).
 function aged(s) {
   touch(path.join(s.memory, 'MEMORY.md'), '2026-11-21T10:00:00Z');
@@ -328,9 +329,10 @@ function hookHarness(s, { cwd = s.base, record = s.state } = {}) {
   return { hook, dir, started, fire, later: minutes => { clock.now += minutes * MINUTE; } };
 }
 
-const runOut = (s, out) => (argv, now = NOW) => {
+// `state` is the computer's run record: another one has its own folder records.
+const runOut = (s, out, state = s.state) => (argv, now = NOW) => {
   const lines = [];
-  const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv, '--json'], { handoffState: s.state, now, stdout: text => lines.push(text), stderr: text => lines.push(text) });
+  const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv, '--json'], { handoffState: state, now, stdout: text => lines.push(text), stderr: text => lines.push(text) });
   return { code, result: JSON.parse(lines.join('')) };
 };
 
@@ -447,6 +449,7 @@ test('a hook-started refresh writes a file only when this copy is newer, adds wh
   assert.equal(run(['--baseline', baseline]).result.handoff, 'UNCHANGED');
   // Its own change is written; the newer row stays.
   s.put('memory/owner-rules.md', 'merge commits only; no rebase\n');
+  touch(path.join(s.memory, 'owner-rules.md'), '2026-11-21T12:30:00Z');
   assert.equal(run(['--baseline', baseline]).result.handoff, 'WRITTEN');
   assert.match(copy('MEMORY.md'), /newest queue/);
   assert.match(copy('memory/owner-rules.md'), /no rebase/);
@@ -556,11 +559,11 @@ test('an older session that later saves its own file never drops a newer file it
   putAt(s, 'memory/owner-rules.md', 'rules v1\n', '2026-11-21T09:00:00Z');
   putAt(s, 'memory/newer-topic.md', 'saved by the coordinator at 10:30\n', '2026-11-21T10:30:00Z');
   assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
-  // Session A synced at 10:00: it never had newer-topic.md. At 11:00 it saves its own file.
+  // Session A synced at 10:00 in its own container: it never had newer-topic.md. At 11:00 it saves its own file.
   fs.rmSync(path.join(s.memory, 'newer-topic.md'));
   const a = baselineOf(s, path.join(s.base, 'session-a.json'));
   putAt(s, 'memory/owner-rules.md', 'rules v2 (session A)\n', '2026-11-21T11:00:00Z');
-  assert.equal(run(['--baseline', a]).result.handoff, 'WRITTEN');
+  assert.equal(runOut(s, out, path.join(s.base, 'container-a', 'handoff-refresh.json'))(['--baseline', a]).result.handoff, 'WRITTEN');
   assert.match(v.copy('memory/owner-rules.md'), /session A/, 'its own newer edit is written');
   assert.ok(v.row('memory/newer-topic.md'), 'a file this session does not hold is unknown here, never dropped');
 });
@@ -591,15 +594,16 @@ test('a gate-end manual run from an older session never reverts or drops newer m
   putAt(s, 'memory/owner-rules.md', 'rules\n', '2026-11-21T09:00:00Z');
   putAt(s, 'memory/newer-topic.md', 'new at 11:30\n', '2026-11-21T11:30:00Z');
   assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
-  // An older gate thread (synced 10:00) ends its gate with a plain run.
+  // An older gate thread (synced 10:00, in its own container) ends its gate with a plain run.
+  const thread = runOut(s, out, path.join(s.base, 'container-gate', 'handoff-refresh.json'));
   putAt(s, 'memory/MEMORY.md', '# Memory\n- old queue (08:00)\n', '2026-11-21T08:00:00Z');
   fs.rmSync(path.join(s.memory, 'newer-topic.md'));
-  assert.equal(run([]).result.handoff, 'UNCHANGED');
+  assert.equal(thread([]).result.handoff, 'UNCHANGED');
   assert.doesNotMatch(v.copy('MEMORY.md'), /old queue/);
   assert.ok(v.row('memory/newer-topic.md'));
   // Its own newer save is written by the same plain run.
   putAt(s, 'memory/owner-rules.md', 'rules, gate end\n', '2026-11-21T12:30:00Z');
-  assert.equal(run([]).result.handoff, 'WRITTEN');
+  assert.equal(thread([]).result.handoff, 'WRITTEN');
   assert.match(v.copy('memory/owner-rules.md'), /gate end/);
   assert.doesNotMatch(v.copy('MEMORY.md'), /old queue/);
 });
@@ -859,7 +863,7 @@ test('a save the last untimed snapshot missed is named unsure by --check and lan
   assert.equal(run(['--reseed'], () => new Date('2026-11-21T18:41:00Z')).result.handoff, 'WRITTEN');
   assert.match(v.copy('MEMORY.md'), /queue v1/);
   assert.deepEqual([v.row('MEMORY.md').modified, v.row('MEMORY.md').modified_from], ['2026-11-21T18:05:00.000Z', undefined]);
-  assert.equal(run(['--check']).result.handoff, 'CURRENT');
+  assert.equal(run(['--check'], () => new Date('2026-11-21T18:41:00Z')).result.handoff, 'CURRENT');
 });
 
 test('a row whose time came from its snapshot stays marked after later writes, so the order stays unsure', t => {
@@ -880,7 +884,7 @@ test('a row whose time came from its snapshot stays marked after later writes, s
   assert.equal(run(['--check']).result.unsure, 'MEMORY.md');
   // A row whose matching copy fixed its time has a real one, so nothing is unsure about it.
   putAt(s, 'memory/MEMORY.md', '# Memory\n- snapshot copy\n', '2026-11-21T17:00:00Z');
-  assert.equal(run(['--check']).result.handoff, 'CURRENT');
+  assert.equal(run(['--check'], () => new Date('2026-11-21T18:31:00Z')).result.handoff, 'CURRENT');
   // --reseed is a manual run only.
   for (const extra of [['--check'], ['--baseline', path.join(s.base, 'a.json')]]) {
     assert.equal(store.main(['handoff', '--out', out, '--repo-root', s.repo, '--reseed', ...extra], { handoffState: s.state, stdout: () => {}, stderr: () => {} }), 2, extra.join(' '));
@@ -933,9 +937,10 @@ test('a hook-started run keeps memory rows first written under an older folder p
   touch(path.join(old, 'MEMORY.md'), '2026-11-21T08:00:00Z');
   touch(path.join(old, 'owner-rules.md'), '2026-11-21T09:00:00Z');
   assert.equal(run(['--memory', old]).result.handoff, 'WRITTEN');
-  // The folder is named again under a new path in a run that also writes a newer file: the unchanged
-  // MEMORY.md row keeps the old path as its source.
+  // The folder is named again under a new path (a first run there records it), then a run writes a
+  // newer file: the unchanged MEMORY.md row keeps the old path as its source.
   fs.renameSync(old, s.memory);
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'UNCHANGED');
   putAt(s, 'memory/owner-rules.md', 'rules v2\n', '2026-11-21T10:20:00Z');
   assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
   assert.equal(v.row('MEMORY.md').source, old);
@@ -945,4 +950,94 @@ test('a hook-started run keeps memory rows first written under an older folder p
   assert.equal(result.handoff, 'UNCHANGED', JSON.stringify(result));
   assert.equal(result.kept, s.memory);
   for (const name of ['MEMORY.md', 'memory/owner-rules.md']) assert.ok(v.row(name), name);
+});
+
+// ---- polish rows: the reader's limits, the undo, a named-source check, network-share paths, the README
+
+test('the snapshot skips dot-named memory files and refuses a source over 5 MB or holding a NUL byte', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const run = runOut(s, out);
+  s.put('memory/.draft.md', 'an editor\'s swap copy\n');
+  s.put('memory/.cache/notes.md', 'a tool\'s cache\n');
+  assert.equal(run(['--memory', s.memory]).result.handoff, 'WRITTEN');
+  const rows = JSON.parse(fs.readFileSync(path.join(out, FOLDER, 'manifest.json'), 'utf8')).files.map(row => row.path);
+  assert.deepEqual(rows.filter(name => name.includes('.draft') || name.includes('.cache')), [], 'dot-names are never copied');
+  // Over 5 MB: refused by name before it is read.
+  const big = s.put('plans/big.md', 'a'.repeat(5 * 1024 * 1024 + 1));
+  const over = run(['--file', big]);
+  assert.equal(over.code, 1);
+  assert.match(over.result.stopped, /big\.md is over 5 MB\./);
+  // A NUL byte is valid UTF-8 but the store refuses it as binary, so the reader refuses it first:
+  // otherwise every refresh would write, stop at the save and undo, and --check would stay STALE.
+  const nul = s.put('plans/nul.md', 'text\u0000more\n');
+  const binary = run(['--file', nul]);
+  assert.equal(binary.code, 1);
+  assert.match(binary.result.stopped, /nul\.md holds a NUL byte \(binary\)\./);
+  assert.ok(!fs.existsSync(path.join(out, FOLDER, 'files', 'nul.md')), 'nothing is written');
+});
+
+test('undo of a stopped save removes the files the write created and restores the ones it changed', t => {
+  const handoff = handoffLib();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-handoff-undo-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const folder = 'evidence/handoff/acme/widget';
+  const at = rel => path.join(base, folder, ...rel.split('/'));
+  fs.mkdirSync(path.dirname(at('manifest.json')), { recursive: true });
+  fs.writeFileSync(at('manifest.json'), 'old manifest\n');
+  const undo = handoff.write(base, { folder, manifest: { schema: handoff.SCHEMA, files: [] }, writes: [{ path: 'memory/new-topic.md', text: 'new\n' }] }, 'acme/widget');
+  assert.ok(fs.existsSync(at('memory/new-topic.md')) && fs.existsSync(at('README.md')));
+  undo();
+  assert.equal(fs.existsSync(at('memory/new-topic.md')), false, 'a created snapshot file is removed');
+  assert.equal(fs.existsSync(at('README.md')), false, 'a created README is removed');
+  assert.equal(fs.readFileSync(at('manifest.json'), 'utf8'), 'old manifest\n', 'a changed file gets its old bytes back');
+});
+
+test('--check with a named source compares against that source, not the remembered one', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  const act = argv => { const lines = []; const code = store.main(['handoff', '--out', out, '--repo-root', s.repo, ...argv], { handoffState: s.state, now: NOW, stdout: text => lines.push(text), stderr: text => lines.push(text) }); return { code, text: lines.join('') }; };
+  assert.equal(act(['--memory', s.memory]).code, 0);
+  const other = path.join(s.base, 'other-memory');
+  fs.cpSync(s.memory, other, { recursive: true });
+  fs.writeFileSync(path.join(other, 'MEMORY.md'), '# Memory\n- the other folder\n');
+  fs.utimesSync(path.join(other, 'MEMORY.md'), new Date('2026-11-21T12:30:00Z'), new Date('2026-11-21T12:30:00Z'));
+  fs.utimesSync(path.join(other, 'owner-rules.md'), new Date('2026-11-20T09:00:00Z'), new Date('2026-11-20T09:00:00Z'));
+  assert.match(act(['--check']).text, /^HANDOFF CURRENT /, 'the remembered folder is unchanged');
+  const named = act(['--check', '--memory', other]);
+  assert.equal(named.code, 1, named.text);
+  // A folder this computer never saved from holds rows it never recorded: diverged, not changed.
+  assert.match(named.text, /^HANDOFF STALE .*diverged=MEMORY\.md/);
+});
+
+test('a Windows network-share path is a full path on Windows and another computer\'s path elsewhere', () => {
+  const { fullPathHere } = handoffLib();
+  for (const share of ['\\\\server\\share\\memory', '//server/share/memory']) {
+    assert.equal(fullPathHere(share, 'win32'), true, share);
+  }
+  assert.equal(fullPathHere('\\\\server\\share\\memory', 'linux'), false);
+  assert.equal(fullPathHere('\\\\server\\share\\memory', 'darwin'), false);
+  assert.equal(fullPathHere('\\\\', 'win32'), false, 'a bare double separator names no share');
+});
+
+test('the snapshot README gives a successor its reading order: MEMORY.md first, then the named working files', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--memory', s.memory, '--instructions', s.instructions, '--file', s.hourly, '--file', s.daily]).code, 0);
+  const readme = fs.readFileSync(path.join(out, FOLDER, 'README.md'), 'utf8');
+  const order = readme.slice(readme.indexOf('## Read in this order'));
+  assert.ok(readme.includes('## Read in this order'), readme);
+  const steps = order.split('\n').filter(line => /^\d+\. /.test(line));
+  assert.match(steps[0], /^1\. `MEMORY\.md`/);
+  assert.match(steps[1], /`files\/instructions\.md`/);
+  assert.match(steps[2], /`files\/daily-additions\.md`, `files\/hourly-additions\.md`/);
+});
+
+test('a snapshot with no memory folder gives no MEMORY.md reading step', t => {
+  const s = sources(t);
+  const out = path.join(s.base, 'drive');
+  assert.equal(runOut(s, out)(['--file', s.hourly]).code, 0);
+  const readme = fs.readFileSync(path.join(out, FOLDER, 'README.md'), 'utf8');
+  const steps = readme.slice(readme.indexOf('## Read in this order')).split('\n').filter(line => /^\d+\. /.test(line));
+  assert.deepEqual(steps, ['1. The named working files: `files/additions.md`.'], readme);
 });
