@@ -12,12 +12,12 @@ const train = require('../scripts/toolkit-merge-train.cjs');
 const { fixture, built, MEMBER_BODY } = require('./support/merge-train-fixture.cjs');
 
 // GitHub facts in find's --live format: one open train pull request, its body the member table.
-function openTrainFacts(f, { number = 50, branch = 'toolkit-train/one', base = 'main', head, members = [] }) {
+function openTrainFacts(f, { number = 50, branch = 'toolkit-train/one', base = 'main', head, members = [], repo = 'example/repo' }) {
   const file = path.join(f.root, `open-${number}.json`);
   const table = members.map(([pr, sha]) => `| #${pr} | \`${sha}\` | NORMAL | patch | x |`).join('\n');
   fs.writeFileSync(file, JSON.stringify({
     default_branch: 'main',
-    pulls: [{ number, draft: false, base: { ref: base }, head: { ref: branch, sha: head }, body: `## Merge train\n\n| Member | Reviewed head | Tier | Bump | Review |\n|---|---|---|---|---|\n${table}\n` }],
+    pulls: [{ number, draft: false, base: { ref: base }, head: { ref: branch, sha: head, repo: { full_name: repo } }, body: `## Merge train\n\n| Member | Reviewed head | Tier | Bump | Review |\n|---|---|---|---|---|\n${table}\n` }],
   }));
   return file;
 }
@@ -41,6 +41,12 @@ test('a build on main beside an open train refuses, names how to stack, and --se
   assert.throws(() => f.git('rev-parse', '--verify', '--quiet', 'refs/heads/toolkit-train/two'), /git rev-parse/, 'no branch was made');
   const cli = f.cli('build', '--manifest', manifest, '--branch', 'toolkit-train/two', '--main', 'main', '--live', open);
   assert.equal(cli.status, 1, cli.stdout + cli.stderr);
+
+  // A fork's pull request with a member table is not a train here: the build is not held by it.
+  const fork = openTrainFacts(f, { number: 60, branch: 'toolkit-train/fork', head: first.result.head, members: [[1, one]], repo: 'someone/fork' });
+  const beside = train.run(['build', '--manifest', manifest, '--branch', 'toolkit-train/fork-check', '--main', 'main', '--live', fork], f.repo, f.opts);
+  assert.equal(beside.ok, true, JSON.stringify(beside));
+  f.git('switch', '--quiet', 'toolkit-train/one');
 
   // Rebuilding the open train's own branch on main (main moved) is not beside it.
   const rebuilt = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }, 'again.json'), '--branch', 'toolkit-train/one', '--main', 'main', '--live', open], f.repo, f.opts);
@@ -95,7 +101,9 @@ test('build stacks onto the manifest onto at the head find saw, prints the base 
   f.write('later.txt', 'later\n');
   f.git('add', 'later.txt');
   f.git('commit', '--quiet', '-m', 'main moves past the landed train');
-  assert.throws(() => train.run(['build', '--manifest', manifest, '--branch', 'toolkit-train/x', '--main', 'main'], f.repo, f.opts), /train #50 at [0-9a-f]{12} does not contain main: it landed or main moved under it; run find again/);
+  // A stacked train left open after the train under it landed is not a train that landed: the
+  // refusal names catchup, or find would write the same onto again.
+  assert.throws(() => train.run(['build', '--manifest', manifest, '--branch', 'toolkit-train/x', '--main', 'main'], f.repo, f.opts), /train #50 at [0-9a-f]{12} does not contain main: if it landed, run find again; if it is still open \(stacked on a train that landed\), catch it up first \(catchup in a clean checkout of toolkit-train\/one\), then run find again$/);
 
   f.git('switch', '--quiet', 'toolkit-train/two');
   const caught = train.catchup(f.repo, boarded, { main: 'main', out });

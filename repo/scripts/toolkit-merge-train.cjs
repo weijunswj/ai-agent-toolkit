@@ -9,7 +9,7 @@
 // merges, pushes or writes to GitHub: `land` only checks, then names the train pull request and the
 // exact head the merging agent may merge, by the repository's normal merge route.
 //
-//   node repo/scripts/toolkit-merge-train.cjs find   --out <file> [--live <file>] [--json]   (toolkit-merge-train-finder.cjs)
+//   node repo/scripts/toolkit-merge-train.cjs find   --out <file> [--pr <n,n,...>] [--live <file>] [--json]   (toolkit-merge-train-finder.cjs)
 //   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref> | --separate <reason>] [--live <file>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs catchup --manifest <file> [--main <ref>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
@@ -101,7 +101,7 @@
 // card), with the reasons. --live reads those pull request facts from a JSON file
 // ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
 // (REST); a member entry with no body is refused, never read as NOT_REQUIRED. A ready land says the
-// merge step plainly (merge_step): route owner asks the owner "Merge PR N?" with the external
+// merge step plainly (merge_step): route owner asks the owner in a plain message (never a question card) "Merge PR N?" with the external
 // effects and, on the yes, the agent runs the named merge so the merge guard shows its card, never
 // sending the owner to click Merge on GitHub unless the guard cannot record the answer. It also
 // lists the steps after the merge: the closing stories for the train and each member, the sessions to
@@ -404,7 +404,7 @@ function ontoOf(cwd, manifest, main, options, separate) {
     throw new TrainError(`--onto and the manifest's onto (train #${train.pr} at ${train.head.slice(0, 12)}) disagree: drop one`);
   }
   if (!isAncestor(cwd, main, train.head)) {
-    throw new TrainError(`train #${train.pr} at ${train.head.slice(0, 12)} does not contain main: it landed or main moved under it; run find again`, 1);
+    throw new TrainError(`train #${train.pr} at ${train.head.slice(0, 12)} does not contain main: if it landed, run find again; if it is still open (stacked on a train that landed), catch it up first (catchup in a clean checkout of ${train.branch}), then run find again`, 1);
   }
   return { onto: train.head, train };
 }
@@ -890,7 +890,7 @@ function land(cwd, manifest, options) {
 function mergeStep(merge) {
   const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;
   if (merge.route === 'auto') return `post the effects notice, then run ${command}; no ask`;
-  return `ask the owner "Merge PR ${merge.pr}?" with its external effects; on their yes, run ${command} yourself, so the merge guard shows its card and records the answer. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${merge.head.slice(0, 12)}`;
+  return `ask the owner in a plain message (a question card that asks to merge is refused): "Merge PR ${merge.pr}?" with its external effects; on their yes, run ${command} yourself, so the merge guard shows its card and records the answer. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${merge.head.slice(0, 12)}`;
 }
 
 // The owed steps once the train has merged, so stories and clean-up are not forgotten: the closing
@@ -972,7 +972,15 @@ function parseArgs(argv) {
     options[key] = rest[++index];
   }
   if (!options.manifest && command !== 'find') throw new TrainError('--manifest is required');
-  if (options.pr !== undefined) options.pr = /^\d+$/.test(options.pr) ? Number(options.pr) : -1;
+  // find takes the pull requests to consider (the owner-approved members); the other commands one number.
+  if (options.pr !== undefined && command === 'find') {
+    const named = String(options.pr).split(',').map(part => part.trim());
+    if (!named.every(part => /^[1-9]\d*$/.test(part)) || new Set(named).size !== named.length) {
+      throw new TrainError('--pr for find takes pull request numbers separated by commas, each once, for example --pr 1494,1478');
+    }
+    options.prs = named.map(Number);
+    delete options.pr;
+  } else if (options.pr !== undefined) options.pr = /^\d+$/.test(options.pr) ? Number(options.pr) : -1;
   return options;
 }
 

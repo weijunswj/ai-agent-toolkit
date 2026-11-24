@@ -97,7 +97,7 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   f.governed({ auto_merge: 'off' });
   landed = land(plain.out, plain.result.head);
   assert.deepEqual([landed.merge.route, landed.merge.route_reasons], ['owner', ['task auto-merge is off here (repository-off)']]);
-  assert.match(landed.merge_step, /^ask the owner "Merge PR 50\?" with its external effects; on their yes, run gh pr merge 50 /);
+  assert.match(landed.merge_step, /^ask the owner in a plain message \(a question card that asks to merge is refused\): "Merge PR 50\?" with its external effects; on their yes, run gh pr merge 50 /);
 
   f.governed({ auto_merge: 'after-gates' });
   const risky = JSON.parse(fs.readFileSync(plain.out, 'utf8'));

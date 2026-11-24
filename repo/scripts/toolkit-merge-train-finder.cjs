@@ -4,7 +4,12 @@
 // to count them by hand. It only reads: it never pushes, merges, comments or writes to GitHub, and
 // writes one manifest file that `toolkit-merge-train.cjs build` takes as it is.
 //
-//   node repo/scripts/toolkit-merge-train.cjs find --out <manifest> [--live <file>] [--json]
+//   node repo/scripts/toolkit-merge-train.cjs find --out <manifest> [--pr <n,n,...>] [--live <file>] [--json]
+//
+// --pr names the pull requests to consider (the owner-approved members): only those are judged,
+// with every check below, and the ready ones are written, oldest first up to the cap; a named one
+// that is not ready, or not open here, is listed with its reason and left out. Without it, every open
+// pull request is judged and the oldest ready ones board.
 //
 // Ready means, at the pull request's current head:
 //   - it is open, not a draft, and based on the default branch;
@@ -220,9 +225,11 @@ function reviewFor(pull, facts, verdict, files, uatState, byFiles, tiers) {
 }
 
 // The open train pull requests: { pr, branch, base, head }, oldest first. A train is a pull request
-// whose body holds the merge-train member table.
-function openTrains(pulls) {
-  return pulls.filter(pull => mergeTrainMembers(pull.body))
+// from this repository (its head repository is `repository`) whose body holds the merge-train member
+// table; a fork's pull request with such a body is not a train here.
+function openTrains(pulls, repository) {
+  const here = String(repository || '').toLowerCase();
+  return pulls.filter(pull => here && String(pull.head && pull.head.repo && pull.head.repo.full_name || '').toLowerCase() === here && mergeTrainMembers(pull.body))
     .map(pull => ({ pr: pull.number, branch: pull.head && pull.head.ref, base: pull.base && pull.base.ref, head: pull.head && pull.head.sha }))
     .sort((a, b) => a.pr - b.pr);
 }
@@ -252,8 +259,9 @@ function stackTip(trains) {
 
 // Open trains read from GitHub (or a --live file in find's format): for build's open-train check.
 function readOpenTrains(cwd, repository, liveFile) {
-  const facts = liveFile ? new LiveFacts(liveFile) : new GitHubFacts(repository || governance.remoteSlug(governance.readIdentity(cwd).remote));
-  return openTrains(facts.pulls());
+  const slug = repository || governance.remoteSlug(governance.readIdentity(cwd).remote);
+  const facts = liveFile ? new LiveFacts(liveFile) : new GitHubFacts(slug);
+  return openTrains(facts.pulls(), slug);
 }
 
 const PLAIN_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -268,8 +276,9 @@ function find(cwd, options, maxMembers) {
   const facts = options.live ? new LiveFacts(options.live) : new GitHubFacts(repository);
   const branch = facts.defaultBranch();
   const pulls = facts.pulls().slice().sort((a, b) => a.number - b.number);
-  const held = new Set(pulls.flatMap(pull => mergeTrainMembers(pull.body) || []));
-  const { tip, others } = stackTip(openTrains(pulls));
+  const trains = openTrains(pulls, repository);
+  const held = new Set(pulls.filter(pull => trains.some(entry => entry.pr === pull.number)).flatMap(pull => mergeTrainMembers(pull.body)));
+  const { tip, others } = stackTip(trains);
   if (tip && (!PLAIN_REF.test(tip.branch || '') || tip.branch.includes('..') || !SHA40.test(tip.head || ''))) {
     throw new Error(`open train #${tip.pr} has no readable head branch and SHA, so nothing can stack onto it; read it again`);
   }
@@ -277,11 +286,16 @@ function find(cwd, options, maxMembers) {
   const registry = gateRoute.loadRegistry();
   const ready = [];
   const skipped = [];
+  const named = options.prs ? new Set(options.prs) : null;
   for (const pull of pulls) {
-    if (mergeTrainMembers(pull.body)) continue; // a train pull request itself
+    if (named && !named.has(pull.number)) continue; // only the named pull requests are judged
+    if (mergeTrainMembers(pull.body)) { if (named) skipped.push(`#${pull.number}: a train pull request, not a member`); continue; }
     const outcome = judge(pull, facts, { required, branch, held, tiers, registry });
     if (outcome.member) ready.push(outcome.member);
     else skipped.push(`#${pull.number}: ${outcome.skip}`);
+  }
+  for (const number of named ? [...named].sort((a, b) => a - b) : []) {
+    if (!pulls.some(pull => pull.number === number)) skipped.push(`#${number}: not an open pull request here`);
   }
   const members = ready.slice(0, maxMembers);
   const later = ready.slice(maxMembers).map(member => `#${member.pr}`);

@@ -284,7 +284,8 @@ test('land checks live heads, main and RISKY owner OKs before it names the one m
     route_reasons: ['task auto-merge is off here (no-switch-set)', "RISKY members wait for the owner's merge card: #2"] });
   // The 23 November miss: the owner was asked to click Merge on GitHub instead of getting the merge
   // guard's card. Route owner says plainly: ask, then the agent runs the exact merge on the yes.
-  assert.equal(JSON.parse(ready.stdout).merge_step, `ask the owner "Merge PR 50?" with its external effects; on their yes, run gh pr merge 50 --repo example/repo --merge --match-head-commit ${result.head} yourself, so the merge guard shows its card and records the answer. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${result.head.slice(0, 12)}`);
+  // A question card that asks to merge is refused by the merge hold, so the ask is a plain message.
+  assert.equal(JSON.parse(ready.stdout).merge_step, `ask the owner in a plain message (a question card that asks to merge is refused): "Merge PR 50?" with its external effects; on their yes, run gh pr merge 50 --repo example/repo --merge --match-head-commit ${result.head} yourself, so the merge guard shows its card and records the answer. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${result.head.slice(0, 12)}`);
   const text = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'toolkit-merge-train.cjs'), 'land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], { cwd: f.repo, encoding: 'utf8', env: { ...process.env, HOME: path.join(f.root, 'home'), USERPROFILE: path.join(f.root, 'home') } });
   assert.ok(text.stdout.split('\n').includes(`Merge step: ${JSON.parse(ready.stdout).merge_step}`), text.stdout);
 
@@ -417,6 +418,7 @@ test('the controller, the changelog guide and the repo map describe the train th
   for (const command of ['build', 'verify', 'body', 'land', 'eject']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
   assert.match(guide, /\*\*Eject after boarding:\*\* .*It never rewrites the branch/);
   assert.match(guide, /\*\*Batches:\*\* several merge-ready pull requests land as one merge train that bumps once/);
+  assert.match(guide, /`find --pr <n,n,\.\.\.>` judges only the named pull requests \(the owner-approved members\)/);
   // Stacking is the script's default, and land lists what is owed after the merge.
   assert.match(guide, /A build on main reads the open train pull requests first .* and refuses while one is open, .*`--separate "<reason>"` builds beside it on purpose/);
   assert.match(guide, /A ready `land` also lists what is owed once the merge is in: the closing story on the train and each member, the sessions to archive/);
@@ -434,7 +436,7 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\./);
   assert.match(roles, /`land` route `auto` \(task auto-merge on, clean scope and UAT line, no RISKY member\) merges after the effects notice, with no ask; `owner`: \[`land`'s merge step\]\(\.\.\/docs\/changelog\.d\/README\.md#merge-trains\), never a GitHub click\. The train's merge ask goes up where `land` and the merge run, never relayed/);
   // One home for the owner-route merge step: the changelog guide's Land bullet, linked from the roles page.
-  assert.match(guide, /for `owner`, ask the owner "Merge PR N\?" with the external effects, and on their yes run the named merge command \(a merge commit at the exact head\) yourself, so the merge guard shows its card and records the answer\. Never tell the owner to click Merge on GitHub/);
+  assert.match(guide, /for `owner`, ask the owner in a plain message \(a question card that asks to merge is refused\) "Merge PR N\?" with the external effects, and on their yes run the named merge command \(a merge commit at the exact head\) yourself, so the merge guard shows its card and records the answer\. Never tell the owner to click Merge on GitHub/);
   assert.match(roles, /Trains run only while governance is ENABLED and `task_prs\.merge_train` is not `off`; otherwise `build`, `catchup` and `land` refuse and each ready PR merges alone\./);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/reference/cloud-hook-parity.md'), /A merge train's merge thread is the train thread: it posts the card for the train PR at its head and runs `land` and the merge itself[\s\S]*Fallback: the owner types `merge PR N at <full SHA> as a merge commit` in the train thread\./);
   assert.match(roles, /At boarding, copy each member's `Pack changes` lines into its manifest entry \(`pack_changes`\)/);
