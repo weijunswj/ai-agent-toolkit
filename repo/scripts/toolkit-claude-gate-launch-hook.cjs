@@ -22,10 +22,11 @@
 //                declares none. The brief is read as the started session reads its first prompt: the
 //                background, then the prompt.
 //   PostToolUse  after a gate start or proposal card, prints the next steps with the session id
-//                filled in: when the start effort is below the pin (start_session cannot go above
-//                the caller's own effort), a READY-only first turn, then set_session_effort to the
-//                pin, then the go-ahead; and the record step (`programme.cjs assign`) for the
-//                brief's assignment.
+//                filled in: when the start runs below the pin, a READY-only first turn, then
+//                set_session_effort to the pin, then the go-ahead; and the record step
+//                (`programme.cjs assign`) for the brief's assignment. start_session caps an effort
+//                above the caller's own without an error, so a start that asks for more runs at the
+//                caller's; with the caller's effort unknown, the steps say to read it first.
 //
 // It reads only exact fields: the tool name, the title, the call's context, target, model and effort,
 // and the brief's first Gate, Route, Route override, Review class and Assignment lines, never the
@@ -33,7 +34,8 @@
 // (fail open): the started gate's own route check still refuses an off-pin session.
 //
 // Accepted gaps: a start by proposal id alone carries no brief, so it is checked when the card is
-// proposed; a cloud start pins nothing in the call, so only its lines are checked; an assignment id
+// proposed, and an offer card's brief sent with its proposal id has only its lines checked (that call
+// may carry no model or effort); a cloud start pins nothing in the call, so only its lines are checked; an assignment id
 // is checked for shape, not looked up in the programme state; a brief that names no gate and has an
 // ordinary title is not read.
 
@@ -107,20 +109,26 @@ function launchCheck(toolInput, { registry, callerEffort = null } = {}) {
     if (!assignmentId().test(id)) return deny(`\`Assignment: ${brief.assignment}\` is not an assignment id (letters, digits, dot, dash or underscore, up to 60). Use \`Assignment: <id>\` or \`Assignment: none\`.`);
     assignment = id;
   }
+  const caller = route.EFFORTS.includes(callerEffort) ? callerEffort : null;
   const launch = { gate, pin, assignment, effort: null, model, cloud: call.target === 'cloud' };
   // A cloud start takes no model or effort (the app ignores them there).
   if (launch.cloud) return launch;
+  // An offer card's brief goes with its proposal id, which may carry no model or effort: its lines
+  // are checked, and it starts at this session's effort.
+  if (typeof call.proposal_id === 'string' && call.proposal_id) { launch.effort = caller; return launch; }
   const pinned = `${pin.profile}/${pin.member} is ${pin.model}/${pin.effort}`;
   if (typeof call.model !== 'string' || !call.model.trim()) return deny(`pass \`model: "${model}"\` in the launch call: a ${gate} runs on its pinned model (${pinned}), and an inherited model is not pinned.`);
   if (route.registryModel(call.model) !== route.registryModel(pin.model)) return deny(`the launch call asks for ${route.registryModel(call.model)}, but the ${pin.profile}/${pin.member} pin is ${pin.model}. Pass \`model: "${model}"\`.`);
-  const caller = route.EFFORTS.includes(callerEffort) ? callerEffort : null;
   const want = caller && rank(caller) < rank(pin.effort) ? caller : pin.effort;
   const wantText = want === pin.effort ? `pass \`effort: "${want}"\`` : `pass \`effort: "${want}"\`, the highest this session can give, and raise it after the start`;
   if (!route.EFFORTS.includes(call.effort)) return deny(`${wantText} in the launch call: a ${gate} runs on its pinned effort (${pinned}), and an inherited effort is not pinned.`);
   if (rank(call.effort) > rank(pin.effort)) return deny(`the launch call's effort ${call.effort} is above its pin ${pin.model}/${pin.effort}; ${wantText}.`);
   // With the caller's effort unknown, a start below the pin may be its cap: the steps after it say how to raise it.
   if (caller && rank(call.effort) < rank(want)) return deny(`the launch call's effort ${call.effort} is below the ${pin.profile}/${pin.member} pin ${pin.model}/${pin.effort}; ${wantText}.`);
-  launch.effort = call.effort;
+  // start_session takes an effort at or below this session's own and caps one above it without an
+  // error (23 Nov: every G2 started at high with the pin's xhigh needed a raise), so such a start
+  // runs at this session's effort.
+  launch.effort = caller && rank(call.effort) > rank(caller) ? caller : call.effort;
   return launch;
 }
 
@@ -154,6 +162,8 @@ function postToolUse(input, { environment = process.env, registry } = {}) {
     const steps = [];
     if (decision.effort && rank(decision.effort) < rank(pin.effort)) {
       steps.push(`its first turn runs at ${decision.effort}, below its ${pin.model}/${pin.effort} pin (start_session cannot go above this session's own effort), so its route check refuses its tools until the raise: let that first turn end (it should only reply READY), then call mcp__ccd_session_mgmt__set_session_effort with session_id ${id} and effort ${pin.effort}, confirm it with get_session, and only then send it the go-ahead.`);
+    } else if (!decision.effort && !decision.cloud) {
+      steps.push(`this session's effort is unknown here, so read its effort with get_session; if it is below its ${pin.model}/${pin.effort} pin, let its first turn end (it should only reply READY), call mcp__ccd_session_mgmt__set_session_effort with session_id ${id} and effort ${pin.effort}, and only then send it the go-ahead.`);
     }
     if (assignment && ['G0', 'G1', 'G2'].includes(gate)) {
       steps.push(`it binds to assignment ${assignment}, and bind refuses until that assignment is recorded: if \`${programmeCommand(`assign --issue <n> --role ${gate} --assignment ${assignment}`)}\` has not run yet, run it now.`);

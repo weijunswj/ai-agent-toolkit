@@ -143,7 +143,7 @@ test('a start that asks for more effort than the caller has still gets the raise
     const call = { tool_name: TOOL, tool_input: g2(), ...input };
     assert.deepEqual(launch.preToolUse(call, { environment, registry }), {}, label);
     const steps = context(launch.postToolUse({ ...call, tool_response: [{ type: 'text', text: started }] }, { environment, registry }));
-    assert.match(steps, /its first turn runs at high, below its opus-5\.5\/xhigh pin/, label);
+    assert.match(steps, /Its first turn runs at high, below its opus-5\.5\/xhigh pin/, label);
     assert.match(steps, /set_session_effort with session_id local_1234abcd-0000-4000-8000-000000000002 and effort xhigh/, label);
   }
   // The caller at the pin: the start runs on it, so no raise.
