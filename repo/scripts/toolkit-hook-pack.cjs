@@ -346,8 +346,9 @@ function combineDecisions(decisions) {
 
 // Read only the surface delivered as context by each host, never stderr diagnostics.
 function hookContext(host, event, result) {
-  if (result.status !== 0 || !['SessionStart', 'UserPromptSubmit'].includes(event)) return '';
-  // Codex takes a session start's plain stdout as context; both hosts send prompt context as JSON.
+  if (result.status !== 0 || !['SessionStart', 'UserPromptSubmit', 'PostToolUse'].includes(event)) return '';
+  // Codex takes a session start's plain stdout as context; both hosts send prompt and after-tool
+  // context as JSON.
   if (host === 'codex' && event === 'SessionStart') return result.stdout;
   try {
     const output = JSON.parse(result.stdout);

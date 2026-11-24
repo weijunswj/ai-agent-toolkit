@@ -79,6 +79,21 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.doesNotMatch(diagnostic, /\brequire\b|\bimport\b/);
         continue;
       }
+      // The merge train's land prints the merge command for the agent to run after the owner's yes
+      // (merge_step), so the merge guard shows its card; the script itself never runs a merge. Proof:
+      // the command text appears once, as mergeStep's printed template, the script starts only git,
+      // the manifest's bump command and read-only `gh api`, and it holds no other merge text.
+      if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-train.cjs') {
+        // LF first: a CRLF checkout (Windows CI) must read the same lines and function bounds.
+        const source = fs.readFileSync(full, 'utf8').replace(/\r\n/g, '\n');
+        const named = source.split('\n').filter(line => /gh\s+pr\s+merge/i.test(line)).map(line => line.trim());
+        assert.deepEqual(named, ["const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;"]);
+        const step = source.slice(source.indexOf('function mergeStep('), source.indexOf('\n}\n', source.indexOf('function mergeStep(')));
+        assert.deepEqual(step.split('\n').filter(line => line.includes('${command}')).map(line => line.trim().startsWith('if (merge.route') || line.trim().startsWith('return ')), [true, true], 'the command is only returned as text');
+        assert.deepEqual([...source.matchAll(/\bspawnSync\(\s*([^,]+),\s*(\[?[^,\]]*)/g)].map(match => [match[1].trim(), match[2].trim()]), [['\'git\'', 'args'], ['argv[0]', 'argv.slice(1)'], ['\'gh\'', "['api'"]]);
+        assert.doesNotMatch(source, /(?<![.\w])(?:spawn|exec|execFile|fork|execSync|execFileSync)\s*\(|\bimport\s*\(|\bfetch\s*\(|node:https?\b|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i);
+        continue;
+      }
       const text = fs.readFileSync(full, 'utf8');
       if (/gh\s+pr\s+merge|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i.test(text)) hits.push(path.relative(root, full));
     }
