@@ -92,7 +92,7 @@ function buildCloudJobsGuide({ root = process.cwd(), contract = null } = {}) {
   return { jobs: jobs.map(job => structuredClone(job)), never_granted: [...source.never_granted] };
 }
 
-// The guide as lines for `toolkit governance check`; the App's own setup steps print beside it.
+// The guide as lines for the governance check (`toolkit-governance.cjs check`); the App's own setup steps print beside it.
 function guideLines(guide) {
   const roles = { governed_repository: 'Governed repository', evidence_store: 'Evidence store' };
   const lines = [`Cloud jobs: one governance GitHub App, variable ${governanceApp.APP.variable} and secret ${governanceApp.APP.secret}`];

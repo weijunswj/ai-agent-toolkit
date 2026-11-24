@@ -4,7 +4,7 @@
 // workflow of that repository mints its short-lived tokens from. GitHub counts its hourly allowance
 // per App installation, so one App per repository gives each repository its own allowance and a busy
 // repository never slows another. Turning governance on shows the owner how to set it up, turning it
-// off suggests and guides its removal, and `toolkit governance check` keeps reporting either. The
+// off suggests and guides its removal, and the governance check (toolkit-governance.cjs check) keeps reporting either. The
 // check reads only the names of the variable and the secret, so it cannot tell whether two
 // repositories share one App. Toolkit only prints the
 // owner's steps and reads whether the repository's variable and secret exist (names only); it never
@@ -160,8 +160,8 @@ function setupLines(slug, store, state, owner = null) {
     '   Or in your own terminal, with gh signed in (it keeps an App someone else set up here meanwhile):',
     ...saveCommands(slug),
     '5. Delete the .pem file once the secret is saved. It is the App\'s password and never expires; the App\'s page can generate a new key any time.',
-    `6. Check both halves are in place: run toolkit governance check in ${slug}. It should report the App's variable and secret as set and the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate, which the governance pull request carries) as current.`,
-    'Use one App per governed repository, even if another repository already has one: GitHub gives each App installation its own hourly allowance, so a busy repository never slows this one. toolkit governance check cannot tell whether two repositories share an App, because it reads only the variable and secret names.',
+    `6. Check both halves are in place: ask your agent to check governance in ${slug}. It should report the App's variable and secret as set and the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate, which the governance pull request carries) as current.`,
+    'Use one App per governed repository, even if another repository already has one: GitHub gives each App installation its own hourly allowance, so a busy repository never slows this one. The governance check cannot tell whether two repositories share an App, because it reads only the variable and secret names.',
   ];
 }
 
@@ -176,14 +176,14 @@ function removalLines(slug, state, others) {
     `   gh secret delete ${APP.secret} --repo ${slug}`,
     `2. Remove ${slug} from the App's installation: GitHub Settings, Applications, ${installation}.`,
     '3. If no other repository uses the App (with one App per repository, none does), also remove the evidence store from the installation, uninstall the App and delete it (the App\'s settings, Advanced, Delete GitHub App); its private keys stop working.',
-    `4. Check both halves are gone: run toolkit governance check in ${slug}. It should report no App variable or secret left over and no cloud sweep copies.`,
+    `4. Check both halves are gone: ask your agent to check governance in ${slug}. It should report no App variable or secret left over and no cloud sweep copies.`,
     others.length
       ? `This computer knows these repositories still use governance: ${others.join(', ')}. Other computers may know more.`
       : 'This computer knows no other repository that still uses governance. Other computers may know more, so check before deleting the App.',
   ];
 }
 
-// The `toolkit governance check` finding, or null when there is nothing to say.
+// The governance check's finding, or null when there is nothing to say.
 function appFinding(stateName, slug, store, state, others, owner = null) {
   const finding = (id, severity, lines) => Object.freeze({ id, severity, message: lines.join('\n  ') });
   if (stateName === 'ENABLED') {

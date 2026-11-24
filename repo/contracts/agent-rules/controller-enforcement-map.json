@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "3acfdb691434",
+      "rule_sha": "59c1db27a8d8",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -402,11 +402,11 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Work runs where the controller runs:**",
-      "rule_sha": "0eef493b5fba",
+      "rule": "**Work starts on the owner's computer:**",
+      "rule_sha": "067c0d5f983f",
       "instruction_only": {
         "basis": "judgement",
-        "why": "A design principle the controller applies by judgement in plans, reviews and merges; whether a step needs the other side of the controller's own type is a routing call. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
+        "why": "Whether the owner started or agreed to a cloud start is read from the chat, and no Toolkit check reads a session start's target yet. A deferred or paused scheduled run is a controller decision; the Projects run check prints every run left pending."
       }
     },
     {
@@ -450,12 +450,15 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
-      "rule_sha": "6497d1183487",
-      "instruction_only": {
-        "basis": "planned",
-        "why": "Whether a session is fully done is partly a judgement, but the transcript and the Claude desktop app's session files list the sessions this one started, their archive state and their pull requests, so the done-test is code-decidable.",
-        "planned": "#1225 S2 and C1: a turn-end check lists finished sessions and owed gate records, using the CLOSE_DUE done-test."
-      }
+      "rule_sha": "a38738045dd0",
+      "covers": "Gate assignments only: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. Other sessions, and whether the final message was read in full and acted on, stay instruction text.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/programme-close-due.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/roles-and-routes.md",
