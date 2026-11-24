@@ -608,8 +608,12 @@ class EnvEditSession {
     for (const line of refused) problems.push({ line, why: `this comment looks like it may hold a key or token (or is over ${MAX_COMMENT_CHARS} characters); remove or reword it` });
     lines.forEach((line, index) => {
       // A line break other than CRLF or LF (a lone CR, NEL, LS, PS, VT, FF) would hide the key line after
-      // it inside this line, so a save would delete that key: refuse the whole save instead.
-      if (STRAY_BREAK.test(line)) { problems.push({ line: index + 1, why: 'holds a line break this file cannot use; save it again with Windows (CRLF) or Unix (LF) line ends' }); return; }
+      // it inside this line, so a save would delete that key: refuse the whole save instead (a comment
+      // line holding one is already refused by the comment screen above).
+      if (STRAY_BREAK.test(line)) {
+        if (!refused.includes(index + 1)) problems.push({ line: index + 1, why: 'holds a line break this file cannot use; save it again with Windows (CRLF) or Unix (LF) line ends' });
+        return;
+      }
       const text = line.trim();
       if (!text || text.startsWith('#')) return;
       const at = text.indexOf('=');
