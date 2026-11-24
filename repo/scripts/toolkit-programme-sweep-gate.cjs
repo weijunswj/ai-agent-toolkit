@@ -168,7 +168,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
       : governance === 'disabled' ? 'the programme file on main turns governance off'
         : governance === 'invalid' ? 'the programme file on main is not a valid programme file' : 'the programme file on main names no parent issue';
     const code = !binding || typeof binding !== 'object' ? 'unreadable' : governance === 'disabled' ? 'disabled' : governance === 'invalid' ? 'invalid' : 'no_parent';
-    log(`::warning title=${TITLES.gate}::(${code}) Programme Sweep gate skipped ${repository}: ${why}. Fix: run toolkit governance check in a clone of ${repository}; turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if it should not be governed.`);
+    log(`::warning title=${TITLES.gate}::(${code}) Programme Sweep gate skipped ${repository}: ${why}. Fix: have an agent run the governance check (toolkit-governance.cjs check) in a clone of ${repository}; turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if it should not be governed.`);
     const verdict = { start: false, reason: 'governance off' };
     if (!STREAK_EVENTS.includes(env.EVENT_NAME || '')) return verdict;
     // This run counts as one; the earlier finished hourly runs make up the rest.
@@ -280,7 +280,7 @@ async function sweepStreak(call, runs, findingOf = run => runFinding(call, run, 
   if (setup) return `Programme Sweep held ${count} runs in a row (${named})${when}. ${NO_PARENT_STATE} Controller: create it with ${INIT_PARENT}; the first clean sweep clears this.`;
   return first.title === TITLES.held
     ? `Programme Sweep held ${count} runs in a row (${named})${when}. Controller: read the held items on the programme page and clear their cause, or ask the owner; the first clean sweep clears this.`
-    : `Programme Sweep skipped ${count} runs in a row (${named})${when}. Owner: follow the fix in the sweep run's warning (toolkit governance check names it), or remove the Toolkit Programme Sweep workflows if this repository should not be governed.`;
+    : `Programme Sweep skipped ${count} runs in a row (${named})${when}. Owner: follow the fix in the sweep run's warning (the governance check names it), or remove the Toolkit Programme Sweep workflows if this repository should not be governed.`;
 }
 
 // The sweep's follow-up: after a pass stops early, start one more run on main. A pass paused at

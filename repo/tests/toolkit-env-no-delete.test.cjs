@@ -638,4 +638,30 @@ test('an older tab saved as UTF-16 is kept byte for byte and still named, with n
   assert.ok(fs.readFileSync(older).equals(before), 'the UTF-16 file is unchanged');
   assert.match(status.stdout, /An older Toolkit env tab was not saved/);
   assert.equal(h.store.removes, 0);
+// Line breaks some editor honours beyond CRLF and LF, from the shared hostile inputs, plus VT and FF.
+const { BREAKS } = require('./support/hostile-inputs.cjs');
+const STRAY_BREAKS = { ...Object.fromEntries(Object.entries(BREAKS).filter(([name]) => name !== 'crlf')), vt: String.fromCodePoint(0x0b), ff: String.fromCodePoint(0x0c) };
+
+test('a line break other than CRLF or LF refuses the whole save, so no key is deleted or merged into another', async (t) => {
+  for (const [name, mark] of Object.entries(STRAY_BREAKS)) {
+    for (const place of ['before a key line', 'in a comment before a key line']) {
+      const run = await opened(t);
+      const { h, file } = run;
+      const before = storeImage(h);
+      const text = fs.readFileSync(file, 'utf8');
+      const end = text.includes('\r\n') ? '\r\n' : '\n';
+      const at = text.indexOf(`${end}X1_TEST_OTHER_KEY=`);
+      assert.ok(at > 0, name);
+      const joined = place === 'before a key line' ? mark : `${end}# notes${mark}`;
+      saveAndSettle(run, `${text.slice(0, at)}${joined}${text.slice(at + end.length)}`);
+      assert.equal(storeImage(h), before, `${name}, ${place}: store unchanged`);
+      assert.equal(h.store.removes, 0, `${name}, ${place}: nothing deleted`);
+      assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED/m, `${name}, ${place}: the file says it was not saved`);
+      const done = await h.run('apply');
+      assert.notEqual(done.code, 0, `${name}, ${place}`);
+      assert.match(done.stdout + done.stderr, /holds a line break this file cannot use/, `${name}, ${place}`);
+      assert.equal(storeImage(h), before, `${name}, ${place}: done changed nothing`);
+      assert.equal(h.store.removes, 0);
+    }
+  }
 });
