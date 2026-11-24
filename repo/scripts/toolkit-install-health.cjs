@@ -31,6 +31,7 @@ const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
+const { skillCard, defaultSyncedDir } = require('./toolkit-projects-skill-card.cjs');
 const { AntigravitySessionRefresh, refreshLock, sessionRefreshCheck } = require('./toolkit-antigravity-project-skills.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
@@ -59,13 +60,6 @@ const PLATFORM_NAMES = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux:
 // stricter 48,000-byte reading is used. The body is the text after the frontmatter.
 const SKILL_CARD_LIMIT = 48000;
 const skillBody = (buffer) => buffer.toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-const skillVersion = (text) => /^Version:\s*(\d{4}-\d{2}-\d{2}\.\d+)\s*$/m.exec(String(text || ''))?.[1] || '';
-// Versions look like 2026-10-23.6: the date, then a counter for that day.
-function compareSkillVersions(left, right) {
-  const [ld, ln] = left.split('.'), [rd, rn] = right.split('.');
-  if (ld !== rd) return ld > rd ? 1 : -1;
-  return Number(ln) === Number(rn) ? 0 : (Number(ln) > Number(rn) ? 1 : -1);
-}
 
 // The newest Toolkit version among the account copies in the Claude app's account-plugin folders
 // (claudeAccountPluginFolders), or '' when there is none.
@@ -120,7 +114,7 @@ class ToolkitInstallHealthCheck {
       globalRules: new GlobalRules({ environment, toolkitRoot, harnesses: ['claude-code'], retentionDays, respectRemoval: true }),
       depthSetting: new ClaudeSubagentDepthSetting({ environment }),
       envHealth: ToolkitEnv.forUser({ environment }),
-      syncedSkillsDir: path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
+      syncedSkillsDir: defaultSyncedDir(environment),
       accountPluginFolders: claudeAccountPluginFolders(environment),
       antigravitySkills: new AntigravitySessionRefresh({ checkout: state.repo_path,
         homeDir: (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(),
@@ -129,30 +123,29 @@ class ToolkitInstallHealthCheck {
   }
 
   // Shown only when a copy of the Projects controller skill is synced from claude.ai (the user runs a
-  // Claude Project as controller). An older copy is reported with Toolkit's SKILL.md, its size and sha256,
-  // which the setup agent offers as a skill card the owner saves; it blocks nothing. The coordinator reads
-  // the copy pulled from the repo, never the account copy, so no case asks the owner to upload by hand:
-  // a body too large for a card gets no offer, and an account copy with its own reference files keeps
-  // them (a card replaces SKILL.md only).
+  // Claude Project as controller). A copy whose text differs from Toolkit's (toolkit-projects-skill-card.cjs:
+  // the Version line, line endings and trailing whitespace are not text) is reported with Toolkit's
+  // SKILL.md, its size and sha256, which the setup agent offers as a skill card the owner saves; it blocks
+  // nothing, and a Version-only difference needs no card. The coordinator reads the copy pulled from the
+  // repo, never the account copy, so no case asks the owner to upload by hand: a body too large for a card
+  // gets no offer, and an account copy with its own reference files keeps them (a card replaces SKILL.md only).
   #projectsSkillCheck() {
     if (!this.#syncedSkillsDir) return null;
-    let copies = [];
-    try {
-      copies = fs.readdirSync(this.#syncedSkillsDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(this.#syncedSkillsDir, entry.name, 'web-controller-projects', 'SKILL.md'))
-        .filter((file) => fs.existsSync(file));
-    } catch { return null; }
-    if (!copies.length) return null;
     const source = path.join(this.#toolkitRoot, PROJECTS_SKILL_REL);
-    const repoVersion = fs.existsSync(source) ? skillVersion(fs.readFileSync(source, 'utf8')) : '';
-    if (!repoVersion) return null;
-    const uploaded = copies.map((file) => skillVersion(fs.readFileSync(file, 'utf8'))).filter(Boolean).sort(compareSkillVersions).pop() || '';
+    let body;
+    try { body = fs.readFileSync(source); } catch { return null; }
+    const result = skillCard(this.#syncedSkillsDir, body.toString('utf8'));
+    // No saved copy, an unreadable synced folder or copy, or no Version line in Toolkit's own copy: nothing to show.
+    if (result.state === 'not-seen' && (!result.reason || !result.main)) return null;
     const label = 'Claude Projects controller skill';
-    if (uploaded && compareSkillVersions(uploaded, repoVersion) >= 0) return this.#check('projects-skill', label, STATUS.PASSED, `Your uploaded copy is current (${uploaded}).`);
-    const behind = `Your uploaded copy is ${uploaded || 'missing its Version line'}; Toolkit has ${repoVersion}.`;
     const repoCopy = 'the coordinator reads the copy pulled from the repo, nothing to do.';
-    const body = fs.readFileSync(source);
+    if (result.state === 'not-seen') return this.#check('projects-skill', label, STATUS.PASSED, `Your saved copy could not be compared (${result.reason}); ${repoCopy}`);
+    if (result.state === 'current') {
+      return this.#check('projects-skill', label, STATUS.PASSED, result.saved === result.main ? `Your saved copy is current (${result.main}).`
+        : `Your saved copy matches Toolkit's text (saved ${result.saved}, Toolkit ${result.main}); no card needed.`);
+    }
+    const behind = `Your saved copy is ${result.saved}; Toolkit has ${result.main} with changed text.`;
+    const copies = result.copies;
     const cardBytes = Buffer.byteLength(skillBody(body));
     if (cardBytes >= SKILL_CARD_LIMIT) {
       return this.#check('projects-skill', label, STATUS.PASSED, `${behind} Too large for a skill card (${cardBytes} bytes); ${repoCopy}`);
@@ -162,7 +155,7 @@ class ToolkitInstallHealthCheck {
     const ownReference = copies.some((file) => this.#referenceFilesDiffer(path.dirname(file), path.dirname(source)))
       ? ' Your copy has its own reference files: the card replaces SKILL.md only, so they stay as they are.' : '';
     return this.#check('projects-skill', label, STATUS.PASSED,
-      `${behind} Skill card: offer ${slash(source)} (${body.length} bytes, sha256 ${sha256}) as a skill update card to save.${ownReference} If no card can be offered, ${repoCopy}`);
+      `${behind} Skill card: offer ${slash(source)} (${body.length} bytes, sha256 ${sha256}) as a skill update card to save.${ownReference} Where this session has no \`propose_skills\` tool, the card can't be offered here and nothing needs asking: the Projects daily check-in offers it, and the coordinator reads the copy pulled from the repo.`);
   }
 
   // Whether an account copy holds a reference/*.md file that is not byte-equal to Toolkit's. A folder

@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-24.1
+Version: 2026-11-24.2
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -186,7 +186,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/` in the Toolkit repo: this SKILL.md plus the `reference/` and `tasks/` files beside it. The coordinator reads it only from the library copy (**Guidebook copy**); changes go into Toolkit through a PR, never into the copy.
-- Watch every Toolkit-enabled feature, especially this skill; suggest improvements/settings to the owner, never change them yourself. The managed block carries this to threads.
+- Never change Toolkit features or their settings yourself. The managed block carries this to threads.
 - After a Toolkit release changes this skill or its block, the guidebook refresh brings both here; apply a changed block as **Guidebook copy** says.
 - Keep this skill generic. User details go in memory or claude.ai preferences, never here. Toolkit rules go to `CONTROLLER.md` or the governed rules.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2), set by `bump-version.cjs --next` with the PR's Toolkit bump and the re-bump run.

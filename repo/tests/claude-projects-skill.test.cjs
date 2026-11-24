@@ -481,12 +481,15 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Its closing checklist carries "coordinator: refresh the guidebook"/);
   assert.match(text, /`SKILL UPDATE`: the guidebook's Version is newer than the one on the BINDING line\./);
   assert.match(text, /a guidebook refresh reports BLOCK CHANGED, or the daily check-in reports BLOCK OUTDATED/);
-  // The old skill card thread route stays gone; the coordinator offers one card per Version on SKILL CARD OUTDATED.
+  // The old skill card thread route stays gone; the coordinator offers one card per text fingerprint on SKILL CARD
+  // OUTDATED, which the script prints only when the saved text differs from main's.
   assert.ok(!fs.existsSync(path.join(repoRoot, REFERENCE_DIR, 'skill-card.md')));
-  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|skill-card|card due|damaged card|tap Save/);
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|skill-card|card due|damaged card|tap Save|current there: skip the card/);
+  assert.match(text, /the `--card` line compared the texts, so a release that only restamped the Version line never gets here/);
   assert.match(text, /call `propose_skills` once with kind `improvement`, name and target `web-controller-projects`/);
-  assert.match(text, /Record `skill card <guidebook Version> offered <date>`/);
-  assert.match(text, /never a hand upload\. Never offer a Version that has a `skill card` line again\./);
+  assert.match(text, /Record `skill card <guidebook Version> <fp8> offered <date>` in memory, <fp8> being the line's `text` fingerprint/);
+  assert.match(text, /never a hand upload\. Never offer a text fingerprint \(or, for an older line without one, a Version\) that has a `skill card` line again\./);
+  assert.match(text, /- `SKILL CARD OUTDATED`: as in \*\*Acting on the check-in report\*\*; the nudge and the check-in share the same `skill card` memory lines, so a card is offered once\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
   assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
@@ -1175,4 +1178,16 @@ test('the hourly and daily PR sweeps flag a missing or invalid UAT line by the a
     assert.ok(text.includes('`missing UAT verdict` for a ready PR whose body has no UAT line, or `invalid UAT verdict` when the auto-merge check refuses its UAT line (`toolkit-auto-merge-eligible.cjs` prints `Missing UAT verdict` or `UAT verdict invalid: <why>` for the saved body)'), task);
     assert.ok(!text.includes('no line starting `UAT: `'), `${task} still judges the line by its first word`);
   }
+});
+
+// Owner decision (24 Nov): the coordinator no longer watches Toolkit features to suggest improvements or
+// settings to the owner, but keeps the guard that it never changes Toolkit features or settings itself.
+test('Projects drops the suggest-improvements duty and keeps the never-change-settings guard as its own line', () => {
+  const skill = read(SKILL_REL);
+  const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  for (const text of [bundle(), block]) {
+    assert.doesNotMatch(text, /suggest improvements|suggests changes to the owner|Watch every Toolkit-enabled feature|watches Toolkit features/i);
+  }
+  assert.ok(skill.split('\n').includes('- Never change Toolkit features or their settings yourself. The managed block carries this to threads.'));
+  assert.ok(block.split('\n').includes('- The coordinator never changes Toolkit features or their settings itself.'));
 });

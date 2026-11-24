@@ -193,3 +193,13 @@ The controller principle **Close what you spawn** says when a thread or session 
 - **Claude Code on a computer:** end the session; archive it where the app offers that, else record it retired.
 - **Codex:** archive the thread in the Codex app.
 - **Remote Control:** end the remote session once its result is relayed.
+
+Gate sessions are recorded for the programme sweep with `programme.cjs gate-session --issue <n> --assignment <id> --host <host> [--host-session <id>]` right after the launch, and `--closed` after the close; the sweep raises `CLOSE_DUE` for a finished gate whose session is still open. Archive only the gate's own session, never the controller's. The command refuses the parent's holder and earlier holders, and the calling session's own desktop ID (`CLAUDE_CODE_HOST_SESSION_ID`); a controller ID it cannot see, such as a Codex thread's, is not refused, so pass only the ID the launch returned. Each host's record value and ID source:
+
+| Host | `--host` | `--host-session` | Close action |
+|---|---|---|---|
+| Claude Code in the desktop app | `claude-code` | the `local_` ID that `start_session` returns | `archive_session` |
+| Claude Code in the cloud | `claude-code-cloud` | the ID that `start_session` returns | `archive_session` |
+| Claude Projects | `claude-projects` | none readable | resolve the thread |
+| Codex app | `codex-app` | none readable | archive the thread |
+| Codex CLI run | `codex-exec` | its run log header, if wanted | none: the run ends with its process, so no `CLOSE_DUE` |
