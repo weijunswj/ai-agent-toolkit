@@ -149,8 +149,11 @@ test('cleanup removes only the copies of edit files in the edit folder, and coun
   // A history folder without entries.json, and an unreadable backup line, are left alone.
   fs.mkdirSync(path.join(data, 'User', 'History', 'broken'));
   fs.writeFileSync(path.join(data, 'User', 'History', 'broken', 'x.env'), 'kept');
-  const removed = editor.cleanEditorCopies({ editDir, folders: [data], isEditFile, keep: open, platform: process.platform });
-  assert.equal(removed, 4, 'two history copies of ours, one of the older tab, one backup');
+  // The keep list holds the open tab and an older tab whose typing is kept.
+  assert.equal(editor.cleanEditorCopies({ editDir, folders: [data], isEditFile, keep: [open, older], platform: process.platform }), 3, 'two history copies of ours, one backup');
+  assert.ok(everyFile(data).join('\n').includes(`A_B_C=${canary}3`), 'the kept older tab keeps its copy');
+  const removed = editor.cleanEditorCopies({ editDir, folders: [data], isEditFile, keep: [open], platform: process.platform });
+  assert.equal(removed, 1, 'the older tab once it is no longer kept');
   const left = everyFile(data).join('\n');
   assert.ok(!left.includes(canary), 'no copy of the canary is left');
   for (const kept of ['look-alike elsewhere', 'look-alike backup', 'not an edit file', 'open-tab', 'kept']) assert.ok(left.includes(kept), kept);

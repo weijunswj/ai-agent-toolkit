@@ -80,7 +80,7 @@ function editFiles(paths) {
 }
 
 // The lines of an edit file below its header.
-function bodyOf(text) { return text.split(/\r?\n/).filter((line) => line && !/^# (Toolkit env|While this tab|Close any|Change a value|Each save|A line showing|Your own|When you are|Status:)/.test(line)); }
+function bodyOf(text) { return text.split(/\r?\n/).filter((line) => line && !/^# (Toolkit env|While this tab|Close any|Change a value|Each save|A line showing|Your own|When you are|Status:)/.test(line) && !line.startsWith('#  > ')); }
 
 function clockAt(iso = '2026-10-31T09:00:00.000Z') { return { ms: Date.parse(iso) }; }
 
