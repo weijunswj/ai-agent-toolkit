@@ -123,6 +123,23 @@ test('commit author, committer and tagger addresses are never listed, whatever t
   }
 });
 
+test('a co-author line naming an AI tool is listed whatever its address, in a commit or a tag; a human one is not', t => {
+  const noreply = pii.email('12345+jane', 'users.noreply.github.com');
+  const repo = new TestRepo(t);
+  repo.commit('start', { 'README.md': 'App\n' });
+  repo.commit(`paired\n\nCo-authored-by: Jane <${noreply}>`);
+  const ai = repo.commit(`assisted\n\nCo-authored-by: Claude <${noreply}>`);
+  repo.git(['tag', '-a', 'v1', '-m', `release\n\nCo-authored-by: Copilot <${noreply}>`]);
+  const result = sweep(repo, fakeGh());
+  assert.equal(result.status, 0, result.all);
+  assert.deepEqual(findings(result.out), [`commit ${ai.slice(0, 12)} message:3:1  ai-attribution  PDG-AI-CO-AUTHOR`]);
+  // A pushed tag is checked by the push check, which reads tag messages.
+  const tag = repo.git(['rev-parse', 'v1']);
+  const pushed = repo.guard(['pre-push', 'origin'], { input: `refs/tags/v1 ${tag} refs/tags/v1 ${'0'.repeat(40)}\n` });
+  assert.equal(pushed.status, 1, pushed.all);
+  assert.ok(findings(pushed.all).some(line => /^tag [0-9a-f]{12} message:3:1 {2}ai-attribution {2}PDG-AI-CO-AUTHOR$/.test(line)), pushed.all);
+});
+
 test('every commit message is read: other branches and tags too, once each', t => {
   const value = markerEmail();
   const repo = new TestRepo(t);
