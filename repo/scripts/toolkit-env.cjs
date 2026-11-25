@@ -78,8 +78,8 @@ const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
 const DUMP_COMMANDS = new Set(['env', 'printenv', 'set', 'export', 'declare', 'typeset', 'compgen']);
 const SHELLS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'fish']);
-// Set (non-empty) in shells that a coding agent starts (owner-terminal.cjs holds the one list).
-const { AGENT_MARKERS } = ownerTerminal;
+// Set (non-empty) in shells that a coding agent starts (agent-shell-markers.cjs holds the one list).
+const { AGENT_SHELL_MARKERS: AGENT_MARKERS } = require('./agent-shell-markers.cjs');
 
 function agentContext(environment) { return AGENT_MARKERS.some((name) => Boolean(environment[name])); }
 

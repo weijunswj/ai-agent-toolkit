@@ -28,9 +28,8 @@ test('the detected app comes from exact marker names only', () => {
   for (const [environment, expected] of rows) assert.equal(detectAgentHost(environment), expected, JSON.stringify(environment));
 });
 
-test('toolkit-env reads the same marker list, plus the two that name no app setup can tell apart', () => {
-  // AI_AGENT is any agent's; the launched-by mark is on every shell the Claude app starts for a chat, whose app
-  // setup already tells from the two lists. Neither decides which app started setup.
+test('toolkit-env reads the same marker list, plus the two that never decide which app started setup', () => {
+  // AI_AGENT is any agent's; the launched-by mark is the Claude app's on a Terminal panel tab Claude opened.
   assert.deepEqual(AGENT_MARKERS, [...AGENT_HOST_MARKER_NAMES, 'AI_AGENT', 'CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS']);
   assert.equal(detectAgentHost({ CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS: 'id', CODEX_THREAD_ID: 't' }), 'codex');
   assert.equal(detectAgentHost({ CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS: 'id' }), 'unknown');

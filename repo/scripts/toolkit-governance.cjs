@@ -8,6 +8,7 @@ const path = require('node:path');
 const { detectAgentHost } = require('./agent-host-markers.cjs');
 const readline = require('node:readline');
 const ownerTerminal = require('./owner-terminal.cjs');
+const { AGENT_SHELL_MARKERS } = require('./agent-shell-markers.cjs');
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -969,7 +970,7 @@ class ToolkitGovernanceCli {
   // named), or null. Every terminal route that takes the owner's answer asks it first (#decide, #bank);
   // the Enter prompts (migrate) ask the same in owner-terminal.cjs.
   #agentShell() {
-    return ownerTerminal.refusal({ environment: this.#environment, tty: { stdin: true, stdout: true } });
+    return ownerTerminal.refusal({ environment: this.#environment, tty: { stdin: true, stdout: true }, markers: AGENT_SHELL_MARKERS });
   }
 
   async #decide(command, json) {

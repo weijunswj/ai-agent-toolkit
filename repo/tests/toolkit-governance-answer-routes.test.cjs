@@ -20,7 +20,7 @@ const { GovernanceProposals } = require(path.join(scripts, 'toolkit-governance-p
 const { BankTickets } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
-const { AGENT_MARKERS } = require(path.join(scripts, 'owner-terminal.cjs'));
+const { AGENT_SHELL_MARKERS: AGENT_MARKERS } = require(path.join(scripts, 'agent-shell-markers.cjs'));
 const { SHELL_TOOL_NAMES } = require(path.join(scripts, 'toolkit-shell-call.cjs'));
 
 const REPOSITORY = 'example-owner/example-repo';

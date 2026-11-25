@@ -648,11 +648,14 @@ function migrationPlan(context, source) {
 // pasted blank line never answers it.
 function confirmOwner(effect, deps = {}, summary = '') {
   const environment = deps.environment || process.env;
-  let ownerTerminal;
-  try { ownerTerminal = require('../../../repo/scripts/owner-terminal.cjs'); } catch {
+  let ownerTerminal; let markers;
+  try {
+    ownerTerminal = require('../../../repo/scripts/owner-terminal.cjs');
+    markers = require('../../../repo/scripts/agent-shell-markers.cjs').AGENT_SHELL_MARKERS;
+  } catch {
     throw new ProgrammeError('NOT_CONFIRMED', 'This copy cannot tell an agent\'s shell from the owner\'s terminal, so the owner\'s Enter is not asked. Use a full Toolkit install. Nothing was written.');
   }
-  const marker = ownerTerminal.AGENT_MARKERS.find(name => Boolean(environment[name]));
+  const marker = markers.find(name => Boolean(environment[name]));
   if (marker) throw new ProgrammeError('NOT_CONFIRMED', `This shell was started by a coding agent (${marker}), so the owner's Enter is not asked here. The owner runs this in their own terminal. Nothing was written.`);
   if (deps.confirm) return deps.confirm(effect) === true;
   if (!process.stdin.isTTY) throw new ProgrammeError('NOT_CONFIRMED', 'This step needs the owner\'s Enter in a terminal; run it yourself there. Nothing was written.');

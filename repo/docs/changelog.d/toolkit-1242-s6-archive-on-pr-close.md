@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- A governance answer typed into a Terminal panel tab Claude opened in the desktop app is refused like any shell an agent started: the app marks such a tab, and Toolkit now reads that mark. A tab you open yourself works as before. The bridge doc no longer says the panel carries no mark.
+- A governance answer, or `toolkit env show`, in a Terminal panel tab Claude opened in the desktop app is refused like any shell an agent started: the app marks such a tab, and Toolkit now reads that mark. A tab you open yourself works as before. The bridge doc no longer says the panel carries no mark.
 - A Claude Code setting under an entry that is not an object counts as not read, no longer as having a value.
 - Where the Claude Code settings file cannot be read and no agent profile can be used, setup says it still sets its own profile to root-only.
 - Turning governance off where it is already off says only that.
