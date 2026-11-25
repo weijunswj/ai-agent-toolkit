@@ -167,8 +167,9 @@ function main(args = process.argv.slice(2)) {
     const result = instructions.check(options.file, options.declinedVersion, options.declinedDedupe);
     process.stdout.write(`${result.state}\n${result.overlaps.length ? `${overlapsLine(result.overlaps)}\n` : ''}`);
     return result.exitCode;
-  } catch {
-    process.stderr.write('Project instructions could not be processed (PROJECT_INSTRUCTIONS_INVALID).\n');
+  } catch (error) {
+    const known = /^SETTINGS_/.test((error && error.code) || '');
+    process.stderr.write(`${known ? error.message : 'Project instructions could not be processed (PROJECT_INSTRUCTIONS_INVALID).'}\n`);
     return 2;
   }
 }

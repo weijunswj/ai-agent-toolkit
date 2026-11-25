@@ -29,8 +29,8 @@ P2. **Device folder and keep-awake** (only when work runs locally).
 P3. **Project instructions, project lines and lanes.**
 - A local rc thread renders `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit main, saves the block to the shared folder and reads it back.
 - Draft only project facts: repos, transport, device/folder, work placement, owner-granted approvals and project-specific roles. Never copy base rules into those lines.
-- The lanes, stack profile and gate placement lines come from the controller settings (`toolkit-projects-instructions.cjs --render --settings <file>` prints them after the block). Change lanes only when the owner gives a number. Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.
-- Lint the project lines (`toolkit-owner-lines.cjs check --block projects --settings <file>`), offer its fixes to the owner in one question, and apply only the ones they tap.
+- The lanes, stack profile and gate placement lines come from the controller settings (`toolkit-projects-instructions.cjs --render --settings <file>` prints them after the block). Set lanes only when the owner gives a number; the lanes line names the owner and date only then. Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.
+- Lint the project lines (`toolkit-owner-lines.cjs check --file <file> --block projects --settings <file> --repository <owner/name>`), offer its fixes to the owner in one question with each line's text, and apply only the ones they tap, all at once.
 - Block first, one blank line, project lines after; preserve and deduplicate existing owner text below it. Follow `reference/instructions-sync.md`: saved and read-back copy first, markers verified, conflicts held, final saved instructions read back. Record the block's Toolkit version.
 
 P4. **Daily check-in and hourly nudge.**

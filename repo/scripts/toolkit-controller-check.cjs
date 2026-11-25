@@ -40,7 +40,8 @@
 //   --since          footer scan start (default: 26 hours ago)
 //   --skip           checks the caller already ran elsewhere
 //   --owner-lines    a file of the owner's own lines to lint (instructions, CLAUDE.md, AGENTS.md or memory)
-//   --settings       the controller settings file (state/<owner>/<repo>/controller-settings.json)
+//   --settings       the controller settings file (state/<owner>/<repo>/controller-settings.json), refused when
+//                    it is for another repository than the one this check is for
 //   --expand         every line of every check, passed and skipped ones included (default: one
 //                    line when clear; otherwise each check that needs attention or could not run,
 //                    with up to 3 detail lines and a count of the rest; programme findings are
@@ -271,7 +272,7 @@ function controllerCheck(options, deps = {}) {
       outcome = checkFooter(run, repo, since);
     } else if (name === 'owner-lines') {
       if (!options['owner-lines']) { skip(name, 'pass --owner-lines <file> (the owner\'s own lines, saved), with --settings <file> once there are controller settings'); continue; }
-      const args = ['check', '--file', options['owner-lines'], ...(options.settings ? ['--settings', options.settings] : []), ...(host === 'projects' ? ['--block', 'projects'] : [])];
+      const args = ['check', '--file', options['owner-lines'], ...(options.settings ? ['--settings', options.settings, ...(repo ? ['--repository', repo] : [])] : []), ...(host === 'projects' ? ['--block', 'projects'] : [])];
       outcome = statusCheck(run, SCRIPTS.ownerLines, args, `toolkit-owner-lines.cjs ${args.join(' ')}`);
     } else outcome = statusCheck(run, SCRIPTS.refs, [], 'check-script-references.cjs');
     checks.push({ name, ...outcome });

@@ -203,11 +203,20 @@ test('owner-lines lints the owner\'s lines on any host, with the settings and, o
   const chat = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md', '--settings', 's.json']);
   const lint = chat.calls.find(call => call.script === SCRIPTS.ownerLines);
   assert.deepEqual(lint.args, ['check', '--file', 'CLAUDE.md', '--settings', 's.json']);
+  // Where the controlled repository is known, the settings must be its own.
+  for (const named of [['--repo', 'acme/app'], ['--checkout', '/repo']]) {
+    const owned = run(['--host', 'chat', ...named, '--owner-lines', 'CLAUDE.md', '--settings', 's.json']);
+    assert.deepEqual(owned.calls.find(call => call.script === SCRIPTS.ownerLines).args, ['check', '--file', 'CLAUDE.md', '--settings', 's.json', '--repository', 'acme/app'], named[0]);
+  }
   const projects = run(['--owner-lines', 'i.md']);
   assert.deepEqual(projects.calls.find(call => call.script === SCRIPTS.ownerLines).args, ['check', '--file', 'i.md', '--block', 'projects']);
-  const fixes = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md'], { results: { [SCRIPTS.ownerLines]: { status: 1, stdout: 'line 3: It says live lanes 1, but the controller settings say 2. Fix 3-conflicts-setting-abcd1234: replace it.\n' } } });
+  const fixes = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md'], { results: { [SCRIPTS.ownerLines]: { status: 1, stdout: 'line 3: "- Lanes: 1" It says live lanes 1, but the controller settings say 2. Fix 3-conflicts-setting-abcd1234: replace it.\n' } } });
   assert.equal(fixes.code, 1);
-  assert.match(fixes.text, /ATTENTION owner-lines: line 3: It says live lanes 1/);
+  assert.match(fixes.text, /ATTENTION owner-lines: line 3: "- Lanes: 1" It says live lanes 1/);
+  // A lint that could not run is said so, never as something to settle.
+  const stopped = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md', '--settings', 's.json'], { results: { [SCRIPTS.ownerLines]: { status: 2, stdout: '', stderr: 'The controller settings file is not JSON.' } } });
+  assert.match(stopped.text, /0 need attention, 1 could not run/);
+  assert.match(stopped.text, /The controller settings file is not JSON/);
   const none = run(['--host', 'chat']);
   assert.ok(none.calls.every(call => call.script !== SCRIPTS.ownerLines), 'no file, no lint');
 });
