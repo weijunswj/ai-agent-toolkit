@@ -20,7 +20,7 @@ const { GovernanceProposals } = require(path.join(scripts, 'toolkit-governance-p
 const { BankTickets } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
-const { AGENT_MARKERS } = require(path.join(scripts, 'owner-terminal.cjs'));
+const { AGENT_SHELL_MARKERS: AGENT_MARKERS } = require(path.join(scripts, 'agent-shell-markers.cjs'));
 const { SHELL_TOOL_NAMES } = require(path.join(scripts, 'toolkit-shell-call.cjs'));
 
 const REPOSITORY = 'example-owner/example-repo';
@@ -78,7 +78,7 @@ function recorded(ctx) {
 }
 
 test('own terminal: disable, decline and enable refuse a shell a coding agent started, naming its marker, and record nothing', async t => {
-  assert.ok(AGENT_MARKERS.length >= 7);
+  assert.ok(AGENT_MARKERS.length >= 8);
   for (const marker of AGENT_MARKERS) for (const command of ['disable', 'decline', 'enable']) {
     const ctx = fixture(t);
     const result = await run(ctx, [command], { interactive: true, environment: { [marker]: '1' }, replies: ['1.1=B'] });
@@ -96,6 +96,18 @@ test('own terminal: the owner\'s disable still needs no second Enter, and a vari
     assert.deepEqual(result.calls, [OFF]);
     assert.deepEqual(result.asked, [], 'no second Enter');
   }
+});
+
+test('own terminal: disable where governance is already off says only that, and never that it turns governance off', async t => {
+  const ctx = fixture(t, { governed: false });
+  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath, text: JSON.stringify(OFF) });
+  const result = await run(ctx, ['disable'], { interactive: true });
+  assert.equal(result.code, 0, result.err);
+  assert.match(result.out, /^Already disabled on the default branch\. Nothing was written\.$/m);
+  assert.equal(result.err, '');
+  assert.deepEqual([result.calls, recorded(ctx)], [[], []]);
+  // Where it is on, the two facts still come first.
+  assert.match((await run(fixture(t), ['disable'], { interactive: true })).err, /Turns off: +repository governance, on every computer/);
 });
 
 test('own terminal: without a terminal nothing is recorded, marker or not', async t => {
@@ -136,8 +148,12 @@ test('terminal bank: the owner\'s typed answer still turns governance off', asyn
 // The route write_stdin opens: the shell is already running and allowed, the hooks see nothing, and the
 // command typed into it has a real terminal's streams and the app's marker in its environment. Also any
 // chat whose hooks do not run. The real Enter guard (owner-terminal.cjs) and the real terminal check run.
-test('write_stdin into an allowed shell, or a chat with no hooks: one marker of each app refuses the real process', t => {
-  for (const marker of ['CODEX_THREAD_ID', 'CLAUDECODE', 'AI_AGENT', null]) {
+// A Terminal panel tab Claude opened in the desktop app has none of the other markers: only the app's own.
+// A tab the owner opened there has the same terminal variables without it, and takes the owner's answer.
+const PANEL_TAB = { CLAUDE_AGENT_SDK_VERSION: '0.0.0', TERM_PROGRAM: 'claude-desktop', TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+test('write_stdin into an allowed shell, a chat with no hooks or a Terminal panel tab Claude opened: one marker of each app refuses the real process', t => {
+  for (const [marker, value = 'x', around = {}] of [['CODEX_THREAD_ID'], ['CLAUDECODE'], ['AI_AGENT'], [null], [null, '', PANEL_TAB],
+    ['CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS', '00000000-0000-0000-0000-000000000000', PANEL_TAB], ['CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS', ',', PANEL_TAB]]) {
     const ctx = fixture(t);
     const resultFile = path.join(ctx.root, 'result.json');
     const code = `
@@ -151,12 +167,12 @@ test('write_stdin into an allowed shell, or a chat with no hooks: one marker of 
         registryOptions: ${JSON.stringify(ctx.registryOptions)}, discoveryGh: () => ({ ok: false, reason: 'offline' }), refresh: () => ({ refreshed: false, error: 'offline' }), appReader: () => ({ ok: false }) });
       cli.main(['disable']).then(exit => { require('node:fs').writeFileSync(${JSON.stringify(resultFile)}, JSON.stringify({ exit, calls, err })); process.exit(0); });`;
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(?:CLAUDE|CODEX|AI_AGENT|TOOLKIT_HOST)/i.test(name)));
-    childProcess.spawnSync(process.execPath, ['-e', code], { env: { ...env, HOME: ctx.root, USERPROFILE: ctx.root, ...(marker ? { [marker]: 'x' } : {}) }, input: '\n\n\n', timeout: 60000, windowsHide: true });
+    childProcess.spawnSync(process.execPath, ['-e', code], { env: { ...env, HOME: ctx.root, USERPROFILE: ctx.root, ...around, ...(marker ? { [marker]: value } : {}) }, input: '\n\n\n', timeout: 60000, windowsHide: true });
     const result = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
     if (marker) {
       assert.deepEqual([result.exit, result.calls], [2, []], marker);
       assert.match(result.err, new RegExp(`started by a coding agent \\(${marker}\\)`));
-    } else assert.deepEqual([result.exit, result.calls], [0, [OFF]], 'the owner\'s own shell');
+    } else assert.deepEqual([result.exit, result.calls], [0, [OFF]], `the owner's own shell ${JSON.stringify(around)}`);
   }
 });
 
