@@ -527,3 +527,22 @@ test('the CLI with a pull request body: every waiting reason is named together, 
   out.length = 0;
   assert.equal(eligible.main(['--base', 'nope', '--head', docs, '--body-file', path.join(bodies, 'body-3.md')], io), 2, 'unreadable commits');
 });
+
+// INT-TK421-1319: with the switch On, a pull request this check accepts lands with no card or question,
+// scripted carries of a RISKY change included, and the owner is told after it lands. The rule has one
+// home, the gate rules; the other pages point at it and none keeps the old order or the old card.
+test('the rules say an eligible pull request lands with no card, with one notice after, and the floor stays', () => {
+  const page = rel => fs.readFileSync(path.join(__dirname, '..', '..', ...rel.split('/')), 'utf8').replace(/\r\n/g, '\n');
+  const gate = page('repo/contracts/agent-rules/gate-rules.md');
+  const on = gate.split('\n').find(line => line.startsWith('- With On, the controller')) || '';
+  assert.match(on, /G2 PASS \(or required delta G2, or scripted carry\) is recorded, every required check is green, no other merge is running, no FAIL, disputed verdict or overdue promise is open/);
+  assert.match(on, /It runs `gh pr merge N --merge --match-head-commit <full SHA>` with no card or question at any tier \(the merge hold checks scope first\), then posts one short notice: what landed, its effect, how to undo it\./);
+  assert.match(gate, /Those wait for the owner's typed `merge N`; no label grants anything\./, 'what the check refuses still waits for the owner');
+  assert.match(gate, /RISKY ones keep the merge card in a train, else follow Task auto-merge\./);
+  assert.match(page('repo/docs/agent-playbooks/pr-review-and-ci.md'), /- \*\*Task auto-merge:\*\* with the switch On and an eligible pull request, the merge needs no approval, card or question; one short notice follows it \(gate rules, task auto-merge\)\. Run the check before telling the owner a card will open\./);
+  assert.match(page('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /exit 0 merges with no card, the notice after; scope exit 1 asks by merge card/);
+  assert.match(page('repo/contracts/agent-rules/global-rules.md'), /Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts/);
+  for (const rel of ['repo/contracts/agent-rules/gate-rules.md', 'repo/CONTROLLER.md', 'repo/controller/roles-and-routes.md', 'repo/docs/agent-playbooks/pr-review-and-ci.md', 'repo/docs/changelog.d/README.md', 'repo/contracts/claude-projects/web-controller-projects/SKILL.md', 'repo/scripts/toolkit-merge-train.cjs', 'repo/scripts/refresh-shard-timings.cjs']) {
+    assert.doesNotMatch(page(rel), /posts the effects summary as a notice, then runs|RISKY ones keep the merge card\. |merges after the (?:effects )?notice|post the effects notice, then|RISKY, so the owner\\?'s merge card stays|Before (?:each|every) merge\W/, rel);
+  }
+});

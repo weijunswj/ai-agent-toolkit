@@ -471,10 +471,10 @@ test('every approval surface carries the evidence-store exception and none still
   assert.match(governed, /never delete the sole copy of evidence/);
   assert.match(governed, /once the user-selected store, separate from the task repository/);
   assert.match(controller, /only merges and deletions \(transport stores: below\)/);
-  assert.match(controller, /Before each merge outside a transport store, post a summary of its external effects/);
+  assert.match(controller, /Outside a transport store, summarise a merge's external effects before asking, or after a task auto-merge/);
   assert.match(controller, /\*\*Transport stores:\*\* an evidence \(transport\) store is agent-managed with full standing permission/);
   assert.match(skill, /Transport stores are the exception: agents manage them fully, merges and deletions included/);
-  assert.match(skill, /\*\*Before every merge\*\* outside a transport store/);
+  assert.match(skill, /\*\*Merge summary:\*\* outside a transport store, post a short summary of the merge's external effects [^\n]*with the diff link before asking, or as one short notice after a task auto-merge/);
   assert.match(skill, /Transport-store work needs no further grant/);
   assert.match(playbook, /Evidence custody follows the evidence-store line of the Toolkit-governed rules/);
   for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `skills/toolkit-playbooks/safety-gates.md`]) {

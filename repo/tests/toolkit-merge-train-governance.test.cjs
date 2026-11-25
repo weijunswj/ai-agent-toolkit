@@ -92,7 +92,7 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   let landed = land(plain.out, plain.result.head);
   assert.equal(landed.ok, true, landed.problems.join('\n'));
   assert.deepEqual([landed.merge.route, landed.merge.route_reasons], ['auto', []]);
-  assert.equal(landed.merge_step, `post the effects notice, then run gh pr merge 50 --repo example/repo --merge --match-head-commit ${plain.result.head}; no ask`);
+  assert.equal(landed.merge_step, `run gh pr merge 50 --repo example/repo --merge --match-head-commit ${plain.result.head} with no ask, then post one short notice: what landed, its effect and how to undo it`);
 
   f.governed({ auto_merge: 'off' });
   landed = land(plain.out, plain.result.head);

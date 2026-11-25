@@ -894,7 +894,7 @@ function land(cwd, manifest, options) {
 // except where the guard cannot record the answer, and then the agent says why.
 function mergeStep(merge, guardAsks) {
   const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;
-  if (merge.route === 'auto') return `post the effects notice, then run ${command}; no ask`;
+  if (merge.route === 'auto') return `run ${command} with no ask, then post one short notice: what landed, its effect and how to undo it`;
   const ask = `ask "Merge PR ${merge.pr}?" at the end of your closing message, under its external effects, and run it yourself on their yes`;
   const step = guardAsks
     ? `Where a merge guard is known to run, run it yourself with no question of your own: the guard refuses it and asks the owner, so put its external effects in your closing message and follow the refusal (its card, else the typed line it names). With no guard known to run, ${ask}`

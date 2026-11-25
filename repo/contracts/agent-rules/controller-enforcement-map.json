@@ -200,7 +200,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Standing approvals:**",
-      "rule_sha": "a2e78bf41a34",
+      "rule_sha": "fb3c8334f8a0",
       "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Deletions, keys and other irreversible steps are instruction-only.",
       "enforced_by": [
         {
@@ -244,7 +244,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Roles and routes](controller/roles-and-routes.md)",
-      "rule_sha": "cb9fec89cdfb",
+      "rule_sha": "2e09d44eb2f3",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -525,7 +525,7 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "**Merge-train lanes:**",
-      "rule_sha": "c34c408f6806",
+      "rule_sha": "6a61793a6266",
       "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. For route owner, land prints the merge step: the agent runs the exact merge and the merge guard asks, with the effects in the closing message; it asks first only where no guard is known to run or task auto-merge would let the merge through unasked. The lane's model tier, skipping G0 and G1, and following that step stay instruction-only.",
       "enforced_by": [
         {
@@ -1034,7 +1034,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "**Scripted carry (owner OK):**",
-      "rule_sha": "e3f1ffb13114",
+      "rule_sha": "15be30551d92",
       "covers": "The review carry script accepts a carry only in its exact cases (a body-only FAIL with its Carry line, the shard bot's manifest refresh, sync outputs only), with the same files, green checks and valid UAT and Bump lines.",
       "enforced_by": [
         {
@@ -1145,8 +1145,8 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "With On, the controller, in a session the owner started, merges when",
-      "rule_sha": "b6e53cd081d5",
-      "covers": "The auto-merge eligibility check exits non-zero for a head whose scope or UAT line does not qualify, and the merge hold checks the scope before a standing merge; recording G2 PASS and the other conditions stays the controller's.",
+      "rule_sha": "68c31eacbc85",
+      "covers": "The auto-merge eligibility check exits non-zero for a head whose scope or UAT line does not qualify, and the merge hold checks the scope before a standing merge; recording G2 PASS, the other conditions and the notice after it stay the controller's.",
       "enforced_by": [
         {
           "kind": "script",
