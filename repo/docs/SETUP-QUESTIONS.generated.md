@@ -254,13 +254,13 @@ Anything you do not list takes its recommendation.
 
 # Claude Code setup questions
 
-Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.
+Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet, in the Claude desktop app with its archive setting read as off (outside the app that row shows Not readable here and changes nothing). Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.
 
-## Toolkit setup - 1 question: Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay.
+## Toolkit setup - 1 question: Apply Toolkit's defaults to the 7 Claude Code settings that have no value yet? Your own values and offs stay.
 
-Bank reference: MM3A-XDQ4-26M2-3MFR
+Bank reference: MY9A-21VV-K0S7-WPGR
 
-Setup applies the Toolkit default to 6 settings not set yet and keeps every other setting as it is.
+Setup applies the Toolkit default to 7 settings not set yet and keeps every other setting as it is.
 
 ### 1. Updates and reports
 
@@ -285,9 +285,10 @@ Setup applies the Toolkit default to 6 settings not set yet and keeps every othe
 | 3.3 | Claude Code setting: Let other sessions wake this one? | Off (Claude Code default) | B. Turn on: Sets "crossSessionInbound": "accept" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
 | 3.4 | Claude Code setting: Switch models without asking on a flag? | On (Claude Code default) | A. Keep current | B. Turn off |
 | 3.5 | Claude Code setting: Read AGENTS.md (in all local repos) too? | Off (Claude Code default) | B. Turn on: Sets "instructionFiles": "claude-md-and-agents-md" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
-| 3.6 | Copy Toolkit's skills into Antigravity? | Not copied | B. Copy and keep updated: Copy Toolkit's skills into Antigravity and keep them current. (Toolkit default) | A. Keep current<br>C. Do not copy |
+| 3.6 | Claude desktop app setting: Archive sessions when their PR closes? | Off (not chosen in setup yet) | B. Turn on: Your agent asks the app to turn it on, and you approve that in the app's own approval card; setup changes nothing in the app itself. (Toolkit default) | A. Keep current<br>C. Turn off |
+| 3.7 | Copy Toolkit's skills into Antigravity? | Not copied | B. Copy and keep updated: Copy Toolkit's skills into Antigravity and keep them current. (Toolkit default) | A. Keep current<br>C. Do not copy |
 
-Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay. Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
+Apply Toolkit's defaults to the 7 Claude Code settings that have no value yet? Your own values and offs stay. Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
 
 ## Claude Code rows in full
 
@@ -529,7 +530,33 @@ Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Y
 
 ---
 
-### 3.6 Copy Toolkit's skills into Antigravity?
+### 3.6 Claude desktop app setting: Archive sessions when their PR closes?
+
+**What this controls:** Whether the Claude desktop app archives a session once its pull request merges or closes. It is a setting of your account in the app, on every device. Setup cannot read or change it: an agent in the app reads it with the app's settings tool, and a change is made only there, through the app's own approval card. An archived session can be brought back.
+
+**Current:** Off, as an agent read it in the Claude desktop app; you have not chosen it in setup yet.
+
+**Verification:** agent-read
+
+**Recommended:** B - Turn on
+
+**Recommended outcome:** Your agent asks the app to turn it on, and you approve that in the app's own approval card; setup changes nothing in the app itself.
+
+**Why:** It keeps finished sessions out of the sidebar.
+
+**Choices:**
+
+- **A. Keep current** - Preserve this effective behavior: Off, as an agent read it in the Claude desktop app; you have not chosen it in setup yet.
+- **B. Turn on** - Your agent asks the app to turn it on, and you approve that in the app's own approval card; setup changes nothing in the app itself.
+- **C. Turn off** - The app already has it off. Setup remembers that you turned it off.
+
+**After applying:** Nothing changes in the app until you approve the app's own card.
+
+**Selected:** B - Turn on
+
+---
+
+### 3.7 Copy Toolkit's skills into Antigravity?
 
 **What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills), where each session start and each setup keep them current. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 

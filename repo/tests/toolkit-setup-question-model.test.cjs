@@ -339,9 +339,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
   // Claude Code setup does not ask about Codex's instruction limit.
-  assert.equal(claude[0].presentation.total_visible_question_count, 9);
+  assert.equal(claude[0].presentation.total_visible_question_count, 10);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5', '3.6']);
 });
 
 test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
@@ -948,16 +948,17 @@ test('Keep Toolkit available in Codex? keeps verification under Keep current whe
   assert.deepEqual(older.choices.map((choice) => choice.value), ['keep', 'install', 'instructions']);
 });
 
-test('--claude-settings answers all four Claude Code setting rows and --claude-setting answers one', () => {
+test('--claude-settings answers all five Claude setting rows and --claude-setting answers one', () => {
   const choices = (argv) => {
     const { setupChoices } = core.parseArgs(['--plan', '--host', 'claude-code', ...argv]);
-    return ['claudeSettingAttribution', 'claudeSettingCrossSessionInbound', 'claudeSettingSwitchModelsOnFlag', 'claudeSettingAgentsMd'].map((key) => setupChoices[key]);
+    return ['claudeSettingAttribution', 'claudeSettingCrossSessionInbound', 'claudeSettingSwitchModelsOnFlag', 'claudeSettingAgentsMd', 'claudeSettingAutoArchiveOnPrClose'].map((key) => setupChoices[key]);
   };
-  assert.deepEqual(choices([]), ['', '', '', '']);
-  assert.deepEqual(choices(['--claude-settings', 'enable']), ['enable', 'enable', 'enable', 'enable']);
+  assert.deepEqual(choices([]), ['', '', '', '', '']);
+  assert.deepEqual(choices(['--claude-settings', 'enable']), ['enable', 'enable', 'enable', 'enable', 'enable']);
   // The single-row flag wins whichever comes first.
-  assert.deepEqual(choices(['--claude-setting', 'agents-md=keep', '--claude-settings', 'enable']), ['enable', 'enable', 'enable', 'keep']);
-  assert.deepEqual(choices(['--claude-setting=attribution=disable', '--claude-setting', 'switch-models-on-flag=enable']), ['disable', '', 'enable', '']);
+  assert.deepEqual(choices(['--claude-setting', 'agents-md=keep', '--claude-settings', 'enable']), ['enable', 'enable', 'enable', 'keep', 'enable']);
+  assert.deepEqual(choices(['--claude-setting=attribution=disable', '--claude-setting', 'switch-models-on-flag=enable']), ['disable', '', 'enable', '', '']);
+  assert.deepEqual(choices(['--claude-setting', 'auto-archive-on-pr-close=disable']), ['', '', '', '', 'disable']);
   assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'theme=enable']), /Unsupported --claude-setting name: theme/);
   assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'attribution=maybe']), /Unsupported --claude-setting choice: maybe/);
   assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'attribution']), /Unsupported --claude-setting choice/);
