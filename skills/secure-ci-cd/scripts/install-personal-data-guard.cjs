@@ -36,7 +36,7 @@ const GUARD_SOURCE = path.join(__dirname, 'personal-data-guard.cjs');
 // passing result to the check.
 const WORKFLOWS = ['personal-data-guard', 'personal-data-sweep'];
 const workflowTemplate = name => path.join(__dirname, '..', 'templates', 'github-actions', `${name}.yml`);
-const { GUARD_VERSION, CONFIG_SCHEMA, validateConfig } = require('./personal-data-guard.cjs');
+const { GUARD_VERSION, CONFIG_SCHEMA, PASS_UNREAD, validateConfig } = require('./personal-data-guard.cjs');
 
 const VENDORED_PATH = path.join('.github', 'scripts', 'personal-data-guard.cjs');
 const CONFIG_PATH = path.join('.github', 'personal-data-guard.json');
@@ -112,18 +112,17 @@ function workflowState(text, name = WORKFLOWS[0], raw = fs.readFileSync(workflow
   return { state: 'outdated' };
 }
 
-// What a new config lets through unread. Empty: an image or other file the guard cannot read fails a pull
-// request until the owner lists its path. Whether images pass by default is the owner's choice, and this
-// is the one place that would change it (for example { path: '**.png', reason: '...' }).
-const DEFAULT_NOT_SCANNED = Object.freeze([]);
-
-// The config a repository without one gets. Every scope is on and nothing is allowed.
+// The config a repository without one gets. Every scope is on, nothing is allowed, and images and fonts
+// (the guard's one list, PASS_UNREAD) pass unread and are named; any other file the guard cannot read fails
+// until its path is listed. A config without pass_unread lets none through, and an existing one is the
+// owner's: nothing adds the setting to it.
 function configText(requiredCheck = 'none') {
   const config = {
     schema: CONFIG_SCHEMA,
     scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true },
     allow: [],
-    not_scanned: [...DEFAULT_NOT_SCANNED],
+    not_scanned: [],
+    pass_unread: Object.keys(PASS_UNREAD),
     required_check: requiredCheck,
   };
   validateConfig(config, CONFIG_PATH);

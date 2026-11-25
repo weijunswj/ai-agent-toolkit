@@ -1,7 +1,8 @@
 'use strict';
 
 // What the personal data guard refuses in an ordinary pull request, with the settings a governance
-// turn-on writes: the next step it prints for a file it cannot read, and the addresses it leaves alone on
+// turn-on writes: the next step it prints for a file it cannot read (images and fonts, which pass, are in
+// personal-data-guard-unread.test.cjs), and the addresses it leaves alone on
 // the author lines git and GitHub write into a commit message. Throwaway repositories and fake values only.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -43,7 +44,7 @@ function pullRequest(repo, base, { title = 'Add the logo', body = 'A logo.', ref
 // ---- a file the guard cannot read ---------------------------------------------------------------
 
 test('a pull request refused only for a file the guard cannot read says what to do, and does not call it a leak', t => {
-  for (const [file, bytes] of [['public/logo.png', PNG], ['old.doc', OLE], ['bundle.zip', zip([['a.txt', 'text']])], ['fonts/a.woff2', Buffer.from([0x77, 0x4f, 0x46, 0x32, 0, 1, 0, 0])]]) {
+  for (const [file, bytes] of [['public/logo.png', zip([['a.txt', 'text']])], ['old.doc', OLE], ['bundle.zip', zip([['a.txt', 'text']])], ['data.sqlite', Buffer.from('SQLite format 3\0\0\0')], ['picture.bin', PNG]]) {
     const { repo, base } = guarded(t);
     repo.commit('Add a file', { [file]: bytes });
     const refused = pullRequest(repo, base);
@@ -67,8 +68,8 @@ test('every way the guard runs gives the right next step for an unread file, a f
   const { repo, base } = guarded(t);
   const listed = (result, where) => { assert.equal(result.status, 1, where); assert.match(result.all, UNREAD, where); assert.match(result.all, LIST, where); };
   // Staged and pushed, on the computer.
-  repo.write('logo.png', PNG);
-  repo.git(['add', 'logo.png']);
+  repo.write('logo.bin', PNG);
+  repo.git(['add', 'logo.bin']);
   let result = repo.guard(['staged']);
   listed(result, 'staged');
   assert.match(result.all, /in the same change\./);
@@ -122,7 +123,7 @@ test('a document with a found value and a part that cannot be read gets both ste
   const value = pii.email('zq.split', 'marker.sg');
   const document = docxWithSplitRun(value);
   assert.ok(document.length);
-  repo.commit('Add a letter', { 'letter.docx': document, 'photo.png': PNG });
+  repo.commit('Add a letter', { 'letter.docx': document, 'photo.bin': PNG });
   let result = pullRequest(repo, base);
   assert.match(result.all, UNREAD);
   assert.match(result.all, /the data is public now/);
@@ -135,14 +136,6 @@ test('a document with a found value and a part that cannot be read gets both ste
   assert.match(result.all, /vendor\/lib {2}unscannable/);
   assert.match(result.all, LIST);
   assert.doesNotMatch(result.all, LEAK);
-});
-
-test('whether a new repository\'s images pass unread is one default, empty until the owner decides', () => {
-  assert.deepEqual(settings().not_scanned, []);
-  assert.deepEqual(settings().allow, [], 'a Dependabot sign-off needs no entry: it is an author line');
-  const source = fs.readFileSync(path.join(__dirname, '../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs'), 'utf8');
-  assert.equal(source.split('DEFAULT_NOT_SCANNED').length, 3, 'declared once, used once');
-  assert.match(source, /const DEFAULT_NOT_SCANNED = Object\.freeze\(\[\]\);/);
 });
 
 // ---- author lines in commit messages ------------------------------------------------------------

@@ -36,8 +36,9 @@ const { managedScript } = require('./toolkit-user-state.cjs');
 
 const BANK_HOST = 'governance';
 // What a yes to Turn on also covers: the settings Toolkit adds on its own after the merge
-// (toolkit-governance-finish.cjs), named here so the owner sees them before answering.
-const AFTER_MERGE = `After the merge, Toolkit also turns on, without asking again: ${require('./toolkit-governance-finish.cjs').WHAT}.`;
+// (toolkit-governance-finish.cjs), and what the personal data check its pull request adds lets through,
+// named here so the owner sees them before answering.
+const AFTER_MERGE = `After the merge, Toolkit also turns on, without asking again: ${require('./toolkit-governance-finish.cjs').WHAT}. Where the pull request adds the personal data check, that check lets images and fonts through without reading them and names each one; any other file it cannot read fails until its path is listed.`;
 const BANK_TITLE = 'Toolkit governance choices';
 const TICKETS_BASENAME = 'governance-bank-tickets.v1.json';
 const TICKETS_SCHEMA = 'toolkit.governance-bank-tickets.v1';

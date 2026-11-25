@@ -71,7 +71,7 @@ const RULES = Object.freeze({
 const FIXED_GAPS = Object.freeze([
   'Singapore numbers written as eight digits with no 65 or +65 (too common in ordinary numbers to block on)',
   'Git LFS content (only the pointer is in git) and submodule contents',
-  'images, legacy Office binaries (.doc, .xls, .ppt), archives and other binary files: reported as unscannable',
+  'legacy Office binaries (.doc, .xls, .ppt), archives and other binary files: reported as unscannable',
   'lines that were already present before the change (only introduced content is checked, except in tree and sweep modes)',
   'encoded content such as base64, and a value split across two lines',
 ]);
@@ -388,11 +388,15 @@ function validateConfig(config, file = 'config') {
     printable(entry.path, 'a not_scanned path');
     printable(entry.reason, 'a not_scanned reason');
   }
+  // Optional, nothing when absent: the kinds of file that pass unread.
+  const passUnread = config.pass_unread === undefined ? [] : config.pass_unread;
+  if (!Array.isArray(passUnread) || passUnread.some((kind, index) => typeof kind !== 'string' || !Object.hasOwn(PASS_UNREAD, kind) || passUnread.indexOf(kind) !== index)) problem(`pass_unread must be a list of ${Object.keys(PASS_UNREAD).map((kind) => `"${kind}"`).join(' and ')}, each at most once`);
   if (!['validate', 'personal-data', 'none'].includes(config.required_check)) problem('required_check must be "validate", "personal-data" or "none" (record the decision)');
   return Object.freeze({
     scope: Object.freeze({ ...scope, pull_request_attribution: scope.pull_request_attribution !== false }),
     allowed,
     notScanned: notScanned.map((entry) => ({ path: entry.path.trim(), reason: entry.reason.trim(), pattern: globPattern(entry.path.trim()) })),
+    passUnread: Object.freeze([...passUnread]),
     requiredCheck: config.required_check,
   });
 }
@@ -405,8 +409,8 @@ function configAt(git, commit, relative) {
   return bytes === null ? null : parseConfig(bytes.toString('utf8'), "the base commit's config");
 }
 
-// A change can carry its own config. What the change switches off does not apply to its own
-// check: the base commit's scope stays in force until the change is merged.
+// A change can carry its own config. What the change switches off, or lets through unread, does not
+// apply to its own check: the base commit's scope and pass_unread stay in force until it is merged.
 // Allow and not_scanned entries the change adds do apply, and every run names them.
 function withBaseConfig(head, base, note) {
   if (!base) {
@@ -426,7 +430,10 @@ function withBaseConfig(head, base, note) {
     if (!base.notScanned.some((old) => old.path === entry.path)) note(`the change adds ${entry.path} to not_scanned: ${entry.reason}`);
   }
   if (head.requiredCheck !== base.requiredCheck) note(`the change sets required_check to ${head.requiredCheck} (was ${base.requiredCheck})`);
-  return Object.freeze({ ...head, scope: Object.freeze(scope) });
+  const passUnread = head.passUnread.filter((kind) => base.passUnread.includes(kind));
+  const newlyUnread = head.passUnread.filter((kind) => !base.passUnread.includes(kind));
+  if (newlyUnread.length) note(`the change lets ${newlyUnread.join(' and ')} through unread; the base commit's setting was used for this check`);
+  return Object.freeze({ ...head, scope: Object.freeze(scope), passUnread: Object.freeze(passUnread) });
 }
 
 // not_scanned paths: exact paths, * within one folder, ** across folders.
@@ -445,6 +452,41 @@ function globPattern(glob) {
 // Content decoding: text, OOXML and PDF. Anything else binary is unscannable.
 
 const OOXML_EXTENSIONS = new Set(['.docx', '.docm', '.dotx', '.xlsx', '.xlsm', '.xltx', '.pptx', '.pptm', '.potx']);
+
+// The one list of files that may pass unread (the settings' pass_unread names the kinds): each name ending
+// with the check its bytes must pass, so a file only named like an image, or an image under another name,
+// never passes. Readable text is scanned as text first, whatever its name (an SVG is text).
+const textAt = (bytes, offset, text) => bytes.subarray(offset, offset + text.length).toString('latin1') === text;
+const isPng = (bytes) => textAt(bytes, 0, '\x89PNG\r\n\x1A\n') && textAt(bytes, 12, 'IHDR');
+const isJpeg = (bytes) => textAt(bytes, 0, '\xFF\xD8\xFF') && bytes[3] >= 0xC0 && bytes[3] < 0xFF;
+const isGif = (bytes) => textAt(bytes, 0, 'GIF87a') || textAt(bytes, 0, 'GIF89a');
+const isWebp = (bytes) => textAt(bytes, 0, 'RIFF') && textAt(bytes, 8, 'WEBPVP8') && bytes.readUInt32LE(4) + 8 <= bytes.length;
+const isAvif = (bytes) => textAt(bytes, 4, 'ftypavif') && bytes.readUInt32BE(0) <= bytes.length;
+// The icon's own list of pictures, each inside the file.
+const isIco = (bytes) => bytes.length >= 22 && bytes.readUInt32LE(0) === 0x00010000 && entries(bytes.readUInt16LE(4), 6, bytes, (at, end) => bytes[at + 3] === 0 && bytes.readUInt32LE(at + 12) >= end && bytes.readUInt32LE(at + 8) + bytes.readUInt32LE(at + 12) <= bytes.length);
+// The font's own table list: four-letter names, each table inside the file.
+const isSfnt = (bytes, version) => bytes.length >= 28 && textAt(bytes, 0, version) && entries(bytes.readUInt16BE(4), 12, bytes, (at, end) => /^[\x20-\x7E]{4}$/.test(bytes.toString('latin1', at, at + 4)) && bytes.readUInt32BE(at + 8) >= end && bytes.readUInt32BE(at + 8) + bytes.readUInt32BE(at + 12) <= bytes.length);
+const isWoff = (bytes, version) => bytes.length >= 44 && textAt(bytes, 0, version) && bytes.readUInt32BE(8) === bytes.length;
+// Whether a header names 1 to 128 entries of 16 bytes from `start`, all in the file and all as they should be.
+function entries(count, start, bytes, valid) {
+  const end = start + count * 16;
+  if (count < 1 || count > 128 || end > bytes.length) return false;
+  for (let at = start; at < end; at += 16) if (!valid(at, end)) return false;
+  return true;
+}
+const PASS_UNREAD = Object.freeze({
+  images: Object.freeze({ '.png': isPng, '.jpg': isJpeg, '.jpeg': isJpeg, '.gif': isGif, '.webp': isWebp, '.avif': isAvif, '.ico': isIco }),
+  fonts: Object.freeze({ '.woff': (bytes) => isWoff(bytes, 'wOFF'), '.woff2': (bytes) => isWoff(bytes, 'wOF2'), '.ttf': (bytes) => isSfnt(bytes, '\x00\x01\x00\x00'), '.otf': (bytes) => isSfnt(bytes, 'OTTO') }),
+});
+const PASS_UNREAD_TEXT = `images (${Object.keys(PASS_UNREAD.images).join(', ')}) and fonts (${Object.keys(PASS_UNREAD.fonts).join(', ')})`;
+
+// The kind a file passes as when it cannot be read, or null.
+function unreadKind(filePath, bytes) {
+  const ext = path.posix.extname(filePath).toLowerCase();
+  const kind = Object.keys(PASS_UNREAD).find((name) => Object.hasOwn(PASS_UNREAD[name], ext));
+  if (!kind || bytes.length < 12 || decodeText(bytes.subarray(0, 8000)) !== null) return null;
+  return PASS_UNREAD[kind][ext](bytes) ? kind : null;
+}
 
 // Returns { parts: [{ label, text }], unscannable: [reason] }.
 function decodeContent(filePath, bytes) {
@@ -924,7 +966,7 @@ class GitHubReader {
 // The scan: one owner for the findings, notes and counts of a run.
 
 class PersonalDataGuard {
-  #config; #git; #findings = []; #notes = []; #allowMarkers = 0; #listedGaps = new Map();
+  #config; #git; #findings = []; #notes = []; #allowMarkers = 0; #listedGaps = new Map(); #passedUnread = new Map();
   #counts = { commits: 0, files: 0, messages: 0, texts: 0 };
   #pathIds = new Map();
 
@@ -1017,7 +1059,9 @@ class PersonalDataGuard {
     });
     if (decoded.unscannable.length) {
       const listed = this.#listed(filePath);
+      const kind = unreadKind(filePath, bytes);
       if (listed) this.#listedGaps.set(place, `${place}: ${decoded.unscannable.join('; ')} (listed: ${listed.reason})`);
+      else if (this.#config.passUnread.includes(kind)) this.#passedUnread.set(place, `${place}: not read, let through as one of the ${kind}`);
       else this.#add(place, 0, 0, 'PDG-UNSCANNABLE');
     }
   }
@@ -1143,7 +1187,7 @@ class PersonalDataGuard {
       const kind = /^(file|commit|pull|review|comment) /.exec(finding.place)[1];
       kinds[kind === 'review' ? 'comment' : kind] += 1;
     }
-    return `${this.#findings.length - unread} found (${kinds.file} in files, ${kinds.commit} in commit messages, ${kinds.pull} in pull request text, ${kinds.comment} in comments), ${unread} not readable`;
+    return `${this.#findings.length - unread} found (${kinds.file} in files, ${kinds.commit} in commit messages, ${kinds.pull} in pull request text, ${kinds.comment} in comments), ${unread + this.#passedUnread.size} not readable`;
   }
 
   // Scans an annotated tag (and any tag it points to) and returns the commit it ends at. A tag of
@@ -1191,10 +1235,13 @@ class PersonalDataGuard {
     lines.push(`Checked: ${this.#counts.commits} commit(s), ${this.#counts.files} file version(s), ${this.#counts.messages} message(s).`);
     lines.push('Not scanned:');
     for (const gap of FIXED_GAPS) lines.push(`  - ${gap}`);
+    for (const kind of Object.keys(PASS_UNREAD)) lines.push(`  - ${kind} (${Object.keys(PASS_UNREAD[kind]).join(', ')}): ${this.#config.passUnread.includes(kind) ? 'let through unread when the bytes match the name, and each one named here' : 'reported as unscannable'}`);
     if (where === 'sweep') for (const gap of SWEEP_GAPS) lines.push(`  - ${gap}`);
     for (const entry of this.#config.notScanned) lines.push(`  - config lists ${entry.path}: ${entry.reason}`);
     for (const gap of this.#listedGaps.values()) lines.push(`  - ${gap}`);
+    for (const gap of this.#passedUnread.values()) lines.push(`  - ${gap}`);
     for (const note of this.#notes) lines.push(`Note: ${note}`);
+    if (this.#passedUnread.size) lines.push(`Let through unread: ${this.#passedUnread.size} file version(s), each named above. A reviewer opens each one.`);
     lines.push(`Allow markers used: ${this.#allowMarkers}.`);
     if (this.#findings.length) {
       lines.push(`Found ${this.#findings.length} item(s) (place, class, rule; values are never shown):`);
@@ -1223,8 +1270,9 @@ class PersonalDataGuard {
 function unreadRemedy(where, mixed) {
   const change = { remote: 'in this pull request (a new one if it has landed)', local: 'in the same change', tree: 'in a pull request' }[where];
   return [
-    `${mixed ? 'The PDG-UNSCANNABLE item(s)' : 'Nothing was found: the item(s) listed'} were not checked, because the guard cannot read them (an image, font,`,
-    'archive, submodule or the like). Next, for each one that holds no personal data: add its path with a reason to',
+    `${mixed ? 'The PDG-UNSCANNABLE item(s)' : 'Nothing was found: the item(s) listed'} were not checked, because the guard cannot read them (an archive,`,
+    'Office file, PDF, submodule or other binary, or an image or font that the settings do not let through or whose',
+    'bytes are another type). Next, for each one that holds no personal data: add its path with a reason to',
     `not_scanned in ${DEFAULT_CONFIG.split(path.sep).join('/')}, ${change}.`,
     'A pattern such as public/** covers a folder. Take out one that does hold personal data and tell the owner.',
     ...(mixed ? ['The other item(s) were found:'] : []),
@@ -1405,16 +1453,18 @@ function explain(config) {
   lines.push('decorators, code tokens (self.x, camelCase names), asset names (logo@2x.png), version specs, SQL patterns');
   lines.push('and single-letter placeholders such as a@b.com; numbers inside longer digit or hex runs, dates, IP');
   lines.push('addresses and timestamps.');
-  lines.push('Word, Excel and PowerPoint files (.docx, .xlsx, .pptx) and PDF text are read; other binary content (images,');
-  lines.push('thumbnails, embedded objects) is unscannable and blocks unless the config lists its path with a reason.');
+  lines.push('Word, Excel and PowerPoint files (.docx, .xlsx, .pptx) and PDF text are read; other binary content (archives,');
+  lines.push('pictures inside documents, embedded objects) is unscannable and blocks unless the config lists its path with');
+  lines.push('a reason. Where pass_unread names them, files whose name and bytes are the same type pass unread and each is');
+  lines.push(`named: ${PASS_UNREAD_TEXT}.`);
   lines.push('Commit author, committer and tagger addresses are never scanned; no setting turns that on. The address on an');
   lines.push('author line of a commit message is left alone too: Signed-off-by, Co-authored-by, Co-committed-by,');
   lines.push('Co-developed-by, Reviewed-by, Acked-by or Tested-by with nothing but a name and that address. A co-author');
   lines.push('line naming Claude, and any author line with an anthropic.com address, is AI attribution and is checked.');
-  lines.push('In ci and range modes, a change cannot switch off scope checks for itself: the base commit\'s');
+  lines.push('In ci and range modes, a change cannot switch off scope checks or set pass_unread for itself: the base commit\'s');
   lines.push('settings apply until it is merged, and allow or not_scanned entries it adds are named in the report.');
   if (config) {
-    lines.push(`Config: ${config.allowed.size} allowed role address(es); ${config.notScanned.length} not_scanned entr(ies); required check: ${config.requiredCheck}.`);
+    lines.push(`Config: ${config.allowed.size} allowed role address(es); ${config.notScanned.length} not_scanned entr(ies); passing unread: ${config.passUnread.join(', ') || 'nothing'}; required check: ${config.requiredCheck}.`);
   }
   lines.push('Output never contains a matched value, part of one, or a hash of one.');
   return `${lines.join('\n')}\n`;
@@ -1517,6 +1567,7 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
 module.exports = Object.freeze({
   CONFIG_SCHEMA,
   GUARD_VERSION,
+  PASS_UNREAD,
   RULES,
   GuardError,
   PersonalDataGuard,

@@ -10,7 +10,8 @@ Title: every cloud workflow by default, and a first look at what is already ther
 
 - **The personal data guard never scans commit author, committer or tagger addresses:** the `identity` setting, and the installer's `--identity` and `--identity-reason`, are gone. A config that still holds the key is read without it, and the refresh pull request that brings the new script takes the key out, keeping every other setting.
 - **The same addresses in commit messages:** the personal data guard leaves the address on an author line (Signed-off-by, Co-authored-by and the like) alone, and GitHub no-reply addresses everywhere. An AI co-author line is still checked. The default settings need no Dependabot entry any more.
-- **The guard's refusal for a file it cannot read** (an image, font or archive) says it was not checked and how to list its path, instead of calling it a leak.
+- **Images and fonts pass the personal data guard by default, named:** the settings a new install writes have `pass_unread`, so a PNG, JPEG, GIF, WebP, AVIF, ICO, WOFF, WOFF2, TTF or OTF file whose name and bytes agree passes unread and the report names it; the review steps have the reviewer open each one. Text under such a name is scanned as text, and settings that already exist are left as they are.
+- **The guard's refusal for a file it cannot read** (an archive, Office file or other binary) says it was not checked and how to list its path, instead of calling it a leak.
 - The guard's CI workflow copies have a managed header, and its installer brings an older copy up to date; a hand-edited one is kept.
 - A default branch other than main now leaves out only the sweep, its gate and the shard copies, with the reason, instead of every cloud workflow.
 - With governance off, the left-over files report also names the guard's marked workflows; like its script, they keep working and are the owner's choice to remove.
