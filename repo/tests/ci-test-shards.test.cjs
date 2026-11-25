@@ -286,8 +286,8 @@ function windowsGroups(workflow) {
   return /families: \[([^\]]+)\]/.exec(job)[1].split(', ').map(group => /^([a-z+-]+)$/.exec(group)[1]);
 }
 
-// The hook-pack README holds the one written list of the groups; the other texts about the jobs
-// (the workflow header and the code comments included) may count them but never list them.
+// The hook-pack README holds the one full list of the groups; every text about the jobs (the workflow
+// and the code comments included) must count the groups and families and name a joined group as they are.
 const HOOK_PACK_README = 'repo/tests/hook-pack/README.md';
 const HOOK_PACK_TEXTS = Object.freeze([HOOK_PACK_README, 'repo/docs/VALIDATION-STRATEGY.md', 'repo/ARCHITECTURE.md', 'repo/docs/agent-playbooks/hook-design.md', '.github/workflows/validate.yml', 'repo/scripts/ci-test-shards.cjs']);
 const NUMBER_WORDS = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']);
@@ -314,6 +314,9 @@ function windowsGroupProblems(groups, families, texts) {
     for (const [phrase, number, noun] of text.matchAll(counted)) {
       const value = NUMBER_WORDS.includes(number.toLowerCase()) ? NUMBER_WORDS.indexOf(number.toLowerCase()) : Number(number);
       if (value !== (noun.toLowerCase() === 'groups' ? groups : families).length) problems.push(`${rel} says "${phrase.replace(/\s+/g, ' ')}"`);
+    }
+    for (const [name] of text.matchAll(/[a-z-]+(?:\+[a-z-]+)+/g)) {
+      if (!groups.includes(name) && name.split('+').every(part => families.includes(part))) problems.push(`${rel} names ${name}`);
     }
   }
   return problems;
@@ -351,6 +354,7 @@ test('the Windows group check names a missing, doubled or unknown family and a t
   for (const rel of HOOK_PACK_TEXTS) {
     assert.deepEqual(problems(groups, { ...texts, [rel]: `${texts[rel]}\nThe four groups.\n` }), [`${rel} says "four groups"`]);
     assert.deepEqual(problems(groups, { ...texts, [rel]: `${texts[rel]}\nThe nine\nWindows families.\n` }), [`${rel} says "nine Windows families"`]);
+    assert.deepEqual(problems(groups, { ...texts, [rel]: `${texts[rel]}\nThe closure-shell+push job.\n` }), [`${rel} names closure-shell+push`]);
   }
 });
 
