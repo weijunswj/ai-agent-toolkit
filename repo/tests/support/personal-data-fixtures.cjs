@@ -129,8 +129,6 @@ const INSTALLER = path.resolve(__dirname, '..', '..', '..', 'skills', 'secure-ci
 const BASE_CONFIG = Object.freeze({
   schema: 'personal-data-guard/v1',
   scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true },
-  identity: 'excluded',
-  identity_reason: 'test repositories use reserved test identities',
   allow: [],
   not_scanned: [],
   required_check: 'none',

@@ -70,8 +70,6 @@ const REPO_CONFIG = path.join('.github', 'personal-data-guard.json');
 const DEFAULT_CONFIG = Object.freeze({
   schema: 'personal-data-guard/v1',
   scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true, pull_request_attribution: true },
-  identity: 'excluded',
-  identity_reason: 'pull request pre-flight default: only the title and body are scanned',
   required_check: 'none',
 });
 

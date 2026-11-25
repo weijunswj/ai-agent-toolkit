@@ -7,8 +7,6 @@
     "branch_names": true,
     "pull_request_text": true
   },
-  "identity": "excluded",
-  "identity_reason": "commit author and committer addresses are the maintainers' chosen GitHub identities",
   "allow": [
     {
       "value": "noreply@anthropic.com",

@@ -140,12 +140,8 @@ test('B: only introduced lines are checked, and a merge does not re-report its o
   assert.deepEqual(guard.introducedLines(['a'], []), [0]);
 });
 
-test('B: config rules: explicit identity choice, role-only allow list, reasons required', () => {
-  const ok = guard.validateConfig(structuredClone(BASE_CONFIG));
-  assert.equal(ok.identity, 'excluded');
+test('B: config rules: role-only allow list, reasons required', () => {
   const broken = [
-    { ...BASE_CONFIG, identity: undefined },
-    { ...BASE_CONFIG, identity_reason: '' },
     { ...BASE_CONFIG, allow: [{ value: pii.email(), reason: 'a person' }] },
     { ...BASE_CONFIG, allow: [{ value: pii.email('security', 'example.org') }] },
     { ...BASE_CONFIG, not_scanned: [{ path: 'logo.png' }] },
@@ -689,15 +685,23 @@ test('A range: the spec needs exactly two dots and two ends', (t) => {
   }
 });
 
-test('A identity included: the whole author line is read, name included', (t) => {
-  const repo = new TestRepo(t, { config: { ...BASE_CONFIG, identity: 'included', identity_reason: undefined } });
-  const base = repo.commit('base', { 'README.md': 'base\n' });
-  repo.write('b.txt', 'clean\n');
-  repo.git(['add', 'b.txt']);
-  repo.git(['commit', '-q', '--no-verify', '-m', 'clean', `--author=Jane ${pii.sgPlus()} <author${pii.at}example.invalid>`]);
-  const result = repo.guard(['range', `${base}..HEAD`]);
-  assert.equal(result.status, 1, result.all);
-  assert.match(result.all, /commit [0-9a-f]{12} author:1:1 {2}phone/);
+test('A author, committer and tagger lines are never scanned, whatever the config says', (t) => {
+  for (const config of [BASE_CONFIG, { ...BASE_CONFIG, identity: 'included' }]) {
+    const repo = new TestRepo(t, { config });
+    const base = repo.commit('base', { 'README.md': 'base\n' });
+    repo.write('b.txt', 'clean\n');
+    repo.git(['add', 'b.txt']);
+    const person = pii.email();
+    repo.env.GIT_COMMITTER_EMAIL = person;
+    repo.git(['commit', '-q', '--no-verify', '-m', 'clean', `--author=Jane ${pii.sgPlus()} <${person}>`]);
+    repo.git(['tag', '-a', 'v1', '-m', 'clean']);
+    const result = repo.guard(['range', `${base}..HEAD`]);
+    assert.equal(result.status, 0, result.all);
+    assert.match(result.all, /Author, committer and tagger addresses: never scanned\./);
+    // The same address in the message itself is content, and is found.
+    repo.git(['commit', '-q', '--no-verify', '--allow-empty', '-m', `clean\n\nAsk ${person}`]);
+    assert.equal(repo.guard(['range', `${base}..HEAD`]).status, 1);
+  }
 });
 
 test('A tree: whole content at a revision, with the listed gaps printed', (t) => {
@@ -763,7 +767,7 @@ test('C: arguments, event names, config paths and config text never echo', (t) =
   const value = markerEmail();
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n' });
-  const reason = repo.write('../reason-config.json', JSON.stringify({ ...BASE_CONFIG, identity_reason: `ask ${value}` }));
+  const reason = repo.write('../reason-config.json', JSON.stringify({ ...BASE_CONFIG, not_scanned: [{ path: 'a.png', reason: `ask ${value}` }] }));
   const listed = repo.write('../listed-config.json', JSON.stringify({ ...BASE_CONFIG, not_scanned: [{ path: `${value}.png`, reason: 'artwork' }] }));
   const event = repo.write('../event.json', '{}');
   const paths = [

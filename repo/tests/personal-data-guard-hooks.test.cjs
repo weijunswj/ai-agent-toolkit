@@ -206,18 +206,35 @@ test('installer: reports plainly when it cannot install', (t) => {
   assert.equal(fs.existsSync(path.join(blocked.root, '.github', 'scripts')), false);
 
   const fresh = new TestRepo(t, { config: null });
-  result = fresh.installer([]);
-  assert.equal(result.status, 2);
-  assert.match(result.all, /pass --identity excluded or --identity included/);
+  result = fresh.installer(['--identity', 'included']);
+  assert.equal(result.status, 2, 'no setting scans author or committer addresses');
+  assert.match(result.all, /Unknown option --identity/);
   assert.equal(fs.existsSync(path.join(fresh.root, '.git', 'hooks', 'pre-commit')), false);
-  result = fresh.installer(['--identity', 'excluded']);
-  assert.equal(result.status, 2, 'excluded needs a reason');
-  result = fresh.installer(['--identity', 'excluded', '--identity-reason', 'maintainer identities are public', '--workflow']);
+  result = fresh.installer(['--workflow']);
   assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /Commit author and committer addresses are never scanned/);
   const config = JSON.parse(fs.readFileSync(path.join(fresh.root, '.github', 'personal-data-guard.json'), 'utf8'));
-  assert.equal(config.identity, 'excluded');
+  assert.equal(Object.hasOwn(config, 'identity'), false);
   assert.equal(config.required_check, 'none');
-  assert.equal(fs.readFileSync(path.join(fresh.root, '.github', 'workflows', 'personal-data-guard.yml'), 'utf8'), fs.readFileSync(TEMPLATE, 'utf8').replace(/\r\n/g, '\n'));
+  // The workflow is the template under one managed header; a rerun brings an older copy up to date and
+  // keeps a hand-edited or someone else's file.
+  const workflow = path.join(fresh.root, '.github', 'workflows', 'personal-data-guard.yml');
+  const template = fs.readFileSync(TEMPLATE, 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(fs.readFileSync(workflow, 'utf8').replace(/^[^\n]*\n/, ''), template);
+  assert.match(fs.readFileSync(workflow, 'utf8'), /^# AI-AGENT-TOOLKIT:secure-ci-cd:WORKFLOW personal-data-guard sha256=[0-9a-f]{12}\n/);
+  for (const [text, state, kept] of [
+    [installer.workflowText('personal-data-guard', template.replace('timeout-minutes: 15', 'timeout-minutes: 10')), 'outdated', false],
+    [installer.workflowText().replace(/actions\/checkout@[0-9a-f]{40} # v[\d.]+/, `actions/checkout@${'b'.repeat(40)} # v99.0.0`), 'outdated', false],
+    [installer.workflowText().replace(/actions\/checkout@[0-9a-f]{40}/, 'actions/checkout@main'), 'edited', true],
+    [template, 'outdated', false],
+    [`${installer.workflowText()}# mine\n`, 'edited', true],
+    ['name: Mine\n', 'unmanaged', true],
+  ]) {
+    fs.writeFileSync(workflow, text);
+    assert.equal(installer.workflowState(text).state, state);
+    assert.equal(fresh.installer(['--workflow']).status, 0);
+    assert.equal(fs.readFileSync(workflow, 'utf8') === text, kept, state);
+  }
   out = '';
   status = installer.main(['--repo', fresh.root, '--check'], { out: { write: (text) => { out += text; } }, err: { write: () => {} } });
   assert.equal(status, 0, out);
@@ -254,6 +271,17 @@ test('the CI template checks pull requests and every branch push without interpo
   assert.match(text, /types: \[opened, edited, reopened, synchronize\]/);
   assert.match(text, /node \.github\/scripts\/personal-data-guard\.cjs ci/);
   assert.doesNotMatch(text, /\$\{\{\s*github\.event\./, 'event text is read from the event file, never interpolated');
+  for (const use of text.match(/uses: \S+/g)) assert.match(use, /@[0-9a-f]{40}$/, `${use} is pinned to a commit`);
+  // The check runs on every event it is started by: a job condition would let a skipped job report success.
+  assert.doesNotMatch(text, /workflow_dispatch|^    if:/m);
+});
+
+test('the sweep template runs only when started by hand, with a token that can only read, and has no job of the check\'s name', () => {
+  const text = fs.readFileSync(path.join(path.dirname(TEMPLATE), 'personal-data-sweep.yml'), 'utf8');
+  assert.match(text, /^on:\n  workflow_dispatch:\n\npermissions:\n  contents: read\n  issues: read\n  pull-requests: read\n\njobs:\n  sweep:\n/m);
+  assert.doesNotMatch(text, /:\s*write\b|secrets\.|personal-data:|\$\{\{\s*github\.event\./, 'nothing can be written or posted, and no check is passed');
+  assert.match(text, /fetch-depth: 0\n          persist-credentials: false/);
+  assert.match(text, /run: node \.github\/scripts\/personal-data-guard\.cjs sweep\n$/);
   for (const use of text.match(/uses: \S+/g)) assert.match(use, /@[0-9a-f]{40}$/, `${use} is pinned to a commit`);
 });
 
