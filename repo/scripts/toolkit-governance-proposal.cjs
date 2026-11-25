@@ -80,7 +80,8 @@ function bindingV2(binding) {
 
 // The turn-on file set: the programme file, the CI files the working tree carries (the bank installs the
 // plain-text check and the Dependabot settings there first) and the cloud workflows. Instruction files,
-// product files and backups never join it.
+// product files and backups never join it. A link or folder in a cloud workflow's place is never read:
+// the plan already leaves that workflow out and names it, so it does not stop the turn-on.
 function adoptionFiles(cwd, text, cloud = { files: {} }) {
   const names = [...PLAIN_TEXT_FILES, '.github/plain-text-baseline.json', ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
   const files = { [cache.BINDING_PATH]: text };
@@ -88,12 +89,12 @@ function adoptionFiles(cwd, text, cloud = { files: {} }) {
     const file = path.join(cwd, name);
     if (!fs.existsSync(file)) continue;
     let current = cwd;
-    for (const part of name.split('/')) {
-      current = path.join(current, part);
-      if (fs.lstatSync(current).isSymbolicLink()) fail('PROPOSAL_ADOPTION_INCOMPLETE');
-    }
+    const linked = name.split('/').some(part => { current = path.join(current, part); return fs.lstatSync(current).isSymbolicLink(); });
     const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+    if (linked || !stat.isFile() || stat.size > LIMIT) {
+      if (cloudFiles().includes(name)) continue;
+      fail('PROPOSAL_ADOPTION_INCOMPLETE');
+    }
     files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
   const all = { ...files, ...cloud.files };

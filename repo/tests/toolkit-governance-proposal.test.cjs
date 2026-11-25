@@ -647,8 +647,15 @@ test('a yes publishes the binding and CI files with no instruction copies, and i
   assert.throws(() => owner.publish(f.cwd, owner.request(f.cwd, 'yes', run).run, binding), /PROPOSAL_ADOPTION_INCOMPLETE/);
   assert.equal(published, null, 'a set missing a CI file is never published');
   prepareAdoption(f);
+  // A folder in a cloud workflow's place is left out and stops nothing; in a required file's place it does.
+  fs.mkdirSync(path.join(f.cwd, '.github/personal-data-guard.json'));
   owner.publish(f.cwd, owner.request(f.cwd, 'yes', { ...run, sessionId: 'again' }).run, binding);
   assert.deepEqual(Object.keys(published).sort(), [...REQUIRED_FILES].sort(), 'no AGENTS.md, CLAUDE.md or playbooks are needed');
+  fs.rmSync(path.join(f.cwd, '.github/plain-text.json'));
+  fs.mkdirSync(path.join(f.cwd, '.github/plain-text.json'));
+  published = null;
+  assert.throws(() => owner.publish(f.cwd, owner.request(f.cwd, 'yes', { ...run, sessionId: 'third' }).run, binding), /PROPOSAL_ADOPTION_INCOMPLETE/);
+  assert.equal(published, null);
   const full = Object.fromEntries(REQUIRED_FILES.map(name => [name, 'x']));
   assert.deepEqual(missingFiles(full), []);
   const { '.github/workflows/plain-text.yml': dropped, ...partial } = full;
