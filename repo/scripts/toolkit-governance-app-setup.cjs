@@ -77,8 +77,8 @@ function parseArgs(argv) {
   return options;
 }
 
-// The App's manifest: the same name, page and permissions as the pre-filled link, with the webhook
-// off, installable only on this account and no events.
+// The App's manifest: the per-repository name, the repository page and the App's permission list, with
+// the webhook off, installable only on this account and no events.
 function manifest(slug, redirect) {
   const url = `https://github.com/${slug}`;
   return { name: app.appName(slug), url, hook_attributes: { url, active: false }, redirect_url: redirect, public: false, default_permissions: { ...app.APP.permissions }, default_events: [] };

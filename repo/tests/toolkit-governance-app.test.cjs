@@ -145,7 +145,7 @@ test('a published disable proposal suggests the removal, naming other governed r
   const proposal = { repository: slug, number: 3, head: 'b'.repeat(40), url: `https://github.com/${slug}/pull/3`, state: 'open', answer: 'no' };
   let open = [];
   const reads = [], stdout = sink(), stderr = sink();
-  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true }, interactive: true, confirm: async () => true, stdout, stderr,
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true }, interactive: true, environment: {}, stdout, stderr,
     proposalTransport: { list: () => open, publish() { open = [proposal]; return proposal; }, read: () => proposal },
     appReader: args => { reads.push(args); return answering(found)(args); } });
   assert.equal(await cli.main(['disable']), 0, stderr.text());

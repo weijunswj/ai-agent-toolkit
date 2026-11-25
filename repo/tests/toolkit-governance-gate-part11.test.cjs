@@ -66,7 +66,7 @@ test('card: the first message of a run in Claude Code goes through with the card
   const first = c.send(repo, 'fix the login bug', 's1');
   assert.equal(first.action, 'pass');
   assert.match(first.notice, /Pick an answer on the card, or carry on; nothing waits on it/);
-  assert.deepEqual(noticeOf(first.context).split('\n'), gate.QUESTION);
+  assert.deepEqual(noticeOf(first.context).split('\n'), gate.QUESTION.map(line => line.replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo')));
   assert.ok(first.context.includes(JSON.stringify(gate.PICKER_INPUT)), 'the exact card input');
   assert.match(first.context, /2\. Then carry on with the user's message above, whatever they picked\. If the card is refused or not answered, carry on the same way and do not show it again\./);
   assert.match(first.context, /adding no answers field/);

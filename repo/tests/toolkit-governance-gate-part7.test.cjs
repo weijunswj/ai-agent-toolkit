@@ -226,7 +226,7 @@ test('a damaged asked-runs file never stops work: the question is asked, the fil
     assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }), null);
     const first = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' }, { registryOptions: ctx.options, environment: {} });
     assert.equal(first.decision, undefined, 'the message goes through, and Claude Code shows the card');
-    assert.equal(noticeOf(first.hookSpecificOutput.additionalContext), gate.QUESTION.join('\n'));
+    assert.equal(noticeOf(first.hookSpecificOutput.additionalContext), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', `TRANSPORT-${slug}`));
     assert.ok(JSON.parse(fs.readFileSync(askedPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].sessions.s1, 'the damaged file is replaced');
     const answered = hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);

@@ -610,20 +610,23 @@ function assertQuestionBankAnswerBinding(parsed, specs, label = 'Setup') {
 // for it: the bank asks one approval question, approvalQuestion(). The row's state says what a yes does.
 // UNSET takes the row's Toolkit default; every other state keeps what is there: a value Toolkit set
 // (TOOLKIT_DEFAULT), the owner's own value (OWNER_VALUE), the owner's earlier off (OWNER_OFF, so a default is
-// never put back), or a setting setup could not read (UNREADABLE, nothing written). The owner overrides one row
+// never put back), a setting setup could not read (UNREADABLE) or one this Claude Code version does not have
+// (UNSUPPORTED). Nothing is written for the last two, so setup never asks about them: it only says which they
+// are, and never counts them as having a value (unsetNotes). The owner overrides one row
 // with its number and a choice letter, value or word (`3.5=off`); a row the reply leaves out keeps its current
 // value unless the reply also says yes. No reply, or no, writes nothing.
-const STRONG_DEFAULT_STATES = Object.freeze({ UNSET: 'unset', TOOLKIT_DEFAULT: 'toolkit-default', OWNER_VALUE: 'owner-value', OWNER_OFF: 'owner-off', UNREADABLE: 'unreadable' });
+const STRONG_DEFAULT_STATES = Object.freeze({ UNSET: 'unset', TOOLKIT_DEFAULT: 'toolkit-default', OWNER_VALUE: 'owner-value', OWNER_OFF: 'owner-off', UNREADABLE: 'unreadable', UNSUPPORTED: 'unsupported' });
 const KEPT_REASONS = Object.freeze({
   unset: 'Toolkit leaves this as it is by default.',
   'toolkit-default': 'The Toolkit default is already in place.',
   'owner-value': 'This is your own value, so setup keeps it.',
   'owner-off': 'You turned this off, so setup keeps it off.',
   unreadable: 'Setup could not read this setting, so it writes nothing.',
+  unsupported: 'This Claude Code version does not have this setting, so setup writes nothing.',
 });
 // The one approval question, saying how many settings a yes would set. It makes sense on its own on a native question card.
+// With none left setup asks no question, so there is none to word.
 function approvalQuestion(pending) {
-  if (!pending) return "Apply Toolkit's defaults to the Claude Code settings that have no value yet? None is left, so a yes changes nothing. Your own values and offs stay.";
   const one = pending === 1;
   return `Apply Toolkit's default${one ? '' : 's'} to the ${pending} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
 }
@@ -647,6 +650,28 @@ function strongDefaultRow(definition) {
 
 // A row a setup flag already answered is not pending: the flag's choice applies.
 const pendingDefaults = (specs) => answerable(specs).filter((spec) => spec.applies_default && !spec.selected);
+// The rows that hold no value setup could read, one sentence for each kind; none when every row was read.
+// `name` says how each row is named: its number where the table is shown, which is all it needs there.
+const inState = (specs, state) => answerable(specs).filter((spec) => spec.default_state === state && !spec.selected);
+const settingCount = (rows) => `${rows.length} setting${rows.length === 1 ? '' : 's'}`;
+function unsetNotes(specs, name = (spec) => spec.presentation.question_ref) {
+  const refs = (rows) => rows.map(name).join(', ');
+  const unreadable = inState(specs, STRONG_DEFAULT_STATES.UNREADABLE);
+  const unsupported = inState(specs, STRONG_DEFAULT_STATES.UNSUPPORTED);
+  return [
+    ...(unreadable.length ? [`Setup could not read ${settingCount(unreadable)} (${refs(unreadable)}), so it writes nothing there.`] : []),
+    ...(unsupported.length ? [`This Claude Code version does not have ${settingCount(unsupported)} (${refs(unsupported)}), so setup writes nothing there.`] : []),
+  ];
+}
+// Why setup asks nothing when no default is left to apply, as a title and a sentence.
+function nothingToAsk(specs) {
+  const notes = unsetNotes(specs);
+  const unreadable = inState(specs, STRONG_DEFAULT_STATES.UNREADABLE);
+  return notes.length
+    ? { title: `no questions: nothing to approve${unreadable.length ? `, and ${settingCount(unreadable)} could not be read` : ''}`,
+      sentence: `No setting needs your approval, so setup asks nothing and keeps them all as they are. ${notes.join(' ')}` }
+    : { title: 'no questions: every setting already has a value', sentence: 'Every setting already has a value, so setup asks nothing and keeps them all as they are.' };
+}
 
 // The bank of strong-default rows: the one question, then one table per section with every column, then the
 // one reply line. The Setup applies column shows what a yes does for each row; a row a setup flag answered
@@ -663,10 +688,11 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
   const pending = pendingDefaults(specs).length;
   const rows = answerable(specs);
   const flagged = rows.filter((spec) => spec.selected).length;
-  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting' : `1 question: ${approvalQuestion(pending)}`;
+  const title = flagged === rows.length ? 'no questions: your setup flags answer every setting'
+    : pending ? `1 question: ${approvalQuestion(pending)}` : nothingToAsk(specs).title;
   const summary = flagged === rows.length ? 'Your setup flags answer every setting, so setup asks nothing and applies them as shown.'
-    : [pending ? `Setup applies the Toolkit default to ${pending} setting${pending === 1 ? '' : 's'} not set yet and keeps every other setting as it is.`
-      : 'Every setting already has a value, so a yes keeps them all as they are.',
+    : [...(pending ? [`Setup applies the Toolkit default to ${pending} setting${pending === 1 ? '' : 's'} not set yet and keeps every other setting as it is.`, ...unsetNotes(specs)]
+      : [nothingToAsk(specs).sentence, markdown ? NOTHING_PENDING_CHANGE : NOTHING_PENDING_CHANGE_TERMINAL]),
     ...(flagged ? [`${flagged} setting${flagged === 1 ? ' is' : 's are'} set by your setup flags, and the reply cannot change ${flagged === 1 ? 'it' : 'them'}.`] : [])].join(' ');
   const lines = [
     markdown ? `# Toolkit setup - ${title}` : `Toolkit setup - ${title}`,
@@ -693,6 +719,10 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
   return lines;
 }
 
+// How to change one row when setup asks nothing: a reply in a chat, or a flag in the owner's own terminal,
+// where nothing is prompted.
+const NOTHING_PENDING_CHANGE = 'To change one, reply with its number and choice, for example 3.5=B (on and off work too).';
+const NOTHING_PENDING_CHANGE_TERMINAL = 'To change one, run setup again with its flag (--help lists them), or say setup toolkit in a chat and reply there.';
 // The reply line under the bank: the approval question for the same count of pending settings, then the reply grammar.
 const strongDefaultReply = (pending) => `${approvalQuestion(pending)} Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.`;
 
@@ -775,6 +805,8 @@ module.exports = Object.freeze({
   approvalQuestion,
   strongDefaultRow,
   pendingDefaults,
+  unsetNotes,
+  nothingToAsk,
   renderStrongDefaultBank,
   parseStrongDefaultAnswer,
   looksLikeStrongDefaultAnswer,

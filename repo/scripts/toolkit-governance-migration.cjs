@@ -96,7 +96,8 @@ class GovernanceMaintenance {
     const rows = discoverRepositories(roots).map(root => ({ root, state: governance.governanceState(root, this.#registryOptions), slug: slugFor(root) }))
       .filter(row => row.state.programme_records_bind === true && row.slug);
     if (!rows.length) { this.#say('No fresh merged enabled repository was found. No governance or settings changes were made.'); return 0; }
-    // Every change is read first; the owner's one answer then covers all of them, and nothing is written before it.
+    // Every change is read first; the owner's one answer then covers the rulesets and protection, and none is
+    // written before it. The free dependency and security settings follow either way, as the question says.
     const plans = { noForcePush: this.#planRulesets(rows), keepState: this.#planStateRulesets(rows), protectionCandidates: this.#planProtection(rows) };
     const approved = await this.#approve(plans);
     const rulesets = approved ? [...this.#applyRulesets(plans.noForcePush), ...this.#applyStateRulesets(plans.keepState)] : [];
@@ -208,7 +209,7 @@ class GovernanceMaintenance {
     if (noForcePush.length) changes.push(`- Add the "${ruleset.RULESET_NAME}" ruleset (every branch, no bypass) to:`, ...noForcePush.map(row => `  - ${row.slug} (${row.root})`));
     if (keepState.length) changes.push(`- Add the "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to:`, ...keepState.map(row => `  - ${row.slug} (${row.root})`));
     if (protectionCandidates.length) changes.push(`- Add or update default-branch protection (the "${protection.RULESET_NAME}" ruleset) on:`, ...protectionCandidates.flatMap(({ row, result }) => [`  - ${row.slug} (${row.root})`, ...GovernanceMaintenance.#protectionNotes(result).map(note => `    - ${note}`)]), ...GovernanceMaintenance.#protectionTerms());
-    this.#say(['These governed GitHub repositories would change on GitHub. Nothing is written until you answer once:', ...changes]);
+    this.#say(['These governed GitHub repositories would change on GitHub. No ruleset or default-branch protection is written until you answer once; the free dependency and security settings are turned on either way:', ...changes]);
     if (await this.#confirm(GovernanceMaintenance.#question({ noForcePush, keepState, protectionCandidates })) === true) return true;
     this.#say('No rulesets or default-branch protection were added.');
     return false;

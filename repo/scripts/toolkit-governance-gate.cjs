@@ -883,8 +883,12 @@ const QUESTION = [
   'Reply yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.',
 ];
 
+// The text form names this repository's own store; the card stays generic, because the hook matches
+// its input exactly.
 function questionText(verdict) {
-  const lines = [...QUESTION];
+  const slug = verdict.state.repository;
+  const store = typeof slug === 'string' && /^[^/\s]+\/[^/\s]+$/.test(slug) ? `TRANSPORT-${slug.split('/')[1]}` : null;
+  const lines = store ? QUESTION.map(line => line.replace('TRANSPORT-<repository name>', store)) : [...QUESTION];
   if (verdict.state.notes && verdict.state.notes.includes('pending-binding-merge')) lines.splice(1, 0, 'Its working tree has a programme binding that is not merged on the default branch yet.');
   return lines.join('\n');
 }

@@ -173,7 +173,7 @@ test('A3: a merged disabled is not flipped by the CLI, discovery or migration', 
   const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
   const out = []; const err = [];
   // enable opens the bank, whose recommendation keeps the merged answer.
-  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: true, ask: async () => 'all recommended', stdout: { write: text => out.push(text) }, stderr: { write: text => err.push(text) }, refresh: () => ({}),
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: true, environment: {}, ask: async () => 'all recommended', stdout: { write: text => out.push(text) }, stderr: { write: text => err.push(text) }, refresh: () => ({}),
     hookReader: () => null, queueReader: () => null, permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
   assert.equal(await cli.main(['enable']), 0, err.join(''));
   assert.match(out.join(''), /Nothing changed/);
