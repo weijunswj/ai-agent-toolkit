@@ -241,9 +241,16 @@ function sweepOf(get, repository, branch, main) {
   const answer = readOnce(get, `repos/${repository}/contents/${file}?ref=${encodeURIComponent(branch)}`);
   const text = fileText(answer);
   if (text === null && answer.status !== 404) return { state: 'unread', text: `not read (${unread(answer.status)})`, unread: 'the sweep' };
-  // The copy that runs holds the same workflow file, so no checkout is needed to judge the repository's one.
-  const source = fs.readFileSync(path.join(TOOLKIT_ROOT, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n');
-  const copy = workflows.copyState(text, workflows.render(id, source, '0'.repeat(40), null));
+  // The copy that runs holds the same workflow file, so no checkout is needed to judge the repository's
+  // one; a copy that does not hold it, or cannot render it, says so.
+  let copy;
+  try {
+    const source = fs.readFileSync(path.join(TOOLKIT_ROOT, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n');
+    copy = workflows.copyState(text, workflows.render(id, source, '0'.repeat(40), null));
+  } catch (error) {
+    if (!error.code && !(error instanceof workflows.InstallError)) throw error;
+    return { state: 'unread', text: 'not compared (this copy cannot judge it)', unread: 'the sweep' };
+  }
   if (copy.state === 'missing') return { state: 'missing', text: 'none in this repository' };
   if (copy.state === 'unmanaged') return { state: 'unmanaged', text: 'not a Toolkit copy' };
   if (copy.state === 'edited') return { state: 'edited', text: 'a copy edited by hand' };
@@ -759,7 +766,7 @@ class TakeoverRun {
     error.message += sent.resumed || stale.length ? ' This run made no claim.' : ' No claim was made.';
     if (VOIDS_RECORD.has(error.code) && !error.keep && (!sent.resumed || error.code === FENCE_LOST)) {
       error.message += this.markUnused(record.id) ? ` The record (comment ${record.id}) is marked NOT USED.`
-        : ` The record (comment ${record.id}) could not be marked NOT USED. Controller: run takeover --apply again; mark it by hand only if you will not.`;
+        : ` The record (comment ${record.id}) could not be marked NOT USED${error.code === FENCE_LOST ? '; mark it by hand.' : '. Controller: run takeover --apply again; mark it by hand only if you will not.'}`;
       // Another claim left this epoch, so no older record of this name carried one either.
       if (error.code === FENCE_LOST) for (const row of stale) if (!error.carriers?.includes(row.id)) this.markUnused(row.id);
     }

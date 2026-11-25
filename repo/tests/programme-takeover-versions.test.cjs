@@ -152,6 +152,20 @@ test('what this repository\'s sweep runs, in each state it can be in', () => {
   assert.equal(github.calls.some(call => /workflows|variables/.test(call.path)), false);
 });
 
+test('a copy that cannot judge the sweep workflow says so and never stops the takeover', () => {
+  const real = fs.readFileSync;
+  for (const [label, read] of [['the workflow file is not in this copy', () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }], ['it no longer renders', () => 'name: other\n']]) {
+    const fx = world(fixture());
+    let run;
+    fs.readFileSync = (file, ...rest) => (typeof file === 'string' && file.endsWith('toolkit-programme-sweep.yml') ? read() : real(file, ...rest));
+    try { run = fx.takeover([], { deps: { toolkitGit: checkout(MAIN) } }); } finally { fs.readFileSync = real; }
+    assert.equal(run.error, null, `${label}: ${run.error?.message}`);
+    assert.deepEqual(run.result.versions.sweep, { state: 'unread', text: 'not compared (this copy cannot judge it)' }, label);
+    assert.equal(run.result.versions.refresh, 'none (not compared: the sweep)', label);
+    assert.equal(fx.fence().epoch, 2, label);
+  }
+});
+
 test('a version that could not be read is said, and never counts as current', () => {
   const fx = world(fixture());
   fx.github.intercept(call => (call.path.includes(`contents/${VERSION_REL_PATH}`) ? { status: 403, json: {} } : undefined));

@@ -469,6 +469,16 @@ test('F1 marking: a comment that cannot be read is never overwritten, and the me
   }
 });
 
+test('F1 marking: after another claim left the epoch, running again cannot mark it, so it is for the hand', () => {
+  const fx = fixture();
+  let beaten = false;
+  fx.before(CLAIMS, () => fx.aside(() => { fx.rivalClaims(); beaten = true; }));
+  fx.github.intercept(call => (beaten && call.method === 'PATCH' ? answer(403)() : undefined));
+  const run = fx.takeover();
+  assert.equal(run.error?.code, 'EPOCH_MOVED');
+  assert.match(run.error.message, / The record \(comment \d+\) could not be marked NOT USED; mark it by hand\.$/);
+});
+
 test('F1 a refusal that shows no other claim leaves the older records of the name alone', () => {
   const { fx } = stoppedAfterRecord();
   fx.before(CLAIMS, () => fx.aside(() => fx.oldWrites()));
