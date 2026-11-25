@@ -2084,6 +2084,7 @@ function setupQuestionSpecs(args, current) {
       currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'state-derived' : 'unverified',
       afterApplying: 'A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.',
       defaultState: claudeTopologyDefaultState(activeProfile, current.claudeSubagentDepth),
+      unreadableNote: activeProfile.supported === true ? '' : "Toolkit's own agent profile is still set to root-only, because no saved one can be used.",
       defaultChoice: 'root-only',
       defaultOutcome: 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.',
       defaultReason: 'Root-only is the verified default: outside Toolkit repos the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2.1.217 or later to one layer, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the Toolkit worker launcher pinned in the stack registry.',

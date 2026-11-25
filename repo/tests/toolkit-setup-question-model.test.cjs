@@ -906,7 +906,7 @@ test('Claude Code setting rows tell a value in your settings equal to Toolkit\'s
   assert.deepEqual(blocked.choices.map((choice) => choice.value), ['keep', 'enable', 'disable']);
   for (const choice of blocked.choices.filter((choice) => choice.value !== 'keep')) assert.equal(choice.consequence, 'Nothing changes: setup cannot change this setting because a parent entry is not an object in settings.json.');
   assert.equal(blocked.recommended, 'keep');
-  assert.equal(blocked.recommendation_reason, 'This is your own value, so setup keeps it.');
+  assert.equal(blocked.recommendation_reason, 'Setup could not read this setting, so it writes nothing.');
 
   // An unreadable file shows on every row and nothing is verified.
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, label: entry.label, state: 'unreadable', detail: 'The Claude Code user settings file is not valid JSON.' }));

@@ -35,12 +35,12 @@ function claudeHome(t, version = '2.1.330') {
 
 // The computer as setup reads it: Toolkit installed and current, reports and retention at their defaults,
 // and the Claude Code settings and subagent limit read from the temporary folder.
-function currentState() {
+function currentState({ profile = { supported: true, topology: 'root-only' } } = {}) {
   const base = core.documentationFixtureState();
   return {
     ...base,
     antigravity: { installed: false, copies: false },
-    agentProfile: { supported: true, topology: 'root-only' },
+    agentProfile: profile,
     claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(),
     claudeSettings: new ClaudeUserSettings().inspect(),
     claudePluginInstall: { installed: true, enabled: true, recordCurrent: true, version: '1.0.0', runningRoot: base.managed.currentPath },
@@ -49,14 +49,14 @@ function currentState() {
 }
 
 // One setup or refresh run in a terminal, answered with `replies` in order; a further prompt stops the run.
-async function answer(replies, { refresh = false } = {}) {
+async function answer(replies, { refresh = false, profile } = {}) {
   const args = core.parseArgs(['--execute', '--profile', 'auto-main', '--host', 'claude-code', ...(refresh ? ['--refresh'] : [])]);
   const prompts = [];
   let written = '';
   const log = console.log;
   console.log = () => {};
   try {
-    const result = await core.answerSetupQuestionBank(args, currentState(), {
+    const result = await core.answerSetupQuestionBank(args, currentState({ profile }), {
       isTTY: true,
       write(text) { written += text; return true; },
       createReadlineInterface: () => ({
@@ -228,6 +228,7 @@ test('a setting setup could not read is named and never counted as having a valu
   assert.equal(refresh.prompts.length, 0);
   assert.equal(refresh.result.refresh, 'kept-current');
   // Refresh shows no table, so it gives each row its title.
+  assert.match(refresh.written, /^No setting needs your approval, so refresh kept your current answers, with no question\.$/m, 'never counted as kept on all settings');
   assert.match(refresh.written, /^Setup could not read 5 settings \(2\.1 How should Claude Code use agents, 3\.2 Claude Code setting: Hide AI credit in commits\/PRs, [^?]+\), so it writes nothing there\.$/m);
   applyAnswers(refresh.args);
   assert.equal(fs.readFileSync(path.join(home.root, '.claude', 'settings.json'), 'utf8'), bytes, 'nothing is written');
@@ -238,6 +239,37 @@ test('a setting setup could not read is named and never counted as having a valu
   assert.match(piped.stdout, /^No setting needs your approval, so setup asked nothing and keeps them all as they are\. Setup could not read 5 settings /m);
   assert.doesNotMatch(piped.stdout + piped.written, /already has a value/i);
   assert.match(piped.written, /^# Toolkit setup - no questions: nothing to approve, and \d settings could not be read$/m);
+});
+
+test('a row whose parent entry is not an object is named as not read, never counted as having a value, and is not asked about', async (t) => {
+  const home = claudeHome(t);
+  applyAnswers((await answer(['yes'])).args);
+  const file = path.join(home.root, '.claude', 'settings.json');
+  for (const [pluginConfigs, refs] of [['x', '3.5'], [[], '3.5'], [{ [NEW_ID]: { options: null } }, '3.5']]) {
+    const bytes = JSON.stringify({ ...home.read(), pluginConfigs });
+    fs.writeFileSync(file, bytes);
+    const run = await answer([]);
+    assert.equal(run.prompts.length, 0);
+    assert.match(run.written, /3\.5 .*\n {2}Current: Cannot change: a parent entry is not an object\n/);
+    assert.match(run.written, /Toolkit setup - no questions: nothing to approve, and 1 setting could not be read\n/);
+    assert.ok(run.written.includes(`Setup could not read 1 setting (${refs}), so it writes nothing there.`), run.written);
+    assert.doesNotMatch(run.written, /already has a value/);
+    applyAnswers(run.args);
+    assert.equal(fs.readFileSync(file, 'utf8'), bytes, 'nothing is written');
+  }
+});
+
+test('an unreadable settings file with no usable agent profile says setup still sets the profile, in setup and in refresh', async (t) => {
+  const home = claudeHome(t);
+  applyAnswers((await answer(['yes'])).args);
+  unreadable(home);
+  const still = /so it writes nothing there\. Toolkit's own agent profile is still set to root-only, because no saved one can be used\./;
+  for (const refresh of [false, true]) {
+    assert.match((await answer([], { refresh, profile: { supported: false, topology: 'root-only' } })).written, still);
+    const kept = await answer([], { refresh });
+    assert.match(kept.written, /so it writes nothing there\./);
+    assert.doesNotMatch(kept.written, /agent profile is still set/, 'a usable profile is kept as it is');
+  }
 });
 
 test('with a default left to apply, the one question still names the settings it could not read', async (t) => {

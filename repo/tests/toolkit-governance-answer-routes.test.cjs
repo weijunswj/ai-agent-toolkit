@@ -98,6 +98,18 @@ test('own terminal: the owner\'s disable still needs no second Enter, and a vari
   }
 });
 
+test('own terminal: disable where governance is already off says only that, and never that it turns governance off', async t => {
+  const ctx = fixture(t, { governed: false });
+  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath, text: JSON.stringify(OFF) });
+  const result = await run(ctx, ['disable'], { interactive: true });
+  assert.equal(result.code, 0, result.err);
+  assert.match(result.out, /^Already disabled on the default branch\. Nothing was written\.$/m);
+  assert.equal(result.err, '');
+  assert.deepEqual([result.calls, recorded(ctx)], [[], []]);
+  // Where it is on, the two facts still come first.
+  assert.match((await run(fixture(t), ['disable'], { interactive: true })).err, /Turns off: +repository governance, on every computer/);
+});
+
 test('own terminal: without a terminal nothing is recorded, marker or not', async t => {
   for (const environment of [{}, { CLAUDECODE: '1' }]) for (const command of ['disable', 'enable']) {
     const ctx = fixture(t);

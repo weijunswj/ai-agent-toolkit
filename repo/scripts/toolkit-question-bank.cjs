@@ -633,18 +633,20 @@ function approvalQuestion(pending) {
 
 // definition: a resolvedQuestion definition plus defaultState, defaultChoice (the value a yes applies while the
 // row is UNSET; 'keep' for a row whose default is to leave it), defaultOutcome and defaultReason, and optionally
-// keptValue (what keeping means for this row, such as install for a plugin kept current) and aliases (extra
-// words for choices, such as { on: 'enable', off: 'disable' }).
+// keptValue (what keeping means for this row, such as install for a plugin kept current), aliases (extra
+// words for choices, such as { on: 'enable', off: 'disable' }) and unreadableNote (what setup still does beside a
+// setting it could not read).
 function strongDefaultRow(definition) {
-  const { defaultState, defaultChoice, defaultOutcome, defaultReason, keptValue = 'keep', aliases = {} } = definition;
+  const { defaultState, defaultChoice, defaultOutcome, defaultReason, keptValue = 'keep', aliases = {}, unreadableNote = '' } = definition;
+  const stillDone = defaultState === STRONG_DEFAULT_STATES.UNREADABLE ? unreadableNote : '';
   if (!Object.values(STRONG_DEFAULT_STATES).includes(defaultState)) throw new Error(`Setup row ${definition.id} has no strong-default state.`);
   const applies = defaultState === STRONG_DEFAULT_STATES.UNSET && defaultChoice !== 'keep';
   const recommendation = applies
     ? { value: defaultChoice, outcome: defaultOutcome, reason: defaultReason }
-    : { value: keptValue, outcome: 'Keep it as it is.', reason: KEPT_REASONS[defaultState] };
+    : { value: keptValue, outcome: 'Keep it as it is.', reason: [KEPT_REASONS[defaultState], stillDone].filter(Boolean).join(' ') };
   return {
     ...resolvedQuestion({ ...definition, recommendation }),
-    strong_default: true, default_state: defaultState, default_choice: defaultChoice, applies_default: applies, aliases: { ...aliases },
+    strong_default: true, default_state: defaultState, default_choice: defaultChoice, applies_default: applies, aliases: { ...aliases }, still_done: stillDone,
   };
 }
 
@@ -659,7 +661,7 @@ function unsetNotes(specs, name = (spec) => spec.presentation.question_ref) {
   const unreadable = inState(specs, STRONG_DEFAULT_STATES.UNREADABLE);
   const unsupported = inState(specs, STRONG_DEFAULT_STATES.UNSUPPORTED);
   return [
-    ...(unreadable.length ? [`Setup could not read ${settingCount(unreadable)} (${refs(unreadable)}), so it writes nothing there.`] : []),
+    ...(unreadable.length ? [[`Setup could not read ${settingCount(unreadable)} (${refs(unreadable)}), so it writes nothing there.`, ...unreadable.map((spec) => spec.still_done).filter(Boolean)].join(' ')] : []),
     ...(unsupported.length ? [`This Claude Code version does not have ${settingCount(unsupported)} (${refs(unsupported)}), so setup writes nothing there.`] : []),
   ];
 }
