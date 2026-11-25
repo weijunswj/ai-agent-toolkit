@@ -604,10 +604,11 @@ test('A CI push: new branch, squash commit message, merge commits, branch delete
   assert.equal(result.status, 1, 'new branch without a pull request');
 
   repo.git(['checkout', '-q', 'main']);
-  const squash = repo.commit(`Parser fix (#12)\n\nCo-authored-by: Jane <${value}>`, { 'b.txt': 'clean\n' });
+  const squash = repo.commit(`Parser fix (#12)\n\nCo-authored-by: Jane <${value}>\n\nAsk Jane at ${value}`, { 'b.txt': 'clean\n' });
   result = ciRun(repo, 'push', event({ ref: 'refs/heads/main', before: base, after: squash }));
   assert.equal(result.status, 1, 'default-branch squash commit message');
-  assert.match(result.all, /message:3:\d+ {2}email/);
+  assert.match(result.all, /message:5:\d+ {2}email/);
+  assert.doesNotMatch(result.all, /message:3:/, 'the co-author line git and GitHub write is left alone');
   assertNoEcho(assert, result.all, value, 'squash message');
 
   // A merge brings in a clean branch: passes. Lines that came from the other parent are not
