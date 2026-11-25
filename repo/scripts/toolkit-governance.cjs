@@ -103,7 +103,7 @@ function turnOnSummary(result, binding, storeNote = null) {
     'Merging it turns governance on for this repository on every computer. It changes no credentials or deployment. Anything listed above as made on GitHub was made now; everything else applies only after you merge it.',
     ...(binding?.store?.repository ? [`Store: ${binding.store.repository}, a private GitHub repository${storeNote ? ` (${storeNote})` : ''}, for programme records and evidence.`] : []),
     ...(result.files?.length ? [`It holds: ${result.files.join(', ')}.`] : []),
-    ...(result.added?.includes('personal-data-guard') ? ['Personal data guard: checks each pull request and push on GitHub, with no hooks on any computer. It never scans commit author or committer addresses.'] : []),
+    ...(result.added?.includes('personal-data-guard') ? ['Personal data guard: checks each pull request and push on GitHub (on a private repository that uses Actions minutes), with no hooks on any computer. It never scans commit author or committer addresses.'] : []),
     ...(result.notes || []),
     `After the merge, the next session here finishes on its own: ${finishing.WHAT}. On a private repository on GitHub Free, GitHub cannot enforce the protection or the rulesets; that session says so and the local guards stay the fallback.`,
     ...(noChecks ? [`This repository has no required checks yet, so default-branch protection waits: once a pull request adds the check names to required_checks in ${governance.BINDING_FILE} and merges, run ${CMD('migrate')} in your own terminal to add it.`] : []),

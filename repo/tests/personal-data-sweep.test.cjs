@@ -112,6 +112,8 @@ test('commit author, committer and tagger addresses are never listed, whatever t
     repo.commit('start', { 'README.md': 'App\n' });
     Object.assign(repo.env, { GIT_AUTHOR_EMAIL: person, GIT_COMMITTER_EMAIL: person, GIT_AUTHOR_NAME: 'Jane' });
     repo.commit('clean message');
+    repo.git(['commit', '-q', '--no-verify', '--allow-empty', '--signoff', '-m', 'signed off']);
+    repo.commit(`paired\n\nCo-authored-by: Jane <${person}>`);
     repo.git(['tag', '-a', 'v1', '-m', 'clean tag']);
     const result = sweep(repo, fakeGh());
     assert.equal(result.status, 0, result.all);

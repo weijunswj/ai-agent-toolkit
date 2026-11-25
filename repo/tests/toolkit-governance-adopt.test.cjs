@@ -172,7 +172,7 @@ test('the one turn-on pull request carries every default cloud workflow, says wh
   assert.equal(result.code, 0, result.err + result.out);
   assert.equal(result.published.length, 1, 'one pull request');
   for (const file of [...SWEEPS.map(row => row.file), ...COPIED_FILES]) assert.equal(typeof result.published[0].files[file], 'string', file);
-  assert.match(result.out, /^Personal data guard: checks each pull request and push on GitHub, with no hooks on any computer\. It never scans commit author or committer addresses\.$/m);
+  assert.match(result.out, /^Personal data guard: checks each pull request and push on GitHub \(on a private repository that uses Actions minutes\), with no hooks on any computer\. It never scans commit author or committer addresses\.$/m);
   assert.match(result.out, /After the merge, the next session here finishes on its own: [^\n]*one report-only sweep of what is already there/);
   for (const name of ['personal-data-guard.yml', 'dependency-auto-merge.yml']) assert.equal(fs.existsSync(path.join(ctx.repo, '.github', 'workflows', name)), false, 'the working tree is not written');
   assert.equal(noted(ctx), true);

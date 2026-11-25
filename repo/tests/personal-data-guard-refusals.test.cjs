@@ -59,7 +59,7 @@ test('a pull request refused only for a file the guard cannot read says what to 
     repo.commit('List it', { [CONFIG]: `${JSON.stringify(config, null, 2)}\n` });
     const passed = pullRequest(repo, base);
     assert.equal(passed.status, 0, passed.all);
-    assert.match(passed.all, new RegExp(`the change adds ${file.replace(/[.]/g, '\\.')} to not_scanned: our own artwork`));
+    assert.ok(passed.all.includes(`the change adds ${file} to not_scanned: our own artwork`), passed.all);
   }
 });
 
@@ -180,7 +180,7 @@ test('only the one address of an author line is left alone; anything else on or 
   const refused = [
     `Fix for ${person}`, `Reported-by: Jane <${person}>`, `Cc: Jane <${person}>`, `From: Jane <${person}>`, `Author: Jane <${person}>`, `Suggested-by: Jane <${person}>`,
     `See Signed-off-by: Jane <${person}>`, `* Signed-off-by: Jane <${person}>`, `> Signed-off-by: Jane <${person}>`,
-    `Signed-off-by: Jane <${person}> for ${other}`, `Signed-off-by: ${other} <${person}>`, `Signed-off-by: Jane <${person}> <${other}>`, `Signed-off-by: Jane <${person},${other}>`, `Signed-off-by: ${person} ${other}`,
+    `Signed-off-by: Jane <${person}> for ${other}`, `Signed-off-by: ${other} <${person}>`, `Signed-off-by: Jane <${person}> <${other}>`, `Signed-off-by: <see the note> Jane <${person}>`, `Signed-off-by: Jane <${person},${other}>`, `Signed-off-by: ${person} ${other}`,
     `Signed-off-by: Jane ${pii.sgPlus()} <${person}>`, `Signed-off-by: Jane ${pii.waMe()} <${person}>`, `Signed-off-by: Jane <${person}> ${pii.sgPlus('')}`, `Signed-off-by: ${pii.sgPlus()}`,
     `Signed-off-by: Jane\n <${person}>`, `Signed-off-by:\n${person}`, `Signed-off by: Jane <${person}>`, `Signed-off-by Jane <${person}>`,
     `${pii.email('jane', 'users.noreply.github.com.corner.sg')}`, `${pii.email('jane', 'noreply.github.com')}`, `${pii.email('jane', 'github.com')}`, `support${pii.at}github.com`,
