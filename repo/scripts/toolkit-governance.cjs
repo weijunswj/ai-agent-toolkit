@@ -968,7 +968,8 @@ class ToolkitGovernanceCli {
 
   // Why an answer typed here would not be the owner's: a coding agent started this shell (the marker is
   // named), or null. Every terminal route that takes the owner's answer asks it first (#decide, #bank);
-  // the Enter prompts (migrate) ask the same in owner-terminal.cjs.
+  // migrate's Enter reads only owner-terminal.cjs's own list, which has no mark of a Terminal panel tab
+  // (agent-shell-markers.cjs says why an agent still cannot answer it there).
   #agentShell() {
     return ownerTerminal.refusal({ environment: this.#environment, tty: { stdin: true, stdout: true }, markers: AGENT_SHELL_MARKERS });
   }

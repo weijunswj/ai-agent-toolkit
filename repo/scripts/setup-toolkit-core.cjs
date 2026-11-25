@@ -2342,8 +2342,8 @@ const isStrongDefaultBank = (specs) => specs.some((spec) => spec.strong_default)
 function renderStrongDefaultSetupBank(specs, markdown) {
   // With every setting answered by a flag, or none left to set, there is no question, so the reply line
   // is left out (the bank's own summary says how to change one row).
-  const pending = pendingDefaults(specs).length;
-  const reply = answerable(specs).every((spec) => spec.selected) || !pending ? [] : [strongDefaultReply(pending), ''];
+  const pending = pendingDefaults(specs);
+  const reply = answerable(specs).every((spec) => spec.selected) || !pending.length ? [] : [strongDefaultReply(pending), ''];
   return [QUESTION_BANK_BEGIN, ...renderStrongDefaultBank(specs, { markdown }), '', EXPLAIN_HINT, '', ...reply, QUESTION_BANK_COMPLETE, ''].join('\n');
 }
 
@@ -2448,12 +2448,12 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
     '',
     '# Claude Code setup questions',
     '',
-    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet, in the Claude desktop app with its archive setting read as off (outside the app that row shows Not readable here and changes nothing). Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.',
+    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet, in the Claude desktop app with its archive setting read as off (outside the app that row shows Not readable here and changes nothing). Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose in setup is remembered, so setup never turns it back on by default; an off you set only in the app itself looks the same as one never chosen, so the question says so for that row. `refresh toolkit` asks only when a row has no value yet.',
     '',
     // The bank as a run with no setup flags shows it; the planned specs below carry the plan's selections.
     ...renderStrongDefaultBank(claudeSpecs.map((spec) => ({ ...spec, selected: '' })), { markdown: true }).map((line) => line.replace(/^(#+) /, '$1# ')),
     '',
-    strongDefaultReply(pendingDefaults(claudeSpecs.map((spec) => ({ ...spec, selected: '' }))).length),
+    strongDefaultReply(pendingDefaults(claudeSpecs.map((spec) => ({ ...spec, selected: '' })))),
     '',
     '## Claude Code rows in full',
     '',
@@ -2891,8 +2891,8 @@ function printConfirmedChoices(args, current, confirmedSpecs, heading) {
   }
 }
 
-// The terminal prompt: the same approval question as the bank, for the same count of pending settings.
-const strongDefaultPrompt = (specs) => `${approvalQuestion(pendingDefaults(specs).length)} Enter yes, no, or changes such as 3.5=off: `;
+// The terminal prompt: the same approval question as the bank, for the same pending settings.
+const strongDefaultPrompt = (specs) => `${approvalQuestion(pendingDefaults(specs))} Enter yes, no, or changes such as 3.5=off: `;
 
 async function promptForStrongDefaultAnswer(specs, rl, fixed) {
   for (;;) {

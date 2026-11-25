@@ -282,6 +282,16 @@ test('an unreadable settings file with no usable agent profile says setup still 
   }
 });
 
+test('a subagent limit setup could read says nothing about one it could not read, even with no usable agent profile', (t) => {
+  const home = claudeHome(t);
+  fs.mkdirSync(path.join(home.root, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(home.root, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '3' } }));
+  const args = core.parseArgs(['--execute', '--profile', 'auto-main', '--host', 'claude-code']);
+  const row = core.setupQuestionSpecs(args, currentState({ profile: { supported: false, topology: 'root-only' } })).find((spec) => spec.presentation.question_ref === '2.1');
+  assert.equal(row.default_state, 'owner-value');
+  assert.equal(row.recommendation_reason, 'This is your own value, so setup keeps it.');
+});
+
 test('with a default left to apply, the one question still names the settings it could not read', async (t) => {
   const home = claudeHome(t);
   fs.mkdirSync(path.join(home.root, '.claude'), { recursive: true });
@@ -346,10 +356,10 @@ test('with the app reading off and no off of the owner, the archive row offers O
   const before = home.read();
   const run = await answer(['yes'], { app: 'off' });
   assert.match(run.written, /1 question: Apply Toolkit's default to the 1 Claude Code setting that has no value yet\?/);
-  assert.match(appRow(run), /\n {2}Current: Off \(not chosen in setup yet\)\n {2}Setup applies: B\. Turn on: [^\n]*the app's own approval card[^\n]* \(Toolkit default\)\n/);
+  assert.match(appRow(run), /\n {2}Current: Off \(not chosen in setup yet\)\n {2}Setup applies: B\. Turn on: [^\n]*the app's own approval card[^\n]*auto or bypass permissions mode[^\n]* \(Toolkit default\)\n/);
   const applied = applyApp(run.args);
   assert.deepEqual([applied.status, applied.change], ['change-returned', CHANGE(true)]);
-  assert.match(core.claudeAppSettingOutcome(applied), /^Change for the agent to make now: auto_archive_on_pr_close=true \(Archive sessions when their PR closes\)\. .*only this one change.*the app's own approval card.*Setup changed nothing in the app itself\.$/);
+  assert.match(core.claudeAppSettingOutcome(applied), /^Change for the agent to make now: auto_archive_on_pr_close=true \(Archive sessions when their PR closes\)\. .*only this one change.*the app's own approval card.*auto or bypass permissions mode.*ask the user about this one change first.*Setup changed nothing in the app itself\.$/);
   applyAnswers(run.args);
   assert.deepEqual(home.read(), before, 'the Claude Code settings file is untouched');
   assert.deepEqual(offRows(home), []);
@@ -358,6 +368,47 @@ test('with the app reading off and no off of the owner, the archive row offers O
   assert.match(String(refresh.error?.message), /requires an answer/);
   assert.equal((await answer(['no'], { app: 'off' })).result.declined, true);
   assert.deepEqual(applyApp((await answer(['3.2=off'], { app: 'off' })).args).change, null);
+});
+
+// The app's settings tool says that in auto mode the app may decide from the conversation and that in bypass
+// permissions mode it does not ask, so a text that promises the card names those modes.
+test('no text about the archive row promises the app\'s card without saying when the app may not show it', (t) => {
+  claudeHome(t);
+  const texts = [];
+  for (const [reading, off] of [['off', false], ['on', false], ['off', true], ['on', true]]) {
+    ownerOff.set(ClaudeAppSetting.OFF_ROW, off);
+    const row = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'claude-code']), currentState({ reading })).find((spec) => spec.id === 'claude-app-setting-auto-archive-on-pr-close');
+    texts.push(row.whatThisControls, row.recommended_outcome, row.afterApplying, ...row.choices.map((choice) => choice.consequence));
+  }
+  for (const value of [true, false]) texts.push(core.claudeAppSettingOutcome({ status: 'change-returned', change: CHANGE(value), state: 'unset' }));
+  for (const [file, part] of [['skills/toolkit-setup/SKILL.md', '--claude-app-setting auto_archive_on_pr_close'], ['repo/docs/HOW-TO-USE.md', 'archive sessions when their PR closes'],
+    ['repo/docs/SETUP-QUESTIONS.generated.md', 'approval card']]) {
+    const lines = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8').split(/\r?\n/).filter((line) => line.includes(part));
+    assert.ok(lines.length, file);
+    texts.push(...lines);
+  }
+  const promised = texts.filter((text) => /\bcard\b/.test(text));
+  assert.ok(promised.length >= 15, 'the texts are found');
+  assert.deepEqual(promised.filter((text) => !/auto or bypass permissions mode/.test(text)), []);
+});
+
+test('while the archive row is pending, the one question says its off may be the owner\'s own and how to keep it, and never otherwise', async (t) => {
+  claudeHome(t);
+  const plain = /Your own values and offs stay\./;
+  const noted = /Your own values and offs stay, except (\d\.\d): it reads off in the app, setup cannot tell whether you turned it off there, and \1=off keeps it off\./;
+  const run = await answer(['no'], { app: 'off' });
+  for (const text of [...['1 question:', 'Reply yes to apply'].map((part) => run.written.split('\n').find((line) => line.includes(part))), ...run.prompts]) {
+    assert.match(text, noted);
+    assert.equal(noted.exec(text)[1], APP_ROW.slice(0, 3), 'it names the row\'s own number');
+    assert.doesNotMatch(text, plain);
+  }
+  // Not pending (on, not read, off on record, or answered by a flag): the shared wording, and no word about the app.
+  for (const [options, off] of [[{ app: 'on' }, false], [{ app: '' }, false], [{ app: 'off' }, true], [{ app: 'off', flags: ['--claude-setting', 'auto-archive-on-pr-close=enable'] }, false]]) {
+    ownerOff.set(ClaudeAppSetting.OFF_ROW, off);
+    const other = await answer(['no'], options);
+    assert.match(other.written, plain);
+    for (const text of [other.written, ...other.prompts]) assert.doesNotMatch(text, /stay, except/);
+  }
 });
 
 test('with the owner\'s off on record the archive row stays off and is not asked about, and a listed on returns the change', async (t) => {
@@ -443,6 +494,10 @@ test('the setup skill tells an agent in the desktop app to read the archive sett
   const sentence = skill.split('\n').find((line) => line.includes('--claude-app-setting auto_archive_on_pr_close=on|off'));
   assert.ok(sentence, 'the skill names the argument');
   for (const phrase of ['Claude desktop app', 'settings tool', 'own approval card', 'never set it yourself']) assert.ok(sentence.includes(phrase), phrase);
+  // Where the app may not show its card the agent asks first, and setup's own yes is not that yes.
+  assert.match(sentence, /auto or bypass permissions mode, or where you cannot tell the mode[^.]*ask the user about that one change first[^.]*only on their own plain yes[^.]*not the yes to setup's question/);
+  // A locked setting would be asked about on every run, and no yes could be made.
+  assert.match(sentence, /pass no value where the tool lists it as locked/);
 });
 
 test('the setup skill keeps the bank relay rule as its own short rule', () => {

@@ -74,7 +74,7 @@ The Mac and Linux open commands (`open` and `xdg-open`) are written, but `toolki
 
 `show` takes exactly one name; there is no way to show every value. Before it reads the store, it stops when:
 
-- it runs in a shell an agent started, a Terminal panel tab Claude opened in the desktop app included, because those carry the agent's environment (Claude Code, Codex or a tool that sets `AI_AGENT`) or the app's own mark of such a tab. The message gives you the line to run in your own PowerShell window;
+- it runs in a shell an agent started, a Terminal panel tab Claude opened in the desktop app included, because those carry the agent's environment (Claude Code, Codex or a tool that sets `AI_AGENT`) or the app's own mark of such a tab. The message gives you the line to run in your own PowerShell window. A Terminal panel tab you opened yourself is not refused, but an agent can read what a panel tab shows, so use your own PowerShell window;
 - it is not reading from and printing to a terminal (a pipe, or output sent to a file);
 - you do not press Enter at its prompt (Ctrl+C, or the input ends). It then prints "Not shown." and reads nothing.
 

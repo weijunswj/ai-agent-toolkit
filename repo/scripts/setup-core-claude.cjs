@@ -25,8 +25,10 @@ const claudeSettingKey = (id) => `claudeSetting${id.replace(/(^|-)([a-z])/g, (ma
 // The one Claude desktop app setting setup has a row for. It is a setting of the owner's account in the app, so a
 // script can neither read nor write it: an agent in the app reads it with the app's settings tool and passes what
 // it read (--claude-app-setting auto_archive_on_pr_close=on|off), and a change is returned to that agent, which
-// makes it through the app's own approval card. On and Off are the only values the tool takes (its own listing:
-// "true | false"). Outside the app the row is not readable and nothing changes.
+// makes it with the same tool. The app asks on its own approval card, but that tool says that in auto mode the app may
+// decide from the conversation and that in bypass permissions mode it does not ask, so there the agent asks the owner
+// about the one change first; every text that names the card says so. On and Off are the only values the tool takes
+// (its own listing: "true | false"). Outside the app the row is not readable and nothing changes.
 const CLAUDE_APP_SETTING = Object.freeze({ id: 'auto-archive-on-pr-close', appKey: 'auto_archive_on_pr_close', label: 'Archive sessions when their PR closes' });
 const CLAUDE_APP_READINGS = Object.freeze(['on', 'off']);
 
@@ -245,8 +247,9 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     [STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT]: ['On', `On, ${APP_READ}.`],
     [STRONG_DEFAULT_STATES.OWNER_VALUE]: ['On (your own value in the app)', `On, ${APP_READ}, although you turned it off in setup before; setup keeps the app's value.`],
     [STRONG_DEFAULT_STATES.OWNER_OFF]: ['Off (you turned it off)', `Off, ${APP_READ}; you turned it off in setup, so setup keeps it off.`],
-    [STRONG_DEFAULT_STATES.UNSET]: ['Off (not chosen in setup yet)', `Off, ${APP_READ}; you have not chosen it in setup yet.`],
+    [STRONG_DEFAULT_STATES.UNSET]: ['Off (not chosen in setup yet)', `Off, ${APP_READ}; you have not chosen it in setup yet, and setup cannot tell whether you turned it off in the app.`],
   });
+  const APP_CARD = "You approve it in the app's own approval card; in auto or bypass permissions mode the app may not show that card, so there your agent asks you about this one change first.";
   const appSettingState = (current) => current.claudeAppSetting?.state || STRONG_DEFAULT_STATES.UNREADABLE;
 
   // What an answer does to the app setting, for its choice.
@@ -254,7 +257,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     if (state === STRONG_DEFAULT_STATES.UNREADABLE) return 'Nothing changes: setup cannot read this setting here.';
     const isOn = state === STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT || state === STRONG_DEFAULT_STATES.OWNER_VALUE;
     const app = isOn === on ? `The app already has it ${on ? 'on' : 'off'}.`
-      : `Your agent asks the app to turn it ${on ? 'on' : 'off'}, and you approve that in the app's own approval card; setup changes nothing in the app itself.`;
+      : `Your agent asks the app to turn it ${on ? 'on' : 'off'}; setup changes nothing in the app itself. ${APP_CARD}`;
     if (!on) return `${app} Setup remembers that you turned it off.`;
     return state === STRONG_DEFAULT_STATES.OWNER_VALUE ? `${app} Setup forgets that you turned it off before.` : app;
   }
@@ -270,7 +273,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       section: 'Toolkit in your coding apps',
       title: `Claude desktop app setting: ${CLAUDE_APP_SETTING.label}?`,
       prompt: `Claude desktop app setting choice: ${CLAUDE_APP_SETTING.label}`,
-      whatThisControls: "Whether the Claude desktop app archives a session once its pull request merges or closes. It is a setting of your account in the app, on every device. Setup cannot read or change it: an agent in the app reads it with the app's settings tool, and a change is made only there, through the app's own approval card. An archived session can be brought back.",
+      whatThisControls: `Whether the Claude desktop app archives a session once its pull request merges or closes. It is a setting of your account in the app, on every device. Setup cannot read or change it: an agent in the app reads it with the app's settings tool, and a change is made only there. ${APP_CARD} An archived session can be brought back.`,
       choices: [
         wizardChoice('enable', 'Turn on', claudeAppSettingChoiceOutcome(state, true)),
         wizardChoice('disable', 'Turn off', claudeAppSettingChoiceOutcome(state, false)),
@@ -282,11 +285,12 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       defaultOutcome: claudeAppSettingChoiceOutcome(state, true),
       defaultReason: 'It keeps finished sessions out of the sidebar.',
       aliases: { on: 'enable', off: 'disable' },
+      offNote: 'it reads off in the app, setup cannot tell whether you turned it off there',
       selected: args.setupChoices[key],
       current: full,
       currentShort: short,
       currentVerification: state === STRONG_DEFAULT_STATES.UNREADABLE ? 'unverified' : 'agent-read',
-      afterApplying: "Nothing changes in the app until you approve the app's own card.",
+      afterApplying: `Setup itself changes nothing in the app: a change is made there by your agent. ${APP_CARD}`,
     });
   }
 
@@ -296,7 +300,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
 
   // The closing summary's one line: the change to make, why an answer was not taken, or the state.
   function claudeAppSettingOutcome(result) {
-    if (result.change) return `Change for the agent to make now: ${result.change.key}=${result.change.value} (${CLAUDE_APP_SETTING.label}). Make only this one change, with the app's settings tool, which asks the user in the app's own approval card. Setup changed nothing in the app itself.`;
+    if (result.change) return `Change for the agent to make now: ${result.change.key}=${result.change.value} (${CLAUDE_APP_SETTING.label}). Make only this one change, with the app's settings tool. The app asks the user in the app's own approval card; in auto or bypass permissions mode, or where you cannot tell the mode, it may not, so ask the user about this one change first and make it only on their own plain yes. Setup changed nothing in the app itself.`;
     if (result.status === 'held') return `Not changed: ${result.detail}.`;
     return `${CLAUDE_APP_SETTING.label}: ${APP_CURRENT[result.state][0].replace(/^[A-Z]/, (letter) => letter.toLowerCase())}. No change to make.`;
   }
