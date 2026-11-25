@@ -42,4 +42,4 @@ function managedScript(name, options) { return managedToolkitFile(`repo/scripts/
 const PROGRAMME_SCRIPT = 'skills/github-program-reconciler/scripts/programme.cjs';
 function programmeCommand(args, options) { return `node "${managedToolkitFile(PROGRAMME_SCRIPT, options)}" ${args}`; }
 
-module.exports = Object.freeze({ userStateDirectory, managedScript, PROGRAMME_SCRIPT, programmeCommand });
+module.exports = Object.freeze({ userStateDirectory, managedToolkitFile, managedScript, PROGRAMME_SCRIPT, programmeCommand });

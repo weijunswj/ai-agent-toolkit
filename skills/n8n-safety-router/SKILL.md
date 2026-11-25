@@ -4,7 +4,7 @@ description: Use when working on any n8n task, including [official n8n Skills](h
 ---
 
 <!--
-Canonical Toolkit skill surface. Edit this skill folder directly.
+Canonical skill surface. Edit this skill folder directly.
 Source: skills/n8n-safety-router/SKILL.md
 -->
 
