@@ -332,7 +332,7 @@ class OwnerLineLint {
       }
       if (says) { this.#checkSetting(line, says, stated, add); continue; }
       if (format) {
-        add('overrides-block', 'It sets a post format of its own, against the house format in Toolkit\'s block. Remove it to use the block\'s, or keep it as the owner\'s own choice.', { action: 'delete' });
+        add('overrides-block', 'It sets a post format of its own, against the house format in Toolkit\'s block. Remove it to use the block\'s, or keep it as the owner\'s own choice: end it with "(kept by the owner)".', { action: 'delete' });
         continue;
       }
       const same = sameText(body);
