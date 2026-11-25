@@ -908,6 +908,81 @@ test('attention lists every task waiting on the owner, read from the children at
   assert.match(fx.run(['attention'], {}, { json: false }).result, /^Owner waits: unknown \(STATE_INVALID\)$/m, 'never an empty list from a failed read');
 });
 
+// ---- Open pull requests -------------------------------------------------------------------------
+
+test('attention lists every open pull request with its owner, next step and failing jobs, read live, and never a short list', () => {
+  const catalogue = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
+  const fx = fixture({ catalogue });
+  fx.store.write('child', 423, { ...state.newChild({ repository: 'acme/app', outcome: catalogue[0] }), lifecycle: 'ACTIVE', next_action: `Builder: ${'finish the slice '.repeat(12)}` }, { sha: null, previous: null });
+  const before = hours => new Date(fx.github.clock - hours * 3600 * 1000).toISOString();
+  const job = (name, conclusion) => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion, completedAt: before(1), checkSuite: { app: { databaseId: 15368 } }, isRequired: false });
+  fx.github.addPr(900, { head: SHA_A, title: 'The owned slice', body: 'Refs #423', createdAt: before(30), contexts: [job('validate', 'FAILURE')] });
+  fx.github.addPr(901, { head: SHA_A, title: 'A title that runs past\u0007 the sixty characters the list keeps of it', createdAt: before(7 * 24 + 1), author: 'app/github-actions', isDraft: true });
+  fx.github.addPr(902, { head: SHA_B, title: 'Refresh the shards', createdAt: before(2), contexts: [job('gate', 'FAILURE'), job('validate', 'FAILURE'), job('lint', 'SUCCESS')] });
+  fx.github.addPr(903, { head: SHA_B, title: 'A new one', createdAt: before(0.5) });
+  const flaggedAfter = new Date(Date.parse(before(0.5)) + 24 * 3600 * 1000).toISOString();
+  fx.github.storePulls.push({ number: 12, title: 'Store clean-up', draft: false, created_at: before(26) });
+  fx.run(['refresh']);
+  const entry = (code, issue, kind) => fx.parentDoc().attention.find(item => item.code === code && item.issue === issue && item.kind === kind);
+  const ids = { aged: entry('PR_UNOWNED', 901)?.id, red: entry('PR_RED_UNOWNED', 902)?.id, store: entry('PR_UNOWNED', 12, 'store')?.id };
+  const at = fx.github.calls.length;
+  const text = fx.run(['attention'], {}, { json: false }).result;
+  const block = text.slice(text.indexOf('Open PRs')).split('\n');
+  assert.deepEqual(block.slice(0, 7), ['Open PRs (5)',
+    `- PR #903 "A new one", open 0 h, owner none, flagged after ${flaggedAfter}`,
+    `- PR #902 "Refresh the shards", open 2 h, owner none, flagged ${ids.red}, failing: gate, validate`,
+    `- PR #901 "A title that runs past the sixty characters the list keep...", draft, open 7 d, owner none, flagged ${ids.aged}`,
+    `- PR #900 "The owned slice", open 30 h, owner #423, next: Builder: ${'finish the slice '.repeat(12).slice(0, 108)}...`,
+    `- store PR 12 "Store clean-up", open 26 h, owner none, flagged ${ids.store}`, '']);
+  assert.doesNotMatch(text, /store (?:PR )?#12|#12\b/, 'a store number never links to a task here');
+  assert.match(text, new RegExp(`^- ${ids.store} new PR_UNOWNED store PR 12: Controller: today, land`, 'm'));
+  assert.match(text, new RegExp(`^- ${ids.red} new PR_RED_UNOWNED PR #902 at bbbbbbb: Controller: read the failing job`, 'm'));
+  const reads = fx.github.calls.slice(at);
+  assert.deepEqual([reads.filter(call => /\/pulls\?state=open/.test(call.path)).length, reads.filter(call => /p90\d: pullRequest/.test(call.body?.query || '')).length], [2, 1], 'two lists and one check batch');
+  // The owner of an acknowledged one is the controller, until its due time.
+  const acked = fx.ctrl(['ack', '--finding', ids.red, '--next', 'gate failed on a full disk; rerun every job']);
+  assert.equal(acked.error, null);
+  const json = fx.run(['attention']).result;
+  assert.deepEqual(json.open_prs.map(row => [row.where, row.number, row.owner, row.code, row.red, row.failing]), [['repo', 903, 'none', null, false, []],
+    ['repo', 902, 'controller', 'PR_RED_UNOWNED', true, ['gate', 'validate']], ['repo', 901, 'none', 'PR_UNOWNED', false, []],
+    ['repo', 900, '#423', null, false, []], ['store', 12, 'none', 'PR_UNOWNED', false, []]]);
+  assert.match(fx.run(['attention'], {}, { json: false }).result, new RegExp(`^- PR #902 "Refresh the shards", open 2 h, owner controller until ${acked.result.due}, next: gate failed on a full disk; rerun every job, failing: gate, validate$`, 'm'));
+  // Each read failing on its own.
+  const failing = match => { fx.github.hooks = [call => (match(call) ? { status: 503, json: { message: 'unavailable' } } : undefined)]; return fx.run(['attention'], {}, { json: false }); };
+  const noList = failing(call => call.path.startsWith('repos/acme/app/pulls?state=open'));
+  assert.equal(noList.error, null, 'the rest still prints');
+  assert.match(noList.result, /^Open PRs: unknown \(GH_FAILED\)$/m);
+  assert.match(noList.result, /^Owner waits \(0\)$/m);
+  const noStore = failing(call => call.path.startsWith('repos/acme/state-store/pulls')).result;
+  assert.match(noStore, /^Open PRs \(4\)$/m);
+  assert.match(noStore, /^store pull requests not read \(GH_FAILED\)$/m);
+  const noChecks = failing(call => /p90\d: pullRequest/.test(call.body?.query || '') || /\/pulls\/90\d$/.test(call.path)).result;
+  assert.match(noChecks, /^Open PRs \(5\)$/m);
+  assert.match(noChecks, /^check results not read \(GH_FAILED\)$/m);
+  assert.match(noChecks, /^- PR #902 .*owner controller until /m, 'a red one known before stays so');
+  fx.github.hooks = [];
+  assert.equal(fx.run(['attention']).result.open_prs_store_unread, undefined);
+  const { blobSha } = require('./toolkit-programme-fake-github.cjs');
+  fx.github.files.set(fx.store.docPath('child', 423), { text: '{not json', sha: blobSha('{not json') });
+  fx.github.commit();
+  const broken = fx.run(['attention']).result;
+  assert.deepEqual([broken.open_prs, broken.open_prs_unknown], [null, 'STATE_INVALID'], 'owners cannot be worked out without every task');
+});
+
+test('the parent schema and the reader take a store pull request finding, and no other kind on these codes', () => {
+  const Ajv2020 = require('ajv/dist/2020');
+  const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'programme-state', 'parent-state-v1.schema.json'), 'utf8'));
+  const validate = new Ajv2020({ strict: false, allErrors: true }).compile(schema);
+  const at = '2026-11-24T09:00:00Z';
+  const make = (code, kind, head = null) => ({ id: state.findingId('reconcile', code, 12, head, kind), source: 'reconcile', code, issue: 12, head, state: 'new', first_seen: at, changed_at: at, ...(kind ? { kind } : {}) });
+  const doc = entry => ({ ...state.newParent({ repository: 'acme/app', parentIssue: 421 }), attention: [entry] });
+  for (const [entry, taken] of [[make('PR_UNOWNED'), true], [make('PR_UNOWNED', 'store'), true], [make('PR_UNOWNED', 'pr'), false], [make('PR_RED_UNOWNED', null, SHA_A), true], [make('PR_RED_UNOWNED', 'store', SHA_A), false],
+    [make('CHECKS_RED', 'store', SHA_A), false], [make('CLOSING_COMMENT_MISSING', 'store'), false], [make('CLOSING_COMMENT_MISSING', 'pr'), true]]) {
+    assert.equal(state.validateParent(doc(entry)).length === 0, taken, `${entry.code} ${entry.kind}`);
+    assert.equal(validate(doc(entry)), taken, `schema: ${entry.code} ${entry.kind}`);
+  }
+});
+
 // ---- runnable programme.cjs hints (#1373) ---------------------------------------------------------
 
 // A session read "Run programme.cjs attention for the list", looked where most Toolkit scripts are

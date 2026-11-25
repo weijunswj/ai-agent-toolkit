@@ -38,6 +38,8 @@ class FakeGitHub {
     this.issues = new Map();
     this.files = new Map();
     this.prs = new Map();
+    // The store's open pull requests as its REST list shows them: { number, title?, draft?, created_at }.
+    this.storePulls = [];
     this.issuePrLinks = new Map();
     this.commits = 0;
     this.snapshots = new Map();
@@ -77,8 +79,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined, author = undefined, headRepository = undefined } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }),
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main', title = undefined, author = undefined, headRepository = undefined, createdAt = new Date(this.clock).toISOString() } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, createdAt, contexts, rollupOid, hasNextPage, branch, body, base, ...(title === undefined ? {} : { title }),
       ...(author === undefined ? {} : { author }), ...(headRepository === undefined ? {} : { headRepository }) });
   }
 
@@ -186,6 +188,10 @@ class FakeGitHub {
     if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) {
       const [date, sha] = [this.fileDates.get(params.get('path')), this.fileCommits.get(params.get('path'))];
       return ok(200, date || sha ? [{ sha: sha || 'f'.repeat(40), commit: { committer: { date: date || new Date(this.clock).toISOString() } } }] : []);
+    }
+    if (path.toLowerCase() === `repos/${this.storeRepository.toLowerCase()}/pulls` && method === 'GET') {
+      const page = Number(params.get('page') || 1);
+      return ok(200, this.storePulls.slice((page - 1) * 100, page * 100));
     }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
@@ -307,7 +313,7 @@ class FakeGitHub {
       else if (closed) listed.sort((a, b) => b.number - a.number);
       return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, title: pr.title || '', body: pr.body, draft: pr.isDraft,
         state: pr.merged || pr.state === 'CLOSED' ? 'closed' : 'open', closed_at: pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z',
-        updated_at: updated(pr), head: {ref: pr.branch || '', sha: pr.head, repo: pr.headRepository === null ? null : { full_name: pr.headRepository || this.repository }},
+        created_at: pr.createdAt, updated_at: updated(pr), head: {ref: pr.branch || '', sha: pr.head, repo: pr.headRepository === null ? null : { full_name: pr.headRepository || this.repository }},
         user: { login: pr.author || 'fixture-owner' }, merge_commit_sha: pr.merged ? pr.head : null,
         merged_at: pr.mergedAt, base: { repo: { full_name: this.repository } } })));
     }

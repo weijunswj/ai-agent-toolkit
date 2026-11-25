@@ -175,7 +175,7 @@ test('bank: a governed repository with slow CI gets shards by default; the answe
   const ctx = governedFixture(t);
   const transport = recorder();
   const result = await answer(ctx, 'all recommended', { transport });
-  assert.match(result.shown.out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\. Your answer also prepares one binding pull request with a first shard list; it applies only after you merge it, because the last green CI run took 10 minutes or more\. To skip them, add shards=not-now or shards=never to your reply\.$/m, '25 minutes is slow CI; the minutes sit beside the default');
+  assert.match(result.shown.out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\. Your answer also prepares one binding pull request with a first shard list; it applies only after you merge it, because the last green CI run took 10 minutes or more; the split is then refreshed once a day\. To skip them, add shards=not-now or shards=never to your reply\.$/m, '25 minutes is slow CI; the minutes sit beside the default');
   assert.doesNotMatch(result.shown.out, /\| Parallel CI shards \|/, 'never a question');
   assert.equal(result.code, 0, result.err);
   assert.equal(transport.calls.length, 1);
@@ -263,7 +263,7 @@ test('bank: not now writes nothing and checks again; shards=never records the an
   // A merged not-now is the default again; a merged never or yes is only a status line.
   ctx.merge(bindingText({ ci_shards: { answer: 'not-now' } }));
   assert.match((await run(ctx, ['setup'])).out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\./m);
-  for (const [merged, line] of [['never', /^- Set in \.github\/toolkit-programme\.json: .*, parallel CI shards never \(not asked again\)\. /m], ['yes', /^- Set in \.github\/toolkit-programme\.json: .*, parallel CI shards yes\. /m]]) {
+  for (const [merged, line] of [['never', /^- Set in \.github\/toolkit-programme\.json: .*, parallel CI shards never \(not asked again\)\. /m], ['yes', /^- Set in \.github\/toolkit-programme\.json: .*, parallel CI shards yes \(refreshed once a day: explain 1\.1\)\. /m]]) {
     ctx.merge(bindingText({ ci_shards: { answer: merged } }));
     let estimated = 0;
     const shown = await run(ctx, ['setup'], { estimate: () => { estimated += 1; return null; } });
