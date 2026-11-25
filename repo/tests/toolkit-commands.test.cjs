@@ -11,7 +11,7 @@ const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
 const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
 
 test('exactly these typed commands are recognised', () => {
-  assert.deepEqual([...commands.PHRASES].sort(), ['governance setup', 'refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit env', 'toolkit governance',
+  assert.deepEqual([...commands.PHRASES].sort(), ['controller takeover', 'governance setup', 'refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit env', 'toolkit governance',
     'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
 });
 
@@ -111,7 +111,7 @@ test('the list shows only the commands a user types, and is what the script prin
   const list = commands.listText();
   const rows = commands.COMMANDS.flatMap(command => command.type);
   assert.deepEqual(rows, ['toolkit cmd', 'toolkit command', 'setup toolkit', 'toolkit setup', 'refresh toolkit', 'toolkit refresh', 'remove toolkit', 'toolkit env', 'toolkit show env',
-    'toolkit governance', 'governance setup', 'merge N']);
+    'toolkit governance', 'governance setup', 'controller takeover', 'merge N']);
   for (const phrase of rows) assert.ok(list.includes(`\`${phrase}\``), phrase);
   // Other governance phrases and older commands still work when typed, but the list leaves them out.
   for (const hidden of ['toolkit permissions', 'toolkit update scheduled task', 'setup governance', 'refresh governance', 'toolkit governance enable', 'toolkit governance disable']) assert.ok(!list.includes(`\`${hidden}\``), hidden);
@@ -131,7 +131,7 @@ test('the list is one two-column table per group, in group order, with every com
   assert.equal(lines.at(-1), 'Anything else: ask in your own words.');
   const headings = lines.filter(line => /^\*\*[^*]+\*\*$/.test(line)).map(line => line.slice(2, -2));
   assert.deepEqual(headings, [...commands.GROUPS]);
-  assert.deepEqual(commands.GROUPS, ['Setup', 'Keys', 'Governance', 'Merge']);
+  assert.deepEqual(commands.GROUPS, ['Setup', 'Keys', 'Governance', 'Controller', 'Merge']);
   assert.equal(lines.filter(line => line === '| Type this | What it does |').length, commands.GROUPS.length);
   for (const command of commands.COMMANDS) {
     assert.ok(commands.GROUPS.includes(command.group), `${command.type[0]} has no known group`);

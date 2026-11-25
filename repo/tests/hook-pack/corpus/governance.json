@@ -1124,6 +1124,7 @@
         {"event":"UserPromptSubmit","payload":{"prompt":"toolkit governance"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
         {"event":"UserPromptSubmit","payload":{"prompt":"toolkit show env"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
         {"event":"UserPromptSubmit","payload":{"prompt":"toolkit setup"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"controller takeover"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
         {"event":"UserPromptSubmit","payload":{"prompt":"  Toolkit  Refresh. "},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}}
       ],
       "payload": { "prompt": "toolkit cmd" },

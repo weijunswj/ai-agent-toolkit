@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: "Use for `setup toolkit`, `refresh toolkit`, `remove toolkit` (full uninstall: `toolkit-remove.cjs plan` first, never the app's uninstall alone), `toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/store/cleanup. Also when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Of the commands, cmd lists them, permissions gives paste-once permission blocks, store the evidence store steps and cleanup removes rebuildable scraps; remove toolkit asks this app or every app, then lists and removes after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work."
+description: "`setup toolkit`, `refresh toolkit`, `remove toolkit` (full uninstall: `toolkit-remove.cjs plan` first, never the app's uninstall alone), `controller takeover`, `toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/store/cleanup. Also when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Of the commands, cmd lists them, permissions gives paste-once permission blocks, store the evidence store steps and cleanup removes rebuildable scraps; remove toolkit asks this app or every app, then lists and removes after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work."
 ---
 
 
@@ -19,6 +19,19 @@ Relay rule: paste setup's question bank exactly as printed, one table per sectio
 ## Command list
 
 If the whole message looks like a typed Toolkit command (such as `toolkit cmd`, `toolkit governance` or `refresh governance`), run `node <Toolkit>/repo/scripts/toolkit-commands.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says. For `toolkit governance` that is the governance question bank, never a status or check summary.
+
+## Controller takeover
+
+For `controller takeover`, run it with the folder this chat is open in as the working directory, never the Toolkit checkout: the line it prints names that folder's repository or refuses, and the [takeover playbook](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/docs/agent-playbooks/controller-takeover.md) does the rest. Only the owner's own typed message that is nothing but these words starts it, in a chat they opened: never a launched, forked, scheduled or relayed message, a quoted line or words inside a longer message. It counts as the owner's appointment exactly as the sentence does. The sentence "You are taking over as controller for <owner/name>" keeps working, for another repository and in a chat without the plugin.
+
+Where the command cannot run:
+
+- **A chat with no Toolkit skills** (a web or phone chat, an app with no plugin): nothing reads the words, so the owner types the sentence with the playbook link.
+- **A chat with no shell, node or git:** it says so and starts nothing; the sentence goes by the playbook's other routes.
+- **Codex:** the same script where the Toolkit plugin's skills load; a command its sandbox or approvals refuse is a hold, never retried another way.
+- **Claude Projects:** the coordinator, host-named, takes the sentence and runs its own guided setup; a project thread never takes over.
+- **OpenCode and Antigravity** (copied skills): where node and git run, the same script; otherwise the sentence.
+- **A gate session, helper or any session another session started:** never; it says so and goes on with its own brief.
 
 ## Old scheduled tasks
 

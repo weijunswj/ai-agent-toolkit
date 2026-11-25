@@ -53,7 +53,7 @@ class FakeGitHub {
     this.commitRows = [];
     this.committer = null;
     this.merges = [];
-    this.toolkitMain = { sha: '1'.repeat(40), blob: '2'.repeat(40) };
+    this.toolkitMain = { sha: '1'.repeat(40), blob: '2'.repeat(40), version: '3.9.0' };
     this.comments = new Map();
     this.commentSequence = 0;
     this.login = 'owner';
@@ -197,6 +197,9 @@ class FakeGitHub {
     if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
     if ((match = /^repos\/weijunswj\/ai-agent-toolkit\/(commits\/main|contents\/repo\/CONTROLLER\.md)$/.exec(path)) && method === 'GET') {
       return ok(200, { sha: match[1] === 'commits/main' ? this.toolkitMain.sha : this.toolkitMain.blob });
+    }
+    if (path === 'repos/weijunswj/ai-agent-toolkit/contents/repo/contracts/toolkit-local-bridge/version.json' && method === 'GET') {
+      return ok(200, { sha: this.toolkitMain.blob, encoding: 'base64', content: Buffer.from(JSON.stringify({ version: this.toolkitMain.version })).toString('base64') });
     }
     if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
     if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) return this.commitList(params);

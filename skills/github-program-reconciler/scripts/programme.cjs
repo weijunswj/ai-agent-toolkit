@@ -34,7 +34,7 @@
 //   reconcile --apply [--issue <n>]
 //   init-parent --catalogue <file> --apply
 //   update-parent --patch <file>
-//   takeover --session <new name> --surface <text> --next <text> [--owner-stop <the owner's words>] [--apply]
+//   takeover --session <new name> --surface <text> --next <text> [--owner-stop <the owner's words>] [--session-copy <folder>] [--apply]
 //                                                      without --apply, a dry run anyone may make: the facts, the stop
 //                                                      proof and the record it would post; with it, the record, then the
 //                                                      claim, both read back. Only this moves a parent's epoch
@@ -96,7 +96,7 @@ const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent'
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace', '--queue']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--surface', '--owner-stop', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--surface', '--owner-stop', '--session-copy', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -165,9 +165,9 @@ function parseArgs(argv) {
     needs(!args.parent && args.issue !== undefined && args.lane, 'claim needs --issue <n> --lane: it takes one task for a lane controller. Controller: take the parent with takeover, and assign gates with assign.');
   } else needs(!args.takeover && !args.lane, '--takeover and --lane go with claim --issue <n> --lane.');
   if (command === 'takeover') {
-    const extra = Object.keys(args).filter(key => !['command', 'session', 'prefix', 'controller', 'surface', 'next', 'owner-stop', 'apply', 'json', 'repo-root'].includes(key));
-    needs(!extra.length, `takeover takes only --session, --prefix, --controller, --surface, --next, --owner-stop, --apply, --json and --repo-root (got --${extra[0]}).`);
-  } else needs(args.surface === undefined && args['owner-stop'] === undefined, '--surface and --owner-stop go with takeover.');
+    const extra = Object.keys(args).filter(key => !['command', 'session', 'prefix', 'controller', 'surface', 'next', 'owner-stop', 'session-copy', 'apply', 'json', 'repo-root'].includes(key));
+    needs(!extra.length, `takeover takes only --session, --prefix, --controller, --surface, --next, --owner-stop, --session-copy, --apply, --json and --repo-root (got --${extra[0]}).`);
+  } else needs(args.surface === undefined && args['owner-stop'] === undefined && args['session-copy'] === undefined, '--surface, --owner-stop and --session-copy go with takeover.');
   if (command === 'assign') {
     needs(args.issue !== undefined && args.role && args.assignment, 'assign needs --issue <n>, --role G0|G1|G2 and --assignment <id>.');
     needs(!args.reason || args.supersede, '--reason goes with --supersede on assign.');
@@ -1025,7 +1025,7 @@ const commands = {
 
   // One controller takeover of the parent (programme-takeover.cjs); its context is opened there too.
   takeover(args, context, deps = {}) {
-    return takeoverRun.takeover(args, context, { attention: doc => showAttention(doc, args, deps) });
+    return takeoverRun.takeover(args, context, { attention: doc => showAttention(doc, args, deps), git: deps.toolkitGit });
   },
 
   // A lane controller's fence on the one task the catalogue delegates to it.
