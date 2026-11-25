@@ -335,10 +335,10 @@ test('F1 an earlier record of the name: marked when a read shows another claim l
   }
 });
 
-test('F1 a resumed record is not marked for what could not be read: an earlier run may have claimed with it', () => {
+test('F1 a resumed record is marked only when a read shows another claim left its epoch: an earlier run may have claimed with it', () => {
   for (const [label, arrange, code, marked] of [
     ['a comment, the newest state commit not read', fx => fx.github.intercept(call => (AT_COMMIT(call) ? { status: 404, json: {} } : undefined)), 'OLD_WRITER_ACTIVE', false],
-    ['a comment, the newest state commit read', () => {}, 'OLD_WRITER_ACTIVE', true],
+    ['a comment, the newest state commit read', () => {}, 'OLD_WRITER_ACTIVE', false],
   ]) {
     const { fx } = stoppedAfterRecord();
     arrange(fx);
@@ -358,6 +358,145 @@ test('F1 a resumed record is not marked for what could not be read: an earlier r
   jump(fresh);
   assert.equal(fresh.takeover().error?.code, 'EPOCH_MOVED');
   assert.match(fresh.records()[0].body, /^NOT USED: /);
+});
+
+// A run whose claim landed and whose answer never came, while every list and branch read stays as it was
+// before it, until `thaw`. `refuse` answers each later claim request.
+function landedUnseen(backend) {
+  const fx = fixture({ backend });
+  const { github } = fx;
+  let frozen = null;
+  let sent = 0;
+  fx.refuse = null;
+  fx.thaw = () => { frozen = null; fx.refuse = null; };
+  github.intercept(call => {
+    if (CLAIMS(call)) {
+      sent += 1;
+      if (fx.refuse) return fx.refuse();
+      if (sent > 1) return undefined;
+      const paths = new Set(github.calls.filter(old => old.method === 'GET' && (COMMITS(old) || ON_BRANCH(old) || /\/branches\//.test(old.path))).map(old => old.path));
+      frozen = new Map([...paths].map(path => [path, JSON.parse(JSON.stringify(github.route('GET', path)))]));
+      github.route(call.method, call.path, call.body);
+      return LOST();
+    }
+    return frozen && call.method === 'GET' && frozen.has(call.path) ? JSON.parse(JSON.stringify(frozen.get(call.path))) : undefined;
+  });
+  const run = fx.takeover();
+  assert.equal(run.error?.code, 'CLAIM_UNCERTAIN', run.error?.message);
+  assert.ok(fx.everHeld(NEW, 2));
+  return fx;
+}
+
+test('F1 a later run never marks a record an earlier run\'s claim landed with, however old the reads stay', () => {
+  const refused = status => fx => { fx.refuse = answer(status); };
+  for (const backend of BACKENDS) {
+    for (const [label, arrange] of [
+      ...[401, 403, 404, 422, 429].map(status => [`its own request refused (${status})`, refused(status)]),
+      ['a comment of the replaced controller between its two reads', fx => fx.before(READS_RECORD, () => fx.aside(() => comment(fx)))],
+      ['a merge of the replaced controller between its two reads', fx => fx.before(READS_RECORD, () => fx.aside(() => fx.github.addMerge()))],
+      ['the store no longer private', fx => fx.github.intercept(call => (fx.armed && call.method === 'GET' && call.path === `repos/${STORE_REPO}` ? answer(200, { private: false, permissions: { push: true } })() : undefined))],
+      ['nothing else', () => {}],
+    ]) {
+      const fx = landedUnseen(backend);
+      const [record] = fx.records();
+      fx.before(READS_RECORD, () => { fx.armed = true; });
+      arrange(fx);
+      const run = fx.takeover();
+      const name = `${backend}, ${label}: ${run.error?.code} ${run.error?.message}`;
+      assert.ok(run.error, name);
+      assert.ok(record.body.startsWith(PREFIX), `${name}: the record that carried the claim stands`);
+      assert.doesNotMatch(run.error.message, /is marked NOT USED|No claim was made/, name);
+      fx.armed = false;
+      fx.thaw();
+      fx.github.hooks = [];
+      assert.equal(fx.takeover().error?.code, 'ALREADY_HOLDER', name);
+      assert.ok(fx.records()[0].body.startsWith(PREFIX), name);
+      // Nobody is locked out, and no epoch has two claims.
+      fx.wait(30);
+      assert.equal(fx.takeover([], { session: 'desk-controller-6' }).error, null, name);
+      assert.equal(fx.fence().epoch, 3, name);
+    }
+  }
+});
+
+test('F1 two runs of one name sharing one record: the second one\'s refusal never marks what carried the first one\'s claim', () => {
+  for (const status of [403, 429]) {
+    const { fx, first } = stoppedAfterRecord();
+    // The other run lands its claim with the record between this one's last read and its request.
+    fx.before(CLAIMS, () => fx.aside(() => fx.rivalClaims(NEW, first.id)));
+    fx.github.intercept(call => (CLAIMS(call) ? answer(status)() : undefined));
+    const run = fx.takeover();
+    assert.equal(run.error?.code, 'STORE_UNREACHABLE', run.error?.message);
+    assert.ok(fx.records()[0].body.startsWith(PREFIX), run.error.message);
+  }
+});
+
+test('F1 a claim settled by reading, then followed before the last read, is not called done', () => {
+  for (const backend of BACKENDS) {
+    const fx = fixture({ backend });
+    let sent = 0;
+    let reads = 0;
+    fx.github.intercept(call => {
+      if (CLAIMS(call)) { sent += 1; if (sent === 1) { fx.github.route(call.method, call.path, call.body); return answer(502)(); } }
+      if (sent && ON_BRANCH(call)) { reads += 1; if (reads === 2) fx.aside(() => fx.rivalClaims('desk-controller-9', 5001)); }
+      return undefined;
+    });
+    const run = fx.takeover();
+    assert.equal(run.error?.code, 'EPOCH_MOVED', `${backend} ${run.error?.message}`);
+    assert.match(run.error.message, /^The claim of #421 landed: .*another takeover followed this one/, backend);
+  }
+});
+
+test('F1 marking: a comment that cannot be read is never overwritten, and the message says what to do', () => {
+  for (const status of [403, 404, 502]) {
+    const fx = fixture();
+    let claimed = false;
+    fx.github.intercept(call => {
+      if (CLAIMS(call)) { claimed = true; return answer(403)(); }
+      return claimed && READS_RECORD(call) ? answer(status)() : undefined;
+    });
+    const run = fx.takeover();
+    assert.match(run.error.message, / The record \(comment \d+\) could not be marked NOT USED\. Controller: run takeover --apply again; mark it by hand only if you will not\.$/);
+    assert.match(fx.records()[0].body, /^INT-TK421-001 TAKEOVER: /);
+    assert.equal(fx.writes(run.calls).filter(call => call.method === 'PATCH').length, 0, String(status));
+  }
+});
+
+test('F1 a refusal that shows no other claim leaves the older records of the name alone', () => {
+  const { fx } = stoppedAfterRecord();
+  fx.before(CLAIMS, () => fx.aside(() => fx.oldWrites()));
+  const run = fx.takeover(['--owner-stop', 'it is closed']);
+  assert.equal(run.error?.code, 'OLD_WRITER_ACTIVE', run.error?.message);
+  assert.deepEqual(fx.records().map(row => row.body.startsWith('NOT USED: ')), [false, true]);
+});
+
+test('F1 an uncertain claim says why that claim is uncertain, not what a later request was refused for', () => {
+  const fx = fixture();
+  route(fx, { put: LOST, lag: true, staleCommits: true, again: answer(422) });
+  const run = fx.takeover();
+  assert.equal(run.error?.code, 'CLAIM_UNCERTAIN', run.error?.message);
+  assert.match(run.error.message, /GitHub gave no answer that says whether it landed \(gh returned no HTTP status\), and no read settled it\. It stopped on: .*422/);
+});
+
+test('F1 a record of the name with other text in it is never resumed, so it never holds a takeover up', () => {
+  // Its listing still shows it as posted once; the read by id shows the edit.
+  const { fx, first } = stoppedAfterRecord();
+  let late = true;
+  fx.github.intercept(call => {
+    if (!late || !READS_RECORD(call)) return undefined;
+    late = false;
+    first.body = `${first.body}\n\nEdited`;
+    return undefined;
+  });
+  const run = fx.takeover();
+  assert.equal(run.error?.code, 'TAKEOVER_UNVERIFIED', run.error?.message);
+  assert.match(first.body, /^INT-TK421-001 TAKEOVER: [^\n]+\n\nEdited$/, 'not marked: an earlier run may have claimed with it');
+  // From the next run on it is an older record: a new one is posted, and it is marked whole once that claim stands.
+  fx.wait(1);
+  const next = fx.takeover();
+  assert.equal(next.error, null, next.error?.message);
+  assert.deepEqual([next.result.record.resumed, fx.fence().epoch], [false, 2]);
+  assert.match(first.body, /^NOT USED: INT-TK421-001 TAKEOVER: [^\n]+\n\nEdited$/);
 });
 
 test('F1 where a parent document stands against one claim', () => {

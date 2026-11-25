@@ -385,7 +385,7 @@ test('8 the number: only an earlier person\'s comment takes it, and a renumbered
   // GitHub refuses the edit: no claim under a number another comment has.
   const shut = clash(fx => fx.github.intercept(call => (call.method === 'PATCH' ? { status: 403, json: {} } : undefined)));
   assert.equal(shut.run.error?.code, 'TAKEOVER_UNVERIFIED');
-  assert.match(shut.run.error.message, /could not be changed \(HTTP 403\)\. No claim was made\. .*could not be marked NOT USED; edit it by hand\.$/);
+  assert.match(shut.run.error.message, /could not be changed \(HTTP 403\)\. No claim was made\. .*could not be marked NOT USED\. Controller: run takeover --apply again; mark it by hand only if you will not\.$/);
   assert.equal(shut.fx.fence().epoch, 1);
 });
 
@@ -398,11 +398,12 @@ test('9 a record is marked only for what it can never carry, and marked whole', 
   assert.match(run.error.message, /could not be read \(HTTP 502\)\. No claim was made\.$/);
   assert.ok(fx.records()[0].body.startsWith(PREFIX), 'not marked');
   assert.equal(fx.takeover().result?.record.resumed, true, 'the next run uses it');
-  // A record posted by hand in the exact form, with lines under it, keeps them.
+  // A record posted by hand in the exact form, with lines under it, is never resumed and keeps them when it is marked.
   const hand = fixture();
   const id = hand.github.addComment(421, { body: `${PREFIX}090 TAKEOVER: controller ${NEW} on x harness; Toolkit main ${'a'.repeat(40)}; CONTROLLER.md blob ${'b'.repeat(40)}; epoch 1 to 2; old writer stopped: said so; next: go on.\n\nKept lines` });
   hand.wait(1);
-  assert.equal(hand.takeover().error?.code, 'TAKEOVER_UNVERIFIED');
+  const past = hand.takeover();
+  assert.deepEqual([past.error, past.result?.record.resumed], [null, false], past.error?.message);
   assert.match(hand.github.comments.get(id).body, /^NOT USED: INT-TK421-090 TAKEOVER: [^\n]+\n\nKept lines$/);
 });
 

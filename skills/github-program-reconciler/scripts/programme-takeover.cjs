@@ -19,7 +19,9 @@
 // state commits and takeover record came from.
 //
 // A record is only ever marked NOT USED, and "No claim was made" only ever said after a record, when the
-// claim cannot have landed: SentClaim knows what was sent, and `stopped` is the one place that decides.
+// claim cannot have landed: SentClaim knows what this run sent, and `stopped` is the one place that
+// decides. What an earlier run sent is never known, so a record this run resumed is marked only when a
+// read shows that another claim left its epoch, or after a later claim of this name is confirmed.
 //
 // The number of requests is fixed: no task document is read, however many tasks there are.
 const state = require('./programme-state.cjs');
@@ -180,7 +182,7 @@ class SentClaim {
     this.failures += 1;
     if (!put.sent) return;
     this.replaced.add(read.sha);
-    this.open.push({ revision: read.doc.revision, commit: put.commit || null });
+    this.open.push({ revision: read.doc.revision, commit: put.commit || null, why: error.message });
   }
 
   // The commit GitHub answered a claim with, when that claim is not read back yet.
@@ -194,7 +196,7 @@ class SentClaim {
   // Another claim left the epoch this one names.
   beaten() { this.open = this.open.filter(entry => entry.commit); }
 
-  describe() { return this.accepted() ? `GitHub accepted it as commit ${short(this.accepted())}` : `GitHub gave no answer that says whether it landed (${this.why})`; }
+  describe() { return this.accepted() ? `GitHub accepted it as commit ${short(this.accepted())}` : `GitHub gave no answer that says whether it landed (${this.open.at(-1).why})`; }
 }
 
 // ---- one takeover ---------------------------------------------------------------------------
@@ -478,7 +480,8 @@ class TakeoverRun {
     const fresh = row => facts.appointment || (this.input.ownerStop
       ? firstLine(row.body).includes(`the owner said "${this.input.ownerStop}"`) && !(facts.stop.last && ms(facts.stop.last.at) >= ms(row.created_at))
       : this.stopHold(facts.stop, ms(row.created_at)) === null);
-    const found = mine.find(fresh) || null;
+    // One with other text in it can never be verified, so it is an older record from here on.
+    const found = mine.find(row => String(row.body).trim() === firstLine(row.body).trim() && fresh(row)) || null;
     return { record: found ? { id: found.id, line: firstLine(found.body), resumed: true } : null, stale: mine.filter(row => row !== found) };
   }
 
@@ -607,7 +610,6 @@ class TakeoverRun {
         // The newer write may be this claim, landed while the branch read still serves the version before it.
         const newest = this.parentAt(head);
         if (newest && this.settle(newest, facts, record, sent)) return;
-        refused.keep = !newest && sent.resumed;
         throw refused;
       }
       if (sent.accepted()) continue;
@@ -651,7 +653,8 @@ class TakeoverRun {
   //   the claim         says                                      the record
   //   landed            that it landed, and what stopped after    stands
   //   may have landed   CLAIM_UNCERTAIN, and what stopped it      stands
-  //   cannot have       the refusal, and that no claim was made   NOT USED when it can never carry one
+  //   cannot have       the refusal, and that no claim was made   NOT USED when it can never carry one; a
+  //                                                               resumed one only for another's claim
   stopped(error, { facts, record, sent, stale }) {
     const { epoch } = facts.fence;
     // What stopped it, without the next step it would have named had nothing been sent.
@@ -666,8 +669,9 @@ class TakeoverRun {
     }
     if (!error.code) return error;
     error.message += sent.resumed || stale.length ? ' This run made no claim.' : ' No claim was made.';
-    if (VOIDS_RECORD.has(error.code) && !error.keep) {
-      error.message += this.markUnused(record.id) ? ` The record (comment ${record.id}) is marked NOT USED.` : ` The record (comment ${record.id}) could not be marked NOT USED; edit it by hand.`;
+    if (VOIDS_RECORD.has(error.code) && !error.keep && (!sent.resumed || error.code === FENCE_LOST)) {
+      error.message += this.markUnused(record.id) ? ` The record (comment ${record.id}) is marked NOT USED.`
+        : ` The record (comment ${record.id}) could not be marked NOT USED. Controller: run takeover --apply again; mark it by hand only if you will not.`;
       // Another claim left this epoch, so no older record of this name carried one either.
       if (error.code === FENCE_LOST) for (const row of stale) if (!error.carriers?.includes(row.id)) this.markUnused(row.id);
     }
