@@ -48,7 +48,9 @@ test('each fixed line fails again as the plain value it once was, and passes quo
     assert.ok(text.includes(': '), `${rel} ${key} still holds the ": " that strict YAML refuses unquoted`);
     const plain = validator.strictYamlFindings(`name: x\n${indent ? 'interface:\n' : ''}${indent}${key}: ${text}`);
     assert.equal(plain.length, 1, `${rel} ${key} unquoted: ${plain.join('; ')}`);
-    assert.match(plain[0], /value holds ": ", which strict YAML reads as a nested key; quote the value with double quotes/);
+    // A value that opens with a command in backticks is refused for that first character, before its ": " is reached.
+    assert.match(plain[0], text.startsWith('`') ? /value starts with the YAML character `; quote the value with double quotes/
+      : /value holds ": ", which strict YAML reads as a nested key; quote the value with double quotes/);
     assert.deepEqual(validator.strictYamlFindings(`name: x\n${indent ? 'interface:\n' : ''}${indent}${key}: ${value}`), [], `${rel} ${key} quoted`);
   }
 });

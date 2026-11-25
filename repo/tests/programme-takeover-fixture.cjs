@@ -44,7 +44,7 @@ function fixture({ held = true, missing = false, holder = controller, backend = 
   const dir = branch ? temporary() : __dirname;
   const fx = { github, binding, now, backend, output: '', errors: '' };
   fx.other = () => (branch ? state.openStore({ ...common, binding, localCheckpoint: null }) : new state.StateStore({ ...common, store: STORE }));
-  fx.deps = (extra = {}) => ({ transport: github, binding, originUrl: `https://github.com/${REPO}.git`, repoRoot: dir, toolkitVersion: '3.9.0', environment: {}, now,
+  fx.deps = (extra = {}) => ({ transport: github, binding, originUrl: `https://github.com/${REPO}.git`, repoRoot: dir, toolkitVersion: '3.9.0', environment: {}, now, toolkitGit: () => ({ status: 128, stdout: '', stderr: '', error: null }),
     ...(branch ? { stateCheckpointDir: path.join(dir, 'checkpoints'), attentionDir: path.join(dir, 'attention') } : {}),
     stdout: { write: text => { fx.output += text; } }, stderr: { write: text => { fx.errors += text; } }, ...extra });
   fx.run = (argv, extra) => {
