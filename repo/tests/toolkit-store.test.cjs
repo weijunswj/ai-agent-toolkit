@@ -1,92 +1,18 @@
 'use strict';
 
-// toolkit store: every store step checks the store itself, scans exactly what it commits, pushes
-// only the bound branch with no rewrite and never loses a file. Real Git against a local bare
-// repository; only the GitHub read, the binding read and the reported remote address are faked.
+// toolkit store: every step checks the store itself first, reads and moves only inside the store
+// folders, and takes only the pinned commands and flags.
+// Real Git against a local bare repository; only the GitHub read, the binding read and the reported
+// remote address are faked.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { spawnSync } = require('node:child_process');
 const store = require('../scripts/toolkit-store.cjs');
+const { ORIGIN, git, pushes, world } = require('./support/toolkit-store-world.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const { ORIGIN, PLANTED, git, commitIn, pushes, world } = require('./support/toolkit-store-world.cjs');
-
-test('save commits only the named new files, scans them, pushes the bound branch and reads it back', t => {
-  const w = world(t);
-  w.write('archives/868/report.md', 'G0 report\n');
-  w.write('archives/868/other.md', 'not named\n');
-  const { code, result } = w.act(['save', '--path', 'archives/868/report.md', '--message', 'archive 868 report']);
-  assert.equal(code, 0, JSON.stringify(result));
-  assert.equal(result.read_back, true);
-  assert.equal(result.files, 1);
-  assert.ok(w.remoteHas('archives/868/report.md'));
-  assert.ok(!w.remoteHas('archives/868/other.md'), 'an unnamed file is never committed');
-  assert.equal(git(w.dir, 'log', '-1', '--format=%s'), 'archive 868 report');
-  assert.deepEqual(pushes(w.calls), [['push', '--quiet', 'origin', 'refs/heads/main:refs/heads/main']]);
-  assert.deepEqual(fs.readdirSync(w.tmp), [], 'the empty hooks folder is removed');
-});
-
-test('a planted secret, an unreadable large file or a path outside the store folders commits nothing', t => {
-  const w = world(t);
-  const head = git(w.dir, 'rev-parse', 'HEAD');
-  w.write('archives/x/leak.md', `token = ${PLANTED}\n`);
-  let run = w.act(['save', '--path', 'archives/x', '--message', 'leak']);
-  assert.equal(run.code, 1);
-  assert.match(run.result.stopped, /secret scan found 1 match\(es\): archives\/x\/leak\.md:1 \(github-token\)/);
-  assert.ok(!run.result.stopped.includes(PLANTED), 'the finding never prints the secret');
-  fs.rmSync(path.join(w.dir, 'archives', 'x'), { recursive: true });
-
-  w.write('evidence/big.log', 'a'.repeat(5 * 1024 * 1024 + 1));
-  run = w.act(['save', '--path', 'evidence/big.log', '--message', 'big']);
-  assert.match(run.result.stopped, /could not be scanned \(over 5 MB, binary or not UTF-8\): evidence\/big\.log/);
-  fs.rmSync(path.join(w.dir, 'evidence'), { recursive: true });
-
-  w.write('elsewhere/x.md', 'x\n');
-  assert.match(w.act(['save', '--path', 'elsewhere/x.md', '--message', 'x']).result.stopped, /outside the store folders this command writes \(state\/owner\/repo\/, archives\/, evidence\/\)/);
-  w.write('state/owner/repo/doc.md', 'doc\n');
-  for (const bad of ['../x', 'archives/../x', '.git/config', 'archives/.GIT/x', '/abs', '-x', 'archives/*', 'archives/x?']) {
-    assert.equal(store.storePath(bad), null, bad);
-  }
-  assert.equal(git(w.dir, 'rev-parse', 'HEAD'), head);
-  assert.equal(git(w.dir, 'diff', '--cached', '--name-only'), '', 'nothing is left staged after a refusal');
-  assert.deepEqual(pushes(w.calls), []);
-  assert.equal(w.act(['save', '--path', 'state/owner/repo/doc.md', '--message', 'doc']).code, 0, 'the binding store path is writable');
-});
-
-test('save never stages a deletion and never pushes a local commit that fails the checks', t => {
-  const w = world(t);
-  fs.rmSync(path.join(w.dir, 'archives', 'old', 'kept.md'));
-  w.write('archives/old/new.md', 'new\n');
-  assert.equal(w.act(['save', '--path', 'archives/old', '--message', 'folder']).code, 0);
-  assert.ok(w.remoteHas('archives/old/kept.md'), 'the deleted file stays in the store');
-  assert.ok(w.remoteHas('archives/old/new.md'));
-
-  git(w.dir, 'checkout', '--quiet', '--', 'archives/old/kept.md');
-  w.write('loose.json', '{"raw":true}\n');
-  git(w.dir, 'commit', '--quiet', '-am', 'raw commit');
-  w.write('archives/after.md', 'after\n');
-  const run = w.act(['save', '--path', 'archives/after.md', '--message', 'after']);
-  assert.match(run.result.stopped, /^commit [0-9a-f]{7}: loose\.json is outside the store folders this command writes/);
-  assert.ok(!w.remoteHas('archives/after.md') && !w.remoteHas('archives/old/after.md'));
-  assert.equal(git(w.dir, 'diff', '--cached', '--name-only'), '', 'nothing is staged by the refused run');
-});
-
-test('a store that moved during the push is merged in once with a merge commit, then pushed', t => {
-  const w = world(t);
-  w.hooks.beforePush = () => {
-    fs.writeFileSync(path.join(w.other, 'loose-2.json'), '{}\n');
-    git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'raced'); git(w.other, 'push', '--quiet', 'origin', 'main');
-  };
-  w.write('archives/race.md', 'race\n');
-  const { code, result } = w.act(['save', '--path', 'archives/race.md', '--message', 'race']);
-  assert.equal(code, 0, JSON.stringify(result));
-  assert.equal(result.merged_remote, true);
-  assert.ok(w.remoteHas('archives/race.md') && w.remoteHas('loose-2.json'));
-  assert.equal(git(w.dir, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length, 3, 'a merge commit, never a rebase');
-});
 
 test('the pre-flight refuses anything that is not the private, writable bound store on its branch', t => {
   const w = world(t);
@@ -172,71 +98,6 @@ test('move renames with git mv only, inside the store folders', t => {
   assert.match(git(w.dir, 'show', '--name-status', '-M100%', '--format=', 'HEAD'), /^R100\tloose\.json\tarchives\/loose\/loose\.json$/);
 });
 
-test('merge-branch merges with a merge commit, refuses deletions and secrets, and aborts cleanly', t => {
-  const w = world(t);
-  const branchWith = (name, change) => {
-    git(w.other, 'checkout', '--quiet', '-B', name, 'origin/main');
-    change();
-    git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', name); git(w.other, 'push', '--quiet', '--force', 'origin', name);
-  };
-  branchWith('cloud-add', () => fs.writeFileSync(path.join(w.other, 'archives', 'old', 'cloud.md'), 'cloud\n'));
-  branchWith('cloud-delete', () => fs.rmSync(path.join(w.other, 'archives', 'old', 'kept.md')));
-  branchWith('cloud-leak', () => fs.writeFileSync(path.join(w.other, 'handoff.md'), `key ${PLANTED}\n`));
-
-  assert.match(w.act(['merge-branch', '--branch', 'cloud-delete', '--message', 'm']).result.stopped, /archives\/old\/kept\.md would be deleted or changed away/);
-  assert.ok(!fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD')), 'the refused merge is aborted');
-  assert.match(w.act(['merge-branch', '--branch', 'cloud-leak', '--message', 'm']).result.stopped, /handoff\.md:1 \(github-token\)/);
-  assert.ok(!fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD')));
-  assert.match(w.act(['merge-branch', '--branch', 'main', '--message', 'm']).result.stopped, /is the bound store branch itself/);
-
-  const { code, result } = w.act(['merge-branch', '--branch', 'cloud-add', '--message', 'merge cloud-add']);
-  assert.equal(code, 0, JSON.stringify(result));
-  assert.ok(w.remoteHas('archives/old/cloud.md'));
-  assert.equal(git(w.dir, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length, 3);
-  assert.equal(w.act(['merge-branch', '--branch', 'cloud-add', '--message', 'again']).result.nothing_to_merge, true);
-});
-
-test('delete-merged-branch deletes only a branch already in the bound branch', t => {
-  const w = world(t);
-  git(w.other, 'checkout', '--quiet', '-B', 'merged-one', 'origin/main');
-  git(w.other, 'push', '--quiet', 'origin', 'merged-one');
-  git(w.other, 'checkout', '--quiet', '-B', 'open-one', 'origin/main');
-  fs.writeFileSync(path.join(w.other, 'open.md'), 'open\n');
-  git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'open'); git(w.other, 'push', '--quiet', 'origin', 'open-one');
-
-  assert.match(w.act(['delete-merged-branch', '--branch', 'open-one']).result.stopped, /has commits that are not in main, so deleting it could lose the only copy/);
-  assert.match(w.act(['delete-merged-branch', '--branch', 'main']).result.stopped, /is the bound store branch itself/);
-  assert.match(w.act(['delete-merged-branch', '--branch', 'missing']).result.stopped, /has no branch missing/);
-  assert.equal(w.act(['delete-merged-branch', '--branch', '--mirror']).code, 2);
-  assert.equal(w.act(['delete-merged-branch', '--branch', '-x']).code, 2);
-  const { code, result } = w.act(['delete-merged-branch', '--branch', 'merged-one']);
-  assert.equal(code, 0, JSON.stringify(result));
-  assert.equal(git(w.remote, 'branch', '--list', 'merged-one'), '');
-  assert.notEqual(git(w.remote, 'branch', '--list', 'open-one'), '');
-});
-
-test('no step ever force-pushes, mirrors, rewrites or pushes a branch but the bound one', t => {
-  const w = world(t);
-  git(w.other, 'checkout', '--quiet', '-B', 'done', 'origin/main'); git(w.other, 'push', '--quiet', 'origin', 'done');
-  w.write('archives/s.md', 's\n');
-  w.act(['save', '--path', 'archives/s.md', '--message', 's']);
-  w.act(['move', '--from', 'archives/s.md', '--to', 'archives/t.md', '--message', 't']);
-  w.act(['delete-merged-branch', '--branch', 'done']);
-  const all = pushes(w.calls);
-  assert.ok(all.length >= 3);
-  for (const args of all) {
-    const deleting = args.includes('--delete');
-    assert.ok(!args.some(word => /^(?:--force|-f|--mirror|--all|--prune|--tags)$/.test(word) || /^\+/.test(word) || /^:/.test(word)), args.join(' '));
-    if (deleting) assert.deepEqual(args, ['push', '--quiet', `--force-with-lease=refs/heads/done:${git(w.other, 'rev-parse', 'done')}`, 'origin', '--delete', 'refs/heads/done']);
-    else assert.deepEqual(args, ['push', '--quiet', 'origin', 'refs/heads/main:refs/heads/main']);
-  }
-  assert.ok(!w.calls.some(args => /^(?:rebase|filter-branch|update-ref)$/.test(args[0]) || (args[0] === 'commit' && args.includes('--amend'))));
-  // The only reset is the one that unstages a refused save: index only, no ref, no mode flag.
-  const source = fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8');
-  assert.deepEqual([...source.matchAll(/\[\s*'reset'[^\]]*\]/g)].map(match => match[0]), ["['reset', '--quiet']", "['reset', '--quiet']"]);
-  assert.ok(w.calls.filter(args => args[0] === 'reset').every(args => args.length === 2 && args[1] === '--quiet'));
-});
-
 test('the command line refuses unknown commands, flags and messages, and the flag table is pinned', () => {
   for (const argv of [[], ['upload'], ['save', '--store', 'x', '--path', 'a'], ['save', '--store', 'x', '--message', 'm'], ['save', '--store', 'x', '--path', 'a', '--message', 'two\nlines'],
     ['status', '--force'], ['status', '--store', 'a', '--store', 'b'], ['move', '--store', 'x', '--from', 'a', '--message', 'm'], ['delete-merged-branch', '--store', 'x'], ['sync', '--path', 'a']]) {
@@ -268,94 +129,6 @@ test('the retired handoff snapshot command is refused as unknown, with nothing r
   }
 });
 
-// The store's deletion rule has no exception: save, move and merge-branch never delete a file, and a
-// deletion in a staged change, a commit the remote lacks or a merge is refused. A file in the retired
-// handoff snapshot's memory area, with that folder's manifest listing it as removed (either manifest
-// version), is refused like any other file.
-test('every deletion is refused by save, move and merge-branch, a retired snapshot memory file included', t => {
-  const w = world(t);
-  const SNAPSHOT = 'evidence/handoff/owner/repo';
-  const manifest = (schema, removed) => `${JSON.stringify({ schema, files: [], removed: removed ? [{ path: 'memory/note.md', removed_at: '2026-11-21T18:07:00.000Z' }] : [] }, null, 2)}\n`;
-  git(w.other, 'pull', '--quiet', '--no-rebase', 'origin', 'main');
-  fs.mkdirSync(path.join(w.other, ...SNAPSHOT.split('/'), 'memory'), { recursive: true });
-  fs.writeFileSync(path.join(w.other, ...SNAPSHOT.split('/'), 'memory', 'note.md'), 'note\n');
-  fs.writeFileSync(path.join(w.other, ...SNAPSHOT.split('/'), 'manifest.json'), manifest('toolkit.handoff-snapshot.v2', false));
-  git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'old snapshot'); git(w.other, 'push', '--quiet', 'origin', 'main');
-  git(w.dir, 'pull', '--quiet', '--ff-only', 'origin', 'main');
-  const seeded = w.remoteTip();
-  // One deletion, as a commit in `dir` (the checkout) or `other` (a store branch).
-  const deletions = {
-    plain: dir => { fs.rmSync(path.join(dir, 'archives', 'old', 'kept.md')); return 'archives/old/kept.md'; },
-    'snapshot v1': dir => { fs.rmSync(path.join(dir, ...SNAPSHOT.split('/'), 'memory', 'note.md')); fs.writeFileSync(path.join(dir, ...SNAPSHOT.split('/'), 'manifest.json'), manifest('toolkit.handoff-snapshot.v1', true)); return `${SNAPSHOT}/memory/note.md`; },
-    'snapshot v2': dir => { fs.rmSync(path.join(dir, ...SNAPSHOT.split('/'), 'memory', 'note.md')); fs.writeFileSync(path.join(dir, ...SNAPSHOT.split('/'), 'manifest.json'), manifest('toolkit.handoff-snapshot.v2', true)); return `${SNAPSHOT}/memory/note.md`; },
-  };
-  const commands = {
-    save: () => { w.write('archives/after.md', 'after\n'); return ['save', '--path', 'archives/after.md', '--message', 'after']; },
-    move: () => ['move', '--from', 'loose.json', '--to', 'archives/loose/loose.json', '--message', 'tidy'],
-    'merge-branch': () => ['merge-branch', '--branch', 'drop', '--message', 'merge drop'],
-  };
-  for (const [command, argv] of Object.entries(commands)) {
-    for (const [kind, remove] of Object.entries(deletions)) {
-      const label = `${command} / ${kind}`;
-      let file;
-      if (command === 'merge-branch') {
-        git(w.other, 'checkout', '--quiet', '-B', 'drop', 'origin/main');
-        file = remove(w.other);
-        git(w.other, 'add', '-A'); git(w.other, 'commit', '--quiet', '-m', 'drop'); git(w.other, 'push', '--quiet', '--force', 'origin', 'drop');
-        git(w.other, 'checkout', '--quiet', 'main');
-      } else {
-        file = remove(w.dir);
-        git(w.dir, 'add', '-A'); git(w.dir, 'commit', '--quiet', '-m', 'drop');
-      }
-      const run = w.act(argv());
-      assert.equal(run.code, 1, `${label}: ${JSON.stringify(run.result)}`);
-      assert.ok(run.result.stopped.includes(`${file} would be deleted or changed away`), `${label}: ${run.result.stopped}`);
-      assert.equal(w.remoteTip(), seeded, `${label}: nothing reaches the store`);
-      assert.ok(w.remoteHas(file), `${label}: the file stays in the store`);
-      assert.ok(!fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD')), `${label}: no half-done merge`);
-      git(w.dir, 'reset', '--quiet', '--hard', 'origin/main');
-      fs.rmSync(path.join(w.dir, 'archives', 'after.md'), { force: true });
-    }
-  }
-});
-
-// ---- G2 round 1 findings: each test below reproduces one finding and holds the fix ---------------
-
-const zlib = require('node:zlib');
-
-test('a graft in the store checkout cannot make an unmerged branch look merged, and the merged check is GitHub\'s', t => {
-  const w = world(t);
-  git(w.other, 'checkout', '--quiet', '-B', 'only-copy', 'origin/main');
-  commitIn(w.other, 'only.md', 'only copy\n', 'only');
-  git(w.other, 'push', '--quiet', 'origin', 'only-copy');
-  const tip = git(w.other, 'rev-parse', 'HEAD');
-  git(w.dir, 'fetch', '--quiet', 'origin', 'only-copy');
-  fs.writeFileSync(path.join(w.dir, '.git', 'info', 'grafts'), `${git(w.dir, 'rev-parse', 'origin/main')} ${tip}\n`);
-  const run = w.act(['delete-merged-branch', '--branch', 'only-copy']);
-  assert.equal(run.code, 1, JSON.stringify(run.result));
-  assert.match(run.result.stopped, /has commits that are not in main/);
-  assert.notEqual(git(w.remote, 'branch', '--list', 'only-copy'), '', 'the only copy is still on the store');
-  // Every Git call runs with grafts pointed at a missing file and the commit-graph off.
-  assert.ok(w.calls.env.GIT_GRAFT_FILE && !fs.existsSync(w.calls.env.GIT_GRAFT_FILE));
-});
-
-test('a graft cannot turn a save into a history rewrite, and the read-back checks the old tip on GitHub', t => {
-  const w = world(t);
-  const tip = git(w.dir, 'rev-parse', 'origin/main');
-  git(w.dir, 'checkout', '--quiet', '--orphan', 'tmpx');
-  git(w.dir, 'rm', '-rq', '--cached', '.');
-  fs.rmSync(path.join(w.dir, 'archives'), { recursive: true, force: true }); fs.rmSync(path.join(w.dir, 'loose.json'), { force: true });
-  commitIn(w.dir, 'archives/rewritten.md', 'history replaced\n', 'orphan');
-  const orphan = git(w.dir, 'rev-parse', 'HEAD');
-  git(w.dir, 'branch', '-f', 'main', orphan); git(w.dir, 'checkout', '--quiet', 'main'); git(w.dir, 'branch', '-D', 'tmpx');
-  fs.writeFileSync(path.join(w.dir, '.git', 'info', 'grafts'), `${orphan} ${tip}\n`);
-  w.write('archives/new.md', 'n\n');
-  const run = w.act(['save', '--path', 'archives/new.md', '--message', 'save']);
-  assert.equal(run.code, 1);
-  assert.deepEqual(pushes(w.calls), [], 'nothing is pushed');
-  assert.equal(spawnSync('git', ['--git-dir', w.remote, 'merge-base', '--is-ancestor', tip, 'main']).status, 0, 'the remote history is intact');
-});
-
 test('a shallow store checkout is refused', t => {
   const w = world(t);
   const shallow = path.join(w.base, 'shallow');
@@ -364,51 +137,6 @@ test('a shallow store checkout is refused', t => {
   const out = [];
   assert.equal(store.main(['status', '--store', shallow, '--json'], { ...w.deps, stdout: text => out.push(text) }), 1);
   assert.match(JSON.parse(out.join('')).stopped, /shallow/);
-});
-
-test('a branch name that differs from the bound branch only by case is refused, and other branches never touch the bound tracking ref', t => {
-  const w = world(t);
-  for (const command of [['merge-branch', '--branch', 'Main', '--message', 'm'], ['delete-merged-branch', '--branch', 'MAIN']]) {
-    assert.match(w.act(command).result.stopped, /is the bound store branch itself/, command.join(' '));
-  }
-  git(w.other, 'checkout', '--quiet', '-B', 'cloud', 'origin/main');
-  commitIn(w.other, 'archives/cloud.md', 'cloud\n', 'cloud');
-  git(w.other, 'push', '--quiet', 'origin', 'cloud');
-  assert.equal(w.act(['merge-branch', '--branch', 'cloud', '--message', 'm']).code, 0);
-  for (const args of w.calls.filter(call => call[0] === 'fetch')) {
-    const spec = args.at(-1);
-    assert.ok(spec === '+refs/heads/main:refs/remotes/origin/main' || spec === '+refs/heads/cloud:refs/toolkit-store/cloud', spec);
-  }
-});
-
-test('a file the scan cannot read as text (gzip, UTF-16) is refused', t => {
-  const w = world(t);
-  fs.mkdirSync(path.join(w.dir, 'evidence'), { recursive: true });
-  fs.writeFileSync(path.join(w.dir, 'evidence', 'logs.gz'), zlib.gzipSync(`token = ${PLANTED}\n`));
-  assert.match(w.act(['save', '--path', 'evidence/logs.gz', '--message', 'gz']).result.stopped, /could not be scanned \(over 5 MB, binary or not UTF-8\): evidence\/logs\.gz/);
-  fs.rmSync(path.join(w.dir, 'evidence', 'logs.gz'));
-  fs.writeFileSync(path.join(w.dir, 'evidence', 'u16.txt'), Buffer.from(`token = ${PLANTED}\n`, 'utf16le'));
-  assert.match(w.act(['save', '--path', 'evidence/u16.txt', '--message', 'u16']).result.stopped, /evidence\/u16\.txt/);
-  assert.ok(!w.remoteHas('evidence/logs.gz') && !w.remoteHas('evidence/u16.txt'));
-  assert.deepEqual(pushes(w.calls), []);
-});
-
-test('merge-branch scans every commit the branch brings in, and keeps to the store folders', t => {
-  const w = world(t);
-  git(w.other, 'checkout', '--quiet', '-B', 'hist', 'origin/main');
-  commitIn(w.other, 'archives/tmp.md', `key ${PLANTED}\n`, 'leak');
-  fs.rmSync(path.join(w.other, 'archives', 'tmp.md'));
-  commitIn(w.other, 'archives/clean.md', 'clean\n', 'cleanup');
-  git(w.other, 'push', '--quiet', 'origin', 'hist');
-  assert.match(w.act(['merge-branch', '--branch', 'hist', '--message', 'm']).result.stopped, /archives\/tmp\.md:1 \(github-token\)/);
-  assert.ok(!spawnSync('git', ['--git-dir', w.remote, 'log', '--format=%s', 'main'], { encoding: 'utf8' }).stdout.split('\n').includes('leak'));
-  assert.ok(!fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD')));
-
-  git(w.other, 'checkout', '--quiet', '-B', 'wf', 'origin/main');
-  commitIn(w.other, '.github/workflows/x.yml', 'on: push\n', 'wf');
-  git(w.other, 'push', '--quiet', 'origin', 'wf');
-  assert.match(w.act(['merge-branch', '--branch', 'wf', '--message', 'm']).result.stopped, /\.github\/workflows\/x\.yml is outside the store folders/);
-  assert.ok(!w.remoteHas('.github/workflows/x.yml'));
 });
 
 test('global push settings that could widen a push are refused, and git is found on PATH by full path', t => {

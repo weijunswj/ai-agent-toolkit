@@ -333,7 +333,7 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   // The render result is set here, never left to where this checkout's commit sits: the prepared copies travel as they are.
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stderr.push(text) },
-    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, ask: async () => answers.shift() ?? '',
+    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, environment: {}, ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
   // A yes receipt from an older Toolkit is never published by an agent's publish --run.
@@ -405,7 +405,7 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: rendered, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stdout.push(text) },
-    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, ask: async () => answers.shift() ?? '',
+    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, environment: {}, ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
   answers.push('all recommended');
@@ -813,7 +813,7 @@ test('a disabled repository turned on through the bank: the bank shown before th
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stdout.push(text) },
-    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true,
+    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, environment: {},
     ask: async () => { shown.push(stdout.join('')); return answers.shift() ?? ''; },
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });

@@ -508,8 +508,13 @@ test('F: the Hooks lines for each host, with the portable path whenever a host h
     ['Claude Code account copy with no hooks declared', { claudeRegistry: absent, claudeAccountCopy: () => tmp(), claudeBlockers: () => [] }, {}, ['Hooks: Claude Code plugin present, no hooks declared'], true],
     ['Claude Code, no install and no account copy', { claudeRegistry: absent, claudeAccountCopy: () => null }, {}, ['Hooks: Claude Code plugin absent'], true],
     ['Claude Code, hooks off in settings', { claudeRegistry: installed, claudeBlockers: () => ['Your Claude Code user settings set disableAllHooks.'] }, {}, ['Hooks: Claude Code disabled (Your Claude Code user settings set disableAllHooks.)'], true],
-    ['Codex, plugin enabled', { claudeRegistry: absent, codexInspect: () => ({ status: 'enabled' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex present, trust unknown'], true],
+    // Codex runs the hooks and Claude Code has no Toolkit, so no session here runs Toolkit without hooks.
+    ['Codex, plugin enabled', { claudeRegistry: absent, codexInspect: () => ({ status: 'enabled' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex present, trust unknown'], false],
     ['Projects synced copy', { claudeRegistry: absent }, { synced: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Claude Projects hooks run in cloud threads from the account copy'], true],
+    // #1381 L2: the synced Projects line is not this computer's, so it never adds the hand-run line.
+    ['Claude Code hooks and the Projects synced copy', { claudeRegistry: installed, claudeBlockers: () => [] }, { synced: true }, ['Hooks: Claude Code present (trust not checkable)', 'Hooks: Claude Projects hooks run in cloud threads from the account copy'], false],
+    ['Claude Code hooks, Codex without Toolkit', { claudeRegistry: installed, claudeBlockers: () => [], codexInspect: () => ({ status: 'unprovable' }) }, { codex: true }, ['Hooks: Claude Code present (trust not checkable)', 'Hooks: Codex plugin absent'], false],
+    ['Claude Code hooks off, Codex hooks on', { claudeRegistry: installed, claudeBlockers: () => ['Your Claude Code user settings set disableAllHooks.'], codexInspect: () => ({ status: 'enabled' }) }, { codex: true }, ['Hooks: Claude Code disabled (Your Claude Code user settings set disableAllHooks.)', 'Hooks: Codex present, trust unknown'], true],
     ['no plugin anywhere', { claudeRegistry: absent, codexInspect: () => ({ status: 'unprovable' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex plugin absent'], true],
   ];
   for (const [name, readers, setup, expected, portable] of rows) {
@@ -524,6 +529,9 @@ test('F: the Hooks lines for each host, with the portable path whenever a host h
     assert.deepEqual(lines.filter(line => line.startsWith('Hooks:')), expected, name);
     assert.equal(lines.some(line => PORTABLE.test(line)), portable, `${name}: portable path`);
   }
+  // A Claude Code cloud session runs the account copy's hooks, so it needs no hand-run line.
+  const cloud = hooks.describeHooks(hooks.hookCapability({ environment: { CLAUDE_CODE_REMOTE: 'true' }, homeDir: tmp(), readers: {} }));
+  assert.deepEqual(cloud, ['Hooks: Claude Code account copy hooks run (cloud session; merge hold runs)']);
   const nothing = hooks.describeHooks(hooks.hookCapability({ environment: {}, homeDir: tmp(), readers: {} }));
   assert.equal(nothing.length, 2);
   assert.equal(nothing[0], 'Hooks: Toolkit plugin absent');
@@ -575,6 +583,24 @@ test('status: a refresh held by an error code gets a plain reason line', () => {
   assert.equal(bindingCache.refreshReason('IDENTITY_UNREADABLE'), 'the identity read failed (IDENTITY_UNREADABLE)');
   assert.equal(bindingCache.refreshReason('not-applicable'), null);
   assert.equal(bindingCache.refreshReason('<script>'), null);
+  // #1394 L3: codes that never reach status have no line of their own.
+  for (const code of ['refresh-failed', 'identity-invalid']) assert.equal(bindingCache.refreshReason(code), null, code);
+});
+
+test('status: an origin that cannot be read is not a refresh that was held', () => {
+  const dir = tmp();
+  const governance = require('../scripts/toolkit-governance-state.cjs');
+  // No repository, no origin and an origin with no repository in it: each is answered before any refresh.
+  for (const origin of [null, '', 'https://github.com/']) {
+    const repo = path.join(dir, `repo-${String(origin).length}-${origin === null}`);
+    if (origin === null) fs.mkdirSync(repo);
+    else {
+      require('node:child_process').execFileSync('git', ['init', '--quiet', repo], { stdio: 'ignore', windowsHide: true });
+      if (origin) require('node:child_process').execFileSync('git', ['-C', repo, 'config', 'remote.origin.url', origin], { stdio: 'ignore', windowsHide: true });
+    }
+    const runGit = () => { throw new Error('no read is started'); };
+    assert.deepEqual(governance.refreshMergedBinding(repo, { registryPath: path.join(dir, 'state', 'repository-governance.v1.json'), testOnly: true }, { runGit }), { refreshed: false, error: 'not-applicable' }, String(origin));
+  }
 });
 
 test('session start deletes this repository\'s offline queues once governance is confirmed off, and only then', () => {

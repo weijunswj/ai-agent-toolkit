@@ -125,6 +125,9 @@ test('a single no writes none of the three and says so once', async t => {
   assert.deepEqual(github.writes, []);
   assert.equal(github.rulesets.length, 0);
   assert.equal(out.split('No rulesets or default-branch protection were added.').length - 1, 1, 'said once');
+  // 1460 G2 L5: the question no longer implies a no writes nothing, since the free security step still runs.
+  assert.match(out, /No ruleset or default-branch protection is written until you answer once; the free dependency and security settings are turned on either way:/);
+  assert.doesNotMatch(out, /Nothing is written until you answer/);
 });
 
 test('the one Enter covers only the changes that need something', async t => {

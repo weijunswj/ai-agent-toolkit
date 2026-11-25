@@ -110,7 +110,8 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
 
   // The strong-default state of one setting row (toolkit-question-bank.cjs).
   function claudeSettingDefaultState(entry) {
-    if (!entry || [CLAUDE_SETTINGS_STATES.UNREADABLE, CLAUDE_SETTINGS_STATES.UNSUPPORTED].includes(entry.state)) return STRONG_DEFAULT_STATES.UNREADABLE;
+    if (!entry || entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return STRONG_DEFAULT_STATES.UNREADABLE;
+    if (entry.state === CLAUDE_SETTINGS_STATES.UNSUPPORTED) return STRONG_DEFAULT_STATES.UNSUPPORTED;
     if (entry.blocked || entry.state === CLAUDE_SETTINGS_STATES.OWNER) return STRONG_DEFAULT_STATES.OWNER_VALUE;
     if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return STRONG_DEFAULT_STATES.TOOLKIT_DEFAULT;
     if (entry.state === CLAUDE_SETTINGS_STATES.OFF || entry.state === CLAUDE_SETTINGS_STATES.OWNER_OFF) return STRONG_DEFAULT_STATES.OWNER_OFF;

@@ -15,8 +15,7 @@
 //
 // A Claude Code cloud session runs the hooks synced from the claude.ai account copy too, the merge
 // hold included (not the governance question, which a cloud container cannot keep an answer
-// for), but the programme refresh cannot write without a signed-in gh, so the portable path still
-// applies there.
+// for), so the portable path is not named there.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -98,7 +97,16 @@ function hookCapability({ environment = process.env, homeDir = os.homedir(), rea
     projectsHooks({ environment, homeDir }),
   ].filter(Boolean);
   if (!hosts.length) hosts.push({ host: 'Toolkit', state: 'plugin absent' });
-  return { hosts, portable: hosts.some(entry => !/^present/.test(entry.state)) };
+  return { hosts, portable: portable(hosts) };
+}
+
+// Whether a session here may run Toolkit without its hooks, read from the coding apps' lines only (the
+// synced Projects line says nothing about this computer): no coding app runs the hooks, or one has
+// Toolkit installed with its hooks not running. An app with no Toolkit at all runs no Toolkit session.
+function portable(hosts) {
+  const coding = hosts.filter(entry => entry.host === 'Claude Code' || entry.host === 'Codex');
+  const running = entry => /^present|^account copy hooks run/.test(entry.state);
+  return !coding.some(running) || coding.some(entry => !running(entry) && entry.state !== 'plugin absent');
 }
 
 function describeHooks(result) {

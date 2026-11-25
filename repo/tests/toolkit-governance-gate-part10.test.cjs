@@ -240,7 +240,7 @@ test('hosts: the Claude hook script asks once and records the answer end to end 
   const card = run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' });
   assert.equal(card.decision, undefined);
   assert.match(card.systemMessage, /Pick an answer on the card, or carry on; nothing waits on it/);
-  assert.equal(noticeOf(card.hookSpecificOutput.additionalContext), gate.QUESTION.join('\n'));
+  assert.equal(noticeOf(card.hookSpecificOutput.additionalContext), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
   assert.ok(card.hookSpecificOutput.additionalContext.includes(JSON.stringify(gate.PICKER_INPUT)));
   for (let call = 0; call < 3; call += 1) assert.deepEqual(tool(), {}, `tool call ${call + 1} of the asked run`);
   // The second and third messages of the run carry no question.
@@ -299,7 +299,7 @@ test('hosts: the Codex helper hook lets prompts and tools through in an undecide
   const first = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
   assert.equal(first.status, 0, first.stderr);
   assert.match(contextOf(first), /1\. Do what the user asked in the message above\.\n2\. End your reply with this question, word for word, and ask nothing else in that reply:/);
-  assert.equal(noticeOf(contextOf(first)), gate.QUESTION.join('\n'));
+  assert.equal(noticeOf(contextOf(first)), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
   for (let call = 0; call < 3; call += 1) {
     const tool = run({ hook_event_name: 'PreToolUse', cwd: repo, session_id: 'codex-session', tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
     assert.equal(tool.status, 0, `tool call ${call + 1}: ${tool.stdout}`);
@@ -310,7 +310,7 @@ test('hosts: the Codex helper hook lets prompts and tools through in an undecide
   codexSessionStart({ hook_event_name: 'SessionStart', session_id: 'codex-session', source: 'resume', cwd: repo });
   const resumed = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'yes' });
   assert.equal(resumed.status, 0, resumed.stderr);
-  assert.equal(noticeOf(contextOf(resumed)), gate.QUESTION.join('\n'));
+  assert.equal(noticeOf(contextOf(resumed)), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
   assert.equal(ticketOf(contextOf(resumed)), undefined);
   const homeRegistry = { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
   assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: homeRegistry, sessionId: 'codex-session' }), /is pending/);
