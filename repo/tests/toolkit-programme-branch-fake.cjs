@@ -19,7 +19,7 @@ class BranchFakeGitHub extends FakeGitHub {
     this.counter = 0;
     this.commitLog = [];
     for (const slug of [this.repository, this.storeRepository]) {
-      const git = { slug, branches: new Map(), commits: new Map(), trees: new Map(), dates: new Map() };
+      const git = { slug, branches: new Map(), commits: new Map(), trees: new Map() };
       git.branches.set('main', this.newCommit(git, new Map(), [], 'initial'));
       this.gits.set(slug.toLowerCase(), git);
     }
@@ -29,7 +29,7 @@ class BranchFakeGitHub extends FakeGitHub {
 
   newCommit(git, files, parents, message, branch = null) {
     const sha = this.newSha('commit');
-    git.commits.set(sha, { files: new Map(files), parents, message });
+    git.commits.set(sha, { files: new Map(files), parents, message, login: this.committer || this.login, date: this.tick() });
     this.commitLog.push({ repository: git.slug, branch, sha, message });
     return sha;
   }
@@ -126,9 +126,19 @@ class BranchFakeGitHub extends FakeGitHub {
       if (logged) logged.branch = branch;
       return ok(200, { ref: `refs/heads/${branch}`, object: { sha: body.sha } });
     }
+    // The branch's commits that changed a path, newest first along the first parent.
     if (rest === 'commits' && method === 'GET') {
-      const date = git.dates.get(`${params.get('sha')}:${params.get('path')}`);
-      return ok(200, date ? [{ sha: 'f'.repeat(40), commit: { committer: { date } } }] : []);
+      const path = params.get('path') || '';
+      const rows = [];
+      for (let sha = this.resolve(git, params.get('sha')); sha; sha = git.commits.get(sha).parents[0]) {
+        const { files, parents, message, login, date } = git.commits.get(sha);
+        const before = git.commits.get(parents[0])?.files || new Map();
+        const changed = [...new Set([...files.keys(), ...before.keys()])].filter(file => files.get(file) !== before.get(file));
+        if (changed.some(file => file === path || file.startsWith(`${path}/`)) && (!params.get('author') || login === params.get('author'))) rows.push({ sha, commit: { message, committer: { date } }, author: { login } });
+      }
+      const size = Number(params.get('per_page') || 30);
+      const page = Number(params.get('page') || 1);
+      return ok(200, rows.slice((page - 1) * size, page * size));
     }
     return super.route(method, fullPath, body);
   }
@@ -161,7 +171,6 @@ class BranchFakeGitHub extends FakeGitHub {
       files.set(file, text);
       const sha = this.newCommit(git, files, [head], body.message, branch);
       git.branches.set(branch, sha);
-      git.dates.set(`${branch}:${file}`, this.tick());
       return ok(currentSha ? 200 : 201, { content: { sha: blobSha(text) }, commit: { sha } });
     }
     if (method === 'DELETE') {

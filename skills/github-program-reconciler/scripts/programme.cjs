@@ -28,13 +28,16 @@
 //   checkpoint --session <id> [--message-file <file>]  (the turn-end hook runs the same step)
 //
 // Only the appointed controller writes programme state. Every write below needs --controller and
-// --session <id>, and every write except creating the parent and a deliberate parent takeover also
+// --session <id>, and every write except creating the parent and a takeover also
 // needs that session to hold the parent document (a lane controller may assign and interrupt the one
 // child the catalogue delegates to its prefix):
 //   reconcile --apply [--issue <n>]
 //   init-parent --catalogue <file> --apply
 //   update-parent --patch <file>
-//   claim --parent [--takeover --takeover-record <comment id>]
+//   takeover --session <new name> --surface <text> --next <text> [--owner-stop <the owner's words>] [--apply]
+//                                                      without --apply, a dry run anyone may make: the facts, the stop
+//                                                      proof and the record it would post; with it, the record, then the
+//                                                      claim, both read back. Only this moves a parent's epoch
 //   claim --issue <n> --lane [--takeover]
 //   assign --issue <n> --role G0|G1|G2 --assignment <id> [--supersede --reason <text>]
 //   reopen --issue <n> --reason <text> [--assignment <new id>]
@@ -63,7 +66,7 @@
 //   migrate-state --dry-run                            print the public documents, sidecars and digests
 //   migrate-state --apply --plan-digest <digest>       create the branch from the dry run it names
 //
-// claim, assign, return --consume and an update that sets DONE or RETIRED first print the parent's
+// takeover, claim, assign, return --consume and an update that sets DONE or RETIRED first print the parent's
 // stored attention line (to standard error; in the JSON result as `attention`). They never refuse on it.
 //
 // The record prefix is the binding's writer prefix unless --prefix is given. --json prints JSON.
@@ -84,15 +87,16 @@ const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
 const { ReadCache } = require('./programme-read-cache.cjs');
 const holderOrder = require('./programme-holder-order.cjs');
 const { OrderQueue } = require('./programme-order-queue.cjs');
+const takeoverRun = require('./programme-takeover.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
-const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
+const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'takeover', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace', '--queue']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--surface', '--owner-stop', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -157,12 +161,13 @@ function parseArgs(argv) {
   if (command === 'show') needs(!(args.parent && args.issue !== undefined), 'show takes --parent or --issue <n>, not both.');
   needs(!args.queue || (command === 'show' && args.issue === undefined && !args['include-private'] && !args.session), 'show --queue lists the queue of the parent and takes only --parent, --json and --repo-root.');
   if (command === 'claim') {
-    needs(Boolean(args.parent) !== (args.issue !== undefined), 'claim needs --issue <n> --lane or --parent.');
     needs(args.role === undefined, 'Gates are not claimed: the controller runs assign --issue <n> --role <gate> --assignment <id>.');
-    needs(!args.parent || !args.lane, '--lane is for claim --issue <n>.');
-    needs(args.parent || args.lane, 'claim --issue <n> is only for a lane controller (--lane); the controller assigns gates with assign.');
-    needs(!args['takeover-record'] || (args.parent && args.takeover), '--takeover-record goes with claim --parent --takeover.');
-  }
+    needs(!args.parent && args.issue !== undefined && args.lane, 'claim needs --issue <n> --lane: it takes one task for a lane controller. Controller: take the parent with takeover, and assign gates with assign.');
+  } else needs(!args.takeover && !args.lane, '--takeover and --lane go with claim --issue <n> --lane.');
+  if (command === 'takeover') {
+    const extra = Object.keys(args).filter(key => !['command', 'session', 'prefix', 'controller', 'surface', 'next', 'owner-stop', 'apply', 'json', 'repo-root'].includes(key));
+    needs(!extra.length, `takeover takes only --session, --prefix, --controller, --surface, --next, --owner-stop, --apply, --json and --repo-root (got --${extra[0]}).`);
+  } else needs(args.surface === undefined && args['owner-stop'] === undefined, '--surface and --owner-stop go with takeover.');
   if (command === 'assign') {
     needs(args.issue !== undefined && args.role && args.assignment, 'assign needs --issue <n>, --role G0|G1|G2 and --assignment <id>.');
     needs(!args.reason || args.supersede, '--reason goes with --supersede on assign.');
@@ -183,7 +188,7 @@ function parseArgs(argv) {
   }
   if (command === 'checkpoint') needs(args.session, 'checkpoint needs --session <this session\'s own id>.');
   if (command === 'ack') needs(args.finding && args.next && !args.reason, 'ack needs --finding <id> and --next <the step you will take> (and no --reason; dispose takes one); --due <time> is optional.');
-  needs(command === 'ack' || (args.next === undefined && args.due === undefined), '--next and --due go with ack.');
+  needs(command === 'ack' || (args.due === undefined && (args.next === undefined || command === 'takeover')), '--next and --due go with ack (--next with takeover too).');
   if (command === 'dispose') needs(args.finding && args.reason, 'dispose needs --finding <id> and --reason <text>.');
   if (command === 'migrate-state') {
     needs(Boolean(args['dry-run']) !== Boolean(args.apply), 'migrate-state needs --dry-run or --apply.');
@@ -197,7 +202,7 @@ function parseArgs(argv) {
 // Commands that write programme state or GitHub. Each one is the controller's. `refresh` also writes,
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
-  if (args.command === 'reconcile' || args.command === 'init-parent' || args.command === 'migrate-state') return Boolean(args.apply);
+  if (['reconcile', 'init-parent', 'migrate-state', 'takeover'].includes(args.command)) return Boolean(args.apply);
   return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive', 'gate-session'].includes(args.command);
 }
 
@@ -317,7 +322,7 @@ function requireGitHubGovernance(repoRoot, online = null) {
     if (merged) return merged;
   }
   if (readStop?.code) throw readStop;
-  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`);
+  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`, { governance: current.state });
 }
 
 // Binds repository identity, the store and the writer. `deps` lets tests supply a transport and the
@@ -406,7 +411,7 @@ function localCheckpoint(repository, deps = {}) {
 // A writer whose prefix is not the binding's writer prefix is a lane controller.
 const isLane = (context, writer) => writer.prefix !== context.binding.writer_prefix;
 
-// Every controller write except creating the parent and a deliberate parent takeover needs the
+// Every controller write except creating the parent and a takeover needs the
 // writing session to hold the parent document.
 function requireParentHolder(context, parentDoc) {
   const writer = requireWriter(context);
@@ -702,32 +707,6 @@ function markJournalsSeen(doc, files) {
   if (!files.length) return doc;
   doc.journals_seen = { ...(doc.journals_seen || {}), ...Object.fromEntries(files.map(file => [file.name, file.sha])) };
   return doc;
-}
-
-const escapeRegExp = text => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-// A takeover is verified from its record: a comment on the bound parent issue, by this same account,
-// carrying a decision ID with this writer's prefix, naming the epoch it takes over, and posted after
-// the parent document was last written. The tool cannot see whether another session stopped; the
-// record must say so.
-function verifyTakeoverRecord(context, parentDoc, commentId, writer) {
-  const refuse = detail => new ProgrammeError('TAKEOVER_UNVERIFIED', `The takeover record was not verified: ${detail}. Nothing changed. The new controller posts a takeover record on #${context.binding.parent_issue} (decision ID with ${writer.prefix}, the epoch it takes over, evidence that the previous writer stopped) and passes its comment ID.`);
-  if (!/^\d+$/.test(String(commentId || ''))) throw refuse('no comment ID was given');
-  const comment = context.transport.request('GET', `repos/${context.repository}/issues/comments/${commentId}`);
-  if (comment.status !== 200 || !comment.json) throw refuse(`comment ${commentId} could not be read (${comment.status})`);
-  const onParent = new RegExp(`/repos/${escapeRegExp(context.repository)}/issues/${context.binding.parent_issue}$`, 'i').test(String(comment.json.issue_url || ''));
-  if (!onParent) throw refuse(`comment ${commentId} is not on #${context.binding.parent_issue}`);
-  const user = context.transport.request('GET', 'user');
-  const login = String(user.json?.login || '');
-  if (user.status !== 200 || !login || String(comment.json.user?.login || '').toLowerCase() !== login.toLowerCase()) throw refuse('it was not posted by the account running this command');
-  const body = String(comment.json.body || '');
-  if (!new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(writer.prefix)}\\d+`).test(body)) throw refuse(`it carries no decision ID with ${writer.prefix}`);
-  const epochs = [...body.matchAll(/\bepoch\s*[:=#]?\s*(\d+)/gi)].map(match => Number(match[1]));
-  if (!epochs.includes(parentDoc.fence.epoch)) throw refuse(`it does not name epoch ${parentDoc.fence.epoch}, the one it takes over`);
-  const lastWrite = context.store.lastCommitDate('parent', context.binding.parent_issue);
-  const posted = Date.parse(comment.json.created_at || '');
-  if (!lastWrite || !Number.isFinite(posted) || posted <= Date.parse(lastWrite)) throw refuse('it is older than the parent document\'s last write');
-  return { comment_id: Number(commentId), from_epoch: parentDoc.fence.epoch };
 }
 
 // The live PR head for a G1 acceptance check; null when no PR is found.
@@ -1034,43 +1013,22 @@ const commands = {
     return writeResult('parent', context.binding.parent_issue, result, writer);
   },
 
+  // One controller takeover of the parent (programme-takeover.cjs); its context is opened there too.
+  takeover(args, context, deps = {}) {
+    return takeoverRun.takeover(args, context, { attention: doc => showAttention(doc, args, deps) });
+  },
+
+  // A lane controller's fence on the one task the catalogue delegates to it.
   claim(args, context, deps = {}) {
     const writer = requireWriter(context);
     const parentDoc = readParent(context);
     const attention = showAttention(parentDoc, args, deps);
-    if (args.lane) {
-      const outcome = outcomeFor(parentDoc, args.issue);
-      const result = context.store.mutate('child', args.issue, {
-        writer, authorise: false, create: () => state.newChild({ repository: context.repository, outcome }),
-        change: doc => state.claimLane(doc, writer, outcome, { takeover: Boolean(args.takeover) }),
-      });
-      return { ...writeResult('child', args.issue, result, writer), attention };
-    }
-    const retired = Array.isArray(parentDoc.private?.retired_holders) ? parentDoc.private.retired_holders : [];
-    if (retired.includes(writer.session)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
-    if (isLane(context, writer)) throw new ProgrammeError('ROLE_REFUSED', `A lane controller (${writer.prefix}) never holds the parent document.`);
-    const heldByOther = Boolean(parentDoc.fence.holder_session) && !state.isHolder(parentDoc, writer);
-    let record = null;
-    if (heldByOther && args.takeover) record = verifyTakeoverRecord(context, parentDoc, args['takeover-record'], writer);
-    const result = context.store.mutate('parent', context.binding.parent_issue, { writer, authorise: false, change: doc => {
-      if (record && doc.fence.epoch !== record.from_epoch) throw new ProgrammeError('TAKEOVER_UNVERIFIED', `The parent moved to epoch ${doc.fence.epoch} after the takeover record named epoch ${record.from_epoch}. Nothing changed.`);
-      const previous = doc.fence.holder_session;
-      const next = state.claimDocument(doc, writer, { takeover: Boolean(args.takeover) });
-      if (!next || !record) return next;
-      const holders = Array.isArray(next.private.retired_holders) ? next.private.retired_holders : [];
-      const takeovers = Array.isArray(next.private.takeovers) ? next.private.takeovers : [];
-      next.private = { ...next.private, retired_holders: [...holders, previous].slice(-20), takeovers: [...takeovers, record].slice(-20) };
-      return next;
-    } });
-    const output = { ...writeResult('parent', context.binding.parent_issue, result, writer), attention };
-    if (record) {
-      const unsettled = [parentDoc, ...parentDoc.outcomes.map(outcome => context.store.read('child', outcome.issue).doc).filter(Boolean)]
-        .reduce((count, doc) => count + doc.pending_effects.length, 0);
-      output.next_action = unsettled
-        ? `Controller: run reconcile --apply --controller to settle ${unsettled} earlier intent(s) by readback before any other write`
-        : 'Controller: run reconcile (a dry run) and continue';
-    }
-    return output;
+    const outcome = outcomeFor(parentDoc, args.issue);
+    const result = context.store.mutate('child', args.issue, {
+      writer, authorise: false, create: () => state.newChild({ repository: context.repository, outcome }),
+      change: doc => state.claimLane(doc, writer, outcome, { takeover: Boolean(args.takeover) }),
+    });
+    return { ...writeResult('child', args.issue, result, writer), attention };
   },
 
   assign(args, context, deps = {}) {
@@ -1662,10 +1620,10 @@ function finish(args, deps, out, opened = null) {
   const local = args.command === 'checkpoint' || (args.command === 'show' && args.session && !args.parent && args.issue === undefined);
   if (local) result = localCommands[args.command](args, deps);
   else {
-    const context = opened || openContext(args, deps);
+    const context = opened || (args.command === 'takeover' ? takeoverRun.openTakeover(args, deps, openContext) : openContext(args, deps));
     result = commands[args.command](args, context, deps);
     // A restore, rebuild or recompute of the public state branch is reported with any command.
-    const events = typeof context.store.stateBranch === 'function' && !result.state_branch ? context.store.stateBranch().events : [];
+    const events = typeof context.store?.stateBranch === 'function' && !result.state_branch ? context.store.stateBranch().events : [];
     if (events.length) {
       result = { ...result, state_branch: context.store.stateBranch() };
       if (!args.json) for (const event of events) (deps.stderr || process.stderr).write(`State branch: ${event.code}: ${event.text}\n`);
@@ -1677,6 +1635,7 @@ function finish(args, deps, out, opened = null) {
   else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
   else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
   else if (args.command === 'show' && args.queue && !args.json) out.write(formatQueue(result));
+  else if (args.command === 'takeover' && !args.json) out.write(takeoverRun.formatTakeover(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
   if (pass) return result.holds.length ? 1 : 0;
   return 0;
@@ -1690,4 +1649,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ cloudLayoutFindings, parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });
+module.exports = Object.freeze({ cloudLayoutFindings, parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, MergedSweepBindingReader });

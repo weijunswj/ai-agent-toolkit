@@ -74,3 +74,33 @@ test('real show reads stay bounded with short or long history, and only selected
     assert.ok(bytes(long, resource) > bytes(short, resource), resource);
   }
 });
+
+test('a takeover makes the same requests with 3 tasks and with 300, and reads no task document', () => {
+  const run = (tasks, argv) => {
+    const github = new FakeGitHub();
+    github.addIssue(12);
+    const binding = state.validateBinding({ schema: state.SCHEMA.bindingV2, repository: 'acme/app', governance: 'enabled',
+      parents: [{ issue: 12, record_prefix: 'INT-APP-', writer_prefix: 'INT-APP-' }],
+      store: { kind: 'github', repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' }, required_checks: ['validate'] });
+    const outcomes = Array.from({ length: tasks }, (_, index) => ({ issue: 100 + index, class: 'COMMITTED', parent: 12, order: index + 1 }));
+    github.putFile('state/acme/app/parent-12.json', state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 12, outcomes }), { session: 'desk-1', prefix: 'INT-APP-' }, {}));
+    for (const outcome of outcomes) github.files.set(`state/acme/app/issue-${outcome.issue}.json`, { text: JSON.stringify(state.newChild({ repository: 'acme/app', outcome })), sha: String(outcome.issue).padStart(40, '0') });
+    github.clock += 11 * 60 * 1000;
+    const from = github.calls.length;
+    let output = '';
+    assert.equal(cli.main(['takeover', '--session', 'desk-2', '--surface', 'test harness', '--next', 'read the map', ...argv, '--json'], {
+      transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: '.', toolkitVersion: '3.9.0', environment: {},
+      now: () => new Date(github.clock).toISOString(), stdout: { write: text => { output += text; } }, stderr: { write() {} } }), 0);
+    const result = JSON.parse(output);
+    if (argv.length) assert.equal(result.parent.epoch, 2);
+    // Ids and times differ between two runs; the requests do not.
+    return github.calls.slice(from).map(call => `${call.method} ${call.path.replace(/[0-9a-f]{40}|(?<=comments\/)\d+|(?<=ref=)c\d+/g, '*')}`);
+  };
+  for (const argv of [[], ['--apply', '--controller']]) {
+    const small = run(3, argv);
+    const large = run(300, argv);
+    assert.deepEqual(large, small, 'the same requests, one for one');
+    assert.equal(large.some(call => /issue-\d+\.json/.test(call)), false, 'no task document is read');
+    assert.ok(large.length <= 40, `${large.length} requests`);
+  }
+});
