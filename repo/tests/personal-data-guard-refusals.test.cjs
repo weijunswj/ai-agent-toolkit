@@ -202,6 +202,69 @@ test('only the one address of an author line is left alone; anything else on or 
   for (const line of refused.filter(text => /^co-authored-by/i.test(text))) assert.equal(hasAttribution(line), true, line);
 });
 
+// A co-author line naming an AI tool fails whatever its address: the no-reply exemption comes after it.
+test('a co-author line naming an AI tool is refused whatever its address, a human co-author is not', t => {
+  const { repo } = guarded(t);
+  const bot = name => pii.email(`12345+${name}`, 'users.noreply.github.com');
+  const addresses = [noreply, `noreply${pii.at}github.com`, person, `noreply${pii.at}anthropic.com`, bot('claude[bot]')];
+  const refused = [
+    // Each tool, with a GitHub no-reply address and with its own.
+    ...addresses.map(address => `Co-authored-by: Claude <${address}>`),
+    `Co-authored-by: claude[bot] <${bot('claude[bot]')}>`, `Co-authored-by: Jane <${pii.email('jane', 'anthropic.com')}>`, `Co-authored-by: Anthropic <${noreply}>`,
+    `Co-authored-by: Codex <noreply${pii.at}openai.com>`, `Co-authored-by: chatgpt-codex-connector[bot] <${bot('chatgpt-codex-connector[bot]')}>`,
+    `Co-authored-by: Cursor Agent <cursoragent${pii.at}cursor.com>`, `Co-authored-by: Cursor <${noreply}>`,
+    `Co-authored-by: Copilot <${bot('Copilot')}>`, `Co-authored-by: copilot-swe-agent[bot] <${bot('copilot-swe-agent[bot]')}>`,
+    `Co-authored-by: Gemini <${noreply}>`, `Co-authored-by: gemini-code-assist[bot] <${bot('gemini-code-assist[bot]')}>`,
+    `Co-authored-by: ChatGPT <${noreply}>`, `Co-authored-by: OpenAI <${noreply}>`, `Co-authored-by: Windsurf <${noreply}>`, `Co-authored-by: Codeium <${noreply}>`,
+    `Co-authored-by: Tabnine <${noreply}>`, `Co-authored-by: aider <${noreply}>`, `Co-authored-by: Amazon Q Developer <${noreply}>`, `Co-authored-by: CodeWhisperer <${noreply}>`, `Co-authored-by: devin-ai-integration[bot] <${bot('devin-ai-integration[bot]')}>`,
+    // Case, spacing and the other spellings of the trailer.
+    `CO-AUTHORED-BY: CLAUDE <${noreply.toUpperCase()}>`, `co-authored-by: copilot <${noreply}>`, `Co-Authored-By: Gemini <${noreply}>`,
+    `Co-authored-by :\tClaude <${noreply}>`, `  Co-authored-by:Cursor <${noreply}>  `, `Co-authored-by: Claude <${noreply}>\r`, `Co-authored-by=Claude <${noreply}>`, `Co-authored-by \t= Codex <${noreply}>`,
+    `Co-developed-by: Claude <${noreply}>`, `Co-committed-by: Copilot <${noreply}>`, `Co-authored-by: Claude`, `Co-authored-by: <${bot('claude')}>`,
+    `See Co-authored-by: Claude <${noreply}>`, `> Co-authored-by: Codex <${noreply}>`, `Co-authored-by: Jane <${noreply}> and Claude`,
+    // A human named like a tool: refused, as the attribution guard refuses it.
+    `Co-authored-by: Claude Dupont <${pii.email('claude.dupont', 'users.noreply.github.com')}>`, `Co-authored-by: Claudette Tan <${noreply}>`,
+  ];
+  const ok = [
+    `Co-authored-by: Jane <${noreply}>`, `Co-authored-by: Jane Tan <${person}>`, `Co-Authored-By: Jane Tan <${noreply}>`, `Co-developed-by: Jane <${noreply}>`,
+    `Co-authored-by: Ann Cursorini <${noreply}>`, `Co-authored-by: Ming Copilotto <${noreply}>`, `Co-authored-by: Ben Geminiani <${noreply}>`,
+    `Signed-off-by: Claude Dupont <${pii.email('claude.dupont', 'users.noreply.github.com')}>`, `Signed-off-by: Jane <${noreply}>`,
+    `Signed-off-by: dependabot[bot] <support${pii.at}github.com>`, `Co-authored-by: dependabot[bot] <${bot('dependabot[bot]')}>`,
+    'Fixed the parser that Cursor and Copilot both tripped on', `Thanks to Claude for the idea, see ${noreply}`,
+  ];
+  const rule = /commit message:3:\d+ {2}ai-attribution {2}PDG-AI-CO-AUTHOR/;
+  for (const [lines, status] of [[refused, 1], [ok, 0]]) {
+    for (const line of lines) {
+      const file = repo.write('.git/COMMIT_EDITMSG', `Subject\n\n${line}\n`);
+      const result = inProcess(repo, ['message', file]);
+      assert.equal(result.status, status, `${line}\n${result.all}`);
+      if (status) assert.match(result.all, rule, line);
+      else assert.doesNotMatch(result.all, /PDG-AI-CO-AUTHOR/, line);
+    }
+  }
+  // Every co-author line the attribution guard refuses fails here, whatever its address.
+  for (const name of ['Claude', 'claude', 'Claude Opus 4', 'claude[bot]', 'Jane (anthropic.com)']) {
+    for (const address of addresses) {
+      for (const label of ['Co-authored-by: ', 'Co-Authored-By:', 'co-authored-by = ']) {
+        const line = `${label}${name} <${address}>`;
+        assert.equal(hasAttribution(line), true, line);
+        const file = repo.write('.git/COMMIT_EDITMSG', `Subject\n\n${line}\n`);
+        assert.equal(inProcess(repo, ['message', file]).status, 1, line);
+      }
+    }
+  }
+  // As commits: the check of a range and the pull request check refuse one; the push check too.
+  for (const line of [`Co-authored-by: Claude <${noreply}>`, `Co-authored-by: Copilot <${bot('Copilot')}>`]) {
+    const { repo: other, base } = guarded(t);
+    other.git(['commit', '-q', '--no-verify', '--allow-empty', '-m', `Fix\n\n${line}`]);
+    const head = other.git(['rev-parse', 'HEAD']);
+    for (const result of [other.guard(['range', `${base}..HEAD`]), pullRequest(other, base), other.guard(['pre-push', 'origin'], { input: `refs/heads/feature ${head} refs/heads/feature ${base}\n` })]) {
+      assert.equal(result.status, 1, `${line}\n${result.all}`);
+      assert.match(result.all, /message:3:1 {2}ai-attribution {2}PDG-AI-CO-AUTHOR/, line);
+    }
+  }
+});
+
 test('a long line that looks like an author line is read in one pass', t => {
   const { repo } = guarded(t);
   for (const filler of [' ', '\t ', '<', '>', '< ', '> <']) {
