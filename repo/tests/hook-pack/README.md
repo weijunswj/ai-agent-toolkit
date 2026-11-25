@@ -11,11 +11,17 @@ The pack starts hooks directly in fixtures. It cannot prove that the installed h
 - `node repo/scripts/toolkit-hook-pack.cjs check-expectations`: lists every row removed, lowered to `known-bad` or changed in any other way since the base (hosts, event, payload, fixture, fault, expect, kind, source or note); only flipping a known-bad row toward passing (`status`, `known_bad_on`, `lane`, `added`) needs no reason. In a pull request each needs a line under a `## Pack changes` heading in the body: `<row id>: <why>`.
 - `node repo/scripts/toolkit-hook-pack.cjs validate`: checks the row format only.
 
-CI runs the full pack on Linux in `hook-pack` and in four groups of families in the `hook-pack-windows` matrix of `validate.yml`: attribution with closure-matrix and env-edit, closure-shell with push, governance with issue-closure, and fault with merge and task-governance. `--family` takes a list joined by commas or `+` (the workflow uses `+`), so each group runs in one job. The groups have about the same measured time and their union covers every row and host exactly once. Four jobs instead of nine keeps more of the account's concurrent runner slots free. The Linux job has a 360-second pack budget and each Windows group a 420-second one, all with a 15-minute timeout. The pack reports overdue work and fails the completed run if it exceeds its budget; the budget does not stop the process. The `gate` job waits for the Linux job and every Windows group and runs the expectation-change check.
+CI runs the full pack on Linux in `hook-pack` and in groups of families in the `hook-pack-windows` matrix of `validate.yml`, one job per group:
+
+- Windows groups: `attribution+issue-closure`, `closure-matrix`, `closure-shell`, `env-edit+merge-sequence+push+task-governance`, `fault+governance`, `merge`.
+
+`--family` takes a list joined by commas or `+` (the workflow uses `+`), so each group runs in one job. The groups are balanced by measured time and their union covers every row and host exactly once. Grouping the small families keeps more of the account's concurrent runner slots free. A row costs about the same for every hook process it starts (0.2 to 0.25 seconds on Windows in CI, its fixture included), so a new family joins the group whose rows start the fewest. The Linux job has a 360-second pack budget and each Windows group a 420-second one, all with a 15-minute timeout. The pack reports overdue work and fails the completed run if it exceeds its budget; the budget does not stop the process. The `gate` job waits for the Linux job and every Windows group and runs the expectation-change check.
 
 The closure shell family covers hidden writes, strict Start-Process arguments and shell syntax, with retained read and data controls. It keeps new cases out of the issue-closure and merge families.
 
 The closure matrix includes ordinary command data across folders and tool names, clean identity and body-file controls, and API, connector and approval-ordering cases. Keeping those rows together leaves headroom in the executable issue-closure family without changing any row, host or expectation. Step rows share one fixture to check merge, attribution and push decisions across Codex shell names and input shapes.
+
+The merge sequence family holds the merge rows with four or more `steps`: long approval chats whose last call must still be decided from what came before. Each starts several times as many hooks as another merge row, so keeping them together leaves headroom in the merge family.
 
 ## Rows
 

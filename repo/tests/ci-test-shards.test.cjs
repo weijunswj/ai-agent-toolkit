@@ -280,20 +280,78 @@ test('a one-file shard run writes run_id into its summary only inside GitHub Act
   assert.equal(Object.hasOwn(named, 'run_id'), false, 'a named-file run is not a shard run');
 });
 
-test('Windows hook pack groups cover every corpus host case exactly once', () => {
+// The families each Windows hook-pack job runs, as validate.yml lists them.
+function windowsGroups(workflow) {
+  const job = workflow.split('\n  hook-pack-windows:\n')[1].split('\n  personal-data:\n')[0];
+  return /families: \[([^\]]+)\]/.exec(job)[1].split(', ').map(group => /^([a-z+-]+)$/.exec(group)[1]);
+}
+
+// The hook-pack README holds the one written list of the groups; the other texts about the jobs
+// (the workflow header and the code comments included) may count them but never list them.
+const HOOK_PACK_README = 'repo/tests/hook-pack/README.md';
+const HOOK_PACK_TEXTS = Object.freeze([HOOK_PACK_README, 'repo/docs/VALIDATION-STRATEGY.md', 'repo/ARCHITECTURE.md', 'repo/docs/agent-playbooks/hook-design.md', '.github/workflows/validate.yml', 'repo/scripts/ci-test-shards.cjs']);
+const NUMBER_WORDS = Object.freeze(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']);
+
+function hookPackTexts() {
+  return Object.fromEntries(HOOK_PACK_TEXTS.map(rel => [rel, fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8')]));
+}
+
+// What is wrong with the groups: a family in no group or in two, a name that is no family, or a text
+// that lists or counts them differently.
+function windowsGroupProblems(groups, families, texts) {
+  const problems = [];
+  const grouped = groups.flatMap(group => group.split('+'));
+  for (const family of families) {
+    const count = grouped.filter(name => name === family).length;
+    if (count !== 1) problems.push(`${family} is in ${count} groups`);
+  }
+  for (const name of new Set(grouped)) if (!families.includes(name)) problems.push(`${name} is no family`);
+  const listed = /^- Windows groups: (.+)$/m.exec(texts[HOOK_PACK_README]);
+  const named = listed ? [...listed[1].matchAll(/`([^`]+)`/g)].map(match => match[1]) : [];
+  if (named.join(', ') !== groups.join(', ')) problems.push(`${HOOK_PACK_README} lists ${named.join(', ') || 'no groups'}`);
+  const counted = new RegExp(`\\b(${NUMBER_WORDS.join('|')}|\\d+)\\s+(?:Windows\\s+)?(?:hook-pack\\s+)?(families|groups)\\b`, 'gi');
+  for (const [rel, text] of Object.entries(texts)) {
+    for (const [phrase, number, noun] of text.matchAll(counted)) {
+      const value = NUMBER_WORDS.includes(number.toLowerCase()) ? NUMBER_WORDS.indexOf(number.toLowerCase()) : Number(number);
+      if (value !== (noun.toLowerCase() === 'groups' ? groups : families).length) problems.push(`${rel} says "${phrase.replace(/\s+/g, ' ')}"`);
+    }
+  }
+  return problems;
+}
+
+test('Windows hook pack groups cover every corpus host case exactly once, as the docs list them', () => {
   const pack = require('../scripts/toolkit-hook-pack.cjs');
   const corpus = pack.loadCorpus(ROOT);
   assert.deepEqual(corpus.errors, []);
-  const job = WORKFLOW.split('\n  hook-pack-windows:\n')[1].split('\n  personal-data:\n')[0];
-  const groups = /families: \[([^\]]+)\]/.exec(job)[1].split(', ').map(group => /^([a-z+-]+)$/.exec(group)[1]);
-  assert.equal(groups.length, 4, 'four Windows jobs');
-  const families = groups.flatMap(group => group.split('+'));
-  assert.equal(new Set(families).size, families.length, 'no family in two groups');
-  assert.deepEqual([...families].sort(), [...new Set(corpus.rows.map(row => row.family))].sort());
+  const groups = windowsGroups(WORKFLOW);
+  assert.equal(groups.length, 6, 'six Windows jobs');
+  const families = [...new Set(corpus.rows.map(row => row.family))].sort();
+  assert.deepEqual(windowsGroupProblems(groups, families, hookPackTexts()), []);
   const cases = rows => rows.flatMap(row => row.hosts.map(host => `${row.id}:${host}`)).sort();
   // The rows each job actually selects, through the script's own --family parsing.
   const selected = groups.flatMap(group => pack.selectRows(corpus.rows, pack.parseArgs(['run', '--family', group])));
   assert.deepEqual(cases(selected), cases(corpus.rows), 'same row and host pairs, with no duplicates or omissions');
+});
+
+test('the Windows group check names a missing, doubled or unknown family and a text that disagrees', () => {
+  const families = [...new Set(require('../scripts/toolkit-hook-pack.cjs').loadCorpus(ROOT).rows.map(row => row.family))].sort();
+  const groups = windowsGroups(WORKFLOW);
+  const texts = hookPackTexts();
+  const [family] = groups[0].split('+');
+  // The README follows each bad group list, so only the fault under test is left.
+  const withList = list => ({ ...texts, [HOOK_PACK_README]: texts[HOOK_PACK_README].replace(/^- Windows groups: .+$/m, `- Windows groups: ${list.map(group => `\`${group}\``).join(', ')}.`) });
+  const problems = (list, where = withList(list), known = families) => windowsGroupProblems(list, known, where);
+  const without = groups.map(group => group.split('+').filter(name => name !== family).join('+')).filter(Boolean);
+  assert.ok(problems(without).includes(`${family} is in 0 groups`), 'a family left out of the groups');
+  assert.ok(problems(groups, texts, [...families, 'new-family']).includes('new-family is in 0 groups'), 'a new corpus family no group runs');
+  assert.deepEqual(problems([...groups.slice(0, -1), `${groups.at(-1)}+${family}`]), [`${family} is in 2 groups`]);
+  assert.deepEqual(problems([...groups.slice(0, -1), `${groups.at(-1)}+not-a-family`]), ['not-a-family is no family']);
+  assert.deepEqual(problems(groups, withList([...groups].reverse())), [`${HOOK_PACK_README} lists ${[...groups].reverse().join(', ')}`]);
+  assert.deepEqual(problems(groups, { ...texts, [HOOK_PACK_README]: texts[HOOK_PACK_README].replace(/^- Windows groups: .+$/m, '') }), [`${HOOK_PACK_README} lists no groups`]);
+  for (const rel of HOOK_PACK_TEXTS) {
+    assert.deepEqual(problems(groups, { ...texts, [rel]: `${texts[rel]}\nThe four groups.\n` }), [`${rel} says "four groups"`]);
+    assert.deepEqual(problems(groups, { ...texts, [rel]: `${texts[rel]}\nThe nine\nWindows families.\n` }), [`${rel} says "nine Windows families"`]);
+  }
 });
 
 // The pinned uses: text of an action as it stands in a workflow. Found at run time, so the tests
@@ -381,13 +439,13 @@ function assertDriftGuard(WORKFLOW) {
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the hook pack dropped on Windows', WORKFLOW.replace('    runs-on: windows-latest\n    timeout-minutes: 15', '    runs-on: ubuntu-latest\n    timeout-minutes: 15')],
     ['the Windows pack job removed', WORKFLOW.replace(/\n  hook-pack-windows:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
-    ['the closure matrix family dropped', WORKFLOW.replace('[attribution+closure-matrix+env-edit,', '[attribution+env-edit,')],
-    ['the env edit family dropped', WORKFLOW.replace('[attribution+closure-matrix+env-edit,', '[attribution+closure-matrix,')],
-    ['the closure shell family dropped', WORKFLOW.replace(' closure-shell+push,', ' push,')],
-    ['a Windows family dropped', WORKFLOW.replace(' governance+issue-closure,', ' governance,')],
-    ['a Windows family duplicated', WORKFLOW.replace('fault+merge+task-governance]', 'fault+merge+task-governance+push]')],
-    ['a Windows group dropped', WORKFLOW.replace(', fault+merge+task-governance]', ']')],
-    ['the Windows groups split back into one job per family', WORKFLOW.replace('governance+issue-closure', 'governance, issue-closure')],
+    ['the closure matrix family dropped', WORKFLOW.replace(' closure-matrix,', '')],
+    ['the env edit family dropped', WORKFLOW.replace(' env-edit+merge-sequence+', ' merge-sequence+')],
+    ['the closure shell family dropped', WORKFLOW.replace(' closure-shell,', '')],
+    ['a Windows family dropped', WORKFLOW.replace(' fault+governance,', ' governance,')],
+    ['a Windows family duplicated', WORKFLOW.replace(', merge]', ', merge+push]')],
+    ['a Windows group dropped', WORKFLOW.replace(', merge]', ']')],
+    ['the Windows groups split back into one job per family', WORKFLOW.replace('attribution+issue-closure', 'attribution, issue-closure')],
     ['the Windows group left unquoted for PowerShell', WORKFLOW.replace('--family "${{ matrix.families }}"', '--family ${{ matrix.families }}')],
     ['a Windows family filter removed', WORKFLOW.replace(' --family "${{ matrix.families }}"', '')],
     ['the Windows pack budget raised', WORKFLOW.replace(' --family "${{ matrix.families }}" --budget-seconds 420', ' --family "${{ matrix.families }}" --budget-seconds 480')],
