@@ -50,8 +50,10 @@ const PREFIX = 'Toolkit gate launch check: ';
 // The failure it prevents: the app continues a controller's chat only once none of the sessions it
 // started is working, so with two gates running the first result waits for the second (25 November 2026:
 // 34 minutes). Tried on 26 November 2026: the host's idle notice refuses a session's id; by its listed name
-// it subscribes, and the one notice wakes the asking chat once that chat's own turn has ended.
-const WAKE_LINE = 'With more than one gate session running, ask for a wake on this one once it is at work: SendMessage to its ListAgents name (not its id, which is refused) with notify_when_idle true and no message, or a background watch on GitHub for its verdict comment or pull request. The app continues this chat by itself only once no session it started is working.';
+// it subscribes, and the one notice wakes the asking chat once that chat's own turn has ended (seen twice:
+// once at the end of a turn, once while the chat was already idle). The host offers it for sessions on this
+// computer only, so the GitHub watch stays for the rest and for a notice that never comes.
+const WAKE_LINE = 'With more than one gate session running, ask for a wake on this one once it is at work. For a session on this computer: SendMessage to the name ListAgents shows for it (never its local_ id, which is refused) with notify_when_idle true and no message; its one notice wakes this chat once this chat has ended its turn. If that is refused or no notice comes, and for a cloud session or one on another computer through Remote Control, watch GitHub in the background for its verdict comment or pull request instead. The app continues this chat by itself only once no session it started is working.';
 
 const gateRoute = () => require('./toolkit-gate-route.cjs');
 const programmeCommand = args => require('./toolkit-user-state.cjs').programmeCommand(args);

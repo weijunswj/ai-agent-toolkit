@@ -3988,7 +3988,7 @@
       "expect": {
         "decision": "allow",
         "context_contains": [
-          "With more than one gate session running, ask for a wake on this one once it is at work"
+          "With more than one gate session running, ask for a wake on this one once it is at work. For a session on this computer: SendMessage to the name ListAgents shows for it (never its local_ id, which is refused)"
         ]
       },
       "status": "pass"

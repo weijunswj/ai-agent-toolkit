@@ -111,7 +111,7 @@ test('hostile line breaks and large briefs never split the launch check from the
 
 // 25 Nov 2026: a review passed at 14:07Z and the controller saw it at 14:41Z, because the app continues a
 // chat only once no session it started is working and another gate was still building.
-const WAKE = /With more than one gate session running, ask for a wake on this one once it is at work: SendMessage to its ListAgents name \(not its id, which is refused\) with notify_when_idle true and no message, or a background watch on GitHub for its verdict comment or pull request\. The app continues this chat by itself only once no session it started is working\.$/;
+const WAKE = /With more than one gate session running, ask for a wake on this one once it is at work\. For a session on this computer: SendMessage to the name ListAgents shows for it \(never its local_ id, which is refused\) with notify_when_idle true and no message; its one notice wakes this chat once this chat has ended its turn\. If that is refused or no notice comes, and for a cloud session or one on another computer through Remote Control, watch GitHub in the background for its verdict comment or pull request instead\. The app continues this chat by itself only once no session it started is working\.$/;
 
 test('after a start it prints the effort raise and the record steps', () => {
   const post = (toolInput, text, level = 'high') => launch.postToolUse({ tool_name: TOOL, tool_input: toolInput, tool_response: [{ type: 'text', text }], effort: { level } }, { environment: {}, registry });
