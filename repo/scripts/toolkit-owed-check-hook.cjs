@@ -10,11 +10,21 @@
 //   not running, have every pull request merged or closed and no step waiting on the owner;
 // - gate records owed: a gate this session launched with no `programme.cjs gate-session` record after
 //   it, and an archived gate session whose close is not recorded.
-// It reads only local files (no git, gh or network), stops a turn only when the list has an entry it has
-// not shown this session before, never
-// when the host says this stop already follows a hook block, and never in a gate, helper or side
-// session. Anything it cannot read is one visible note and never a block. Claude Code only: Codex runs
-// toolkit-programme-checkpoint-hook.cjs alone, which never prints.
+// It reads only local files (no git, gh or network) and stops a turn only when the list has an entry it
+// has not shown this session before.
+//
+// Who counts as the controller is decided the same in every Claude Code entry point (desktop app, CLI in
+// a terminal, IDE extensions, headless): no variable the host sets decides it, only this session's
+// transcript (its own rows show it acted as the controller, see scanTranscript; its first message is not
+// a gate brief) and Toolkit's own launcher marks (toolkit-governed-repo.cjs LAUNCHER_MARKERS). For a
+// controller's session, CLAUDE_CODE_HOST_SESSION_ID finds the desktop app's session files; they add the
+// finished side sessions section (which can stop a turn by itself) and drop launch records owed for
+// sessions the app shows archived. Without them that part is skipped and the rest still runs.
+// It never stops a turn when the host says this stop already follows a hook block. Anything it cannot
+// read is one visible note and never a block.
+//
+// Codex is not covered: it runs toolkit-programme-checkpoint-hook.cjs alone at turn end, which never
+// prints.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -28,11 +38,10 @@ const CLAUDE_SESSION = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 const PR_STATES = new Set(['OPEN', 'MERGED', 'CLOSED']);
 // A transcript larger than this is not scanned (one note instead), so the hook stays inside its timeout.
 const TRANSCRIPT_MAX_BYTES = 256 * 1024 * 1024;
+// How much of the end of another chat's transcript is read to see when it last went on.
+const TAIL_BYTES = 1024 * 1024;
 // Desktop session files read per turn end, at most; past it the check says it stopped early.
 const SESSION_FILES_MAX = 5000;
-// Launcher marks of gate and helper runs (programme.cjs EXECUTOR_MARKERS) and the host's side-session mark.
-const SILENT_ENV = ['CLAUDE_CODE_CHILD_SESSION', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING'];
-const GATES = new Set(['G0', 'G1', 'G2', 'DESIGN_CHALLENGE']);
 const LIST_LIMIT = 12;
 // A launch record is owed right after the launch, so launches older than LAUNCH_WINDOW_MS are not
 // checked (an older one predates the check or was settled long ago); archives are checked for a week.
@@ -59,10 +68,57 @@ function flagValue(command, flag) {
   return match ? (match[1] ?? match[2] ?? match[3]) : null;
 }
 
-// What this session's transcript shows: whether it acted as the controller (a gate launch, or a
-// programme command with --controller), the gate sessions it launched, the gate-session records and
+// Whether a shell call runs programme.cjs with --controller: `node <...>/programme.cjs ... --controller`
+// as a command it executes, with the script or the flags written out or held in a variable the same call
+// sets. A command that only mentions them (a search, a commit message, a file it writes, --help) does
+// not count. Accepted gap: a script file that runs it is not read, so it does not count either.
+function runsAsController(name, command) {
+  if (!/programme\.cjs/.test(command) || !/--controller\b/.test(command)) return false;
+  const { scriptCommands, scriptContext } = require('./toolkit-shell-call.cjs');
+  let commands;
+  try { commands = scriptCommands(command, scriptContext({ tool_name: name, tool_input: { command } })); } catch { return false; }
+  const variables = new Map();
+  const split = words => words.join(' ').split(/\s+/).map(word => word.replace(/^["']+|["']+$/g, '')).filter(Boolean);
+  for (const { words, sourceWords = [] } of commands) {
+    // NAME=value (bash), or $name = value and $name=value (PowerShell).
+    const assignment = /^\$?([A-Za-z_]\w*)(?:=(.*))?$/s.exec(sourceWords[0] || '');
+    if (assignment && (assignment[2] !== undefined || sourceWords[1] === '=')) {
+      variables.set(assignment[1], split(assignment[2] ? [assignment[2], ...sourceWords.slice(1)] : sourceWords.slice(sourceWords[1] === '=' ? 2 : 1)));
+    }
+    const run = words.flatMap(word => {
+      const variable = /^\$(?:\{(\w+)\}|(\w+))$/.exec(word);
+      return (variable && variables.get(variable[1] || variable[2])) || [word];
+    });
+    if (!/(?:^|[\\/])node(?:\.exe)?$/i.test(run[0] || '')) continue;
+    const script = run.findIndex((word, index) => index > 0 && !word.startsWith('-'));
+    if (script < 0 || !/(?:^|[\\/])programme\.cjs$/.test(run[script])) continue;
+    const flags = run.slice(script + 1);
+    if (flags.includes('--controller') && !flags.includes('--help')) return true;
+  }
+  return false;
+}
+
+// Whether the chat with this session id went on after `sinceMs`, read from its own transcript beside
+// this one. False when that transcript is gone or cannot be read.
+function wentOn(file, sessionId, sinceMs) {
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return false;
+  const tail = require('./toolkit-transcript-tail.cjs').readTail(path.join(path.dirname(file), `${sessionId}.jsonl`), TAIL_BYTES);
+  return (tail ? tail.entries : []).some(row => (row.type === 'user' || row.type === 'assistant') && !row.isSidechain && Date.parse(row.timestamp) > sinceMs);
+}
+
+// What this session's own transcript rows show: whether it acted as the controller (a gate it launched,
+// or programme.cjs run with --controller), the gate sessions it launched, the gate-session records and
 // closes it ran, and the sessions it archived. Calls the host refused (is_error) do not count.
-function scanTranscript(file, nowMs = Date.now()) {
+//
+// Rows Claude Code copied from another chat do not count:
+// - a file copy (the desktop app's Fork, /btw and forked side sessions) keeps the other chat's sessionId;
+// - a branch rewrites sessionId and writes forkedFrom on every copied row;
+// - a continuation under a new id (the desktop app's rewind of a chat, or a CLI resume with
+//   --fork-session) rewrites sessionId and names the old id in requestSessionId on assistant rows. The
+//   rows do not say which it was, so they count as this chat's own unless the old chat went on after
+//   this one began (accepted gap: a --fork-session copy counts until the old chat next goes on).
+// A resume after a restart, and a compaction, keep the session id, so those rows are the chat's own.
+function scanTranscript(file, sessionId, nowMs = Date.now()) {
   const out = { controller: false, launches: [], recorded: new Map(), closed: new Set(), archived: [] };
   const size = fs.statSync(file).size;
   if (size > TRANSCRIPT_MAX_BYTES) throw Object.assign(new Error('too large'), { note: 'this session\'s transcript is too large to scan' });
@@ -70,39 +126,50 @@ function scanTranscript(file, nowMs = Date.now()) {
   const errors = new Set();
   const calls = [];
   const results = new Map();
+  // When this chat itself began: its first assistant row that was not carried over.
+  let beganMs = null;
   for (const line of lines) {
-    if (!/start_session|Started session|archive_session|gate-session|--controller|"is_error":true/.test(line)) continue;
+    const began = beganMs === null && line.includes('"type":"assistant"') && line.includes(sessionId) && !line.includes('"requestSessionId"');
+    if (!began && !/start_session|Started session|archive_session|gate-session|--controller|"is_error":true/.test(line)) continue;
     let row;
     try { row = JSON.parse(line); } catch { continue; }
-    if (row && row.isSidechain) continue;
-    const content = row?.message?.content;
+    if (!row || row.isSidechain || row.forkedFrom !== undefined || (typeof row.sessionId === 'string' && row.sessionId !== sessionId)) continue;
+    const from = typeof row.requestSessionId === 'string' && row.requestSessionId !== sessionId ? row.requestSessionId : null;
+    if (began && row.type === 'assistant') beganMs = Date.parse(row.timestamp);
+    const content = row.message?.content;
     if (!Array.isArray(content)) continue;
     for (const part of content) {
       if (!part || typeof part !== 'object') continue;
-      if (part.type === 'tool_use') calls.push({ ...part, at: Date.parse(row.timestamp) });
+      if (part.type === 'tool_use') calls.push({ ...part, at: Date.parse(row.timestamp), from });
       else if (part.type === 'tool_result') {
         if (part.is_error === true) errors.add(part.tool_use_id);
         results.set(part.tool_use_id, toolText(part.content));
       }
     }
   }
-  const { parseBrief } = require('./toolkit-gate-route.cjs');
+  const { parseBrief, declaredGate } = require('./toolkit-gate-route.cjs');
+  const elsewhere = new Map();
   for (const call of calls) {
     if (errors.has(call.id)) continue;
+    if (call.from) {
+      if (!elsewhere.has(call.from)) elsewhere.set(call.from, wentOn(file, call.from, beganMs ?? nowMs));
+      if (elsewhere.get(call.from)) continue;
+    }
     const name = String(call.name || '');
     const input = call.input && typeof call.input === 'object' ? call.input : {};
     const age = Number.isFinite(call.at) ? nowMs - call.at : Infinity;
     if (/(?:^|__)start_session$/.test(name)) {
-      const gate = parseBrief(typeof input.prompt === 'string' ? input.prompt : '').gate;
-      if (!GATES.has(gate)) continue;
-      out.controller = true;
+      // The brief as the started session reads it; a proposal nobody started is not a launch.
+      const gate = declaredGate(parseBrief([input.context === 'fork' ? null : input.background, input.prompt].filter(text => typeof text === 'string').join('\n\n')));
       const started = /\(session_id: (local_[0-9a-f-]{36})\b/.exec(results.get(call.id) || '');
-      if (age <= LAUNCH_WINDOW_MS && started && CLAUDE_SESSION.test(started[1])) out.launches.push({ session: started[1], gate, title: oneLine(input.title) });
+      if (!gate || !started) continue;
+      out.controller = true;
+      if (age <= LAUNCH_WINDOW_MS && CLAUDE_SESSION.test(started[1])) out.launches.push({ session: started[1], gate, title: oneLine(input.title) });
     } else if (/(?:^|__)archive_session$/.test(name)) {
       if (age <= ARCHIVE_WINDOW_MS && CLAUDE_SESSION.test(String(input.session_id))) out.archived.push(input.session_id);
     } else if (/^(?:Bash|PowerShell)$/.test(name) && typeof input.command === 'string' && /programme\.cjs/.test(input.command)) {
       const command = input.command;
-      if (/\s--controller\b/.test(command)) out.controller = true;
+      if (!out.controller && runsAsController(name, command)) out.controller = true;
       if (!/\sgate-session\b/.test(command)) continue;
       const assignment = flagValue(command, '--assignment');
       const session = flagValue(command, '--host-session');
@@ -304,7 +371,9 @@ function check(input, deps = {}) {
   if (!input || typeof input !== 'object') return { outcome: 'NO_INPUT', output: null };
   if (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop') return { outcome: 'NOT_STOP', output: null };
   if (input.stop_hook_active === true) return { outcome: 'ALREADY_BLOCKED', output: null };
-  if (SILENT_ENV.some(name => String(env[name] || '').trim())) return { outcome: 'EXECUTOR', output: null };
+  // A session a Toolkit launcher started (a gate, a pinned helper or task profile) is an executor.
+  const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
+  if (LAUNCHER_MARKERS.some(name => String(env[name] || '').trim())) return { outcome: 'EXECUTOR', output: null };
   const sessionId = typeof input.session_id === 'string' && input.session_id.trim() ? input.session_id : null;
   if (!sessionId) return { outcome: 'NO_SESSION', output: null };
   const root = require(path.join(SCRIPTS, 'programme-refresh-trigger.cjs')).governedRoot(input.cwd);
@@ -320,10 +389,9 @@ function check(input, deps = {}) {
     // A gate session (its first message is a gate brief) is never stopped by this check.
     try {
       const brief = route.readTranscript(transcriptPath, { brief: true, served: false }).brief;
-      const gate = route.parseBrief(brief).gate;
-      if (gate && gate !== 'none') return { outcome: 'GATE', output: null };
+      if (route.declaredGate(route.parseBrief(brief))) return { outcome: 'GATE', output: null };
     } catch { /* an unreadable brief is caught by the scan below */ }
-    try { transcript = scanTranscript(transcriptPath, deps.nowMs ?? Date.now()); } catch (error) { notes.push(error.note || 'this session\'s transcript could not be read, so gate launches and records were not checked'); }
+    try { transcript = scanTranscript(transcriptPath, sessionId, deps.nowMs ?? Date.now()); } catch (error) { notes.push(error.note || 'this session\'s transcript could not be read, so gate launches and records were not checked'); }
   } else {
     notes.push('the host gave no transcript, so gate launches and records were not checked');
   }

@@ -20,6 +20,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// The environment variables a Toolkit launcher sets on a session it starts: the shared list. The Claude
+// agent and Codex helper hooks and the governance gate keep their own copy so that this module failing
+// to load never breaks them too (a test checks the copies match), and programme.cjs keeps its own (a
+// skill script, and a narrower rule for who writes programme state).
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
 

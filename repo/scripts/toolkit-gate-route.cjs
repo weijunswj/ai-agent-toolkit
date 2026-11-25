@@ -136,6 +136,16 @@ function parseBrief(text) {
   return out;
 }
 
+// The gate a parsed brief declares (G0, G1, G2 or DESIGN_CHALLENGE), or null.
+function declaredGate(brief) {
+  // A Gate line that names no gate (an owner's "Gate: please check" in a first message) declares
+  // nothing: refusing it would stop every tool of an ordinary session. Its verdicts stamp UNVERIFIED.
+  if (!brief.gate || brief.gate === 'none' || brief.gate.unknown !== undefined) return null;
+  // Outside a Projects spawn relay, a first prompt declares a gate only with both lines, so an
+  // owner's own first message that happens to start a line with "Gate:" stops nothing.
+  return brief.relay || brief.route ? brief.gate : null;
+}
+
 function entryText(entry) {
   const content = entry && entry.message && entry.message.content;
   if (typeof content === 'string') return content;
@@ -191,13 +201,7 @@ function evaluate({ input = {}, environment = process.env, registry, transcript 
   let read = transcript || (file ? readTranscript(file, { brief: true, served: false }) : { brief: null, model: null, effort: null });
   const brief = parseBrief(read.brief);
   const marked = ['G0', 'G1', 'G2'].includes(environment.TOOLKIT_GATE_ROLE) ? environment.TOOLKIT_GATE_ROLE : null;
-  let gate = brief.gate === 'none' ? null : brief.gate;
-  // A Gate line that names no gate (an owner's "Gate: please check" in a first message) declares
-  // nothing: refusing it would stop every tool of an ordinary session. Its verdicts stamp UNVERIFIED.
-  if (gate && gate.unknown !== undefined) gate = null;
-  // Outside a Projects spawn relay, a first prompt declares a gate only with both lines, so an
-  // owner's own first message that happens to start a line with "Gate:" stops nothing.
-  if (gate && !brief.relay && !brief.route) gate = null;
+  let gate = declaredGate(brief);
   if (marked && gate && marked !== gate) return refuse(marked, `the launcher marked this session ${marked} but its brief says Gate: ${gate}. Launch it again with one role.`);
   gate = marked || gate;
   if (!gate) return { gate: null, stamp: 'Route: UNVERIFIED' };
@@ -399,4 +403,4 @@ function main(argv = process.argv.slice(2), environment = process.env, write = t
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EFFORTS, ROLE_MEMBER, WORDING_EFFORT, checkBriefRoute, evaluate, loadRegistry, main, membersOf, parseBrief, pinFor, preToolUse, readTranscript, registryModel, stampLines, stampStatus, transcriptFor });
+module.exports = Object.freeze({ EFFORTS, ROLE_MEMBER, WORDING_EFFORT, checkBriefRoute, declaredGate, evaluate, loadRegistry, main, membersOf, parseBrief, pinFor, preToolUse, readTranscript, registryModel, stampLines, stampStatus, transcriptFor });
