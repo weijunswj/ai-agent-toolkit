@@ -150,16 +150,28 @@ function statusCheck(run, script, args, command) {
 }
 
 // The managed checkout against its origin branch, the same comparison the bridge makes at a session
-// start. A chat that runs for days never starts again, so its controller updates from here.
-function checkToolkit(git, checkout, branch) {
+// start. A chat that runs for days never starts again, so its controller updates from here. `tip` is
+// that branch's commit when the caller already read it.
+function checkToolkit(git, checkout, branch, tip = null) {
   const head = git(checkout, ['rev-parse', 'HEAD']);
   if (head.status !== 0) return { state: 'failed', lines: [`cannot read the Toolkit checkout: ${why(head)}`] };
-  const remote = git(checkout, ['ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`]);
-  if (remote.status !== 0) return { state: 'failed', lines: [`cannot read origin ${branch}: ${why(remote)}`] };
-  const local = head.stdout.trim(), upstream = remote.stdout.trim().split(/\s+/)[0];
+  const remote = tip ? null : git(checkout, ['ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`]);
+  if (remote && remote.status !== 0) return { state: 'failed', lines: [`cannot read origin ${branch}: ${why(remote)}`] };
+  const local = head.stdout.trim(), upstream = tip || remote.stdout.trim().split(/\s+/)[0];
   if (local === upstream) return { state: 'ok', lines: [`this computer's Toolkit is current with origin ${branch} at ${local.slice(0, 7)}`] };
   const command = `node "${path.join(checkout, 'repo', 'scripts', 'toolkit-local-bridge.cjs').replace(/\\/g, '/')}" --repo-update-now --write`;
   return { state: 'attention', lines: [`this computer's Toolkit is at ${local.slice(0, 7)}, origin ${branch} is at ${upstream.slice(0, 7)}: run ${command}, then reread CONTROLLER.md and the global rules`], command };
+}
+
+// The Toolkit copy at `root`, for a caller that reports it: { commit, atMain, command } against Toolkit
+// main's commit (`tip`), or null when the folder is no checkout of its own, as a plugin folder is.
+function toolkitCheckout(root, tip, git = defaultGit) {
+  const top = git(root, ['rev-parse', '--show-toplevel']);
+  if (top.status !== 0) return null;
+  try { if (fs.realpathSync.native(top.stdout.trim()) !== fs.realpathSync.native(root)) return null; } catch { return null; }
+  const result = checkToolkit(git, root, 'main', tip);
+  const head = git(root, ['rev-parse', 'HEAD']).stdout.trim();
+  return /^[0-9a-f]{40}$/.test(head) ? { commit: head, atMain: result.state === 'ok', command: result.command || null } : null;
 }
 
 function checkTasks(run, tasks) {
@@ -320,5 +332,5 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return report.attention || report.failed || !ranForController(report) ? 1 : 0;
 }
 
-module.exports = { parseArgs, controllerCheck, format, main, CHECKS, SCRIPTS };
+module.exports = { parseArgs, controllerCheck, format, main, toolkitCheckout, CHECKS, SCRIPTS };
 if (require.main === module) process.exitCode = main();

@@ -156,7 +156,7 @@ Every Core includes the security, privacy, integrity and recovery its effects ne
 
 ## 16. Switching controllers and executors
 
-Every explicitly appointed controller runs the [takeover journey](agent-playbooks/controller-takeover.md): probe capabilities, follow the generic steps, then applicable harness extras. It covers binding, custody, the record and governance-gated checks. A new executor continues from durable state and its brief. Reconcile uncertain effects and active writers first.
+Every explicitly appointed controller runs the [takeover journey](agent-playbooks/controller-takeover.md): probe capabilities, follow the generic steps, then applicable harness extras. It covers binding, custody and governance-gated checks; one command proves that the old controller stopped, posts the record and claims, and names the Toolkit versions and one refresh action. A new executor continues from durable state and its brief. Reconcile uncertain effects and active writers first.
 
 ## 17. Canonical implementation surfaces
 

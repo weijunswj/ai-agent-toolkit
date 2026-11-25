@@ -15,7 +15,7 @@ Classify toolkit repo tasks before planning or editing. Read only the playbooks 
 
 ## Match: Controller Takeover
 
-Triggers: explicit controller appointment, "you are taking over as controller for <repo>", relaunch or recovery. Executors keep their assigned brief.
+Triggers: explicit controller appointment, "you are taking over as controller for <repo>", the typed `controller takeover`, relaunch or recovery. Executors keep their assigned brief.
 
 Read: [controller takeover](controller-takeover.md), including capability routes, relay proof and the connector guards. Run the generic journey before applicable harness extras.
 

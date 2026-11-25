@@ -65,7 +65,7 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit setup`, `toolkit refresh`, `toolkit env`, `toolkit show env`, `toolkit governance` and `governance setup` are matched exactly by `toolkit-commands.cjs`, which the Toolkit setup skill runs on your message, so the agent is told which action you asked for instead of guessing; Toolkit's skills read the others. Typing `toolkit governance` again while a bank is open asks for it afresh; it never counts as your answer. If GitHub cannot be read even after a second try, you get one line asking you to type it again in a moment, never a status summary. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit setup`, `toolkit refresh`, `toolkit env`, `toolkit show env`, `toolkit governance`, `governance setup` and `controller takeover` are matched exactly by `toolkit-commands.cjs`, which the Toolkit setup skill runs on your message, so the agent is told which action you asked for instead of guessing; Toolkit's skills read the others. Typing `toolkit governance` again while a bank is open asks for it afresh; it never counts as your answer. If GitHub cannot be read even after a second try, you get one line asking you to type it again in a moment, never a status summary. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
@@ -73,6 +73,7 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `remove toolkit`: choose this app only or every app, see what Toolkit put there, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `toolkit env` or `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
 - `toolkit governance` or `governance setup`: Toolkit's governance question bank for this repository, in the same format as `setup toolkit` (below). Each change is one pull request for you to merge.
+- `controller takeover`: in a new chat, make it the controller of the repository of the folder the chat is open in, where Toolkit's GitHub governance is on. It says which repository, takes over by the [takeover playbook](agent-playbooks/controller-takeover.md) and ends in one short status: what runs, what is next and what waits on you. It counts only when you type it yourself, as the whole message; for another repository, or in an app that cannot run it, type the sentence at the top of that playbook.
 - `merge N`: approve the merge of pull request N.
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.

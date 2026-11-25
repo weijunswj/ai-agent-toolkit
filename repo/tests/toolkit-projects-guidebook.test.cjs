@@ -149,8 +149,7 @@ test('T6 the guidebook writes the canonical takeover byte for byte and checks wi
   const published = fs.readFileSync(path.join(out, 'takeover.md'), 'utf8');
   for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Gate pack']) assert.ok(published.includes(`**${name}:**`), name);
   assert.doesNotMatch(published, /\bR\d+\b/);
-  assert.deepEqual([...published.matchAll(/^Pack: (read-example-repo-20261108T0930Z-abcd)\r?$/gm)].map(match => match[1]),
-    Array(3).fill('read-example-repo-20261108T0930Z-abcd'));
+  assert.equal(published.match(/programme\.cjs takeover --session /g)?.length, 1, 'the one command reaches the library');
   fs.writeFileSync(path.join(out, 'takeover.md'), 'damaged\n');
   assert.deepEqual(guidebook().check(out), { state: 'stale', reason: 'differs takeover.md' });
   assert.equal(fs.readFileSync(path.join(out, 'takeover.md'), 'utf8'), 'damaged\n');
