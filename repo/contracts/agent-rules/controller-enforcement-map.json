@@ -1030,7 +1030,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "**Scripted carry (owner OK):**",
-      "rule_sha": "15be30551d92",
+      "rule_sha": "33ed19ecff6c",
       "covers": "The review carry script accepts a carry only in its exact cases (a body-only FAIL with its Carry line, the shard bot's manifest refresh, sync outputs only), with the same files, green checks and valid UAT and Bump lines.",
       "enforced_by": [
         {
@@ -1141,7 +1141,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "With On, the controller, in a session the owner started, merges when",
-      "rule_sha": "68c31eacbc85",
+      "rule_sha": "f67be4b4c09e",
       "covers": "The auto-merge eligibility check exits non-zero for a head whose scope or UAT line does not qualify, and the merge hold checks the scope before a standing merge; recording G2 PASS, the other conditions and the notice after it stay the controller's.",
       "enforced_by": [
         {
@@ -1159,7 +1159,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "That check exits 1 for bindings and their schemas/readers",
-      "rule_sha": "86fb224ebb9e",
+      "rule_sha": "9e725cb7dc39",
       "covers": "The auto-merge eligibility check exits 1 for every listed path family and for a major bump, so those wait for the owner's typed merge.",
       "enforced_by": [
         {
