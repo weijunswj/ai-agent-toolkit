@@ -163,7 +163,7 @@ function checkToolkit(git, checkout, branch, tip = null) {
   return { state: 'attention', lines: [`this computer's Toolkit is at ${local.slice(0, 7)}, origin ${branch} is at ${upstream.slice(0, 7)}: run ${command}, then reread CONTROLLER.md and the global rules`], command };
 }
 
-// The Toolkit copy at `root`, for a caller that reports it: { commit, behind, command } against Toolkit
+// The Toolkit copy at `root`, for a caller that reports it: { commit, atMain, command } against Toolkit
 // main's commit (`tip`), or null when the folder is no checkout of its own, as a plugin folder is.
 function toolkitCheckout(root, tip, git = defaultGit) {
   const top = git(root, ['rev-parse', '--show-toplevel']);
@@ -171,7 +171,7 @@ function toolkitCheckout(root, tip, git = defaultGit) {
   try { if (fs.realpathSync.native(top.stdout.trim()) !== fs.realpathSync.native(root)) return null; } catch { return null; }
   const result = checkToolkit(git, root, 'main', tip);
   const head = git(root, ['rev-parse', 'HEAD']).stdout.trim();
-  return /^[0-9a-f]{40}$/.test(head) ? { commit: head, behind: result.state === 'attention', command: result.command || null } : null;
+  return /^[0-9a-f]{40}$/.test(head) ? { commit: head, atMain: result.state === 'ok', command: result.command || null } : null;
 }
 
 function checkTasks(run, tasks) {

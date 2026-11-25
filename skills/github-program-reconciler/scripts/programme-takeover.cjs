@@ -269,12 +269,12 @@ function versionsOf({ get, main, chat = null, repository = null, branch = 'main'
   }
   const byVersion = version => (mainVersion === null ? 'not compared' : compareVersions(version, mainVersion) < 0 ? 'behind' : 'current');
   const checkout = main ? require('../../../repo/scripts/toolkit-controller-check.cjs').toolkitCheckout(TOOLKIT_ROOT, main, git) : null;
-  const ran = { version: TOOLKIT_VERSION, commit: checkout?.commit ?? null, state: !main ? 'not compared' : checkout ? (checkout.behind ? 'behind' : 'current') : byVersion(TOOLKIT_VERSION) };
+  const ran = { version: TOOLKIT_VERSION, commit: checkout?.commit ?? null, state: !main ? 'not compared' : checkout ? (checkout.atMain ? 'current' : 'not at main') : byVersion(TOOLKIT_VERSION) };
   const loaded = chat ? { version: chat.version, state: byVersion(chat.version) } : null;
   const { pin, unread: sweepUnread, ...sweep } = repository ? sweepOf(get, repository, branch, main) : { state: 'unread', text: 'not read here' };
   const script = name => require('../../../repo/scripts/toolkit-user-state.cjs').managedScript(name).replace(/\\/g, '/');
   const notCompared = [...(ran.state === 'not compared' ? ['the copy that ran'] : []), ...(loaded?.state === 'not compared' ? ['this chat\'s copy'] : []), ...(sweepUnread ? [sweepUnread] : [])];
-  const refresh = ran.state === 'behind' ? `run ${checkout?.command || `node "${script('toolkit-local-bridge.cjs')}" --repo-update-now --write`}, then reread CONTROLLER.md and the global rules`
+  const refresh = ['behind', 'not at main'].includes(ran.state) ? `run ${checkout?.command || `node "${script('toolkit-local-bridge.cjs')}" --repo-update-now --write`}, then reread CONTROLLER.md and the global rules`
     : loaded?.state === 'behind' ? 'say `refresh toolkit`, then go on in a fresh chat'
       : sweep.state === 'outdated' ? `run node "${script('toolkit-cloud-workflows.cjs')}" --repo <target checkout> --refresh-pr`
         : ['edited', 'unmanaged', 'missing'].includes(sweep.state) ? 'refresh the repository rules (say `refresh governance`)'

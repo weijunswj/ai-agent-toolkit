@@ -101,7 +101,7 @@ test('the one refresh action: the copy that ran, then this chat\'s, then the swe
     assert.equal(error, null, `${label}: ${error?.message}`);
     assert.match(result.versions.refresh, ranBehind ? UPDATE : chatBehind ? CHAT : sweepAction, label);
     assert.deepEqual([result.versions.ran.state, result.versions.chat?.state ?? 'not given', result.versions.sweep.state],
-      [ranBehind ? 'behind' : 'current', version === null ? 'not given' : chatBehind ? 'behind' : 'current', { 'follows main': 'current', pinned: 'pinned', outdated: 'outdated' }[sweepLabel]], label);
+      [ranBehind ? 'not at main' : 'current', version === null ? 'not given' : chatBehind ? 'behind' : 'current', { 'follows main': 'current', pinned: 'pinned', outdated: 'outdated' }[sweepLabel]], label);
     assert.ok(result.versions.line.endsWith(`; refresh: ${result.versions.refresh}`), label);
     assert.ok(result.versions.line.startsWith(`versions: this chat ${version === null ? 'not given' : version}, ran ${TOOLKIT_VERSION} (${head.slice(0, 7)}), Toolkit main ${TOOLKIT_VERSION} (1111111), sweep `), result.versions.line);
     // A version fact is never a hold.
