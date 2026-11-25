@@ -90,10 +90,14 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // The merge card (Claude Code on this computer): a tap in place of the typed line. When a merge that
 // names its repository, number and full head SHA is refused for want of an approval, in a session
 // that could record a typed one, the refusal carries one exact AskUserQuestion input: "Merge
-// owner/name#N at <7 characters>?" with the options Merge (its description names the full SHA) and
-// Not now. That refusal leads with the card, so the agent shows it instead of asking its own
-// question. cardAsked (PreToolUse) notes that exact call for the session's run; cardAnswered
-// (PostToolUse) records an approval for that pull request at that full SHA when the answer the host
+// owner/name#N at <7 characters>?" with the options Merge and Not now. Merge's description is the
+// effect line: which pull request of which repository goes into its base branch, at the full SHA, and
+// that nothing else is approved. The hook builds it from the merge it refused and reads no title or
+// base name for it, so the line holds no text anyone else wrote, and cardOf accepts no other wording.
+// The refusal leads with the card and its route (the merge summary as the turn's closing message, then
+// the card first in the turn a short background command starts), so the agent shows it instead of
+// asking its own question and the user reads the summary. cardAsked (PreToolUse) notes that exact call
+// for the session's run; cardAnswered (PostToolUse) records an approval for that pull request at that full SHA when the answer the host
 // reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
 // These record nothing: a card with other wording, options or keys, a card asked with an answer
 // already filled in, a call that was not noted, a typed "Other" answer, an answer the host marks as
@@ -1451,7 +1455,7 @@ const CARD_KEYS = Object.freeze(['questions', 'metadata']);
 const CARD_ANSWERED_KEYS = Object.freeze([...CARD_KEYS, 'answers', 'annotations']);
 const CARD_RESPONSE_KEYS = Object.freeze(['questions', 'answers', 'annotations']);
 const CARD_QUESTION = new RegExp(`^Merge (${SLUG})#([1-9]\\d{0,5}) at ([0-9a-f]{7})\\?$`);
-const CARD_MERGE = /^Merge it at commit ([0-9a-f]{40})\. Nothing else is approved\.$/;
+const CARD_MERGE = new RegExp(`^Merges pull request ([1-9]\\d{0,5}) of (${SLUG}) into its base branch, at commit ([0-9a-f]{40})\\. Nothing else is approved\\.$`);
 const CARD_NOT_NOW = 'Leave it open. Nothing is merged.';
 const CARD_LABELS = Object.freeze(['Merge', 'Not now']);
 const CARD_UNCOUNTED = `Toolkit: no merge approval was recorded from that card. It counts only as Toolkit's exact merge card, in a chat the user started, answered by the user's own plain tap on Merge with no note, typed text or follow-up. ${ASK_TEXT}`;
@@ -1459,7 +1463,7 @@ const CARD_UNCOUNTED = `Toolkit: no merge approval was recorded from that card. 
 // The one AskUserQuestion input that is the merge card for a pull request at a full head SHA.
 function mergeCard(repository, pr, sha) {
   return { questions: [{ question: `Merge ${repository}#${pr} at ${sha.slice(0, 7)}?`, header: CARD_HEADER, multiSelect: false, options: [
-    { label: CARD_LABELS[0], description: `Merge it at commit ${sha}. Nothing else is approved.` },
+    { label: CARD_LABELS[0], description: `Merges pull request ${pr} of ${repository} into its base branch, at commit ${sha}. Nothing else is approved.` },
     { label: CARD_LABELS[1], description: CARD_NOT_NOW },
   ] }] };
 }
@@ -1467,7 +1471,8 @@ function mergeCard(repository, pr, sha) {
 function plainObject(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 
 // What an exact merge card asks, { repository, pr, sha, question }, or null for anything else: other
-// keys, more questions, other options or wording, or a short and a full SHA that disagree. The
+// keys, more questions, other options or wording, or a question and an effect line that name another
+// pull request, repository or SHA than each other. The
 // host's own `kind: "choice"` on the question is the only addition read as the same card. As asked
 // (PreToolUse) an answers field is another key; `answered` reads the input the host hands back
 // after the tap, which also carries answers and annotations.
@@ -1487,8 +1492,8 @@ function cardOf(toolInput, answered = false) {
   if (!options.every((option, index) => plainObject(option)
     && Object.keys(option).every(key => ['label', 'description'].includes(key)) && option.label === CARD_LABELS[index] && typeof option.description === 'string')) return null;
   const full = CARD_MERGE.exec(options[0].description);
-  if (!full || options[1].description !== CARD_NOT_NOW || !full[1].startsWith(asked[3])) return null;
-  return { repository: asked[1], pr: Number(asked[2]), sha: full[1], question: question.question };
+  if (!full || options[1].description !== CARD_NOT_NOW || full[1] !== asked[2] || full[2] !== asked[1] || !full[3].startsWith(asked[3])) return null;
+  return { repository: asked[1], pr: Number(asked[2]), sha: full[3], question: question.question };
 }
 
 // What a card's note must say for its answer to count: this card, for this pull request and SHA.
@@ -1548,7 +1553,7 @@ const MERGE_ASIDE = [
   /\bmerg\w*\b[^.?!\n]{0,80}?\binto\b/gi,
 ];
 const MERGE_ASK = /\bmerge\b|\b(?:be|get|gets|getting)[ \t]+merged\b/i;
-const CARD_REDIRECT = 'Toolkit: a tap on this question cannot approve a merge; only Toolkit\'s merge card can, and the hold shows it when a merge is run. If the user asked you to merge this pull request, do not ask again: after the merge summary, run that merge naming its full 40 character head SHA and show the card the hold returns, unchanged. If the user has not asked, do not merge: ask again without a merge option or merge wording, or in a plain message.';
+const CARD_REDIRECT = 'Toolkit: a tap on this question cannot approve a merge; only Toolkit\'s merge card can, and the hold shows it when a merge is run. If the user asked you to merge this pull request, do not ask again: run that merge naming its full 40 character head SHA and follow the route in its refusal, with its card unchanged. If the user has not asked, do not merge: ask again without a merge option or merge wording, or in a plain message.';
 
 // The text with every set-aside merge phrase blanked, and whether any was found.
 function mergeAside(text) {
@@ -1630,7 +1635,7 @@ function cardOffer(merge, input, { environment, registryOptions, now, host }) {
   if (host !== 'claude' || !merge || merge.pr === null || typeof merge.repository !== 'string' || !new RegExp(`^${SLUG}$`).test(merge.repository)) return '';
   if (!cardSession(input, environment, registryOptions, now, host)) return '';
   if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return 'To show the user Toolkit\'s merge card instead of asking them to type, retry this merge naming its full 40 character head SHA, and ask no merge question of your own.';
-  return `Toolkit's merge card is how the user approves this merge, so ask no merge question of your own. After the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
+  return `Toolkit's merge card is how the user approves this merge, so ask no merge question of your own. Put the merge summary in this turn's closing message. Before you end the turn, start a short background command (about 20 seconds). When it wakes you, open that turn with the card and no text: call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
 }
 
 // A refusal that ends with the typed-line request, with the card offer put first: an agent that

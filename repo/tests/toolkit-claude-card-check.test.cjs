@@ -44,6 +44,35 @@ test('a card first in the turn, after tool calls only, or after a turn boundary 
   assert.equal(decide(transcript([tool('a'), result('a')]), question(), { chunk: 64 }), null);
 });
 
+// The real shape of a turn a background command starts, structure only: the closing message, the
+// host's turn-end and queue entries, an optional meta companion, then the notification as a user
+// entry whose content is plain text.
+const CLOSING = [owner('land it'), said('The full context, as the closing message.'), { type: 'system', subtype: 'stop_hook_summary', isSidechain: false }, { type: 'data-flow-records' }];
+const QUEUED = [{ type: 'queue-operation', operation: 'enqueue', content: '<task-notification>done</task-notification>' }, { type: 'queue-operation', operation: 'dequeue' }];
+const COMPANION = { type: 'user', isMeta: true, turnCompanion: true, isSidechain: false, message: { role: 'user', content: '<system-reminder>note</system-reminder>' } };
+const NOTICE = { type: 'user', isSidechain: false, origin: { kind: 'task-notification', producer: 'session-task' }, promptSource: 'system', message: { role: 'user', content: '<task-notification>done</task-notification>' } };
+const REQUEST = [{ type: 'api-request-blob', message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>note</system-reminder>' }] } }, { type: 'api-request' }];
+
+test('the route the refusal names works: a card first in the turn a background command starts is shown', () => {
+  const thinking = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] } };
+  for (const before of [[...QUEUED, NOTICE], [...QUEUED, COMPANION, NOTICE], [...QUEUED, NOTICE, COMPANION]]) {
+    assert.equal(decide(transcript([...CLOSING, ...before, ...REQUEST, thinking, tool('card', 'AskUserQuestion')]), question(), { chunk: 64 }), null);
+  }
+  // Text before the card on the wake is still refused.
+  assert.deepEqual(decide(transcript([...CLOSING, ...QUEUED, NOTICE, ...REQUEST, said('Asking now.'), tool('card', 'AskUserQuestion')])), { deny: card.TEXT_FIRST });
+  // A command that ends before the turn does reaches the agent inside it, as an attachment: no new
+  // turn, so text before the card is still refused.
+  const midTurn = { type: 'attachment', isSidechain: false, attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: '<task-notification>done</task-notification>' } };
+  assert.deepEqual(decide(transcript([owner('land it'), said('The context.'), tool('a'), result('a'), midTurn, tool('card', 'AskUserQuestion')])), { deny: card.TEXT_FIRST });
+});
+
+test('both refusals name the route in plain words, and keep their limit', () => {
+  const route = 'Put the full context in this turn\'s closing message. Before you end the turn, start a short background command (about 20 seconds). When it wakes you, open that turn with the card and no text.';
+  assert.equal(card.MAX_QUESTION, 120);
+  assert.equal(card.TEXT_FIRST, `Toolkit: this question card follows text you wrote earlier in this turn. The owner sees a turn's closing message in full, but text written before a card in the same turn is cut to one line. ${route}`);
+  assert.equal(card.TOO_LONG, `Toolkit: a question on this card is longer than 120 characters. The card holds only a short question, so shorten it. ${route}`);
+});
+
 test('an over-long question is refused before the transcript is read', () => {
   const long = 'q'.repeat(card.MAX_QUESTION + 1);
   assert.deepEqual(decide(path.join(folder, 'missing.jsonl'), question(long)), { deny: card.TOO_LONG });

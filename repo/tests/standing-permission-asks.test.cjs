@@ -79,8 +79,8 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
     'tell the owner which change to undo and in which file',
-    // The owner may see only an open card, not the text above it (owner, 23 November), so the ask goes as written text.
-    'The owner may see only an open card, never the text above it, and this ask needs its context, so ask it as written text at the end of the closing message, not on a card: the lines below as plain-English formatted text, then the question and its options (just this once, from now on, no), the recommended one marked.',
+    // The owner may see only an open card, not the text above it (owner, 23 November), so the lines go in the closing message and the question follows (INT-TK421-1317).
+    'The owner may see only an open card, never that turn\'s text above it, and this ask needs its context, so put the lines below in the turn\'s closing message as plain-English formatted text, then the question and its options (just this once, from now on, no), the recommended one marked: on a card that opens the next turn where the host can wake the session, else at the end of that message.',
     'In Claude Projects, where web chat keeps the text above a card on screen, follow the Projects skill: these lines, then one decision card.',
     'batch several asks into one message where they arrive together',
     'Where the host still blocks a granted step, the ask names the exact native change.',

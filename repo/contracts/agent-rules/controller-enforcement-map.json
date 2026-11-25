@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "46ed6d45bf39",
+      "rule_sha": "1e4aaf3426fb",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -422,12 +422,15 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Plain owner posts:**",
-      "rule_sha": "ed3980b1d58e",
-      "instruction_only": {
-        "basis": "planned",
-        "why": "The wording of each post and card stays a judgement; a card after text the owner cannot see and an over-long card question are code-decidable.",
-        "planned": "#1467 S8: the Claude governance hook refuses a question card after text in the same turn, or with a question over 120 characters."
-      }
+      "rule_sha": "138d6efaebb9",
+      "covers": "In Claude Code the governance hook refuses a question card after text in the same turn, or with a question over 120 characters, and names the closing message then card route. The wording of each post and card stays a judgement.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-claude-card-check.cjs",
+          "test": "repo/tests/toolkit-claude-card-check.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/controller/principles.md",
@@ -523,7 +526,7 @@
       "file": "repo/controller/roles-and-routes.md",
       "rule": "**Merge-train lanes:**",
       "rule_sha": "c34c408f6806",
-      "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. For route owner, land prints the merge step: ask in a plain message, then the agent runs the exact merge so the merge guard shows its card. The lane's model tier, skipping G0 and G1, and following that step stay instruction-only.",
+      "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. For route owner, land prints the merge step: the agent runs the exact merge and the merge guard asks, with the effects in the closing message; it asks first only where no guard is known to run or task auto-merge would let the merge through unasked. The lane's model tier, skipping G0 and G1, and following that step stay instruction-only.",
       "enforced_by": [
         {
           "kind": "script",

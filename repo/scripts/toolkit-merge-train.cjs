@@ -101,9 +101,11 @@
 // card), with the reasons. --live reads those pull request facts from a JSON file
 // ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
 // (REST); a member entry with no body is refused, never read as NOT_REQUIRED. A ready land says the
-// merge step plainly (merge_step): route owner asks the owner in a plain message (never a question card) "Merge PR N?" with the external
-// effects and, on the yes, the agent runs the named merge so the merge guard shows its card, never
-// sending the owner to click Merge on GitHub unless the guard cannot record the answer. It also
+// merge step plainly (merge_step). Route owner, where the merge guard asks: the agent runs the named
+// merge, which the guard refuses, and gives the external effects in its closing message before the
+// guard's card; with no guard known to run, or where task auto-merge would let the merge through with
+// no card, the agent asks first and runs it on the yes. The owner is never sent to click Merge on
+// GitHub unless the guard cannot record the answer. It also
 // lists the steps after the merge: the closing stories for the train and each member, the sessions to
 // archive (keeping those whose owner test is owed) and, for each worktree at the train or a member
 // head, the `git worktree remove` and `git branch -d` lines (worktrees a host made are left to it).
@@ -871,7 +873,8 @@ function land(cwd, manifest, options) {
       problems.push(`ejected #${entry.pr} is still open at ${facts.head.slice(0, 12)}, which the train carries: GitHub would mark it merged; push its next commit or close it first`);
     }
   }
-  const merge = problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit', ...landRoute(cwd, manifest, checked.main, options) };
+  const { guardAsks, ...route } = problems.length ? {} : landRoute(cwd, manifest, checked.main, options);
+  const merge = problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit', ...route };
   return {
     ok: problems.length === 0,
     pr: options.pr,
@@ -879,18 +882,24 @@ function land(cwd, manifest, options) {
     members: checked.members,
     problems,
     merge,
-    ...(merge ? { merge_step: mergeStep(merge) } : {}),
+    ...(merge ? { merge_step: mergeStep(merge, guardAsks) } : {}),
     steps: problems.length ? [] : afterLanding(cwd, manifest, options),
   };
 }
 
-// The merge itself, said plainly. Route owner: the agent asks, then runs the exact merge on the
-// owner's yes, so the merge guard shows its card and records the answer; the owner is never sent to
-// click Merge on GitHub, except where the guard cannot record the answer, and then the agent says why.
-function mergeStep(merge) {
+// The merge itself, said plainly. Route owner: the merge guard's own ask is the one ask, so the agent
+// runs the exact merge and follows the refusal. Where the guard may not ask (none known to run, or task
+// auto-merge on with nothing on the merge-authority list, which it lets through with no card), the agent
+// asks first and runs the merge on the owner's yes. The owner is never sent to click Merge on GitHub,
+// except where the guard cannot record the answer, and then the agent says why.
+function mergeStep(merge, guardAsks) {
   const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;
   if (merge.route === 'auto') return `post the effects notice, then run ${command}; no ask`;
-  return `ask the owner in a plain message (a question card that asks to merge is refused): "Merge PR ${merge.pr}?" with its external effects; on their yes, run ${command} yourself, so the merge guard shows its card and records the answer. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${merge.head.slice(0, 12)}`;
+  const ask = `ask "Merge PR ${merge.pr}?" at the end of your closing message, under its external effects, and run it yourself on their yes`;
+  const step = guardAsks
+    ? `Where a merge guard is known to run, run it yourself with no question of your own: the guard refuses it and asks the owner, so put its external effects in your closing message and follow the refusal (its card, else the typed line it names). With no guard known to run, ${ask}`
+    : `Task auto-merge is on here, so the merge guard may let it through without asking: ${ask}`;
+  return `the merge is ${command}. ${step}. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${merge.head.slice(0, 12)}`;
 }
 
 // The owed steps once the train has merged, so stories and clean-up are not forgotten: the closing
@@ -933,6 +942,9 @@ function worktreeSteps(cwd, heads) {
 
 // How the named head may merge: `auto` on the repository's task auto-merge switch, or `owner` (a
 // merge card), with every reason. RISKY members keep the owner gate even with an OK recorded.
+// `guardAsks` is whether the merge guard refuses this merge for the owner's approval: it lets one
+// through when task auto-merge is on and the scope holds nothing on the merge-authority list, whatever
+// the members' tiers or UAT.
 function landRoute(cwd, manifest, main, options) {
   const reasons = [];
   const answer = governance.taskAutoMerge(cwd, options.registryOptions || {});
@@ -944,7 +956,8 @@ function landRoute(cwd, manifest, main, options) {
   if (!uat.mergeable) reasons.push(`the train UAT line is ${uat.state}${uat.problem ? ` (${uat.problem})` : ''}`);
   const risky = manifest.members.filter(member => member.tier === 'RISKY').map(member => `#${member.pr}`);
   if (risky.length) reasons.push(`RISKY members wait for the owner's merge card: ${risky.join(', ')}`);
-  return { route: reasons.length ? 'owner' : 'auto', route_reasons: reasons };
+  const guardAsks = answer.auto_merge !== 'after-gates' || !scope || scope.reasons.length > 0;
+  return { route: reasons.length ? 'owner' : 'auto', route_reasons: reasons, guardAsks };
 }
 
 // Refuses a command that starts, grows or lands a train unless merge trains are on here.

@@ -234,7 +234,8 @@ test('the owner-post rule has one home: the principles page, read before every o
     "This binds the controller's own posts to the owner, relays included",
     // The owner sees only an open card, not the text above it, so the card must stand alone (owner, 23 November).
     'a card of the native question method holds a short question and short options that make sense with nothing else on screen',
-    'A question that needs context, items or each pick\'s reason goes as written text at the end of the closing message instead',
+    // The app shows a turn's closing message in full, so the context goes there and the card follows on the wake (INT-TK421-1317).
+    'Context, items or each pick\'s reason go in the turn\'s closing message, then the card opens the next turn where the host can wake the session, else the question ends that message',
     // A one-line status cannot lead with three lines, so only asks, plans and explanations do.
     'Asks, plans and explanations lead with problem, fix and skip',
   ]) assert.ok(line.includes(phrase), phrase);

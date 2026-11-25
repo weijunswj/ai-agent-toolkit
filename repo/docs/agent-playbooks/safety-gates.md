@@ -59,7 +59,7 @@ A matching active `standing` entry is the fresh approval the approval rule above
 
 ### The card
 
-The owner may see only an open card, never the text above it, and this ask needs its context, so ask it as written text at the end of the closing message, not on a card: the lines below as plain-English formatted text, then the question and its options (just this once, from now on, no), the recommended one marked. In Claude Projects, where web chat keeps the text above a card on screen, follow the Projects skill: these lines, then one decision card.
+The owner may see only an open card, never that turn's text above it, and this ask needs its context, so put the lines below in the turn's closing message as plain-English formatted text, then the question and its options (just this once, from now on, no), the recommended one marked: on a card that opens the next turn where the host can wake the session, else at the end of that message. In Claude Projects, where web chat keeps the text above a card on screen, follow the Projects skill: these lines, then one decision card.
 
 - **Stopped on:** the step in plain words.
 - **Why it stopped:** one line, for example "your computer's safety check blocks changing scripts it didn't write".

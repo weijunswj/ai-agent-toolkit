@@ -79,8 +79,8 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.doesNotMatch(diagnostic, /\brequire\b|\bimport\b/);
         continue;
       }
-      // The merge train's land prints the merge command for the agent to run after the owner's yes
-      // (merge_step), so the merge guard shows its card; the script itself never runs a merge. Proof:
+      // The merge train's land prints the merge command for the agent to run (merge_step), so the merge
+      // guard asks the owner, or after their yes; the script itself never runs a merge. Proof:
       // the command text appears once, as mergeStep's printed template, the script starts only git,
       // the manifest's bump command and read-only `gh api`, and it holds no other merge text.
       if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-train.cjs') {

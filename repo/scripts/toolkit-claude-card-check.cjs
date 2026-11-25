@@ -3,16 +3,18 @@
 // Claude Code only: the question card check, run by the governance hook's PreToolUse step on
 // AskUserQuestion (toolkit-governance-hook.cjs).
 //
-// The failure it prevents: in the Claude desktop app the owner sees only the open card, never the
-// text the agent wrote earlier in the same turn, so they answer a question without the context
-// written above it. A card is refused when:
+// The failure it prevents: the Claude desktop app and Remote Control show a turn's closing message in
+// full, but cut text the agent wrote earlier in the same turn to one line, so with a card open the
+// owner answers a question without the context written above it. A card is refused when:
 //   - the current turn already holds visible assistant text: read from the session transcript
 //     (`transcript_path`), back from its end to the last message that is not a tool result
 //     (the owner's message, or anything the host injected), skipping subagent (sidechain) entries;
 //   - or a question is longer than MAX_QUESTION characters (the card holds the question only).
-// The refusal says to end the turn and ask in the closing message, or put the context into the
-// card's option descriptions. A card that is the turn's first visible output, or follows only tool
-// calls, passes.
+// The refusal names the route (ROUTE): the context as the closing message, then the card first in the
+// turn a short background command starts; the host writes that command's notification as a user
+// entry, so it starts a new turn here. A command that ends inside the turn is written as an attachment
+// instead and starts none. A card that is the turn's first visible output, or follows only tool calls,
+// passes.
 //
 // Toolkit's own cards pass whatever came before them: the governance question and the exact merge
 // card carry everything the owner needs in the card itself.
@@ -29,8 +31,9 @@ const MAX_QUESTION = 120;
 const CHUNK = 256 * 1024;
 const BUDGET = 8 * 1024 * 1024;
 
-const TEXT_FIRST = 'Toolkit: this question card follows text you wrote earlier in this turn, and the owner sees only the open card, not that text. End the turn and ask in your closing message instead, or put the context into the card\'s option descriptions and ask again in a turn with no text before the card.';
-const TOO_LONG = `Toolkit: a question on this card is longer than ${MAX_QUESTION} characters. The card holds only the question: put the context above it in your closing message, or into the option descriptions, and ask a short question.`;
+const ROUTE = 'Put the full context in this turn\'s closing message. Before you end the turn, start a short background command (about 20 seconds). When it wakes you, open that turn with the card and no text.';
+const TEXT_FIRST = `Toolkit: this question card follows text you wrote earlier in this turn. The owner sees a turn's closing message in full, but text written before a card in the same turn is cut to one line. ${ROUTE}`;
+const TOO_LONG = `Toolkit: a question on this card is longer than ${MAX_QUESTION} characters. The card holds only a short question, so shorten it. ${ROUTE}`;
 const UNREAD = 'Toolkit could not read this session\'s transcript, so it could not check for text before this question card; the card was shown.';
 const PARTIAL = 'Toolkit could not read this whole turn of the transcript, so it could not check all of it for text before this question card; the card was shown.';
 

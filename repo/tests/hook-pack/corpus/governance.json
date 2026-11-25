@@ -1519,6 +1519,26 @@
       "status": "pass"
     },
     {
+      "id": "CARD.first-on-wake",
+      "source": "INT-TK421-1317: the route the refusal names, a closing message then a card first in the turn a background command starts (real transcript shape), is shown",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_wait","name":"Bash","input":{"command":"sleep 20","run_in_background":true}}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_wait","content":"started"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail, both in the reader; the docs name a third shape."}]}},{"type":"system","subtype":"stop_hook_summary","isSidechain":false},{"type":"queue-operation","operation":"enqueue","content":"<task-notification>done</task-notification>"},{"type":"queue-operation","operation":"dequeue"},{"type":"user","isMeta":true,"turnCompanion":true,"isSidechain":false,"message":{"role":"user","content":"<system-reminder>note</system-reminder>"}},{"type":"user","isSidechain":false,"origin":{"kind":"task-notification","producer":"session-task"},"promptSource":"system","message":{"role":"user","content":"<task-notification>done</task-notification>"}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "CARD.text-on-wake",
+      "source": "INT-TK421-1317 control: text before the card in the turn a background command starts is refused as in any turn",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
+      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_wait","name":"Bash","input":{"command":"sleep 20","run_in_background":true}}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_wait","content":"started"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail, both in the reader; the docs name a third shape."}]}},{"type":"system","subtype":"stop_hook_summary","isSidechain":false},{"type":"queue-operation","operation":"enqueue","content":"<task-notification>done</task-notification>"},{"type":"queue-operation","operation":"dequeue"},{"type":"user","isMeta":true,"turnCompanion":true,"isSidechain":false,"message":{"role":"user","content":"<system-reminder>note</system-reminder>"}},{"type":"user","isSidechain":false,"origin":{"kind":"task-notification","producer":"session-task"},"promptSource":"system","message":{"role":"user","content":"<task-notification>done</task-notification>"}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Asking now."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "status": "pass"
+    },
+    {
       "id": "CARD.text-in-subagent-only",
       "source": "#1467 S8 control: a subagent's own text (a sidechain entry) is not text the owner was meant to see, so it does not hold the card",
       "kind": "benign",
@@ -1543,7 +1563,7 @@
       "source": "#1467 S8 control: Toolkit's exact merge card names the pull request and head itself, so text before it does not hold it",
       "kind": "benign",
       "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merges pull request 5 of toolkit-test-fixture/hook-pack-fixture into its base branch, at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},
       "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true,"transcript":[{"type":"user","message":{"role":"user","content":"Please land PR 5."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"PR 5 is green and reviewed; asking for the merge."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
       "expect": {"decision":"allow"},
       "status": "pass"
