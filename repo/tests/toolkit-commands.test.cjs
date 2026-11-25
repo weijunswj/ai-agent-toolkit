@@ -148,7 +148,7 @@ test('the list is one two-column table per group, in group order, with every com
 // `toolkit governance` once became a status summary instead of the bank (#1373).
 test('the toolkit-setup skill gets the line for any typed command from the script', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
-  assert.match(skill.match(/^description: .*$/m)[0], /`setup toolkit`, `refresh toolkit`, [^\n]*`toolkit cmd`, `toolkit governance`, `refresh governance`/);
+  assert.match(skill.match(/^description: .*$/m)[0], /`setup toolkit`, `refresh toolkit`, [^\n]*`toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/);
   assert.match(skill, /If the whole message looks like a typed Toolkit command \(such as `toolkit cmd`, `toolkit governance` or `refresh governance`\), run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says\. For `toolkit governance` that is the governance question bank, never a status or check summary\./);
   assert.doesNotMatch(skill, /hook line|as if the hook/, 'the skill waits for no hook');
   for (const phrase of commands.PHRASES) {

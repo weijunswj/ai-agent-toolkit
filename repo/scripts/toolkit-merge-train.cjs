@@ -104,8 +104,8 @@
 // merge step plainly (merge_step). Route owner, where the merge guard asks: the agent runs the named
 // merge after giving its external effects, and the guard refuses it and shows its card; with no guard
 // known to run, or where task auto-merge would let the merge through with no card, the agent asks first
-// and runs it on the yes. The owner is never sent to click Merge on
-// GitHub unless the guard cannot record the answer. It also
+// and runs it on the yes. The owner is never sent to click Merge on GitHub unless the guard cannot
+// record the answer. It also
 // lists the steps after the merge: the closing stories for the train and each member, the sessions to
 // archive (keeping those whose owner test is owed) and, for each worktree at the train or a member
 // head, the `git worktree remove` and `git branch -d` lines (worktrees a host made are left to it).

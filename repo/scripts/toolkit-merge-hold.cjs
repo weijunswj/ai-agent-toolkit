@@ -96,7 +96,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // base name for it, so the line holds no text anyone else wrote, and cardOf accepts no other wording.
 // The refusal leads with the card, so the agent shows it instead of asking its own question. cardAsked
 // (PreToolUse) notes that exact call for the session's run; cardAnswered (PostToolUse) records an
-// approval for that pull request at that full SHA when the answer the host reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
+// approval for that pull request at that full SHA when the answer the host reports is a plain Merge,
+// and removes any unused approval for it when the answer is Not now.
 // These record nothing: a card with other wording, options or keys, a card asked with an answer
 // already filled in, a call that was not noted, a typed "Other" answer, an answer the host marks as
 // idle, follow-up, free text or noted, any field the reader does not know, and a card in a chat

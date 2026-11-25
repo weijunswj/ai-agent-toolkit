@@ -23,7 +23,8 @@ const { managedScript } = require('./toolkit-user-state.cjs');
 
 // Each command the printed list shows, as the user types it, its group and what it does in one
 // line. The list holds only commands a user would type themselves; the phrases in ACTIONS below are
-// matched exactly whether listed or not, so a command left off the list still works when typed. Dropping a command from the list is dropping its one entry here.
+// matched exactly whether listed or not, so a command left off the list still works when typed.
+// Dropping a command from the list is dropping its one entry here.
 const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['toolkit cmd', 'toolkit command'], does: 'Show this list.' }),
   Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
