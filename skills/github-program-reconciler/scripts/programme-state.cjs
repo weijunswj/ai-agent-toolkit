@@ -1570,6 +1570,12 @@ function refreshWriter(parentDoc) {
   return { by_hash: true, session_hash: sessionHashOf(session), prefix };
 }
 
+// A state commit a refresh made ends with this mark, so a takeover can tell the sweep's own commits
+// from the controller's. Each store backend adds it where it builds the commit message; a commit
+// without it counts as the controller's.
+const REFRESH_MARK = ' (refresh)';
+const refreshMark = writer => (writer?.by_hash === true ? REFRESH_MARK : '');
+
 function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child', parentDoc = null) {
   const prefix = doc?.fence?.holder_prefix || 'nobody';
   const epoch = doc?.fence?.epoch ?? 0;
@@ -3713,7 +3719,7 @@ class StateStore {
           tree: written.map(entry => ({ path: entry.path, mode: '100644', type: 'blob', content: entry.text })) });
         if (!okStatus(tree.status) || !isSha(tree.json?.sha)) throw ghFailure(tree, 'Writing the state tree');
         const lines = documents.map(entry => `${documentName(entry.kind, entry.number)} r${entry.doc.revision}`);
-        const commit = this.transport.request('POST', `repos/${this.store.repository}/git/commits`, { message: `${message}: ${lines.join(', ')} [skip ci]`, tree: tree.json.sha, parents: [batch.snapshot.head] });
+        const commit = this.transport.request('POST', `repos/${this.store.repository}/git/commits`, { message: `${message}: ${lines.join(', ')} [skip ci]${batch.byRefresh() ? REFRESH_MARK : ''}`, tree: tree.json.sha, parents: [batch.snapshot.head] });
         if (!okStatus(commit.status) || !isSha(commit.json?.sha)) throw ghFailure(commit, 'Writing the state commit');
         // Only the ref update can land this commit: until it is confirmed, the outcome is unsure.
         unsure = true;
@@ -3785,11 +3791,12 @@ class StateStore {
   readPath(docPath, kind, ref = null) {
     const response = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(ref || this.store.branch)}`);
     const own = ref ? null : this.ownWrites.get(docPath);
-    if (own && (response.status === 404 ? own.replaced === null : response.status === 200 && response.json.sha === own.replaced)) {
+    if (own && (response.status === 404 ? own.replaced === null : response.status === 200 && response.json?.sha === own.replaced)) {
       return { doc: clone(own.doc), sha: own.sha };
     }
     if (response.status === 404) return { doc: null, sha: null };
-    if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
+    // An answer with nothing in it is no read.
+    if (response.status !== 200 || !response.json) throw ghFailure(response, `Reading ${docPath}`);
     let text;
     if (response.json.encoding === 'base64') text = Buffer.from(response.json.content, 'base64').toString('utf8');
     else {
@@ -3860,11 +3867,24 @@ class StateStore {
   }
 
   // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
-  // (422) is STATE_CONFLICT.
-  putVerified(docPath, kind, text, sha, message) {
-    const response = this.transport.request('PUT', this.encodedContents(docPath), {
-      message, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch, ...(sha ? { sha } : {}),
-    });
+  // (422) is STATE_CONFLICT. `put` is the caller's record of how far this one write got, whatever is
+  // thrown: `sent` (a request may have gone out), `refused` (GitHub answered that it wrote nothing),
+  // `commit` (the commit GitHub answered with) and `verified` (read back as written).
+  putVerified(docPath, kind, text, sha, message, put = {}) {
+    put.sent = true;
+    let response;
+    try {
+      response = this.transport.request('PUT', this.encodedContents(docPath), {
+        message, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch, ...(sha ? { sha } : {}),
+      });
+    } catch (error) {
+      // gh not signed in: nothing went out. Any other failure to answer may have written.
+      if (error.code === 'GH_AUTH') put.refused = true;
+      throw error;
+    }
+    // A request that timed out on GitHub's side (408) is no answer about the write.
+    if (response.status >= 400 && response.status < 500 && response.status !== 408) put.refused = true;
+    if (okStatus(response.status)) put.commit = response.json?.commit?.sha || null;
     if (response.status === 409 || (response.status === 422 && !sha)) {
       this.ownWrites.delete(docPath);
       throw new ProgrammeError('STATE_CONFLICT', `${docPath} moved since it was read.`, { status: response.status });
@@ -3881,7 +3901,13 @@ class StateStore {
     }
     this.ownWrites.set(docPath, { replaced: sha || null, doc: clone(readback.doc), sha: blob });
     this.lastCommit = commit;
+    put.verified = true;
     return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
+  }
+
+  // A document as it stands at one commit: exact, never the older version a branch read can serve.
+  readAt(kind, number, commit) {
+    return this.readPath(this.docPath(kind, number), kind, commit);
   }
 
   listJournals(issue) {
@@ -3908,17 +3934,16 @@ class StateStore {
     return this.putVerified(this.journalPath(issue, name), 'journal', canonicalText(doc), sha, `programme journal: issue-${issue} ${name} seq ${doc.seq}`);
   }
 
-  // When the store last committed a document, by GitHub's clock.
-  lastCommitDate(kind, number) {
-    const docPath = this.docPath(kind, number);
-    const response = this.transport.request('GET', `repos/${this.store.repository}/commits?path=${encodeURIComponent(docPath)}&sha=${encodeURIComponent(this.store.branch)}&per_page=1`);
-    if (response.status !== 200 || !Array.isArray(response.json)) throw ghFailure(response, `Reading the history of ${docPath}`);
-    return response.json[0]?.commit?.committer?.date || null;
+  // Where this store's commits are read from: every place a programme write leaves one.
+  historyPlaces() {
+    return [{ repository: this.store.repository, branch: this.store.branch, path: this.store.path.replace(/\/$/, '') }];
   }
 
   // Writes `next` only when its state differs from `previous`. Bumps the revision only when the
   // content changes. Rejected compare-and-swap surfaces as STATE_CONFLICT; every write is read back.
-  write(kind, number, next, { sha, previous }) {
+  // `writer` only marks the commit: a refresh's commit says so (REFRESH_MARK). `put` is filled in as
+  // putVerified says.
+  write(kind, number, next, { sha, previous, writer = null, put = {} }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
     if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
@@ -3929,7 +3954,7 @@ class StateStore {
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
     return this.putVerified(this.docPath(kind, number), kind, canonicalText(doc), sha,
-      `programme state: ${kind === 'parent' ? 'parent' : 'issue'}-${number} revision ${doc.revision}`);
+      `programme state: ${kind === 'parent' ? 'parent' : 'issue'}-${number} revision ${doc.revision}${refreshMark(writer)}`, put);
   }
 
   // Read, authorise, change and write with compare-and-swap. On a conflict the change is re-applied
@@ -3948,7 +3973,7 @@ class StateStore {
       const next = change(clone(start), { created: base === null });
       if (!next) return { outcome: 'NOOP', doc: base, sha };
       try {
-        return this.write(kind, number, next, { sha, previous: base });
+        return this.write(kind, number, next, { sha, previous: base, writer });
       } catch (error) {
         if (error.code !== 'STATE_CONFLICT') throw error;
         const fresh = this.read(kind, number);
@@ -4004,6 +4029,9 @@ class StateBatch {
   }
 
   parent() { return this.read('parent', this.parentNumber).doc; }
+
+  // Whether a refresh made every change staged here.
+  byRefresh() { return [...this.entries.values()].every(entry => entry.ops.every(op => op.writer?.by_hash === true)); }
 
   run(entry, current, op) {
     if (op.authorise) authoriseWrite(entry.kind, current, entry.kind === 'parent' ? null : this.parent(), op.writer);
@@ -4299,6 +4327,9 @@ class BranchStateStore extends StateStore {
   }
 
   storedText(kind, doc) { return canonicalText(publicView(kind, doc, [...this.sessions])); }
+
+  // The public documents' own commits, and everything kept in the private store beside them.
+  historyPlaces() { return [...super.historyPlaces(), ...this.private.historyPlaces()]; }
 
   // The sweep record lives in the private store beside the sidecars.
   sweepRecordPath() { return this.private.sweepRecordPath(); }
@@ -4620,6 +4651,11 @@ class BranchStateStore extends StateStore {
     return { doc: this.join(kind, number, found.doc), sha: found.sha };
   }
 
+  readAt(kind, number, commit) {
+    const found = this.readPath(this.docPath(kind, number), kind, commit);
+    return found.doc ? { doc: this.join(kind, number, found.doc), sha: found.sha } : found;
+  }
+
   // The private store must still be private before any sidecar is written.
   requirePrivateStore() {
     const repo = this.transport.request('GET', `repos/${this.binding.store.repository}`);
@@ -4628,8 +4664,8 @@ class BranchStateStore extends StateStore {
   }
 
   // Writes `next` only when its state differs from `previous`, as StateStore does: the sidecar first,
-  // then the public file (compare-and-swap, read back), then the checkpoint.
-  write(kind, number, next, { sha, previous }) {
+  // then the public file (compare-and-swap, read back), then the checkpoint. `put` is the public file's.
+  write(kind, number, next, { sha, previous, writer = null, put = {} }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
     // Before the sidecar: a sidecar is never written for a public write that cannot be conditional.
     if (previous) requireVersionToken(sha, this.docPath(kind, number));
@@ -4649,7 +4685,7 @@ class BranchStateStore extends StateStore {
     const digest = sha256(text);
     this.requirePrivateStore();
     const sidecarSha = this.putSidecar(name, doc, digest);
-    const result = this.putVerified(this.docPath(kind, number), kind, text, sha, commitLine(`programme-state: ${name} r${doc.revision}`));
+    const result = this.putVerified(this.docPath(kind, number), kind, text, sha, `${commitLine(`programme-state: ${name} r${doc.revision}`)}${refreshMark(writer)}`, put);
     const replaced = this.joined.get(name);
     this.joined.set(name, { file: this.sidecarPath(name, doc.revision, digest), sha: sidecarSha, revision: doc.revision });
     try {
@@ -8652,6 +8688,7 @@ module.exports = Object.freeze({
   SCHEMA, ASSIGNMENT_ID, BINDING_FILE, RETIRED_BINDING_KEYS, withoutRetiredKeys, withoutRetiredKeysText, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
+  REFRESH_MARK,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies, queueOrder, queueStep, explainQueue, dependencyCycles, GRAPH_BANDS, IN_FLIGHT_BANDS, RETIRED_FINDING_CODES,
   evaluateChecks, frozenPage, titleCell, pageTitles, ownerWaits, uatOwer, agentUatUnstarted, unstartedAgentUats, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,

@@ -81,5 +81,5 @@
     "live_gate_states": ["ASSIGNED", "ACTIVE", "SUBMITTED", "WAITING_OWNER"]
   },
   "handover": ["stop or fence the old writer", "settle in-flight effects", "assign the successor with --supersede --reason", "journals of the old assignment are stale and never replayed"],
-  "limits": ["The fence orders cooperating Toolkit writers under one account; it authenticates nobody.", "The tool cannot see whether another host session has stopped; a takeover record must carry that evidence."]
+  "limits": ["The fence orders cooperating Toolkit writers under one account; it authenticates nobody.", "The tool cannot see whether another host session has stopped; a takeover reads that controller's own last write instead, or takes the owner's own words."]
 }

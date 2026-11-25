@@ -5,8 +5,10 @@
 // 2026-10-23: sub-issue ids (not numbers), 422 for a second parent without replace_parent or a
 // duplicate, 422 for a reorder without an anchor, 409 for a stale Contents sha, 422 for a create
 // over an existing file, and a new commit even for an identical Contents PUT. A Contents GET on a
-// folder lists its files, `commits?path=` gives the last commit that changed a file (its id and
-// date), and comments carry their issue URL, author and creation time. With `branchLag` on, a
+// folder lists its files, `commits?path=` gives the commits that changed a file or a folder, newest
+// first (id, date, message and author; `author=` filters), and comments carry their issue URL, author
+// and creation time; the repository-wide comment list can be read newest first. `activity` lists the
+// merges `addMerge` recorded. `toolkitMain` is Toolkit's own default branch. With `branchLag` on, a
 // Contents read of the branch serves the files as of the commit before the latest one, as the real
 // API did on 2026-10-23 right after a write; a read at a commit sha is always exact.
 
@@ -48,8 +50,10 @@ class FakeGitHub {
     this.calls = [];
     this.hooks = [];
     this.nextId = 9000;
-    this.fileDates = new Map();
-    this.fileCommits = new Map();
+    this.commitRows = [];
+    this.committer = null;
+    this.merges = [];
+    this.toolkitMain = { sha: '1'.repeat(40), blob: '2'.repeat(40) };
     this.comments = new Map();
     this.commentSequence = 0;
     this.login = 'owner';
@@ -102,6 +106,13 @@ class FakeGitHub {
 
   // A hook runs before every call and may answer it: (call) => response | undefined.
   intercept(hook) { this.hooks.push(hook); }
+
+  // A pull request merged to the default branch, as the repository activity list shows it.
+  addMerge({ login = this.login, at = this.tick(), ref = `refs/heads/${this.branch}`, type = 'pr_merge' } = {}) {
+    const id = 5000 + this.merges.length;
+    this.merges.push({ id, activity_type: type, ref, actor: { login }, timestamp: at, after: crypto.createHash('sha1').update(`merge-${id}`).digest('hex') });
+    return id;
+  }
 
   // Writes to the governed repository (issues and links), not to the state store.
   mutations() { return this.calls.filter(call => call.method !== 'GET' && call.path !== 'graphql' && !call.path.includes('/contents/')
@@ -169,7 +180,7 @@ class FakeGitHub {
       const before = this.files;
       this.files = new Map(this.snapshots.get(body.sha)); this.commits++;
       this.snapshots.set(`c${this.commits}`, new Map(this.files)); this.sweepHead = body.sha;
-      this.touched(before, body.sha);
+      this.touched(before, body.sha, this.sweepCommits.get(body.sha)?.message || '');
       return ok(200, { object: { sha: body.sha } });
     }
     if ((match = /^repos\/[^/]+\/[^/]+\/git\/blobs\/([0-9a-f]{40})$/.exec(path)) && method === 'GET') {
@@ -184,11 +195,11 @@ class FakeGitHub {
       return ok(200, { status: base === head ? 'identical' : ancestors(head).has(base) ? 'ahead' : ancestors(base).has(head) ? 'behind' : 'diverged' });
     }
     if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
-    if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
-    if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) {
-      const [date, sha] = [this.fileDates.get(params.get('path')), this.fileCommits.get(params.get('path'))];
-      return ok(200, date || sha ? [{ sha: sha || 'f'.repeat(40), commit: { committer: { date: date || new Date(this.clock).toISOString() } } }] : []);
+    if ((match = /^repos\/weijunswj\/ai-agent-toolkit\/(commits\/main|contents\/repo\/CONTROLLER\.md)$/.exec(path)) && method === 'GET') {
+      return ok(200, { sha: match[1] === 'commits/main' ? this.toolkitMain.sha : this.toolkitMain.blob });
     }
+    if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
+    if ((match = /^repos\/([^/]+\/[^/]+)\/commits$/.exec(path)) && method === 'GET' && this.repos.has(match[1].toLowerCase())) return this.commitList(params);
     if (path.toLowerCase() === `repos/${this.storeRepository.toLowerCase()}/pulls` && method === 'GET') {
       const page = Number(params.get('page') || 1);
       return ok(200, this.storePulls.slice((page - 1) * 100, page * 100));
@@ -213,6 +224,18 @@ class FakeGitHub {
       return pr ? ok(200,{number:pr.number,title:pr.title || '',body:pr.body,state:pr.merged || pr.state==='CLOSED' ? 'closed':'open',
         closed_at:pr.closedAt || pr.mergedAt || null,merged_at:pr.mergedAt,merge_commit_sha:pr.merged ? pr.head:null,
         user:{login:pr.author || 'fixture-owner'},head:{ref:pr.branch || '',repo:pr.headRepository===null ? null : {full_name:pr.headRepository || this.repository}}}) : ok(404,{});
+    }
+    if (rest === 'issues/comments' && method === 'GET') {
+      const size = Number(params.get('per_page') || 30);
+      const page = Number(params.get('page') || 1);
+      const rows = [...this.comments.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+      if (params.get('direction') === 'desc') rows.reverse();
+      return ok(200, rows.slice((page - 1) * size, page * size).map(comment => ({ ...this.commentsOf(comment.issue).find(row => row.id === comment.id),
+        issue_url: `https://api.github.com/repos/${this.repository}/issues/${comment.issue}` })));
+    }
+    if (rest === 'activity' && method === 'GET') {
+      return ok(200, this.merges.filter(row => (!params.get('ref') || row.ref === params.get('ref')) && (!params.get('actor') || row.actor.login === params.get('actor')))
+        .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, Number(params.get('per_page') || 30)));
     }
     if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && ['GET', 'PATCH'].includes(method)) {
       const comment = this.comments.get(Number(match[1]));
@@ -344,7 +367,7 @@ class FakeGitHub {
     if (method === 'DELETE') {
       if (!file) return ok(404, {});
       if (body.sha !== file.sha) return ok(409, {});
-      this.files.delete(filePath); this.commit(); return ok(200, {});
+      this.files.delete(filePath); this.commit(body.message); return ok(200, {});
     }
     if (method === 'PUT') {
       if (body.branch !== this.branch) return ok(404, { message: `Branch ${body.branch} not found` });
@@ -353,35 +376,44 @@ class FakeGitHub {
       if (!file && body.sha) return ok(404, { message: 'Not Found' });
       const text = Buffer.from(body.content, 'base64').toString('utf8');
       this.files.set(filePath, { text, sha: blobSha(text) });
-      this.fileDates.set(filePath, this.tick());
-      this.commit();
+      this.tick();
+      this.commit(body.message);
       return ok(file ? 200 : 201, { content: { sha: blobSha(text) }, commit: { sha: `c${this.commits}` } });
     }
     return ok(405, { message: 'Method not allowed' });
   }
 
   // Writes a state file directly, as another writer would.
-  putFile(filePath, doc) {
+  putFile(filePath, doc, message = 'a write by hand') {
     const text = `${JSON.stringify(doc, null, 2)}\n`;
     this.files.set(filePath, { text, sha: blobSha(text) });
-    this.fileDates.set(filePath, this.tick());
-    this.commit();
+    this.tick();
+    this.commit(message);
   }
 
-  commit() {
+  commit(message = '') {
     const before = this.snapshots.get(`c${this.commits}`) || new Map();
     this.commits += 1;
     this.snapshots.set(`c${this.commits}`, new Map(this.files));
     this.sweepHead = crypto.createHash('sha1').update(`contents-${this.commits}-${++this.sweepSequence}`).digest('hex');
     this.snapshots.set(this.sweepHead, new Map(this.files));
-    this.touched(before, this.sweepHead);
+    this.touched(before, this.sweepHead, message);
   }
 
-  // Every file a commit added, changed or removed now names that commit as its last one.
-  touched(before, sha) {
-    for (const file of new Set([...before.keys(), ...this.files.keys()])) {
-      if (before.get(file)?.sha !== this.files.get(file)?.sha) this.fileCommits.set(file, sha);
-    }
+  // One row per commit, with every file it added, changed or removed, by `committer` (or the signed-in
+  // account).
+  touched(before, sha, message) {
+    const files = [...new Set([...before.keys(), ...this.files.keys()])].filter(file => before.get(file)?.sha !== this.files.get(file)?.sha);
+    this.commitRows.push({ sha, message, files, login: this.committer || this.login, date: new Date(this.clock).toISOString() });
+  }
+
+  // The commits that changed a path (a file, or anything under a folder), newest first.
+  commitList(params) {
+    const path = params.get('path') || '';
+    const size = Number(params.get('per_page') || 30);
+    const page = Number(params.get('page') || 1);
+    const rows = this.commitRows.filter(row => row.files.some(file => file === path || file.startsWith(`${path.replace(/\/$/, '')}/`)) && (!params.get('author') || row.login === params.get('author'))).reverse();
+    return ok(200, rows.slice((page - 1) * size, page * size).map(row => ({ sha: row.sha, commit: { message: row.message, committer: { date: row.date } }, author: { login: row.login } })));
   }
 
   readFile(filePath) {

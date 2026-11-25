@@ -27,8 +27,8 @@ const CATALOGUE = [
   { issue: 471, label: 'H3', class: 'COMMITTED', parent: 467, order: 5 },
 ];
 
-test('T10 the playbook governed record passes the real takeover verifier', () => {
-  const { github, store, binding, parentDoc } = setup();
+test('T10 the playbook governed record is the record a takeover reads', () => {
+  const { binding } = setup();
   const playbook = fs.readFileSync(path.join(__dirname, '../docs/agent-playbooks/controller-takeover.md'), 'utf8');
   assert.ok(playbook.includes('**Record pack:**'), 'the named relay group still owns record and claim');
   assert.deepEqual([...playbook.matchAll(/^Pack: (.+)\r?$/gm)].map(match => match[1].trim()).filter(id => !id.startsWith('<')),
@@ -36,10 +36,8 @@ test('T10 the playbook governed record passes the real takeover verifier', () =>
   const sample = playbook.match(/^EXAMPLE-001 TAKEOVER:.*$/m)?.[0];
   assert.ok(sample, 'the published example is the fixture, not a separately invented record');
   const body = sample.replace('EXAMPLE-001', `${binding.writer_prefix}001`);
-  const id = github.addComment(421, { body });
-  const result = require('../../skills/github-program-reconciler/scripts/programme.cjs').verifyTakeoverRecord(
-    { transport: github, repository: binding.repository, binding, store }, parentDoc(), id, successor);
-  assert.deepEqual(result, { comment_id: id, from_epoch: 1 });
+  const { parseRecord } = require('../../skills/github-program-reconciler/scripts/programme-takeover.cjs');
+  assert.deepEqual(parseRecord(body, binding.writer_prefix), { unused: false, id: `${binding.writer_prefix}001`, controller: 'example-controller', from: 1, to: 2 });
 });
 
 function setup({ initialiseParent = true } = {}) {
@@ -112,6 +110,10 @@ test('claim rejects missing, ambiguous and invalid targets before opening the st
     ['--issue', '0', '--role', 'G1', '--takeover'],
     ['--parent', '--role', 'G1'],
     ['--parent', '--issue', '423'],
+    // The parent is never claimed: every form of the removed claim is refused as unknown usage.
+    ['--parent'], ['--parent', '--takeover'], ['--parent', '--takeover', '--controller'], ['--parent', '--lane', '--issue', '423', '--controller'],
+    ['--parent', '--takeover', '--takeover-' + 'record', '1', '--controller'], ['--issue', '423', '--lane', '--takeover-' + 'record', '1', '--controller'],
+    ['--issue', '423', '--controller'], ['--takeover', '--controller'],
     ['--issue', '-1'], ['--issue', '1.5'], ['--issue', '9007199254740992'],
   ]) {
     assert.throws(() => cli.main(['claim', ...args, '--session', builder.session], {
@@ -121,6 +123,25 @@ test('claim rejects missing, ambiguous and invalid targets before opening the st
     assert.equal(github.commits, writes, 'no store writes');
   }
   assert.deepEqual(store.read('parent', 421).doc, before, 'the parent and its epoch are unchanged');
+});
+
+test('no source, skill, doc or test names the removed parent claim or its record flag', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  // Built here, so this test is not its own finding. The changelog keeps its history.
+  const removed = [new RegExp(['claim', '--parent'].join(' ')), new RegExp(['--takeover', 'record'].join('-')), new RegExp(['verify', 'TakeoverRecord'].join(''))];
+  const named = [];
+  const walk = dir => {
+    for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) { if (rel !== 'repo/docs/changelog.d' && entry.name !== 'node_modules') walk(rel); continue; }
+      if (rel === 'repo/docs/CHANGELOG.md' || !/\.(?:cjs|mjs|js|json|md|yml|yaml|ps1|txt|toml)$/.test(entry.name)) continue;
+      const text = fs.readFileSync(path.join(root, rel), 'utf8');
+      for (const pattern of removed) if (pattern.test(text)) named.push(`${rel}: ${pattern}`);
+    }
+  };
+  for (const dir of ['skills', 'repo', '.github', '.claude-plugin', '.codex-plugin']) walk(dir);
+  for (const file of ['README.md', 'AGENTS.md', 'CLAUDE.md']) for (const pattern of removed) if (pattern.test(fs.readFileSync(path.join(root, file), 'utf8'))) named.push(`${file}: ${pattern}`);
+  assert.deepEqual(named, []);
 });
 
 test('an assignment the controller issues after planning survives applying a planned create_state', () => {
@@ -165,7 +186,7 @@ test('only the appointed controller writes: every command x scenario x role', ()
   };
   const writes = [
     ['reconcile', '--apply'], ['init-parent', '--catalogue', catalogue, '--apply'], ['update-parent', '--patch', patches.parent],
-    ['claim', '--parent'], ['claim', '--parent', '--takeover'], ['claim', '--issue', '423', '--lane'],
+    ['claim', '--parent'], ['claim', '--issue', '423', '--lane'], ['takeover', '--surface', 'test harness', '--next', 'read the map', '--apply'],
     ['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-new'], ['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-new', '--supersede', '--reason', 'lost'],
     ['reopen', '--issue', '423', '--reason', 'correction', '--assignment', 'g1-fix'], ['reopen', '--issue', '423', '--reason', 'correction'],
     ['interrupt', '--issue', '423', '--reason', 'lost'], ['update', '--issue', '423', '--patch', patches.ordinary],
@@ -182,11 +203,11 @@ test('only the appointed controller writes: every command x scenario x role', ()
     { name: 'settled', child: true, settled: true },
   ];
   const others = [builder, successor, { session: 'reviewer-g2', prefix: 'INT-TK421-' }, { session: 'helper-1', prefix: 'INT-TK421-' }];
-  const inherent = args => (args[0] === 'init-parent' && args.includes('--apply')) || (args[0] === 'claim' && args.includes('--takeover') && args.includes('--parent'));
+  const inherent = args => (args[0] === 'init-parent' && args.includes('--apply')) || args[0] === 'takeover';
   // A controller-only option or command may appear only in a sentence addressed to the controller.
   const addressed = text => {
     for (const sentence of text.split(/\n|(?<=[.!?])\s+/)) {
-      if (!/--apply|--controller|--takeover|--consume|--verdict|init-parent|update-parent|claim --parent/.test(sentence)) continue;
+      if (!/--apply|--controller|--takeover|--consume|--verdict|init-parent|update-parent|takeover --/.test(sentence)) continue;
       assert.match(sentence, /(?:^|: )"?(?:Controller:|The appointed controller|Only the appointed controller|The new controller)/, `not addressed to the controller: ${sentence}`);
     }
   };
@@ -224,7 +245,7 @@ test('only the appointed controller writes: every command x scenario x role', ()
             const label = `${scenario.name} / ${role.session} / ${argv.join(' ')}`;
             cases += 1;
             if (role === controller) {
-              if (error) assert.ok(!['STALE_WRITER', 'ROLE_REFUSED', 'CLAIM_HELD', 'USAGE', 'WRITER_UNKNOWN'].includes(error.code), `${label}: ${error.code}`);
+              if (error && !(args[0] === 'claim' && args[1] === '--parent')) assert.ok(!['STALE_WRITER', 'ROLE_REFUSED', 'CLAIM_HELD', 'USAGE', 'WRITER_UNKNOWN'].includes(error.code), `${label}: ${error.code}`);
               continue;
             }
             if (isWrite && !flagged) {
@@ -252,20 +273,20 @@ test('a stopped controller is told to stop and report, never to take the parent 
   const { github, store, binding, reconciler } = setup();
   github.intercept(call => {
     if (call.method === 'POST' && /\/sub_issues$/.test(call.path) && store.read('parent', 421).doc.fence.epoch === 1) {
-      store.mutate('parent', 421, { writer: successor, authorise: false, change: doc => state.claimDocument(doc, successor, { takeover: true }) });
+      store.mutate('parent', 421, { writer: successor, authorise: false, change: doc => ({ ...state.claimDocument(doc, successor, { takeover: true }), private: { retired_holders: [controller.session] } }) });
     }
     return undefined;
   });
   const messages = [];
   try { reconciler(controller).run({ apply: true }); } catch (error) { messages.push(error.message); }
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname, toolkitVersion: '3.9.1', stdout: { write() {} } };
-  for (const args of [['claim', '--parent'], ['reconcile', '--apply'], ['update-parent', '--patch', __filename]]) {
+  for (const args of [['takeover', '--surface', 'test harness', '--next', 'read the map', '--apply'], ['reconcile', '--apply'], ['update-parent', '--patch', __filename]]) {
     try { cli.main([...args, '--session', controller.session, '--controller'], deps); } catch (error) { messages.push(error.message); }
   }
   assert.equal(messages.length, 4);
   for (const message of messages) {
     assert.match(message, /A controller stopped by a takeover stops and reports to the owner\./);
-    assert.doesNotMatch(message, /--takeover|claim --parent/);
+    assert.doesNotMatch(message, /--takeover|takeover --apply|takeover --session/);
   }
 });
 
@@ -560,7 +581,7 @@ test('every custody surface says only the appointed controller writes', () => {
   }
   assert.match(surfaces.who, /A controller stopped by a takeover stops and reports to the owner/);
   assert.match(surfaces.who, /verifies that the previous writer stopped, posts its takeover record/);
-  assert.match(surfaces.who, /--takeover-record <comment id>/);
+  assert.match(surfaces.who, /`takeover --session <new name>/);
   // Executors write only their own journal; no surface says they never write at all.
   for (const name of ['description', 'who', 'prompt', 'readme', 'trigger']) {
     assert.match(surfaces[name], /writes only its own checkpoint journal/, name);

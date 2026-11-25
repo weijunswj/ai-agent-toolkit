@@ -458,7 +458,7 @@ test('E3: claim, assign, return --consume and a terminal update print the stored
   const from = clean.github.calls.length;
   clean.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1'], { json: false });
   assert.equal(withLine.count, clean.github.calls.length - from, 'no extra GitHub request');
-  for (const argv of [['claim', '--parent'], ['return', '--issue', '423', '--record', 'g1-r1', '--assignment', 'g1-a1'], ['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'REOPEN']]) {
+  for (const argv of [['takeover', '--surface', 'test harness', '--next', 'read the map'], ['return', '--issue', '423', '--record', 'g1-r1', '--assignment', 'g1-a1'], ['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'REOPEN']]) {
     const { run } = calls(argv);
     const printed = /^Attention: /.test(fx.errors);
     assert.equal(printed, argv[1] !== '--issue' || argv.includes('--consume'), argv.join(' '));

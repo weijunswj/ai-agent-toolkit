@@ -62,7 +62,8 @@ const GUARDS = Object.freeze({
 const PROGRAMME_ALLOW = Object.freeze(['reconcile', 'refresh', 'show', 'inventory', 'attention', 'update', 'update-parent', 'bind', 'checkpoint',
   'assign', 'return', 'reopen', 'interrupt', 'gate-session', 'ack', 'dispose', 'closing-comment', 'run-order']);
 const PROGRAMME_ASK = Object.freeze({
-  claim: 'Taking or taking over the controller role is an authority change.',
+  takeover: 'Taking over the controller role is an authority change.',
+  claim: 'A lane controller taking a task it was delegated is an authority change.',
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
   'migrate-state': 'Moving the state documents asks for the owner in that run.',
   'mark-archive': 'It edits a page\'s hand-written text; agents run it through a holder order, which the cloud sweep applies.',
