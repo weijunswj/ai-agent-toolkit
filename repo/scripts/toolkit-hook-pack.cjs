@@ -42,7 +42,7 @@ const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
 const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']);
 // The fixture's Claude desktop session (fixture.desktop_sessions): this session's own file and the
-// variables the app sets.
+// host-session variable the app sets.
 const DESKTOP_SELF = 'local_00000000-0000-4000-8000-000000000001';
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
@@ -465,9 +465,7 @@ class Fixture {
         const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
         fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
       });
-      // The desktop app sets both in every session it runs, top-level chats included.
       this.env.CLAUDE_CODE_HOST_SESSION_ID = DESKTOP_SELF;
-      this.env.CLAUDE_CODE_CHILD_SESSION = '1';
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
@@ -850,7 +848,8 @@ async function runOnHost(row, host, fixture, roots) {
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
   const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);
-  const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work } : { PLUGIN_ROOT: pluginRoot }) };
+  // Every Claude Code hook process carries CLAUDE_CODE_CHILD_SESSION, so no row may depend on its absence.
+  const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work, CLAUDE_CODE_CHILD_SESSION: '1' } : { PLUGIN_ROOT: pluginRoot }) };
   // Event-local fixture values only: no real session variable is read or carried between steps.
   if (row.host_session !== undefined) env.TOOLKIT_HOST_SESSION = row.host_session === 'matching' ? payload.session_id : row.host_session === 'empty' ? '' : 'different-fixture-session';
   const decisionFile = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');

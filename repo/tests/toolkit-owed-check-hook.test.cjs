@@ -18,6 +18,9 @@ const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'sc
 const support = require('./toolkit-governed-fixture-support.cjs');
 const { LAUNCHER_MARKERS } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governed-repo.cjs'));
 
+// This session's id, and the id of a chat its transcript may be copied from.
+const SESSION = '00000000-0000-4000-8000-0000000000b1';
+const PARENT = '00000000-0000-4000-8000-0000000000b2';
 const SELF = 'local_00000000-0000-4000-8000-000000000001';
 const CHILD = n => `local_00000000-0000-4000-9000-${String(n).padStart(12, '0')}`;
 const NOW = Date.parse('2026-11-23T12:00:00Z');
@@ -33,18 +36,20 @@ function fixture(t, { governed = true } = {}) {
   support.makeGoverned(work, 'owed', { home });
   const sessions = path.join(dir, 'local', 'Claude-Data', 'claude_fx', 'claude-code-sessions', 'a', 'b');
   fs.mkdirSync(sessions, { recursive: true });
-  const transcript = path.join(dir, 'transcript.jsonl');
+  const transcript = path.join(dir, `${SESSION}.jsonl`);
   const fx = {
     dir, home, work, sessions, transcript, repository: 'toolkit-test-fixture/owed',
     deps: { home, nowMs: NOW, localAppData: path.join(dir, 'local'), startRefresh: () => {}, governanceState: () => (governed ? { state: 'ENABLED', programme_records_bind: true } : { state: 'DISABLED' }),
       env: { CLAUDE_CODE_HOST_SESSION_ID: SELF } },
     rows: [],
     // Transcript rows, in order; each call is { name, input, at (hours ago), result, error }.
-    brief(text) { fx.rows.unshift({ type: 'user', message: { role: 'user', content: text }, timestamp: iso(NOW - 30 * HOUR) }); return fx; },
+    brief(text) { fx.rows.unshift({ type: 'user', sessionId: SESSION, message: { role: 'user', content: text }, timestamp: iso(NOW - 30 * HOUR) }); return fx; },
+    // Rewrites the rows so far as a copy of another chat's, one function from row to row.
+    copied(asCopy) { fx.rows = fx.rows.map(asCopy); return fx; },
     call({ name, input, hoursAgo = 1, result = 'ok', error = false }) {
       const id = `toolu_${fx.rows.length}`;
-      fx.rows.push({ type: 'assistant', timestamp: iso(NOW - hoursAgo * HOUR), message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
-      fx.rows.push({ type: 'user', timestamp: iso(NOW - hoursAgo * HOUR), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: result }], ...(error ? { is_error: true } : {}) }] } });
+      fx.rows.push({ type: 'assistant', sessionId: SESSION, timestamp: iso(NOW - hoursAgo * HOUR), message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+      fx.rows.push({ type: 'user', sessionId: SESSION, timestamp: iso(NOW - hoursAgo * HOUR), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: result }], ...(error ? { is_error: true } : {}) }] } });
       return fx;
     },
     launch(n, { gate = 'G1', hoursAgo = 1, error = false } = {}) {
@@ -66,7 +71,7 @@ function fixture(t, { governed = true } = {}) {
         JSON.stringify({ sessionId: CHILD(index + 100), spawnedFrom: { sessionId: SELF, title: `Side ${index + 100}` }, ...child })));
       return fx;
     },
-    run(input = {}) { return hook.check({ hook_event_name: 'Stop', session_id: 'cli-session-1', transcript_path: transcript, cwd: fx.work, stop_hook_active: false, ...input }, fx.deps); },
+    run(input = {}) { return hook.check({ hook_event_name: 'Stop', session_id: SESSION, transcript_path: transcript, cwd: fx.work, stop_hook_active: false, ...input }, fx.deps); },
   };
   return fx;
 }
@@ -219,7 +224,7 @@ test('O-10 the hook process prints one JSON block on stdout, exits 0, and stays 
   // The real process with the fixture's home; governance comes from the fixture's recorded binding.
   const env = { ...process.env, HOME: fx.home, USERPROFILE: fx.home, LOCALAPPDATA: path.join(fx.dir, 'local'), TOOLKIT_GOVERNANCE_OFFLINE: '1', CLAUDE_CODE_HOST_SESSION_ID: SELF };
   for (const name of LAUNCHER_MARKERS) delete env[name];
-  const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'cli-session-2', transcript_path: fx.transcript, cwd: fx.work, stop_hook_active: false });
+  const input = JSON.stringify({ hook_event_name: 'Stop', session_id: SESSION, transcript_path: fx.transcript, cwd: fx.work, stop_hook_active: false });
   const run = text => childProcess.spawnSync(process.execPath, [HOOK], { input: text, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
   const first = run(input);
   assert.equal(first.status, 0, first.stderr);
@@ -236,9 +241,9 @@ test('O-11 the per-session memory holds hashes only: no session IDs, titles, fin
   const folder = path.join(fx.home, '.ai-agent-toolkit', 'user-state', 'owed-check');
   const files = fs.readdirSync(folder);
   assert.equal(files.length, 1);
-  assert.doesNotMatch(files[0], /cli-session/);
+  assert.equal(files[0].includes(SESSION), false);
   const text = fs.readFileSync(path.join(folder, files[0]), 'utf8');
-  for (const secret of ['local_', 'Gate 1', 'Side 100', 'aaaaaaaaaaaa', fx.dir.replace(/\\/g, '\\\\'), 'cli-session']) assert.equal(text.includes(secret), false, secret);
+  for (const secret of ['local_', 'Gate 1', 'Side 100', 'aaaaaaaaaaaa', fx.dir.replace(/\\/g, '\\\\'), SESSION]) assert.equal(text.includes(secret), false, secret);
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['keys', 'notes', 'schema']);
 });
 
@@ -283,25 +288,28 @@ test('O-14 when its memory file cannot be saved, the check notes the owed entrie
   }
 });
 
-// Every CLAUDE_CODE_* variable the Claude desktop app sets in a top-level chat, with fake values.
+// The CLAUDE_CODE_* variables a hook sees in a top-level desktop chat, with fake values.
 const DESKTOP_ENV = Object.freeze({
+  CLAUDECODE: '1',
   CLAUDE_CODE_ACCOUNT_UUID: '00000000-0000-4000-8000-0000000000a1', CLAUDE_CODE_CHILD_NOTES_DIR: 'fixture-notes', CLAUDE_CODE_CHILD_SESSION: '1',
   CLAUDE_CODE_DESKTOP_APP_VERSION: '0.0.0-fixture', CLAUDE_CODE_DISABLE_CRON: '1', CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1', CLAUDE_CODE_EAGER_FLUSH: '1',
   CLAUDE_CODE_EMIT_STARTUP_TIMING: '1', CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1', CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL: '1',
   CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: '1', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_EXECPATH: 'fixture-claude',
   CLAUDE_CODE_HOST_SESSION_ID: SELF, CLAUDE_CODE_HOST_SHORT_TEMP_DIRS: '1', CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '1', CLAUDE_CODE_MESSAGING_SOCKET: 'fixture-socket',
   CLAUDE_CODE_MESSAGING_TOKEN: 'fixture', CLAUDE_CODE_ORGANIZATION_UUID: '00000000-0000-4000-8000-0000000000a2', CLAUDE_CODE_REPORT_FINDINGS: '1',
-  CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH: '1', CLAUDE_CODE_SESSION_ATTENDED: '1', CLAUDE_CODE_SESSION_ID: '00000000-0000-4000-8000-0000000000a3',
+  CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH: '1', CLAUDE_CODE_SESSION_ATTENDED: '1', CLAUDE_CODE_SESSION_ID: SESSION,
   CLAUDE_CODE_SIMPLE: '1', CLAUDE_CODE_STARTUP_FAILURE_RESULTS: '1', CLAUDE_CODE_TERMINAL_MCP_TOOLS: '1', CLAUDE_CODE_USER_EMAIL: 'owner@example.com',
 });
-// The two Claude Code shapes: the desktop app (its variables and session files, with one finished side
-// session) and a plain CLI (no host variables, no desktop files).
+// The variables a hook sees in a plain CLI chat, with fake values.
+const CLI_ENV = Object.freeze({ CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1', CLAUDE_CODE_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ATTENDED: '1', CLAUDE_CODE_ENTRYPOINT: 'cli' });
+// The two Claude Code shapes: the desktop app (with its session files and one finished side session)
+// and a plain CLI (no desktop files).
 const SHAPES = Object.freeze([
   { name: 'desktop app', env: DESKTOP_ENV, setup: fx => fx.desktop({}, [finished()]), side: true },
-  { name: 'plain CLI', env: {}, setup: fx => fx, side: false },
+  { name: 'plain CLI', env: CLI_ENV, setup: fx => fx, side: false },
 ]);
 
-test('O-15 a top-level controller is stopped the same in the desktop app and a plain CLI; host variables only add the side-session section', t => {
+test('O-15 a top-level controller is stopped the same in the desktop app and a plain CLI; the desktop files only add the side-session section', t => {
   for (const shape of SHAPES) {
     const fx = shape.setup(fixture(t).launch(1).writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) }]));
     fx.deps.env = { ...shape.env };
@@ -316,7 +324,7 @@ test('O-15 a top-level controller is stopped the same in the desktop app and a p
     const live = shape.setup(fixture(t).launch(1).writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(Date.now() - 5 * HOUR) }]));
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^CLAUDE/i.test(key) && !LAUNCHER_MARKERS.includes(key)));
     Object.assign(env, { HOME: live.home, USERPROFILE: live.home, LOCALAPPDATA: path.join(live.dir, 'local'), TOOLKIT_GOVERNANCE_OFFLINE: '1' }, shape.env);
-    const input = JSON.stringify({ hook_event_name: 'Stop', session_id: 'cli-session-3', transcript_path: live.transcript, cwd: live.work, stop_hook_active: false });
+    const input = JSON.stringify({ hook_event_name: 'Stop', session_id: SESSION, transcript_path: live.transcript, cwd: live.work, stop_hook_active: false });
     const run = childProcess.spawnSync(process.execPath, [HOOK], { input, env, encoding: 'utf8', timeout: 30000, windowsHide: true });
     assert.equal(run.status, 0, run.stderr);
     assert.notEqual(run.stdout.trim(), '', `${shape.name}: the hook process printed nothing, so it did not stop the turn`);
@@ -350,3 +358,136 @@ test('O-17 the launcher-marker copies kept for a module failure match the shared
     assert.deepEqual(copy[1].split(',').map(name => name.trim().replace(/^'|'$/g, '')), [...LAUNCHER_MARKERS], file);
   }
 });
+
+const DUE = [{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 9 * HOUR) }];
+const ACK = 'ack --finding abcdefabcdef --next "x" --session ctl --controller';
+
+// Rows Claude Code copied from another chat, in the three shapes it writes: a file copy keeps the other
+// chat's session id, a branch rewrites the id and adds forkedFrom, and a continuation under a new id
+// (the desktop app's rewind, or a CLI resume with --fork-session) rewrites the id and names the old one
+// on assistant rows only.
+const fileCopy = row => ({ ...row, sessionId: PARENT });
+const branched = row => ({ ...row, forkedFrom: { sessionId: PARENT, messageUuid: 'u1' }, ...(row.type === 'assistant' ? { requestSessionId: PARENT } : {}) });
+const continued = row => ({ ...row, ...(row.type === 'assistant' ? { requestSessionId: PARENT } : {}) });
+// The other chat's own transcript beside this one, with its last turn that many hours ago.
+const parentFile = (fx, hoursAgo) => fs.writeFileSync(path.join(fx.dir, `${PARENT}.jsonl`),
+  [30, hoursAgo].map(age => JSON.stringify({ type: 'assistant', sessionId: PARENT, timestamp: iso(NOW - age * HOUR), message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] } })).join('\n') + '\n');
+// A chat that only answers a question, after the rows so far: what a side chat's own rows hold.
+const asks = fx => fx.call({ name: 'Read', input: { file_path: 'README.md' }, hoursAgo: 0.5 });
+
+test('O-18 rows copied from the controller\'s chat never make a fork, side chat or branch the controller', t => {
+  for (const shape of SHAPES) {
+    for (const [name, asCopy] of Object.entries({ 'file copy (Fork, /btw, a forked side session)': fileCopy, 'branch (forkedFrom)': branched })) {
+      const copy = asks(shape.setup(fixture(t)).launch(1).controller().copied(asCopy)).writeTranscript().net(DUE);
+      copy.deps.env = { ...shape.env };
+      assert.deepEqual(copy.run(), { outcome: 'NOT_CONTROLLER', output: null }, `${shape.name}: ${name}`);
+      // The control: the same copied rows, then the chat's own controller command. Only its own launch is listed.
+      const own = shape.setup(fixture(t)).launch(1).controller().copied(asCopy).launch(2).controller().writeTranscript().net(DUE);
+      own.deps.env = { ...shape.env };
+      const result = own.run();
+      assert.equal(result.outcome, 'BLOCK', `${shape.name}: ${name}, own rows`);
+      assert.match(result.output.reason, new RegExp(`Gate launches with no gate-session record \\(1\\):\\n- G1 "Gate 2": session_id ${CHILD(2)}`));
+    }
+    // A CLI resume with --fork-session while the controller's own chat goes on.
+    const forked = asks(shape.setup(fixture(t)).launch(1, { hoursAgo: 3 }).copied(continued)).writeTranscript().net(DUE);
+    parentFile(forked, 0.1);
+    forked.deps.env = { ...shape.env };
+    assert.deepEqual(forked.run(), { outcome: 'NOT_CONTROLLER', output: null }, `${shape.name}: --fork-session`);
+  }
+});
+
+test('O-19 a resumed controller chat still counts: same id after a restart or compaction, or a new id the chat continued under', t => {
+  // The same session id after a restart (another host version) and a compaction: the rows stay its own.
+  const same = fixture(t).launch(1);
+  same.rows.forEach(row => { row.version = '2.1.330'; });
+  same.rows.push({ type: 'system', subtype: 'compact_boundary', sessionId: SESSION, timestamp: iso(NOW - HOUR) },
+    { type: 'user', isCompactSummary: true, sessionId: SESSION, timestamp: iso(NOW - HOUR), message: { role: 'user', content: 'summary' } });
+  asks(same).writeTranscript().net(DUE);
+  assert.equal(same.run().outcome, 'BLOCK');
+  // A new id with the earlier rows carried over (the desktop app's rewind): the chat left the old id
+  // before the new one began, or its old transcript is gone.
+  for (const [name, setup] of Object.entries({ 'the old transcript stopped': fx => parentFile(fx, 2), 'the old transcript is gone': () => {} })) {
+    const resumed = asks(fixture(t).launch(1, { hoursAgo: 3 }).copied(continued)).writeTranscript().net(DUE);
+    setup(resumed);
+    const result = resumed.run();
+    assert.equal(result.outcome, 'BLOCK', name);
+    assert.match(result.output.reason, new RegExp(`session_id ${CHILD(1)}`), name);
+  }
+  // An old id that is not a session id is never read as a path: the rows still count.
+  const odd = asks(fixture(t).launch(1, { hoursAgo: 3 }).copied(row => ({ ...continued(row), ...(row.type === 'assistant' ? { requestSessionId: '../outside' } : {}) }))).writeTranscript().net(DUE);
+  assert.equal(odd.run().outcome, 'BLOCK');
+});
+
+test('O-20 only a command that runs programme.cjs with --controller counts, never one that mentions it', t => {
+  const script = 'C:/Users/owner/.ai-agent-toolkit/repo/skills/github-program-reconciler/scripts/programme.cjs';
+  const runs = [
+    ['Bash', `node "${script}" ${ACK}`],
+    ['Bash', `cd repo && timeout 60 node skills/github-program-reconciler/scripts/programme.cjs ${ACK} 2>&1 | tail -5`],
+    ['Bash', `P="${script}"\nnode "$P" ${ACK}`],
+    ['Bash', `P='node ${script}'; $P ${ACK}`],
+    ['Bash', `A='--session ctl --controller'; node ${script} ack --finding abcdefabcdef --next x $A`],
+    ['Bash', `for id in a b; do node "${script}" ack --finding $id --next x --session ctl --controller; done`],
+    ['Bash', `out=$(node ${script} ${ACK}) && echo "$out"`],
+    ['Bash', `bash -c 'node ${script} ${ACK}'`],
+    ['Bash', `run() { node "${script}" "$@" --session ctl --controller; }\nrun ack --finding abcdefabcdef --next x`],
+    ['PowerShell', `node "${script.replace(/\//g, '\\')}" ${ACK}`],
+    ['PowerShell', `$p = "${script}"\n& node $p ${ACK}`],
+    ['PowerShell', `$out = node.exe ${script} ${ACK}; $out | Select-Object -Last 5`],
+    ['PowerShell', `foreach ($id in 'a','b') { node ${script} ack --finding $id --next x --session ctl --controller }`],
+  ];
+  const mentions = [
+    ['Bash', 'grep -n -- " --controller" skills/github-program-reconciler/scripts/programme.cjs'],
+    ['Bash', 'rg -n "programme.cjs attention --controller" repo/tests'],
+    ['Bash', 'git commit -m "programme.cjs: refuse --controller without a session"'],
+    ['Bash', 'gh issue comment 7 --body "run node programme.cjs ack --session ctl --controller"'],
+    ['Bash', 'echo node programme.cjs ack --session ctl --controller'],
+    ['Bash', `node ${script} reconcile --controller --help`],
+    ['Bash', `node ${script} attention && grep -rn -- --controller repo/docs`],
+    ['Bash', `cat > notes.md <<'EOF'\nnode programme.cjs ${ACK}\nEOF`],
+    ['Bash', `node -e "console.log('programme.cjs --controller')" -- --controller`],
+    ['Bash', `node repo/tests/fixture.cjs programme.cjs --controller`],
+    ['PowerShell', 'Select-String -Path repo/docs/*.md -Pattern "programme.cjs .* --controller"'],
+    ['PowerShell', `Get-Content ${script} | Select-String -- ' --controller'`],
+  ];
+  for (const [rows, expected] of [[runs, 'BLOCK'], [mentions, 'NOT_CONTROLLER']]) {
+    for (const [name, command] of rows) {
+      const fx = fixture(t).brief('What does the flag do?').call({ name, input: { command } }).writeTranscript().net(DUE);
+      assert.equal(fx.run().outcome, expected, `${name}: ${command}`);
+    }
+  }
+});
+
+test('O-21 a gate is what the route check says: a Gate line with a Route line, in a brief or a launch', t => {
+  const route = 'Route: owner-claude BUILDER opus-5.5/high';
+  const briefs = [
+    ['Gate: G2\nRoute: owner-claude opus opus-5.5/xhigh\nReview it.', 'GATE'],
+    [`Background (from the session that started this one):\nGate: G1\n${route}\n\nTask:\nBuild.`, 'GATE'],
+    ['You are taking over as controller.\nGate: G1 of PR 5 is running.\n', 'BLOCK'],
+    ['Gate: please check the two reviews\nYou are the controller.', 'BLOCK'],
+    ['Gate: none\nCheck the docs.', 'BLOCK'],
+  ];
+  for (const [text, expected] of briefs) {
+    const fx = fixture(t).brief(text).controller().writeTranscript().net(DUE);
+    assert.equal(fx.run().outcome, expected, text);
+    assert.equal(routeSaysGate(text), expected === 'GATE', text);
+  }
+  // A launch: the brief as the started session reads it (background, then prompt), and a start that happened.
+  const started = `Started session "Gate 1" (session_id: ${CHILD(1)}, name: gate-1). It runs on its own.`;
+  const launches = [
+    [{ prompt: `Gate: G1\n${route}\nBuild.` }, started, 'BLOCK'],
+    [{ background: `Gate: G1\n${route}`, prompt: 'Build.' }, started, 'BLOCK'],
+    [{ prompt: 'Gate: please look at these\nRead the docs.' }, started, 'NOT_CONTROLLER'],
+    [{ prompt: 'Gate: G1 of PR 5 is running; summarise its notes.' }, started, 'NOT_CONTROLLER'],
+    [{ prompt: `Gate: G1\n${route}\nBuild.`, initiation: 'own_initiative' }, 'Proposed as a card (task_id: task_1). It starts when the user clicks it.', 'NOT_CONTROLLER'],
+  ];
+  for (const [input, result, expected] of launches) {
+    const fx = fixture(t).brief('Help me plan.').call({ name: 'mcp__ccd_session__start_session', input: { initiation: 'user_asked', title: 'Gate 1', ...input }, result }).writeTranscript().net([]);
+    assert.equal(fx.run().outcome, expected, JSON.stringify(input));
+  }
+});
+
+// Whether the route check itself reads a first prompt as a gate.
+function routeSaysGate(text) {
+  const gateRoute = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-gate-route.cjs'));
+  return gateRoute.evaluate({ environment: {}, transcript: { brief: text, model: null, effort: null } }).gate !== null;
+}
