@@ -232,14 +232,15 @@ const unread = status => (status ? `HTTP ${status}` : 'no answer');
 const fileText = answer => (answer.status === 200 && answer.json?.encoding === 'base64' ? Buffer.from(String(answer.json.content), 'base64').toString('utf8') : null);
 
 // What this repository's cloud sweep runs: its copy of the sweep workflow on the default branch, judged as
-// the governance check judges it, and the variable that can pin it. A fact, never a hold.
+// the governance check judges it, and the variable that can pin it. { state, text, pin, unread }: `pin` is
+// a pin to ask the owner about, `unread` what could not be read. A fact, never a hold.
 function sweepOf(get, repository, branch, main) {
   const workflows = require('../../../repo/scripts/toolkit-cloud-workflows.cjs');
   if (same(repository, workflows.TOOLKIT_REPOSITORY)) return { state: 'own', text: 'runs this repository\'s own commit' };
   const [{ id, file }] = workflows.WORKFLOWS;
   const answer = readOnce(get, `repos/${repository}/contents/${file}?ref=${encodeURIComponent(branch)}`);
   const text = fileText(answer);
-  if (text === null && answer.status !== 404) return { state: 'unread', text: `not read (${unread(answer.status)})` };
+  if (text === null && answer.status !== 404) return { state: 'unread', text: `not read (${unread(answer.status)})`, unread: 'the sweep' };
   // The copy that runs holds the same workflow file, so no checkout is needed to judge the repository's one.
   const source = fs.readFileSync(path.join(TOOLKIT_ROOT, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n');
   const copy = workflows.copyState(text, workflows.render(id, source, '0'.repeat(40), null));
@@ -248,10 +249,10 @@ function sweepOf(get, repository, branch, main) {
   if (copy.state === 'edited') return { state: 'edited', text: 'a copy edited by hand' };
   if (copy.state === 'outdated') return { state: 'outdated', text: `an outdated copy (Toolkit ${short(copy.toolkit)})` };
   const variable = readOnce(get, `repos/${repository}/actions/variables/TOOLKIT_REF`);
-  if (![200, 404].includes(variable.status)) return { state: 'current', text: `follows main unless a TOOLKIT_REF variable pins it (not read: ${unread(variable.status)})` };
+  if (![200, 404].includes(variable.status)) return { state: 'current', text: `follows main unless a TOOLKIT_REF variable pins it (not read: ${unread(variable.status)})`, unread: 'the sweep\'s pin' };
   const pin = variable.status === 200 ? String(variable.json?.value ?? '') : '';
   if (pin === '' || pin === 'main') return { state: 'current', text: 'follows main' };
-  if (!PLAIN_REF.test(pin)) return { state: 'pinned', text: 'pinned by the TOOLKIT_REF variable at a value that is not a plain ref' };
+  if (!PLAIN_REF.test(pin)) return { state: 'pinned', text: 'pinned by the TOOLKIT_REF variable at a value that is not a plain ref', pin: 'a value that is not a plain ref' };
   return { state: 'pinned', text: `pinned at ${/^[0-9a-f]{40}$/.test(pin) ? short(pin) : pin} by the TOOLKIT_REF variable`, ...(pin === main ? {} : { pin }) };
 }
 
@@ -270,16 +271,14 @@ function versionsOf({ get, main, chat = null, repository = null, branch = 'main'
   const checkout = main ? require('../../../repo/scripts/toolkit-controller-check.cjs').toolkitCheckout(TOOLKIT_ROOT, main, git) : null;
   const ran = { version: TOOLKIT_VERSION, commit: checkout?.commit ?? null, state: !main ? 'not compared' : checkout ? (checkout.behind ? 'behind' : 'current') : byVersion(TOOLKIT_VERSION) };
   const loaded = chat ? { version: chat.version, state: byVersion(chat.version) } : null;
-  const { pin, ...sweep } = repository ? sweepOf(get, repository, branch, main) : { state: 'unread', text: 'not read here' };
+  const { pin, unread: sweepUnread, ...sweep } = repository ? sweepOf(get, repository, branch, main) : { state: 'unread', text: 'not read here' };
   const script = name => require('../../../repo/scripts/toolkit-user-state.cjs').managedScript(name).replace(/\\/g, '/');
-  const notCompared = [...(ran.state === 'not compared' ? ['the copy that ran'] : []), ...(loaded?.state === 'not compared' ? ['this chat\'s copy'] : []),
-    ...(repository && sweep.state === 'unread' ? ['the sweep'] : []), ...(sweep.text.includes('(not read: ') ? ['the sweep\'s pin'] : [])];
-  const pinnedAt = pin || (sweep.state === 'pinned' && !sweep.text.startsWith('pinned at ') ? 'a value that is not a plain ref' : null);
+  const notCompared = [...(ran.state === 'not compared' ? ['the copy that ran'] : []), ...(loaded?.state === 'not compared' ? ['this chat\'s copy'] : []), ...(sweepUnread ? [sweepUnread] : [])];
   const refresh = ran.state === 'behind' ? `run ${checkout?.command || `node "${script('toolkit-local-bridge.cjs')}" --repo-update-now --write`}, then reread CONTROLLER.md and the global rules`
     : loaded?.state === 'behind' ? 'say `refresh toolkit`, then go on in a fresh chat'
       : sweep.state === 'outdated' ? `run node "${script('toolkit-cloud-workflows.cjs')}" --repo <target checkout> --refresh-pr`
         : ['edited', 'unmanaged', 'missing'].includes(sweep.state) ? 'refresh the repository rules (say `refresh governance`)'
-          : pinnedAt ? `ask the owner whether the TOOLKIT_REF variable still pins ${repository} at ${pinnedAt}`
+          : pin ? `ask the owner whether the TOOLKIT_REF variable still pins ${repository} at ${pin}`
             : notCompared.length ? `none (not compared: ${notCompared.join(', ')})` : 'none';
   const at = commit => (commit ? ` (${short(commit)})` : '');
   return { line: `versions: this chat ${loaded ? loaded.version : 'not given'}, ran ${ran.version}${at(ran.commit)}, Toolkit main ${mainVersion || 'not read'}${at(main)}, sweep ${sweep.text}; refresh: ${refresh}`,

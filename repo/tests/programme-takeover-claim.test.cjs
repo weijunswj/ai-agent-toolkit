@@ -348,6 +348,13 @@ test('F1 a resumed record is marked only when a read shows another claim left it
     assert.match(run.error.message, /This run made no claim\./, label);
     assert.equal(fx.records()[0].body.startsWith('NOT USED: '), marked, label);
   }
+  // Another controller's claim from that epoch is final for a resumed record too.
+  const beaten = stoppedAfterRecord().fx;
+  beaten.before(CLAIMS, () => beaten.aside(() => beaten.rivalClaims()));
+  const lost = beaten.takeover();
+  assert.equal(lost.error?.code, 'EPOCH_MOVED', lost.error?.message);
+  assert.match(lost.error.message, /This run made no claim\. The record \(comment \d+\) is marked NOT USED\.$/);
+  assert.match(beaten.records()[0].body, /^NOT USED: /);
   // The fence is far past the record's epoch with no trace of who left it: the same for a new record is final.
   const jump = fx => fx.before(CLAIMS, () => fx.aside(() => fx.other().mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, fence: { ...doc.fence, epoch: 5, holder_session: 'x-controller' } }) })));
   const { fx } = stoppedAfterRecord();
