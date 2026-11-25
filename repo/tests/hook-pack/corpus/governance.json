@@ -1902,6 +1902,57 @@
       "status": "pass"
     },
     {
+      "id": "GOV.owed-check-desktop-top-level-blocks",
+      "source": "the turn-end owed check in a top-level desktop chat of the controller: the host-session variable and CLAUDE_CODE_CHILD_SESSION do not decide whether the turn is stopped",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ],
+        "desktop_sessions": []
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
       "id": "GOV.owed-check-same-list-silent",
       "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
       "hosts": [
@@ -2108,6 +2159,517 @@
       },
       "expect": {
         "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-copied-transcript-silent",
+      "source": "PR 1519 review round 1 (M1): a Fork, /btw side chat or branch of the controller's chat holds copied rows and was stopped as the controller",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "message": {
+              "role": "user",
+              "content": "You are taking over as controller."
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "btw, what does this mean?"
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_2",
+                  "name": "Bash",
+                  "input": {
+                    "command": "ls"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-branched-transcript-silent",
+      "source": "PR 1519 review round 1 (M1): a Fork, /btw side chat or branch of the controller's chat holds copied rows and was stopped as the controller",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "forkedFrom": {
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "messageUuid": "u1"
+            },
+            "message": {
+              "role": "user",
+              "content": "You are taking over as controller."
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "forkedFrom": {
+              "sessionId": "22222222-2222-4222-8222-222222222222",
+              "messageUuid": "u1"
+            },
+            "requestSessionId": "22222222-2222-4222-8222-222222222222",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_3",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "only a question"
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_4",
+                  "name": "Bash",
+                  "input": {
+                    "command": "ls"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-copy-own-rows-block",
+      "source": "control for the copied rows: the chat's own rows hold a controller command, so it is stopped",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "message": {
+              "role": "user",
+              "content": "You are taking over as controller."
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "22222222-2222-4222-8222-222222222222",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_5",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "carry on as controller"
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_6",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-continued-transcript-blocks",
+      "source": "control for the copied rows: the controller's chat continued under a new session id (the desktop app's rewind), so its carried rows still count",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "You are taking over as controller."
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "requestSessionId": "22222222-2222-4222-8222-222222222222",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_7",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "go on"
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_8",
+                  "name": "Bash",
+                  "input": {
+                    "command": "ls"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-flag-mention-silent",
+      "source": "PR 1519 review round 1 (L1): a chat that only searched for the flag was stopped as the controller",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "What does the flag do?"
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_9",
+                  "name": "Bash",
+                  "input": {
+                    "command": "grep -n -- \" --controller\" skills/github-program-reconciler/scripts/programme.cjs"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_10",
+                  "name": "Bash",
+                  "input": {
+                    "command": "git commit -m \"programme.cjs: refuse --controller without a session\""
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_11",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs reconcile --controller --help"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-gate-line-without-route-blocks",
+      "source": "PR 1519 review round 1 (L2): a Gate line with no Route line declares no gate, so it must not silence the controller",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": "You are taking over as controller.\nGate: G1 of PR 5 is running."
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_12",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TASK_IDLE",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 7
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
       },
       "status": "pass"
     },

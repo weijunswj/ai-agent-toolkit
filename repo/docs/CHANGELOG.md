@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.181.2
+
+### Fixed
+
+- **The turn-end owed check now runs in every Claude Code entry point, for the first time.** It stayed silent in the desktop app, the CLI, IDE extensions and headless runs alike, because it read a variable every Claude Code hook process carries as the mark of a side session. No variable the host sets decides whether a turn is stopped now. Gate sessions are still recognised by their brief and launched sessions by Toolkit's launcher marks.
+- The owed check stops only a chat whose own rows show it acted as the controller. Rows copied from another chat (a Fork, a `/btw` or forked side session, a branch) no longer count, and neither does a command that only mentions `programme.cjs` and `--controller`. A controller's chat still counts after a restart, a compaction or a rewind. A gate launched with its brief in the start's background is now seen, a proposed start nobody began is not a launch, and a `Gate:` line counts as a gate only with its `Route:` line, as the gate route check reads it.
+- The owed check reads Toolkit's launcher marks from the shared list in `toolkit-governed-repo.cjs`, so a session started with a pinned task profile now also counts as launched there. The copies the Claude agent hook, the Codex helper hook and the governance gate keep for a module failure are now checked against that list.
+- The hook test pack runs every Claude Code row with `CLAUDE_CODE_CHILD_SESSION=1`, as Claude Code hook processes have it.
+
 ## 3.181.1
 
 ### Changed
