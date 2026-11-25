@@ -226,7 +226,7 @@ test('conflicting repositories: a file Toolkit did not write is never overwritte
     assert.deepEqual(Object.keys(carried.files).sort(), Object.values(EXPECTED).flat().filter(entry => !left.has(entry)).sort(), name);
     assert.equal(carried.added.includes(id), false, name);
     assert.equal(carried.notes.length, 1, name);
-    assert.match(carried.notes[0], new RegExp(`^${file.replace(/[.]/g, '\\.')} is not a Toolkit copy, so it is left as it is and the default ${id} workflow is not added around it`));
+    assert.ok(carried.notes[0].startsWith(`${file} is not a Toolkit copy, so it is left as it is and the default ${id} workflow is not added around it`), carried.notes[0]);
     workflows.apply(plan(dir));
     for (const other of EXPECTED[id].filter(entry => entry !== file)) assert.equal(fs.existsSync(path.join(dir, other)), false, `${name}: ${other} is not added beside it`);
     if (kept !== null) assert.equal(read(dir, file), kept, name);

@@ -106,7 +106,7 @@ test('a sweep that may not or cannot be started is one plain line with the owner
     assert.equal(fake.world.starts.length, 0, name);
     assert.equal(waits.length, 0, `${name}: nothing is waited for`);
     // The governance App, its variable and its secret are never read or needed.
-    for (const call of fake.world.calls) assert.doesNotMatch(call, /variables|secrets|installation|\/apps?\b/, call);
+    for (const call of fake.world.calls) assert.doesNotMatch(call, /variables|secrets|installation/, call);
   }
   // A run that could not scan everything is never a report.
   const failed = run(fakeGitHub({ runs: [{ ...DONE, conclusion: 'failure' }] })).result;

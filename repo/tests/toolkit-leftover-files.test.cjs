@@ -53,6 +53,21 @@ const TOOLKIT_FILES = {
   'src/app.js': '// AI-AGENT-TOOLKIT is mentioned here, and this is still my file\n',
 };
 
+test('the personal data guard\'s marked workflows are listed once governance is off, kept while it is on, and never claimed without the marker', t => {
+  const guard = require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs');
+  const names = guard.WORKFLOWS.map(name => `.github/workflows/${name}.yml`);
+  const files = { ...Object.fromEntries(guard.WORKFLOWS.map(name => [`.github/workflows/${name}.yml`, guard.workflowText(name)])), '.github/scripts/personal-data-guard.cjs': guard.vendoredText() };
+  const w = world(t, {
+    on: { state: 'ENABLED', files },
+    off: { state: 'DISABLED', files },
+    mine: { state: 'DISABLED', files: Object.fromEntries(names.map(name => [name, 'name: Mine\non: push\n'])) },
+  });
+  const report = w.scan(), listed = ['.github/scripts/personal-data-guard.cjs', ...names];
+  assert.deepEqual(w.of(report, 'off').files.map(item => [item.file, item.kind]), listed.map(name => [name, 'check']));
+  assert.deepEqual([w.of(report, 'on').files, w.of(report, 'on').kept.map(item => item.file)], [[], listed]);
+  assert.deepEqual([w.of(report, 'mine').files, w.of(report, 'mine').kept], [[], []]);
+});
+
 test('a repository whose governance could not be checked is not scanned, only provably Toolkit files are listed, and nothing is written', t => {
   const w = world(t, {
     governed: { state: 'ENABLED', files: TOOLKIT_FILES },
