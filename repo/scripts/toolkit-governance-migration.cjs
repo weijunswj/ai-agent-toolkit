@@ -69,9 +69,10 @@ function slugFor(root) {
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
 class GovernanceMaintenance {
-  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
+  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #firstSweep; #now;
 
-  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
+  // `firstSweep` runs the first-install sweep (toolkit-first-sweep.cjs), or null where it cannot run here.
+  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, firstSweep = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#confirm = confirm;
     this.#interactive = interactive === true;
@@ -84,6 +85,7 @@ class GovernanceMaintenance {
     this.#securityReader = securityReader;
     this.#securityWriter = securityWriter || security.ghSecurityWriter;
     this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
+    this.#firstSweep = firstSweep;
     this.#now = now;
   }
 
@@ -113,8 +115,9 @@ class GovernanceMaintenance {
   // listed them. Nothing that needs billing is turned on. Each setting ends as on (read back),
   // unavailable (GitHub cannot enforce it on this plan), held (an owner step Toolkit cannot take
   // itself, named in the result) or retry; only retry keeps the finish pending.
-  // { result: 'not-ready' } or { result: 'done' | 'failed', reason, on, unavailable, held, files }.
-  async finish(root) {
+  // `sweep` is whether the turn-on added the personal data guard, so its first-install sweep runs too.
+  // { result: 'not-ready' } or { result: 'done' | 'failed', reason, on, unavailable, held, reports, files }.
+  async finish(root, { sweep = false } = {}) {
     const state = governance.governanceState(root, this.#registryOptions);
     const slug = slugFor(root);
     if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
@@ -123,7 +126,7 @@ class GovernanceMaintenance {
     const protections = this.#finishProtection(rows);
     const securities = await this.#applySecurity(rows);
     if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
-    const on = [], unavailable = [], held = [], retry = [];
+    const on = [], unavailable = [], held = [], retry = [], reports = [];
     const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
     // hidden behind "not read back". A refusal for this account (forbidden: not an admin) does not
@@ -146,9 +149,18 @@ class GovernanceMaintenance {
     else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
     else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
     this.#securityEnd(rows[0], securities, { on, held, retry, because });
+    if (sweep) this.#sweepEnd(slug, { held, retry, reports });
     // Security files written into this working tree still need a pull request; the result says so.
     const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, files };
+    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, reports, files };
+  }
+
+  // Where the first-install sweep ended: its report line, an owner step, or tried again later.
+  #sweepEnd(slug, { held, retry, reports }) {
+    const end = this.#firstSweep ? this.#firstSweep.run(slug) : { end: 'retry', reason: 'the first personal data sweep cannot be started from here' };
+    if (end.end === 'report') reports.push(end.text);
+    else if (end.end === 'held') held.push({ name: 'the first personal data sweep', step: end.step });
+    else retry.push(end.reason);
   }
 
   // Where the security settings ended. A read or write GitHub did not confirm is retried, and so is a
