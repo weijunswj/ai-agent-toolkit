@@ -26,7 +26,7 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 
 ## Shard From One Manifest
 
-A generated weekly refresh PR is a candidate. G0 checks its source run, trigger and unchanged budgets. A fresh G1 owns verification and records the classifier's tier, currently RISKY for the shard manifest. Agent UAT verifies exact-head CI coverage on Linux and Windows. Owner UAT is NOT_REQUIRED for manifest-only redistribution because both CI systems exercise the entire changed surface. Full G2 precedes merge. Budget or generator changes need their own impact assessment.
+A generated weekly refresh PR is a candidate. Its review route is the scripted carry (gate rules): the merge train finder boards it with no G2 only while it stays a manifest-only redistribution from the shard bot's branch (measured times and the files each named shard lists; budgets and every shard unchanged) and its required checks are green on Linux and Windows. Anything more needs the full gates: G0, a fresh G1 and a full G2. The shard manifest is RISKY. Owner UAT is NOT_REQUIRED for manifest-only redistribution because both CI systems exercise the entire changed surface. Budget or generator changes need their own impact assessment.
 
 - One manifest lists named shards per system and one `rest` shard per system that takes every file no other shard names, so new files always run.
 - The runner refuses an unknown or empty shard and fails when a file does not load. CI and local runs read the same manifest.

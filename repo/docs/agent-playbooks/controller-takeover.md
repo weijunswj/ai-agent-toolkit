@@ -58,7 +58,7 @@ Show the checklist once. Each step is verified with evidence, supplied by user w
 
 No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim. Complete, consistent user-supplied evidence is visibly labelled; it never becomes independent verification or gate/merge authority.
 
-Questions use the harness's native question method (global rules) with plain option labels and "(my pick)" on the recommended one. A card's question and options make sense alone, since the owner may not see text above an open card; a question that needs the problem, fix and consequence explained ends the closing message instead, below that explanation. If that method leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A question that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
+Questions use the harness's native question method (global rules) with plain option labels and "(my pick)" on the recommended one. If that method leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A question that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
 
 ### 1. The capability check
 

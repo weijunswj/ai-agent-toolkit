@@ -51,7 +51,7 @@ test('a first message that asks for the bank gets no session question: the bank 
     const first = hold(ctx).decide({ cwd: repo, prompt: phrase, sessionId: `s${index}` });
     assert.equal(first.action, 'pass');
     assert.ok(!asksIn(first), `${phrase}: no session question`);
-    assert.equal(first.question, undefined, `${phrase}: no card`);
+    assert.equal(first.notice, undefined, `${phrase}: no card`);
     const next = hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: `s${index}` });
     assert.ok(!asksIn(next), 'not asked on a later message either');
     assert.doesNotMatch(String(next.context || ''), / ANSWER [0-9a-f]{32}/, 'no session-question reply ticket');

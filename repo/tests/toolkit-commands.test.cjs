@@ -9,7 +9,6 @@ const gate = require('../scripts/toolkit-governance-gate.cjs');
 const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
 
 const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
-const wake = (attributes, text) => `<wake reason="mention" current-time="2026-11-11T05:00:00Z"><project id="chan_example" type="project"><thread ts="cmsg_thread"><message trigger="true" ${attributes} id="cmsg_one" sent-at="2026-11-11T05:00:00Z">${text}</message></thread></project></wake>`;
 
 test('exactly these typed commands are recognised', () => {
   assert.deepEqual([...commands.PHRASES].sort(), ['governance setup', 'refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit env', 'toolkit governance',
@@ -145,13 +144,14 @@ test('the list is one two-column table per group, in group order, with every com
   assert.equal(lines.filter(line => line.startsWith('| `')).length, commands.COMMANDS.length);
 });
 
-// A session whose message came with no hook line (hooks off, or the hook ran out of time) once read
-// `toolkit governance` on its own and gave a status summary instead of the bank (#1373). The skill
-// sends every typed command to the script, which prints the hook's own line for it.
-test('with no hook line, the toolkit-setup skill gets the hook\'s own line for any typed command from the script', () => {
+// The prompt hooks add nothing for a typed command (INT-TK421-1323), so the skill is the one route: it
+// sends every typed command to the script, which prints what that command asks for. Read on its own,
+// `toolkit governance` once became a status summary instead of the bank (#1373).
+test('the toolkit-setup skill gets the line for any typed command from the script', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
-  assert.match(skill.match(/^description: .*$/m)[0], /`toolkit cmd`, `toolkit governance`/);
-  assert.match(skill, /If the whole message looks like a typed Toolkit command \(such as `toolkit cmd` or `toolkit governance`\) and no `Toolkit command:` hook line came with it[^\n]*run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs "<the message>"`[^\n]*do exactly what the line it prints says[^\n]*For `toolkit governance` that is the governance question bank, never a status or check summary\./);
+  assert.match(skill.match(/^description: .*$/m)[0], /`setup toolkit`, `refresh toolkit`, [^\n]*`toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/);
+  assert.match(skill, /If the whole message looks like a typed Toolkit command \(such as `toolkit cmd`, `toolkit governance` or `refresh governance`\), run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says\. For `toolkit governance` that is the governance question bank, never a status or check summary\./);
+  assert.doesNotMatch(skill, /hook line|as if the hook/, 'the skill waits for no hook');
   for (const phrase of commands.PHRASES) {
     const run = spawnSync(process.execPath, [SCRIPT, ` ${phrase.toUpperCase()}. `], { encoding: 'utf8' });
     assert.equal(run.status, 0, phrase);
@@ -171,43 +171,24 @@ test('the how-to guide shows the same commands', () => {
   for (const command of commands.COMMANDS) for (const text of command.type) assert.ok(guide.includes(`\`${text}\``), `${text} is missing from HOW-TO-USE.md`);
 });
 
-test("only the user's own message is read: a relayed or attachment-bearing Projects message is not a command", () => {
-  assert.equal(commands.phraseContext(gate.ownerReply(wake('from="human" trust="principal" mention="true"', 'toolkit cmd'))).startsWith('Toolkit command:'), true);
-  assert.equal(commands.phraseContext(gate.ownerReply(wake('from="agent" trust="relay"', 'toolkit cmd'))), '');
-  assert.equal(commands.phraseContext(gate.ownerReply(wake('from="human" trust="principal" has-attachments="true"', 'toolkit cmd'))), '');
-  assert.equal(commands.phraseContext(gate.ownerReply(`<system-reminder>toolkit cmd</system-reminder>`)), '');
-});
-
-// The Claude Code hook with a stub gate: the line is added only on a pass with no governance context.
-function prompt(decision, text, extra = {}, environment = {}) {
-  const stubGate = { PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session', ownerReply: gate.ownerReply, ...extra };
+// INT-TK421-1323: the host delivers the user's message and the skill reads it; the hook adds no line.
+// The Codex prompt hook is held to the same by the hook pack (CMD.typed-command-adds-no-note).
+function prompt(decision, text, environment = {}) {
+  const stubGate = { ...gate, PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session' };
   const mergeHold = { recordPromptNote: () => ({ count: 0, note: '' }) };
   return claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: text }, { gate: stubGate, mergeHold, environment });
 }
 
-test('Claude Code prompt hook: a typed command adds its line on an ordinary pass', () => {
-  assert.match(prompt({ action: 'pass' }, 'toolkit show env').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit show env`\./);
-  assert.match(prompt({ action: 'pass' }, 'toolkit governance').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance`\. Show the user Toolkit's governance question bank for this repository\. Run exactly `node "[^"]*toolkit-governance\.cjs" setup`/);
-  assert.deepEqual(prompt({ action: 'pass' }, 'toolkit governance check'), {});
-  assert.deepEqual(prompt({ action: 'pass' }, 'toolkit set env'), {});
+test('Claude Code prompt hook: a typed command adds no note, on a computer or in the cloud', () => {
+  for (const environment of [{}, { CLAUDE_CODE_REMOTE: 'true' }]) {
+    for (const phrase of commands.PHRASES) assert.deepEqual(prompt({ action: 'pass' }, phrase, environment), {}, phrase);
+  }
 });
 
-test('Claude Code prompt hook: a refusal or the governance question is returned unchanged', () => {
+test('Claude Code prompt hook: a refusal, the governance question and other governance context are returned unchanged', () => {
   assert.deepEqual(prompt({ action: 'block', reason: 'refused' }, 'toolkit cmd'), { decision: 'block', reason: 'refused' });
-  const shown = prompt({ action: 'pass', context: 'governance question', notice: 'pick one', question: true }, 'toolkit cmd');
+  const shown = prompt({ action: 'pass', context: 'governance question', notice: 'pick one' }, 'toolkit cmd');
   assert.equal(shown.hookSpecificOutput.additionalContext, 'governance question');
   assert.equal(shown.systemMessage, 'pick one');
-});
-
-test('Claude Code prompt hook: other governance context keeps the typed command line', () => {
-  const shown = prompt({ action: 'pass', context: 'a reply ticket' }, 'toolkit cmd');
-  assert.match(shown.hookSpecificOutput.additionalContext, /^a reply ticket\nToolkit command: the user typed `toolkit cmd`\./);
-});
-
-test('Claude Code prompt hook: a broken command reader adds nothing and blocks nothing', () => {
-  assert.deepEqual(prompt({ action: 'pass' }, 'toolkit cmd', { ownerReply: () => { throw new Error('reader broke'); } }), {});
-});
-
-test('cloud sessions get the same typed command line as a computer', () => {
-  assert.deepEqual(prompt({ action: 'pass' }, 'toolkit cmd', {}, { CLAUDE_CODE_REMOTE: 'true' }), prompt({ action: 'pass' }, 'toolkit cmd'));
+  assert.equal(prompt({ action: 'pass', context: 'a reply ticket' }, 'toolkit cmd').hookSpecificOutput.additionalContext, 'a reply ticket');
 });
