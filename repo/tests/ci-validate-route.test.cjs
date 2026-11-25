@@ -111,7 +111,7 @@ test('an edit reuses the newest earlier run that tested exactly this code', asyn
 test('every way an earlier run differs from this code runs in full', async () => {
   const cases = [
     ['a failed shard', (r) => { r.jobs.find((job) => job.name === 'tests-windows (windows-2)').conclusion = 'failure'; }, /tests-windows \(windows-2\) finished as failure/],
-    ['a cancelled Windows pack group', (r) => { r.jobs.find((job) => job.name === 'hook-pack-windows (fault+merge+task-governance)').conclusion = 'cancelled'; }, /hook-pack-windows \(fault\+merge\+task-governance\) finished as cancelled/],
+    ['a cancelled Windows pack group', (r) => { r.jobs.find((job) => job.name === 'hook-pack-windows (fault+governance)').conclusion = 'cancelled'; }, /hook-pack-windows \(fault\+governance\) finished as cancelled/],
     ['a skipped clock-ahead run (an earlier light run)', (r) => { r.jobs.find((job) => job.name === 'tests-clock-ahead').conclusion = 'skipped'; }, /tests-clock-ahead finished as skipped/],
     ['a job still running', (r) => { Object.assign(r.jobs.find((job) => job.name === 'hook-pack (ubuntu-latest)'), { status: 'in_progress', conclusion: null }); }, /hook-pack \(ubuntu-latest\) finished as in_progress/],
     ['a missing shard job', (r) => { r.jobs = r.jobs.filter((job) => job.name !== 'tests-linux (linux-1)'); }, /no tests-linux \(linux-1\) job/],
