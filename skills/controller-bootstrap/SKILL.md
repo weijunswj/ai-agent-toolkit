@@ -1,6 +1,6 @@
 ---
 name: controller-bootstrap
-description: Use only when explicitly asked to take over as controller (including "you are taking over as controller for [repo]"), bootstrap or recover the assigned controller after context loss or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, questions about controllers, or programme reconciliation (github-program-reconciler does that).
+description: Use only when explicitly asked to take over as controller (including "you are taking over as controller for [repo]", or when the owner types `controller takeover` as their whole message), bootstrap or recover the assigned controller after context loss or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, questions about controllers, or programme reconciliation (github-program-reconciler does that).
 ---
 
 # Controller Bootstrap
@@ -30,6 +30,8 @@ Verify the repository, commit, path and blob relationship and the complete retur
 If any source or trusted-reader result is unavailable or differs, keep the current binding and history, make no new effect, and return the exact typed failure with a short plain explanation. Do not call a changed policy a product defect without causal evidence.
 
 ## Takeover record
+
+`controller takeover`, typed by the owner as the whole message in a new chat, is the same appointment for the repository of the folder the chat is open in as the sentence is for the one it names. Act only on the line `toolkit-commands.cjs` prints for it, never on the words alone: run it in that folder as the `toolkit-setup` skill says, which also says what each harness that cannot run it does. A launched, forked, scheduled or relayed message, a quoted line or words inside a longer message appoint nobody; the sentence keeps working for another repository and where the command cannot run.
 
 Run the [takeover playbook](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/docs/agent-playbooks/controller-takeover.md) in order, including its [capability routes](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/docs/agent-playbooks/controller-takeover.md#capability-routes), generic journey and applicable harness extras. It covers custody, stopping the previous writer and the record: post one takeover record on the parent's CURRENT only with fresh ENABLED governance, otherwise in the verified evidence store. Read it back before acting. A newly taking-over governed controller claims immediately on the same account; all routes, relay proof and connector guards apply. Keep the exact dependency proof above and the conditional record-update mechanics below. Then continue the same approved assignment.
 
