@@ -230,11 +230,11 @@ const PLACES = [
   ['under a heading about something else', '## Billing repository\n\n- Lanes: 5\n', false],
   ['under a heading inside it', '## Billing repository\n\n### Gates\n\n- Lanes: 5\n', false],
   ['under a retired heading', '## Old rules\n- Lanes: 5\n', false],
-  ['under an underlined heading', 'Retired rules\n-------------\n- Lanes: 5\n', false],
+  ['under an underlined heading', 'Billing rules.\n-------------\n- Lanes: 5\n', false],
   ['under a title that says no', '# Never do these\n\n- Lanes: 5\n', false],
   ['under a second title', '# Project\n\nText.\n\n# Example\n\n- Lanes: 5\n', false],
-  ['in a file with line breaks the reader does not read', `Old${cp(0x2028)}notes\n\n- Lanes: 5\n`, false],
-  ['in a file with a lone carriage return', `Old${cp(0x0d)}notes\n\n- Lanes: 5\n`, false],
+  ['in a file with line breaks the reader does not read', `Old${cp(0x2028)}notes.\n\n- Lanes: 5\n`, false],
+  ['in a file with a lone carriage return', `Old${cp(0x0d)}notes.\n\n- Lanes: 5\n`, false],
 ];
 
 test('H1: a settings line gets a fix only where it stands on its own', t => {
