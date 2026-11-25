@@ -112,11 +112,7 @@ function decidePrompt(input, environment = process.env) {
   } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
   if (decision.action === 'block') return { block: [decision.reason, approvalNote].filter(Boolean).join('\n') };
-  // A typed Toolkit command gets one advisory line; a failure adds nothing, and the turn that
-  // carries the governance question gets no line.
-  let typed = '';
-  if (!decision.question) try { typed = require('./toolkit-commands.cjs').phraseContext(gate().ownerReply(input?.prompt)); } catch { typed = ''; }
-  const context = [decision.context, approvalNote, typed].filter(Boolean).join('\n');
+  const context = [decision.context, approvalNote].filter(Boolean).join('\n');
   return context ? { context } : {};
 }
 

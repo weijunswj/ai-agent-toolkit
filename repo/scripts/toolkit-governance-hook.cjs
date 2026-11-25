@@ -4,14 +4,11 @@
 // Claude Code's governance hook: one script for four events, named by --event.
 //   UserPromptSubmit  in an undecided repository, attaches the governance question once per session
 //                     (toolkit-governance-gate.cjs) and lets the message through. It also
-//                     keeps each "merge N" the user types, for the merge hold, and adds one
-//                     context line for a typed Toolkit command (toolkit-commands.cjs).
+//                     keeps each "merge N" the user types, for the merge hold.
 //   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs),
 //                     and a gate session off its pinned route or a wrong route stamp (toolkit-gate-route.cjs);
-//                     points an agent's own merge question (AskUserQuestion) at the merge card,
-//                     and refuses any other card that follows text written earlier in the same
-//                     turn or asks an over-long question (toolkit-claude-card-check.cjs).
+//                     points an agent's own merge question (AskUserQuestion) at the merge card.
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
 //   SessionStart      runs as a reader of the Toolkit checkout (toolkit-update-marker.cjs): it
@@ -107,34 +104,27 @@ function respondSteady(event, input, options) {
       // cloud sessions, which cannot keep the owner's answer; nothing is held either way.
       const decision = cloud ? { action: 'pass' } : new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
-      const text = [decision.context, approvalNote, decision.question ? '' : typedCommandNote(gate, input.prompt)].filter(Boolean).join('\n');
+      const text = [decision.context, approvalNote].filter(Boolean).join('\n');
       const context = text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
       const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
-      let cardCheck = null;
       if (input.tool_name === 'AskUserQuestion') {
         const cardOptions = { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' };
         // An agent's own merge question is pointed at the merge card; a reader failure shows it.
         let redirect = null;
         try { redirect = (options.mergeHold || mergeHold()).cardRedirect(input, cardOptions); } catch { /* shown: at worst a second tap */ }
         if (redirect) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: redirect.deny } };
-        // A card after text the owner cannot see, or with an over-long question, is refused
-        // (toolkit-claude-card-check.cjs); a check that cannot run shows the card.
-        try { cardCheck = require('./toolkit-claude-card-check.cjs').cardDecision(input, { pickerQuestion: gate.PICKER_QUESTION, mergeCardOf: toolInput => (options.mergeHold || mergeHold()).cardOf(toolInput) }); } catch { cardCheck = null; }
-        if (cardCheck && cardCheck.deny) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: cardCheck.deny } };
         // Notes an exact merge card so its answer can count; it refuses nothing.
         try { (options.mergeHold || mergeHold()).cardAsked(input, cardOptions); } catch { /* an unnoted card records nothing */ }
       }
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
-      // A cloud closure advisory (closure.systemMessage) shows only when nothing refuses the call,
-      // and so does the card check's note that it could not run.
-      if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
-      return cardCheck && cardCheck.note && !closure.hookSpecificOutput ? { ...closure, systemMessage: [closure.systemMessage, cardCheck.note].filter(Boolean).join('\n') } : closure;
+      // A cloud closure advisory (closure.systemMessage) shows only when nothing refuses the call.
+      return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : closure;
     }
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};
@@ -199,14 +189,6 @@ function gateRouteDecision(input, options) {
     return ['G0', 'G1', 'G2'].includes(environment.TOOLKIT_GATE_ROLE) && STATE_CHANGING_TOOLS.test(String(input && input.tool_name || ''))
       ? 'Toolkit gate route check: the check is unavailable, so this gate session\'s tools are refused. Run setup toolkit to repair the plugin.' : null;
   }
-}
-
-// One advisory context line when the user's own message is exactly a typed Toolkit command
-// (toolkit-commands.cjs). It never blocks: any failure adds nothing, and the turn that carries
-// the governance question gets no line (the question comes first; the command works from the
-// next message).
-function typedCommandNote(gate, prompt) {
-  try { return require('./toolkit-commands.cjs').phraseContext(gate.ownerReply(prompt)); } catch { return ''; }
 }
 
 function closureDecision(input, options) {

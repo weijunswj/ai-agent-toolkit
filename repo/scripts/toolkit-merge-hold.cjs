@@ -94,11 +94,9 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // effect line: which pull request of which repository goes into its base branch, at the full SHA, and
 // that nothing else is approved. The hook builds it from the merge it refused and reads no title or
 // base name for it, so the line holds no text anyone else wrote, and cardOf accepts no other wording.
-// The refusal leads with the card and its route (the merge summary as the turn's closing message, then
-// the card first in the turn a short background command starts), so the agent shows it instead of
-// asking its own question and the user reads the summary. cardAsked (PreToolUse) notes that exact call
-// for the session's run; cardAnswered (PostToolUse) records an approval for that pull request at that full SHA when the answer the host
-// reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
+// The refusal leads with the card, so the agent shows it instead of asking its own question. cardAsked
+// (PreToolUse) notes that exact call for the session's run; cardAnswered (PostToolUse) records an
+// approval for that pull request at that full SHA when the answer the host reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
 // These record nothing: a card with other wording, options or keys, a card asked with an answer
 // already filled in, a call that was not noted, a typed "Other" answer, an answer the host marks as
 // idle, follow-up, free text or noted, any field the reader does not know, and a card in a chat
@@ -1553,7 +1551,7 @@ const MERGE_ASIDE = [
   /\bmerg\w*\b[^.?!\n]{0,80}?\binto\b/gi,
 ];
 const MERGE_ASK = /\bmerge\b|\b(?:be|get|gets|getting)[ \t]+merged\b/i;
-const CARD_REDIRECT = 'Toolkit: a tap on this question cannot approve a merge; only Toolkit\'s merge card can, and the hold shows it when a merge is run. If the user asked you to merge this pull request, do not ask again: run that merge naming its full 40 character head SHA and follow the route in its refusal, with its card unchanged. If the user has not asked, do not merge: ask again without a merge option or merge wording, or in a plain message.';
+const CARD_REDIRECT = 'Toolkit: a tap on this question cannot approve a merge; only Toolkit\'s merge card can, and the hold shows it when a merge is run. If the user asked you to merge this pull request, do not ask again: after the merge summary, run that merge naming its full 40 character head SHA and show the card the hold returns, unchanged. If the user has not asked, do not merge: ask again without a merge option or merge wording, or in a plain message.';
 
 // The text with every set-aside merge phrase blanked, and whether any was found.
 function mergeAside(text) {
@@ -1635,7 +1633,7 @@ function cardOffer(merge, input, { environment, registryOptions, now, host }) {
   if (host !== 'claude' || !merge || merge.pr === null || typeof merge.repository !== 'string' || !new RegExp(`^${SLUG}$`).test(merge.repository)) return '';
   if (!cardSession(input, environment, registryOptions, now, host)) return '';
   if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return 'To show the user Toolkit\'s merge card instead of asking them to type, retry this merge naming its full 40 character head SHA, and ask no merge question of your own.';
-  return `Toolkit's merge card is how the user approves this merge, so ask no merge question of your own. Put the merge summary in this turn's closing message. Before you end the turn, start a short background command (about 20 seconds). When it wakes you, open that turn with the card and no text: call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
+  return `Toolkit's merge card is how the user approves this merge, so ask no merge question of your own. After the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
 }
 
 // A refusal that ends with the typed-line request, with the card offer put first: an agent that

@@ -102,9 +102,9 @@
 // ({"<number>": {"state": "OPEN", "head": "<sha>", "body": "<live body>"}}) instead of `gh api`
 // (REST); a member entry with no body is refused, never read as NOT_REQUIRED. A ready land says the
 // merge step plainly (merge_step). Route owner, where the merge guard asks: the agent runs the named
-// merge, which the guard refuses, and gives the external effects in its closing message before the
-// guard's card; with no guard known to run, or where task auto-merge would let the merge through with
-// no card, the agent asks first and runs it on the yes. The owner is never sent to click Merge on
+// merge after giving its external effects, and the guard refuses it and shows its card; with no guard
+// known to run, or where task auto-merge would let the merge through with no card, the agent asks first
+// and runs it on the yes. The owner is never sent to click Merge on
 // GitHub unless the guard cannot record the answer. It also
 // lists the steps after the merge: the closing stories for the train and each member, the sessions to
 // archive (keeping those whose owner test is owed) and, for each worktree at the train or a member
@@ -895,9 +895,9 @@ function land(cwd, manifest, options) {
 function mergeStep(merge, guardAsks) {
   const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;
   if (merge.route === 'auto') return `run ${command} with no ask, then post one short notice: what landed, its effect and how to undo it`;
-  const ask = `ask "Merge PR ${merge.pr}?" at the end of your closing message, under its external effects, and run it yourself on their yes`;
+  const ask = `ask the owner "Merge PR ${merge.pr}?" with its external effects and run it yourself on their yes`;
   const step = guardAsks
-    ? `Where a merge guard is known to run, run it yourself with no question of your own: the guard refuses it and asks the owner, so put its external effects in your closing message and follow the refusal (its card, else the typed line it names). With no guard known to run, ${ask}`
+    ? `Where a merge guard is known to run, give its external effects, then run it yourself with no question of your own: the guard refuses it and asks the owner with its card (else the typed line it names). With no guard known to run, ${ask}`
     : `Task auto-merge is on here, so the merge guard may let it through without asking: ${ask}`;
   return `the merge is ${command}. ${step}. Never tell the owner to click Merge on GitHub: only where the guard cannot record their answer, say why and ask them to merge it there at ${merge.head.slice(0, 12)}`;
 }

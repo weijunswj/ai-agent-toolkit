@@ -212,9 +212,3 @@ Gate sessions are recorded for the programme sweep with `programme.cjs gate-sess
 | Claude Projects | `claude-projects` | none readable | resolve the thread |
 | Codex app | `codex-app` | none readable | archive the thread |
 | Codex CLI run | `codex-exec` | its run log header, if wanted | none: the run ends with its process, so no `CLOSE_DUE` |
-
-## 11. Question cards
-
-The owner may see an open card and none of the text written before it in the same turn, so a card holds a short question and short options that make sense alone, and its context goes in the turn's closing message. Where the host can wake the session, the card then opens the next turn; elsewhere the question ends that closing message.
-
-- **Claude Code in the desktop app and over Remote Control:** they show a turn's closing message in full and cut text written earlier in the turn to one line. Put the full context in the closing message, start a short background command (about 20 seconds) before the turn ends, and when it wakes the session open that turn with the question card and no text. The governance hook refuses a card after text in the same turn and a question over 120 characters, and the refusal names this route; so does the merge refusal that carries Toolkit's merge card (Bridge page). A command that ends before the turn does starts no new turn: start another.

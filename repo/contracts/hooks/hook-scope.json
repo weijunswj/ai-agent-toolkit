@@ -33,7 +33,7 @@
       "rules": ["merge-hold", "push-floor", "issue-closure", "owner-only", "gate-routes"],
       "events": {
         "SessionStart": "Session start: this chat needs governance on or off and the governed rules before its first step, and again after compaction erases them.",
-        "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval, a governance answer or a typed command.",
+        "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval or a governance answer.",
         "PreToolUse": "Before the tool runs: a merge, push, closure, owner-only answer, user-state edit or off-route gate write is refused before it happens.",
         "PostToolUse": "Right after AskUserQuestion returns: the owner's tap on a Toolkit card is recorded from that card's own answer."
       }
@@ -102,7 +102,7 @@
       "script": "repo/scripts/toolkit-codex-helper-hook.cjs",
       "rules": ["merge-hold", "push-floor", "issue-closure", "owner-only", "helper-admission"],
       "events": {
-        "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval, a governance answer or a typed command.",
+        "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval or a governance answer.",
         "PreToolUse": "Before the tool runs: a merge, push, closure, owner-only answer, user-state edit or off-route helper launch is refused before it happens."
       }
     },

@@ -97,7 +97,7 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   f.governed({ auto_merge: 'off' });
   landed = land(plain.out, plain.result.head);
   assert.deepEqual([landed.merge.route, landed.merge.route_reasons], ['owner', ['task auto-merge is off here (repository-off)']]);
-  assert.match(landed.merge_step, /^the merge is gh pr merge 50 [^.]*\. Where a merge guard is known to run, run it yourself with no question of your own: the guard refuses it and asks the owner, so put its external effects in your closing message/);
+  assert.match(landed.merge_step, /^the merge is gh pr merge 50 [^.]*\. Where a merge guard is known to run, give its external effects, then run it yourself with no question of your own: the guard refuses it and asks the owner with its card/);
 
   f.governed({ auto_merge: 'after-gates' });
   const risky = JSON.parse(fs.readFileSync(plain.out, 'utf8'));
@@ -109,7 +109,7 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   assert.deepEqual(landed.merge.route_reasons, ["RISKY members wait for the owner's merge card: #2"]);
   // Task auto-merge is on and nothing here is on the merge-authority list, so the merge guard would let
   // this through with no card: the step never says to run the merge before the owner answers.
-  assert.match(landed.merge_step, /^the merge is gh pr merge 50 [^.]*\. Task auto-merge is on here, so the merge guard may let it through without asking: ask "Merge PR 50\?" at the end of your closing message, under its external effects, and run it yourself on their yes\. Never tell the owner to click Merge on GitHub/);
+  assert.match(landed.merge_step, /^the merge is gh pr merge 50 [^.]*\. Task auto-merge is on here, so the merge guard may let it through without asking: ask the owner "Merge PR 50\?" with its external effects and run it yourself on their yes\. Never tell the owner to click Merge on GitHub/);
 
   // A member that changes a merge-authority path (a CI workflow) sends the train to the owner too.
   const ci = f.branch('pr-3', { '.github/workflows/ci.yml': 'name: ci\n' });
@@ -121,6 +121,6 @@ test('land names the auto route only with task auto-merge on, a clean scope and 
   assert.equal(landed.merge.route, 'owner');
   assert.ok(landed.merge.route_reasons.some(reason => reason.startsWith('.github/workflows/ci.yml: ')), landed.merge.route_reasons.join('\n'));
   // The guard refuses a merge-authority path whatever the switch says, so it asks here.
-  assert.match(landed.merge_step, /Where a merge guard is known to run, run it yourself/);
+  assert.match(landed.merge_step, /Where a merge guard is known to run, give its external effects, then run it yourself/);
   assert.equal(landed.merge.guardAsks, undefined, 'the printed facts stay the same');
 });

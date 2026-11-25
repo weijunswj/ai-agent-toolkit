@@ -232,13 +232,11 @@ test('the owner-post rule has one home: the principles page, read before every o
     'one point per task, or one line for a single task, each led by a bold task label, never a line saying nothing needs them',
     'Leave out the working detail of gates, helpers and other spawned work (probes, test counts, round-by-round findings, file lists) unless asked: it stays in their full reports and the evidence store',
     "This binds the controller's own posts to the owner, relays included",
-    // The owner sees only an open card, not the text above it, so the card must stand alone (owner, 23 November).
-    'a card of the native question method holds a short question and short options that make sense with nothing else on screen',
-    // The app shows a turn's closing message in full, so the context goes there and the card follows on the wake (INT-TK421-1317).
-    'Context, items or each pick\'s reason go in the turn\'s closing message, then the card opens the next turn where the host can wake the session, else the question ends that message',
     // A one-line status cannot lead with three lines, so only asks, plans and explanations do.
     'Asks, plans and explanations lead with problem, fix and skip',
   ]) assert.ok(line.includes(phrase), phrase);
+  // How a question is asked is the harness's own method (global rules), not a rule on this page (INT-TK421-1322).
+  assert.doesNotMatch(line, /\bcards?\b|closing message/i);
   // Every controller type binds the core, which re-reads the page before it posts to the owner.
   assert.ok(read('repo/CONTROLLER.md').includes('before every plan, review, merge decision or owner post'));
 
@@ -261,7 +259,7 @@ test('the owner-post rule has one home: the principles page, read before every o
   for (const rel of projects) {
     assert.doesNotMatch(read(rel), /tell the owner in one line what changed|tell the owner once which|and tell the owner; never|tell the owner once what waits|line, and tell the owner once\./i, rel);
   }
-  // Ask cards carry only a short question and options that make sense alone; any longer context goes in the written message, never inside the card.
+  // An ask that names its scope or its native change says so in words that fit any question method, never as text a card holds.
   for (const rel of [...projects, 'repo/docs/agent-playbooks/safety-gates.md', 'skills/toolkit-playbooks/safety-gates.md']) {
     assert.doesNotMatch(read(rel), /a decision card and a reply|opening with its problem, fix and skip lines|posts one decision card: just this once[^.]*, with what is checked first|question card, with its problem, fix and skip|One plain-English card, one screen|three lines below|(?<!above )the card names|native change the card named|copy of the card and (?:the owner's )?answer/i, rel);
   }

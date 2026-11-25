@@ -548,15 +548,13 @@ test('the merge card says what its Merge does, from the merge itself and nothing
   for (const text of [card().questions[0].question, EFFECT(), JSON.stringify(card())]) assert.deepEqual(hold.approvalsIn(text), [], text);
 });
 
-test('the refusal that shows the card names the route: the summary in the closing message, the card first on the wake', t => {
+// INT-TK421-1322: the refusal hands over the card and says nothing about how to ask.
+test('the refusal that shows the card puts the summary before it and teaches no way of asking', t => {
   const ctx = context(t);
   const session = SESSIONS['a chat the user started'](ctx);
   const refusal = merge(ctx, session).deny;
-  const route = 'Put the merge summary in this turn\'s closing message. Before you end the turn, start a short background command (about 20 seconds). When it wakes you, open that turn with the card and no text: call AskUserQuestion once with exactly this input';
-  assert.ok(refusal.includes(route), refusal.slice(0, 600));
-  assert.ok(refusal.indexOf(route) < refusal.indexOf(JSON.stringify(card())));
-  // No card, no route: a Codex merge and a chat that records nothing keep the typed line alone.
-  for (const refused of [merge(ctx, session, { host: 'codex' }).deny, merge(ctx, SESSIONS['a session a launcher started'](ctx)).deny]) assert.doesNotMatch(refused, /wakes you|background command/);
+  assert.ok(refusal.includes('so ask no merge question of your own. After the merge summary, call AskUserQuestion once with exactly this input'), refusal.slice(0, 600));
+  assert.doesNotMatch(refusal, /background command|closing message|wakes you|next turn/i);
 });
 
 test('an agent\'s own merge question is pointed at the merge card before the user sees it', async t => {
@@ -589,7 +587,7 @@ test('an agent\'s own merge question is pointed at the merge card before the use
       assert.equal(out && out.permissionDecision, 'deny', 'the question is not shown');
       assert.match(out.permissionDecisionReason, /cannot approve a merge; only Toolkit's merge card can/);
       assert.match(out.permissionDecisionReason, /If the user asked you to merge this pull request, .*run that merge naming its full 40 character head SHA/);
-      assert.match(out.permissionDecisionReason, /follow the route in its refusal, with its card unchanged/);
+      assert.match(out.permissionDecisionReason, /after the merge summary, run that merge naming its full 40 character head SHA and show the card the hold returns, unchanged\./);
       assert.match(out.permissionDecisionReason, /If the user has not asked, do not merge/);
       assert.doesNotMatch(out.permissionDecisionReason, /asks the user about merging|Ask no merge question of your own: after/, 'it neither claims what the question means nor orders a merge');
       // Even if a host showed it anyway, its answer records nothing.

@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: "Use for `setup toolkit`, `refresh toolkit`, `remove toolkit` (full uninstall: `toolkit-remove.cjs plan` first, never the app's uninstall alone), `toolkit cmd`, `toolkit governance` and toolkit permissions/store/cleanup. Also when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Of the commands, cmd lists them, permissions gives paste-once permission blocks, store the evidence store steps and cleanup removes rebuildable scraps; remove toolkit asks this app or every app, then lists and removes after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work."
+description: "Use for `setup toolkit`, `refresh toolkit`, `remove toolkit` (full uninstall: `toolkit-remove.cjs plan` first, never the app's uninstall alone), `toolkit cmd`, `toolkit governance`, `refresh governance` and toolkit permissions/store/cleanup. Also when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Of the commands, cmd lists them, permissions gives paste-once permission blocks, store the evidence store steps and cleanup removes rebuildable scraps; remove toolkit asks this app or every app, then lists and removes after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work."
 ---
 
 
@@ -18,7 +18,7 @@ Relay rule: paste setup's question bank exactly as printed, one table per sectio
 
 ## Command list
 
-If the whole message looks like a typed Toolkit command (such as `toolkit cmd` or `toolkit governance`) and no `Toolkit command:` hook line came with it (for example when Codex hooks are off after an update), run `node <Toolkit>/repo/scripts/toolkit-commands.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says, as if the hook had added it. For `toolkit governance` that is the governance question bank, never a status or check summary.
+If the whole message looks like a typed Toolkit command (such as `toolkit cmd`, `toolkit governance` or `refresh governance`), run `node <Toolkit>/repo/scripts/toolkit-commands.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says. For `toolkit governance` that is the governance question bank, never a status or check summary.
 
 ## Old scheduled tasks
 

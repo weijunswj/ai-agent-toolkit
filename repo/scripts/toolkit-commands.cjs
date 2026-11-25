@@ -1,28 +1,29 @@
 #!/usr/bin/env node
 'use strict';
 
-// The Toolkit command list, and the typed commands the prompt hooks recognise.
+// The Toolkit command list, and what each typed command asks for.
 //
 // A typed command is the user's whole message and nothing else: one of the phrases in ACTIONS below.
-// For a typed command the prompt hook adds a short context line that tells the agent what the user
-// asked for, so the agent never has to guess from loose words (an owner once typed "toolkit set env"
-// and got the one-key prompt instead of the editor). Every other request stays plain language, read
-// by the skills. Every typed command is on the printed list, or opens the same action as one that is.
+// The toolkit-setup skill runs this script with the message and gets one line that tells the agent
+// what the user asked for, so the agent never has to guess from loose words (an owner once typed
+// "toolkit set env" and got the one-key prompt instead of the editor). Every other request stays
+// plain language, read by the skills. Every typed command is on the printed list, or opens the same
+// action as one that is. The governance gate also reads the governance phrases (typedCommand), so
+// asking for the bank again is never taken as an answer to the one shown.
 //
 // Advisory only: this module never blocks a prompt and starts no process; the only file it reads is
 // where the managed Toolkit checkout is, to name the governance command from there. A phrase
 // inside a longer message, or with other words around it, is ordinary text and gets no line.
 //
 // Usage: node repo/scripts/toolkit-commands.cjs              prints the command list
-//        node repo/scripts/toolkit-commands.cjs "<message>"  prints the line the prompt hook adds for that
-//          typed command, for a session whose message came with no hook line (exit 1 if it is none)
+//        node repo/scripts/toolkit-commands.cjs "<message>"  prints the line for that typed command
+//          (exit 1 if it is none)
 
 const { managedScript } = require('./toolkit-user-state.cjs');
 
 // Each command the printed list shows, as the user types it, its group and what it does in one
 // line. The list holds only commands a user would type themselves; the phrases in ACTIONS below are
-// matched exactly by the prompt hooks whether listed or not, so a command left off the list still
-// works when typed. Dropping a command from the list is dropping its one entry here.
+// matched exactly whether listed or not, so a command left off the list still works when typed. Dropping a command from the list is dropping its one entry here.
 const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['toolkit cmd', 'toolkit command'], does: 'Show this list.' }),
   Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
@@ -87,7 +88,7 @@ const CONTEXT = Object.freeze({
   },
 });
 
-// The context line for the user's own typed message, or '' when it is not a typed command.
+// The line for a message the user typed, or '' when it is not a typed command.
 function phraseContext(text) {
   const command = typedCommand(text);
   return command ? `Toolkit command: the user typed \`${command.phrase}\`. ${CONTEXT[command.action]()}` : '';
@@ -95,8 +96,6 @@ function phraseContext(text) {
 
 module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext, bankGuide: CONTEXT.guide, main });
 
-// With the user's message, the same line the prompt hook would have added, so a session whose hooks
-// did not run (hooks off, or the hook ran out of time) takes the same action as one whose hooks did.
 function main(argv = process.argv.slice(2), out = process.stdout, err = process.stderr) {
   if (!argv.length) { out.write(`${listText()}\n`); return 0; }
   const line = argv.length === 1 ? phraseContext(argv[0]) : '';
