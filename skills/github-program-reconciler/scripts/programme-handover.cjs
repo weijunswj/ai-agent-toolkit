@@ -196,4 +196,4 @@ function command(argv, deps, out, openContext) {
   return 0;
 }
 
-module.exports = Object.freeze({ handoverPath, handoverUrl, renderHandover, parse, command });
+module.exports = Object.freeze({ DEVICE_PATH, handoverPath, handoverUrl, renderHandover, parse, command });

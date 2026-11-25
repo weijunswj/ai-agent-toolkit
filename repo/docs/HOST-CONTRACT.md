@@ -88,7 +88,7 @@ Before launching a gate the launcher runs `show --issue <n>`. A live assignment 
 
 ## 5. Handover
 
-Stop or fence the old writer, settle in-flight effects, then assign the successor. Journals of the old assignment are reported once as `STALE_ASSIGNMENT` and never replayed. A parent takeover needs a takeover record comment on the parent issue that the tool reads back (`claim --parent --takeover --takeover-record <comment id>`).
+Stop or fence the old writer, settle in-flight effects, then assign the successor. Journals of the old assignment are reported once as `STALE_ASSIGNMENT` and never replayed. A parent takeover is one command (`takeover`): it reads the old controller's own last write, posts the takeover record on the parent issue, reads both again and claims.
 
 ## 6. Helpers
 
@@ -190,7 +190,7 @@ The integration controller alone writes the parent, the version files and the in
 ## 9. Honest limits
 
 - The fence orders cooperating Toolkit writers under one GitHub account; it authenticates nobody.
-- The tool cannot see whether another host session has stopped. A takeover record must carry that evidence (session archived, remote control ended).
+- The tool cannot see whether another host session has stopped. A takeover reads that controller's own last write instead (10 minutes of quiet, read again after the record, or the owner's own words); a controller that only waits looks stopped, and its next programme write is refused.
 - A journal is evidence, not state, until the controller's reconcile reads it.
 
 ## 10. Closing finished sessions

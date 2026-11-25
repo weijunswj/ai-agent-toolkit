@@ -132,6 +132,7 @@ for (const [label, change, code] of [
   ['an order for another holder', { holder_session: 'someone-else' }, 'ORDER_STALE'],
   ['an order for another parent', { parent_issue: 422 }, 'ORDER_INVALID'],
   ['a claim', { ops: [{ command: 'claim', parent: true }] }, 'ORDER_INVALID'],
+  ['a takeover', { ops: [{ command: 'takeover', session: 'desk-controller-2' }] }, 'ORDER_INVALID'],
   ['a takeover by migrate-state', { ops: [{ command: 'migrate-state' }] }, 'ORDER_INVALID'],
   ['a write with an unknown field', { ops: [{ command: 'ack', finding: ADDED, next: 'x', takeover: true }] }, 'ORDER_INVALID'],
   ['an order without its record', { record: '' }, 'ORDER_INVALID'],

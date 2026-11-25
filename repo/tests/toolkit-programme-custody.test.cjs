@@ -34,7 +34,12 @@ const CATALOGUE = [
 ];
 const LANE_PREFIX = 'CDX-TK469-';
 
-test('T10b a split connector record and shell claim preserve account and parent freshness guards', () => {
+// The line a takeover record carries, and the command that claims with it.
+const recordLine = ({ id = 'INT-TK421-090', session = 'controller-2', epoch = 1 } = {}) => `${id} TAKEOVER: controller ${session} on example harness; Toolkit main ${'a'.repeat(40)}; CONTROLLER.md blob ${'b'.repeat(40)}; epoch ${epoch} to ${epoch + 1}; old writer stopped: the owner said so; next: read the repository map.`;
+const takeoverArgs = (session, extra = []) => ['takeover', '--session', session, '--surface', 'example harness', '--next', 'read the repository map', '--apply', '--controller', ...extra];
+const QUIET = 11 * 60 * 1000;
+
+test('T10b a split connector record and shell claim preserve account and controller freshness guards', () => {
   const playbook = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), 'utf8');
   assert.ok(playbook.includes('**Custody pack:**'), 'the named relay group still preserves evidence');
   assert.ok(playbook.includes('**Record pack:**'), 'the named relay group still owns the split record and claim');
@@ -42,29 +47,32 @@ test('T10b a split connector record and shell claim preserve account and parent 
     Array(3).fill('read-example-repo-20261108T0930Z-abcd'));
   const sample = playbook.match(/^EXAMPLE-001 TAKEOVER:.*$/m)?.[0];
   assert.ok(sample, 'use the actual published relay record');
-  for (const scenario of ['matching account', 'different account', 'parent write between record and claim']) {
+  for (const scenario of ['matching account', 'different account', 'controller write between record and claim']) {
     const fx = fixture();
+    fx.github.clock += QUIET;
     const body = sample.replace('EXAMPLE-001', 'INT-TK421-091');
     const id = fx.github.addComment(421, { body });
     if (scenario === 'different account') fx.github.login = 'other-owner';
-    if (scenario === 'parent write between record and claim') {
+    if (scenario === 'controller write between record and claim') {
       fx.store.mutate('parent', 421, { writer: controller, change: doc => { doc.private.note = 'intervening parent write'; return doc; } });
     }
     const commits = fx.github.commits;
-    const { result, error } = fx.run(['claim', '--parent', '--takeover', '--takeover-record', String(id),
-      '--session', 'example-controller', '--controller']);
+    const mutations = fx.github.mutations();
+    const { result, error } = fx.run(takeoverArgs('example-controller'));
     if (scenario === 'matching account') {
       assert.equal(error, null, error?.message);
-      assert.equal(result.epoch, 2);
-      assert.equal(result.acting.session, 'example-controller');
+      assert.deepEqual([result.parent.epoch, result.record.comment_id, result.record.resumed], [2, id, true], 'the connector\'s record carries the claim');
+      assert.equal(fx.github.mutations(), mutations, 'no second record is posted');
+      assert.equal(result.claim.acting.session, 'example-controller');
       assert.equal(fx.parentDoc().fence.holder_session, 'example-controller');
       const observed = fx.run(['show', '--parent', '--include-private']);
       assert.equal(observed.error, null);
       assert.equal(observed.result.document.fence.holder_session, 'example-controller');
       assert.equal(observed.result.document.fence.epoch, 2);
     } else {
-      assert.equal(error?.code, 'TAKEOVER_UNVERIFIED', scenario);
+      assert.equal(error?.code, scenario === 'different account' ? 'ACCOUNT_MISMATCH' : 'OLD_WRITER_ACTIVE', scenario);
       assert.equal(fx.github.commits, commits, `${scenario}: no claim write`);
+      assert.equal(fx.github.mutations(), mutations, `${scenario}: no record or edit`);
       assert.equal(fx.parentDoc().fence.epoch, 1);
     }
   }
@@ -353,33 +361,49 @@ test('W3 an accepted gate reopened for a correction loses its acceptance and the
 });
 
 test('W4 and W5 a parent takeover needs a read-back record; the replaced controller is refused afterwards', () => {
-  const successor = ['--session', 'controller-2', '--controller'];
-  const takeover = (fx, record) => fx.run(['claim', '--parent', '--takeover', ...(record ? ['--takeover-record', String(record)] : []), ...successor]);
+  // A comment that is not this takeover's record, whatever it says, never carries the claim: the command
+  // posts its own and claims with that.
   const cases = [
     ['no record', () => null],
-    ['another issue', fx => fx.github.addComment(423, { body: 'INT-TK421-090 takeover from epoch 1' })],
-    ['another account', fx => fx.github.addComment(421, { body: 'INT-TK421-090 takeover from epoch 1', login: 'someone-else' })],
-    ['no decision ID', fx => fx.github.addComment(421, { body: 'Takeover from epoch 1' })],
-    ['wrong prefix', fx => fx.github.addComment(421, { body: 'CDX-TK469-090 takeover from epoch 1' })],
-    ['wrong epoch', fx => fx.github.addComment(421, { body: 'INT-TK421-090 takeover from epoch 7' })],
-    ['older than the last write', fx => fx.github.addComment(421, { body: 'INT-TK421-090 takeover from epoch 1', createdAt: '2026-01-01T00:00:00Z' })],
+    ['another issue', fx => fx.github.addComment(423, { body: recordLine() })],
+    ['another account', fx => fx.github.addComment(421, { body: recordLine(), login: 'someone-else' })],
+    ['no decision ID', fx => fx.github.addComment(421, { body: recordLine({ id: 'EXAMPLE-090' }) })],
+    ['wrong prefix', fx => fx.github.addComment(421, { body: recordLine({ id: 'CDX-TK469-090' }) })],
+    ['wrong epoch', fx => fx.github.addComment(421, { body: recordLine({ epoch: 7 }) })],
+    ['a later epoch skipped to', fx => fx.github.addComment(421, { body: recordLine().replace('epoch 1 to 2', 'epoch 1 to 3') })],
+    ['marked not used', fx => fx.github.addComment(421, { body: `NOT USED: ${recordLine()}` })],
+    ['another session', fx => fx.github.addComment(421, { body: recordLine({ session: 'controller-9' }) })],
+    ['older than the last write', fx => fx.github.addComment(421, { body: recordLine(), createdAt: '2026-01-01T00:00:00Z' })],
   ];
   for (const [name, make] of cases) {
     const fx = fixture();
     const commits = fx.github.commits;
-    const { error } = takeover(fx, make(fx));
-    assert.equal(error?.code, 'TAKEOVER_UNVERIFIED', `${name}: ${error?.message}`);
-    assert.equal(fx.github.commits, commits, `${name}: no write`);
-    assert.equal(fx.parentDoc().fence.epoch, 1, name);
+    // Posted once the old controller was quiet, so nothing but its own fault keeps it from being used.
+    fx.github.clock += QUIET;
+    const bad = make(fx);
+    fx.github.clock += QUIET;
+    const { result, error } = fx.run(takeoverArgs('controller-2'));
+    assert.equal(error, null, `${name}: ${error?.message}`);
+    assert.notEqual(result.record.comment_id, bad, name);
+    assert.equal(result.record.resumed, false, name);
+    assert.deepEqual(fx.parentDoc().private.takeovers, [{ comment_id: result.record.comment_id, from_epoch: 1 }], name);
+    assert.match(fx.github.comments.get(result.record.comment_id).body, /^INT-TK421-\d+ TAKEOVER: controller controller-2 on .*; epoch 1 to 2; /, name);
+    assert.equal(fx.github.commits, commits + 1, `${name}: one claim`);
+    assert.equal(fx.parentDoc().fence.epoch, 2, name);
   }
+  // Its own record, posted before and unused, is read back and carries the claim.
   const fx = fixture();
-  const record = fx.github.addComment(421, { body: 'INT-TK421-090 takeover from epoch 1; previous session archived' });
-  const taken = takeover(fx, record);
+  fx.github.clock += QUIET;
+  const record = fx.github.addComment(421, { body: recordLine() });
+  const taken = fx.run(takeoverArgs('controller-2'));
   assert.equal(taken.error, null, taken.error?.message);
+  assert.equal(taken.result.record.comment_id, record);
   assert.equal(fx.parentDoc().fence.epoch, 2);
   const stopped = fx.run(['update-parent', '--patch', __filename, '--session', controller.session, '--controller']);
   assert.equal(stopped.error?.code, 'STALE_WRITER');
-  const again = fx.run(['claim', '--parent', '--takeover', '--takeover-record', String(fx.github.addComment(421, { body: 'INT-TK421-091 takeover from epoch 2' })), '--session', controller.session, '--controller']);
+  fx.github.addComment(421, { body: recordLine({ id: 'INT-TK421-091', session: controller.session, epoch: 2 }) });
+  fx.github.clock += QUIET;
+  const again = fx.run(takeoverArgs(controller.session));
   assert.equal(again.error?.code, 'STALE_WRITER', 'the replaced controller never takes the parent back');
   assert.match(again.error.message, /stops and reports to the owner/);
   assert.equal(fx.parentDoc().fence.holder_session, 'controller-2');
@@ -590,7 +614,7 @@ test('W12 a lane controller assigns and interrupts only its delegated child', ()
   fs.writeFileSync(patch, JSON.stringify({ next_action: 'Lane note' }));
   for (const argv of [['reopen', '--issue', '423', '--reason', 'x'], ['return', '--issue', '423', '--record', 'r1', '--assignment', 'g1-a1'],
     ['update', '--issue', '423', '--patch', patch], ['update-parent', '--patch', patch], ['assign', '--issue', '467', '--role', 'G1', '--assignment', 'g1-b1'],
-    ['claim', '--parent']]) {
+    ['takeover', '--surface', 'example harness', '--next', 'read the map', '--apply']]) {
     const commits = fx.github.commits;
     assert.equal(asLane(argv).error?.code, 'ROLE_REFUSED', argv.join(' '));
     assert.equal(fx.github.commits, commits, argv.join(' '));

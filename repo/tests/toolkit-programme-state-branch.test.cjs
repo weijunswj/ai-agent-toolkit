@@ -740,3 +740,26 @@ test('lease public: a renewal due during the progress write does not nest', () =
   assert.equal(record.holder, null, 'released');
   assert.equal(record.stopped_passes, 0);
 });
+
+// ---------------------------------------------------------------------------------------------
+// Takeover on a public state branch
+
+test('a takeover lands on a public state branch: the stop is read from the branch, a refresh commit there is marked', () => {
+  const fx = fixture();
+  const take = (extra = []) => fx.run(['takeover', '--session', 'desk-controller-2', '--surface', 'test harness', '--next', 'read the map', '--apply', '--controller', ...extra]);
+  const heads = () => fx.github.commitLog.filter(entry => entry.repository === REPO && entry.branch === BRANCH).map(entry => entry.message);
+  fx.github.clock += 11 * 60 * 1000;
+  // The old controller's write on the branch holds the takeover; the checkpoint and sidecars beside it never do.
+  bumpChild(fx);
+  assert.doesNotMatch(heads().at(-1), /\(refresh\)$/);
+  assert.equal(take().error?.code, 'OLD_WRITER_ACTIVE');
+  fx.github.clock += 11 * 60 * 1000;
+  bumpChild(fx, doc => { doc.next_action = 'Controller: plan another step'; return doc; }, state.refreshWriter(fx.store().read('parent', 7).doc));
+  assert.ok(heads().at(-1).endsWith(state.REFRESH_MARK), heads().at(-1));
+  const { result, error } = take();
+  assert.equal(error, null, error?.message);
+  assert.deepEqual([result.parent.epoch, fx.store().read('parent', 7).doc.fence.holder_session], [2, 'desk-controller-2']);
+  assert.match(result.record.line, /state commit [0-9a-f]{7} at /);
+  // The public documents never name the session.
+  assert.ok(!fx.github.textAt(REPO, BRANCH, 'state/parent-7.json').includes('desk-controller-2'));
+});
