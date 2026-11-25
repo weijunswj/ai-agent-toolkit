@@ -72,6 +72,16 @@
         ]
       },
       {
+        "matcher": "^mcp__ccd_session__start_session$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-gate-launch-hook.cjs\" --event PreToolUse",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "^(?:Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Grep|Glob|LS|Bash|PowerShell|Monitor)$",
         "hooks": [
           {
@@ -114,11 +124,11 @@
         ]
       },
       {
-        "matcher": "^(?!(?:Read|Grep|Glob|LS|NotebookRead|WebFetch|WebSearch|ToolSearch|TodoWrite|TaskGet|TaskList|TaskOutput)$)",
+        "matcher": "^mcp__ccd_session__start_session$",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-handoff-hook.cjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-gate-launch-hook.cjs\" --event PostToolUse",
             "timeout": 10
           }
         ]
