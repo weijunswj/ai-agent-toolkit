@@ -403,4 +403,4 @@ function main(argv = process.argv.slice(2), environment = process.env, write = t
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EFFORTS, ROLE_MEMBER, WORDING_EFFORT, checkBriefRoute, declaredGate, evaluate, loadRegistry, main, membersOf, parseBrief, pinFor, preToolUse, readTranscript, registryModel, stampLines, stampStatus });
+module.exports = Object.freeze({ EFFORTS, ROLE_MEMBER, WORDING_EFFORT, checkBriefRoute, declaredGate, evaluate, loadRegistry, main, membersOf, parseBrief, pinFor, preToolUse, readTranscript, registryModel, stampLines, stampStatus, transcriptFor });

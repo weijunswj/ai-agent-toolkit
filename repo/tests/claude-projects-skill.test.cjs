@@ -39,7 +39,7 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
 
 test('Projects P2 fills the gate route, and no step waits on a device for scheduled tasks', () => {
   const setup = read(`${REFERENCE_DIR}/setup.md`);
-  const folder = 'When any gate runs on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.';
+  const folder = 'When any gate runs on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named: set it in the controller settings (`toolkit-controller-settings.cjs set --folder`) and save the line their `render` gives.';
   const p2 = setup.split('P2. **')[1].split('P3. **')[0];
   assert.ok(p2.includes(folder), folder);
   assert.doesNotMatch(setup, /step 9b|standing approval|toolkit-windows-tasks|Programme sweep on a device/);
@@ -459,7 +459,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
-  assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
+  assert.ok(text.includes('`GATE ROUTE: profile <profile> lanes <n> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
   assert.match(text, /save BINDING and GATE ROUTE from the exact bound Controller\/stack and the owner's rule on where gates run/);
   // The coordinator loads no account skills: it reads the skill from the library copy, which three routes keep current.
@@ -810,8 +810,10 @@ test('device steps go to the Remote Control session, not the owner', () => {
 
 test('Toolkit text says computer or Remote Control session, not laptop', () => {
   // Work runs on whatever computer the user has. "laptop" stays only as a screen size or an icon
-  // name in the frontend art direction skill, matched line by line.
+  // name in the frontend art direction skill, and as one of the owner's own words the owner-line lint
+  // reads (never Toolkit's text), matched line by line.
   const allowedFolder = /^skills\/frontend-art-direction\//;
+  const ownerWords = { file: 'repo/scripts/toolkit-owner-lines.cjs', phrase: '(?:this|my|the) (?:device|computer|laptop|desktop|pc|machine)' };
   const roots = ['skills', 'repo/contracts', 'repo/docs', 'repo/scripts', 'repo/tests/fixtures'];
   const hits = [];
   const walk = (rel) => {
@@ -821,7 +823,7 @@ test('Toolkit text says computer or Remote Control session, not laptop', () => {
       if (/\.(png|jpe?g|gif|ico)$/i.test(entry.name)) continue;
       fs.readFileSync(path.join(repoRoot, child), 'utf8').split(/\r?\n/).forEach((line, index) => {
         // Only the allowed phrase is exempt, so a banned use on the same line still fails.
-        const rest = !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
+        const rest = child === ownerWords.file ? line.replace(ownerWords.phrase, '') : !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
         if (/laptop/i.test(rest)) hits.push(`${child}:${index + 1}`);
       });
     }
@@ -934,7 +936,7 @@ test('reviews count toward the work cap unless a project sets review lanes', () 
 test('gate route placement defaults to the device, with a cloud gate only from the user\'s line', () => {
   const route = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Gate route line.**'));
   assert.doesNotMatch(route, /`cloud` for new projects/);
-  for (const phrase of ['`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`',
+  for (const phrase of ['`GATE ROUTE: profile <profile> lanes <n> placement <remote_control|cloud|any> [folder <path>]`',
     '`placement remote_control G2=cloud folder <path>`', 'per-gate placement', '`cloud` only from the user\'s line',
     '`remote_control` for new projects']) {
     assert.ok(route.includes(phrase), phrase);

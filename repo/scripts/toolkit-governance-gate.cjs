@@ -107,7 +107,6 @@ function frameBody(body, name) {
   const close = `</${name}>`;
   return open && text.endsWith(close) ? text.slice(open[0].length, -close.length).trim() : null;
 }
-function ownerReply(prompt) { return ownerMessage(prompt).text; }
 // The reply with where it came from: { text, id, wrapped, markup, approvalEligible, sentAt }.
 // approvalEligible is true only for a well-formed direct Projects mention with no decoded markup;
 // sentAt lets the approval store reject old deliveries after their replay markers expire.
@@ -1117,7 +1116,7 @@ class PromptHold {
   // else text for the agent to put to the user. lead is an extra first line for the user.
   #ask(verdict, lead = null) {
     const notice = [lead, questionText(verdict)].filter(Boolean).join('\n');
-    return this.#picker ? { action: 'pass', context: pickerContext(notice), notice: PICKER_NOTICE, question: true } : { action: 'pass', context: textContext(notice), question: true };
+    return this.#picker ? { action: 'pass', context: pickerContext(notice), notice: PICKER_NOTICE } : { action: 'pass', context: textContext(notice) };
   }
 
   #decide({ cwd, prompt, sessionId = null }) {
@@ -1208,8 +1207,8 @@ class PromptHold {
     if (this.#launched(sessionId)) { drop(); return { action: 'pass' }; }
     if (!ownTyped(message)) return null;
     // Typing toolkit governance (or another phrase for the bank) again asks for the bank afresh, so
-    // it never answers the shown one: the note is dropped and the typed command's own line shows it.
-    // As a reply it got a ticket and was told never to show the bank, beside a line to show it.
+    // it never answers the shown one: the note is dropped and the toolkit-setup skill shows it. As a
+    // reply it got a ticket and was told never to show the bank.
     if (require('./toolkit-commands.cjs').typedCommand(message.text)?.action === 'guide') { drop(); return null; }
     if (this.#epochs.repository(shown.repository_id) !== shown.repository_mark) {
       drop();
@@ -1788,7 +1787,6 @@ module.exports = Object.freeze({
   ReplyTickets,
   TICKETS_BASENAME,
   ANSWER_SCRIPT,
-  ownerReply,
   ownerMessage,
   hasFrameMarkup,
   sessionIdOf,

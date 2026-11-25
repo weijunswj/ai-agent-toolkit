@@ -507,11 +507,10 @@ test('explain after a row changed in place names the change, then the row', asyn
 // #1373: the owner typed `toolkit governance` while a bank was open in the session (shown, or kept
 // open after an answer) and got a status summary instead of the bank. The prompt hook read the
 // phrase as a possible bank reply: the agent got a one-use ticket, was told to send anything unclear
-// as typed and never to show the bank again, and beside that the typed command's line to show it.
-// Typing the phrase asks for the bank afresh: only the command line comes, and the old bank closes.
+// as typed and never to show the bank again. Typing the phrase asks for the bank afresh: the hook adds
+// nothing (the toolkit-setup skill shows the bank) and the old bank closes.
 test('typing toolkit governance while a bank is open asks for the bank afresh, never a reply ticket', async t => {
   const hook = require(path.join(scripts, 'toolkit-governance-hook.cjs'));
-  const commands = require(path.join(scripts, 'toolkit-commands.cjs'));
   const ctx = fixture(t, { quiet: true });
   const prompt = text => hook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: text, session_id: SESSION }, {
     registryOptions: ctx.registryOptions, environment: { [gate.HOST_SESSION_VARIABLE]: SESSION }, mergeHold: { recordPromptNote: () => ({ count: 0, note: '' }) },
@@ -520,14 +519,13 @@ test('typing toolkit governance while a bank is open asks for the bank afresh, n
     const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
     assert.ok(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), 'the bank is open');
     const context = prompt(phrase);
-    assert.equal(context, commands.phraseContext(phrase), `${phrase}: only the command line, which runs setup`);
-    assert.doesNotMatch(context, /--ticket|may answer it|Never show the bank again yourself/, phrase);
+    assert.equal(context, '', `${phrase}: no ticket and no line`);
     assert.equal(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), null, `${phrase}: bank ${reference} no longer waits for a reply`);
   }
   // After an answer the bank stays open for the next own message; the phrase still asks afresh.
   const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'])).out)[1];
   assert.match((await reply(ctx, reference, KEEP)).out, /^Nothing changed/m);
-  assert.equal(prompt('toolkit governance'), commands.phraseContext('toolkit governance'));
+  assert.equal(prompt('toolkit governance'), '');
   // Any other own message after a bank still gets its ticket.
   await run(ctx, ['setup']);
   assert.match(prompt('1.2=A'), /--ticket [0-9a-f]{32}/);

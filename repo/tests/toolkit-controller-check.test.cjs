@@ -17,6 +17,7 @@ const CLEAN = {
   [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify({ items: [{ level: 'CHECK', check: 'speed.jobs', path: '', message: 'judge' }] }) },
   [SCRIPTS.footer]: { status: 0, stdout: 'GitHub footer sweep (report only) of acme/app: no posts with the footer\n' },
   [SCRIPTS.refs]: { status: 0, stdout: 'SCRIPT REFERENCES: clear\n' },
+  [SCRIPTS.ownerLines]: { status: 0, stdout: 'Nothing to fix.\n' },
 };
 
 const NOW = new Date('2026-11-14T12:00:00Z');
@@ -40,12 +41,12 @@ const run = (argv, setup) => {
   const code = main(argv, { ...deps, stdout: chunk => { text += chunk; }, stderr: chunk => { text += chunk; } });
   return { code, text, calls };
 };
-const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md', '--task', 'hourly-nudge=h.md'];
+const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md', '--task', 'hourly-nudge=h.md', '--owner-lines', 'o.md'];
 
 test('a clean run prints one line and exits 0', () => {
   const { code, text } = run(ALL);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces ci footer refs; skipped: toolkit)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks owner-lines programme traces ci footer refs; skipped: toolkit)\n');
 });
 
 test('checks are segregated by host and governance, and skip cleanly with the reason', () => {
@@ -54,7 +55,7 @@ test('checks are segregated by host and governance, and skip cleanly with the re
   for (const name of ['guidebook', 'instructions', 'memory', 'tasks']) {
     assert.deepEqual(chat.checks.find(check => check.name === name), { name, state: 'skipped', lines: ['Claude Projects only'] });
   }
-  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['programme', 'traces', 'ci', 'footer', 'refs']);
+  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['owner-lines', 'programme', 'traces', 'ci', 'footer', 'refs']);
   const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
   assert.deepEqual(off.checks.filter(check => check.state === 'skipped').map(check => `${check.name}: ${check.lines[0]}`).slice(-2), ['programme: governance off', 'traces: governance off']);
   const none = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: null }).deps);
@@ -78,7 +79,7 @@ test('findings print compactly: counts by code and the top items, full detail be
   const compact = run(ALL, { results });
   assert.equal(compact.code, 1);
   assert.deepEqual(compact.text.trimEnd().split('\n'), [
-    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer refs; skipped: toolkit)',
+    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks owner-lines traces ci footer refs; skipped: toolkit)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
     `  ... 3 more (--expand, or ${require('../scripts/toolkit-user-state.cjs').programmeCommand('attention')})`,
@@ -174,24 +175,48 @@ test('--json prints the report as data', () => {
   const report = JSON.parse(text);
   assert.equal(report.host, 'projects');
   assert.equal(report.governed, true);
-  assert.equal(report.checks.length, 10);
+  assert.equal(report.checks.length, 11);
   assert.equal(format(report).split('\n')[0].startsWith('CONTROLLER CHECK: clear'), true);
 });
 
 test('a run where every check is skipped says nothing ran and exits 1, never clear', () => {
   const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
   assert.equal(code, 1);
-  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks programme traces ci footer refs\): pass the inputs each skipped check names/);
+  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks owner-lines programme traces ci footer refs\): pass the inputs each skipped check names/);
   // With no inputs at all only the Toolkit's own script-reference check runs, which is not a clear run.
   const bare = run(['--host', 'chat']);
   assert.equal(bare.code, 1);
-  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks programme traces ci footer\)/);
+  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks owner-lines programme traces ci footer\)/);
 });
 
 test('there is no stale check: a stored task prompt that still skips it runs the rest', () => {
   assert.equal(require('../scripts/toolkit-controller-check.cjs').CHECKS.includes('stale'), false);
   const { code, text, calls } = run([...ALL, '--skip', 'programme,traces,stale,ci']);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks footer refs; skipped: toolkit programme traces ci)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks owner-lines footer refs; skipped: toolkit programme traces ci)\n');
   assert.equal(calls.some(call => call.gh), false, 'no GitHub read of its own');
+});
+
+// #1242 S4: the owner's own lines are linted on any host, against the controller settings when given,
+// and against Toolkit's block only on a Projects host.
+test('owner-lines lints the owner\'s lines on any host, with the settings and, on Projects, the block', () => {
+  const chat = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md', '--settings', 's.json']);
+  const lint = chat.calls.find(call => call.script === SCRIPTS.ownerLines);
+  assert.deepEqual(lint.args, ['check', '--file', 'CLAUDE.md', '--settings', 's.json']);
+  // Where the controlled repository is known, the settings must be its own.
+  for (const named of [['--repo', 'acme/app'], ['--checkout', '/repo']]) {
+    const owned = run(['--host', 'chat', ...named, '--owner-lines', 'CLAUDE.md', '--settings', 's.json']);
+    assert.deepEqual(owned.calls.find(call => call.script === SCRIPTS.ownerLines).args, ['check', '--file', 'CLAUDE.md', '--settings', 's.json', '--repository', 'acme/app'], named[0]);
+  }
+  const projects = run(['--owner-lines', 'i.md']);
+  assert.deepEqual(projects.calls.find(call => call.script === SCRIPTS.ownerLines).args, ['check', '--file', 'i.md', '--block', 'projects']);
+  const fixes = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md'], { results: { [SCRIPTS.ownerLines]: { status: 1, stdout: 'line 3: "- Lanes: 1" It says live lanes 1, but the controller settings say 2. Fix 3-conflicts-setting-abcd1234: replace it.\n' } } });
+  assert.equal(fixes.code, 1);
+  assert.match(fixes.text, /ATTENTION owner-lines: line 3: "- Lanes: 1" It says live lanes 1/);
+  // A lint that could not run is said so, never as something to settle.
+  const stopped = run(['--host', 'chat', '--owner-lines', 'CLAUDE.md', '--settings', 's.json'], { results: { [SCRIPTS.ownerLines]: { status: 2, stdout: '', stderr: 'The controller settings file is not JSON.' } } });
+  assert.match(stopped.text, /0 need attention, 1 could not run/);
+  assert.match(stopped.text, /The controller settings file is not JSON/);
+  const none = run(['--host', 'chat']);
+  assert.ok(none.calls.every(call => call.script !== SCRIPTS.ownerLines), 'no file, no lint');
 });

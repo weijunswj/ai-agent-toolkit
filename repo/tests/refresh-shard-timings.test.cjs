@@ -263,7 +263,9 @@ test('generated candidate body names the scripted carry route, its limits and th
   assert.match(body, /Review route: scripted carry \(shard-timings\)/);
   assert.match(body, /manifest-only redistribution.*budgets and every shard unchanged.*green on Linux and Windows/);
   assert.match(body, /Anything more needs the full gates: G0, a fresh G1 and a full G2/);
-  assert.match(body, /RISKY, so the owner's merge card stays/);
+  // With task auto-merge on and an accepting check it lands with no card (INT-TK421-1319); only otherwise, or in a train, does the card stay.
+  assert.match(body, /The shard manifest is RISKY: merged alone with task auto-merge on and the auto-merge check accepting it, it lands with no card and one notice after; otherwise, or in a merge train, the owner's merge card stays\./);
+  assert.doesNotMatch(body, /RISKY, so the owner's merge card stays/);
   assert.match(body, /Budget or generator changes.*impact assessment/);
   assert.equal(uatVerdict(body).state, 'NOT_REQUIRED');
   assert.deepEqual(body.match(/^Bump: .*$/gm), ['Bump: none']);

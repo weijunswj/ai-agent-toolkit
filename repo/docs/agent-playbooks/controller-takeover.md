@@ -58,7 +58,7 @@ Show the checklist once. Each step is verified with evidence, supplied by user w
 
 No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim. Complete, consistent user-supplied evidence is visibly labelled; it never becomes independent verification or gate/merge authority.
 
-Questions use the harness's native question method (global rules) with plain option labels and "(my pick)" on the recommended one. A card's question and options make sense alone, since the owner may not see text above an open card; a question that needs the problem, fix and consequence explained ends the closing message instead, below that explanation. If that method leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A question that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
+Questions use the harness's native question method (global rules) with plain option labels and "(my pick)" on the recommended one. If that method leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A question that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
 
 ### 1. The capability check
 
@@ -78,7 +78,7 @@ Through the first working route, run `node <Toolkit>/repo/scripts/toolkit-govern
 
 ### 5. Bind direction and routes
 
-Bind Controller and this playbook from Toolkit main by commit and blob, with their full bytes. Bind the explicitly selected stack revision per Controller Roles and routes; never infer adoption of a newer stack. Record where gates run and the owner's lane count, default one. Projects saves BINDING and GATE ROUTE memory lines. Missing gate launch proof holds gates, including the installed Codex hook hold, without relaying around it.
+Bind Controller and this playbook from Toolkit main by commit and blob, with their full bytes. Bind the explicitly selected stack revision per Controller Roles and routes; never infer adoption of a newer stack. Record where gates run and the owner's lane count, default one, as controller settings: `node repo/scripts/toolkit-controller-settings.cjs set` on the owner's word (`--owner-said`), saved to the evidence store at `state/<owner>/<repo>/controller-settings.json` with `toolkit-store.cjs save` (governance off: `save` refuses, so commit and push it at that path as step 6 does custody files, and read it back); its `render` gives the project lines and the GATE ROUTE line, never written by hand. The pinned CURRENT selection decides the stack: where `stack_profile` differs from it, hold gates and ask. Lint the owner's own instruction lines with `node repo/scripts/toolkit-owner-lines.cjs check --file <file> --settings <file> --repository <owner/name>` (or `toolkit-controller-check.cjs --owner-lines`), offer its fixes to the owner in one question with each line's text, and `apply` only the ones they tap, all at once. Projects saves BINDING and GATE ROUTE memory lines. Missing gate launch proof holds gates, including the installed Codex hook hold, without relaying around it.
 
 ### 6. Outgoing writer and custody
 

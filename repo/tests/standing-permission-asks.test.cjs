@@ -79,10 +79,10 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
     'tell the owner which change to undo and in which file',
-    // The owner may see only an open card, not the text above it (owner, 23 November), so the ask goes as written text.
-    'The owner may see only an open card, never the text above it, and this ask needs its context, so ask it as written text at the end of the closing message, not on a card: the lines below as plain-English formatted text, then the question and its options (just this once, from now on, no), the recommended one marked.',
-    'In Claude Projects, where web chat keeps the text above a card on screen, follow the Projects skill: these lines, then one decision card.',
-    'batch several asks into one message where they arrive together',
+    // The host's own question method asks (INT-TK421-1322); the ask carries its scope lines, so it is clear on its own.
+    'Ask with the harness\'s native question method and make the ask clear on its own: the lines below in plain English, then the question and its options (just this once, from now on, no), the recommended one marked.',
+    'In Claude Projects follow the Projects skill: these lines, then one decision card.',
+    'batch several asks into one where they arrive together',
     'Where the host still blocks a granted step, the ask names the exact native change.',
     '`native_rule` (the native change the ask named, with its file,',
     'save a copy of the ask as the owner saw it (the written ask, or the card and any text shown with it) and the owner\'s answer, word for word with its id and time, at `standing-permissions/answers/<id>.md` beside the ledger. The copy is a record only: the original wins whenever it can be opened, and if the two differ beyond the label swaps the entry covers nothing and the owner is told.',

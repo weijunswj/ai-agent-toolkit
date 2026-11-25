@@ -1115,81 +1115,33 @@
       "status": "pass"
     },
     {
-      "id": "CMD.toolkit-cmd-lists-commands",
-      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "id": "CMD.typed-command-adds-no-note",
+      "source": "INT-TK421-1323: the prompt hooks add no note for a typed Toolkit command; the toolkit-setup and toolkit-env skills read it",
       "kind": "benign",
       "hosts": ["claude", "codex"],
       "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"UserPromptSubmit","payload":{"prompt":"toolkit governance"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"toolkit show env"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"toolkit setup"},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"  Toolkit  Refresh. "},"expect":{"decision":"allow","context_excludes":["Toolkit command:"]}}
+      ],
       "payload": { "prompt": "toolkit cmd" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`.", "**Keys**\n\n| Type this | What it does |\n| --- | --- |\n| `toolkit env` or `toolkit show env` | Open your keys"] },
-      "status": "pass"
-    },
-    {
-      "id": "CMD.toolkit-command-any-case-and-stop",
-      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
-      "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "event": "UserPromptSubmit",
-      "payload": { "prompt": "  Toolkit  Command. " },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit command`."] },
-      "status": "pass"
-    },
-    {
-      "id": "CMD.toolkit-refresh",
-      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
-      "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "event": "UserPromptSubmit",
-      "payload": { "prompt": "toolkit refresh" },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit refresh`. Treat it exactly as `refresh toolkit`"] },
-      "status": "pass"
-    },
-    {
-      "id": "CMD.toolkit-setup",
-      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
-      "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "event": "UserPromptSubmit",
-      "payload": { "prompt": "toolkit setup" },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit setup`. Treat it exactly as `setup toolkit`"] },
-      "status": "pass"
-    },
-    {
-      "id": "CMD.toolkit-show-env-opens-editor",
-      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
-      "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "event": "UserPromptSubmit",
-      "payload": { "prompt": "toolkit show env" },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit show env`. Open the env editor", "Never run the one-key `set` prompt"] },
-      "status": "pass"
-    },
-    {
-      "id": "CMD.toolkit-governance-opens-the-guide",
-      "source": "owner 14 Nov 2026: toolkit governance is the one governance entry and guides on, the auto-merge switch and off; owner 15 Nov 2026 UAT: the Agents paragraph never reaches the owner; owner 15 Nov 2026: the governance bank is one typed question bank, never a card",
-      "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "event": "UserPromptSubmit",
-      "payload": { "prompt": "toolkit governance" },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \"", "toolkit-governance.cjs\" setup` in this repository, then do what its paragraph that starts with `Agents` says", "That paragraph is for you alone: never show the user any of it.", "Show them the rest of the output once, as printed, as plain text", "never summarise, shorten or repeat it", "Never answer the bank for the user."], "context_excludes": ["in full and as printed", "question card", "card input"] },
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command:", "Type this"] },
       "status": "pass"
     },
     {
       "id": "CMD.toolkit-governance-with-a-bank-open-shows-it-afresh",
-      "source": "owner test of 20 Nov 2026: toolkit governance typed while a governance bank was open gave a status summary; the prompt hook read the phrase as a bank reply, with a ticket and a never-show-the-bank line beside the line to show it",
+      "source": "owner test of 20 Nov 2026: toolkit governance typed while a governance bank was open gave a status summary; the prompt hook read the phrase as a bank reply, with a ticket and a never-show-the-bank line",
       "kind": "state",
       "hosts": ["claude", "codex"],
       "event": "UserPromptSubmit",
       "payload": { "prompt": "toolkit governance" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "owner_session": true, "bank_open": true },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \""], "context_excludes": ["may answer it", "--ticket", "Never show the bank again yourself"] },
-      "status": "pass"
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command:", "may answer it", "--ticket", "Never show the bank again yourself"] },
+      "status": "pass",
+      "note": "The hook adds nothing: the toolkit-setup skill shows the bank afresh."
     },
     {
       "id": "CMD.bank-reply-with-a-bank-open-gets-a-ticket",
@@ -1497,11 +1449,11 @@
       "event": "UserPromptSubmit",
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"toolkit cmd"},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."],"context_excludes":["Toolkit command: the user typed"]},"note":"The question comes first: the turn that carries it gets no command line."}
+        {"event":"UserPromptSubmit","payload":{"prompt":"toolkit cmd"},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."],"context_excludes":["Toolkit command: the user typed"]}}
       ],
       "payload": { "prompt": "toolkit cmd" },
       "fixture": { "repo": { "governance": "undecided" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`."], "context_excludes": ["Toolkit asks the user once per session, and nothing waits on the answer."] },
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command: the user typed", "Toolkit asks the user once per session, and nothing waits on the answer."] },
       "status": "pass"
     },
     {
@@ -1532,92 +1484,22 @@
       "status": "pass"
     },
     {
-      "id": "CARD.text-then-card",
-      "source": "#1467 S8: 7 of 8 controller cards on 22-23 Nov came after text the owner could not see, since the app shows only the open card",
-      "kind": "hostile",
+      "id": "ASK.card-after-text-is-shown",
+      "source": "INT-TK421-1322: agents ask the harness's way; a question card after text in the same turn is the harness's own and is shown",
+      "kind": "benign",
       "hosts": ["claude"],
       "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
       "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The build failed on two tests; here is what I found."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
-      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "expect": {"decision":"allow"},
       "status": "pass"
     },
     {
-      "id": "CARD.text-then-tools-then-card",
-      "source": "#1467 S8: text earlier in the turn stays hidden behind the card even after tool calls",
-      "kind": "hostile",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
-      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail. Checking why."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Bash","input":{"command":"npm test"}}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"2 failed"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
-      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.long-question",
-      "source": "#1467 S8 (old L5): a card holds only a short question; the context goes above it or into the options",
-      "kind": "hostile",
+      "id": "ASK.long-question-is-shown",
+      "source": "INT-TK421-1322: Toolkit sets no length on a question; a question over 120 characters is shown",
+      "kind": "benign",
       "hosts": ["claude"],
       "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"The reader refuses two shapes and the docs describe a third one that no longer exists, so should I fix the reader first or update the docs first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
       "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}}]},
-      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.first-in-turn",
-      "source": "#1467 S8 control: a card that is the turn's first visible output is shown",
-      "kind": "benign",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"The reader refuses two shapes."},{"label":"Docs first","description":"The docs name a third one."}]}]}},
-      "fixture": {"repo":{"governance":"enabled"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"fixture"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
-      "expect": {"decision":"allow"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.tools-then-card",
-      "source": "#1467 S8 control: a card after tool calls only, with no text, is shown",
-      "kind": "benign",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
-      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"  "},{"type":"tool_use","id":"toolu_a","name":"Bash","input":{"command":"npm test"}}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"2 failed"}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
-      "expect": {"decision":"allow"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.text-previous-turn",
-      "source": "#1467 S8 control: text from an earlier turn, which the owner has seen, does not hold the card",
-      "kind": "benign",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
-      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail; details above."}]}},{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Go ahead and pick one."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
-      "expect": {"decision":"allow"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.text-in-subagent-only",
-      "source": "#1467 S8 control: a subagent's own text (a sidechain entry) is not text the owner was meant to see, so it does not hold the card",
-      "kind": "benign",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
-      "fixture": {"repo":{"governance":"none"},"transcript":[{"type":"user","message":{"role":"user","content":"Please check the build."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Agent","input":{"prompt":"Find the failing tests."}}]}},{"type":"user","isSidechain":true,"message":{"role":"user","content":"Find the failing tests."}},{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"Two tests fail in the reader."}]}},{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"Two tests fail in the reader."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
-      "expect": {"decision":"allow"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.no-transcript",
-      "source": "#1467 S8 fail-open: with no transcript to read the card is shown, with a note that the check could not run",
-      "kind": "benign",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which fix first?","header":"Fix","multiSelect":false,"options":[{"label":"Parser fix","description":"Fix the reader first."},{"label":"Docs first","description":"Update the docs first."}]}]}},
-      "fixture": {"repo":{"governance":"enabled"}},
-      "expect": {"decision":"allow"},
-      "status": "pass"
-    },
-    {
-      "id": "CARD.merge-card-after-text",
-      "source": "#1467 S8 control: Toolkit's exact merge card names the pull request and head itself, so text before it does not hold it",
-      "kind": "benign",
-      "hosts": ["claude"],
-      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},
-      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true,"transcript":[{"type":"user","message":{"role":"user","content":"Please land PR 5."}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"PR 5 is green and reviewed; asking for the merge."}]}},{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_card","name":"AskUserQuestion","input":{}}]}}]},
       "expect": {"decision":"allow"},
       "status": "pass"
     },

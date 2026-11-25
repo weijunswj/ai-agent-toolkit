@@ -1,5 +1,32 @@
 # Toolkit Changelog
 
+## 3.183.0 (controller settings and owner-line lint)
+
+### Added
+
+- Controller settings: `toolkit-controller-settings.cjs` keeps the stack profile, the number of live lanes and where gates run (by default, per gate, device and folder) in one file the controller saves to the evidence store at `state/<owner>/<repo>/controller-settings.json`. Only a controller changes it, on the owner's words, which are kept as said with each change and with the setting; a gate session (by its launcher mark or its brief) and a launcher-bound helper are refused, and every write goes through a temporary file over unchanged bytes and is read back.
+- The project lines (lanes, stack profile, where gates run) and the `GATE ROUTE:` memory line are rendered from the settings, and the lanes line names the owner and date only where the owner gave the number; `toolkit-projects-instructions.cjs --render --settings <file>` prints the lines after the block.
+- Owner-line lint: `toolkit-owner-lines.cjs check` reads the owner's own lines in any controller's instructions or memory and offers one-tap fixes for a whole line that repeats or contradicts the settings, overrides the block's post format, or is a block line or another owner line again. A line it does not understand whole, or that does not stand on its own, gets no fix; a near copy is only a hint; a second line with another value is shown as a conflict. `apply` writes only the fixes the owner tapped, exactly as they were shown, changes no other byte, and refuses when the file, the settings or their repository changed.
+- `toolkit-controller-check.cjs --owner-lines <file> [--settings <file>]` runs the lint on any host.
+
+### Changed
+
+- The `GATE ROUTE:` line also names the live lanes: `GATE ROUTE: profile <profile> lanes <n> placement <...> [folder <path>]`.
+
+## 3.182.0 (questions asked the app's own way)
+
+### Changed
+
+- **The merge card says what it does:** its Merge option now reads "Merges pull request N of owner/name into its base branch, at commit <full SHA>. Nothing else is approved." Toolkit builds the line from the merge it refused and reads no pull request title for it, so no one else's text reaches the card. Any other wording, pull request or repository records nothing.
+- **Merge train `land`, route owner:** the agent gives the effects and runs the merge, and the merge guard's card is the one ask. The agent asks first only where no guard is known to run, or where task auto-merge is on and the guard may let the merge through unasked.
+- **Task auto-merge needs no card:** with the switch On, a pull request the auto-merge check accepts, with its other gate conditions met, lands with no card or question at any tier, scripted carries included; the controller posts one short notice after (what landed, its effect, how to undo it) and runs the check before telling the owner a card will open. A refused one keeps the card, and a merge train with a RISKY member keeps it too. The shard refresh body, the fast-tests playbook and the train's `land` say the same. What the merge guard allows or refuses is unchanged.
+
+### Removed
+
+- **The question-card check in Claude Code:** a question card after text in the same turn, or with a question over 120 characters, is no longer refused. Agents ask with the app's own question method. The merge card, the governance question and the redirect of an agent's own merge question are unchanged.
+- **How-to-ask rules:** the controller principles, the takeover and the standing permission asks no longer say where the context or the card goes; the global rules' one line stays (the harness's own question method, clear on its own).
+- **The typed-command note:** the Claude Code and Codex prompt hooks no longer add a line for a typed Toolkit command. Every command still works: the Toolkit setup skill, whose description now also names `refresh governance`, reads the message and runs `toolkit-commands.cjs`.
+
 ## 3.181.2
 
 ### Fixed

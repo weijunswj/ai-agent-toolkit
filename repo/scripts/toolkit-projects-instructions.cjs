@@ -5,7 +5,9 @@
 // previous instructions, a check of the result and a note with an undo (Projects skill sync). A block
 // whose text equals main's is current whatever Toolkit version its marker names.
 //
-//   --render                    the managed block
+//   --render [--settings <file>]
+//                               the managed block; with controller settings, then one blank line and the
+//                               project lines rendered from them (toolkit-controller-settings.cjs)
 //   --check <file> [--declined <version>] [--declined-dedupe <version>]
 //                               current | outdated | edited | missing | misplaced | declined | malformed,
 //                               then `overlaps: <n> (...)` when project lines repeat block lines
@@ -15,6 +17,7 @@ const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { renderBlock, findBlocks, blockState, removeBlock, normalizeBody, bodyDigest } = require('./toolkit-managed-block.cjs');
+const { blockOverlaps } = require('./toolkit-owner-lines.cjs');
 
 const SOURCE_FILE = 'repo/contracts/claude-projects/web-controller-projects/project-instructions.md';
 const VERSION_FILE = 'repo/contracts/toolkit-local-bridge/version.json';
@@ -24,18 +27,6 @@ const VERSION = /^\d+\.\d+\.\d+$/;
 // How far back the source's history is searched for the block an edited marker was written from.
 const HISTORY_COMMITS = 100;
 const KEPT_LABEL = '(kept from an edit inside the block)';
-// Trimmed lines carry this label and are never flagged again.
-const ADDS_LABEL = /\(adds to the block/i;
-const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'its', 'are', 'any', 'all', 'not',
-  'only', 'each', 'when', 'then', 'than', 'but', 'also', 'own', 'one', 'out', 'has', 'have', 'was', 'were', 'will', 'can', 'may']);
-// Flag when most words match (a near copy), or when many words match (a long line that restates
-// a block line among its own text). Tuned on real project lines: it misses repeats worded
-// differently, so the coordinator still reads the lines on every block change.
-const OVERLAP_SHARE = 0.6;
-const OVERLAP_MIN_WORDS = 4;
-const OVERLAP_MANY_WORDS = 8;
-const OVERLAP_MANY_SHARE = 0.4;
-
 function target(text) {
   const { blocks, errors } = findBlocks(text);
   const targets = blocks.filter(block => block.name === NAME);
@@ -54,38 +45,15 @@ function checkInstructions(text, expected, declinedVersion) {
   return { state, exitCode: state === 'current' ? 0 : 1 };
 }
 
-function words(line) {
-  return new Set((line.toLowerCase().match(/[a-z0-9]+/g) || []).filter(word => word.length >= 3 && !STOP_WORDS.has(word)));
-}
-
-// A cheap hint, not a judgement: project lines (outside the markers) sharing most of their words
-// with a line of the current block, either way round. File line numbers for the project line,
-// body line numbers for the block line.
+// Project lines (outside the markers) that say again what a line of the current block says: the
+// owner-line lint's overlap hint (toolkit-owner-lines.cjs), its one home. A cheap hint, not a
+// judgement, so the coordinator still reads the lines on every block change.
 function findOverlaps(text, expected) {
   const { found } = target(text);
-  const blockLines = normalizeBody(expected.body).split('\n').map((line, index) => ({ index: index + 1, words: words(line) }))
-    .filter(line => line.words.size >= OVERLAP_MIN_WORDS);
-  const insideBlock = offset => found && offset >= found.start && offset <= found.end;
-  const overlaps = [];
+  const starts = [];
   let offset = 0;
-  text.split('\n').forEach((raw, index) => {
-    const start = offset;
-    offset += raw.length + 1;
-    const line = raw.replace(/\r$/, '');
-    if (insideBlock(start) || !line.trim() || ADDS_LABEL.test(line)) return;
-    const own = words(line);
-    if (own.size < OVERLAP_MIN_WORDS) return;
-    let best = null;
-    for (const block of blockLines) {
-      const shared = [...own].filter(word => block.words.has(word)).length;
-      const share = Math.max(shared / own.size, shared / block.words.size);
-      const near = shared >= OVERLAP_MIN_WORDS && share >= OVERLAP_SHARE;
-      const many = shared >= OVERLAP_MANY_WORDS && share >= OVERLAP_MANY_SHARE;
-      if ((near || many) && (!best || share > best.share)) best = { block: block.index, share };
-    }
-    if (best) overlaps.push({ line: index + 1, block: best.block });
-  });
-  return overlaps;
+  for (const raw of text.split('\n')) { starts.push(offset); offset += raw.length + 1; }
+  return blockOverlaps(text, expected.body, index => !(found && starts[index] >= found.start && starts[index] <= found.end));
 }
 
 function overlapsLine(overlaps) {
@@ -115,6 +83,7 @@ function placeInstructions(text, expected, { baseBody = null } = {}) {
 
 function parseArgs(args) {
   if (args.length === 1 && args[0] === '--render') return { mode: 'render' };
+  if (args.length === 3 && args[0] === '--render' && args[1] === '--settings' && !args[2].startsWith('--')) return { mode: 'render', settings: args[2] };
   if (args.length === 2 && args[0] === '--place' && !args[1].startsWith('--')) return { mode: 'place', file: args[1] };
   if (args[0] === '--check' && args[1] && !args[1].startsWith('--')) {
     const options = { mode: 'check', file: args[1] };
@@ -187,7 +156,8 @@ function main(args = process.argv.slice(2)) {
     const options = parseArgs(args);
     const instructions = new ProjectsInstructions();
     if (options.mode === 'render') {
-      process.stdout.write(`${instructions.render()}\n`);
+      const lines = options.settings ? new (require('./toolkit-controller-settings.cjs').ControllerSettings)({ file: options.settings }).render().project_lines : [];
+      process.stdout.write(`${instructions.render()}\n${lines.length ? `\n${lines.join('\n')}\n` : ''}`);
       return 0;
     }
     if (options.mode === 'place') {
@@ -197,8 +167,9 @@ function main(args = process.argv.slice(2)) {
     const result = instructions.check(options.file, options.declinedVersion, options.declinedDedupe);
     process.stdout.write(`${result.state}\n${result.overlaps.length ? `${overlapsLine(result.overlaps)}\n` : ''}`);
     return result.exitCode;
-  } catch {
-    process.stderr.write('Project instructions could not be processed (PROJECT_INSTRUCTIONS_INVALID).\n');
+  } catch (error) {
+    const known = /^SETTINGS_/.test((error && error.code) || '');
+    process.stderr.write(`${known ? error.message : 'Project instructions could not be processed (PROJECT_INSTRUCTIONS_INVALID).'}\n`);
     return 2;
   }
 }
