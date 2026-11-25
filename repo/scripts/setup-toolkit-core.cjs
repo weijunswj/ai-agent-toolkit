@@ -2913,9 +2913,10 @@ async function answerStrongDefaultBank(args, current, options = {}) {
   const base = { answers_initially_required: pending.length > 0, stopped_for_answers: false, remaining_input: [] };
   if (args.refresh && !pending.length) {
     for (const spec of open) assignChoice(args, spec.key, spec.recommended);
+    const notes = unsetNotes(specs, (spec) => `${spec.presentation.question_ref} ${spec.title.replace(/\?$/, '')}`);
     emitRefreshKeptNotice(['', '## Refresh',
-      `No setting needs your approval, so refresh kept all ${answerable(specs).length} settings as they are, with no question.`,
-      ...unsetNotes(specs, (spec) => `${spec.presentation.question_ref} ${spec.title.replace(/\?$/, '')}`), 'To change a setting, say setup toolkit.', ''].join('\n'), answerable(specs).length, options);
+      `No setting needs your approval, so refresh kept your current answers${notes.length ? '' : ` on all ${answerable(specs).length} settings`}, with no question.`,
+      ...notes, 'To change a setting, say setup toolkit.', ''].join('\n'), answerable(specs).length, options);
     resolveClaudeTopology(args, current);
     const confirmedSpecs = setupQuestionSpecs(args, current);
     assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
