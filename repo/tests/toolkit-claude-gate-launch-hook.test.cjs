@@ -109,6 +109,10 @@ test('hostile line breaks and large briefs never split the launch check from the
   assert.ok(timed.ok, timed.message);
 });
 
+// 25 Nov 2026: a review passed at 14:07Z and the controller saw it at 14:41Z, because the app continues a
+// chat only once no session it started is working and another gate was still building.
+const WAKE = /With more than one gate session running, ask for a wake on this one once it is at work: SendMessage to its ListAgents name \(not its id\) with notify_when_idle true and no message; if that is refused, watch GitHub for its verdict comment or pull request\. The app continues this chat by itself only once no session it started is working\.$/;
+
 test('after a start it prints the effort raise and the record steps', () => {
   const post = (toolInput, text, level = 'high') => launch.postToolUse({ tool_name: TOOL, tool_input: toolInput, tool_response: [{ type: 'text', text }], effort: { level } }, { environment: {}, registry });
   const context = output => output && output.hookSpecificOutput ? output.hookSpecificOutput.additionalContext : '';
@@ -117,16 +121,20 @@ test('after a start it prints the effort raise and the record steps', () => {
   assert.match(capped, /set_session_effort with session_id local_1234abcd-0000-4000-8000-000000000001 and effort xhigh/);
   assert.match(capped, /READY/);
   assert.match(capped, /programme\.cjs" assign --issue <n> --role G2 --assignment 1265-g2-pr1480/);
+  assert.match(capped, WAKE);
   // On its pin already: only the record step.
   const onPin = context(post(start(), started.replace('G2 PR 1480', 'G1')));
   assert.doesNotMatch(onPin, /set_session_effort/);
   assert.match(onPin, /--role G1 --assignment 1265-g1-s4-20261123/);
+  assert.match(onPin, WAKE);
+  assert.equal(onPin.split('With more than one').length, 2, 'one line');
   // A gate outside a programme on its pin needs nothing.
   assert.deepEqual(post(start({ prompt: G1_BRIEF.replace('1265-g1-s4-20261123', 'none') }), started), {});
   // A proposal card: the steps wait for its start.
   const card = context(post(start({ initiation: 'own_initiative', title: 'G2 PR 1480', prompt: G2_BRIEF, effort: 'high' }), 'Proposed "G2 PR 1480" (task_id: task_b0c327da). The user sees a card.'));
   assert.match(card, /card task_b0c327da/);
   assert.match(card, /set_session_effort with session_id <its session id> and effort xhigh/);
+  assert.match(card, WAKE);
   // Not a gate, or a start that was refused: nothing.
   assert.deepEqual(post(start({ title: 'Polish', prompt: 'Fix typos.' }), started), {});
   assert.deepEqual(post(start({ model: undefined }), started), {});

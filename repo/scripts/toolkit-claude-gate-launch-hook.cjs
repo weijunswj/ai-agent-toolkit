@@ -26,7 +26,8 @@
 //                set_session_effort to the pin, then the go-ahead; and the record step
 //                (`programme.cjs assign`) for the brief's assignment. start_session caps an effort
 //                above the caller's own without an error, so a start that asks for more runs at the
-//                caller's; with the caller's effort unknown, the steps say to read it first.
+//                caller's; with the caller's effort unknown, the steps say to read it first. The note
+//                ends with one line (WAKE_LINE) on being woken for each gate, not only for the last.
 //
 // It reads only exact fields: the tool name, the title, the call's context, target, model and effort,
 // and the brief's first Gate, Route, Route override, Review class and Assignment lines, never the
@@ -45,6 +46,11 @@ const TOOL = /^mcp__ccd_session__start_session$/;
 const TITLE_GATE = /^[ \t]*(?:\*\*)?G([012])\b/i;
 const CLAUDE_MODEL = /^(?:opus|sonnet|haiku|fable)-\d/;
 const PREFIX = 'Toolkit gate launch check: ';
+
+// The failure it prevents: the app continues a controller's chat only once none of the sessions it
+// started is working, so with two gates running the first result waits for the second (25 November 2026:
+// 34 minutes). The app's idle notice takes a session by its listed name; by its id it was refused.
+const WAKE_LINE = 'With more than one gate session running, ask for a wake on this one once it is at work: SendMessage to its ListAgents name (not its id) with notify_when_idle true and no message; if that is refused, watch GitHub for its verdict comment or pull request. The app continues this chat by itself only once no session it started is working.';
 
 const gateRoute = () => require('./toolkit-gate-route.cjs');
 const programmeCommand = args => require('./toolkit-user-state.cjs').programmeCommand(args);
@@ -170,7 +176,7 @@ function postToolUse(input, { environment = process.env, registry } = {}) {
     }
     if (!steps.length) return {};
     const head = session ? `Toolkit gate launch: ${gate} session ${id} started.` : `Toolkit gate launch: ${gate} card ${card[1]} is proposed; once it starts, take its session id from the linked sessions note.`;
-    const text = `${head} ${steps.map((step, index) => `${index + 1}) ${step[0].toUpperCase()}${step.slice(1)}`).join(' ')}`;
+    const text = `${head} ${steps.map((step, index) => `${index + 1}) ${step[0].toUpperCase()}${step.slice(1)}`).join(' ')} ${WAKE_LINE}`;
     return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } };
   } catch { return {}; }
 }

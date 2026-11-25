@@ -157,10 +157,14 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'toolkit_helpers'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.attention_net !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.attention_net)
     || fixture.attention_net.some(entry => !entry || typeof entry !== 'object' || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code)) || !['new', 'acknowledged'].includes(entry.state)
       || typeof entry.age_hours !== 'number' || entry.age_hours < 0 || Object.keys(entry).some(key => !['code', 'state', 'age_hours', 'issue', 'kind'].includes(key))))) errors.push('fixture.attention_net needs an enabled repository and entries { code, state, age_hours, issue?, kind? }');
+  if (fixture.gate_records !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.gate_records)
+    || fixture.gate_records.some(entry => !entry || typeof entry !== 'object' || !Number.isInteger(entry.issue) || typeof entry.assignment !== 'string' || typeof entry.session !== 'string'
+      || Object.keys(entry).some(key => !['issue', 'assignment', 'session', 'closed'].includes(key))))) errors.push('fixture.gate_records needs an enabled repository and entries { issue, assignment, session, closed? }');
+  if (fixture.entrypoint !== undefined && (typeof fixture.entrypoint !== 'string' || !/^[a-z0-9_-]+$/.test(fixture.entrypoint))) errors.push('fixture.entrypoint is the name of a Claude Code entry point');
   if (fixture.desktop_sessions !== undefined && (!Array.isArray(fixture.desktop_sessions) || fixture.desktop_sessions.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry)))) errors.push('fixture.desktop_sessions must list session file objects');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
@@ -455,6 +459,14 @@ class Fixture {
         issue: entry.issue ?? null, kind: entry.kind ?? null, state: entry.state, changed_at: this.#now(entry.age_hours * 3600000).toISOString(), due: null }));
       cache.writeCache(repository, { complete: true, net }, { home: this.home });
     }
+    // Gate sessions programme.cjs accepted from this computer, as `gate-session` leaves them.
+    if (spec.gate_records) {
+      const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
+      const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
+      for (const entry of spec.gate_records) cache.writeGateSession(repository, entry, { home: this.home });
+    }
+    // The Claude Code entry point the session runs in, as the host names it.
+    if (spec.entrypoint) this.env.CLAUDE_CODE_ENTRYPOINT = spec.entrypoint;
     // The Claude desktop app's session files: this session's own, and each listed one it started
     // (spawnedFrom names this session unless the entry sets its own).
     if (spec.desktop_sessions) {

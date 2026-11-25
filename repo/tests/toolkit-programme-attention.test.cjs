@@ -394,7 +394,7 @@ test('E3: many failed Checkpoint lines are counted, not listed, so the session l
   const sessionsDir = tmp();
   const programmeDeps = { attentionDir: tmp(), sessionsDir, home: tmp(), mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => '2026-10-28T10:00:00.000Z' };
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
-  const evaluate = () => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
+  const evaluate = (extra = {}) => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps, ...extra });
   const rules = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
   for (let index = 0; index < 60; index += 1) {
     const hash = checkpoint.sessionHash(`exec-${index}`);
@@ -405,6 +405,10 @@ test('E3: many failed Checkpoint lines are counted, not listed, so the session l
   assert.equal(gate.SESSION_TEXT_LIMIT, 10000);
   assert.ok(Buffer.byteLength(line, 'utf8') <= gate.SESSION_TEXT_LIMIT, `${Buffer.byteLength(line, 'utf8')} bytes`);
   assert.equal(line.split(rules).length, 2, 'the whole governed rules text, once');
+  // A hook that adds a line of its own leaves less room: fewer Checkpoint lines, the rules still whole.
+  const smaller = evaluate({ limit: 9000 });
+  assert.ok(Buffer.byteLength(smaller, 'utf8') <= 9000, `${Buffer.byteLength(smaller, 'utf8')} bytes`);
+  assert.equal(smaller.split(rules).length, 2);
   assert.match(line, /^Toolkit governance: ENABLED/);
   assert.doesNotMatch(line, /Attention:/);
   const listed = (line.match(/Checkpoint: last turn's record failed/g) || []).length;

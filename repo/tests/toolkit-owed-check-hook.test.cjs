@@ -52,9 +52,17 @@ function fixture(t, { governed = true } = {}) {
       fx.rows.push({ type: 'user', sessionId: SESSION, timestamp: iso(NOW - hoursAgo * HOUR), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: result }], ...(error ? { is_error: true } : {}) }] } });
       return fx;
     },
-    launch(n, { gate = 'G1', hoursAgo = 1, error = false } = {}) {
-      return fx.call({ name: 'mcp__ccd_session__start_session', hoursAgo, error, input: { initiation: 'user_asked', title: `Gate ${n}`, prompt: `Gate: ${gate}\nRoute: owner-claude BUILDER opus-5.5/high\nTask ${n}` },
+    launch(n, { gate = 'G1', hoursAgo = 1, error = false, brief = '' } = {}) {
+      return fx.call({ name: 'mcp__ccd_session__start_session', hoursAgo, error, input: { initiation: 'user_asked', title: `Gate ${n}`, prompt: `Gate: ${gate}\nRoute: owner-claude BUILDER opus-5.5/high\n${brief}\nTask ${n}` },
         result: error ? 'refused' : `Started session "Gate ${n}" (session_id: ${CHILD(n)}, name: gate-${n}). It runs on its own.` });
+    },
+    // A gate held at its first turn until the controller's go-ahead, and that go-ahead.
+    held(n, opts = {}) { return fx.launch(n, { brief: 'FIRST TURN: reply only READY, then stop. The controller sends the go-ahead.', ...opts }); },
+    send(input, opts = {}) { return fx.call({ name: 'SendMessage', input: { message: 'Go ahead.', ...input }, result: '{"success":true,"message":"Sent"}', ...opts }); },
+    // What an accepted `programme.cjs gate-session` leaves in this computer's cache.
+    record(n, assignment, { closed = false, issue = 9 } = {}) {
+      assert.equal(cache.writeGateSession(fx.repository, { issue, assignment, session: n === null ? null : CHILD(n), closed }, { home, now: () => iso(NOW) }), true);
+      return fx;
     },
     shell(command, opts = {}) { return fx.call({ name: 'Bash', input: { command }, ...opts }); },
     archive(n, opts = {}) { return fx.call({ name: 'mcp__ccd_session_mgmt__archive_session', input: { session_id: CHILD(n) }, ...opts }); },
@@ -213,10 +221,7 @@ test('O-7 a missing or older attention cache is a note; with other entries owed 
 test('O-8 gate launches with no gate-session record, and archived gate sessions with no close, are listed', t => {
   const fx = fixture(t)
     .launch(1).launch(2).launch(3, { gate: 'none' }).launch(4, { error: true }).launch(5, { hoursAgo: 30 }).launch(6).launch(7)
-    .shell(`node programme.cjs gate-session --issue 9 --assignment g1-9-a2 --host claude-code --host-session ${CHILD(2)} --session ctl --controller`)
-    .shell(`node programme.cjs gate-session --issue 9 --assignment=g1-9-a6 --host claude-code --host-session "${CHILD(6)}" --session ctl --controller`)
-    .shell(`node programme.cjs gate-session --issue 9 --assignment g1-9-a7 --host claude-code --host-session ${CHILD(7)}`)
-    .archive(6).archive(7).shell('node programme.cjs gate-session --issue 9 --assignment g1-9-a7 --closed --session ctl --controller')
+    .record(2, 'g1-9-a2').record(6, 'g1-9-a6').record(7, 'g1-9-a7').archive(6).archive(7).record(7, 'g1-9-a7', { closed: true })
     .writeTranscript().net([]).desktop();
   const { reason } = fx.run().output;
   assert.match(reason, new RegExp(`Gate launches with no gate-session record \\(1\\):\\n- G1 "Gate 1": session_id ${CHILD(1)}\\n`));
@@ -227,8 +232,7 @@ test('O-8 gate launches with no gate-session record, and archived gate sessions 
 });
 
 test('O-9 a launch whose session the desktop app shows archived owes no launch record; a refused archive counts for nothing', t => {
-  const fx = fixture(t).launch(1).launch(2)
-    .shell(`node programme.cjs gate-session --issue 9 --assignment g1-9-a2 --host claude-code --host-session ${CHILD(2)} --session ctl --controller`)
+  const fx = fixture(t).launch(1).launch(2).record(2, 'g1-9-a2')
     .archive(2, { error: true, result: 'still working' }).writeTranscript().net([])
     .desktop({}, [{ sessionId: CHILD(1), isArchived: true, prs: [] }]);
   assert.deepEqual(fx.run(), { outcome: 'NOTHING_OWED', output: null });
@@ -499,6 +503,163 @@ test('O-21 a gate is what the route check says: a Gate line with a Route line, i
     const fx = fixture(t).brief('Help me plan.').call({ name: 'mcp__ccd_session__start_session', input: { initiation: 'user_asked', title: 'Gate 1', ...input }, result }).writeTranscript().net([]);
     assert.equal(fx.run().outcome, expected, JSON.stringify(input));
   }
+});
+
+test('O-22 a record counts by what programme.cjs accepted on this computer, never by the words of a command', t => {
+  // Made through a script file or shell variables: the transcript never spells the command out.
+  const made = fixture(t).launch(1).launch(2).launch(3).record(1, 'g1-9-a1').record(2, 'g1-9-a2')
+    .shell('node .tmp/record-gates.cjs').shell('P=x; W="--host claude-code"; node $P gate-session $A $W')
+    .archive(2).record(2, 'g1-9-a2', { closed: true }).record(3, 'g2-9-a3').writeTranscript().net([]).desktop();
+  assert.deepEqual(made.run(), { outcome: 'NOTHING_OWED', output: null });
+  // Refused: the command is spelled out and its call did not fail (a pipe hid the exit code), yet nothing was accepted.
+  const refused = fixture(t).launch(1).launch(2).record(2, 'g1-9-a2').archive(2)
+    .shell(`node programme.cjs gate-session --issue 9 --assignment g1-9-a1 --host claude-code --host-session ${CHILD(1)} --session ctl --controller | tail -3`, { result: 'STALE_ASSIGNMENT: #9 has no gate session entry' })
+    .shell('node programme.cjs gate-session --issue 9 --assignment g1-9-a2 --closed --session ctl --controller | tail -3', { result: 'ROLE_REFUSED: not the holder' })
+    .writeTranscript().net([]).desktop();
+  const { reason } = refused.run().output;
+  assert.match(reason, new RegExp(`Gate launches with no gate-session record \\(1\\):\\n- G1 "Gate 1": session_id ${CHILD(1)}\\n`));
+  assert.match(reason, /Archived gate sessions with no close record \(1\):\n- assignment g1-9-a2 \(its session was archived\)/);
+  // Another repository's record, and one for another session, do not count.
+  const other = fixture(t).launch(1).record(2, 'g1-9-a2').writeTranscript().net([]).desktop();
+  cache.writeGateSession('toolkit-test-fixture/other', { issue: 9, assignment: 'g1-9-a1', session: CHILD(1) }, { home: other.home });
+  assert.match(other.run().output.reason, /Gate launches with no gate-session record \(1\)/);
+});
+
+test('O-23 a replaced session owes nothing more; its assignment\'s close is owed only for the current session', t => {
+  // Session 1 was recorded, then session 2 took over the same assignment (gate-session --replace).
+  const fx = fixture(t).launch(1).launch(2).record(1, 'g1-9-a1').record(2, 'g1-9-a1').archive(1).writeTranscript().net([]).desktop();
+  assert.deepEqual(fx.run(), { outcome: 'NOTHING_OWED', output: null });
+  const both = fixture(t).launch(1).launch(2).record(1, 'g1-9-a1').record(2, 'g1-9-a1').archive(1).archive(2).writeTranscript().net([]).desktop();
+  assert.match(both.run().output.reason, /Archived gate sessions with no close record \(1\):\n- assignment g1-9-a1 /);
+});
+
+test('O-24 gate records that cannot be read are one note, and never an owed entry', t => {
+  const fx = fixture(t).launch(1).writeTranscript().net([]).desktop();
+  const folder = cache.cacheFile(fx.repository, { home: fx.home }).replace(/\.json$/, '.gates');
+  fs.writeFileSync(folder, 'not a folder');
+  const first = fx.run();
+  assert.equal(first.outcome, 'NOTE');
+  assert.match(first.output.systemMessage, /the gate sessions recorded on this computer could not be read, so gate launches and closes were not checked/);
+  assert.deepEqual(fx.run(), { outcome: 'NOTHING_OWED', output: null });
+  // One broken file among good ones is left out alone.
+  const broken = fixture(t).launch(1).launch(2).record(1, 'g1-9-a1').record(2, 'g1-9-a2').writeTranscript().net([]).desktop();
+  const gates = cache.cacheFile(broken.repository, { home: broken.home }).replace(/\.json$/, '.gates');
+  for (const name of fs.readdirSync(gates)) if (fs.readFileSync(path.join(gates, name), 'utf8').includes('g1-9-a2')) fs.writeFileSync(path.join(gates, name), '{broken');
+  assert.match(broken.run().output.reason, new RegExp(`no gate-session record \\(1\\):\\n- G1 "Gate 2": session_id ${CHILD(2)}\\n`));
+});
+
+test('O-25 a session held before its go-ahead owes no record; the go-ahead makes it owed', t => {
+  const owed = n => new RegExp(`Gate launches with no gate-session record \\(1\\):\\n- G1 "Gate ${n}": session_id ${CHILD(n)}\\n`);
+  // Held: nothing owed, whatever else runs, and a pure idle subscription or a message to another session is not a go-ahead.
+  const held = fixture(t).held(1).send({ to: CHILD(1), message: '', notify_when_idle: true }).send({ to: CHILD(2) })
+    .send({ to: CHILD(1) }, { error: true, result: 'refused' }).send({ to: CHILD(1) }, { result: '{"success":false,"message":"not listed"}' }).writeTranscript().net([]);
+  assert.deepEqual(held.run().output?.decision, undefined, JSON.stringify(held.run()));
+  // The same session once its go-ahead was sent, by id, by name, by title with its reference, or through the app's own tool.
+  for (const send of [fx => fx.send({ to: CHILD(1) }), fx => fx.send({ to: 'gate-1' }), fx => fx.send({ to: 'Gate 1 [aee3f8]' }),
+    fx => fx.call({ name: 'mcp__ccd_session_mgmt__send_message', input: { session_id: CHILD(1), message: 'Go ahead.' } })]) {
+    assert.match(send(fixture(t).held(1)).writeTranscript().net([]).run().output.reason, owed(1));
+  }
+  // Recorded after the go-ahead: nothing owed.
+  assert.equal(fixture(t).held(1).send({ to: CHILD(1) }).record(1, 'g1-9-a1').writeTranscript().net([]).run().output?.decision, undefined);
+  // The day to record in starts at the go-ahead; a session that was not held starts at its launch.
+  assert.match(fixture(t).held(1, { hoursAgo: 40 }).send({ to: CHILD(1) }, { hoursAgo: 2 }).writeTranscript().net([]).run().output.reason, owed(1));
+  assert.equal(fixture(t).controller().launch(1, { hoursAgo: 40 }).send({ to: CHILD(1) }, { hoursAgo: 2 }).writeTranscript().net([]).run().output?.decision, undefined);
+  // Only a brief line that starts with "First turn:" and names READY holds a session; a later mention does not.
+  for (const brief of ['', 'When CI is green mark the PR READY.', 'Report READY after the first turn: see the plan.', 'First turn: read the plan and start.', 'First turn: reply ready when you have read it.']) {
+    assert.match(fixture(t).launch(1, { brief }).writeTranscript().net([]).run().output.reason, owed(1), brief);
+  }
+  for (const brief of ['First turn: reply only READY.', '- **First turn:** reply READY, then stop.', '  first turn: read AGENTS.md, then reply only `READY`.\r']) {
+    assert.equal(fixture(t).launch(1, { brief }).writeTranscript().net([]).run().output?.decision, undefined, brief);
+  }
+});
+
+test('O-26 the desktop app\'s own file shows a held session that went on: it owes its record', t => {
+  const child = extra => ({ sessionId: CHILD(1), isArchived: false, prs: [], ...extra });
+  const run = extra => fixture(t).held(1).writeTranscript().net([]).desktop({}, [child(extra)]).run();
+  // Its one turn ended with READY, and nothing came since.
+  assert.deepEqual(run({ completedTurns: 1, lastTurnEdgeAt: NOW - HOUR, latestUserFrameAt: NOW - 2 * HOUR }), { outcome: 'NOTHING_OWED', output: null });
+  assert.deepEqual(run({ latestUserFrameAt: NOW - 2 * HOUR }), { outcome: 'NOTHING_OWED', output: null }, 'still in its first turn');
+  // The owner or another chat sent it on: a message after its first turn, or a second turn.
+  assert.match(run({ completedTurns: 1, lastTurnEdgeAt: NOW - 2 * HOUR, latestUserFrameAt: NOW - HOUR }).output.reason, /Gate launches with no gate-session record \(1\)/);
+  assert.match(run({ completedTurns: 2, lastTurnEdgeAt: NOW - HOUR, latestUserFrameAt: NOW - 2 * HOUR }).output.reason, /Gate launches with no gate-session record \(1\)/);
+});
+
+test('O-27 the stop text asks for what is owed only, never the last message or its question again', t => {
+  const { reason } = fixture(t).launch(1).writeTranscript().net([]).desktop().run().output;
+  assert.match(reason, /^Toolkit owed check: this turn leaves work owed\. Do each step now, or say in one line why it waits\. Add only what you did: do not repeat your last message or ask its question again\.\n/);
+});
+
+test('O-28 no row carried over counts once any chat it names went on, however the copy was made', t => {
+  // A copy of a controller chat that was itself rewound: its older rows name the first, stopped id and
+  // its newer ones the chat that goes on.
+  const GRAND = '00000000-0000-4000-8000-0000000000b3';
+  const carried = id => row => ({ ...row, ...(row.type === 'assistant' ? { requestSessionId: id } : {}) });
+  const chain = fixture(t).launch(1, { hoursAgo: 5 }).copied(carried(GRAND));
+  chain.rows.push(...fixture(t).launch(2, { hoursAgo: 4 }).rows.map(carried(PARENT)).map(row => JSON.parse(JSON.stringify(row).replaceAll('toolu_', 'toolu_b'))));
+  asks(chain).writeTranscript().net(DUE);
+  fs.writeFileSync(path.join(chain.dir, `${GRAND}.jsonl`), `${JSON.stringify({ type: 'assistant', sessionId: GRAND, timestamp: iso(NOW - 20 * HOUR), message: { role: 'assistant', content: [] } })}\n`);
+  parentFile(chain, 0.1);
+  assert.deepEqual(chain.run(), { outcome: 'NOT_CONTROLLER', output: null });
+  // The control: neither chat went on (a controller rewound twice), so its rows still count.
+  parentFile(chain, 3.9);
+  assert.equal(chain.run().outcome, 'BLOCK');
+});
+
+test('O-29 what shows that the old chat went on: its own talk after this one began, read only from a session file beside it', t => {
+  const carriedOn = rows => {
+    const fx = asks(fixture(t).launch(1, { hoursAgo: 3 }).copied(continued)).writeTranscript().net(DUE);
+    fs.writeFileSync(path.join(fx.dir, `${PARENT}.jsonl`), rows.map(row => JSON.stringify({ sessionId: PARENT, timestamp: iso(NOW - 0.1 * HOUR), ...row })).join('\n') + '\n');
+    return fx.run().outcome;
+  };
+  const talk = type => ({ type, message: { role: type, content: [{ type: 'text', text: 'x' }] } });
+  assert.equal(carriedOn([talk('user')]), 'NOT_CONTROLLER', 'a user row');
+  assert.equal(carriedOn([talk('assistant')]), 'NOT_CONTROLLER', 'an assistant row');
+  assert.equal(carriedOn([{ type: 'system', subtype: 'turn_duration' }]), 'BLOCK', 'the host\'s own row is not talk');
+  assert.equal(carriedOn([{ ...talk('assistant'), isSidechain: true }]), 'BLOCK', 'a subagent\'s row is not the chat');
+  // A path in place of an id is never read, even where a file that went on waits at its end.
+  const odd = asks(fixture(t).launch(1, { hoursAgo: 3 }).copied(row => ({ ...continued(row), ...(row.type === 'assistant' ? { requestSessionId: '../planted/chat' } : {}) })));
+  odd.transcript = path.join(odd.dir, 'chats', `${SESSION}.jsonl`);
+  fs.mkdirSync(path.join(odd.dir, 'chats'));
+  fs.mkdirSync(path.join(odd.dir, 'planted'));
+  fs.writeFileSync(odd.transcript, odd.rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  fs.writeFileSync(path.join(odd.dir, 'planted', 'chat.jsonl'), `${JSON.stringify({ sessionId: PARENT, timestamp: iso(NOW - 0.1 * HOUR), ...talk('assistant') })}\n`);
+  odd.net(DUE);
+  assert.equal(odd.run({ transcript_path: odd.transcript }).outcome, 'BLOCK');
+});
+
+test('O-30 a launch reads its brief as the started session does, and only node runs programme.cjs', t => {
+  const started = `Started session "Gate 1" (session_id: ${CHILD(1)}, name: gate-1). It runs on its own.`;
+  const launch = input => fixture(t).brief('Help me plan.').call({ name: 'mcp__ccd_session__start_session', input: { initiation: 'user_asked', title: 'Gate 1', prompt: 'Build.', background: 'Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high', ...input }, result: started }).writeTranscript().net([]).run().outcome;
+  assert.equal(launch({}), 'BLOCK');
+  assert.equal(launch({ context: 'fork' }), 'NOT_CONTROLLER', 'a fork takes no background');
+  for (const program of ['python', 'deno run', 'cat']) {
+    const fx = fixture(t).brief('What does it do?').shell(`${program} scripts/programme.cjs ${ACK}`).writeTranscript().net(DUE);
+    assert.deepEqual(fx.run(), { outcome: 'NOT_CONTROLLER', output: null }, program);
+  }
+});
+
+test('O-31 the gate session cache keeps hashes only, the newest session last, and drops month-old records', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'owed-gates-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const at = hours => ({ home: dir, now: () => iso(NOW + hours * HOUR) });
+  assert.deepEqual(cache.readGateSessions('acme/app', { home: dir }), []);
+  for (const bad of [{ issue: 0, assignment: 'a' }, { issue: 9, assignment: 'has space' }, { issue: 9, assignment: '../up' }]) assert.equal(cache.writeGateSession('acme/app', bad, at(0)), false, JSON.stringify(bad));
+  assert.equal(cache.writeGateSession('not a repository', { issue: 9, assignment: 'a1' }, at(0)), false);
+  cache.writeGateSession('acme/app', { issue: 9, assignment: 'a1', session: CHILD(1) }, at(0));
+  cache.writeGateSession('acme/app', { issue: 8, assignment: 'a1', session: CHILD(3) }, at(0));
+  cache.writeGateSession('acme/app', { issue: 9, assignment: 'a1', session: CHILD(2) }, at(1));
+  cache.writeGateSession('Acme/App', { issue: 9, assignment: 'a1', closed: true }, at(2));
+  const mine = cache.readGateSessions('acme/app', { home: dir }).find(record => record.issue === 9);
+  assert.deepEqual(mine, { issue: 9, assignment: 'a1', sessions: [cache.gateSessionHash(CHILD(1)), cache.gateSessionHash(CHILD(2))], closed: true, at: iso(NOW + 2 * HOUR) });
+  assert.equal(cache.readGateSessions('acme/app', { home: dir }).length, 2, 'one record per task and assignment');
+  const folder = cache.cacheFile('acme/app', { home: dir }).replace(/\.json$/, '.gates');
+  for (const name of fs.readdirSync(folder)) assert.equal(fs.readFileSync(path.join(folder, name), 'utf8').includes('local_'), false, name);
+  for (let n = 10; n < 25; n += 1) cache.writeGateSession('acme/app', { issue: 9, assignment: 'a1', session: CHILD(n) }, at(3));
+  const kept = cache.readGateSessions('acme/app', { home: dir }).find(record => record.issue === 9).sessions;
+  assert.equal(kept.length, 10);
+  assert.equal(kept.at(-1), cache.gateSessionHash(CHILD(24)));
+  cache.writeGateSession('acme/app', { issue: 9, assignment: 'a2', session: CHILD(4) }, { home: dir, now: () => iso(NOW + cache.GATE_KEEP_MS + HOUR / 2) });
+  assert.deepEqual(cache.readGateSessions('acme/app', { home: dir }).map(record => `${record.issue} ${record.assignment}`).sort(), ['9 a1', '9 a2'], 'the month-old record of #8 is gone');
 });
 
 // Whether the route check itself reads a first prompt as a gate.

@@ -2819,6 +2819,1181 @@
       "status": "pass"
     },
     {
+      "id": "GOV.owed-check-record-by-script-silent",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a record counts by what programme.cjs accepted, never by the words of a command",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_2",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node .tmp/record-gates.cjs"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_2",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": [
+          {
+            "assignment": "g1-9-a1",
+            "issue": 9,
+            "session": "local_00000000-0000-4000-8000-000000000011"
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-record-by-variable-silent",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a record counts by what programme.cjs accepted, never by the words of a command",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_2",
+                  "name": "Bash",
+                  "input": {
+                    "command": "P=programme.cjs; W=\"--host claude-code\"; node $P gate-session $A $W"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_2",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": [
+          {
+            "assignment": "g1-9-a1",
+            "issue": 9,
+            "session": "local_00000000-0000-4000-8000-000000000011"
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-refused-record-blocks",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a record counts by what programme.cjs accepted, never by the words of a command",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_2",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs gate-session --issue 9 --assignment g1-9-a1 --host claude-code --host-session local_00000000-0000-4000-8000-000000000011 --session fixture --controller | tail -3"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_2",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "STALE_ASSIGNMENT: #9 has no gate session entry"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": []
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "note": "The pipe hid the refusal's exit code, so the words of the command look like a record.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-no-record-blocks",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a record counts by what programme.cjs accepted, never by the words of a command",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": []
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-close-by-script-silent",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a record counts by what programme.cjs accepted, never by the words of a command",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_2",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs gate-session --issue 9 --assignment g1-9-a1 --host claude-code --host-session local_00000000-0000-4000-8000-000000000011 --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_2",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_9",
+                  "name": "mcp__ccd_session_mgmt__archive_session",
+                  "input": {
+                    "session_id": "local_00000000-0000-4000-8000-000000000011"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_9",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Archived."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_3",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node .tmp/close-gates.cjs"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_3",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": [
+          {
+            "assignment": "g1-9-a1",
+            "issue": 9,
+            "session": "local_00000000-0000-4000-8000-000000000011",
+            "closed": true
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-refused-close-blocks",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a record counts by what programme.cjs accepted, never by the words of a command",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_2",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs gate-session --issue 9 --assignment g1-9-a1 --host claude-code --host-session local_00000000-0000-4000-8000-000000000011 --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_2",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_9",
+                  "name": "mcp__ccd_session_mgmt__archive_session",
+                  "input": {
+                    "session_id": "local_00000000-0000-4000-8000-000000000011"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_9",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Archived."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_3",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs gate-session --issue 9 --assignment g1-9-a1 --closed --session fixture --controller | tail -3"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_3",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "STALE_WRITER: not the holder"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": [
+          {
+            "assignment": "g1-9-a1",
+            "issue": 9,
+            "session": "local_00000000-0000-4000-8000-000000000011"
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-held-session-silent",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a session held before its go-ahead owes no record yet",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nFIRST TURN: reply only READY, then stop. The controller sends the go-ahead.\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": []
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-held-go-ahead-blocks",
+      "source": "owner decision on the turn-end owed check (25 Nov 2026): a session held before its go-ahead owes no record yet",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_1",
+                  "name": "mcp__ccd_session__start_session",
+                  "input": {
+                    "initiation": "user_asked",
+                    "title": "G1 fixture",
+                    "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: g1-9-a1\nFIRST TURN: reply only READY, then stop. The controller sends the go-ahead.\nBuild it."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_1",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Started session \"G1 fixture\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1-fixture). It runs on its own."
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_gate_4",
+                  "name": "SendMessage",
+                  "input": {
+                    "to": "local_00000000-0000-4000-8000-000000000011",
+                    "message": "Go ahead."
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "user",
+            "timestamp": "{now}",
+            "sessionId": "hook-pack",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_gate_4",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "{\"success\":true,\"message\":\"Sent\"}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [],
+        "gate_records": []
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.desktop-governance-on",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.desktop-governance-off",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "resume"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "disabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.desktop-undecided",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "compact"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.desktop-no-repository",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "clear"
+      },
+      "kind": "state",
+      "fixture": {
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.terminal-silent",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "cli"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_excludes": [
+          "Asking the owner"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.codex-never",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_excludes": [
+          "Asking the owner"
+        ]
+      },
+      "status": "pass",
+      "note": "Codex never reads the Claude entry point variable, even when it is set."
+    },
+    {
+      "id": "ASK.card-never-refused",
+      "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "AskUserQuestion",
+        "tool_input": {
+          "questions": [
+            {
+              "question": "Which colour?",
+              "header": "Colour",
+              "multiSelect": false,
+              "options": [
+                {
+                  "label": "Red",
+                  "description": "A long description that carries the whole context of the choice inside the card."
+                },
+                {
+                  "label": "Blue",
+                  "description": "b"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GATE-LAUNCH.wake-line",
+      "source": "owner decision on gate launches (25 Nov 2026): a finished gate was seen 34 minutes late because another gate was still running",
+      "hosts": [
+        "claude"
+      ],
+      "event": "PostToolUse",
+      "payload": {
+        "tool_name": "mcp__ccd_session__start_session",
+        "effort": {
+          "level": "high"
+        },
+        "tool_input": {
+          "initiation": "user_asked",
+          "title": "G1 #1265 S4: gate launch check",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "prompt": "Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nAssignment: 1265-g1-s4-20261123\n\nBuild slice S4.",
+          "background": "Background for the gate: the plan is in the evidence store; branch from origin/main and keep the diff narrow."
+        },
+        "tool_response": [
+          {
+            "type": "text",
+            "text": "Started session \"G1\" (session_id: local_00000000-0000-4000-8000-000000000011, name: g1). It runs on its own."
+          }
+        ]
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "With more than one gate session running, ask for a wake on this one once it is at work"
+        ]
+      },
+      "status": "pass"
+    },
+    {
       "id": "GOV.owed-check-renamed-field-fails-open",
       "source": "turn-end owed check: a controller turn that leaves findings due, finished sessions or gate records owed is stopped once with the steps; everything else passes",
       "hosts": [

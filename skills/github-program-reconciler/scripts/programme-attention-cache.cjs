@@ -1,10 +1,13 @@
 'use strict';
 
-// This computer's copy of a repository's open net findings, so the Claude Code turn-end owed check
-// (repo/scripts/toolkit-owed-check-hook.cjs) can list the findings due without any git, gh or network
-// call. `programme.cjs refresh` and `programme.cjs attention` write it after reading the parent
-// document. It lives in Toolkit's own user-state, never the repository, and holds no free text: each
-// open net finding's ID, code, task, kind, state and times.
+// This computer's copy of what the Claude Code turn-end owed check (repo/scripts/toolkit-owed-check-hook.cjs)
+// lists, so it needs no git, gh or network call. It lives in Toolkit's own user-state, never the
+// repository, and holds no free text:
+// - a repository's open net findings: each one's ID, code, task, kind, state and times. `programme.cjs
+//   refresh` and `programme.cjs attention` write it after reading the parent document.
+// - the gate sessions `programme.cjs gate-session` recorded from this computer, one file per
+//   assignment: the host sessions by hash and whether the close is recorded. Only an accepted result
+//   is written, so a refused command leaves nothing.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -104,4 +107,64 @@ function claimBackgroundStart(repository, deps = {}) {
   return true;
 }
 
-module.exports = Object.freeze({ CACHE_SCHEMA, NET_LIMIT, STALE_MS, START_GAP_MS, netOf, cacheDir, cacheFile, readCache, writeCache, claimBackgroundStart, ageText });
+// ---- gate sessions ----
+
+const GATE_SCHEMA = 'toolkit.programme-gate-session.v1';
+const ASSIGNMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
+// The check looks back a day for launches and a week for closes; older records go with the next write.
+const GATE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+// Earlier sessions of one assignment (a replaced one) kept beside the current one.
+const GATE_SESSIONS_KEPT = 10;
+
+const sha = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 32);
+const gateSessionHash = session => sha(String(session));
+const gateFiles = folder => fs.readdirSync(folder).filter(name => /^[0-9a-f]{32}\.json$/.test(name));
+const gateFolder = (repository, deps) => { const file = cacheFile(repository, deps); return file ? file.replace(/\.json$/, '.gates') : null; };
+
+// A whole, well-formed record, or null.
+function gateRecordOf(text) {
+  let value;
+  try { value = JSON.parse(text); } catch { return null; }
+  if (!value || value.schema !== GATE_SCHEMA || !Number.isInteger(value.issue) || value.issue < 1 || !ASSIGNMENT.test(String(value.assignment)) || typeof value.closed !== 'boolean' || !ISO(value.at)
+    || !Array.isArray(value.sessions) || value.sessions.length > GATE_SESSIONS_KEPT || value.sessions.some(hash => !/^[0-9a-f]{32}$/.test(String(hash)))) return null;
+  return { issue: value.issue, assignment: value.assignment, sessions: value.sessions, closed: value.closed, at: value.at };
+}
+
+// Keeps one accepted gate-session result: the assignment's host session (null when the host gave none)
+// and whether its close is recorded. Two commands at once write different files unless they name one
+// assignment. Never throws: a record that cannot be kept only means the check may list it.
+function writeGateSession(repository, { issue, assignment, session = null, closed = false }, deps = {}) {
+  const folder = gateFolder(repository, deps);
+  if (!folder || !Number.isInteger(issue) || issue < 1 || !ASSIGNMENT.test(String(assignment))) return false;
+  const file = path.join(folder, `${sha(`${issue}:${assignment}`)}.json`);
+  const at = (deps.now || (() => new Date().toISOString()))();
+  try {
+    let before = null;
+    try { before = gateRecordOf(fs.readFileSync(file, 'utf8')); } catch { /* the first record */ }
+    const own = session ? gateSessionHash(session) : null;
+    const sessions = [...(before ? before.sessions : []).filter(hash => hash !== own), ...(own ? [own] : [])].slice(-GATE_SESSIONS_KEPT);
+    writeAtomically(file, { schema: GATE_SCHEMA, issue, assignment, sessions, closed: closed === true, at });
+    for (const name of gateFiles(folder)) {
+      const other = path.join(folder, name);
+      try { if (Date.parse(gateRecordOf(fs.readFileSync(other, 'utf8')).at) < Date.parse(at) - GATE_KEEP_MS) fs.rmSync(other); } catch { /* not a whole record, or the next write tries again */ }
+    }
+    return true;
+  } catch { return false; }
+}
+
+// The gate sessions recorded from this computer ({ issue, assignment, sessions, closed, at }; the last hash
+// in `sessions` is the current session), [] when none was, or null when the folder cannot be read. A
+// file that is not a whole record is left out.
+function readGateSessions(repository, deps = {}) {
+  const folder = gateFolder(repository, deps);
+  if (!folder) return null;
+  let names;
+  try { names = gateFiles(folder); } catch (error) { return error.code === 'ENOENT' ? [] : null; }
+  const records = [];
+  for (const name of names) {
+    try { const record = gateRecordOf(fs.readFileSync(path.join(folder, name), 'utf8')); if (record) records.push(record); } catch { /* left out */ }
+  }
+  return records;
+}
+
+module.exports = Object.freeze({ CACHE_SCHEMA, NET_LIMIT, STALE_MS, START_GAP_MS, GATE_KEEP_MS, netOf, cacheDir, cacheFile, readCache, writeCache, claimBackgroundStart, ageText, gateSessionHash, readGateSessions, writeGateSession });

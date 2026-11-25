@@ -15,6 +15,8 @@ const state = require('../../skills/github-program-reconciler/scripts/programme-
 const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
 const holderOrder = require('../../skills/github-program-reconciler/scripts/programme-holder-order.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
+const attentionCache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+const owedCheck = require('../scripts/toolkit-owed-check-hook.cjs');
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 
 const HOUR = 3600 * 1000;
@@ -56,7 +58,7 @@ function fixture(tasks, prs = []) {
   fx.parent = () => store.read('parent', 421).doc;
   fx.child = issue => store.read('child', issue).doc;
   fx.deps = () => ({ transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: tmp(), toolkitVersion: '3.9.0', lockFile: path.join(tmp(), 'pass.lock'),
-    attentionDir: tmp(), environment: {}, now: () => new Date(github.clock).toISOString(), stdout: { write: text => { fx.output += text; } }, stderr: { write: () => {} } });
+    attentionDir: fx.attentionDir || tmp(), environment: {}, now: () => new Date(github.clock).toISOString(), stdout: { write: text => { fx.output += text; } }, stderr: { write: () => {} } });
   fx.run = (argv, { json = true, writer = true, session = controller.session, environment = null } = {}) => {
     fx.output = '';
     const deps = fx.deps();
@@ -269,6 +271,58 @@ test('C-2: G8, a lane that does not hold the child is refused; G11 a holder orde
   // G8: the same writer check as assign (requireGateWriter): a lane that does not hold the child is refused.
   const lane = fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', '--closed', '--prefix', 'INT-TK999-'], { session: 'lane-1' });
   assert.ok(lane.error, 'a lane that does not hold the child is refused');
+});
+
+// The turn-end owed check reads what gate-session accepted from this computer's cache, so the cache
+// holds every accepted result, however the command was run, and nothing a refusal left behind.
+test('C-2: an accepted gate-session is kept in this computer\'s cache; a refused or rehearsed one is not', () => {
+  const fx = fixture([{ issue: 30 }]);
+  fx.attentionDir = tmp();
+  const kept = () => attentionCache.readGateSessions('acme/app', { attentionDir: fx.attentionDir }).map(({ issue, assignment, sessions, closed }) => ({ issue, assignment, sessions, closed }));
+  const hash = n => attentionCache.gateSessionHash(localId(n));
+  const record = (...extra) => fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', ...extra]);
+  assert.equal(fx.run(['assign', '--issue', '30', '--role', 'G1', '--assignment', 'g1']).error, null);
+  assert.deepEqual(kept(), [], 'assign records no session');
+  // Refused: no entry, not the writer, the controller's own session, a bad ID.
+  assert.ok(fx.run(['gate-session', '--issue', '30', '--assignment', 'nope', '--host', 'claude-code', '--host-session', localId(1)]).error);
+  assert.ok(fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', '--host', 'claude-code', '--host-session', localId(1)], { session: 'someone-else' }).error);
+  assert.ok(fx.run(['gate-session', '--issue', '30', '--assignment', 'g1', '--host', 'claude-code', '--host-session', localId(9)], { environment: { CLAUDE_CODE_HOST_SESSION_ID: localId(9) } }).error);
+  assert.ok(record('--host', 'claude-code', '--host-session', 'not-an-id').error);
+  assert.deepEqual(kept(), []);
+  assert.equal(record('--host', 'claude-code', '--host-session', localId(1)).error, null);
+  assert.deepEqual(kept(), [{ issue: 30, assignment: 'g1', sessions: [hash(1)], closed: false }]);
+  // A refused change leaves the record as it was; the accepted replacement becomes the current session.
+  assert.ok(record('--host', 'claude-code', '--host-session', localId(2)).error);
+  assert.deepEqual(kept()[0].sessions, [hash(1)]);
+  assert.equal(record('--host', 'claude-code', '--host-session', localId(2), '--replace', '--reason', 'relaunched').error, null);
+  assert.deepEqual(kept()[0].sessions, [hash(1), hash(2)]);
+  // A no-op is accepted too: on a computer whose cache lost the record, the same command restores it.
+  fx.attentionDir = tmp();
+  assert.equal(record('--host', 'claude-code', '--host-session', localId(2)).result.outcome, 'NOOP');
+  assert.deepEqual(kept(), [{ issue: 30, assignment: 'g1', sessions: [hash(2)], closed: false }]);
+  // The close keeps the session, so an archived session is matched to its closed assignment.
+  fx.attentionDir = tmp();
+  assert.equal(record('--closed').error, null);
+  assert.deepEqual(kept(), [{ issue: 30, assignment: 'g1', sessions: [hash(2)], closed: true }]);
+  // A holder order: its dry run keeps nothing, its run keeps the record.
+  assert.equal(fx.run(['assign', '--issue', '30', '--role', 'G2', '--assignment', 'g2', '--supersede', '--reason', 'next']).error, null);
+  const file = path.join(tmp(), 'order.json');
+  const order = { schema: holderOrder.SCHEMA, order_id: 'order-2', parent_issue: 421, holder_session: controller.session, record: 'INT-TK421-1', epoch: fx.parent().fence.epoch,
+    expires_at: new Date(fx.github.clock + HOUR).toISOString(), ops: [{ command: 'gate-session', issue: 30, assignment: 'g2', host: 'claude-code', 'host-session': localId(3) }] };
+  fs.writeFileSync(file, JSON.stringify(order));
+  const run = (...extra) => { fx.output = ''; cli.main(['run-order', '--order', file, '--session', controller.session, '--json', ...extra], { ...fx.deps(), orderClock: () => fx.github.clock }); };
+  run('--dry-run');
+  assert.equal(kept().length, 1);
+  // End to end: the owed check lists the launch until that run records it, and the archive until its close is.
+  const owed = transcript => owedCheck.owedList({ repository: 'acme/app', transcript, cache: { net: [] }, cacheModule: attentionCache, env: {}, deps: { attentionDir: fx.attentionDir } }).items.map(item => item.key);
+  const launched = { launches: [{ session: localId(3), gate: 'G2', title: 'Review', held: false }], archived: [] };
+  assert.deepEqual(owed(launched), [`record:${localId(3)}`]);
+  run();
+  assert.deepEqual(kept().find(entry => entry.assignment === 'g2'), { issue: 30, assignment: 'g2', sessions: [hash(3)], closed: false });
+  assert.deepEqual(owed(launched), []);
+  assert.deepEqual(owed({ launches: [], archived: [localId(3)] }), ['closed:g2']);
+  assert.equal(fx.run(['gate-session', '--issue', '30', '--assignment', 'g2', '--closed']).error, null);
+  assert.deepEqual(owed({ launches: [], archived: [localId(3)] }), []);
 });
 
 test('C-10: CLOSE_DUE acks up to 72 h, falls due again after, and is never disposed', () => {

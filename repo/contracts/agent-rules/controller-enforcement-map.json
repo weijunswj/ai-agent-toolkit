@@ -463,7 +463,7 @@
       "file": "repo/controller/principles.md",
       "rule": "**Close what you spawn:**",
       "rule_sha": "a38738045dd0",
-      "covers": "Gate assignments: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. In Claude Code the turn-end owed check stops the controller's turn once for each new CLOSE_DUE, each finished side session the desktop app shows unarchived, and each gate launch or archive with no gate-session record. Sessions on other hosts, and whether the final message was read in full and acted on, stay instruction text.",
+      "covers": "Gate assignments: each assign or reopen opens a gate session entry, and the sweep raises CLOSE_DUE once the assignment is finished with nothing owed until its close is recorded. In Claude Code the turn-end owed check stops the controller's turn once for each new CLOSE_DUE, each finished side session the desktop app shows unarchived, and each gate launch or archive with no accepted gate-session record (a gate held at its first turn owes one after its go-ahead). Sessions on other hosts, and whether the final message was read in full and acted on, stay instruction text.",
       "enforced_by": [
         {
           "kind": "script",
@@ -494,7 +494,7 @@
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Launch every gate with model and effort pinned explicitly",
       "rule_sha": "106056efbda9",
-      "covers": "On Claude Code, the gate launch hook refuses a start_session gate brief without valid Gate, Route and Assignment lines or with an unpinned model or effort, and after a capped start prints the effort raise and record steps; the started session's route check refuses an off-pin gate. Projects threads and starts by a person stay instruction-only.",
+      "covers": "On Claude Code, the gate launch hook refuses a start_session gate brief without valid Gate, Route and Assignment lines or with an unpinned model or effort, and after a start prints the effort raise and record steps and how to be woken for each gate; the started session's route check refuses an off-pin gate. Projects threads and starts by a person stay instruction-only.",
       "enforced_by": [
         {
           "kind": "hook",
