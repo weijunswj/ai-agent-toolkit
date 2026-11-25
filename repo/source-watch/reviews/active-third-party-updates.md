@@ -58,7 +58,7 @@ Tracked files:
 - Source ref: `main`
 - Adopted commit: `0e8d408204fdc66b8189960dd28cc20d71db188e`
 - Reviewed-through commit: `e59ff376a41f7ca47b7541ad5c116495cbade3ee`
-- Latest observed commit: `8db36338810d0942567b97ce439affd1619fcf31`
+- Latest observed commit: `bde080f4c6d546fea1313bff76960c99045b2ae7`
 - Why a new review is required: The latest observed upstream commit differs from the human-reviewed-through commit.
 - Prior disposition: `NO_ACTION`
 - Tracker at last review (history; find the current owner at triage): `#473`
