@@ -9,75 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
-const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
-const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
-
-const REPO = 'acme/app';
-const STORE_PATH = `state/${REPO}/`;
-const PARENT_FILE = `${STORE_PATH}parent-421.json`;
-const PREFIX = 'INT-TK421-';
-const MINUTE = 60 * 1000;
-const controller = { session: 'desk-controller-1', prefix: PREFIX };
-const NEW = 'desk-controller-2';
-const WORDS = ['--surface', 'test harness (host evidence read)', '--next', 'read the repository map'];
-const PAGE = /^<!-- programme-page-archive/;
-const OUTCOMES = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
-
-function fixture({ held = true, missing = false, holder = controller } = {}) {
-  const github = new FakeGitHub({ repository: REPO, store: 'acme/state-store' });
-  github.repos.get(REPO).default_branch = 'main';
-  const binding = { schema: state.SCHEMA.binding, repository: REPO, parent_issue: 421, record_prefix: PREFIX, writer_prefix: PREFIX,
-    store: { kind: 'github', repository: 'acme/state-store', branch: 'main', path: STORE_PATH }, required_checks: ['validate'] };
-  github.addIssue(421, { body: '## CURRENT\n' });
-  github.addIssue(423, { body: 'Task' });
-  const now = () => new Date(github.clock).toISOString();
-  const store = new state.StateStore({ transport: github, store: binding.store, now, toolkitVersion: '3.9.0' });
-  const fx = { github, binding, store, now, output: '', errors: '' };
-  const empty = state.newParent({ repository: REPO, parentIssue: 421, outcomes: OUTCOMES });
-  if (!missing) store.write('parent', 421, held ? state.claimDocument(empty, holder, {}) : empty, { sha: null, previous: null });
-  // The old controller has been quiet for an hour unless a test says otherwise.
-  fx.wait = minutes => { github.clock += minutes * MINUTE; };
-  fx.wait(60);
-  fx.parentDoc = () => store.read('parent', 421).doc;
-  fx.fence = () => JSON.parse(github.files.get(PARENT_FILE).text).fence;
-  fx.deps = (extra = {}) => ({ transport: github, binding, originUrl: `https://github.com/${REPO}.git`, repoRoot: __dirname, toolkitVersion: '3.9.0', environment: {}, now,
-    stdout: { write: text => { fx.output += text; } }, stderr: { write: text => { fx.errors += text; } }, ...extra });
-  fx.run = (argv, extra) => {
-    fx.output = '';
-    fx.errors = '';
-    const from = github.calls.length;
-    try {
-      const code = cli.main(argv, fx.deps(extra));
-      return { code, result: fx.output.startsWith('{') ? JSON.parse(fx.output) : fx.output, error: null, calls: github.calls.slice(from) };
-    } catch (error) {
-      if (!error.code) throw error;
-      return { result: null, error, calls: github.calls.slice(from) };
-    }
-  };
-  fx.takeover = (extra = [], { session = NEW, apply = true, deps = {} } = {}) => fx.run(['takeover', '--session', session, ...WORDS, ...(apply ? ['--apply', '--controller'] : []), '--json', ...extra], deps);
-  fx.dry = (extra = [], options = {}) => fx.takeover(extra, { ...options, apply: false });
-  // Another writer, on its own store object, as another process would be.
-  fx.other = () => new state.StateStore({ transport: github, store: binding.store, now, toolkitVersion: '3.9.0' });
-  fx.oldWrites = (note = 'old controller at work') => fx.other().mutate('parent', 421, { writer: holder, change: doc => { doc.private.note = `${note} ${github.clock}`; return doc; } });
-  fx.sweepWrites = () => fx.other().mutate('parent', 421, { writer: state.refreshWriter(fx.other().read('parent', 421).doc),
-    change: doc => { doc.attention = []; doc.private.sweep_note = String(github.clock); return doc; } });
-  fx.commit = (file, message, login = github.login) => { github.committer = login; github.putFile(`${STORE_PATH}${file}`, { at: github.clock, message }, message); github.committer = null; };
-  // Runs `effect` once, just before the first call that `when` matches.
-  fx.before = (when, effect) => {
-    let done = false;
-    github.intercept(call => { if (!done && when(call)) { done = true; effect(call); } return undefined; });
-  };
-  fx.records = () => [...github.comments.values()].filter(comment => comment.issue === 421 && /TAKEOVER: controller/.test(comment.body));
-  fx.writes = calls => calls.filter(call => call.method !== 'GET');
-  return fx;
-}
-
-const POSTS = call => call.method === 'POST' && call.path.endsWith('/issues/421/comments');
-const READS_RECORD = call => call.method === 'GET' && /issues\/comments\/\d+$/.test(call.path);
-const CLAIMS = call => call.method === 'PUT' && call.path.endsWith('/parent-421.json');
-// Nothing anywhere: no comment, no edit, no store commit.
-function wroteNothing(fx, run, label) { assert.deepEqual(fx.writes(run.calls).map(call => `${call.method} ${call.path}`), [], `${label}: nothing was written`); }
+const { state, FakeGitHub, fixture, wroteNothing, REPO, STORE_PATH, PARENT_FILE, PREFIX, MINUTE, controller, NEW, WORDS, PAGE, POSTS, READS_RECORD, CLAIMS } = require('./programme-takeover-fixture.cjs');
 
 test('1 an unheld parent does not move without a record; a takeover appoints with one', () => {
   const fx = fixture({ held: false });
@@ -247,6 +179,9 @@ const ACTIVITY = [
   ['a trace index comment', fx => fx.github.addComment(421, { body: 'Comment index\n---\n<!-- decision-trace-index -->\nx' }), false],
   ['a closing facts comment', fx => fx.github.addComment(421, { body: 'Closed\n\n<!-- toolkit-closing kind=facts -->' }), false],
   ['a parent repair note', fx => fx.github.addComment(421, { body: '<!-- toolkit-parent-repair:421:1 -->\nReopened' }), false],
+  ['a comment that quotes a generated marker', fx => fx.github.addComment(421, { body: 'The sweep writes `<!-- decision-trace-index -->` on its own line, then `<!-- toolkit-closing kind=facts -->` and `<!-- toolkit-parent-repair:421:1 -->`.' }), true],
+  ['a comment with a generated marker at the end of a line', fx => fx.github.addComment(421, { body: 'The sweep starts it with <!-- decision-trace-index -->\nand then the list' }), true],
+  ['a comment with a directory of topics', fx => fx.github.addComment(421, { body: '<!-- decision-trace-index -->\n<!-- decision-trace-directory -->\n## Comment topics' }), false],
   ['another successor\'s record for this epoch', fx => fx.github.addComment(421, { body: `NOT USED: ${PREFIX}050 TAKEOVER: controller desk-controller-9 on x; Toolkit main ${'a'.repeat(40)}; CONTROLLER.md blob ${'b'.repeat(40)}; epoch 1 to 2; y` }), false],
   ['another account\'s comment', fx => fx.github.addComment(421, { body: 'Hello', login: 'someone-else' }), false],
   ['a comment on a task', fx => fx.github.addComment(423, { body: 'G1 report' }), false],
@@ -303,6 +238,30 @@ test('6 each source alone trips the stop; a sweep\'s, a gate\'s or a bot\'s writ
   }
 });
 
+test('6 the state commits: a list with no commit at all, for a parent just read from there, is no proof', () => {
+  for (const backend of ['store', 'branch']) {
+    const fx = fixture({ backend });
+    fx.oldWrites();
+    fx.github.intercept(call => (/\/commits\?/.test(call.path) ? { status: 200, json: [] } : undefined));
+    const run = fx.takeover();
+    assert.equal(run.error?.code, 'STOP_UNREADABLE', backend);
+    wroteNothing(fx, run, backend);
+  }
+});
+
+test('5 GitHub\'s clock decides, whatever this computer\'s says', () => {
+  for (const hours of [-5, 5]) {
+    for (const [minutes, code] of [[9, 'OLD_WRITER_ACTIVE'], [11, undefined]]) {
+      const fx = fixture();
+      fx.oldWrites();
+      fx.wait(minutes);
+      const run = fx.takeover([], { deps: { now: () => new Date(fx.github.clock + hours * 60 * MINUTE).toISOString() } });
+      assert.equal(run.error?.code, code, `computer ${hours} h off, ${minutes} min after the write`);
+      if (code) wroteNothing(fx, run, 'not quiet');
+    }
+  }
+});
+
 test('6b every state commit of a real refresh pass is marked, and none of a controller pass is', () => {
   const states = fx => fx.github.commitRows.filter(row => /^programme[ -]state: /.test(row.message)).map(row => row.message);
   const swept = fixture();
@@ -355,6 +314,96 @@ test('7 the owner\'s words: quoted in the record, instead of the 10 minutes, nev
     assert.equal(run.error?.code, 'USAGE', JSON.stringify(empty));
     assert.equal(run.calls.length, 0, 'refused before anything is read');
   }
+});
+
+test('7 the owner\'s words: what they do and do not carry', () => {
+  const words = ['--owner-stop', 'it is closed'];
+  // A run that stopped right after its record: { the record, what the next run did }.
+  const crashed = (first, between, second) => {
+    const fx = fixture();
+    let dead = true;
+    fx.github.intercept(call => { if (dead && READS_RECORD(call)) throw Object.assign(new Error('killed'), { killed: true }); return undefined; });
+    assert.throws(() => fx.takeover(first), { killed: true });
+    dead = false;
+    between(fx);
+    const run = fx.takeover(second);
+    assert.equal(run.error, null, run.error?.message);
+    return { resumed: run.result.record.resumed, records: fx.records().map(record => record.body.startsWith('NOT USED: ')) };
+  };
+  // With the same words and nothing since, the record is used; one older than the old controller's last
+  // write, or one that does not quote these words, never is.
+  assert.deepEqual(crashed(words, () => {}, words), { resumed: true, records: [false] });
+  assert.deepEqual(crashed(words, fx => fx.oldWrites(), words), { resumed: false, records: [true, false] }, 'the old controller wrote after the record');
+  assert.deepEqual(crashed([], fx => fx.wait(1), words), { resumed: false, records: [true, false] }, 'a record with no words in it');
+  assert.deepEqual(crashed(['--owner-stop', 'another sentence'], fx => fx.wait(1), words), { resumed: false, records: [true, false] }, 'other words');
+  // A source the first read did not reach and the second did: only what came after the record counts.
+  for (const [label, effect, code] of [['an old merge', () => {}, undefined], ['a merge after the record', fx => fx.github.addMerge(), 'OLD_WRITER_ACTIVE']]) {
+    const fx = fixture();
+    fx.github.addMerge();
+    fx.wait(1);
+    let posted = false;
+    fx.github.intercept(call => {
+      if (POSTS(call)) posted = true;
+      else if (posted && READS_RECORD(call)) effect(fx);
+      return !posted && /\/activity\?/.test(call.path) ? { status: 403, json: {} } : undefined;
+    });
+    const run = fx.takeover(words);
+    assert.equal(run.error?.code, code, `${label}: ${run.error?.message}`);
+    assert.equal(fx.fence().epoch, code ? 1 : 2, label);
+  }
+});
+
+test('8 the number: only an earlier person\'s comment takes it, and a renumbered record is read back', () => {
+  // A later comment with the same number is not a clash: the record keeps it.
+  const later = fixture();
+  later.before(READS_RECORD, () => later.github.addComment(423, { body: `${PREFIX}001 OWNER-DECISION: later` }));
+  const kept = later.takeover();
+  assert.deepEqual([kept.error, kept.result?.record.record_id, kept.result?.record.renumbered_from], [null, `${PREFIX}001`, undefined]);
+  // An older generated index edited to list the record is not one either.
+  const listed = fixture();
+  const index = listed.github.addComment(423, { body: '<!-- decision-trace-index -->\n## Comment trace for #423' });
+  listed.before(READS_RECORD, () => { listed.github.comments.get(index).body += `\n${PREFIX}001`; });
+  assert.equal(listed.takeover().result?.record.record_id, `${PREFIX}001`);
+  // The number was taken: the record is edited and read back before the claim.
+  const clash = change => {
+    const fx = fixture();
+    fx.before(POSTS, () => fx.github.addComment(423, { body: `${PREFIX}001 OWNER-DECISION: first` }));
+    change(fx);
+    return { fx, run: fx.takeover() };
+  };
+  const changed = clash(fx => {
+    let edited = false;
+    fx.github.intercept(call => {
+      if (call.method === 'PATCH') edited = true;
+      else if (edited && READS_RECORD(call)) { edited = false; fx.records()[0].body += ' edited'; }
+      return undefined;
+    });
+  });
+  assert.equal(changed.run.error?.code, 'TAKEOVER_UNVERIFIED', changed.run.error?.message);
+  assert.deepEqual([changed.fx.fence().epoch, changed.fx.writes(changed.run.calls).filter(CLAIMS).length], [1, 0]);
+  assert.match(changed.fx.records()[0].body, /^NOT USED: INT-TK421-002 TAKEOVER: .* edited$/, 'marked as it stands, under its own number');
+  // GitHub refuses the edit: no claim under a number another comment has.
+  const shut = clash(fx => fx.github.intercept(call => (call.method === 'PATCH' ? { status: 403, json: {} } : undefined)));
+  assert.equal(shut.run.error?.code, 'TAKEOVER_UNVERIFIED');
+  assert.match(shut.run.error.message, /could not be changed \(HTTP 403\)\. No claim was made\. .*could not be marked NOT USED; edit it by hand\.$/);
+  assert.equal(shut.fx.fence().epoch, 1);
+});
+
+test('9 a record is marked only for what it can never carry, and marked whole', () => {
+  // One failed read of it is no reason.
+  const fx = fixture();
+  fx.github.intercept(call => (READS_RECORD(call) && !fx.once ? (fx.once = true, { status: 502, json: {} }) : undefined));
+  const run = fx.takeover();
+  assert.equal(run.error?.code, 'TAKEOVER_UNVERIFIED');
+  assert.match(run.error.message, /could not be read \(HTTP 502\)\. No claim was made\.$/);
+  assert.ok(fx.records()[0].body.startsWith(PREFIX), 'not marked');
+  assert.equal(fx.takeover().result?.record.resumed, true, 'the next run uses it');
+  // A record posted by hand in the exact form, with lines under it, keeps them.
+  const hand = fixture();
+  const id = hand.github.addComment(421, { body: `${PREFIX}090 TAKEOVER: controller ${NEW} on x harness; Toolkit main ${'a'.repeat(40)}; CONTROLLER.md blob ${'b'.repeat(40)}; epoch 1 to 2; old writer stopped: said so; next: go on.\n\nKept lines` });
+  hand.wait(1);
+  assert.equal(hand.takeover().error?.code, 'TAKEOVER_UNVERIFIED');
+  assert.match(hand.github.comments.get(id).body, /^NOT USED: INT-TK421-090 TAKEOVER: [^\n]+\n\nKept lines$/);
 });
 
 test('8 a number another comment took first: the record moves to the next free one before the claim', () => {
@@ -553,12 +602,13 @@ test('9 M1: an answer that never came back is settled by reading, for the record
   const retried = lost.takeover();
   assert.equal(retried.error, null, retried.error?.message);
   assert.deepEqual([lost.fence().epoch, lost.writes(retried.calls).filter(CLAIMS).length], [2, 2]);
-  // Twice with no answer and nothing landed: it stops, and the record waits for the next run.
+  // Twice with no answer: a read of the version it was sent over cannot show that neither landed, so it
+  // stops uncertain, and the record waits for the next run.
   const down = fixture();
   let stop = true;
   down.github.intercept(call => (stop && CLAIMS(call) ? { status: 502, json: {} } : undefined));
   const failed = down.takeover();
-  assert.equal(failed.error?.code, 'GH_FAILED');
+  assert.equal(failed.error?.code, 'CLAIM_UNCERTAIN');
   assert.deepEqual([down.fence().epoch, down.writes(failed.calls).filter(CLAIMS).length, down.records()[0].body.startsWith(PREFIX)], [1, 2, true]);
   stop = false;
   assert.equal(down.takeover().result?.record.resumed, true);
@@ -667,10 +717,33 @@ test('9 M1: governance off, undecided or unreadable: the dry run says so and pri
   assert.throws(() => openTakeover(args, {}, () => { throw new state.ProgrammeError('REPO_IDENTITY_MISMATCH', 'x'); }), { code: 'REPO_IDENTITY_MISMATCH' });
 });
 
+test('2 the takeover\'s and the lane claim\'s options are refused on every other command', () => {
+  for (const argv of [
+    ['show', '--parent', '--owner-stop', 'it is closed'], ['reconcile', '--apply', '--owner-stop', 'it is closed'], ['show', '--parent', '--surface', 'a harness'],
+    ['show', '--parent', '--lane'], ['show', '--parent', '--takeover'], ['reconcile', '--apply', '--lane'], ['update-parent', '--patch', __filename, '--takeover'], ['assign', '--issue', '423', '--role', 'G1', '--lane'],
+  ]) {
+    const fx = fixture();
+    const run = fx.run([...argv, '--session', controller.session, '--controller', '--json']);
+    assert.equal(run.error?.code, 'USAGE', argv.join(' '));
+    assert.equal(run.calls.length, 0, argv.join(' '));
+  }
+});
+
+const UUID = '11111111-2222-3333-4444-555555555555';
+// Each host's session ID, and one with no boundary around it.
+const SESSIONS = [`local_${UUID}`, UUID, UUID.toUpperCase(), UUID.replaceAll('-', ''), UUID.replaceAll('-', '_'), UUID.replaceAll('-', '\u2011'), `chat${UUID}`, `${UUID}_x`, '019a1b2c-3d4e-7f50-8a6b-7c8d9e0f1a2b',
+  'session_011CUqTestTestTestTest99', 'cse_011CUqTestTestTest', 'cmsg_01Test99', 'session_abcdefgh12345678', 'x_thread_0123456789'];
+const PRIVATE = ['see $HOME/notes', 'see ${HOME}', 'in $env:USERPROFILE', 'in %USERPROFILE%', 'in %LOCALAPPDATA%', 'in ~', 'in ~me/notes', 'in (~/notes)', 'in (/srv/x)', 'in "/var/x"', 'in ./x', 'in ../x', 'on C:/x', 'on (d:/x)', 'on \\\\box\\share',
+  'on nas.local', 'on box.lan', 'on box.home', 'on my_box.internal', 'on NAS.LOCAL.', 'on localhost', 'on my_box.example.test', 'on box:8080', 'on my-box_2:22', 'on localhost:3000', 'on 127.0.0.1:8080', 'on host_10.0.0.1',
+  'on 2001:db8::1', 'on [fe80::1]', 'on ::1', 'on 2001:db8:0:0:0:0:0:1', 'on fe80::1%eth0', 'on 00:1a:2b:3c:4d:5e'];
+// What a controller does write there.
+const PLAIN = ['Claude Code desktop, Windows (session metadata read)', 'Claude Projects on claude.ai (host record read)', 'read CONTROLLER.md and/or the map at 14:45', 'finish G0/G1 for PR 1537 in release 3.185.0', 'wait until 2026-11-25T10:30:00Z',
+  'about ~10 minutes, $5, 50% done', 'it is closed, ok~', 'main 35d67b987, blob ' + 'b'.repeat(40), 'epoch 9 to 10: go on', 'land PR 1537: then S2', 'INT-TK421-1339 first', 'run toolkit-gate-route.cjs'];
+
 test('11 the record holds no secret, path, address or session ID, and names the old controller only when a record did', () => {
   const token = `ghp_${'a'.repeat(36)}`;
   const bad = [token, 'see C:\\Users\\me', 'in ~/notes', 'at /home/me/x', 'ask me@example.com', 'open https://example.com/x', 'on 10.0.0.1', 'on box.example.test',
-    'chat 11111111-2222-3333-4444-555555555555', 'a <!-- mark -->', 'a\u202Eb', '@owner said so'];
+    'chat 11111111-2222-3333-4444-555555555555', 'a <!-- mark -->', 'a\u202Eb', '@owner said so', ...SESSIONS.map(id => `chat ${id}`), ...PRIVATE];
   for (const flag of ['--surface', '--next', '--owner-stop']) {
     for (const value of bad) {
       const fx = fixture();
@@ -694,6 +767,25 @@ test('11 the record holds no secret, path, address or session ID, and names the 
     assert.equal(run.error?.code, 'USAGE', label);
     assert.equal(run.calls.length, 0, label);
   }
+  // The name is in the record too.
+  for (const name of [...SESSIONS.filter(id => /^[\w.-]+$/.test(id)), 'nas.local', 'my_box.example.test', '10.0.0.1', 'host_10.0.0.1', 'localhost']) {
+    const fx = fixture();
+    const run = fx.takeover([], { session: name });
+    assert.equal(run.error?.code, 'USAGE', name);
+    assert.equal(run.calls.length, 0, name);
+    assert.ok(!run.error.message.includes(name), 'the refusal never repeats it');
+  }
+  for (const name of ['claude-code-desktop-controller-4', 'toolkit-421-controller', 'projects_controller_2', 'chat-20261125', 'v4.lane.2', 'session_controller2']) {
+    assert.equal(fixture().dry([], { session: name }).error, null, name);
+  }
+  for (const value of PLAIN) {
+    for (const flag of ['--surface', '--next', '--owner-stop']) {
+      const fx = fixture();
+      const given = { '--surface': 'test harness', '--next': 'read the map', [flag]: value };
+      const run = fx.run(['takeover', '--session', NEW, ...Object.entries(given).flat(), '--json']);
+      assert.equal(run.error, null, `${flag} ${value}: ${run.error?.message}`);
+    }
+  }
   // The first holder was never named in public, so the record does not name it; the next takeover's
   // record names the one this record named.
   const fx = fixture();
@@ -706,11 +798,12 @@ test('11 the record holds no secret, path, address or session ID, and names the 
   assert.match(second.result.done_line, new RegExp(`epoch 3 \\(was 2, ${NEW}\\)`));
   assert.deepEqual(fx.parentDoc().private.retired_holders, [controller.session, NEW]);
   // A holder that is a host session ID is never named, whatever an earlier comment holds.
-  const uuid = '11111111-2222-3333-4444-555555555555';
-  const raw = fixture({ holder: { session: uuid, prefix: PREFIX } });
-  const earlier = raw.github.addComment(421, { body: `takeover by ${uuid}` });
-  raw.other().mutate('parent', 421, { writer: { session: uuid, prefix: PREFIX }, change: doc => { doc.private.takeovers = [{ comment_id: earlier, from_epoch: 0 }]; return doc; } });
-  raw.wait(11);
-  assert.equal(raw.takeover().error, null);
-  assert.ok(!raw.records()[0].body.includes(uuid));
+  for (const uuid of [UUID, `local_${UUID}`]) {
+    const raw = fixture({ holder: { session: uuid, prefix: PREFIX } });
+    const earlier = raw.github.addComment(421, { body: `takeover by ${uuid}` });
+    raw.other().mutate('parent', 421, { writer: { session: uuid, prefix: PREFIX }, change: doc => { doc.private.takeovers = [{ comment_id: earlier, from_epoch: 0 }]; return doc; } });
+    raw.wait(11);
+    assert.equal(raw.takeover().error, null);
+    assert.ok(!raw.records()[0].body.includes(uuid));
+  }
 });

@@ -5,7 +5,8 @@
 // SHAs), branches and file trees. The Contents API reads a branch or a commit, writes and deletes with
 // compare-and-swap on the blob SHA (409 stale, 422 create over an existing file) and makes one commit
 // per write; the Git Data API creates trees, commits and refs (422 for a ref that exists), and reads a
-// commit while it exists. Issues, comments, pull requests and GraphQL behave as in the base fake.
+// commit while it exists. Issues, comments, pull requests and GraphQL behave as in the base fake. With
+// `branchLag` on, a Contents read of a branch serves the commit before its head, as in the base fake.
 
 const crypto = require('node:crypto');
 const { FakeGitHub, blobSha, topLevelEntries } = require('./toolkit-programme-fake-github.cjs');
@@ -145,8 +146,10 @@ class BranchFakeGitHub extends FakeGitHub {
 
   gitContents(git, method, file, body, params) {
     if (method === 'GET') {
-      const sha = this.resolve(git, params.get('ref') || 'main');
+      const ref = params.get('ref') || 'main';
+      let sha = this.resolve(git, ref);
       if (!sha) return ok(404, { message: 'No commit found for the ref' });
+      if (this.branchLag && git.branches.has(ref)) sha = git.commits.get(sha).parents[0] || sha;
       const files = git.commits.get(sha).files;
       if (files.has(file)) {
         const text = files.get(file);

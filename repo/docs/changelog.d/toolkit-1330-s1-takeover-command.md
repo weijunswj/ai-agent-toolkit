@@ -2,7 +2,8 @@
 
 - **One takeover command:** `programme.cjs takeover` takes over as controller of a governed programme. The dry run, which any session may make, reads and prints the facts, whether the old controller has stopped, every hold and the record it would post. `--apply --controller` posts the record, reads it back, claims and reads the claim back, in seconds however many tasks there are.
 - **Stop proof from the old controller's own last write:** its state commits, its comments on the parent and its merges to the default branch, by GitHub's clock. It must be 10 minutes old at the record and still the last one after it. Less takes the owner's own words (`--owner-stop`), quoted in the record. A source that cannot be read, or a takeover from another account than the old controller's, is refused.
-- **Safe to run again:** a run that stopped early claims with its own unused record, an answer that never came back is settled by reading, a record number another comment took first moves to the next free one, and a record that can no longer carry a claim is marked `NOT USED:`.
+- **Safe to run again:** a run that stopped early claims with its own unused record, an answer that never came back or did not read back is settled by reading, a record number another comment took first moves to the next free one, and a record that can no longer carry a claim is marked `NOT USED:`. A claim that landed, or may have, says so (`CLAIM_LANDED`, `CLAIM_UNCERTAIN`) and its record is never marked.
+- **Nothing private in the public record:** the controller's name and the words it is given are refused before anything is read when they hold a session ID of any host, a path or home folder, a host name, an address or a port.
 
 ### Changed
 
