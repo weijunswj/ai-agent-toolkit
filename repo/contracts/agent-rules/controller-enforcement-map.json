@@ -668,7 +668,7 @@
         {
           "kind": "script",
           "path": "repo/scripts/toolkit-store.cjs",
-          "test": "repo/tests/toolkit-store.test.cjs"
+          "test": "repo/tests/toolkit-store-save.test.cjs"
         }
       ]
     },
@@ -708,7 +708,7 @@
         {
           "kind": "script",
           "path": "repo/scripts/toolkit-store.cjs",
-          "test": "repo/tests/toolkit-store.test.cjs"
+          "test": "repo/tests/toolkit-store-save.test.cjs"
         }
       ]
     },
