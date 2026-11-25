@@ -378,12 +378,13 @@ function bankExtras(text) {
 
 // What the owner's answer applies: { governance, taskAutoMerge, governanceApp,
 // permissionBlocks, ciShards?, instructionCopies?, store }, or { noStore: true }. Questions left out
-// stay as they are; each status row's Toolkit default applies unless an override changes it.
-function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
+// stay as they are; each status row's Toolkit default applies unless an override changes it. With
+// `plainWords` false (a bank an answer was already used for) a bare yes, no or later is not read.
+function parseBankAnswer(text, specs, { requireBankReference = true, plainWords = true } = {}) {
   const turnsOn = specs.some(spec => spec.id === 'governance' && spec.turns_on);
   // Where the bank is the turn-on question itself (no card came first), it takes the card's plain
   // answers too: yes is all recommended, later is no store, and no is the owner's off decision.
-  const plain = turnsOn ? plainAnswer(text, specs, requireBankReference) : null;
+  const plain = turnsOn && plainWords ? plainAnswer(text, specs, requireBankReference) : null;
   if (plain === 'later') return { noStore: true, later: true };
   if (plain === 'no') return { governance: 'off', taskAutoMerge: 'keep', store: null, governanceApp: 'keep', permissionBlocks: 'keep' };
   const extras = bankExtras(plain === 'yes' ? text.replace(/(yes)\s*\.?\s*$/i, 'all recommended') : text);

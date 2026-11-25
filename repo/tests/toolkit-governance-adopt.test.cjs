@@ -16,6 +16,9 @@ const { managedAgentsCopy } = require('./support/retired-instruction-copies.cjs'
 const scripts = path.join(__dirname, '..', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const adopt = require(path.join(scripts, 'toolkit-governance-adopt.cjs'));
+const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
+const { BankTickets } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 
 const OWNER = 'toolkit-test-fixture';
 const SLUG = `${OWNER}/fresh`;
@@ -196,11 +199,35 @@ test('the turn-on bank takes a plain yes, no or later', async t => {
   assert.deepEqual(noGitHub.calls, [], 'no store or parent issue for an off decision');
   assert.equal(no.published.length, 1);
   assert.deepEqual(no.published[0].binding, { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' });
-  assert.equal(require(path.join(scripts, 'toolkit-governance-state.cjs')).governanceState(noCtx.repo, noCtx.registryOptions).state, 'UNDECIDED', 'nothing decides until it merges');
+  assert.equal(governance.governanceState(noCtx.repo, noCtx.registryOptions).state, 'UNDECIDED', 'nothing decides until it merges');
   // Anything more than the plain word is read as an ordinary bank answer.
   const unclear = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['no thanks', ''] });
   assert.match(unclear.out, /Governance question bank answer was not read/);
   assert.equal(unclear.published.length, 0);
+});
+
+// The bank stays open after a used answer, so a yes or a no meant for something else could reach it: after
+// "later", a stray yes made the store, the parent issue and the pull request. Plain words answer it once.
+test('the plain words answer a turn-on bank once: after a used answer a yes or a no is not read, and a listed change still is', async t => {
+  const ctx = fixture(t);
+  const github = fakeGitHub();
+  const epochs = new gate.SessionEpochs({ registryOptions: ctx.registryOptions });
+  epochs.start('session-adopt', 'startup', governance.governanceState(ctx.repo, ctx.registryOptions).repository_id);
+  const tickets = new BankTickets({ registryOptions: ctx.registryOptions });
+  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'], github)).out)[1];
+  const reply = answer => run(ctx, ['setup', '--answers', `${reference}: ${answer}`, '--ticket', tickets.issue('session-adopt', epochs.get('session-adopt'))], github);
+  // An answer that could not be read is not a used one: the plain word after it is the first answer.
+  assert.match((await reply('maybe')).out, /answer was not read/);
+  const later = await reply('later');
+  assert.match(later.out, /^Later: nothing was written, and governance stays off\./m);
+  for (const word of ['yes', 'no', 'later', 'Yes.']) {
+    const stray = await reply(word);
+    assert.match(stray.out, /^Your earlier answer to this bank was already used, and this reply changes nothing\. Nothing more was written\.$/m, word);
+    assert.deepEqual([github.calls, stray.published], [[], []], word);
+  }
+  const listed = await reply('all recommended');
+  assert.equal(listed.code, 0, listed.err + listed.out);
+  assert.equal(listed.published[0].binding.governance, 'enabled');
 });
 
 test('a failed step stops with what was made, and answering again reuses it instead of making a second one', async t => {
@@ -273,6 +300,16 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   assert.deepEqual(itself.calls, [], 'no parent issue, store or file');
   assert.equal(self.published.length, 0);
   assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'plain-text.json')), false, 'no local write either');
+  // Nor the shard list, which joins the answer by default where CI is slow.
+  fs.mkdirSync(path.join(selfCtx.repo, 'test'), { recursive: true });
+  for (let index = 1; index <= 4; index += 1) fs.writeFileSync(path.join(selfCtx.repo, 'test', `case${index}.test.js`), "require('node:test')('ok', () => {});\n");
+  for (const answer of [`store=${SLUG}`, `store=${SLUG}, shards=yes`]) {
+    const slow = await run(selfCtx, ['setup'], itself, { interactive: true, answers: [answer], estimate: { minutes: 25, workflow: 'CI' } });
+    assert.equal(slow.code, 2, answer);
+    assert.match(slow.out, /is this repository itself/);
+    assert.doesNotMatch(slow.out, /added to the working tree/, answer);
+    assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'toolkit-test-shards.json')), false, answer);
+  }
   // A malformed name is refused as unreadable, nothing written.
   const bad = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['store=not a repo', ''] });
   assert.match(bad.out, /store= needs a repository as owner\/name/);

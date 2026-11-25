@@ -89,7 +89,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, refresh
   const stderr = sink();
   const asked = [];
   const cli = new ToolkitGovernanceCli({
-    stdout, stderr, cwd, interactive,
+    stdout, stderr, cwd, interactive, environment: {},
     ask: async (question) => { asked.push(question); return answer; },
     confirm: async (effect) => { asked.push(effect); return answer === 'yes'; },
     registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' },
@@ -223,7 +223,7 @@ test('one off route: the terminal no, the card No and the bank Turn off make the
       publish(repository, binding, files) { open = [proposalFor(binding.governance === 'disabled' ? 'no' : 'yes')]; transport.calls.push({ repository, binding, files }); return open[0]; }, calls: [] };
     const stdout = sink(), stderr = sink();
     const replies = [];
-    const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' }, interactive: true,
+    const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' }, interactive: true, environment: {},
       ask: async () => replies.shift() || '', confirm: async () => { throw new Error('a second Enter was asked'); }, stdout, stderr,
       proposalTransport: transport, discoveryGh: () => ({ ok: false, reason: 'offline' }), refresh: () => ({ refreshed: false, error: 'offline' }),
       rulesetReader: PROTECTED, protectionReader: BRANCH_PROTECTED, securityReader: SECURE });
@@ -260,7 +260,7 @@ test('interactive no publishes the off proposal without a laptop decision, decli
     const proposal = { repository: 'example-owner/example-repo', number: 1, head: 'a'.repeat(40), url: 'https://github.com/example-owner/example-repo/pull/1', state: 'open', answer: 'no' };
     const stdout = sink(), stderr = sink();
     const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true },
-      interactive: true, confirm: async () => true, stdout, stderr,
+      interactive: true, environment: {}, stdout, stderr,
       proposalTransport: { list: () => open, publish() { writes++; open = [proposal]; return proposal; }, read: () => proposal } });
     assert.equal(await cli.main([command]), 0, stderr.text());
     assert.match(stdout.text(), /decision pending[\s\S]*merge this pull request now/);

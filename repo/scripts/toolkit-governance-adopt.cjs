@@ -177,15 +177,19 @@ function ensureSecurityFiles(root, writer = null) {
   return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the working tree; they travel in the turn-on pull request.`] : [];
 }
 
+// Why the planned store cannot be used, known from the plan alone, or null: a named store that is this
+// repository itself (the binding would refuse it only after the parent issue is made).
+function storeProblem(plan) {
+  return plan.store.named && plan.store.repository.toLowerCase() === plan.repository.toLowerCase()
+    ? `${plan.store.repository} is this repository itself, so it was not used as the evidence store: the store must be a separate private repository.` : null;
+}
+
 // The whole turn-on: { binding, made, lines }. The binding still goes through the one
 // governance pull request, which decides nothing until the owner merges it.
 function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
   const made = [];
-  // A named store that is this repository itself is refused first, for that reason, before any local
-  // write or anything made on GitHub (the binding would refuse it only after the parent issue).
-  if (plan.store.named && plan.store.repository.toLowerCase() === plan.repository.toLowerCase()) {
-    throw new AdoptError(`${plan.store.repository} is this repository itself, so it was not used as the evidence store: the store must be a separate private repository.`, made);
-  }
+  const problem = storeProblem(plan);
+  if (problem) throw new AdoptError(problem, made);
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
   try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; } catch (error) { error.made = made; throw error; }
@@ -212,4 +216,4 @@ function prepared({ root, plainText = null, securityFiles = null }) {
   return { binding, made: [], lines };
 }
 
-module.exports = Object.freeze({ AdoptError, GitHubAdoptionWriter, adopt, adoptionPlan, adoptionPrepared, prepared, storeName });
+module.exports = Object.freeze({ AdoptError, GitHubAdoptionWriter, adopt, adoptionPlan, adoptionPrepared, prepared, storeName, storeProblem });

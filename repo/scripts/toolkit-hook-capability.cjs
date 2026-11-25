@@ -15,8 +15,7 @@
 //
 // A Claude Code cloud session runs the hooks synced from the claude.ai account copy too, the merge
 // hold included (not the governance question, which a cloud container cannot keep an answer
-// for), but the programme refresh cannot write without a signed-in gh, so the portable path still
-// applies there.
+// for), so the portable path is not named there.
 
 const fs = require('node:fs');
 const os = require('node:os');

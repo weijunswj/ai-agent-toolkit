@@ -169,11 +169,11 @@ function pipedRun(input) {
     "const args = core.parseArgs(['--execute', '--profile', 'auto-main', '--host', 'claude-code']);",
     "let written = '';",
     "core.answerSetupQuestionBank(args, current, { isTTY: false, write(text) { written += text; return true; } })",
-    "  .then((result) => { core.applyClaudeSubagentDepth(args); core.applyClaudeUserSettings(args); process.stdout.write(JSON.stringify({ written, source: result.answer_source })); })",
+    "  .then((result) => { core.applyClaudeSubagentDepth(args); core.applyClaudeUserSettings(args); process.stdout.write(JSON.stringify({ written, source: result.answer_source, asked: result.answers_initially_required, sent: result.answers_supplied_by_complete_stdin })); })",
     "  .catch((error) => { process.stdout.write(JSON.stringify({ error: error.message })); });",
   ].join('\n');
   const run = spawnSync(process.execPath, ['-e', code], { input, encoding: 'utf8', env: process.env, timeout: 60000 });
-  return JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('{"')));
+  return { stdout: run.stdout, ...JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('{"'))) };
 }
 
 test('with every setting already set, setup asks nothing and keeps them; a piped change still applies', async (t) => {
@@ -184,7 +184,10 @@ test('with every setting already set, setup asks nothing and keeps them; a piped
   assert.equal(run.prompts.length, 0, 'no question in a terminal');
   assert.equal(run.result.answer_source, 'nothing to approve');
   assert.match(run.written, /Toolkit setup - no questions: every setting already has a value\n/);
-  assert.match(run.written, /Every setting already has a value, so setup asks nothing and keeps them all as they are\. To change one, reply with its number and choice, for example 3\.5=B/);
+  // Nothing reads a reply in the owner's own terminal, so it names the flag there.
+  assert.match(run.written, /Every setting already has a value, so setup asks nothing and keeps them all as they are\. To change one, run setup again with its flag \(--help lists them\), or say setup toolkit in a chat and reply there\./);
+  assert.doesNotMatch(run.written, /could not read|does not have|reply with its number/i);
+  assert.deepEqual([run.result.answers_initially_required, run.result.answers_supplied_by_complete_stdin], [false, false], 'nothing was asked or sent');
   assert.doesNotMatch(run.written, /a yes changes nothing|Apply Toolkit's defaults|Reply yes to apply/);
   applyAnswers(run.args);
   assert.deepEqual(home.read(), before, 'nothing changed');
@@ -192,12 +195,74 @@ test('with every setting already set, setup asks nothing and keeps them; a piped
   const empty = pipedRun('');
   assert.equal(empty.error, undefined, 'an empty pipe keeps every row');
   assert.equal(empty.source, 'nothing to approve');
+  assert.match(empty.written, /keeps them all as they are\. To change one, reply with its number and choice, for example 3\.5=B/);
+  assert.deepEqual([empty.asked, empty.sent], [false, false], 'an empty pipe sent no answer');
   assert.deepEqual(home.read(), before);
   const reference = /Bank reference: (\S+)/.exec(empty.written)[1];
   const change = pipedRun(`${reference}: 3.5=off\n`);
   assert.equal(change.source, 'user-approved listed changes only');
+  assert.deepEqual([change.asked, change.sent], [false, true]);
   assert.equal(agentsMd(home.read()), undefined, 'the piped change turned 3.5 off');
   assert.equal(stateOf('agents-md'), STATES.OWNER_OFF);
+});
+
+// A settings.json Toolkit cannot read (a comment, a trailing comma) leaves four rows with no value it knows.
+const unreadable = (home) => fs.writeFileSync(path.join(home.root, '.claude', 'settings.json'), '{ "attribution": false, // my note');
+
+test('a setting setup could not read is named and never counted as having a value, in setup and in refresh, and is not asked about', async (t) => {
+  const home = claudeHome(t);
+  applyAnswers((await answer(['yes'])).args);
+  unreadable(home);
+  const bytes = fs.readFileSync(path.join(home.root, '.claude', 'settings.json'), 'utf8');
+  const run = await answer([]);
+  assert.equal(run.prompts.length, 0, 'a yes would write nothing there, so nothing is asked');
+  assert.equal(run.result.answer_source, 'nothing to approve');
+  assert.match(run.written, /Toolkit setup - no questions: nothing to approve, and \d settings could not be read\n/);
+  // The four setting rows and the agents row, whose subagent limit sits in the same file.
+  assert.match(run.written, /No setting needs your approval, so setup asks nothing and keeps them all as they are\. Setup could not read 5 settings \(2\.1, 3\.2, 3\.3, 3\.4, 3\.5\), so it writes nothing there\./);
+  assert.deepEqual([...run.written.matchAll(/^(\d\.\d) .*\n {2}Current: Could not read$/gm)].map((match) => match[1]), ['3.2', '3.3', '3.4', '3.5']);
+  assert.doesNotMatch(run.written, /already has a value|already have a value/);
+  applyAnswers(run.args);
+
+  const refresh = await answer([], { refresh: true });
+  assert.equal(refresh.prompts.length, 0);
+  assert.equal(refresh.result.refresh, 'kept-current');
+  // Refresh shows no table, so it gives each row its title.
+  assert.match(refresh.written, /^Setup could not read 5 settings \(2\.1 How should Claude Code use agents, 3\.2 Claude Code setting: Hide AI credit in commits\/PRs, [^?]+\), so it writes nothing there\.$/m);
+  applyAnswers(refresh.args);
+  assert.equal(fs.readFileSync(path.join(home.root, '.claude', 'settings.json'), 'utf8'), bytes, 'nothing is written');
+
+  // A piped run's heading and closing line say the same.
+  const piped = pipedRun('');
+  assert.equal(piped.source, 'nothing to approve');
+  assert.match(piped.stdout, /^No setting needs your approval, so setup asked nothing and keeps them all as they are\. Setup could not read 5 settings /m);
+  assert.doesNotMatch(piped.stdout + piped.written, /already has a value/i);
+  assert.match(piped.written, /^# Toolkit setup - no questions: nothing to approve, and \d settings could not be read$/m);
+});
+
+test('with a default left to apply, the one question still names the settings it could not read', async (t) => {
+  const home = claudeHome(t);
+  fs.mkdirSync(path.join(home.root, '.claude'), { recursive: true });
+  unreadable(home);
+  // A row with no value yet, which a yes sets, beside the settings that could not be read.
+  const args = core.parseArgs(['--execute', '--profile', 'auto-main', '--host', 'claude-code']);
+  const specs = core.setupQuestionSpecs(args, currentState());
+  const row = specs.find((spec) => spec.default_state === 'toolkit-default');
+  const pending = specs.map((spec) => (spec === row ? { ...spec, default_state: 'unset', applies_default: true } : spec));
+  const bank = require('../scripts/toolkit-question-bank.cjs').renderStrongDefaultBank(pending.map((spec) => ({ ...spec, presentation: undefined })), { markdown: false }).join('\n');
+  assert.match(bank, /1 question: Apply Toolkit's default to the 1 Claude Code setting that has no value yet\?/);
+  assert.match(bank, /Setup applies the Toolkit default to 1 setting not set yet and keeps every other setting as it is\. Setup could not read 5 settings \(2\.1, 3\.2, 3\.3, 3\.4, 3\.5\), so it writes nothing there\./);
+});
+
+test('a setting this Claude Code version does not have is named as that, never as having a value or unreadable', async (t) => {
+  claudeHome(t, '2.1.270');
+  applyAnswers((await answer(['yes'])).args);
+  const run = await answer([]);
+  assert.equal(run.prompts.length, 0);
+  assert.match(run.written, /Toolkit setup - no questions: nothing to approve\n/);
+  assert.match(run.written, /setup asks nothing and keeps them all as they are\. This Claude Code version does not have 1 setting \(3\.5\), so setup writes nothing there\./);
+  assert.match(run.written, /3\.5 .*\n {2}Current: Not in this Claude Code version\n/);
+  assert.doesNotMatch(run.written, /could not read|already has a value/i);
 });
 
 test('the setup skill keeps the bank relay rule as its own short rule', () => {

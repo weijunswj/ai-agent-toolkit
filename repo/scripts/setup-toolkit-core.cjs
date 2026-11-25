@@ -33,7 +33,7 @@ const {
   questionBankApprovalPayload, questionBankSemanticIdentity, withPresentationMetadata, ensurePresentationMetadata,
   choiceByPresentationReference, answerable, renderQuestionRows, renderCompactQuestionTable, renderQuestionBankHeader,
   changedOnlyExample, isAllRecommendedAnswer, looksLikeConciseSubmission, parseConciseQuestionBankAnswer,
-  strongDefaultRow, STRONG_DEFAULT_STATES, pendingDefaults, renderStrongDefaultBank, parseStrongDefaultAnswer, strongDefaultReply, approvalQuestion,
+  strongDefaultRow, STRONG_DEFAULT_STATES, pendingDefaults, unsetNotes, nothingToAsk, renderStrongDefaultBank, parseStrongDefaultAnswer, strongDefaultReply, approvalQuestion,
   assertQuestionBankAnswerBinding,
 } = require('./toolkit-question-bank.cjs');
 
@@ -2329,7 +2329,7 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
 // apart from the table form.
 const isStrongDefaultBank = (specs) => specs.some((spec) => spec.strong_default);
 function renderStrongDefaultSetupBank(specs, markdown) {
-  // With every setting answered by a flag, or every setting already set, there is no question, so the reply line
+  // With every setting answered by a flag, or none left to set, there is no question, so the reply line
   // is left out (the bank's own summary says how to change one row).
   const pending = pendingDefaults(specs).length;
   const reply = answerable(specs).every((spec) => spec.selected) || !pending ? [] : [strongDefaultReply(pending), ''];
@@ -2899,9 +2899,10 @@ async function promptForStrongDefaultAnswer(specs, rl, fixed) {
 
 // Claude Code setup: one approval question over strong-default rows (toolkit-question-bank.cjs). A refresh asks
 // only when a row has no value yet; otherwise it keeps every row as it is, with no bank. A no writes nothing.
-// Setup asks nothing either when every row already has a value: it shows the tables, takes a piped change such
-// as 3.5=off if one is sent, and otherwise keeps every row as it is. The rows' own states decide a refresh, so
-// this path saves no question shapes.
+// Setup asks nothing either when no row is left to set: it shows the tables, takes a piped change such as
+// 3.5=off if one is sent, and otherwise keeps every row as it is. A row it could not read is never asked about,
+// because a yes would write nothing there; setup and refresh say which rows those are. The rows' own states
+// decide a refresh, so this path saves no question shapes.
 async function answerStrongDefaultBank(args, current, options = {}) {
   const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const specs = setupQuestionSpecs(args, current);
@@ -2909,12 +2910,12 @@ async function answerStrongDefaultBank(args, current, options = {}) {
   const open = unanswered(specs, args);
   const fixed = (spec) => !open.includes(spec);
   const pending = pendingDefaults(open);
-  const base = { answers_initially_required: open.length > 0, stopped_for_answers: false, remaining_input: [] };
+  const base = { answers_initially_required: pending.length > 0, stopped_for_answers: false, remaining_input: [] };
   if (args.refresh && !pending.length) {
     for (const spec of open) assignChoice(args, spec.key, spec.recommended);
     emitRefreshKeptNotice(['', '## Refresh',
-      `No setting needs your approval, so refresh kept your current answers on all ${answerable(specs).length} settings, with no question.`,
-      'To change a setting, say setup toolkit.', ''].join('\n'), answerable(specs).length, options);
+      `No setting needs your approval, so refresh kept all ${answerable(specs).length} settings as they are, with no question.`,
+      ...unsetNotes(specs, (spec) => `${spec.presentation.question_ref} ${spec.title.replace(/\?$/, '')}`), 'To change a setting, say setup toolkit.', ''].join('\n'), answerable(specs).length, options);
     resolveClaudeTopology(args, current);
     const confirmedSpecs = setupQuestionSpecs(args, current);
     assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
@@ -2944,10 +2945,10 @@ async function answerStrongDefaultBank(args, current, options = {}) {
     // owner sent a change (an empty one keeps every row as it is).
     answerSource = 'nothing to approve';
     if (!isTTY) {
-      fromStdin = true;
       const piped = await readNonInteractiveStdin();
       if (piped.split(/\r?\n/).filter((line) => line.trim()).length > 1) throw new Error('Setup question bank received unexpected extra non-empty input.');
       if (piped.trim()) {
+        fromStdin = true;
         answer = parseStrongDefaultAnswer(piped, specs, { fixed });
         if (!answer) throw new Error('Setup did not read that change: reply with the bank reference and a change such as 3.5=off.');
         answerSource = { 'apply-defaults': 'user-approved defaults', 'changes-only': 'user-approved listed changes only', declined: 'user declined' }[answer.mode];
@@ -2955,7 +2956,7 @@ async function answerStrongDefaultBank(args, current, options = {}) {
     }
     if (!answer) {
       for (const spec of open) assignChoice(args, spec.key, spec.recommended);
-      console.log('Every setting already has a value, so setup asked nothing and keeps them all as they are.');
+      console.log(nothingToAsk(specs).sentence.replace('so setup asks nothing', 'so setup asked nothing'));
     }
   } else if (open.length) {
     if (isTTY) {
