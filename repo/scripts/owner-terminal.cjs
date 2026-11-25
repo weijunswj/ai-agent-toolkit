@@ -38,6 +38,7 @@ const childProcess = require('node:child_process');
 const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
 
 // Set (non-empty) in shells that a coding agent starts: each app's exact markers, plus the generic AI_AGENT.
+// Hooks of every harness load this file, so an app's other marks live in agent-shell-markers.cjs.
 const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT']);
 const QUIET_MS = 400;
 const WIDTH = 80;
@@ -58,8 +59,8 @@ function colour({ stream = process.stdout, environment = process.env } = {}) {
 const paint = (on, code, text) => (on ? `\x1b[${code}m${text}\x1b[0m` : text);
 
 // The reason an Enter prompt is not shown, or null: an agent's shell, or no terminal on both ends.
-function refusal({ environment = process.env, tty = { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) } } = {}) {
-  const marker = AGENT_MARKERS.find(name => Boolean(environment[name]));
+function refusal({ environment = process.env, tty = { stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }, markers = AGENT_MARKERS } = {}) {
+  const marker = markers.find(name => Boolean(environment[name]));
   if (marker) return { stopped: `this shell was started by a coding agent (${marker}), and agents never answer the owner's prompts.`, next: 'the owner runs this in their own PowerShell or terminal, outside any agent. Nothing changed.' };
   if (!tty.stdin || !tty.stdout) return { stopped: 'this needs your own terminal (no pipe or file).', next: 'run it in your own PowerShell or terminal. Nothing changed.' };
   return null;

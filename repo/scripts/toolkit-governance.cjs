@@ -8,6 +8,7 @@ const path = require('node:path');
 const { detectAgentHost } = require('./agent-host-markers.cjs');
 const readline = require('node:readline');
 const ownerTerminal = require('./owner-terminal.cjs');
+const { AGENT_SHELL_MARKERS } = require('./agent-shell-markers.cjs');
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -939,13 +940,15 @@ class ToolkitGovernanceCli {
   }
 
   // The owner's no from the bank or their own terminal: recorded for one run of its own, then the one off
-  // route. Governance already off on the default branch is said once, with nothing written.
-  #prepareOff({ json = false, failures = this.#stdout } = {}) {
+  // route. Governance already off on the default branch is said once, with nothing written; `heading` says
+  // on stderr what is about to be turned off, only where something is.
+  #prepareOff({ json = false, failures = this.#stdout, heading = '' } = {}) {
     const before = this.#state();
     if (before.merged?.fresh && before.rule === 'M2') {
       this.#print(json, { state: before.state, writes: 0 }, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
       return 0;
     }
+    if (heading) this.#stderr.write(`${heading}\n`);
     const sessionId = 'owner-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     return this.#turnOff(json, this.#proposals.request(this.#cwd, 'no', { sessionId, epoch }).run, failures);
   }
@@ -970,9 +973,10 @@ class ToolkitGovernanceCli {
 
   // Why an answer typed here would not be the owner's: a coding agent started this shell (the marker is
   // named), or null. Every terminal route that takes the owner's answer asks it first (#decide, #bank);
-  // the Enter prompts (migrate) ask the same in owner-terminal.cjs.
+  // migrate's Enter reads only owner-terminal.cjs's own list, which has no mark of a Terminal panel tab
+  // (agent-shell-markers.cjs says why an agent still cannot answer it there).
   #agentShell() {
-    return ownerTerminal.refusal({ environment: this.#environment, tty: { stdin: true, stdout: true } });
+    return ownerTerminal.refusal({ environment: this.#environment, tty: { stdin: true, stdout: true }, markers: AGENT_SHELL_MARKERS });
   }
 
   async #decide(command, json) {
@@ -991,8 +995,8 @@ class ToolkitGovernanceCli {
     if (command === 'enable') return this.#bank(json, null, null);
     // No in the owner's own terminal is the answer itself, as the card's No is: no second Enter, and the
     // same off pull request through the same route (#turnOff).
-    this.#stderr.write(`${ownerTerminal.facts([['Turns off', 'repository governance, on every computer'], ['Applies', 'only after the owner merges the pull request']])}\n`);
-    return this.#prepareOff({ json, failures: this.#stderr });
+    const heading = ownerTerminal.facts([['Turns off', 'repository governance, on every computer'], ['Applies', 'only after the owner merges the pull request']]);
+    return this.#prepareOff({ json, failures: this.#stderr, heading });
   }
 }
 
