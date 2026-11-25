@@ -1764,6 +1764,105 @@
       "status": "pass"
     },
     {
+      "id": "GOV.owed-check-pr-unowned-blocks",
+      "source": "turn-end owed check: an open pull request no task owns (PR_UNOWNED), new for 4 hours or more, stops the controller once",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "hostile",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "PR_UNOWNED",
+            "state": "new",
+            "age_hours": 5,
+            "issue": 1261
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-pr-unowned-under-4h-silent",
+      "source": "turn-end owed check: the same finding under 4 hours old stops nothing",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "benign",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "PR_UNOWNED",
+            "state": "new",
+            "age_hours": 3,
+            "issue": 1261
+          }
+        ]
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
       "id": "GOV.owed-check-desktop-top-level-blocks",
       "source": "the turn-end owed check in a top-level desktop chat of the controller: the host-session variable and CLAUDE_CODE_CHILD_SESSION do not decide whether the turn is stopped",
       "hosts": [

@@ -82,7 +82,7 @@ test('fix1 H2: 520 historic unlinked merges seed without findings; a later merge
 test('fix1 M1: reconcile apply holds all three acknowledged refresh-owned findings',()=>{
   const f=fixture([2,3]); f.run(); f.close(2);
   f.store.mutate('child',3,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'RETIRED'})});
-  pr(f,20); f.run();
+  pr(f,20,{createdAt:new Date(epoch).toISOString()}); f.run();
   const codes=['CLOSED_WITHOUT_ACCEPTANCE','CHILD_STATE_CONFLICT','PR_WITHOUT_TASK'];
   assert.deepEqual(openCodes(f),codes.slice().sort());
   for(const entry of f.parent().attention.filter(e=>codes.includes(e.code))) {
@@ -94,7 +94,8 @@ test('fix1 M1: reconcile apply holds all three acknowledged refresh-owned findin
   f.run(); assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)),before);
   assert.doesNotMatch(state.attentionLine(f.parent().attention,new Date(epoch+25*3600000).toISOString()),/waiting on you/);
   // Past the promised time the acknowledgement no longer silences them: new again, and waiting at once.
-  assert.match(state.attentionLine(f.parent().attention,new Date(epoch+73*3600000).toISOString()),/3 waiting on you/);
+  // PR 20 names no task, so from 24 hours open it is PR_UNOWNED too: the fourth one waiting.
+  assert.match(state.attentionLine(f.parent().attention,new Date(epoch+73*3600000).toISOString()),/4 waiting on you/);
   f.time(epoch+73*3600000); f.run();
   assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)).map(e=>e.state),['new','new','new']);
 });

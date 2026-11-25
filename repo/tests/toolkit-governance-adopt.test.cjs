@@ -276,7 +276,7 @@ test('parallel CI shards are a Toolkit default by CI time, not a question: slow 
   const slow = { minutes: 25, workflow: 'CI' };
   const ctx = withTests();
   const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(shown.out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\. The turn-on pull request also adds a first shard list and the shard workflows, because the last green CI run took 10 minutes or more\. To skip them, add shards=not-now or shards=never to your reply\.$/m);
+  assert.match(shown.out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\. The turn-on pull request also adds a first shard list and the shard workflows, because the last green CI run took 10 minutes or more; the split is then refreshed once a day\. To skip them, add shards=not-now or shards=never to your reply\.$/m);
   assert.doesNotMatch(shown.out, /\| Parallel CI shards \|/, 'never a question');
   const github = fakeGitHub();
   const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], estimate: slow });

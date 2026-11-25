@@ -469,14 +469,37 @@ function formatQueue(result) {
 
 // The tasks waiting on the owner (state.ownerWaits), from the children's documents as they stand
 // now; nothing is stored. A child that cannot be read makes the list unknown, never short.
-function ownerWaitsOf(context, parentDoc) {
+function ownerWaitsOf(parentDoc, docs) {
+  return docs.map ? { owner_waits: state.ownerWaits(parentDoc, docs.map) } : { owner_waits: null, owner_waits_unknown: docs.unknown };
+}
+
+// Every child document from one snapshot, as `map`, or `unknown` with the code of the read that failed.
+function childDocsOf(context, parentDoc) {
   try {
     const snapshot = context.store.readSnapshot();
-    const children = new Map(parentDoc.outcomes.map(outcome => [outcome.issue, context.store.snapshotDoc(snapshot, 'child', outcome.issue).doc]));
-    return { owner_waits: state.ownerWaits(parentDoc, children) };
+    return { map: new Map(parentDoc.outcomes.map(outcome => [outcome.issue, context.store.snapshotDoc(snapshot, 'child', outcome.issue).doc])), unknown: null };
   } catch (error) {
     if (!error.code) throw error;
-    return { owner_waits: null, owner_waits_unknown: error.code };
+    return { map: null, unknown: error.code };
+  }
+}
+
+// Every open pull request with its owner and next step, read live and never stored: the repository's
+// open list, the evidence store's, and the check results of those no task owns. An open list or a child
+// document that cannot be read makes the whole list unknown, never a short one; a store or check read
+// that failed is named beside it.
+function openPrsOf(context, parentDoc, docs, deps) {
+  if (!docs.map) return { open_prs: null, open_prs_unknown: docs.unknown };
+  try {
+    const reader = new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository });
+    const open = reader.graphPullRequests('open', () => {});
+    const now = nowText(deps);
+    const facts = state.readOpenPrFacts({ reader, binding: context.binding, parent: parentDoc, docs: docs.map, open, now });
+    return { open_prs: state.openPrRows({ open, storeOpen: facts.store || [], parent: parentDoc, docs: docs.map, checks: facts.checks, now }),
+      ...(facts.store_unread ? { open_prs_store_unread: facts.store_unread } : {}), ...(facts.checks_unread ? { open_prs_checks_unread: facts.checks_unread } : {}) };
+  } catch (error) {
+    if (!error.code) throw error;
+    return { open_prs: null, open_prs_unknown: error.code };
   }
 }
 
@@ -844,7 +867,8 @@ const commands = {
       ...(entry.diagnostics ? { diagnostics: entry.diagnostics } : {}) }));
     // The stale-work net's callout: net findings unanswered for 4 hours (new that long, or past due).
     const callout = state.netCallout(parentDoc.attention, nowText(deps));
-    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open, callout: { count: callout.count, entries: callout.entries }, ...ownerWaitsOf(context, parentDoc) };
+    const docs = childDocsOf(context, parentDoc);
+    return { repository: context.repository, parent_issue: parentDoc.parent_issue, read_at: nowText(deps), ...storedAttention(parentDoc, deps), findings: open, callout: { count: callout.count, entries: callout.entries }, ...ownerWaitsOf(parentDoc, docs), ...openPrsOf(context, parentDoc, docs, deps) };
   },
 
   // The documents in the private store, moved to the public state branch. The dry run writes nothing;
@@ -1202,7 +1226,7 @@ function formatReport(report) {
     `Repository ${report.repository}, parent #${report.parent_issue}; state store ${report.store.repository} ${report.store.branch} ${report.store.path} (parent revision ${report.parent_revision ?? 'none'})`,
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
-  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${state.kindText(finding)} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
+  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${state.refText(finding)}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
   if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
@@ -1310,6 +1334,27 @@ function attentionCommand(args, deps, out) {
   }
 }
 
+// Outside text (a title, a job name, a stored next step) as one plain line of at most `limit` characters.
+function plainLine(text, limit) {
+  const line = String(text ?? '').replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+  return line.length > limit ? `${line.slice(0, limit - 3)}...` : line;
+}
+
+function formatOpenPrs(result) {
+  if (!result.open_prs) return result.open_prs_unknown ? [`Open PRs: unknown (${result.open_prs_unknown})`, ''] : [];
+  const now = Date.parse(result.read_at);
+  const lines = result.open_prs.map(row => {
+    const hours = Math.floor((now - Date.parse(row.opened_at)) / (60 * 60 * 1000));
+    const age = !Number.isFinite(hours) ? 'open time unread' : `open ${hours < 48 ? `${Math.max(0, hours)} h` : `${Math.floor(hours / 24)} d`}`;
+    return `- ${[`${row.where === 'store' ? `store PR ${row.number}` : `PR #${row.number}`} "${plainLine(row.title, 60)}"`, row.draft ? 'draft' : null, age,
+      `owner ${row.owner}${row.due ? ` until ${row.due}` : ''}`, row.owner === 'none' ? row.next : `next: ${plainLine(row.next || 'not recorded', 120)}`,
+      row.failing.length ? `failing: ${row.failing.map(name => plainLine(name, 60)).join(', ')}` : null].filter(Boolean).join(', ')}`;
+  });
+  return [`Open PRs (${result.open_prs.length})`, ...lines,
+    ...(result.open_prs_store_unread ? [`store pull requests not read (${result.open_prs_store_unread})`] : []),
+    ...(result.open_prs_checks_unread ? [`check results not read (${result.open_prs_checks_unread})`] : []), ''];
+}
+
 function formatAttention(result) {
   const lines = [result.text];
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
@@ -1325,8 +1370,9 @@ function formatAttention(result) {
   if (result.owner_waits) lines.push(...(queue.length ? [] : ['']), `Owner waits (${result.owner_waits.length})`, ...result.owner_waits.map(wait => `- ${[`#${wait.issue} ${wait.ask}${wait.after ? ` after ${wait.after}` : ''}`,
     wait.pr ? `PR #${wait.pr}` : null, wait.head ? wait.head.slice(0, 7) : null].filter(Boolean).join(' · ')}`), '');
   else if (result.owner_waits_unknown) lines.push(...(queue.length ? [] : ['']), `Owner waits: unknown (${result.owner_waits_unknown})`, '');
+  lines.push(...formatOpenPrs(result));
   for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
-    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${state.kindText(entry)}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${state.refText(entry)}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
     if (entry.code === 'CLOSE_DUE') lines.push(`  Session: ${entry.session ? `${entry.host} ${entry.session}` : `${entry.host || 'host not recorded'}, no session ID recorded: find it by the assignment ID or title`}`);
     if (entry.due) lines.push(`  ${entry.overdue ? 'OVERDUE: the step promised by' : 'Promised by'} ${entry.due}${entry.promised ? `: ${entry.promised}` : ''}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));

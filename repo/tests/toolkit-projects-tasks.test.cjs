@@ -1202,16 +1202,19 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
       'its owner (the thread that owns or watches it', 'or the merge train holding it', 'its live next step',
       // Step 2 is skipped on quiet runs, so owners come from step 2b's list_threads read, which always runs.
       'that step 2b reads on every run, quiet runs included', 'under `GITHUB STEPS OWED` pages list_threads itself',
-      'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
+      'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "',
+      // Where governance is on, the sweep is the one definition of an unowned pull request.
+      'Where governance is ENABLED this step works out none: the unowned PRs are the sweep\'s `PR_UNOWNED` and `PR_RED_UNOWNED` findings, which step 5b lists under `PROGRAMME FINDINGS`']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
     assert.ok(text.includes('plus steps 2a, 2b, 4, 4a, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
     const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
     assert.ok(none.includes('5. PRs: none (no repo).') && !none.includes('every open PR on'), `${session}: no-repo nudge has no PR sweep`);
   }
   const checkIn = rendered('daily-check-in').split('\n').find(line => line.startsWith('11. TOOL STEP (GitHub): GitHub'));
   for (const phrase of ["and the project's evidence store", 'no thread owns or watches', 'no merge train holds',
-    'bot and workflow PRs included', 'the reason `unowned`']) assert.ok(checkIn.includes(phrase), phrase);
+    'bot and workflow PRs included', 'the reason `unowned`',
+    'where governance is ENABLED this step works out none, because the unowned PRs are the sweep\'s `PR_UNOWNED` and `PR_RED_UNOWNED` findings']) assert.ok(checkIn.includes(phrase), phrase);
   const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
-  for (const phrase of ['- `PR UNOWNED`: every open PR needs an owner and a live next step', 'to the merge train',
+  for (const phrase of ['- `PR UNOWNED`: every open PR needs an owner and a live next step', 'Where governance is ENABLED no run lists it: the sweep\'s `PR_UNOWNED` and `PR_RED_UNOWNED` findings do, under `PROGRAMME FINDINGS`', 'to the merge train',
     "after the owner's OK (an evidence-store PR needs none: the store is agent-managed with standing permission, so merge or close it yourself)", 'the same PR listed again on the next run goes to the owner',
     'an `unowned` PR is routed as for `PR UNOWNED`']) assert.ok(acting.includes(phrase), phrase);
 });

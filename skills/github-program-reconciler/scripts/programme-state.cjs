@@ -403,7 +403,7 @@ const FINDING_ID = /^[0-9a-f]{12}$/;
 const ATTENTION_KEEP = 200;
 const ATTENTION_LIMIT = 500;
 // Codes whose finding speaks for one PR head; a new head is a new finding.
-const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED', 'OWNER_OK_CLOSE']);
+const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED', 'OWNER_OK_CLOSE', 'PR_RED_UNOWNED']);
 // A row may also carry, for the stale-work net (one lifecycle for every check of work left undone):
 //   net: true          a stale-work net member: one unanswered for NET_CALLOUT_HOURS is called out to the
 //                      controller (netCallout); every work-queue code is a member too;
@@ -467,6 +467,10 @@ const FINDING_CODES = Object.freeze({
   ROWS_UNTICKED: { source: 'reconcile', net: true, next_action: 'Controller: a PR on this task merged, but none of its DONE WHEN or ROWS checkbox rows is ticked: tick each row a merged PR delivered, so the done-when read counts them' },
   // One per finished gate assignment (kind = its assignment ID) whose host session is still open.
   CLOSE_DUE: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 72, next_action: 'Controller: check the gate\'s report is in the evidence store, archive its session with its host\'s archive action (HOST-CONTRACT 10; never your own session), then run gate-session --issue <n> --assignment <id> --closed; or acknowledge it with why it stays open' },
+  // An open pull request no task in progress owns (openPrRows); the issue slot holds its number, and
+  // kind `store` marks one in the evidence store. One of the two per pull request: red wins over age.
+  PR_UNOWNED: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 24, next_action: 'Controller: today, land this open pull request (a train, or the owner\'s merge), hand it to the task that acts on it (its `Refs` line, or update --patch), or close it with a closing comment on the owner\'s OK (an evidence-store one needs no OK); else ack with the next step, at most 24 hours ahead' },
+  PR_RED_UNOWNED: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 24, next_action: 'Controller: read the failing job attention names under Open PRs (gh pr checks <n>) and put its cause in the ack, then fix it or rerun every job of that run, never `--failed`' },
   // inventory source: open issues and registered parents.
   NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
   CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', net: true, next_action: 'Controller: reopen the parent, or move or close its open descendants' },
@@ -496,10 +500,18 @@ const NET_CALLOUT_HOURS = 4;
 // tasks are left alone, so turning the check on does not flag every old task at once.
 const NEAREST_WINDOW_DAYS = 7;
 // Codes whose finding ID also carries a kind: a closing finding's pr or issue, a close-due
-// finding's assignment ID.
-const KIND_CODES = new Set(['CLOSING_COMMENT_MISSING', 'CLOSE_DUE']);
-// How a finding's kind reads in a line of text.
-const kindText = entry => (entry.kind === 'pr' ? ' PR' : entry.kind === 'issue' ? ' issue' : entry.kind ? ` ${entry.kind}` : '');
+// finding's assignment ID, an unowned pull request's `store`.
+const KIND_CODES = new Set(['CLOSING_COMMENT_MISSING', 'CLOSE_DUE', 'PR_UNOWNED']);
+// The open-pull-request findings, and the age from which an unowned one is raised.
+const OPEN_PR_CODES = new Set(['PR_UNOWNED', 'PR_RED_UNOWNED']);
+const PR_UNOWNED_HOURS = 24;
+// How a finding's kind and number read after its code in a line of text. A store pull request has no
+// `#`, so its number never links to a task here.
+function refText(entry) {
+  if (OPEN_PR_CODES.has(entry.code)) return entry.kind === 'store' ? ` store PR ${entry.issue}` : ` PR #${entry.issue}`;
+  const kind = entry.kind === 'pr' ? ' PR' : entry.kind === 'issue' ? ' issue' : entry.kind ? ` ${entry.kind}` : '';
+  return `${kind}${entry.issue ? ` #${entry.issue}` : ''}`;
+}
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
@@ -695,8 +707,9 @@ function validateAttention(errors, attention) {
     check(errors, FINDING_STATES.includes(entry.state), `${at}.state must be ${FINDING_STATES.join(', ')}`);
     for (const field of ['first_seen', 'changed_at']) check(errors, isText(entry[field]) && !Number.isNaN(Date.parse(entry[field])), `${at}.${field} must be a date and time`);
     check(errors, entry.code === 'CLOSING_COMMENT_MISSING' ? ['pr','issue'].includes(entry.kind)
-      : entry.code === 'CLOSE_DUE' ? ASSIGNMENT_ID.test(String(entry.kind ?? '')) : entry.kind === undefined,
-    `${at}.kind belongs to a closing finding (pr or issue) or a close-due finding (its assignment ID)`);
+      : entry.code === 'CLOSE_DUE' ? ASSIGNMENT_ID.test(String(entry.kind ?? ''))
+        : entry.kind === undefined || (entry.code === 'PR_UNOWNED' && entry.kind === 'store'),
+    `${at}.kind belongs to a closing finding (pr or issue), a close-due finding (its assignment ID) or an unowned pull request in the evidence store (store)`);
     check(errors, entry.due === undefined || (isText(entry.due) && !Number.isNaN(Date.parse(entry.due))), `${at}.due must be a date and time`);
     check(errors, FINDING_ID.test(String(entry.id)) && entry.id === findingId(entry.source, entry.code, entry.issue, entry.head, entry.kind), `${at}.id must be the finding's own id`);
     check(errors, !ids.has(entry.id), `${at}.id is repeated`);
@@ -910,7 +923,7 @@ function netCallout(findings, now) {
     const overdue = ackOverdue(entry, time);
     const since = overdue ? ackDue(entry) : Date.parse(entry.changed_at);
     if (!Number.isFinite(since) || (!overdue && (entry.state !== 'new' || time - since < NET_CALLOUT_HOURS * HOUR_MS))) continue;
-    entries.push({ id: entry.id, ref: isInt(entry.issue, 1) ? `#${entry.issue}` : '-', code: entry.code, state: overdue ? 'overdue' : 'new', hours: Math.max(0, Math.floor((time - since) / HOUR_MS)), since });
+    entries.push({ id: entry.id, ref: !isInt(entry.issue, 1) ? '-' : OPEN_PR_CODES.has(entry.code) ? refText(entry).trim() : `#${entry.issue}`, code: entry.code, state: overdue ? 'overdue' : 'new', hours: Math.max(0, Math.floor((time - since) / HOUR_MS)), since });
   }
   entries.sort((a, b) => a.since - b.since || String(a.id).localeCompare(String(b.id)));
   const out = entries.map(({ since, ...rest }) => rest);
@@ -956,7 +969,7 @@ function findingText(entry) {
     return `ARCHIVE_COMMENT_UNTRUSTED #${entry.issue}: a comment holding archived notes is ${entry.diagnostics.reason === 'missing' ? 'missing' : 'no longer as written'}; the notes are in the private store at page-copies/issue-${entry.issue}/${entry.diagnostics.copy}.md. Put them back on the page under \`## Archive\` for a fresh comment, or dispose of this finding`;
   }
   const next = FINDING_CODES[entry.code]?.next_action || '';
-  return `${entry.code}${kindText(entry)}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${entry.issue ? next.replace('issue-<n>', `issue-${entry.issue}`) : next}`;
+  return `${entry.code}${refText(entry)}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${entry.issue ? next.replace('issue-<n>', `issue-${entry.issue}`) : next}`;
 }
 
 // A digest of the open findings and their states, to tell when the set changed.
@@ -4956,11 +4969,24 @@ class ProgrammeGraphReader {
         // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
         // is descending by updated_at, so nothing after this row can be newer than the cutoff.
         if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
-        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, head_repo:pr.head?.repo?.full_name || null, updated_at:pr.updated_at || null, closed_at:pr.closed_at || pr.merged_at || null});
+        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, head_repo:pr.head?.repo?.full_name || null, created_at:pr.created_at || null, draft:pr.draft === true, updated_at:pr.updated_at || null, closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `The programme PR scan reached ${LIST_PAGE_GUARD} full pages.`);
+  }
+
+  // The open pull requests of the evidence store: what openPrRows reads of them, never a body.
+  storePullRequests(repository) {
+    const all = [];
+    for (let page = 1; page <= LIST_PAGE_GUARD; page += 1) {
+      const response = this.transport.request('GET', `repos/${repository}/pulls?state=open&per_page=100&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, 'Listing the evidence store\'s open pull requests');
+      if (!Array.isArray(response.json) || response.json.some(pr => !isInt(pr?.number, 1))) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The evidence store\'s pull request list was not readable.');
+      all.push(...response.json.map(pr => ({ number: pr.number, title: String(pr.title || ''), draft: pr.draft === true, created_at: pr.created_at || null })));
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `The evidence store's pull request list reached ${LIST_PAGE_GUARD} full pages.`);
   }
 
   // At most twenty aliases, each with two issue connections of 100. A connection that has more pages
@@ -5448,6 +5474,75 @@ function withoutCarriers(items) {
 }
 const excludedGraphPr = pr => Boolean(pr && (GRAPH_BOTS.has(pr.author) || pr.branch?.startsWith(GRAPH_GENERATED_BRANCH_PREFIX)));
 
+// The names whose deciding result at the head failed, required or not, each once. A failed row a newer
+// run replaced is not a failing job (checkResults).
+function failingJobs(contexts) {
+  return [...new Set(contexts.map(contextName))].filter(name => name && checkResults(contexts.filter(context => contextName(context) === name)).includes('failed')).sort();
+}
+
+// What openPrRows needs beyond the open list, read once for a refresh pass or for `attention`: the
+// evidence store's open pull requests (none when the binding names no separate GitHub store) and the
+// check facts of the pull requests no task owns, twenty to a request. A read that fails leaves its
+// part unread with the error's code, which holds or says so, and never reads as none.
+function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
+  const facts = { store: [], store_unread: null, checks: new Map(), checks_unread: null };
+  const attempt = (read, failed) => {
+    try { read(); }
+    catch (error) { if (!error.code || error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; failed(error.code); }
+  };
+  const store = binding.store;
+  if (store?.kind === 'github' && store.repository.toLowerCase() !== binding.repository.toLowerCase()) {
+    attempt(() => { facts.store = reader.storePullRequests(store.repository); }, code => { facts.store = null; facts.store_unread = code; });
+  }
+  const unowned = openPrRows({ open, parent, docs, now }).filter(row => !row.task).map(row => row.number);
+  if (unowned.length) {
+    attempt(() => {
+      for (const [number, pr] of reader.pullRequests(unowned)) {
+        const { state, at_head } = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: binding.required_checks });
+        facts.checks.set(number, { state, head: at_head, failing: state === 'RED' ? failingJobs(pr.contexts) : [] });
+      }
+    }, code => { facts.checks_unread = code; });
+  }
+  return facts;
+}
+
+// One row per open pull request, with the owner the records name and the finding owed, if any. Pure.
+// Owner, first match: a task in progress that the pull request claims (referencedIssues: its own Refs,
+// Closes and the like, or its PATH block) or that tracks it, a claimed task no document shows yet
+// included; the controller, while the finding below is acknowledged and not past due; else none. A bare
+// mention, a task's free-text next action and a queued task own nothing: each has let a pull request
+// hang. Finding (`code`), only where no task owns it: red at its head, else open PR_UNOWNED_HOURS or
+// more (an unread open time counts as old). Check results not known keep a red finding already open at
+// that head. The evidence store has no tasks and no checks, so its rows go by age alone. No pull request
+// class (bot, train, draft, stacked, dependency) has a rule of its own.
+function openPrRows({ open = [], storeOpen = [], parent, docs, checks = new Map(), now }) {
+  const time = Date.parse(now);
+  const claims = referencedIssues(open);
+  const findings = new Map(openFindings(parent.attention).map(entry => [entry.id, entry]));
+  const row = (where, pr) => {
+    const tasks = where === 'store' ? [] : parent.outcomes.filter(outcome => docs.get(outcome.issue)?.pr?.number === pr.number || claims.get(outcome.issue)?.includes(pr.number));
+    const task = tasks.find(outcome => statusText(outcome, docs.get(outcome.issue)) === 'IN PROGRESS')
+      || tasks.find(outcome => !docs.get(outcome.issue) && !isFinished(outcome, null)) || null;
+    const facts = where === 'store' || task ? null : checks.get(pr.number) || null;
+    const head = facts?.head || pr.head_sha || null;
+    const known = Boolean(facts) && facts.state !== 'UNKNOWN';
+    const idOf = code => findingId('reconcile', code, pr.number, code === 'PR_RED_UNOWNED' ? head : null, where === 'store' ? 'store' : null);
+    const red = where === 'repo' && !task && (known ? facts.state === 'RED' : findings.has(idOf('PR_RED_UNOWNED')));
+    const opened = Date.parse(pr.created_at || '');
+    const old = !Number.isFinite(opened) || time - opened >= PR_UNOWNED_HOURS * HOUR_MS;
+    const code = task ? null : red ? 'PR_RED_UNOWNED' : old ? 'PR_UNOWNED' : null;
+    const finding = code ? findings.get(idOf(code)) || null : null;
+    const acked = finding?.state === 'acknowledged' && !ackOverdue(finding, time);
+    return { where, number: pr.number, title: pr.title || '', draft: pr.draft === true, opened_at: pr.created_at || null,
+      task: task?.issue ?? null, owner: task ? `#${task.issue}` : acked ? 'controller' : 'none',
+      next: task ? docs.get(task.issue)?.next_action ?? 'not read yet' : acked ? parent.private?.attention_notes?.[finding.id] ?? null
+        : finding ? `flagged ${finding.id}` : code ? 'flagged by the next sweep' : `flagged after ${new Date(opened + PR_UNOWNED_HOURS * HOUR_MS).toISOString()}`,
+      ...(acked ? { due: finding.due ?? null } : {}),
+      red, failing: facts?.failing || [], code, head: code === 'PR_RED_UNOWNED' ? head : null };
+  };
+  return [...open.map(pr => row('repo', pr)), ...storeOpen.map(pr => row('store', pr))];
+}
+
 function graphPr(pr, repository) {
   const repo = pr.repository?.nameWithOwner || pr.base?.repo?.full_name;
   if (!isInt(pr.number,1) || repo?.toLowerCase() !== repository.toLowerCase()) return null;
@@ -5730,9 +5825,10 @@ class Reconciler {
       if (!prPages.has(number)) prPages.set(number, this.reader.issue(number));
     }
     const closing = sweep ? sweep.closing : this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
+    const openPrs = sweep ? sweep.openPrs : this.refreshFacts && !only ? this.openPrFacts(parent, children, prGraph) : null;
     if (closing && !sweep) this.pass.planning();
     this.pass.phaseAt('planning');
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, prUpdated, discovery, additions, prGraph, closing,
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, prUpdated, discovery, additions, prGraph, closing, openPrs,
       ...(sweep ? { sweep: { ...sweep.result, scoped } } : {}) };
   }
 
@@ -5804,6 +5900,7 @@ class Reconciler {
     this.sweepOrder = order;
     const discussion = this.discussion(parent.parent_issue, issues.get(parent.parent_issue), cache);
     const graph = this.listGraph(parent, outcomes);
+    const openPrs = this.openPrFacts(parent, children, graph);
     const closing = this.closing.scan(parent, graph, this.now, excludedGraphPr);
     this.pass.planning();
     this.pass.phaseAt('planning');
@@ -5847,10 +5944,17 @@ class Reconciler {
       }
     }
     const left = order.filter(number => !read.includes(number) && !failed.includes(number));
-    return { lists, graph, closing, read, prCache, ...primed,
+    return { lists, graph, openPrs, closing, read, prCache, ...primed,
       counts: { reused: all.length - read.length, reread: read.filter(number => !urgent.has(number)).length },
       result: { order, read, failed, left, changedComplete: changed.complete, changedCursor: changed.complete ? null : changed.cursor || null,
         why: Object.fromEntries(['intents', 'gates', 'unverified', 'changed', 'drifted', 'checks', 'queued'].map((name, at) => [name, reasons[at].length])) } };
+  }
+
+  // The open-pull-request facts of a refresh pass, read against the stored documents: the store's list,
+  // and the checks of the pull requests no task owns (none when the open list was not read in full).
+  openPrFacts(parent, children, graph) {
+    const docs = new Map([...children].map(([number, entry]) => [number, entry.doc]));
+    return readOpenPrFacts({ reader: this.reader, binding: this.binding, parent, docs, open: graph.openComplete ? graph.openListed : [], now: this.now() });
   }
 
   // The PR lists and every task's links, for the queued pass's discovery. The per-task reads of the
@@ -6276,6 +6380,27 @@ class Reconciler {
       if (merged.length && !ticks.ticked && ticks.unticked) {
         findings.push({ code: 'ROWS_UNTICKED', issue: outcome.issue, detail: `PR ${merged.map(number => `#${number}`).join(', ')} merged, but none of its ${ticks.unticked} DONE WHEN or ROWS checkbox row(s) is ticked` });
       }
+    }
+  }
+
+  // PR_UNOWNED and PR_RED_UNOWNED, decided on this pass's own documents (openPrRows). Only a refresh
+  // pass of the whole programme reads the open pull requests, so any other holds both codes as they
+  // stand; so does an open list not read in full (the repository's) or a store that could not be read
+  // (the store's). Report only: nothing here reruns, closes, merges or comments on a pull request.
+  diffOpenPrs(parent, docs, observed, findings) {
+    const facts = observed.openPrs;
+    const openRead = Boolean(facts) && observed.prGraph.openComplete;
+    const storeRead = Boolean(facts) && facts.store !== null;
+    this.openPrHolds = (parent.attention || []).filter(entry => OPEN_PR_CODES.has(entry.code) && !(entry.kind === 'store' ? storeRead : openRead)).map(entry => entry.id);
+    if (!facts) return;
+    const now = this.now();
+    for (const row of openPrRows({ open: openRead ? observed.prGraph.openListed : [], storeOpen: facts.store || [], parent, docs, checks: facts.checks, now })) {
+      if (!row.code) continue;
+      // No title: the report is printed in the sweep's log, and a store's titles are private.
+      findings.push({ code: row.code, issue: row.number, ...(row.where === 'store' ? { kind: 'store' } : {}), ...(row.head ? { head: row.head } : {}),
+        detail: row.code === 'PR_RED_UNOWNED'
+          ? `red at ${shortSha(row.head)}${row.failing.length ? ` (failing: ${row.failing.join(', ')})` : ''}, and no task in progress owns it`
+          : `open ${row.opened_at ? `since ${row.opened_at}` : 'at an unread time'}, and no task in progress owns it` });
     }
   }
 
@@ -7103,11 +7228,13 @@ class Reconciler {
     // Only a sweep pass can tell that the sweep is no longer stuck.
     const sweepStuckHolds = sweep ? [] : openFindings(parent.attention).filter(entry => entry.code === 'SWEEP_STUCK').map(entry => entry.id);
     const tasks = new Set(parent.outcomes.map(outcome => outcome.issue));
-    const unread = !this.scope ? [] : (parent.attention || []).filter(entry => tasks.has(entry.issue) ? !this.scope.has(entry.issue)
-      : sweep && (!sweep.changedComplete || sweep.left.length || sweep.failed.length)).map(entry => entry.id);
+    // Open-pull-request findings are left out: their issue slot is a pull request, decided from the open
+    // list and the stored documents, never from a task's own read (diffOpenPrs holds what it could not read).
+    const unread = !this.scope ? [] : (parent.attention || []).filter(entry => !OPEN_PR_CODES.has(entry.code) && (tasks.has(entry.issue) ? !this.scope.has(entry.issue)
+      : sweep && (!sweep.changedComplete || sweep.left.length || sweep.failed.length))).map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...unread, ...(this.closeDueHolds || []), ...(observed.prGraph?.holdWithoutTask || []),
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...unread, ...(this.closeDueHolds || []), ...(this.openPrHolds || []), ...(observed.prGraph?.holdWithoutTask || []),
         ...(parent.attention || []).filter(entry=>entry.code==='CLOSING_COMMENT_MISSING' && !observed.closing?.checked.has(`${entry.kind}:${entry.issue}`)).map(entry=>entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
@@ -7270,6 +7397,7 @@ class Reconciler {
     this.diffIdle(parent, desiredDocs, observed, only, findings);
     this.diffAgentUat(parent, desiredDocs, observed, only, findings);
     this.diffStaleNet(parent, desiredDocs, observed, only, findings);
+    this.diffOpenPrs(parent, desiredDocs, observed, findings);
     this.diffCloseDue(parent, desiredDocs, observed, only, findings);
     if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
@@ -8469,7 +8597,7 @@ class Reconciler {
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
       : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
         : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply --controller to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
-        : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
+        : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on${OPEN_PR_CODES.has(attention[0].code) ? refText(attention[0]) : ` #${attention[0].issue}`}`
           : 'None: the state documents and GitHub agree';
     if (typeof this.store.stateBranch === 'function') report.state_branch = this.store.stateBranch();
     // What a queued pass leaves for the next one.
@@ -8533,7 +8661,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, stampChild, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue, NET_CODES, NET_CALLOUT_HOURS, NEAREST_WINDOW_DAYS, netCallout, GATE_SESSION_HOSTS, GATE_SESSIONS_LIMIT, recordGateSession, closeDueOf, closeDueSessions, KIND_CODES, kindText,
+  SAFE_LIMIT, PAGE_BUDGETS, pageBudgetFinding, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, KEPT_OPEN_IDLE_HOURS, stampChild, PR_STALE_HOURS, BLOCKED_SKIP_DAYS, WORK_QUEUE_CODES, workQueue, NET_CODES, NET_CALLOUT_HOURS, NEAREST_WINDOW_DAYS, netCallout, GATE_SESSION_HOSTS, GATE_SESSIONS_LIMIT, recordGateSession, closeDueOf, closeDueSessions, KIND_CODES, refText, OPEN_PR_CODES, openPrRows, readOpenPrFacts,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });

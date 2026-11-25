@@ -56,6 +56,9 @@ const script = () => managedScript('toolkit-governance.cjs');
 // in this order, with how to change them said once.
 const BOUND = 'Bound in the merged programme file';
 const BOUND_ORDER = Object.freeze(['evidence-store', 'parent-issue', 'required-checks', 'merge-train', 'ci-shards']);
+// How a shard split stays current. The shards row has no number to explain, so this joins the governance
+// row's explain text where shards are on, as the App's removal steps do.
+const SHARDS_REFRESH = '**Parallel CI shards, daily refresh:** once a day Shard Timings measures the tests and, when the shards have drifted, opens one pull request with the new split (this needs the governance App). Nothing changes until it is merged, and the programme flags it after 24 hours with no owner.';
 const BOUND_CHANGE = 'To change them, edit that file in a pull request and merge it.';
 // Where governance is decided the bank has one section and builds the GitHub governance question
 // first, so it is always row 1.1 (a test pins it).
@@ -165,14 +168,16 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   // only (estimateShort), so a CI run that finishes between showing the bank and answering it changes
   // the bank reference only when it crosses the threshold.
   const answered = merged?.ci_shards?.answer;
+  let shardsOn = false;
   const pending = ciShards?.open?.[0];
   const where = turnsOn ? 'The turn-on pull request also adds a first shard list and the shard workflows'
     : governed ? 'Your answer also prepares one binding pull request with a first shard list; it applies only after you merge it'
       : 'If your answer turns governance on, its pull request also adds a first shard list and the shard workflows';
   if (governed && (answered === 'yes' || answered === 'never')) {
+    shardsOn = answered === 'yes';
     specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
       text: answered === 'yes' ? `${BOUND}; the next rules refresh copies the shard workflows while the shard list is usable` : `${BOUND}; Toolkit does not ask again`,
-      bound: answered === 'yes' ? 'parallel CI shards yes' : 'parallel CI shards never (not asked again)' }));
+      bound: answered === 'yes' ? `parallel CI shards yes (refreshed once a day: explain ${GOVERNANCE_REF})` : 'parallel CI shards never (not asked again)' }));
   } else if (pending) {
     // An answer already waits in its own pull request: that one is merged or closed, never a second.
     specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Pull request #${pending.number} open`,
@@ -181,11 +186,14 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Already in your CI (${ciShards.existing})` }));
   } else if (ciShards && (governed || turnsOn || state.state === 'DISABLED')) {
     const slow = Number.isFinite(ciShards.measured?.minutes) && ciShards.measured.minutes >= SLOW_CI_MINUTES;
+    shardsOn = slow;
     specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: slow ? 'Yes (Toolkit default)' : 'Not now (Toolkit default)',
-      text: slow ? `${where}, because the last green CI run took ${SLOW_CI_MINUTES} minutes or more` : `CI is under ${SLOW_CI_MINUTES} minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh`,
+      text: slow ? `${where}, because the last green CI run took ${SLOW_CI_MINUTES} minutes or more; the split is then refreshed once a day` : `CI is under ${SLOW_CI_MINUTES} minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh`,
       change: slow ? 'To skip them, add shards=not-now or shards=never to your reply' : 'To add them anyway, add shards=yes to your reply; shards=never stops the check' }),
     shards_default: slow ? 'yes' : 'not-now', estimateShort: estimateShort(ciShards.measured) });
   }
+  const governanceRow = specs.find(spec => spec.id === 'governance' && !spec.report_only);
+  if (shardsOn && governanceRow) governanceRow.explain_more = [...(governanceRow.explain_more || []), SHARDS_REFRESH];
   if (adoption && adoption.blocked) {
     // The search's own reason is for the logs, not the owner: an answer makes nothing until it works.
     specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Not checked yet', text: 'GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing. Type toolkit governance again in a moment' }));

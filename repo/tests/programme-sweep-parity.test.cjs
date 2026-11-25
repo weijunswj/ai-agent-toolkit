@@ -45,6 +45,8 @@ function fixture() {
   github.issuePrLinks.set(503, { timeline: [950] });
   github.addPr(951, { head: 'd'.repeat(40), body: 'An open change for nothing in the catalogue' });
   github.addIssue(990, { body: 'Not placed anywhere' });
+  // An unowned pull request in the evidence store, old enough to be a finding.
+  github.storePulls.push({ number: 952, title: 'A store pull request', draft: false, created_at: '2026-11-10T00:00:00Z' });
   Object.assign(github.addIssue(991, { state: 'closed' }), { closed_at: BETWEEN, updated_at: BETWEEN, state_reason: 'completed' });
   return { github, store, binding, full };
 }
@@ -80,6 +82,7 @@ test('parity: a queued pass on a parent without a queue applies what the full re
     'C1 inventory': [true, true],
     'C14 closing scan': [['DONE'], ['#950', '#991']],
     'C15 PR graph': [true, ['DONE']],
+    'C18 open pull requests': ['PR_UNOWNED PR #951', 'PR_UNOWNED store PR 952'],
   };
   const rows = [
     ['C1 inventory', (report, f) => [report.inventory.complete, attention(f).includes('NEEDS_PLACEMENT #990')]],
@@ -93,6 +96,7 @@ test('parity: a queued pass on a parent without a queue applies what the full re
     ['C14 closing scan', report => [report.results.filter(result => result.kind === 'advance_closing_scan').map(result => result.outcome),
       report.findings.filter(finding => finding.code === 'CLOSING_COMMENT_MISSING').map(finding => `#${finding.issue}`).sort()]],
     ['C15 PR graph', report => [report.findings.some(finding => finding.code === 'PR_WITHOUT_TASK' && finding.issue === 951), report.results.filter(result => result.kind === 'advance_pr_watermark').map(result => result.outcome)]],
+    ['C18 open pull requests', report => report.findings.filter(finding => state.OPEN_PR_CODES?.has(finding.code)).map(finding => `${finding.code}${state.refText(finding)}`).sort()],
     ['C17 findings', report => report.findings.map(finding => finding.code).sort()],
   ];
   for (const [name, pick] of rows) {
