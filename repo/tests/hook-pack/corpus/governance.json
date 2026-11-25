@@ -3988,7 +3988,7 @@
       "expect": {
         "decision": "allow",
         "context_contains": [
-          "With more than one gate session running, start one background watch on GitHub for this one's own result once it is at work"
+          "With more than one gate session running, ask for a wake on this one once it is at work"
         ]
       },
       "status": "pass"

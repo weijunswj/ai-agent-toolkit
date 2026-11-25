@@ -1,7 +1,7 @@
 ### Added
 
 - **How to ask the owner, in the Claude desktop app:** each session start (startup, resume, clear, compact) ends with one line for the agent, in every folder and whatever the governance state: the context, options and pick go in the closing message and the question card follows on the next turn, because the app cuts text written before a card in the same turn. It stands over the agent's own notes, no card is refused and Toolkit's merge card keeps its own text. The terminal, the IDE extensions, cloud sessions and Codex do not get it.
-- **Woken for each finished gate:** the note after a gate launch (Claude Code) says to watch GitHub for each running gate session's own result, since the app continues a chat only once none of the sessions it started is working.
+- **Woken for each finished gate:** the note after a gate launch (Claude Code) says how to be woken for each running gate session's own result (the host's idle notice by the session's listed name, or a GitHub watch), since the app continues a chat only once none of the sessions it started is working.
 
 ### Fixed
 
