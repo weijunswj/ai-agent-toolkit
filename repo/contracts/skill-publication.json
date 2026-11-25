@@ -114,11 +114,5 @@
       "reason": "Runs local dev servers on any Windows computer; Windows is a platform, not an app."
     }
   },
-  "baseline": [
-    {
-      "skill": "n8n-safety-router",
-      "term": "Toolkit",
-      "count": 1
-    }
-  ]
+  "baseline": []
 }
