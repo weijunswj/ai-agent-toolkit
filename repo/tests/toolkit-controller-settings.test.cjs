@@ -212,7 +212,7 @@ test('the settings reader is default-deny: unknown keys, types, characters and f
   const change = good.changes[0];
   for (const [name, value] of [
     ['extra key', { ...good, lanes: 2 }],
-    ['prototype key', JSON.parse(JSON.stringify(good).replace('{', '{"__proto__":{},'))],
+    ['prototype key', JSON.parse(`{"__proto__":{},${JSON.stringify(good).slice(1)}`)],
     ['other schema', { ...good, schema: 'toolkit.controller-settings.v2' }],
     ['lanes as text', { ...good, live_lanes: '2' }],
     ['lanes zero', { ...good, live_lanes: 0 }],
