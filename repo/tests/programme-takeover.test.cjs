@@ -80,7 +80,6 @@ test('3b the dry run writes nothing, needs no --controller, and prints the recor
   assert.deepEqual([dry.result.governance.state, dry.result.account.login, dry.result.account.permission, dry.result.parent.epoch, dry.result.parent.next_epoch, dry.result.stop.proven, dry.result.holds],
     ['ENABLED', 'owner', 'push', 1, 2, true, []]);
   assert.equal(dry.result.stop.last_write.source, 'state commits');
-  assert.equal(dry.result.versions, null, 'the version block is not built here');
   const line = dry.result.record.line;
   assert.equal(fx.takeover().result.record.line, line, 'the apply posts the line the dry run printed');
   // Its text form says the same, with nothing in it addressed to another session.

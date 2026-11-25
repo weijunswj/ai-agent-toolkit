@@ -24,6 +24,8 @@
 // read shows that another claim left its epoch, or after a later claim of this name is confirmed.
 //
 // The number of requests is fixed: no task document is read, however many tasks there are.
+const fs = require('node:fs');
+const path = require('node:path');
 const state = require('./programme-state.cjs');
 const { isArchiveComment } = require('./decision-tags.cjs');
 const { INDEX_COMMENT_MARKER } = require('./decision-trace-audit.cjs');
@@ -116,7 +118,19 @@ function takeoverInput(args) {
   const surface = recordText('--surface', args.surface);
   if (surface.includes(';')) throw usage('--surface may not hold a semicolon: the record separates its parts with them.');
   const ownerStop = args['owner-stop'] === undefined ? null : recordText('--owner-stop', args['owner-stop']).replace(/"/g, '\'');
-  return { session: args.session, surface, next: recordText('--next', args.next).replace(/[.;]+$/, ''), ownerStop };
+  return { session: args.session, surface, next: recordText('--next', args.next).replace(/[.;]+$/, ''), ownerStop, chat: chatCopy(args['session-copy']) };
+}
+
+// The version of the Toolkit copy this chat loaded, read from its folder; null when the chat does not
+// know it, so it is never guessed from the copy that runs.
+function chatCopy(folder) {
+  if (folder === undefined) return null;
+  const { SEMVER, VERSION_REL_PATH } = require('../../../repo/scripts/toolkit-version.cjs');
+  const json = file => { try { return JSON.parse(fs.readFileSync(path.join(folder, ...file.split('/')), 'utf8')); } catch { return null; } };
+  const version = json(VERSION_REL_PATH)?.version;
+  const named = ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json'].some(file => json(file)?.name === 'ai-agent-toolkit');
+  if (!named || !SEMVER.test(version || '')) throw usage('--session-copy takes the folder of the Toolkit copy this chat loaded (the one that holds its skills folder), and this is not one. Leave it out when the chat does not show it. Nothing was read or written.');
+  return { version };
 }
 
 // ---- the record line ------------------------------------------------------------------------
@@ -199,13 +213,86 @@ class SentClaim {
   describe() { return this.accepted() ? `GitHub accepted it as commit ${short(this.accepted())}` : `GitHub gave no answer that says whether it landed (${this.open.at(-1).why})`; }
 }
 
+// ---- the Toolkit versions -------------------------------------------------------------------
+
+const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const PLAIN_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
+
+// What was read of one GitHub file or variable: { status, json }, where 0 means no answer.
+function readOnce(get, path) {
+  try {
+    const { status, json } = get(path);
+    return { status, json };
+  } catch (error) {
+    if (!error.code) throw error;
+    return { status: 0, json: null };
+  }
+}
+const unread = status => (status ? `HTTP ${status}` : 'no answer');
+const fileText = answer => (answer.status === 200 && answer.json?.encoding === 'base64' ? Buffer.from(String(answer.json.content), 'base64').toString('utf8') : null);
+
+// What this repository's cloud sweep runs: its copy of the sweep workflow on the default branch, judged as
+// the governance check judges it, and the variable that can pin it. A fact, never a hold.
+function sweepOf(get, repository, branch, main) {
+  const workflows = require('../../../repo/scripts/toolkit-cloud-workflows.cjs');
+  if (same(repository, workflows.TOOLKIT_REPOSITORY)) return { state: 'own', text: 'runs this repository\'s own commit' };
+  const [{ id, file }] = workflows.WORKFLOWS;
+  const answer = readOnce(get, `repos/${repository}/contents/${file}?ref=${encodeURIComponent(branch)}`);
+  const text = fileText(answer);
+  if (text === null && answer.status !== 404) return { state: 'unread', text: `not read (${unread(answer.status)})` };
+  // The copy that runs holds the same workflow file, so no checkout is needed to judge the repository's one.
+  const source = fs.readFileSync(path.join(TOOLKIT_ROOT, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n');
+  const copy = workflows.copyState(text, workflows.render(id, source, '0'.repeat(40), null));
+  if (copy.state === 'missing') return { state: 'missing', text: 'none in this repository' };
+  if (copy.state === 'unmanaged') return { state: 'unmanaged', text: 'not a Toolkit copy' };
+  if (copy.state === 'edited') return { state: 'edited', text: 'a copy edited by hand' };
+  if (copy.state === 'outdated') return { state: 'outdated', text: `an outdated copy (Toolkit ${short(copy.toolkit)})` };
+  const variable = readOnce(get, `repos/${repository}/actions/variables/TOOLKIT_REF`);
+  if (![200, 404].includes(variable.status)) return { state: 'current', text: `follows main unless a TOOLKIT_REF variable pins it (not read: ${unread(variable.status)})` };
+  const pin = variable.status === 200 ? String(variable.json?.value ?? '') : '';
+  if (pin === '' || pin === 'main') return { state: 'current', text: 'follows main' };
+  if (!PLAIN_REF.test(pin)) return { state: 'pinned', text: 'pinned by the TOOLKIT_REF variable at a value that is not a plain ref' };
+  return { state: 'pinned', text: `pinned at ${/^[0-9a-f]{40}$/.test(pin) ? short(pin) : pin} by the TOOLKIT_REF variable`, ...(pin === main ? {} : { pin }) };
+}
+
+// The Toolkit copies behind a takeover and the one refresh to do, in one line: the copy this chat loaded
+// (`chat`, null when not given), the copy that runs this, Toolkit main at commit `main`, and the sweep.
+// `repository` is null where governance keeps it shut.
+function versionsOf({ get, main, chat = null, repository = null, branch = 'main', git = undefined }) {
+  const { TOOLKIT_VERSION, SEMVER, VERSION_REL_PATH, compareVersions } = require('../../../repo/scripts/toolkit-version.cjs');
+  const { TOOLKIT_REPOSITORY } = require('../../../repo/scripts/toolkit-cloud-workflows-render.cjs');
+  let mainVersion = null;
+  if (main) {
+    try { mainVersion = JSON.parse(fileText(readOnce(get, `repos/${TOOLKIT_REPOSITORY}/contents/${VERSION_REL_PATH}?ref=${main}`))).version; } catch { /* not read */ }
+    if (!SEMVER.test(mainVersion || '')) mainVersion = null;
+  }
+  const byVersion = version => (mainVersion === null ? 'not compared' : compareVersions(version, mainVersion) < 0 ? 'behind' : 'current');
+  const checkout = main ? require('../../../repo/scripts/toolkit-controller-check.cjs').toolkitCheckout(TOOLKIT_ROOT, main, git) : null;
+  const ran = { version: TOOLKIT_VERSION, commit: checkout?.commit ?? null, state: !main ? 'not compared' : checkout ? (checkout.behind ? 'behind' : 'current') : byVersion(TOOLKIT_VERSION) };
+  const loaded = chat ? { version: chat.version, state: byVersion(chat.version) } : null;
+  const { pin, ...sweep } = repository ? sweepOf(get, repository, branch, main) : { state: 'unread', text: 'not read here' };
+  const script = name => require('../../../repo/scripts/toolkit-user-state.cjs').managedScript(name).replace(/\\/g, '/');
+  const notCompared = [...(ran.state === 'not compared' ? ['the copy that ran'] : []), ...(loaded?.state === 'not compared' ? ['this chat\'s copy'] : []),
+    ...(repository && sweep.state === 'unread' ? ['the sweep'] : []), ...(sweep.text.includes('(not read: ') ? ['the sweep\'s pin'] : [])];
+  const pinnedAt = pin || (sweep.state === 'pinned' && !sweep.text.startsWith('pinned at ') ? 'a value that is not a plain ref' : null);
+  const refresh = ran.state === 'behind' ? `run ${checkout?.command || `node "${script('toolkit-local-bridge.cjs')}" --repo-update-now --write`}, then reread CONTROLLER.md and the global rules`
+    : loaded?.state === 'behind' ? 'say `refresh toolkit`, then go on in a fresh chat'
+      : sweep.state === 'outdated' ? `run node "${script('toolkit-cloud-workflows.cjs')}" --repo <target checkout> --refresh-pr`
+        : ['edited', 'unmanaged', 'missing'].includes(sweep.state) ? 'refresh the repository rules (say `refresh governance`)'
+          : pinnedAt ? `ask the owner whether the TOOLKIT_REF variable still pins ${repository} at ${pinnedAt}`
+            : notCompared.length ? `none (not compared: ${notCompared.join(', ')})` : 'none';
+  const at = commit => (commit ? ` (${short(commit)})` : '');
+  return { line: `versions: this chat ${loaded ? loaded.version : 'not given'}, ran ${ran.version}${at(ran.commit)}, Toolkit main ${mainVersion || 'not read'}${at(main)}, sweep ${sweep.text}; refresh: ${refresh}`,
+    refresh, chat: loaded, ran, main: { version: mainVersion, commit: main }, sweep };
+}
+
 // ---- one takeover ---------------------------------------------------------------------------
 
 class TakeoverRun {
-  // `versions` is called once for the report; it returns null or { line, ... } to show beside it.
-  // `attention` is called with the parent document and returns the attention line to report.
-  constructor({ store, transport, binding, repository, writer, input, now = () => new Date().toISOString(), versions = () => null, attention = () => null }) {
-    Object.assign(this, { store, transport, binding, repository, writer, input, now, versions, attention });
+  // `git` reads the copy this runs from (the host's own git when not given). `attention` is called with
+  // the parent document and returns the attention line to report.
+  constructor({ store, transport, binding, repository, writer, input, now = () => new Date().toISOString(), git = undefined, attention = () => null }) {
+    Object.assign(this, { store, transport, binding, repository, writer, input, now, git, attention });
     this.parent = binding.parent_issue;
     this.prefix = binding.writer_prefix;
     this.githubMs = null;
@@ -395,8 +482,10 @@ class TakeoverRun {
     const access = repo.json?.permissions || {};
     const permission = access.admin ? 'admin' : access.maintain ? 'maintain' : access.push ? 'push' : 'read';
     const branch = repo.json?.default_branch || 'main';
-    const facts = { login, permission, branch, holds, stop: null, oldName: null, fence: null, attention: null, appointment: false,
-      toolkit: readToolkit(path => this.get(path)), sweep: this.sweep(branch), versions: this.versions() };
+    const get = path => this.get(path);
+    const toolkit = readToolkit(get);
+    const facts = { login, permission, branch, holds, stop: null, oldName: null, fence: null, attention: null, appointment: false, toolkit, sweep: this.sweep(branch),
+      versions: versionsOf({ get, main: toolkit.main, chat: this.input.chat, repository: this.repository, branch, git: this.git }) };
     if (this.writer.prefix !== this.prefix) hold('ROLE_REFUSED', `A lane controller (${this.writer.prefix}) never holds the parent document.`);
     if (!login || permission === 'read') {
       hold('ACCOUNT_MISMATCH', login ? `The signed-in account ${login} cannot write to ${this.repository}, so it cannot take over as controller. Sign in with the repository's own account.` : 'The signed-in GitHub account could not be read.');
@@ -749,7 +838,7 @@ class TakeoverRun {
     const handover = require('./programme-handover.cjs').handoverUrl(this.binding.store, this.parent);
     return [`Takeover done: ${this.writer.session} holds #${this.parent} at epoch ${result.parent.epoch} (was ${facts.fence.epoch}${facts.oldName ? `, ${facts.oldName}` : ''})`,
       `record ${result.record.record_id} ${result.record.url}`, `Toolkit main ${short(facts.toolkit.main)}, Controller blob ${short(facts.toolkit.controller_blob)}`,
-      ...(facts.versions?.line ? [facts.versions.line] : []), `sweep: ${facts.sweep.status}`, `handover file ${handover}`, `next: ${this.input.next}`].join('; ') + '.';
+      facts.versions.line, `latest sweep run: ${facts.sweep.status}`, `handover file ${handover}`, `next: ${this.input.next}`].join('; ') + '.';
   }
 }
 
@@ -784,20 +873,21 @@ function openTakeover(args, deps, openContext) {
 }
 
 // A dry run without a programme to read: what can still be said, and the line for the evidence store.
-function closedReport({ closed, input, transport }) {
+function closedReport({ closed, input, transport }, git) {
   const store = closed.code === 'STORE_UNREACHABLE';
-  const toolkit = readToolkit(path => transport.request('GET', path));
+  const get = path => transport.request('GET', path);
+  const toolkit = readToolkit(get);
   const old = input.ownerStop ? `old writer stopped: the owner said "${input.ownerStop}"` : 'old writer: not read (no programme state)';
   const line = toolkit.controller_blob ? recordLine({ input, toolkit, old }) : null;
   const holds = [{ code: closed.code, detail: closed.message }, ...(line ? [] : [{ code: 'TOOLKIT_UNREADABLE', detail: `Toolkit main or its CONTROLLER.md could not be read (${toolkit.reason}).` }])];
   return { schema: SCHEMA, mode: 'dry-run', ready: false, repository: null, governance: { state: store ? 'ENABLED' : closed.details?.governance || 'UNREADABLE' }, account: null,
-    toolkit: { main: toolkit.main, controller_blob: toolkit.controller_blob }, versions: null, sweep: null, attention: null, parent: null, stop: null,
+    toolkit: { main: toolkit.main, controller_blob: toolkit.controller_blob }, versions: versionsOf({ get, main: toolkit.main, chat: input.chat, git }), sweep: null, attention: null, parent: null, stop: null,
     record: line && !store ? { line, ready: false, carrier: 'evidence store' } : null, holds, done_line: null };
 }
 
-function takeover(args, context, { attention } = {}) {
-  if (context.closed) return closedReport(context);
-  const run = new TakeoverRun({ store: context.store, transport: context.transport, binding: context.binding, repository: context.repository, writer: context.writer, input: context.input, now: context.now, attention });
+function takeover(args, context, { attention, git } = {}) {
+  if (context.closed) return closedReport(context, git);
+  const run = new TakeoverRun({ store: context.store, transport: context.transport, binding: context.binding, repository: context.repository, writer: context.writer, input: context.input, now: context.now, git, attention });
   return args.apply ? run.apply() : run.dryRun();
 }
 
@@ -808,8 +898,8 @@ function formatTakeover(result) {
     `Governance: ${result.governance.state}`,
     ...(result.account ? [`Account: ${result.account.login || 'not read'} (${result.account.permission})`] : []),
     `Toolkit main ${result.toolkit.main || 'not read'}; CONTROLLER.md blob ${result.toolkit.controller_blob || 'not read'}`,
-    ...(result.versions?.line ? [result.versions.line] : []),
-    ...(result.sweep ? [`Cloud sweep: ${result.sweep.status}${result.sweep.url ? ` (${result.sweep.url})` : ''}`] : []),
+    `Versions: ${result.versions.line.slice('versions: '.length)}`,
+    ...(result.sweep ? [`Latest sweep run: ${result.sweep.status}${result.sweep.url ? ` (${result.sweep.url})` : ''}`] : []),
     ...(parent?.epoch === null || !parent ? [] : [`Parent #${parent.issue}: epoch ${parent.epoch}, ${parent.held ? `held by ${parent.holder || `a ${parent.holder_prefix} controller no earlier record names`}` : 'held by nobody'}; a takeover makes it epoch ${parent.next_epoch}`]),
     ...(stop?.last_write ? [`Old controller's last own write: ${stop.last_write.what} at ${stop.last_write.at} (${stop.last_write.url})`] : []),
     ...(stop ? [`Stop: ${stop.proven ? `proven (${stop.by === 'owner' ? 'the owner\'s words' : 'quiet for 10 minutes'})` : `not proven yet${stop.quiet_at ? `; quiet for 10 minutes at ${stop.quiet_at}` : ''}`}`] : []),
@@ -818,4 +908,4 @@ function formatTakeover(result) {
   return `${lines.join('\n')}\n`;
 }
 
-module.exports = Object.freeze({ SCHEMA, QUIET_MS, TakeoverRun, takeoverInput, recordLine, parseRecord, claimStanding, nextName, openTakeover, takeover, formatTakeover });
+module.exports = Object.freeze({ SCHEMA, QUIET_MS, TakeoverRun, takeoverInput, versionsOf, recordLine, parseRecord, claimStanding, nextName, openTakeover, takeover, formatTakeover });
