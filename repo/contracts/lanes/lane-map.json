@@ -10,7 +10,6 @@
       "repo/scripts/toolkit-claude-agent-hook.cjs",
       "repo/scripts/toolkit-claude-agent-route.cjs",
       "repo/scripts/toolkit-claude-attribution-hook.cjs",
-      "repo/scripts/toolkit-claude-card-check.cjs",
       "repo/scripts/toolkit-claude-env-edit-hook.cjs",
       "repo/scripts/toolkit-claude-gate-launch-hook.cjs",
       "repo/scripts/toolkit-claude-helper-agents.cjs",

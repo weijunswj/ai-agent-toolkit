@@ -3,6 +3,7 @@ const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot
 
 const pending = (ctx, repo, sessionId = 's1') => gate.sessionLine(repo, { registryOptions: ctx.options, sessionId });
 const record = (ctx, ticket, word) => new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).answerTicket(ticket, word);
+const ownerReply = prompt => gate.ownerMessage(prompt).text;
 const asksIn = result => result.action === 'pass' && result.context.includes(QUESTION_LINE);
 
 // Split to keep the per-file time budget.
@@ -132,11 +133,11 @@ test('a reply sent from a Claude Projects thread answers like a typed one; relay
   assert.doesNotMatch(pending(ctx, other), /is pending/);
   assert.equal(stateOf(ctx, other).state, 'UNDECIDED');
   // The reader on its own: bare text is the reply, entities are decoded, and nothing else wrapped is.
-  assert.equal(gate.ownerReply('no'), 'no');
-  assert.equal(gate.ownerReply(wake('Not now')), 'Not now');
-  assert.equal(gate.ownerReply(wake('a &amp; b &lt;c&gt;')), 'a & b <c>');
-  assert.equal(gate.ownerReply(relay), relay, 'a relay is read as it is, and is not an answer');
-  for (const prompt of notOwn.slice(1, 13)) assert.equal(gate.ownerReply(prompt), '', prompt);
+  assert.equal(ownerReply('no'), 'no');
+  assert.equal(ownerReply(wake('Not now')), 'Not now');
+  assert.equal(ownerReply(wake('a &amp; b &lt;c&gt;')), 'a & b <c>');
+  assert.equal(ownerReply(relay), relay, 'a relay is read as it is, and is not an answer');
+  for (const prompt of notOwn.slice(1, 13)) assert.equal(ownerReply(prompt), '', prompt);
 });
 
 test('the shared Projects reader exposes provenance without treating decoded markup as merge authority', () => {
@@ -164,21 +165,21 @@ test('the shared Projects reader exposes provenance without treating decoded mar
 
 test('real Projects envelopes: a system note and attachments never break the reader, and are never the answer', () => {
   for (const reply of ['no', 'Yes.', 'later', 'toolkit governance disable']) {
-    assert.equal(gate.ownerReply(REAL_THREAD_WAKE(reply)), reply);
-    assert.equal(gate.ownerReply(REAL_CHAT_WAKE(reply)), reply);
+    assert.equal(ownerReply(REAL_THREAD_WAKE(reply)), reply);
+    assert.equal(ownerReply(REAL_CHAT_WAKE(reply)), reply);
   }
-  assert.equal(gate.ownerReply(REAL_THREAD_WAKE('no for both')), 'no for both', 'read as sent; it is not an answer word');
+  assert.equal(ownerReply(REAL_THREAD_WAKE('no for both')), 'no for both', 'read as sent; it is not an answer word');
   // Two notes, and a note with attributes, are set aside too.
-  assert.equal(gate.ownerReply(REAL_THREAD_WAKE('no').replace('</wake>', '  <system-note kind="hint">second</system-note>\n</wake>')), 'no');
+  assert.equal(ownerReply(REAL_THREAD_WAKE('no').replace('</wake>', '  <system-note kind="hint">second</system-note>\n</wake>')), 'no');
   // An attachment-only message (file or image, as the trigger) is no answer.
   for (const attachment of [FILE_ATTACHMENT, IMAGE_ATTACHMENT]) {
     const only = `<wake reason="mention" current-time="2026-10-23T07:54:03Z">\n  <project id="chan_example" type="project">\n    ${ATTACHMENT_MESSAGE('true', attachment)}\n  </project>\n</wake>`;
-    assert.equal(gate.ownerReply(only), '', attachment);
+    assert.equal(ownerReply(only), '', attachment);
     // The same message as context beside the real reply does not stop that reply being read.
     const beside = REAL_THREAD_WAKE('no').replace('<message trigger="true"', `${ATTACHMENT_MESSAGE('false', attachment)}\n      <message trigger="true"`);
-    assert.equal(gate.ownerReply(beside), 'no', attachment);
+    assert.equal(ownerReply(beside), 'no', attachment);
     // Text next to an attachment is not a typed reply either.
-    assert.equal(gate.ownerReply(REAL_CHAT_WAKE(`no ${attachment}`)), '', attachment);
+    assert.equal(ownerReply(REAL_CHAT_WAKE(`no ${attachment}`)), '', attachment);
   }
   // Still refused: a note inside the frame, a note holding markup, markup a note does not explain.
   const refused = [
@@ -190,10 +191,10 @@ test('real Projects envelopes: a system note and attachments never break the rea
     REAL_THREAD_WAKE(`no<attachment kind="image"><b>x</b></attachment>`),
     REAL_THREAD_WAKE('no').replace('</system-note>', '</system-note>\nno'),
   ];
-  for (const prompt of refused) assert.equal(gate.ownerReply(prompt), '', prompt);
+  for (const prompt of refused) assert.equal(ownerReply(prompt), '', prompt);
   // A long run of spaces before a broken note stays fast.
   const started = Date.now();
-  gate.ownerReply(REAL_THREAD_WAKE('no').replace('<system-note>', `${' '.repeat(200000)}<system-note x>`));
+  ownerReply(REAL_THREAD_WAKE('no').replace('<system-note>', `${' '.repeat(200000)}<system-note x>`));
   assert.ok(Date.now() - started < 1000);
 });
 

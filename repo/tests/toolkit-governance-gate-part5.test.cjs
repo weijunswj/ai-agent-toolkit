@@ -183,7 +183,7 @@ test('reply tickets: only the exact answer command runs; one per question, half-
     assert.equal(toolGate(stateReader ? { stateReader } : {}).decide({ tool_name: 'Bash', cwd: parent, session_id: 'mixed', tool_input: { command } }), null, command);
   }
   // The reader: a trigger marked as carrying attachments is no answer even with no attachment inside.
-  assert.equal(gate.ownerReply(REAL_CHAT_WAKE('no').replace('mention="true">', 'mention="true" has-attachments="true">')), '');
+  assert.equal(gate.ownerMessage(REAL_CHAT_WAKE('no').replace('mention="true">', 'mention="true" has-attachments="true">')).text, '');
   // The ticket text tells the agent that only the user answers.
   const told = asked('told', 'told');
   assert.ok(say('told', 'hmm, no', told).context.includes(gate.NEVER_OWNER));
