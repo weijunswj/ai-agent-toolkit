@@ -245,15 +245,18 @@ test('a default branch other than main: the turn-on carries the guard and depend
   assert.deepEqual(carried.notes, ['The cloud sweep and its gate are left out: the default branch is trunk; the cloud sweep runs only on a main branch.']);
 });
 
-test('a link in a default workflow\'s place is never written through', { skip: process.platform === 'win32' && 'links need a Windows setting' }, t => {
+test('a link in a default workflow\'s place is never written through', t => {
   const dir = repository(t);
-  const outside = path.join(dir, 'outside.yml');
-  fs.writeFileSync(outside, 'mine\n');
-  fs.mkdirSync(path.join(dir, '.github', 'workflows'), { recursive: true });
-  fs.symlinkSync(outside, path.join(dir, CHECK));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'default-cloud-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, '.github'), { recursive: true });
+  // A junction needs no special right on Windows; elsewhere the type is ignored.
+  fs.symlinkSync(outside, path.join(dir, '.github', 'scripts'), 'junction');
   workflows.apply(plan(dir));
-  assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n');
-  assert.equal(fs.existsSync(path.join(dir, SCRIPT)), false);
+  assert.deepEqual(fs.readdirSync(outside), []);
+  for (const file of [CHECK, SWEEP, CONFIG]) assert.equal(fs.existsSync(path.join(dir, file)), false, `${file} is not added around it`);
+  assert.equal(fs.existsSync(path.join(dir, AUTO_MERGE)), true, 'the rest is still installed');
+  assert.deepEqual(turnOn(dir).notes.length, 1);
 });
 
 test('owner choices: governance off reports no missing workflow and its pull request leaves the guard alone; shards on never are left out, not drift', t => {
