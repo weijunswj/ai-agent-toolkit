@@ -185,11 +185,10 @@ function storeProblem(plan) {
 }
 
 // The whole turn-on: { binding, made, lines }. The binding still goes through the one
-// governance pull request, which decides nothing until the owner merges it.
+// governance pull request, which decides nothing until the owner merges it. The caller refuses a plan
+// with a store problem (storeProblem) first, before anything is written, the shard list included.
 function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
   const made = [];
-  const problem = storeProblem(plan);
-  if (problem) throw new AdoptError(problem, made);
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
   try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; } catch (error) { error.made = made; throw error; }

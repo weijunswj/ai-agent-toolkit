@@ -102,7 +102,7 @@ test('the manifest asks for the App\'s one permission list, webhook off, install
 });
 
 test('agents and pipes are refused before anything is read', async t => {
-  for (const [label, options] of [['agent', { environment: { CLAUDECODE: '1' } }], ['codex', { environment: { CODEX_THREAD_ID: 'x' } }], ['pipe', { tty: { stdin: false, stdout: true } }]]) {
+  for (const [label, options] of [['agent', { environment: { CLAUDECODE: '1' } }], ['codex', { environment: { CODEX_THREAD_ID: 'x' } }], ['a tab Claude opened', { environment: { CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS: 'x' } }], ['pipe', { tty: { stdin: false, stdout: true } }]]) {
     const run = owner(t, options);
     assert.equal(await setup.main(['--repo', SLUG], run.deps), 1, label);
     assert.deepEqual(run.gh.calls, [], `${label}: gh is never called`);

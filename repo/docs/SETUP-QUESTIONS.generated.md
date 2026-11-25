@@ -254,13 +254,13 @@ Anything you do not list takes its recommendation.
 
 # Claude Code setup questions
 
-Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.
+Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet, in the Claude desktop app with its archive setting read as off (outside the app that row shows Not readable here and changes nothing). Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose in setup is remembered, so setup never turns it back on by default; an off you set only in the app itself looks the same as one never chosen, so the question says so for that row. `refresh toolkit` asks only when a row has no value yet.
 
-## Toolkit setup - 1 question: Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay.
+## Toolkit setup - 1 question: Apply Toolkit's defaults to the 7 Claude Code settings that have no value yet? Your own values and offs stay, except 3.6: it reads off in the app, setup cannot tell whether you turned it off there, and 3.6=off keeps it off.
 
-Bank reference: MM3A-XDQ4-26M2-3MFR
+Bank reference: 7YBE-EPGH-P1QA-AYYH
 
-Setup applies the Toolkit default to 6 settings not set yet and keeps every other setting as it is.
+Setup applies the Toolkit default to 7 settings not set yet and keeps every other setting as it is.
 
 ### 1. Updates and reports
 
@@ -285,9 +285,10 @@ Setup applies the Toolkit default to 6 settings not set yet and keeps every othe
 | 3.3 | Claude Code setting: Let other sessions wake this one? | Off (Claude Code default) | B. Turn on: Sets "crossSessionInbound": "accept" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
 | 3.4 | Claude Code setting: Switch models without asking on a flag? | On (Claude Code default) | A. Keep current | B. Turn off |
 | 3.5 | Claude Code setting: Read AGENTS.md (in all local repos) too? | Off (Claude Code default) | B. Turn on: Sets "instructionFiles": "claude-md-and-agents-md" in settings.json. (Toolkit default) | A. Keep current<br>C. Turn off |
-| 3.6 | Copy Toolkit's skills into Antigravity? | Not copied | B. Copy and keep updated: Copy Toolkit's skills into Antigravity and keep them current. (Toolkit default) | A. Keep current<br>C. Do not copy |
+| 3.6 | Claude desktop app setting: Archive sessions when their PR closes? | Off (not chosen in setup yet) | B. Turn on: Your agent asks the app to turn it on; setup changes nothing in the app itself. You approve it in the app's own approval card; in auto or bypass permissions mode the app may not show that card, so there your agent asks you about this one change first. (Toolkit default) | A. Keep current<br>C. Turn off |
+| 3.7 | Copy Toolkit's skills into Antigravity? | Not copied | B. Copy and keep updated: Copy Toolkit's skills into Antigravity and keep them current. (Toolkit default) | A. Keep current<br>C. Do not copy |
 
-Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay. Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
+Apply Toolkit's defaults to the 7 Claude Code settings that have no value yet? Your own values and offs stay, except 3.6: it reads off in the app, setup cannot tell whether you turned it off there, and 3.6=off keeps it off. Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.
 
 ## Claude Code rows in full
 
@@ -529,7 +530,33 @@ Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Y
 
 ---
 
-### 3.6 Copy Toolkit's skills into Antigravity?
+### 3.6 Claude desktop app setting: Archive sessions when their PR closes?
+
+**What this controls:** Whether the Claude desktop app archives a session once its pull request merges or closes. It is a setting of your account in the app, on every device. Setup cannot read or change it: an agent in the app reads it with the app's settings tool, and a change is made only there. You approve it in the app's own approval card; in auto or bypass permissions mode the app may not show that card, so there your agent asks you about this one change first. An archived session can be brought back.
+
+**Current:** Off, as an agent read it in the Claude desktop app; you have not chosen it in setup yet, and setup cannot tell whether you turned it off in the app.
+
+**Verification:** agent-read
+
+**Recommended:** B - Turn on
+
+**Recommended outcome:** Your agent asks the app to turn it on; setup changes nothing in the app itself. You approve it in the app's own approval card; in auto or bypass permissions mode the app may not show that card, so there your agent asks you about this one change first.
+
+**Why:** It keeps finished sessions out of the sidebar.
+
+**Choices:**
+
+- **A. Keep current** - Preserve this effective behavior: Off, as an agent read it in the Claude desktop app; you have not chosen it in setup yet, and setup cannot tell whether you turned it off in the app.
+- **B. Turn on** - Your agent asks the app to turn it on; setup changes nothing in the app itself. You approve it in the app's own approval card; in auto or bypass permissions mode the app may not show that card, so there your agent asks you about this one change first.
+- **C. Turn off** - The app already has it off. Setup remembers that you turned it off.
+
+**After applying:** Setup itself changes nothing in the app: a change is made there by your agent. You approve it in the app's own approval card; in auto or bypass permissions mode the app may not show that card, so there your agent asks you about this one change first.
+
+**Selected:** B - Turn on
+
+---
+
+### 3.7 Copy Toolkit's skills into Antigravity?
 
 **What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills), where each session start and each setup keep them current. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 

@@ -16,7 +16,7 @@
 // straight into the repository secret, then opens the App's install page and checks the
 // installation with the key. The key lives only in this process's memory: it is never printed,
 // written to disk or shown to an agent. Agents never run it:
-//   - it refuses in a shell a coding agent started (owner-terminal.cjs AGENT_MARKERS);
+//   - it refuses in a shell a coding agent started (agent-shell-markers.cjs);
 //   - it needs a terminal on stdin and stdout and a fresh Enter; a pipe, a file or a pasted blank
 //     line never answers.
 // It stops, changing nothing, when the repository already holds the App's variable or secret:
@@ -37,7 +37,7 @@ const app = require('./toolkit-governance-app.cjs');
 const ownerTerminal = require('./owner-terminal.cjs');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
-const { AGENT_MARKERS } = ownerTerminal;
+const { AGENT_SHELL_MARKERS } = require('./agent-shell-markers.cjs');
 const CLIENT_ID = /^[A-Za-z0-9._-]{1,100}$/;
 const SAVES = Object.freeze(['both', 'variable', 'secret']);
 const SLUG = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
@@ -210,7 +210,7 @@ async function setup(argv, deps = {}) {
   const look = { stream: deps.say ? null : process.stdout, environment };
   const options = parseArgs(argv);
   const { repo, store } = options;
-  const refused = ownerTerminal.refusal({ environment, tty: tty() });
+  const refused = ownerTerminal.refusal({ environment, tty: tty(), markers: AGENT_SHELL_MARKERS });
   if (refused) throw new SetupStop(refused.stopped, refused.next);
   const read = { reader: args => app.ghReader(args, { spawn }) };
   const owner = app.ownerType(repo, read);
