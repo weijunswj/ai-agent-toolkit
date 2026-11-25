@@ -8,9 +8,10 @@ Title: every cloud workflow by default, and a first look at what is already ther
 
 ### Changed
 
-- **The personal data guard never scans commit author, committer or tagger addresses:** the `identity` setting, and the installer's `--identity` and `--identity-reason`, are gone. A config that still holds the key is read without it.
+- **The personal data guard never scans commit author, committer or tagger addresses:** the `identity` setting, and the installer's `--identity` and `--identity-reason`, are gone. A config that still holds the key is read without it, and the refresh pull request that brings the new script takes the key out, keeping every other setting.
 - The guard's CI workflow copies have a managed header, and its installer brings an older copy up to date; a hand-edited one is kept.
 - A default branch other than main now leaves out only the sweep, its gate and the shard copies, with the reason, instead of every cloud workflow.
+- With governance off, the left-over files report also names the guard's marked workflows; like its script, they keep working and are the owner's choice to remove.
 - The turn-on no longer writes dependency auto-merge into the working tree; it travels in the pull request.
 
 ### Fixed
