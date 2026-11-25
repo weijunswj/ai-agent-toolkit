@@ -352,6 +352,25 @@ test('refresh PR: it stops, with the step, on a stale or changed checkout, a cop
   assert.equal(result.code, 2);
   assert.match(result.line, /branch toolkit\/refresh-cloud-workflows also changes src\/app\.js; land or remove that work first/);
   assert.deepEqual(github.writes(), []);
+  // Nor is someone's own file at a copied workflow's path, or guard settings this run would not carry on;
+  // a Toolkit copy there, edited by hand or not, is the refresh's to rewrite.
+  const installer = require(path.join(ROOT, 'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs'));
+  for (const [file, text, stops] of [
+    ['.github/workflows/personal-data-sweep.yml', 'name: ours\n', true],
+    ['.github/workflows/personal-data-guard.yml', 'name: ours\n', true],
+    ['.github/scripts/personal-data-guard.cjs', '// ours\n', true],
+    ['.github/workflows/dependency-auto-merge.yml', 'name: ours\n', true],
+    ['.github/personal-data-guard.json', '{"ours":true}\n', true],
+    ['.github/scripts/personal-data-guard.cjs', `${installer.vendoredText()}// a hand edit\n`, false],
+    ['.github/workflows/personal-data-guard.yml', installer.workflowText('personal-data-guard', 'name: an older check\n'), false],
+  ]) {
+    const held = new FakeGitHub(dir);
+    held.commits.set('d'.repeat(40), { tree: held.treeSha({ ...held.filesOf(base), [file]: text }), parents: [base] });
+    held.refs.set(BRANCH, 'd'.repeat(40));
+    const outcome = runRefresh(dir, held);
+    assert.equal(outcome.code, stops ? 2 : 0, `${file}: ${outcome.line}`);
+    if (stops) { assert.ok(outcome.line.includes(`also changes ${file}; land or remove that work first`), outcome.line); assert.deepEqual(held.writes(), [], file); }
+  }
 });
 
 test('refresh PR: a shallow Toolkit clone that cannot reach a copy\'s commit is told to fetch its history, not to update to main', t => {

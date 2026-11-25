@@ -10,7 +10,7 @@ const governance = require('./toolkit-governance-state.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
-const { BY_HAND } = require('./toolkit-first-sweep.cjs');
+const { BY_HAND } = require('./toolkit-governance-first-sweep.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
 const RECORD_SCHEMA = 'toolkit.governance-migration.v1';
 const RECORD_BASENAME = 'governance-migration.v1.json';
@@ -72,7 +72,7 @@ function slugFor(root) {
 class GovernanceMaintenance {
   #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #firstSweep; #now;
 
-  // `firstSweep` runs the first-install sweep (toolkit-first-sweep.cjs), or null where it cannot run here.
+  // `firstSweep` runs the first-install sweep (toolkit-governance-first-sweep.cjs), or null where it cannot run here.
   constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, firstSweep = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#confirm = confirm;

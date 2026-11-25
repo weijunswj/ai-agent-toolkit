@@ -112,14 +112,18 @@ function workflowState(text, name = WORKFLOWS[0], raw = fs.readFileSync(workflow
   return { state: 'outdated' };
 }
 
-// The config a repository without one gets. Every scope is on; the one allowed address is the public
-// one Dependabot signs its commit messages off with, so its pull requests pass.
+// What a new config lets through unread. Empty: an image or other file the guard cannot read fails a pull
+// request until the owner lists its path. Whether images pass by default is the owner's choice, and this
+// is the one place that would change it (for example { path: '**.png', reason: '...' }).
+const DEFAULT_NOT_SCANNED = Object.freeze([]);
+
+// The config a repository without one gets. Every scope is on and nothing is allowed.
 function configText(requiredCheck = 'none') {
   const config = {
     schema: CONFIG_SCHEMA,
     scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true },
-    allow: [{ value: ['support', 'github.com'].join('@'), reason: "Dependabot's public Signed-off-by address in its commit messages" }],
-    not_scanned: [],
+    allow: [],
+    not_scanned: [...DEFAULT_NOT_SCANNED],
     required_check: requiredCheck,
   };
   validateConfig(config, CONFIG_PATH);

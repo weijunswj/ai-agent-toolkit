@@ -8,7 +8,8 @@
 // It starts at most one run: a sweep run already on GitHub (from an earlier finish, another computer or
 // a person) is read instead of starting another, and when GitHub cannot be read nothing is started.
 //
-// run(slug) always ends as one plain line, so the sweep never fails the finish or makes it run again:
+// run(slug) always ends as one plain line, so the sweep never fails the finish or keeps it pending (a
+// finish that something else keeps pending asks again, and the one run it finds is read):
 // { end: 'report', text } (the counts and the link, or the link of a run still going) or
 // { end: 'held', step } (what stopped it and how the owner starts it by hand). Only counts, the run's
 // link and fixed words are ever read out of GitHub.
@@ -89,14 +90,14 @@ class FirstInstallSweep {
   // Started, with no result read yet.
   #going(slug, run) {
     const url = run ? `https://github.com/${slug}/actions/runs/${run.id}` : `https://github.com/${slug}/actions/workflows/${WORKFLOW}`;
-    return { end: 'report', text: `First personal data sweep: started, and its list (places and rule names only) will be at ${url}. It changes and posts nothing.` };
+    return { end: 'report', text: `First personal data sweep: started, and its list (places and rule names only) will be at ${url}; on a public repository anyone can read it. It changes and posts nothing.` };
   }
 
   #ended(slug, run) {
     const url = `https://github.com/${slug}/actions/runs/${run.id}`;
     if (run.conclusion !== 'success') return { end: 'held', step: `it could not scan everything; open ${url} to see why, then run it again: ${BY_HAND}.` };
     const counts = this.#counts(slug, run.id);
-    return { end: 'report', text: `First personal data sweep: ${counts ? `${counts}; the list (places and rule names only) is at ${url}` : `it finished; its report is at ${url}`}. It changed and posted nothing.` };
+    return { end: 'report', text: `First personal data sweep: ${counts ? `${counts}; the list (places and rule names only) is at ${url}` : `it finished; its report is at ${url}`}; on a public repository anyone can read it. It changed and posted nothing.` };
   }
 
   // The guard's counts from the run's annotation, or null when they cannot be read.

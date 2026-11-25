@@ -5,9 +5,10 @@
 // committed or pushed, and fails CI when one reaches the repository. Pull request text is also
 // checked for real home-folder paths and, unless the config switches it off, AI attribution
 // (session or project-thread links, "Generated with" footers, the Projects attribution marker). Commit author, committer and
-// tagger addresses are never read: they are the GitHub accounts' own, and no setting turns that on. Zero
-// dependencies (Node and git only; the sweep also calls gh), so a repository can carry a copy of this
-// one file.
+// tagger addresses are never read: they are the GitHub accounts' own, and no setting turns that on. The
+// same addresses on an author line of a commit message (Signed-off-by, Co-authored-by and the like, see
+// AUTHOR_LINE) are left alone there, and GitHub's own no-reply addresses everywhere. Zero dependencies
+// (Node and git only; the sweep also calls gh), so a repository can carry a copy of this one file.
 //
 // It never prints a matched value, any part of one, or a hash of one: every finding is a place
 // (path, line, column, or a commit and field) plus a class and a rule ID. Any error that stops a
@@ -85,6 +86,32 @@ const SWEEP_GAPS = Object.freeze([
 const ROLE_LOCAL_PARTS = new Set(['abuse', 'admin', 'billing', 'contact', 'enquiries', 'feedback', 'hello', 'help', 'hostmaster', 'info', 'legal', 'marketing', 'no-reply', 'noreply', 'notifications', 'postmaster', 'press', 'privacy', 'sales', 'security', 'support', 'team', 'webmaster']);
 const RESERVED_SUFFIXES = ['.example', '.test', '.invalid', '.localhost', '.local', '.internal'];
 const RESERVED_DOMAINS = ['example.com', 'example.net', 'example.org'];
+
+// GitHub's own no-reply addresses: an account's hidden commit address and GitHub's own committer.
+const GITHUB_NOREPLY = /^(?:.*@users\.noreply\.github\.com|noreply@github\.com)$/i;
+
+// A line of a commit message that names an author, committer or reviewer of the commit, as git and
+// GitHub write it.
+const AUTHOR_LINE = /^[ \t]*(?:co-authored|co-committed|co-developed|signed-off|reviewed|acked|tested)-by[ \t]*:/i;
+// The line git adds to the message file it hands the commit-msg hook when the author or committer is
+// not the one it would assume, and takes out of the message afterwards.
+const GIT_IDENTITY_COMMENT = /^\S{1,3} (?:Author|Committer):/;
+
+// The address of an author line ({ address, start, end } in the line), or null for any other line. The
+// line holds nothing but a name and that address in angle brackets, or the address alone. A co-author
+// line the attribution guard refuses (toolkit-attribution-guard.cjs), and any author line with an
+// anthropic.com address, is AI attribution: it is checked like any other text.
+function authorAddress(line, { hookFile = false } = {}) {
+  const label = AUTHOR_LINE.exec(line) || (hookFile ? GIT_IDENTITY_COMMENT.exec(line) : null);
+  if (!label) return null;
+  const value = line.slice(label[0].length).trim();
+  if (/anthropic\.com/i.test(value) || (/^[ \t]*co-authored/i.test(line) && /claude/i.test(value))) return null;
+  const open = value.endsWith('>') ? value.lastIndexOf('<') : 0;
+  const address = value.endsWith('>') ? value.slice(open + 1, -1) : value;
+  if (open < 0 || /[<>]/.test(value.slice(0, open)) || !/^[^\s<>@]+@[^\s<>@]+$/.test(address)) return null;
+  const start = line.lastIndexOf(address);
+  return { address: address.toLowerCase(), start, end: start + address.length };
+}
 
 const ALLOW_MARKER = /personal-data-guard:\s*allow\b(.*)$/i;
 
@@ -175,6 +202,7 @@ function emailNotAddress(text, match) {
   if (start > 0 && text[start - 1] === '\\') local = local.slice(1);
   if (!local) return 'escape';
   if (reservedDomain(domain)) return 'reserved-domain';
+  if (GITHUB_NOREPLY.test(match[0])) return 'github-noreply';
   // scp-style remotes: git@host:owner/repo, deploy@host:/srv/app.
   const after = text.slice(end, end + 256);
   if (after.startsWith(':') && (local === 'git' || /^:[\w~.-]*\//.test(after))) return 'ssh-remote';
@@ -910,8 +938,9 @@ class PersonalDataGuard {
   note(text) { this.#notes.push(text); }
 
   // Scans lines of one text. `place` describes where it came from without its content; `only` is
-  // the set of line indexes to check (null: all).
-  scanText(place, text, only = null, extra = null) {
+  // the set of line indexes to check (null: all); `authorOf` (commit messages only) finds the address an
+  // author line leaves alone.
+  scanText(place, text, only = null, extra = null, authorOf = null) {
     const lines = splitLines(text);
     const indexes = only || lines.map((_, index) => index);
     for (const index of indexes) {
@@ -921,8 +950,11 @@ class PersonalDataGuard {
       const spans = extra ? [...detect(folded), ...extra(folded)] : detect(folded);
       if (!spans.length) continue;
       const marker = ALLOW_MARKER.exec(folded);
+      const author = authorOf ? authorOf(folded) : null;
       for (const span of spans) {
         if (span.rule === 'PDG-EMAIL' && this.#config.allowed.has(span.value.toLowerCase())) continue;
+        // The name may be the same address (a git user.name set to it).
+        if (span.rule === 'PDG-EMAIL' && author && (span.value.toLowerCase() === author.address || (span.start >= author.start && span.end <= author.end))) continue;
         const column = (map ? map[span.start] : span.start) + 1;
         if (marker) {
           if (nonEmpty(marker[1].replace(/^[\s:-]+/, ''))) { this.#allowMarkers += 1; continue; }
@@ -959,10 +991,10 @@ class PersonalDataGuard {
     for (const span of detect(text)) this.#add(label, 1, span.start + 1, span.rule);
   }
 
-  scanMessage(place, message) {
+  scanMessage(place, message, authorOf = null) {
     if (!this.#config.scope.commit_messages) return;
     this.#counts.messages += 1;
-    this.scanText(place, message);
+    this.scanText(place, message, null, null, authorOf);
   }
 
   #listed(filePath) { return this.#config.notScanned.find((entry) => entry.pattern.test(filePath)); }
@@ -1029,7 +1061,7 @@ class PersonalDataGuard {
     const short = commit.slice(0, 12);
     const prefix = `commit ${short} `;
     const { message } = splitObject(git.catFile('commit', commit));
-    this.scanMessage(`commit ${short} message`, message);
+    this.scanMessage(`commit ${short} message`, message, authorAddress);
     const parents = git.parents(commit);
     const base = ['diff-tree', '-r', '-z', '--raw', '--no-abbrev', '--no-commit-id', '-M', '--no-ext-diff', '--no-textconv'];
     if (!parents.length) {
@@ -1084,7 +1116,7 @@ class PersonalDataGuard {
       const commit = cut < 0 ? record : record.slice(0, cut);
       if (!SHA.test(commit)) throw new GuardError('git log output could not be read');
       this.#counts.commits += 1;
-      this.scanMessage(`commit ${commit.slice(0, 12)} message`, cut < 0 ? '' : record.slice(cut + 1));
+      this.scanMessage(`commit ${commit.slice(0, 12)} message`, cut < 0 ? '' : record.slice(cut + 1), authorAddress);
     }
   }
 
@@ -1175,14 +1207,28 @@ class PersonalDataGuard {
       lines.push('Report only: nothing was changed or posted. The repository\'s owner or controller decides what to fix.');
       lines.push(`Result: REPORT ONLY, ${this.sweepCounts()}`);
     } else if (this.#findings.length) {
-      const textOnly = this.#findings.every((finding) => /^pull request (?:title|body)$/.test(finding.place));
-      lines.push(...remedy(textOnly && where === 'remote' ? 'pr-text' : where));
+      const found = this.#findings.filter((finding) => finding.rule !== 'PDG-UNSCANNABLE');
+      const textOnly = found.every((finding) => /^pull request (?:title|body)$/.test(finding.place));
+      if (found.length < this.#findings.length) lines.push(...unreadRemedy(where, found.length > 0));
+      if (found.length) lines.push(...remedy(textOnly && where === 'remote' ? 'pr-text' : where));
       lines.push('Result: BLOCKED');
     } else {
       lines.push('Result: PASS');
     }
     return `${lines.join('\n')}\n`;
   }
+}
+
+// The next step for what the guard could not read: nothing was found in it, so it is not a leak.
+function unreadRemedy(where, mixed) {
+  const change = { remote: 'in this pull request (a new one if it has landed)', local: 'in the same change', tree: 'in a pull request' }[where];
+  return [
+    `${mixed ? 'The PDG-UNSCANNABLE item(s)' : 'Nothing was found: the item(s) listed'} were not checked, because the guard cannot read them (an image, font,`,
+    'archive, submodule or the like). Next, for each one that holds no personal data: add its path with a reason to',
+    `not_scanned in ${DEFAULT_CONFIG.split(path.sep).join('/')}, ${change}.`,
+    'A pattern such as public/** covers a folder. Take out one that does hold personal data and tell the owner.',
+    ...(mixed ? ['The other item(s) were found:'] : []),
+  ];
 }
 
 function remedy(where) {
@@ -1355,13 +1401,16 @@ function explain(config) {
   lines.push('or [slot], or an ellipsis; /c/Users, /mnt/c/Users and /cygdrive/c/Users count as Windows homes.');
   lines.push('scope.pull_request_attribution: false switches off the three AI attribution rules.');
   lines.push('Not reported: reserved fake domains (example.com, .net, .org and .example, .test, .invalid, .localhost,');
-  lines.push('.local, .internal), git@host:path remotes, user@host in URLs, @scope/package names, decorators, code');
-  lines.push('tokens (self.x, camelCase names), asset names (logo@2x.png), version specs, SQL patterns and');
-  lines.push('single-letter placeholders such as a@b.com; numbers inside longer digit or hex runs, dates, IP addresses');
-  lines.push('and timestamps.');
+  lines.push('.local, .internal), GitHub no-reply addresses, git@host:path remotes, user@host in URLs, @scope/package names,');
+  lines.push('decorators, code tokens (self.x, camelCase names), asset names (logo@2x.png), version specs, SQL patterns');
+  lines.push('and single-letter placeholders such as a@b.com; numbers inside longer digit or hex runs, dates, IP');
+  lines.push('addresses and timestamps.');
   lines.push('Word, Excel and PowerPoint files (.docx, .xlsx, .pptx) and PDF text are read; other binary content (images,');
   lines.push('thumbnails, embedded objects) is unscannable and blocks unless the config lists its path with a reason.');
-  lines.push('Commit author, committer and tagger addresses are never scanned; no setting turns that on.');
+  lines.push('Commit author, committer and tagger addresses are never scanned; no setting turns that on. The address on an');
+  lines.push('author line of a commit message is left alone too: Signed-off-by, Co-authored-by, Co-committed-by,');
+  lines.push('Co-developed-by, Reviewed-by, Acked-by or Tested-by with nothing but a name and that address. A co-author');
+  lines.push('line naming Claude, and any author line with an anthropic.com address, is AI attribution and is checked.');
   lines.push('In ci and range modes, a change cannot switch off scope checks for itself: the base commit\'s');
   lines.push('settings apply until it is merged, and allow or not_scanned entries it adds are named in the report.');
   if (config) {
@@ -1412,7 +1461,7 @@ function main(argv, { env = process.env, stdin = () => fs.readFileSync(0, 'utf8'
       let message;
       try { message = fs.readFileSync(path.resolve(rest[0]), 'utf8'); }
       catch { throw new GuardError('the commit message file could not be read'); }
-      guard.scanMessage('commit message', commitMessageText(message));
+      guard.scanMessage('commit message', commitMessageText(message), (line) => authorAddress(line, { hookFile: true }));
     } else if (mode === 'pre-push') {
       guard.scanCommits(prePushCommits(git, stdin(), guard, rest[0]));
     } else if (mode === 'range') {

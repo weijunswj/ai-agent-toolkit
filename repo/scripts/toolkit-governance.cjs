@@ -31,7 +31,7 @@ const ciOffer = require('./toolkit-ci-shards-offer.cjs');
 const governedShards = require('./governed-test-shards.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 const finishing = require('./toolkit-governance-finish.cjs');
-const { FirstInstallSweep } = require('./toolkit-first-sweep.cjs');
+const { FirstInstallSweep } = require('./toolkit-governance-first-sweep.cjs');
 const { managedToolkitFile } = require('./toolkit-user-state.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;

@@ -503,10 +503,11 @@ function openPrsOf(context, parentDoc, docs, deps) {
   }
 }
 
-// The cloud sweep's layout check: CLOUD_LAYOUT_STALE when this repository's Toolkit workflow copies
-// differ from what a refresh writes from the Toolkit this sweep runs (its `.toolkit` checkout), a
-// missing default workflow included. A file Toolkit did not write, which no refresh changes, is left to
-// the governance check. The
+// The cloud sweep's layout check: CLOUD_LAYOUT_STALE when this repository's rendered Toolkit workflow
+// copies (the sweep, its gate and the shard copies) differ from what a refresh writes from the Toolkit
+// this sweep runs (its `.toolkit` checkout). The workflows copied as they are (the personal data guard,
+// dependency auto-merge) have no layout: a missing or older one is the governance check's and the
+// refresh's business, never a call on the board. The
 // sweep never changes workflows itself (its App holds no workflow permission); a controller chat opens
 // the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). Local reads only; any failure
 // adds nothing, and the Toolkit's own repository is never checked.
@@ -518,7 +519,7 @@ function cloudLayoutFindings(context, deps = {}) {
     let ciShards = null;
     try { ciShards = JSON.parse(fs.readFileSync(path.join(context.repoRoot, '.github', 'toolkit-programme.json'), 'utf8'))?.ci_shards?.answer || null; } catch { ciShards = null; }
     const result = workflows.plan({ repo: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), ciShards });
-    return result.rows.some(workflows.refreshable) ? ['CLOUD_LAYOUT_STALE'] : [];
+    return result.rows.some(row => row.kind === 'rendered' && row.state !== 'current') ? ['CLOUD_LAYOUT_STALE'] : [];
   } catch { return []; }
 }
 

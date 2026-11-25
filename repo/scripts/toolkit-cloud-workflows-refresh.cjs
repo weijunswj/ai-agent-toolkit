@@ -34,7 +34,8 @@ const { spawnSync } = require('node:child_process');
 const BRANCH = 'toolkit/refresh-cloud-workflows';
 const TITLE = 'Refresh the Toolkit copies';
 const GITHUB_LIMIT = 16 * 1024 * 1024;
-const { GUARD_CONFIG, SWEEP_WORKFLOW } = require('./toolkit-cloud-workflows-copied.cjs');
+const { COPIED_FILES, GUARD_CONFIG, SWEEP_WORKFLOW, copiedState } = require('./toolkit-cloud-workflows-copied.cjs');
+const COPIED = Object.values(COPIED_FILES).flat();
 const PLAIN_TEXT = Object.freeze({ file: '.github/scripts/plain-text-check.cjs', source: 'skills/secure-ci-cd/scripts/plain-text-check.cjs' });
 
 class RefreshError extends Error {
@@ -79,7 +80,7 @@ function changes({ target, root, commit, ci, ciShards, workflows }) {
     out.push({ file: row.file, text: row.expected, why: row.state === 'missing' ? 'added' : row.state === 'edited' ? 'edited by hand, rewritten' : row.pinned ? 'pinned to one Toolkit commit, now follows Toolkit main' : row.kind === 'copied' ? row.why || 'Toolkit copy updated' : 'layout changed' });
   }
   // Nothing sweeps what is already here after this pull request, as a turn-on's finish does.
-  if (out.some(entry => entry.file === SWEEP_WORKFLOW && entry.why === 'added')) notes.push(`The personal data guard checks new work only; to list what is already here, start ${SWEEP_WORKFLOW} once by hand after the merge (Actions, Personal data sweep, Run workflow). It changes and posts nothing.`);
+  if (out.some(entry => entry.file === SWEEP_WORKFLOW && entry.why === 'added')) notes.push(`The personal data guard checks new work only; to list what is already here, start ${SWEEP_WORKFLOW} once by hand after the merge (Actions, Personal data sweep, Run workflow). It changes and posts nothing; on a public repository anyone can read its list.`);
   const absolute = path.join(target, ...PLAIN_TEXT.file.split('/'));
   const shown = fs.existsSync(absolute) ? git(root, ['show', `${commit}:${PLAIN_TEXT.source}`]) : { ok: false };
   if (shown.ok) {
@@ -161,9 +162,17 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
   const existing = github(`repos/${repository}/git/ref/heads/${BRANCH}`, { missing: true })?.object?.sha || null;
   const allowed = new Set(files.map(entry => entry.file));
   if (existing && existing !== base) {
-    // An older refresh branch may hold only Toolkit-made files; anything else is someone's work.
+    // An older refresh branch may hold only Toolkit-made files; anything else is someone's work: another
+    // path, a file at a copied workflow's path that Toolkit did not write, or guard settings this run
+    // would not carry on.
     const compared = github(`repos/${repository}/compare/${base}...${existing}`);
-    const foreign = (compared.files || []).map(entry => entry.filename).filter(name => !allowed.has(name) && !isToolkitFile(name, workflows));
+    const foreign = (compared.files || []).map(entry => entry.filename).filter(name => {
+      if (name === GUARD_CONFIG) return !allowed.has(name);
+      if (!allowed.has(name) && !isToolkitFile(name, workflows)) return true;
+      if (!COPIED.includes(name)) return false;
+      const held = github(`repos/${repository}/contents/${name.split('/').map(encodeURIComponent).join('/')}?ref=${existing}`, { missing: true });
+      return Boolean(held) && (held.encoding !== 'base64' || copiedState(name, Buffer.from(held.content, 'base64').toString('utf8')) === 'unmanaged');
+    });
     if (foreign.length) throw new RefreshError(`branch ${BRANCH} also changes ${foreign.slice(0, 3).join(', ')}${foreign.length > 3 ? ' and more' : ''}; land or remove that work first.`);
   }
   // A workflow copy the refresh branch already holds with this layout and body stays as it is: only

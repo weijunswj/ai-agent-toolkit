@@ -3,7 +3,7 @@
 // The post-merge finish of a governance turn-on. Some settings can only follow the merge: the
 // default-branch protection ruleset (its required checks come from the merged binding), the
 // no-force-push ruleset, the free dependency and security settings and, where the turn-on added the
-// personal data guard, one report-only sweep of what was already there (toolkit-first-sweep.cjs). When the governance bank
+// personal data guard, one report-only sweep of what was already there (toolkit-governance-first-sweep.cjs). When the governance bank
 // publishes a turn-on pull request it notes the repository here as finish pending. Once that binding
 // is merged and read back, the session-start line starts the finish once in the background
 // (`toolkit-governance.cjs finish`, which asks nothing: the owner's yes in the bank covers these
@@ -26,7 +26,7 @@ const FINISH_GAP_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 32;
 const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // What the finish turns on, as the bank's end lines and the session line say it.
-const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing';
+const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 

@@ -692,7 +692,7 @@ test('answering again updates the open turn-on branch, and guard settings alread
   const binding = { schema: 'toolkit.programme-binding.v2', repository, governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
   const text = JSON.stringify(binding);
   const files = { ...Object.fromEntries(REQUIRED_FILES.map(name => [name, `new ${name}\n`])), [config]: 'the Toolkit default\n', [script]: 'new guard\n' };
-  const held = { ...Object.fromEntries(Object.keys(files).map(name => [name, 'old\n'])), '.github/toolkit-programme.json': text, [config]: 'the owner\'s own\n' };
+  const held = { ...Object.fromEntries(Object.keys(files).map(name => [name, 'old\n'])), '.github/toolkit-programme.json': text, [config]: 'the owner\'s own\n', [script]: require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs').vendoredText('#!/usr/bin/env node\n// an older guard\n') };
   let tree = null;
   const json = value => JSON.stringify(value), blob = value => ({ type: 'file', encoding: 'base64', content: Buffer.from(value).toString('base64') });
   const transport = new GitHubProposalTransport({ run(args, input) {
@@ -706,13 +706,13 @@ test('answering again updates the open turn-on branch, and guard settings alread
     if (endpoint.endsWith(`/git/trees/${'b'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] });
     if (endpoint.endsWith(`/git/trees/${'d'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] });
     if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ ...blob(text), sha: 'c'.repeat(40), size: Buffer.byteLength(text) });
-    if (endpoint.includes('/contents/')) { const name = /\/contents\/([^?]+)/.exec(endpoint)[1]; return json(blob(held[name])); }
+    if (endpoint.includes('/contents/')) { const name = /\/contents\/([^?]+)/.exec(endpoint)[1]; if (held[name] === undefined) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' }); return json(blob(held[name])); }
     if (endpoint.endsWith('/git/trees')) { tree = input.tree; return json({ sha: 'e'.repeat(40) }); }
     if (endpoint.endsWith('/git/commits')) return json({ sha: 'f'.repeat(40) });
     if (endpoint.includes('/git/refs/heads/')) return '{}';
     throw Error(`unexpected endpoint ${endpoint}`);
   } });
-  assert.deepEqual(transport.update(repository, 1, binding, files), { number: 1, head: 'f'.repeat(40), updated: true });
+  assert.deepEqual(transport.update(repository, 1, binding, files), { number: 1, head: 'f'.repeat(40), updated: true, left: [config], notes: [`${config} is already on GitHub with other content, so it is left as it is.`], onBase: [] });
   assert.deepEqual(tree.map(entry => entry.path).sort(), Object.keys(files).filter(name => name !== config).sort());
 });
 

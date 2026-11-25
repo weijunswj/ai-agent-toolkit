@@ -25,6 +25,7 @@ const GUARD_TEMPLATE = 'skills/secure-ci-cd/templates/github-actions/personal-da
 const SWEEP_TEMPLATE = 'skills/secure-ci-cd/templates/github-actions/personal-data-sweep.yml';
 const GUARD_SOURCE = 'skills/secure-ci-cd/scripts/personal-data-guard.cjs';
 
+const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
 const FOREIGN = Symbol('foreign');
 const LIMIT = 4 * 1024 * 1024;
 
@@ -43,29 +44,39 @@ function readPlain(target, file) {
   try { return fs.readFileSync(current, 'utf8'); } catch { return FOREIGN; }
 }
 
-const stateOf = (text, read) => (text === FOREIGN ? 'unmanaged' : read(text).state);
+const guardInstaller = () => require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs');
+// How each copied file's text reads, against the Toolkit file it is made from (by default this copy's
+// own): { source, expected(raw), state(text, raw) }. The guard's settings file has no such state.
+const COPIES = Object.freeze({
+  [GUARD_WORKFLOW]: { source: GUARD_TEMPLATE, expected: raw => guardInstaller().workflowText('personal-data-guard', raw), state: (text, raw) => guardInstaller().workflowState(text, 'personal-data-guard', raw).state },
+  [SWEEP_WORKFLOW]: { source: SWEEP_TEMPLATE, expected: raw => guardInstaller().workflowText('personal-data-sweep', raw), state: (text, raw) => guardInstaller().workflowState(text, 'personal-data-sweep', raw).state },
+  [GUARD_SCRIPT]: { source: GUARD_SOURCE, expected: raw => guardInstaller().vendoredText(raw), state: (text, raw) => guardInstaller().vendoredState(text, raw).state },
+  [security.WORKFLOW_REL]: { source: security.WORKFLOW_TEMPLATE_REL, expected: raw => raw, state: (text, raw = fs.readFileSync(path.join(TOOLKIT_ROOT, ...security.WORKFLOW_TEMPLATE_REL.split('/')), 'utf8').replace(/\r\n/g, '\n')) => (text === null ? 'missing' : text.replace(/\r\n/g, '\n') === raw ? 'current' : text.startsWith(security.WORKFLOW_MARKER) ? 'outdated' : 'unmanaged') },
+});
+
+// 'current', 'outdated', 'edited', 'unmanaged' or 'missing' (null) for a copied file's text.
+const copiedState = (file, text, raw = undefined) => COPIES[file].state(text, raw);
+
+function copyRow(target, file, source) {
+  const raw = source(COPIES[file].source), text = readPlain(target, file);
+  return { file, expected: COPIES[file].expected(raw), state: text === FOREIGN ? 'unmanaged' : copiedState(file, text, raw) };
+}
+
+// What a file Toolkit did not write leaves out.
+const clashNote = (file, id) => `${file} is not a Toolkit copy, so it is left as it is and the default ${id} workflow is not added around it; move it aside in a pull request first.`;
 
 // `source(file)` gives a Toolkit file's text at the commit the copies come from.
 const ROWS = Object.freeze({
   'personal-data-guard'(target, source) {
-    const installer = require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs');
-    const script = source(GUARD_SOURCE);
-    const workflow = (file, name, template) => ({ file, expected: installer.workflowText(name, template), state: stateOf(readPlain(target, file), text => installer.workflowState(text, name, template)) });
-    const rows = [
-      workflow(GUARD_WORKFLOW, 'personal-data-guard', source(GUARD_TEMPLATE)),
-      workflow(SWEEP_WORKFLOW, 'personal-data-sweep', source(SWEEP_TEMPLATE)),
-      { file: GUARD_SCRIPT, expected: installer.vendoredText(script), state: stateOf(readPlain(target, GUARD_SCRIPT), text => installer.vendoredState(text, script)) },
-    ];
+    const installer = guardInstaller();
+    const rows = [GUARD_WORKFLOW, SWEEP_WORKFLOW, GUARD_SCRIPT].map(file => copyRow(target, file, source));
     const config = readPlain(target, GUARD_CONFIG);
     if (config === null || config === FOREIGN) rows.push({ file: GUARD_CONFIG, expected: installer.configText(), state: config === null ? 'missing' : 'unmanaged' });
     else if (installer.currentConfigText(config) !== config) rows.push({ file: GUARD_CONFIG, expected: installer.currentConfigText(config), state: 'outdated', why: 'the retired identity setting, which no guard reads any more, taken out' });
     return rows;
   },
   'dependency-auto-merge'(target, source) {
-    const template = source(security.WORKFLOW_TEMPLATE_REL);
-    return [{ file: security.WORKFLOW_REL, expected: template, state: stateOf(readPlain(target, security.WORKFLOW_REL), text => ({
-      state: text === null ? 'missing' : text.replace(/\r\n/g, '\n') === template ? 'current' : text.startsWith(security.WORKFLOW_MARKER) ? 'outdated' : 'unmanaged',
-    })) }];
+    return [copyRow(target, security.WORKFLOW_REL, source)];
   },
 });
 
@@ -81,6 +92,6 @@ const COPIED_FILES = Object.freeze({
   'dependency-auto-merge': Object.freeze([security.WORKFLOW_REL]),
 });
 // The Toolkit files they are made from.
-const COPIED_SOURCES = Object.freeze([GUARD_TEMPLATE, SWEEP_TEMPLATE, GUARD_SOURCE, security.WORKFLOW_TEMPLATE_REL]);
+const COPIED_SOURCES = Object.freeze(Object.values(COPIES).map(copy => copy.source));
 
-module.exports = Object.freeze({ COPIED_FILES, COPIED_SOURCES, GUARD_CONFIG, SWEEP_WORKFLOW, copiedRows });
+module.exports = Object.freeze({ COPIED_FILES, COPIED_SOURCES, GUARD_CONFIG, SWEEP_WORKFLOW, clashNote, copiedRows, copiedState });

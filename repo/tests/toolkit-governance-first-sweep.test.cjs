@@ -11,7 +11,7 @@ const path = require('node:path');
 const test = require('node:test');
 const childProcess = require('node:child_process');
 const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
-const { FirstInstallSweep, WAIT_MS, WORKFLOW } = require('../scripts/toolkit-first-sweep.cjs');
+const { FirstInstallSweep, WAIT_MS, WORKFLOW } = require('../scripts/toolkit-governance-first-sweep.cjs');
 const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
 const finishing = require('../scripts/toolkit-governance-finish.cjs');
 const governance = require('../scripts/toolkit-governance-state.cjs');
@@ -49,7 +49,7 @@ function run(fake, onWait = () => {}) {
 test('one run is started on the default branch, waited for, and its counts and link come back', () => {
   const fake = fakeGitHub();
   const { result, writes } = run(fake, (world, count) => { world.runs = [count === 1 ? { ...DONE, status: 'in_progress', conclusion: null } : DONE]; });
-  assert.deepEqual(result, { end: 'report', text: `First personal data sweep: ${COUNTS}; the list (places and rule names only) is at https://github.com/${SLUG}/actions/runs/901. It changed and posted nothing.` });
+  assert.deepEqual(result, { end: 'report', text: `First personal data sweep: ${COUNTS}; the list (places and rule names only) is at https://github.com/${SLUG}/actions/runs/901; on a public repository anyone can read it. It changed and posted nothing.` });
   assert.deepEqual(fake.world.starts.map(start => start.input), [{ ref: 'main' }]);
   assert.deepEqual(writes, [`--method POST repos/${SLUG}/actions/workflows/personal-data-sweep.yml/dispatches`], 'starting the run is the only write');
 });
@@ -69,7 +69,7 @@ test('a sweep already on GitHub is read, never started again', () => {
 
 test('a run still going when the wait ends, or that can no longer be read, is one line with its link, and never a second start', () => {
   const going = { ...DONE, status: 'in_progress', conclusion: null };
-  const line = url => `First personal data sweep: started, and its list (places and rule names only) will be at ${url}. It changes and posts nothing.`;
+  const line = url => `First personal data sweep: started, and its list (places and rule names only) will be at ${url}; on a public repository anyone can read it. It changes and posts nothing.`;
   const fake = fakeGitHub({ onStart: world => { world.runs = [going]; } });
   const { result, waits } = run(fake);
   assert.deepEqual(result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/runs/901`) });
@@ -115,7 +115,7 @@ test('a sweep that may not or cannot be started is one plain line with the owner
   // Counts that cannot be read, or are not the guard's own line, are never shown.
   for (const options of [{ refuse: { '/jobs': 'gh-request-failed' } }, { refuse: { '/annotations': 'gh-request-failed' } }, { jobs: [] }, { notes: [] }, { notes: [{ title: 'Toolkit personal data sweep', message: `see ${['jane.tan', 'mailbox.sg'].join('@')}` }] }, { notes: [{ title: 'Other', message: COUNTS }] }]) {
     const { result } = run(fakeGitHub({ runs: [DONE], ...options }));
-    assert.deepEqual(result, { end: 'report', text: `First personal data sweep: it finished; its report is at https://github.com/${SLUG}/actions/runs/901. It changed and posted nothing.` });
+    assert.deepEqual(result, { end: 'report', text: `First personal data sweep: it finished; its report is at https://github.com/${SLUG}/actions/runs/901; on a public repository anyone can read it. It changed and posted nothing.` });
   }
   assert.equal(new FirstInstallSweep({ gh: () => assert.fail('no read') }).run('not a name').end, 'held');
 });
@@ -123,7 +123,7 @@ test('a sweep that may not or cannot be started is one plain line with the owner
 // ---- the finish --------------------------------------------------------------------------------
 
 function governedRepo(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-first-sweep-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-first-sweep-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const repo = path.join(root, 'example-repo');
   childProcess.execFileSync('git', ['init', '--quiet', repo], { windowsHide: true });
@@ -156,7 +156,7 @@ async function finish(ctx, firstSweep) {
 test('the finish of a turn-on that added the guard runs the sweep once and its report is in the next session\'s result line', async t => {
   const ctx = governedRepo(t), asked = [];
   finishing.markPending(ctx.registryOptions, ctx.id, { proposal: 1, firstSweep: true });
-  const text = `First personal data sweep: ${COUNTS}; the list (places and rule names only) is at https://github.com/example-owner/example-repo/actions/runs/901. It changed and posted nothing.`;
+  const text = `First personal data sweep: ${COUNTS}; the list (places and rule names only) is at https://github.com/example-owner/example-repo/actions/runs/901; on a public repository anyone can read it. It changed and posted nothing.`;
   const done = await finish(ctx, { run: slug => { asked.push(slug); return { end: 'report', text }; } });
   assert.equal(done.code, 0, done.out);
   assert.deepEqual(asked, ['example-owner/example-repo']);
@@ -198,5 +198,5 @@ test('a sweep that was not started never fails the finish or makes it run again:
 });
 
 test('the turn-on says before the owner answers that the sweep follows the merge', () => {
-  assert.match(finishing.WHAT, /where it adds the personal data guard, one report-only sweep of what is already there \(files, commit messages, pull request text and comments\), which changes and posts nothing/);
+  assert.match(finishing.WHAT, /where it adds the personal data guard, one report-only sweep of what is already there \(files, commit messages, pull request text and comments\), which changes and posts nothing \(on a public repository anyone can read its list\)/);
 });

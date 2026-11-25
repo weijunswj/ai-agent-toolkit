@@ -42,7 +42,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, TOOLKIT_REF, LAYOUT, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
 const governedShards = require('./governed-test-shards.cjs');
-const { COPIED_FILES, COPIED_SOURCES, copiedRows } = require('./toolkit-cloud-workflows-copied.cjs');
+const { COPIED_FILES, COPIED_SOURCES, clashNote, copiedRows } = require('./toolkit-cloud-workflows-copied.cjs');
 
 const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
 const RENDER_FILE = 'repo/scripts/toolkit-cloud-workflows-render.cjs';
@@ -335,7 +335,7 @@ function writableRows(rows) {
 
 // What a clash with someone else's file leaves out, one line per workflow.
 function clashNotes(rows) {
-  return rows.filter(row => row.kind === 'copied' && row.state === 'unmanaged').map(row => `${row.file} is not a Toolkit copy, so it is left as it is and the default ${row.id} workflow is not added around it; move it aside in a pull request first.`);
+  return rows.filter(row => row.kind === 'copied' && row.state === 'unmanaged').map(row => clashNote(row.file, row.id));
 }
 
 // What a pull request says it leaves out: those clashes, and the sweep where it cannot run.

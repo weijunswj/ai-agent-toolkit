@@ -23,6 +23,7 @@ const SHARDS_BRANCH = /^toolkit\/(?:switches-[a-z0-9-]+-)?ci-shards-(?:yes|never
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').DEFAULT_FILES;
 // The Dependabot settings the turn-on adds where missing (toolkit-governance-adopt.cjs).
 const securityFiles = () => require('./toolkit-governance-security.cjs').DEPENDABOT_NAMES;
+const ownerFiles = () => require('./toolkit-governance-owner-files.cjs');
 const READBACK_TRIES = 4, READBACK_WAIT_MS = 500;
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
@@ -292,7 +293,12 @@ class GovernanceProposals {
       value.requests = value.requests.map(item => item.run === run ? { ...item, proposal: readback.number, head: readback.head } : item);
       value.proposals = [readback]; value.checked_at = this.#now().toISOString(); value.error = null;
     });
-    return { proposal: readback, text: proposalText([readback]), files: files ? Object.keys(files) : null, reused: Boolean(matches[0]), updated: proposal.updated === true, ...(cloud.warning ? { warning: cloud.warning } : {}), ...(cloud.notes?.length ? { notes: cloud.notes } : {}), ...(cloud.added ? { added: cloud.added } : {}) };
+    // What GitHub already holds decides what was written (toolkit-governance-owner-files.cjs), so a checkout
+    // that is behind never counts a file it kept, or one already there, as added.
+    const left = new Set(proposal.left || []), there = new Set([...left, ...(proposal.onBase || [])]);
+    const notes = [...new Set([...(cloud.notes || []), ...(proposal.notes || [])])];
+    const entryFile = id => require('./toolkit-cloud-workflows.cjs').DEFAULT_CLOUD_WORKFLOWS.find(entry => entry.id === id)?.file;
+    return { proposal: readback, text: proposalText([readback]), files: files ? Object.keys(files).filter(name => !left.has(name)) : null, reused: Boolean(matches[0]), updated: proposal.updated === true, ...(cloud.warning ? { warning: cloud.warning } : {}), ...(notes.length ? { notes } : {}), ...(cloud.added ? { added: cloud.added.filter(id => !there.has(entryFile(id))) } : {}) };
   }
 }
 
@@ -362,6 +368,12 @@ class GitHubProposalTransport {
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${ref}`);
       return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && workflows.copyIdAt(name, Buffer.from(file.content, 'base64').toString('utf8')));
     });
+  }
+  // The text of a path at a commit for toolkit-governance-owner-files.cjs: null when nothing is there.
+  #held(repository, name, ref) {
+    const file = this.#optional(`repos/${repository}/contents/${name}?ref=${ref}`);
+    if (file === null) return null;
+    return file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' ? Buffer.from(file.content, 'base64').toString('utf8') : ownerFiles().UNREADABLE;
   }
   #auth() {
     this.#run(['auth', 'status']);
@@ -515,14 +527,15 @@ class GitHubProposalTransport {
     const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, this repository's parallel CI shards answer.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''}${retired ? ` It also deletes ${retired}.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
-  publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
-    if (binding.governance !== 'disabled' && missingFiles(files).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  publish(repository, binding, wanted = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
+    if (binding.governance !== 'disabled' && missingFiles(wanted).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     this.#auth();
     const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
     if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
     const base = this.#api(`repos/${repository}/git/ref/heads/${branch}`);
     if (!SHA.test(base.object?.sha)) fail('PROPOSAL_BASE_INVALID');
     const text = `${JSON.stringify(binding, null, 2)}\n`;
+    const { files, ...judged } = binding.governance === 'disabled' ? { files: wanted } : new (ownerFiles().OwnerFiles)(wanted, { held: name => this.#held(repository, name, base.object.sha) }).judge();
     // Turning governance off also removes the Toolkit's cloud sweep copies that the default branch
     // holds. Only a file carrying the Toolkit's rendered-copy marker is removed; anything else stays.
     const removals = binding.governance === 'disabled' ? this.#cloudCopies(repository, base.object.sha) : [];
@@ -560,28 +573,26 @@ class GitHubProposalTransport {
       }
       if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
     }
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: proposalBody(binding, files, removals) });
-    return { number: pr.number, head: headSha };
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: proposalBody(binding, files, removals, [], judged.notes) });
+    return { number: pr.number, head: headSha, ...judged };
   }
   // A re-run while the turn-on pull request is still open: the owner's new answer goes onto that same
   // branch as one more commit, never a second pull request. Only a branch this transport made is
   // updated (a governance-on branch in this repository, holding only turn-on files); anything else is
   // refused. The same files already there change nothing.
-  update(repository, number, binding, files) {
-    if (binding.governance === 'disabled' || missingFiles(files).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
+  update(repository, number, binding, wanted) {
+    if (binding.governance === 'disabled' || missingFiles(wanted).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     this.#auth();
     const read = this.read(repository, number);
     const pr = this.#api(`repos/${repository}/pulls/${number}`);
     const head = pr.head?.ref;
     if (read.answer !== 'yes' || typeof head !== 'string' || !head.startsWith('toolkit/governance-on-') || pr.head.sha !== read.head) fail('PROPOSAL_BRANCH_CHANGED');
     const diff = this.#api(`repos/${repository}/compare/${pr.base.sha}...${read.head}`);
-    if (!Array.isArray(diff.files) || diff.files.some(file => !Object.hasOwn(files, file.filename) && !TURN_ON_NAMES.some(test => test(file.filename)))) fail('PROPOSAL_BRANCH_CHANGED');
-    const changed = Object.entries(files).filter(([name, content]) => {
-      const file = this.#optional(`repos/${repository}/contents/${name}?ref=${read.head}`);
-      // The guard's settings on the branch may be the owner's, so they are never replaced.
-      if (file && name === require('./toolkit-cloud-workflows-copied.cjs').GUARD_CONFIG) return false;
-      return !file || file.type !== 'file' || file.encoding !== 'base64' || Buffer.from(String(file.content), 'base64').toString('utf8') !== content;
-    });
+    if (!Array.isArray(diff.files) || diff.files.some(file => !Object.hasOwn(wanted, file.filename) && !TURN_ON_NAMES.some(test => test(file.filename)))) fail('PROPOSAL_BRANCH_CHANGED');
+    // A path on the branch that the pull request did not add is the default branch's.
+    const own = new Set(diff.files.filter(file => ['added', 'renamed', 'copied'].includes(file.status)).map(file => file.filename));
+    const { files, ...judged } = new (ownerFiles().OwnerFiles)(wanted, { held: name => this.#held(repository, name, read.head), onBase: name => !own.has(name) }).judge();
+    const changed = Object.entries(files).filter(([name, content]) => this.#held(repository, name, read.head) !== content);
     // A file an earlier answer added that the new answers no longer make (shard workflows and the
     // shard list after shards go from yes to not now) leaves the pull request: one it added is
     // deleted, and one it changed goes back to the default branch's copy. Only the shard list and a
@@ -593,22 +604,22 @@ class GitHubProposalTransport {
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${read.head}`);
       return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && workflows.copyIdAt(name, Buffer.from(file.content, 'base64').toString('utf8')));
     };
-    const dropped = diff.files.filter(file => !Object.hasOwn(files, file.filename) && file.status !== 'removed' && ours(file.filename));
+    const dropped = diff.files.filter(file => !Object.hasOwn(wanted, file.filename) && file.status !== 'removed' && ours(file.filename));
     const restore = dropped.map(file => {
       if (file.status === 'added') return { path: file.filename, mode: '100644', type: 'blob', sha: null };
       const original = this.#optional(`repos/${repository}/contents/${file.filename}?ref=${diff.merge_base_commit?.sha || pr.base.sha}`);
       if (!original || original.type !== 'file' || !/^[0-9a-f]{40}$/.test(original.sha || '')) fail('PROPOSAL_BRANCH_CHANGED');
       return { path: file.filename, mode: '100644', type: 'blob', sha: original.sha };
     });
-    if (!changed.length && !restore.length) return { number, head: read.head, updated: false };
+    if (!changed.length && !restore.length) return { number, head: read.head, updated: false, ...judged };
     const commit = this.#api(`repos/${repository}/git/commits/${read.head}`);
     const tree = this.#api(`repos/${repository}/git/trees`, { base_tree: commit.tree.sha, tree: [...changed.map(([name, content]) => ({ path: name, mode: '100644', type: 'blob', content })), ...restore] });
     const result = this.#api(`repos/${repository}/git/commits`, { message: 'Update repository governance from the owner\'s new answers', tree: tree.sha, parents: [read.head] });
     if (!SHA.test(result.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
     // Not forced: a branch someone moved since it was read is refused by GitHub.
     this.#api(`repos/${repository}/git/refs/heads/${head}`, { sha: result.sha, force: false }, 'PATCH');
-    this.#api(`repos/${repository}/pulls/${number}`, { body: proposalBody(binding, files, [], dropped.map(file => file.filename)) }, 'PATCH');
-    return { number, head: result.sha, updated: true };
+    this.#api(`repos/${repository}/pulls/${number}`, { body: proposalBody(binding, files, [], dropped.map(file => file.filename), judged.notes) }, 'PATCH');
+    return { number, head: result.sha, updated: true, ...judged };
   }
 }
 
@@ -617,7 +628,7 @@ class GitHubProposalTransport {
 // files stay when this run could not make the copies.
 const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name), name => name === require('./governed-test-shards.cjs').MANIFEST_REL, name => cloudFiles().includes(name)];
 
-function proposalBody(binding, files, removals, dropped = []) {
-  return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled, with its CI checks; the installed Toolkit gives sessions the governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}${dropped.length ? `No longer in this pull request (the latest answers do not make them):\n${dropped.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;
+function proposalBody(binding, files, removals, dropped = [], notes = []) {
+  return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled, with its CI checks; the installed Toolkit gives sessions the governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}${dropped.length ? `No longer in this pull request (the latest answers do not make them):\n${dropped.map(name => `- ${name}`).join('\n')}\n\n` : ''}${notes.length ? `Already on GitHub:\n${notes.map(note => `- ${note}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;
 }
 module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingFiles, REQUIRED_FILES, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });

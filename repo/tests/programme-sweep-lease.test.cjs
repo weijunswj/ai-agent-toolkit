@@ -706,19 +706,43 @@ test('cloud sweep: CLOUD_LAYOUT_STALE is raised while the copies are stale and r
 test('cloud sweep: the layout check compares the copies with a render from the Toolkit the sweep runs', t => {
   const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'));
   const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
-  const { SWEEPS, putCopied } = require('./support/default-cloud-workflows.cjs');
+  const { COPIED_FILES, SWEEPS, putCopied } = require('./support/default-cloud-workflows.cjs');
   const commit = workflows.toolkitHead(ROOT);
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-layout-'));
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   fs.mkdirSync(path.join(repo, '.git'));
   fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
   const write = pinned => { for (const row of SWEEPS) { const text = workflows.render(row.id, require('node:child_process').execFileSync('git', ['show', `${commit}:${row.file}`], { cwd: ROOT, encoding: 'utf8' }), commit); fs.writeFileSync(path.join(repo, row.file), pinned ? pinnedCopy(text, commit) : text); } };
+  const put = (file, text) => { fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true }); fs.writeFileSync(path.join(repo, file), text); };
+  // The workflows copied as they are never raise it, in any state: a repository whose owner leaves them
+  // out for now (an already governed one) gets no call on its board.
   write(false);
-  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE'], 'a missing default workflow is stale too');
+  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), [], 'every copied workflow missing');
   putCopied(repo, { root: ROOT, commit });
-  write(true);
-  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE']);
-  write(false);
-  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), []);
+  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), [], 'all current');
+  for (const file of COPIED_FILES) {
+    const text = fs.readFileSync(path.join(repo, file), 'utf8');
+    for (const [state, other] of [['missing', null], ['edited', `${text}# a hand edit\n`], ['someone else\'s', 'name: ours\n']]) {
+      if (other === null) fs.rmSync(path.join(repo, file)); else put(file, other);
+      assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), [], `${file} ${state}`);
+    }
+    put(file, text);
+  }
+  // The rendered copies do, whatever the copied ones are.
+  for (const copied of [true, false]) {
+    if (!copied) for (const file of COPIED_FILES) fs.rmSync(path.join(repo, file));
+    write(true);
+    assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE'], 'pinned to an older layout');
+    write(false);
+    for (const row of SWEEPS) {
+      const text = fs.readFileSync(path.join(repo, row.file), 'utf8');
+      for (const [state, other] of [['missing', null], ['edited', `${text}# a hand edit\n`], ['someone else\'s', 'name: ours\n']]) {
+        if (other === null) fs.rmSync(path.join(repo, row.file)); else put(row.file, other);
+        assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE'], `${row.file} ${state}`);
+      }
+      put(row.file, text);
+    }
+    assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), []);
+  }
   assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: ROOT }), [], 'the Toolkit runs its own workflow files');
 });
