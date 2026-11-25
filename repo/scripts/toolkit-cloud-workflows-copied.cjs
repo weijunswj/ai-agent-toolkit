@@ -8,8 +8,9 @@
 //   - A file Toolkit did not write (no managed header, a link, a folder) is 'unmanaged' and never
 //     written, and the entry's other files are `held`: a workflow never runs a script Toolkit did not
 //     write, and a script is never left beside someone else's workflow of the same name.
-//   - The guard's settings file is the owner's once it exists: it gets a row only while it is missing, and
-//     one already on an open pull request's branch stays as it is there.
+//   - The guard's settings file is the owner's once it exists: it gets a row only while it is missing, or
+//     while it holds a retired setting, which leaves with the script that stopped reading it (so it waits
+//     with the script where that is held). One already on an open pull request's branch is kept there.
 //   - A hand-edited or older copy is brought back to the Toolkit's own text.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -57,6 +58,7 @@ const ROWS = Object.freeze({
     ];
     const config = readPlain(target, GUARD_CONFIG);
     if (config === null || config === FOREIGN) rows.push({ file: GUARD_CONFIG, expected: installer.configText(), state: config === null ? 'missing' : 'unmanaged' });
+    else if (installer.currentConfigText(config) !== config) rows.push({ file: GUARD_CONFIG, expected: installer.currentConfigText(config), state: 'outdated', why: 'the retired identity setting, which no guard reads any more, taken out' });
     return rows;
   },
   'dependency-auto-merge'(target, source) {

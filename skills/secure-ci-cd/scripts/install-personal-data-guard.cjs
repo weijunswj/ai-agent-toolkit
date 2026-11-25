@@ -126,6 +126,24 @@ function configText(requiredCheck = 'none') {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
+// Settings an older guard read and no guard reads now. They leave a config in the same refresh that brings
+// the current script, never before it: an older script refuses a config without them. Remove this list and
+// currentConfigText once no repository's guard config holds one.
+const RETIRED_CONFIG_KEYS = ['identity', 'identity_reason'];
+
+// A config's text without the retired settings, in its own indent and line endings, every other value
+// as it was; the same text when it holds none or is not JSON.
+function currentConfigText(text) {
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  let config;
+  try { config = JSON.parse(text.slice(bom.length)); } catch { return text; }
+  if (!config || typeof config !== 'object' || Array.isArray(config) || !RETIRED_CONFIG_KEYS.some(key => Object.hasOwn(config, key))) return text;
+  const kept = Object.fromEntries(Object.entries(config).filter(([key]) => !RETIRED_CONFIG_KEYS.includes(key)));
+  const indent = /^\s*\{\r?\n([ \t]+)"/.exec(text.slice(bom.length))?.[1] || '  ';
+  const lines = JSON.stringify(kept, null, indent);
+  return `${bom}${text.includes('\r\n') ? lines.replace(/\n/g, '\r\n') : lines}${/\r?\n$/.exec(text)?.[0] || ''}`;
+}
+
 function hookText(name) {
   const lines = [
     '#!/bin/sh',
@@ -405,6 +423,6 @@ function main(argv, { out = process.stdout, err = process.stderr, spawn = spawnS
   }
 }
 
-module.exports = Object.freeze({ GuardInstaller, HOOKS, HOOK_MARKER, configText, hookText, main, vendoredState, vendoredText, workflowState, workflowText });
+module.exports = Object.freeze({ GuardInstaller, HOOKS, HOOK_MARKER, WORKFLOWS, WORKFLOW_MARKER, configText, currentConfigText, hookText, main, vendoredState, vendoredText, workflowState, workflowText });
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

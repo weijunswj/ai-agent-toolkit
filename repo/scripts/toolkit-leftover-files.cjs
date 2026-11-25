@@ -32,6 +32,7 @@ const DECISION_FILE = '.github/toolkit-programme.json';
 const BLOCK_FILES = Object.freeze(['AGENTS.md', 'GEMINI.md', '.agents/rules/00-agent-toolkit-bootstrap.md']);
 const VENDORED_CHECKS = Object.freeze(['plain-text-check', 'personal-data-guard']);
 const VENDORED_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=[0-9a-f]{12}$/m;
+const { WORKFLOWS: GUARD_WORKFLOWS, WORKFLOW_MARKER: GUARD_WORKFLOW_MARKER } = require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs');
 const LIMIT = 1024 * 1024;
 const SCANNED_STATES = Object.freeze({ DISABLED: 'governance off', UNDECIDED: 'no governance decision', ENABLED: 'governance on' });
 // The Toolkit blocks that copied governed rules into a repository. Only these are leftovers where
@@ -213,12 +214,20 @@ class LeftoverScan {
     }
   }
 
-  // A vendored check that still carries Toolkit's first-line marker. The check works without governance.
+  // A vendored check that still carries Toolkit's first-line marker, and the personal data guard's marked
+  // workflows. The checks work without governance.
   #checks(root, result) {
     for (const name of VENDORED_CHECKS) {
       const file = `.github/scripts/${name}.cjs`, read = readInside(root, file);
       if (!read?.text) continue;
       if (VENDORED_MARKER.exec(unix(read.text))?.[1] !== name) continue;
+      if (result.governed) result.kept.push({ file, reason: IN_USE });
+      else result.files.push({ file, kind: 'check', proof: 'Toolkit marker' });
+    }
+    // The personal data guard's own workflows, which carry its marker.
+    for (const name of GUARD_WORKFLOWS) {
+      const file = `.github/workflows/${name}.yml`, read = readInside(root, file);
+      if (!read?.text || GUARD_WORKFLOW_MARKER.exec(unix(read.text))?.[1] !== name) continue;
       if (result.governed) result.kept.push({ file, reason: IN_USE });
       else result.files.push({ file, kind: 'check', proof: 'Toolkit marker' });
     }

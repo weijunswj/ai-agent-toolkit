@@ -435,6 +435,27 @@ test('refresh PR: an edited guard is brought back, and someone else\'s file in a
   assert.equal(github.filesOf(github.refs.get(BRANCH))['.github/workflows/dependency-auto-merge.yml'], 'name: Mine\non: push\n');
 });
 
+test('refresh PR: the retired identity setting goes in the same pull request as the new guard script, named, with the owner\'s other settings kept', t => {
+  const dir = governedCheckout(t, { pinned: false, vendored: false, baseline: false });
+  const installer = require(path.join(ROOT, 'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs'));
+  const config = '.github/personal-data-guard.json', script = '.github/scripts/personal-data-guard.cjs';
+  const own = { ...JSON.parse(fs.readFileSync(path.join(dir, config), 'utf8')), not_scanned: [{ path: 'a.png', reason: 'artwork' }] };
+  fs.writeFileSync(path.join(dir, config), `${JSON.stringify({ ...own, identity: 'included' }, null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, script), installer.vendoredText('#!/usr/bin/env node\n// older\n'));
+  git(dir, ['commit', '--quiet', '-am', 'an older guard']);
+  const github = new FakeGitHub(dir);
+  assert.match(runRefresh(dir, github).line, /\(2 files: \.github\/scripts\/personal-data-guard\.cjs, \.github\/personal-data-guard\.json\)/);
+  assert.match(github.pulls[0].body, /`\.github\/personal-data-guard\.json`: the retired identity setting, which no guard reads any more, taken out/);
+  assert.deepEqual(JSON.parse(github.filesOf(github.refs.get(BRANCH))[config]), own);
+  // A rerun with the branch already there changes nothing, and settings someone added on it stay.
+  assert.match(runRefresh(dir, github).line, /^Unchanged refresh pull request /);
+  const branch = github.refs.get(BRANCH), mine = { ...own, identity: 'included', mine: true };
+  github.commits.set('e'.repeat(40), { tree: github.treeSha({ ...github.filesOf(branch), [config]: `${JSON.stringify(mine, null, 2)}\n` }), parents: [branch] });
+  github.refs.set(BRANCH, 'e'.repeat(40));
+  runRefresh(dir, github);
+  assert.deepEqual(JSON.parse(github.filesOf(github.refs.get(BRANCH))[config]), { ...own, mine: true });
+});
+
 // The command once had no test past the commit check without an injected commit (a change that handed
 // the raw option to the file step went unseen), and none that a refused refresh goes to stderr with exit 2.
 test('refresh PR: the command finds its own Toolkit commit, and a refusal goes to stderr with exit 2', t => {

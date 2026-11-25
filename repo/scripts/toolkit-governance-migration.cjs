@@ -10,6 +10,7 @@ const governance = require('./toolkit-governance-state.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
+const { BY_HAND } = require('./toolkit-first-sweep.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
 const RECORD_SCHEMA = 'toolkit.governance-migration.v1';
 const RECORD_BASENAME = 'governance-migration.v1.json';
@@ -149,18 +150,19 @@ class GovernanceMaintenance {
     else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
     else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
     this.#securityEnd(rows[0], securities, { on, held, retry, because });
-    if (sweep) this.#sweepEnd(slug, { held, retry, reports });
+    if (sweep) this.#sweepEnd(slug, { held, reports });
     // Security files written into this working tree still need a pull request; the result says so.
     const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
     return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, reports, files };
   }
 
-  // Where the first-install sweep ended: its report line, an owner step, or tried again later.
-  #sweepEnd(slug, { held, retry, reports }) {
-    const end = this.#firstSweep ? this.#firstSweep.run(slug) : { end: 'retry', reason: 'the first personal data sweep cannot be started from here' };
-    if (end.end === 'report') reports.push(end.text);
-    else if (end.end === 'held') held.push({ name: 'the first personal data sweep', step: end.step });
-    else retry.push(end.reason);
+  // Where the first-install sweep ended: its report line or an owner step, never a reason to run the
+  // finish again.
+  #sweepEnd(slug, { held, reports }) {
+    let end;
+    try { end = this.#firstSweep ? this.#firstSweep.run(slug) : null; } catch { end = null; }
+    if (end?.end === 'report') reports.push(end.text);
+    else held.push({ name: 'the first personal data sweep', step: end?.step || `it was not started from here; ${BY_HAND}.` });
   }
 
   // Where the security settings ended. A read or write GitHub did not confirm is retried, and so is a

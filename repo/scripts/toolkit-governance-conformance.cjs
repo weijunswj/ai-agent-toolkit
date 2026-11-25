@@ -354,7 +354,7 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     // A held row's workflow clashes with a file Toolkit did not write, which its own row reports.
     if (row.state === 'current' || row.held) continue;
     // A copied workflow names no Toolkit commit, so the session-start note below leaves it to this check.
-    if (row.state === 'outdated' && row.kind === 'copied') { out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} is an older Toolkit copy; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`)); continue; }
+    if (row.state === 'outdated' && row.kind === 'copied') { out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} ${row.why ? 'holds a setting no guard reads any more' : 'is an older Toolkit copy'}; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`)); continue; }
     // The file, the copy's pin and whether a refresh from this checkout moves it forward ride along for
     // the session-start note (toolkit-governance-gate.cjs stalePinLines).
     if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), file: row.file, pin: row.toolkit || null, pinned: Boolean(row.pinned), head, refreshable: direction(row.toolkit) }));

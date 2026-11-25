@@ -276,9 +276,28 @@ test('the CI template checks pull requests and every branch push without interpo
   assert.doesNotMatch(text, /workflow_dispatch|^    if:/m);
 });
 
+test('a config that holds the retired identity setting loses only that, in its own layout', () => {
+  const kept = { ...BASE_CONFIG, not_scanned: [{ path: 'a.png', reason: 'artwork' }], mine: [1, 'two'] };
+  const holds = extra => ({ schema: kept.schema, ...extra, ...Object.fromEntries(Object.entries(kept).filter(([key]) => key !== 'schema')) });
+  for (const extra of [{ identity: 'excluded', identity_reason: 'the owner said so' }, { identity: 'included' }, { identity: 42 }, { identity: { mode: 'sometimes' } }, { identity_reason: 'left alone' }]) {
+    for (const indent of [2, 4, '\t']) {
+      const want = `${JSON.stringify(kept, null, indent)}\n`;
+      assert.equal(installer.currentConfigText(`${JSON.stringify(holds(extra), null, indent)}\n`), want);
+      assert.equal(installer.currentConfigText(`\uFEFF${JSON.stringify(holds(extra), null, indent).replace(/\n/g, '\r\n')}`), `\uFEFF${want.trimEnd().replace(/\n/g, '\r\n')}`);
+    }
+  }
+  for (const text of [`${JSON.stringify(kept)}\n`, 'not json', '', '[]', 'null', '{"schema": "identity"}']) assert.equal(installer.currentConfigText(text), text, 'nothing to take out');
+});
+
 test('the sweep template runs only when started by hand, with a token that can only read, and has no job of the check\'s name', () => {
   const text = fs.readFileSync(path.join(path.dirname(TEMPLATE), 'personal-data-sweep.yml'), 'utf8');
   assert.match(text, /^on:\n  workflow_dispatch:\n\npermissions:\n  contents: read\n  issues: read\n  pull-requests: read\n\njobs:\n  sweep:\n/m);
+  // One event, one permissions block and one job: a start on any branch runs that branch's script with a
+  // token that can only read, no secret and no stored checkout credential.
+  assert.equal((text.match(/permissions:/g) || []).length, 1);
+  assert.deepEqual(text.slice(text.indexOf('\njobs:')).match(/^  [a-z-]+:$/gm), ['  sweep:']);
+  assert.equal((text.match(/uses: actions\/checkout/g) || []).length, (text.match(/persist-credentials: false/g) || []).length);
+  assert.deepEqual(text.match(/\$\{\{[^}]*\}\}/g), ['${{ github.token }}']);
   assert.doesNotMatch(text, /:\s*write\b|secrets\.|personal-data:|\$\{\{\s*github\.event\./, 'nothing can be written or posted, and no check is passed');
   assert.match(text, /fetch-depth: 0\n          persist-credentials: false/);
   assert.match(text, /run: node \.github\/scripts\/personal-data-guard\.cjs sweep\n$/);

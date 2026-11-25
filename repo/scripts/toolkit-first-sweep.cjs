@@ -6,12 +6,12 @@
 // request text and comments: places and rule names only. It changes and posts nothing.
 //
 // It starts at most one run: a sweep run already on GitHub (from an earlier finish, another computer or
-// a person) is read instead of starting another, and when GitHub cannot be read nothing is started. A
-// run that is still going is left for the next finish to read.
+// a person) is read instead of starting another, and when GitHub cannot be read nothing is started.
 //
-// run(slug) ends as { end: 'report', text }, { end: 'held', step } (an owner step: GitHub refused the
-// start, or the run could not scan everything) or { end: 'retry', reason } (GitHub could not be read, or
-// the run is still going). Only counts, the run's link and fixed words are ever read out of GitHub.
+// run(slug) always ends as one plain line, so the sweep never fails the finish or makes it run again:
+// { end: 'report', text } (the counts and the link, or the link of a run still going) or
+// { end: 'held', step } (what stopped it and how the owner starts it by hand). Only counts, the run's
+// link and fixed words are ever read out of GitHub.
 
 const { spawnSync } = require('node:child_process');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
@@ -62,30 +62,35 @@ class FirstInstallSweep {
   }
 
   run(slug) {
-    const retry = why => ({ end: 'retry', reason: `the first personal data sweep ${why}` });
-    if (!SLUG.test(String(slug))) return retry('could not be started, because the repository\'s name could not be read');
+    if (!SLUG.test(String(slug))) return this.#held('it was not started, because the repository\'s name could not be read');
     const repository = this.#gh([`repos/${slug}`]);
     const branch = repository.ok ? repository.value?.default_branch : null;
-    if (typeof branch !== 'string' || !branch) return retry('could not be started, because GitHub could not be read');
+    if (typeof branch !== 'string' || !branch) return this.#held('it was not started, because GitHub could not be read');
     const before = this.#newest(slug, branch);
-    if (!before.ok) return before.reason === 'not-found' ? this.#held('its workflow is not on the default branch') : retry('could not be started, because GitHub could not be read');
+    if (!before.ok) return this.#held(before.reason === 'not-found' ? 'it was not started, because its workflow is not on the default branch' : 'it was not started, because GitHub could not be read');
     if (!before.run) {
       const started = this.#gh(['--method', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`], { ref: branch });
-      if (!started.ok) return ['forbidden', 'not-found', 'refused'].includes(started.reason) ? this.#held(`GitHub did not start it (${started.reason})`) : retry('could not be started, because GitHub could not be written');
+      if (!started.ok) return this.#held(`GitHub did not start it (${started.reason})`);
     }
     const until = this.#now() + WAIT_MS;
     let run = before.run;
     while (run?.status !== 'completed') {
-      if (this.#now() >= until) return retry('is still running');
+      if (this.#now() >= until) return this.#going(slug, run);
       this.#wait(POLL_MS);
       const read = this.#newest(slug, branch);
-      if (!read.ok) return retry('could not be read back');
+      if (!read.ok) return this.#going(slug, run);
       run = read.run || run;
     }
     return this.#ended(slug, run);
   }
 
   #held(why) { return { end: 'held', step: `${why}; ${BY_HAND}.` }; }
+
+  // Started, with no result read yet.
+  #going(slug, run) {
+    const url = run ? `https://github.com/${slug}/actions/runs/${run.id}` : `https://github.com/${slug}/actions/workflows/${WORKFLOW}`;
+    return { end: 'report', text: `First personal data sweep: started, and its list (places and rule names only) will be at ${url}. It changes and posts nothing.` };
+  }
 
   #ended(slug, run) {
     const url = `https://github.com/${slug}/actions/runs/${run.id}`;
@@ -105,4 +110,4 @@ class FirstInstallSweep {
   }
 }
 
-module.exports = Object.freeze({ FirstInstallSweep, WAIT_MS, WORKFLOW });
+module.exports = Object.freeze({ BY_HAND, FirstInstallSweep, WAIT_MS, WORKFLOW });

@@ -686,7 +686,8 @@ test('A range: the spec needs exactly two dots and two ends', (t) => {
 });
 
 test('A author, committer and tagger lines are never scanned, whatever the config says', (t) => {
-  for (const config of [BASE_CONFIG, { ...BASE_CONFIG, identity: 'included' }]) {
+  // A config from before the setting went may still hold it, in any shape; nothing reads it.
+  for (const config of [BASE_CONFIG, { ...BASE_CONFIG, identity: 'excluded', identity_reason: 'the owner said so' }, { ...BASE_CONFIG, identity: 'included' }, { ...BASE_CONFIG, identity: 42, identity_reason: null }, { ...BASE_CONFIG, identity: { mode: 'sometimes' }, something_else: true }]) {
     const repo = new TestRepo(t, { config });
     const base = repo.commit('base', { 'README.md': 'base\n' });
     repo.write('b.txt', 'clean\n');

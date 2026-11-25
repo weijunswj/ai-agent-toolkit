@@ -67,34 +67,46 @@ test('a sweep already on GitHub is read, never started again', () => {
   assert.equal(fake.world.starts.length, 1);
 });
 
-test('a run still going when the wait ends is left for the next finish, which reads it', () => {
+test('a run still going when the wait ends, or that can no longer be read, is one line with its link, and never a second start', () => {
   const going = { ...DONE, status: 'in_progress', conclusion: null };
+  const line = url => `First personal data sweep: started, and its list (places and rule names only) will be at ${url}. It changes and posts nothing.`;
   const fake = fakeGitHub({ onStart: world => { world.runs = [going]; } });
   const { result, waits } = run(fake);
-  assert.deepEqual(result, { end: 'retry', reason: 'the first personal data sweep is still running' });
+  assert.deepEqual(result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/runs/901`) });
   assert.ok(waits.reduce((sum, ms) => sum + ms, 0) >= WAIT_MS);
   assert.ok(WAIT_MS < finishing.FINISH_GAP_MS, 'the finish\'s lock outlasts the wait');
   fake.world.runs = [DONE];
-  assert.equal(run(fake).result.end, 'report');
+  assert.match(run(fake).result.text, /4 found/);
   assert.equal(fake.world.starts.length, 1, 'one start in all');
+  // Started, but GitHub shows no run yet, or stops answering: the link is the workflow's own page.
+  assert.deepEqual(run(fakeGitHub()).result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/workflows/personal-data-sweep.yml`) });
+  const lost = fakeGitHub();
+  const refuse = {};
+  const gh = lost.gh;
+  lost.gh = (args, input) => (refuse.on && args.some(arg => arg.includes('/runs?')) ? { ok: false, reason: 'gh-request-failed' } : gh(args, input));
+  assert.deepEqual(run(lost, () => { refuse.on = true; }).result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/workflows/personal-data-sweep.yml`) });
+  assert.equal(lost.world.starts.length, 1);
 });
 
-test('what GitHub refuses or cannot answer: a named owner step, or a later try with nothing started', () => {
+test('a sweep that may not or cannot be started is one plain line with the owner\'s step, never a retry', () => {
   const cases = [
-    ['the repository cannot be read', { [`repos/${SLUG}`]: 'gh-request-failed' }, 'retry', /GitHub could not be read/, 0],
-    ['the run list cannot be read', { '/runs?': 'gh-request-failed' }, 'retry', /GitHub could not be read/, 0],
-    ['too many requests', { '/runs?': 'rate-limited' }, 'retry', /GitHub could not be read/, 0],
-    ['the workflow is not there', { '/runs?': 'not-found' }, 'held', /its workflow is not on the default branch; on GitHub, open Actions, choose Personal data sweep and press Run workflow\./, 0],
-    ['no right to start it', { '/dispatches': 'forbidden' }, 'held', /GitHub did not start it \(forbidden\)/, 0],
-    ['Actions is off', { '/dispatches': 'refused' }, 'held', /GitHub did not start it \(refused\)/, 0],
-    ['the start fails', { '/dispatches': 'gh-request-failed' }, 'retry', /GitHub could not be written/, 0],
+    ['the repository cannot be read', { [`repos/${SLUG}`]: 'gh-request-failed' }, 'it was not started, because GitHub could not be read'],
+    ['not signed in', { [`repos/${SLUG}`]: 'gh-unavailable' }, 'it was not started, because GitHub could not be read'],
+    ['the run list cannot be read', { '/runs?': 'gh-request-failed' }, 'it was not started, because GitHub could not be read'],
+    ['too many requests', { '/runs?': 'rate-limited' }, 'it was not started, because GitHub could not be read'],
+    ['the workflow is not there', { '/runs?': 'not-found' }, 'it was not started, because its workflow is not on the default branch'],
+    ['no right to start it', { '/dispatches': 'forbidden' }, 'GitHub did not start it (forbidden)'],
+    ['Actions is off', { '/dispatches': 'refused' }, 'GitHub did not start it (refused)'],
+    ['the start fails', { '/dispatches': 'gh-request-failed' }, 'GitHub did not start it (gh-request-failed)'],
   ];
-  for (const [name, refuse, end, words, starts] of cases) {
+  for (const [name, refuse, why] of cases) {
     const fake = fakeGitHub({ refuse });
-    const { result } = run(fake);
-    assert.equal(result.end, end, name);
-    assert.match(result.step || result.reason, words, name);
-    assert.equal(fake.world.starts.length, starts, name);
+    const { result, waits } = run(fake);
+    assert.deepEqual(result, { end: 'held', step: `${why}; on GitHub, open Actions, choose Personal data sweep and press Run workflow.` }, name);
+    assert.equal(fake.world.starts.length, 0, name);
+    assert.equal(waits.length, 0, `${name}: nothing is waited for`);
+    // The governance App, its variable and its secret are never read or needed.
+    for (const call of fake.world.calls) assert.doesNotMatch(call, /variables|secrets|installation|\/apps?\b/, call);
   }
   // A run that could not scan everything is never a report.
   const failed = run(fakeGitHub({ runs: [{ ...DONE, conclusion: 'failure' }] })).result;
@@ -105,7 +117,7 @@ test('what GitHub refuses or cannot answer: a named owner step, or a later try w
     const { result } = run(fakeGitHub({ runs: [DONE], ...options }));
     assert.deepEqual(result, { end: 'report', text: `First personal data sweep: it finished; its report is at https://github.com/${SLUG}/actions/runs/901. It changed and posted nothing.` });
   }
-  assert.equal(new FirstInstallSweep({ gh: () => assert.fail('no read') }).run('not a name').end, 'retry');
+  assert.equal(new FirstInstallSweep({ gh: () => assert.fail('no read') }).run('not a name').end, 'held');
 });
 
 // ---- the finish --------------------------------------------------------------------------------
@@ -166,22 +178,23 @@ test('no sweep where the turn-on did not add the guard, and an update of the ope
   }
 });
 
-test('a sweep GitHub refused waits for the owner with its step; one still running keeps the finish pending', async t => {
-  const held = governedRepo(t);
-  finishing.markPending(held.registryOptions, held.id, { proposal: 1, firstSweep: true });
-  const refused = await finish(held, { run: () => ({ end: 'held', step: 'GitHub did not start it (forbidden); do it by hand.' }) });
-  assert.equal(refused.code, 0, refused.out);
-  assert.match(refused.entry.line, /Waiting for you, the first personal data sweep: GitHub did not start it \(forbidden\); do it by hand\./);
-  const going = governedRepo(t);
-  finishing.markPending(going.registryOptions, going.id, { proposal: 1, firstSweep: true });
-  const pending = await finish(going, { run: () => ({ end: 'retry', reason: 'the first personal data sweep is still running' }) });
-  assert.equal(pending.code, 2);
-  assert.equal(pending.entry.status, 'pending');
-  assert.match(pending.entry.line, /could not finish here yet \(the first personal data sweep is still running\)/);
-  // Where no sweep can be started (offline), it is tried again later, never claimed.
-  const offline = governedRepo(t);
-  finishing.markPending(offline.registryOptions, offline.id, { proposal: 1, firstSweep: true });
-  assert.match((await finish(offline, null)).entry.line, /the first personal data sweep cannot be started from here/);
+test('a sweep that was not started never fails the finish or makes it run again: one line, shown once', async t => {
+  const cases = [
+    [{ run: () => ({ end: 'held', step: 'GitHub did not start it (forbidden); do it by hand.' }) }, /Waiting for you, the first personal data sweep: GitHub did not start it \(forbidden\); do it by hand\./],
+    [{ run: () => { throw new Error('unexpected'); } }, /Waiting for you, the first personal data sweep: it was not started from here; on GitHub, open Actions/],
+    [null, /Waiting for you, the first personal data sweep: it was not started from here; on GitHub, open Actions/],
+  ];
+  for (const [sweeper, words] of cases) {
+    const ctx = governedRepo(t);
+    finishing.markPending(ctx.registryOptions, ctx.id, { proposal: 1, firstSweep: true });
+    const done = await finish(ctx, sweeper);
+    assert.equal(done.code, 0, done.out);
+    assert.equal(done.entry.status, 'done');
+    assert.match(done.entry.line, words);
+    const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+    assert.match(finishing.sessionLines(state, ctx.registryOptions, { startFinish: () => assert.fail('not started again') }).join(' '), words);
+    assert.equal(finishing.entryFor(ctx.registryOptions, ctx.id), null, 'shown once, then gone');
+  }
 });
 
 test('the turn-on says before the owner answers that the sweep follows the merge', () => {

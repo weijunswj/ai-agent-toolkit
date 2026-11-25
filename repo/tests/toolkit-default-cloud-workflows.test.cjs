@@ -151,6 +151,35 @@ test('idempotent: a turn-on or an install where everything is current changes no
   assert.deepEqual(drift(dir), []);
 });
 
+test('a guard config that still holds the retired identity setting loses it only with the script that stopped reading it', t => {
+  const installer = require(path.join(ROOT, 'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs'));
+  const dir = repository(t, { installed: true });
+  const own = { ...JSON.parse(read(dir, CONFIG)), not_scanned: [{ path: '*.png', reason: 'artwork without people' }] };
+  const older = installer.vendoredText('#!/usr/bin/env node\n// older\n'), script = read(dir, SCRIPT);
+  for (const extra of [{ identity: 'excluded', identity_reason: 'the owner said so' }, { identity: 'included' }, { identity: 42 }]) {
+    // With an older script: both change in the one refresh, and the rest of the config stays.
+    put(dir, CONFIG, `${JSON.stringify({ ...own, ...extra }, null, 2)}\n`);
+    put(dir, SCRIPT, older);
+    assert.deepEqual(workflows.apply(plan(dir)).rows.filter(row => row.written).map(row => row.file), [SCRIPT, CONFIG]);
+    assert.deepEqual(JSON.parse(read(dir, CONFIG)), own);
+    assert.equal(read(dir, SCRIPT), script);
+    assert.deepEqual(findings(dir), []);
+    // With the current script: the setting alone, noted and never drift.
+    put(dir, CONFIG, JSON.stringify({ ...own, ...extra }));
+    assert.deepEqual(findings(dir).map(entry => [entry.severity, entry.message.startsWith(`${CONFIG} holds a setting no guard reads any more`)]), [['info', true]]);
+    // A script Toolkit did not write may still read it, so the config waits with it.
+    put(dir, SCRIPT, '// my own script\n');
+    const text = read(dir, CONFIG);
+    assert.equal(workflows.apply(plan(dir)).rows.some(row => row.written), false);
+    assert.equal(turnOn(dir).files[CONFIG], undefined);
+    assert.equal(read(dir, CONFIG), text);
+    put(dir, SCRIPT, script);
+  }
+  // A config that is not JSON is left to its owner.
+  put(dir, CONFIG, 'not json');
+  assert.equal(plan(dir).rows.some(row => row.file === CONFIG), false);
+});
+
 test('partial and drifted repositories: what is missing is added, an edited or older copy is brought back, and the rest stays', t => {
   const installer = require(path.join(ROOT, 'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs'));
   const cases = [

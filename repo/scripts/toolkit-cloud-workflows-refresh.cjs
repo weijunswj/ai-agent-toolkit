@@ -76,7 +76,7 @@ function changes({ target, root, commit, ci, ciShards, workflows }) {
       if (git(root, ['rev-parse', '--is-shallow-repository']).stdout.trim() === 'true') throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this shallow Toolkit checkout (${commit.slice(0, 7)}) cannot reach; run git fetch --unshallow origin in the Toolkit checkout, then run this again.`);
       throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this Toolkit checkout (${commit.slice(0, 7)}) does not contain; update the Toolkit checkout to the latest main first.`);
     }
-    out.push({ file: row.file, text: row.expected, why: row.state === 'missing' ? 'added' : row.state === 'edited' ? 'edited by hand, rewritten' : row.pinned ? 'pinned to one Toolkit commit, now follows Toolkit main' : row.kind === 'copied' ? 'Toolkit copy updated' : 'layout changed' });
+    out.push({ file: row.file, text: row.expected, why: row.state === 'missing' ? 'added' : row.state === 'edited' ? 'edited by hand, rewritten' : row.pinned ? 'pinned to one Toolkit commit, now follows Toolkit main' : row.kind === 'copied' ? row.why || 'Toolkit copy updated' : 'layout changed' });
   }
   // Nothing sweeps what is already here after this pull request, as a turn-on's finish does.
   if (out.some(entry => entry.file === SWEEP_WORKFLOW && entry.why === 'added')) notes.push(`The personal data guard checks new work only; to list what is already here, start ${SWEEP_WORKFLOW} once by hand after the merge (Actions, Personal data sweep, Run workflow). It changes and posts nothing.`);
@@ -173,7 +173,9 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
     if (!existing || (entry.file !== GUARD_CONFIG && workflows.MARKER.exec(entry.text)?.index !== 0)) return entry.text;
     const held = github(`repos/${repository}/contents/${entry.file.split('/').map(encodeURIComponent).join('/')}?ref=${existing}`, { missing: true });
     const text = held?.encoding === 'base64' ? Buffer.from(held.content, 'base64').toString('utf8') : null;
-    return text !== null && (entry.file === GUARD_CONFIG || workflows.copyState(text, entry.text).state === 'current') ? text : entry.text;
+    if (text === null) return entry.text;
+    if (entry.file === GUARD_CONFIG) return require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs').currentConfigText(text);
+    return workflows.copyState(text, entry.text).state === 'current' ? text : entry.text;
   });
   const baseCommit = github(`repos/${repository}/git/commits/${base}`);
   const tree = github(`repos/${repository}/git/trees`, { method: 'POST', input: { base_tree: baseCommit.tree.sha, tree: files.map((entry, index) => ({ path: entry.file, mode: '100644', type: 'blob', content: texts[index] })) } });
