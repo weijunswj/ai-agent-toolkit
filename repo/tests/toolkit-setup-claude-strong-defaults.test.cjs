@@ -497,7 +497,7 @@ test('the setup skill tells an agent in the desktop app to read the archive sett
   // Where the app may not show its card the agent asks first, and setup's own yes is not that yes.
   assert.match(sentence, /auto or bypass permissions mode, or where you cannot tell the mode[^.]*ask the user about that one change first[^.]*only on their own plain yes[^.]*not the yes to setup's question/);
   // A locked setting would be asked about on every run, and no yes could be made.
-  assert.match(sentence, /pass no value where the tool lists it as locked/);
+  assert.match(sentence, /pass no value where the tool says it cannot be changed/);
 });
 
 test('the setup skill keeps the bank relay rule as its own short rule', () => {
