@@ -89,6 +89,15 @@ test('findings print compactly: counts by code and the top items, full detail be
   assert.match(expanded.text, /\nOK ci: 0 GAP, 1 CHECK/);
 });
 
+test('the Open PRs list of attention is neither counted nor listed as a finding', () => {
+  const finding = '- aaaaaaaaaaaa new PR_UNOWNED PR #1261: Controller: today, land this open pull request';
+  const stdout = ['Attention: 1 new, 0 acknowledged', '', 'Owner waits (0)', '', 'Open PRs (3)', '- PR #1261 "Upstream updates", open 7 d, owner none, flagged aaaaaaaaaaaa',
+    '- PR #1523 "A slice", open 3 h, owner #1242, next: Builder: finish it', '- store PR 12 "Clean-up", open 2 h, owner none, flagged after 2026-11-25T09:00:00.000Z', '', finding].join('\n');
+  const { text } = run([...ALL, '--expand'], { results: { [SCRIPTS.programme]: { status: 0, stdout } } });
+  assert.ok(text.includes(`ATTENTION programme: Attention: 1 new, 0 acknowledged (PR_UNOWNED 1)\n  ${finding}\n`), text);
+  assert.doesNotMatch(text, /Upstream updates|A slice|Clean-up/);
+});
+
 test('each checker maps its own exit codes and output to attention or could-not-run', () => {
   const results = {
     [SCRIPTS.guidebook]: { status: 1, stdout: 'stale skill 2026-11-14.7, main 2026-11-14.8\n' },

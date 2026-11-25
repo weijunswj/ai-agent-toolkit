@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "61a0eb2597d0",
+      "rule_sha": "1d7d8746e81e",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -367,8 +367,8 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Stale-work net:**",
-      "rule_sha": "d3185fb924a3",
-      "covers": "The programme sweep raises the net findings (finished children to judge, owner-OK closes, unexplained new children, closed parents with open children, unticked rows and full polish children), and in Claude Code the turn-end owed check stops the controller's turn once for each new one due. Judging done, obsolete children and folding the owner's OK into the next ask stay judgement.",
+      "rule_sha": "199a9f70019f",
+      "covers": "The programme sweep raises the net findings (finished children to judge, owner-OK closes, unexplained new children, closed parents with open children, unticked rows, full polish children and open pull requests no task in progress owns), and in Claude Code the turn-end owed check stops the controller's turn once for each new one due. Judging done, obsolete children, the same-day route of a flagged pull request and folding the owner's OK into the next ask stay judgement.",
       "enforced_by": [
         {
           "kind": "reconciler",

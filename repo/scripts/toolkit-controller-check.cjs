@@ -175,14 +175,16 @@ function checkProgramme(run, checkout) {
   const first = lines[0] || '';
   if (!/^Attention: /.test(first) || /^Attention: unknown/.test(first)) return { state: 'failed', lines: [first || why(result)] };
   if (first === 'Attention: clear' && result.status === 0) return { state: 'ok', lines: [first] };
-  // Findings counted by code, so the compact list still says what kind of work is waiting.
+  // Findings counted by code, so the compact list still says what kind of work is waiting. The Open PRs
+  // rows are not findings: an unowned one is already listed as its own finding.
+  const items = lines.slice(1).filter(line => line.startsWith('- ') && !/^- (?:PR #|store PR )\d+ "/.test(line));
   const codes = {};
-  for (const line of lines) {
+  for (const line of items) {
     const match = /^- \S+ (?:(?:new|acknowledged) )?([A-Z][A-Z0-9_]+) /.exec(line);
     if (match) codes[match[1]] = (codes[match[1]] || 0) + 1;
   }
   const byCode = Object.entries(codes).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code} ${n}`).join(', ');
-  return { state: 'attention', lines: [byCode ? `${first} (${byCode})` : first, ...lines.slice(1).filter(line => line.startsWith('- '))], command: require('./toolkit-user-state.cjs').programmeCommand('attention') };
+  return { state: 'attention', lines: [byCode ? `${first} (${byCode})` : first, ...items], command: require('./toolkit-user-state.cjs').programmeCommand('attention') };
 }
 
 function checkTraces(run, repo, parents) {

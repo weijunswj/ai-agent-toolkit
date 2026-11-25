@@ -107,6 +107,21 @@ test('O-2 only findings new for 4 hours or acknowledged past due are listed, and
   assert.doesNotMatch(reason.split('Gate sessions due')[0], /dddddddddddd/);
 });
 
+test('O-2a an open pull request no task owns stops the turn once, named as a pull request; a store one has no #', t => {
+  const fx = fixture(t).controller().writeTranscript().desktop().net([
+    { id: 'aaaaaaaaaaaa', code: 'PR_UNOWNED', issue: 1261, state: 'new', changed_at: iso(NOW - 5 * HOUR) },
+    { id: 'bbbbbbbbbbbb', code: 'PR_RED_UNOWNED', issue: 1443, state: 'acknowledged', changed_at: iso(NOW - 26 * HOUR), due: iso(NOW - 2 * HOUR) },
+    { id: 'cccccccccccc', code: 'PR_UNOWNED', issue: 12, kind: 'store', state: 'new', changed_at: iso(NOW - 4 * HOUR) },
+    { id: 'dddddddddddd', code: 'PR_UNOWNED', issue: 1471, state: 'new', changed_at: iso(NOW - 4 * HOUR + 60000) },
+    { id: 'eeeeeeeeeeee', code: 'PR_UNOWNED', issue: 1472, state: 'acknowledged', changed_at: iso(NOW - 5 * HOUR), due: iso(NOW + HOUR) },
+  ]);
+  const first = fx.run();
+  assert.equal(first.outcome, 'BLOCK');
+  assert.match(first.output.reason, /Findings due \(3\):\n- PR_UNOWNED on PR #1261 \(aaaaaaaaaaaa\), new for 5 h\n- PR_UNOWNED on store PR 12 \(cccccccccccc\), new for 4 h\n- PR_RED_UNOWNED on PR #1443 \(bbbbbbbbbbbb\), acknowledged and 2 h past its due time/);
+  assert.doesNotMatch(first.output.reason, /dddddddddddd|eeeeeeeeeeee|#12\b/);
+  assert.deepEqual(fx.run(), { outcome: 'SHOWN', output: null }, 'the same list again is silent');
+});
+
 test('O-3 an added entry stops the turn again; a shorter list does not', t => {
   const fx = fixture(t).controller().writeTranscript().desktop();
   const one = { id: 'aaaaaaaaaaaa', code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) };

@@ -140,6 +140,25 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: store=owner/other`, enabled), /store= applies only in an answer that turns governance on here/);
 });
 
+// The shards row's status line and explain text say how a shard split stays current; with no shards it says nothing.
+test('the shards row says the split is refreshed once a day through one pull request, only where shards are on', () => {
+  const specs = extra => bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, merged: { store: { repository: 'owner/store' }, required_checks: [], ...(extra.ci_shards ? { ci_shards: extra.ci_shards } : {}) },
+    ...(extra.minutes === undefined ? {} : { ciShards: { measured: { minutes: extra.minutes } } }) });
+  const daily = /once a day Shard Timings measures the tests and, when the shards have drifted, opens one pull request with the new split \(this needs the governance App\)\. Nothing changes until it is merged, and the programme flags it after 24 hours with no owner\./;
+  // The shards row has no number, so row 1.1's explain text carries it, as it does the App's removal steps.
+  const explained = list => bank.explainText(list, '1.1');
+  const bound = specs({ ci_shards: { answer: 'yes' } });
+  assert.match(bank.renderGovernanceBank(bound), /parallel CI shards yes \(refreshed once a day: explain 1\.1\)/);
+  assert.match(explained(bound), daily);
+  const byDefault = specs({ minutes: 25 });
+  assert.match(bank.renderGovernanceBank(byDefault), /- Parallel CI shards: Yes \(Toolkit default\).*; the split is then refreshed once a day\./);
+  assert.match(explained(byDefault), daily);
+  for (const none of [specs({ ci_shards: { answer: 'never' } }), specs({ minutes: 3 })]) {
+    assert.doesNotMatch(bank.renderGovernanceBank(none), /once a day/);
+    assert.doesNotMatch(explained(none), /once a day|Shard Timings/);
+  }
+});
+
 // Explain is read-only: the owner's "explain 1.4" spends no ticket and keeps the bank open, and the
 // tool gate lets through exactly the ticketless explain command; any other reply without the live
 // ticket is still refused.
