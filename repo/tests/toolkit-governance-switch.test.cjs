@@ -462,3 +462,24 @@ test('the switch pull request text names the retired line it deletes, and only w
   assert.match(body(withRetired(bindingText())), /^This changes only `task_prs\.auto_merge` in `\.github\/toolkit-programme\.json`, and deletes the retired `schedule_folder`, which nothing reads any more\. These are/);
   assert.match(body(bindingText()), /^This changes only `task_prs\.auto_merge` in `\.github\/toolkit-programme\.json`\. These are/);
 });
+
+// A chat the session-start hook did not reach (hooks off or untrusted, a helper, a host without
+// hooks) finds the governed rules only through status, so status names the file in a governed
+// repository, and only there.
+test('status names the governed rules file in a governed repository, and not once governance is off', async t => {
+  const ctx = fixture(t);
+  const enabled = await run(ctx, ['status']);
+  assert.equal(enabled.code, 0, enabled.err);
+  const line = enabled.out.split('\n').find(text => text.startsWith('Governed rules: '));
+  assert.ok(line, enabled.out);
+  assert.match(line, /^Governed rules: .+[\\/]repo[\\/]contracts[\\/]agent-rules[\\/]toolkit-governed-rules\.md\. Each new chat gets them from the session-start hook; where no hook ran, read this file\.$/);
+  const file = line.slice('Governed rules: '.length, line.indexOf('.md. ') + 3);
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Toolkit-Governed Repository Rules/, 'the named file is the governed rules');
+  const json = JSON.parse((await run(ctx, ['status', '--json'])).out);
+  assert.equal(json.governed_rules, file);
+  ctx.merge(bindingText({ governance: 'disabled' }));
+  const disabled = await run(ctx, ['status']);
+  assert.match(disabled.out, /^State: DISABLED/m);
+  assert.doesNotMatch(disabled.out, /Governed rules:/);
+  assert.equal(JSON.parse((await run(ctx, ['status', '--json'])).out).governed_rules, undefined);
+});

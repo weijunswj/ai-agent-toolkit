@@ -30,6 +30,7 @@ const ciOffer = require('./toolkit-ci-shards-offer.cjs');
 const governedShards = require('./governed-test-shards.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 const finishing = require('./toolkit-governance-finish.cjs');
+const { managedToolkitFile } = require('./toolkit-user-state.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 const ADOPTION_NOT_READY = 'The turn-on pull request is not ready: it needs the programme file and the plain-text check. Run toolkit governance where GitHub can be read: its bank makes the missing parent issue and private evidence store and adds the CI checks to one setup pull request. Build none of it by hand.';
@@ -255,6 +256,10 @@ class ToolkitGovernanceCli {
     if (reason) lines.push(`Refresh held: ${reason}. The last read on this computer is kept.`);
     const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
     if (task) lines.push(...task.lines);
+    // A chat the session-start hook did not reach (hooks off or untrusted, a helper, a host without
+    // hooks) has no other pointer to the governed rules than this line.
+    const governedRules = state.state === 'ENABLED' ? managedToolkitFile('repo/contracts/agent-rules/toolkit-governed-rules.md') : null;
+    if (governedRules) lines.push(`Governed rules: ${governedRules}. Each new chat gets them from the session-start hook; where no hook ran, read this file.`);
     let hooks = null;
     try { hooks = this.#hookReader(); } catch { hooks = null; }
     if (hooks) lines.push(...hookCapability.describeHooks(hooks));
@@ -262,7 +267,7 @@ class ToolkitGovernanceCli {
     let queue = null;
     try { queue = state.root ? this.#queueReader(state.root) : null; } catch { queue = null; }
     if (queue && queue.count > 0) lines.push(`Queue: ${queue.count} turn${queue.count === 1 ? '' : 's'} waiting (oldest ${String(queue.oldest).slice(0, 10)}); they are written at the next turn end that can reach GitHub, and dropped unwritten after seven days.`);
-    const extra = { ...(task ? { task_auto_merge: task.value } : {}), ...(pending ? { pending } : {}), ...(reason ? { refresh: { refreshed: false, reason: refresh.error } } : {}), ...(hooks ? { hooks: hooks.hosts } : {}), ...(queue ? { queue } : {}) };
+    const extra = { ...(governedRules ? { governed_rules: governedRules } : {}), ...(task ? { task_auto_merge: task.value } : {}), ...(pending ? { pending } : {}), ...(reason ? { refresh: { refreshed: false, reason: refresh.error } } : {}), ...(hooks ? { hooks: hooks.hosts } : {}), ...(queue ? { queue } : {}) };
     this.#print(json, { ...state, ...extra }, lines);
     return state.rule === 'ERROR' || state.state === 'ERROR' ? 2 : 0;
   }
