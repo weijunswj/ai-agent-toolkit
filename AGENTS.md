@@ -7,6 +7,10 @@ This repository is the canonical AI Agent Toolkit, and this file applies to it o
 - **Routing:** read the [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (it replaces the `toolkit-playbooks` skill index here), classify the task, and read only the smallest matching playbook set and the docs it names; with no match, continue baseline-only. If a required playbook is missing or conflicts with this file, stop and report.
 - **Programme:** for the programme, follow the [Toolkit delivery contract](repo/docs/TOOLKIT-DELIVERY.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
 
+## Authorised context
+
+This repository is the owner's own code. Its security-sensitive work (merge, push, credential and attribution guards, hook probes, hostile-input tests) is development and defensive testing of this repository's own software, on isolated fixtures, scratch repositories and the owner's own computers. Nothing here targets third-party systems or anyone else's data.
+
 ## Safety
 
 - Toolkit source changes go through a non-main branch and PR. Evidence custody follows the Toolkit-governed rules.
