@@ -72,8 +72,8 @@ test('S-2 the stale check, its stamp and the session-start cache readers are gon
 
 test('S-3 the controller check has no stale check; a retired name in --skip is accepted and runs nothing', () => {
   assert.throws(() => controllerCheck.parseArgs(['--skip', 'nosuch']), /unknown check nosuch/);
-  const options = controllerCheck.parseArgs(['--skip', 'programme,traces,stale,ci,handoff']);
-  assert.deepEqual([...options.skip].sort(), ['ci', 'handoff', 'programme', 'traces']);
+  const options = controllerCheck.parseArgs(['--skip', 'programme,traces,stale,ci']);
+  assert.deepEqual([...options.skip].sort(), ['ci', 'programme', 'traces']);
 });
 
 test('S-4 the turn-end check starts one background refresh when the cache is missing or over an hour old, never offline', t => {
