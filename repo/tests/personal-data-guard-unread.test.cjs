@@ -37,6 +37,7 @@ const ico = Buffer.concat([u16(0), u16(1, true), u16(1, true), Buffer.from([16, 
 const TYPES = {
   png: png(),
   jpeg: Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), u16(16), ascii('JFIF\0'), zeros(9), Buffer.from([0xFF, 0xD9])]),
+  'older gif': Buffer.concat([ascii('GIF87a'), u16(1, true), u16(1, true), zeros(3), ascii(';')]),
   gif: Buffer.concat([ascii('GIF89a'), u16(1, true), u16(1, true), zeros(3), ascii(';')]),
   webp: Buffer.concat([ascii('RIFF'), u32(20, true), ascii('WEBPVP8 '), u32(8, true), zeros(8)]),
   avif: Buffer.concat([u32(20), ascii('ftypavif'), zeros(4), ascii('mif1'), zeros(8)]),
@@ -60,7 +61,7 @@ const OTHERS = {
   'a font with a table over its header': Buffer.concat([Buffer.from([0, 1, 0, 0]), u16(1), zeros(6), ascii('head'), zeros(4), u32(0), u32(8), zeros(8)]),
   'an icon with a picture outside': Buffer.concat([u16(0), u16(1, true), u16(1, true), Buffer.from([16, 16, 0, 0]), zeros(4), u32(4000, true), u32(22, true), zeros(8)]), 'an icon with no pictures': Buffer.concat([u16(0), u16(1, true), zeros(30)]),
 };
-const EXTENSIONS = { png: ['.png'], jpeg: ['.jpg', '.jpeg'], gif: ['.gif'], webp: ['.webp'], avif: ['.avif'], ico: ['.ico'], woff: ['.woff'], woff2: ['.woff2'], ttf: ['.ttf'], otf: ['.otf'] };
+const EXTENSIONS = { png: ['.png'], jpeg: ['.jpg', '.jpeg'], 'older gif': ['.gif'], gif: ['.gif'], webp: ['.webp'], avif: ['.avif'], ico: ['.ico'], woff: ['.woff'], woff2: ['.woff2'], ttf: ['.ttf'], otf: ['.otf'] };
 const KINDS = { images: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico'], fonts: ['.woff', '.woff2', '.ttf', '.otf'] };
 const safe = name => name.replace(/ /g, '-');
 
@@ -103,7 +104,7 @@ test('the one list is small: these images and these fonts, and the default setti
 test('every type under every extension: only a file whose bytes are what its name says passes, and it is named', t => {
   const { repo, base } = guarded(t);
   const files = {}, expected = [];
-  const names = [...Object.values(EXTENSIONS).flat(), '.bin', '', '.svg', '.zip', '.pdf', '.bmp', '.svgz'];
+  const names = [...new Set(Object.values(EXTENSIONS).flat()), '.bin', '', '.svg', '.zip', '.pdf', '.bmp', '.svgz'];
   for (const [type, bytes] of Object.entries({ ...TYPES, ...OTHERS })) {
     for (const extension of names) {
       const file = `files/${safe(type)}-as-${extension.slice(1) || 'nothing'}${extension}`;
@@ -132,7 +133,7 @@ test('every type under every extension: only a file whose bytes are what its nam
 
 test('readable text is scanned as text whatever its name, an SVG included', t => {
   const utf16 = value => Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(value, 'utf16le')]);
-  const names = [...Object.values(EXTENSIONS).flat(), '.svg'].map(extension => `art/picture${extension}`);
+  const names = [...new Set(Object.values(EXTENSIONS).flat()), '.svg'].map(extension => `art/picture${extension}`);
   const words = guarded(t);
   commitAll(words.repo, Object.fromEntries(names.map(file => [file, `<svg><text>clean ${file}</text></svg>\n`])));
   let read = inProcess(words.repo, ['range', `${words.base}..HEAD`]);
