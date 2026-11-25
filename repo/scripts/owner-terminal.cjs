@@ -37,8 +37,11 @@
 const childProcess = require('node:child_process');
 const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
 
-// Set (non-empty) in shells that a coding agent starts: each app's exact markers, plus the generic AI_AGENT.
-const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT']);
+// Set (non-empty) in shells that a coding agent starts: each app's exact markers, the generic AI_AGENT, and
+// the Claude desktop app's own mark of a Terminal panel tab Claude opened, which carries none of the others.
+// The app does not set that mark in a tab the owner opens there (read in the app's code, 7.37095.0), so it
+// decides only who answers, never which app started setup (agent-host-markers.cjs).
+const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT', 'CLAUDE_CODE_LAUNCHED_BY_SESSION_IDS']);
 const QUIET_MS = 400;
 const WIDTH = 80;
 const PASTE_ON = '\x1b[?2004h';
