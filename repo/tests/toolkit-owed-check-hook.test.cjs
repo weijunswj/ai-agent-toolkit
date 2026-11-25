@@ -579,6 +579,7 @@ test('O-26 the desktop app\'s own file shows a held session that went on: it owe
   // Its one turn ended with READY, and nothing came since.
   assert.deepEqual(run({ completedTurns: 1, lastTurnEdgeAt: NOW - HOUR, latestUserFrameAt: NOW - 2 * HOUR }), { outcome: 'NOTHING_OWED', output: null });
   assert.deepEqual(run({ latestUserFrameAt: NOW - 2 * HOUR }), { outcome: 'NOTHING_OWED', output: null }, 'still in its first turn');
+  assert.deepEqual(run({ completedTurns: 0, lastTurnEdgeAt: NOW - 3 * HOUR, latestUserFrameAt: NOW - 2 * HOUR }), { outcome: 'NOTHING_OWED', output: null }, 'no turn of it ended yet');
   // The owner or another chat sent it on: a message after its first turn, or a second turn.
   assert.match(run({ completedTurns: 1, lastTurnEdgeAt: NOW - 2 * HOUR, latestUserFrameAt: NOW - HOUR }).output.reason, /Gate launches with no gate-session record \(1\)/);
   assert.match(run({ completedTurns: 2, lastTurnEdgeAt: NOW - HOUR, latestUserFrameAt: NOW - 2 * HOUR }).output.reason, /Gate launches with no gate-session record \(1\)/);

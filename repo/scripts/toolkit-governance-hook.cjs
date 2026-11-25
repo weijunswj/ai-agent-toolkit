@@ -54,11 +54,12 @@ const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as o
 // checked live (an accepted gap).
 const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. A simple question may use the app\'s end-of-turn box in that turn. 3. A merge or three or more choices uses the question card, on your next turn. 4. A card holds only the question and its choices, clear alone, with "(my pick)" on one. 5. Never write the context and open a card in the same turn: the app cuts it short. Toolkit\'s exact merge card keeps its own text.';
 const DESKTOP_APP = /^claude-desktop(?:-3p)?$/;
-const asksHere = environment => !cloudSession(environment) && DESKTOP_APP.test(String(environment.CLAUDE_CODE_ENTRYPOINT || ''));
+const asksHere = environment => DESKTOP_APP.test(String(environment.CLAUDE_CODE_ENTRYPOINT || ''));
 // The host's limit on one hook's session-start text (gate.SESSION_TEXT_LIMIT), spelled out because the
 // gate module may be what failed to load. Text over it is lost, so the governance text goes first.
 const HOST_TEXT_LIMIT = 10000;
 
+// Called for a computer's session start only, never for a cloud session's.
 function withAskingLine(output, environment) {
   if (!asksHere(environment)) return output;
   const text = [output.hookSpecificOutput?.additionalContext, ASKING_LINE].filter(Boolean).join('\n\n');
