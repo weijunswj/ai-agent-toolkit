@@ -14,12 +14,13 @@ const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.
 const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
 const conformance = require(path.join(ROOT, 'repo/scripts/toolkit-governance-conformance.cjs'));
 const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
+const { COPIED_FILES, COPIED_SOURCES, SWEEPS } = require('./support/default-cloud-workflows.cjs');
 const COMMIT = workflows.toolkitHead(ROOT);
 const REF = "\\$\\{\\{ vars\\.TOOLKIT_REF \\|\\| 'main' \\}\\}";
 const OTHER = 'a'.repeat(40);
 const source = file => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
-const SWEEP = workflows.WORKFLOWS.find(row => row.id === 'programme-sweep');
-const GATE = workflows.WORKFLOWS.find(row => row.id === 'programme-sweep-gate');
+const SWEEP = SWEEPS.find(row => row.id === 'programme-sweep');
+const GATE = SWEEPS.find(row => row.id === 'programme-sweep-gate');
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -129,7 +130,7 @@ function toolkitHistory(t) {
   const commit = message => { git(dir, ['add', '-A']); git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '--quiet', '-m', message]); return git(dir, ['rev-parse', 'HEAD']); };
   const RENDER = 'repo/scripts/toolkit-cloud-workflows-render.cjs';
   put(RENDER, source(RENDER));
-  for (const row of workflows.WORKFLOWS) put(row.file, source(row.file));
+  for (const name of [...SWEEPS.map(row => row.file), ...COPIED_SOURCES]) put(name, source(name));
   const one = commit('one');
   put(SWEEP.file, source(SWEEP.file).replace('# Toolkit Programme Sweep:', '# Toolkit Programme Sweep (two):'));
   const two = commit('two');
@@ -186,7 +187,7 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   const run = (argv, commit = COMMIT) => workflows.main(argv, { out, err, root: ROOT, commit });
   assert.equal(run(['--repo', repo, '--check']), 1, 'missing copies are drift');
   assert.equal(run(['--repo', repo]), 0);
-  for (const row of workflows.WORKFLOWS) assert.ok(fs.existsSync(path.join(repo, row.file)), `${row.file} written`);
+  for (const name of [...SWEEPS.map(row => row.file), ...COPIED_FILES]) assert.ok(fs.existsSync(path.join(repo, name)), `${name} written`);
   assert.match(out.text(), /shard-timings: not copied/);
   assert.equal(run(['--repo', repo, '--check']), 0, 'current');
   const sweepFile = path.join(repo, SWEEP.file);
@@ -237,7 +238,7 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   assert.match(err.text(), /not a Toolkit copy/);
 });
 
-test('cloud workflows: a Toolkit checkout, another default branch and an unpublished commit are refused', t => {
+test('cloud workflows: a Toolkit checkout and an unpublished commit are refused, and another default branch leaves out only the sweep', t => {
   const err = capture();
   assert.equal(workflows.main(['--repo', ROOT], { out: capture(), err, root: ROOT, commit: COMMIT }), 2);
   assert.match(err.text(), /Toolkit source checkout/);
@@ -249,7 +250,13 @@ test('cloud workflows: a Toolkit checkout, another default branch and an unpubli
   assert.deepEqual(conformance.cloudWorkflowFindings({ root: older }, ROOT, { cloudWorkflowsCommit: COMMIT }), []);
   const repo = tempRepo(t);
   git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk']);
-  assert.throws(() => workflows.plan({ repo, root: ROOT, commit: COMMIT }), /default branch is trunk/);
+  const trunk = workflows.plan({ repo, root: ROOT, commit: COMMIT });
+  assert.deepEqual([...new Set(trunk.rows.map(row => row.id))], ['personal-data-guard', 'dependency-auto-merge'], 'the guard and dependency auto-merge run on any default branch');
+  assert.deepEqual(trunk.not_copied.map(row => row.id), ['programme-sweep', 'programme-sweep-gate', 'test-shards', 'shard-timings']);
+  for (const row of trunk.not_copied) assert.match(row.reason, /default branch is trunk; the cloud sweep runs only on a main branch/);
+  workflows.apply(trunk);
+  const notes = conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT });
+  assert.deepEqual(notes.map(entry => `${entry.id}:${entry.severity}`), ['CLOUD_WORKFLOWS_UNCHECKED:info', 'CLOUD_WORKFLOWS_UNCHECKED:info'], 'noted, never drift');
   // The pinned commit must be on origin/main of the Toolkit checkout.
   const toolkit = tempRepo(t);
   git(toolkit, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'one']);
@@ -264,7 +271,7 @@ test('cloud workflows: a Toolkit checkout, another default branch and an unpubli
 test('cloud workflows: governance check reports a missing or edited copy as drift and a pinned copy as a note', t => {
   const repo = tempRepo(t);
   const ids = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT }).map(entry => `${entry.id}:${entry.severity}`);
-  assert.deepEqual(ids(), ['CLOUD_WORKFLOW_DRIFT:drift', 'CLOUD_WORKFLOW_DRIFT:drift']);
+  assert.deepEqual(ids(), Array(SWEEPS.length + COPIED_FILES.length).fill('CLOUD_WORKFLOW_DRIFT:drift'));
   workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
   assert.deepEqual(ids(), []);
   fs.writeFileSync(path.join(repo, SWEEP.file), workflows.render('programme-sweep', source(SWEEP.file), OTHER));
@@ -288,8 +295,8 @@ test('cloud workflows: the sweep action runs Toolkit code from its own checkout 
 
 test('cloud workflows: the governance enable proposal carries the copies', () => {
   const text = fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-governance-proposal.cjs'), 'utf8');
-  assert.match(text, /require\('\.\/toolkit-cloud-workflows\.cjs'\)\.WORKFLOWS\.map\(workflow => workflow\.file\)/);
-  assert.deepEqual(workflows.WORKFLOWS.map(row => row.file), ['.github/workflows/toolkit-programme-sweep.yml', '.github/workflows/toolkit-programme-sweep-gate.yml']);
+  assert.match(text, /require\('\.\/toolkit-cloud-workflows\.cjs'\)\.DEFAULT_FILES/);
+  assert.deepEqual(SWEEPS.map(row => row.file), ['.github/workflows/toolkit-programme-sweep.yml', '.github/workflows/toolkit-programme-sweep-gate.yml']);
 });
 
 test('governance check names a governed repository the cloud sweep skips, with the fix, and never as drift', () => {
@@ -356,5 +363,5 @@ module.exports = { InstallError, isToolkitCheckout: () => false, plan: ({ ciShar
 `);
   const { cloudWorkflowFiles } = require(path.join(ROOT, 'repo/scripts/toolkit-governance-proposal.cjs'));
   const repo = tempRepo(t);
-  assert.deepEqual(cloudWorkflowFiles(repo, { source: managed, ciShards: 'yes' }), { files: { '.github/workflows/managed.yml': 'managed render yes\n' }, warning: null });
+  assert.deepEqual(cloudWorkflowFiles(repo, { source: managed, ciShards: 'yes' }), { files: { '.github/workflows/managed.yml': 'managed render yes\n' }, warning: null, notes: [], added: [] });
 });

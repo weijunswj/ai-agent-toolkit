@@ -706,12 +706,16 @@ test('cloud sweep: CLOUD_LAYOUT_STALE is raised while the copies are stale and r
 test('cloud sweep: the layout check compares the copies with a render from the Toolkit the sweep runs', t => {
   const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'));
   const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
+  const { SWEEPS, putCopied } = require('./support/default-cloud-workflows.cjs');
   const commit = workflows.toolkitHead(ROOT);
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-layout-'));
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   fs.mkdirSync(path.join(repo, '.git'));
   fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
-  const write = pinned => { for (const row of workflows.WORKFLOWS) { const text = workflows.render(row.id, require('node:child_process').execFileSync('git', ['show', `${commit}:${row.file}`], { cwd: ROOT, encoding: 'utf8' }), commit); fs.writeFileSync(path.join(repo, row.file), pinned ? pinnedCopy(text, commit) : text); } };
+  const write = pinned => { for (const row of SWEEPS) { const text = workflows.render(row.id, require('node:child_process').execFileSync('git', ['show', `${commit}:${row.file}`], { cwd: ROOT, encoding: 'utf8' }), commit); fs.writeFileSync(path.join(repo, row.file), pinned ? pinnedCopy(text, commit) : text); } };
+  write(false);
+  assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE'], 'a missing default workflow is stale too');
+  putCopied(repo, { root: ROOT, commit });
   write(true);
   assert.deepEqual(cli.cloudLayoutFindings({ repoRoot: repo }), ['CLOUD_LAYOUT_STALE']);
   write(false);

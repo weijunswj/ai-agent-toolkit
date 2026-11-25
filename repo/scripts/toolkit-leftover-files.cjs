@@ -233,7 +233,7 @@ class LeftoverScan {
     // folder only lists names that are then skipped.
     let names = null;
     try { names = fs.readdirSync(path.join(root, '.github', 'workflows')); } catch { names = null; }
-    const fixed = new Set([...cloud.WORKFLOWS, ...cloud.SHARD_WORKFLOWS].map(row => row.file));
+    const fixed = new Set(cloud.DEFAULT_CLOUD_WORKFLOWS.filter(row => row.kind === 'rendered').map(row => row.file));
     for (const file of cloud.copyCandidates(names)) {
       const read = readInside(root, file);
       if (!read) continue;

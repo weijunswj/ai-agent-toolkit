@@ -13,9 +13,10 @@
 //      store is never picked on its own.
 //   2. Parent issue: when discovery found none, it opens one programme parent issue. The controller
 //      still turns it into a programme parent document later; this only gives the binding its issue.
-//   3. The plain-text check (which a governed repository always carries) and the dependency security
-//      files are installed into the working tree only where they are missing, as the
-//      repository-agent-rules skill does; their files join the same proposal.
+//   3. The plain-text check (which a governed repository always carries) and the Dependabot settings
+//      are installed into the working tree only where they are missing, as the repository-agent-rules
+//      skill does; their files join the same proposal. The default cloud workflows join it without
+//      touching the working tree (toolkit-governance-proposal.cjs).
 //
 // No instruction file is written or proposed: the installed Toolkit gives every session in an
 // enabled repository the governed rules and the playbooks, so the repository's own AGENTS.md and
@@ -165,16 +166,15 @@ function ensurePlainText(root, installer = null) {
   return [...said.split('\n').filter(line => line && !line.startsWith('Next:')), 'The plain-text check files were added to the working tree and travel in the turn-on pull request.'];
 }
 
-// Step 4: the dependency security files, where missing: a dependabot.yml for every package ecosystem
-// found and Toolkit's dependency auto-merge workflow. They travel in the turn-on pull request, so
-// governance never starts with its own security check failing. An older Toolkit copy of the workflow
-// is refreshed; any other existing file is never changed.
+// Step 4: a dependabot.yml for every package ecosystem found, where missing. It travels in the turn-on
+// pull request, so governance never starts with its own security check failing. An existing file is
+// never changed.
 function ensureSecurityFiles(root, writer = null) {
   const security = require('./toolkit-governance-security.cjs');
-  const results = (writer || (dir => security.writeSecurityFiles(dir, { dependabot: true, workflow: true })))(root);
+  const results = (writer || (dir => security.writeSecurityFiles(dir, { dependabot: true })))(root);
   const failed = results.filter(entry => entry.result !== 'written');
-  if (failed.length) throw new AdoptError(`The dependency security files could not be added (${failed.map(entry => `${entry.file}: ${entry.result}`).join(', ')}).`);
-  return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the working tree; they travel in the turn-on pull request.`] : [];
+  if (failed.length) throw new AdoptError(`The Dependabot settings could not be added (${failed.map(entry => `${entry.file}: ${entry.result}`).join(', ')}).`);
+  return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the working tree; it travels in the turn-on pull request.`] : [];
 }
 
 // Why the planned store cannot be used, known from the plan alone, or null: a named store that is this
@@ -206,7 +206,7 @@ function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train
 }
 
 // A repository whose programme file was already prepared in the working tree: nothing is made on
-// GitHub, and the plain-text check and dependency security files are added where missing, so its
+// GitHub, and the plain-text check and Dependabot settings are added where missing, so its
 // turn-on pull request carries exactly what a fresh one does.
 // { binding (the working tree's, or null when unreadable), made: [], lines }.
 function prepared({ root, plainText = null, securityFiles = null }) {

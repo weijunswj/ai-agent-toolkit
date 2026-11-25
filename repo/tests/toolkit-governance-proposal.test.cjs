@@ -357,7 +357,7 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1);
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
   const { REQUIRED_FILES } = require('../scripts/toolkit-governance-proposal.cjs');
-  assert.deepEqual(Object.keys(published.files).sort(), ['.github/plain-text-baseline.json', '.github/dependabot.yml', '.github/workflows/dependency-auto-merge.yml', ...REQUIRED_FILES].sort(), 'the binding, the CI checks and the dependency security files, and nothing else');
+  assert.deepEqual(Object.keys(published.files).sort(), ['.github/plain-text-baseline.json', '.github/dependabot.yml', ...REQUIRED_FILES].sort(), 'the binding, the CI checks and the Dependabot settings, and nothing else (no cloud copies are rendered here)');
   for (const name of ['.github/plain-text.json', '.github/workflows/plain-text.yml']) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
   // The bank writes both switches off with the turn-on, as it showed them.
   assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, task_prs: { auto_merge: 'off', merge_train: 'off' } });
@@ -606,7 +606,7 @@ test('shallow binding reads still refuse symlinks, non-files and truncated trees
 
 test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding to v2, and names a copy it could not render', t => {
   const { bindingV2 } = require('../scripts/toolkit-governance-proposal.cjs');
-  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const { SWEEPS } = require('./support/default-cloud-workflows.cjs');
   const programme = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
   const v1 = { schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 1, record_prefix: 'INT-FX-', writer_prefix: 'INT-FX-',
     store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
@@ -614,7 +614,7 @@ test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding 
   assert.deepEqual(v2, { schema: 'toolkit.programme-binding.v2', repository: v1.repository, governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-', writer_prefix: 'INT-FX-' }], store: v1.store, required_checks: ['validate'] });
   programme.validateBinding(v2);
   assert.equal(bindingV2(v2), v2, 'a v2 binding is kept as it is');
-  for (const [cloud, expectWarning] of [[{ files: Object.fromEntries(workflows.WORKFLOWS.map(row => [row.file, `# copy of ${row.id}\n`])), warning: null }, false], [{ files: {}, warning: 'Toolkit: the cloud sweep copies were not refreshed in this pull request (reason). To fix it, run it.' }, true]]) {
+  for (const [cloud, expectWarning] of [[{ files: Object.fromEntries(SWEEPS.map(row => [row.file, `# copy of ${row.id}\n`])), warning: null }, false], [{ files: {}, warning: 'Toolkit: the cloud sweep copies were not refreshed in this pull request (reason). To fix it, run it.' }, true]]) {
     let published = null;
     const transport = { list: () => published ? [proposal('yes')] : [], publish(repository, binding, files) { published = { binding, files }; return proposal('yes'); }, read: () => proposal('yes') };
     const f = fixture(t, transport);
@@ -626,7 +626,7 @@ test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding 
     assert.equal(published.binding.schema, 'toolkit.programme-binding.v2');
     assert.equal(JSON.parse(published.files['.github/toolkit-programme.json']).schema, 'toolkit.programme-binding.v2');
     assert.equal(published.files['AGENTS.md'], undefined, 'the governed rules come from the installed Toolkit, not a repository copy');
-    for (const row of workflows.WORKFLOWS) assert.equal(published.files[row.file], cloud.files[row.file], row.file);
+    for (const row of SWEEPS) assert.equal(published.files[row.file], cloud.files[row.file], row.file);
     assert.equal(result.warning, expectWarning ? cloud.warning : undefined);
   }
   // No receipt reaches the renderer when the answer is no.
@@ -656,32 +656,62 @@ test('a yes publishes the binding and CI files with no instruction copies, and i
   assert.deepEqual(missingFiles(partial), ['.github/workflows/plain-text.yml']);
 });
 
-test('the default renderer leaves a Toolkit source checkout alone, renders both copies, and names a reason and fix when it cannot', t => {
+test('the default renderer leaves a Toolkit source checkout alone, makes every default workflow, and names a reason and fix when it cannot', t => {
   const { cloudWorkflowFiles } = require('../scripts/toolkit-governance-proposal.cjs');
   const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const { COPIED_FILES, SWEEPS } = require('./support/default-cloud-workflows.cjs');
   assert.deepEqual(cloudWorkflowFiles(path.join(__dirname, '..', '..')), { files: {}, warning: null });
   // The commit is set here, so the result never depends on whether this checkout's HEAD is on origin/main.
   const commit = workflows.toolkitHead();
   const f = fixture(t);
   const rendered = cloudWorkflowFiles(f.cwd, { commit });
   assert.equal(rendered.warning, null);
-  assert.deepEqual(Object.keys(rendered.files).sort(), workflows.WORKFLOWS.map(row => row.file).sort());
-  for (const text of Object.values(rendered.files)) assert.match(text, new RegExp(`^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED [a-z-]+ toolkit=${commit} `, 'm'));
+  assert.deepEqual(Object.keys(rendered.files).sort(), [...SWEEPS.map(row => row.file), ...COPIED_FILES].sort());
+  for (const row of SWEEPS) assert.match(rendered.files[row.file], new RegExp(`^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED [a-z-]+ toolkit=${commit} `, 'm'));
   // A same-named file that is not a Toolkit copy stops the render, with the reason and the fix.
-  const [sweep] = workflows.WORKFLOWS.map(row => row.file);
+  const [sweep] = SWEEPS.map(row => row.file);
   fs.mkdirSync(path.join(f.cwd, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(f.cwd, ...sweep.split('/')), 'name: my own sweep\n');
   const refused = cloudWorkflowFiles(f.cwd, { commit });
   assert.deepEqual(refused.files, {});
-  assert.match(refused.warning, /cloud sweep copies were not refreshed in this pull request \(.*is not a Toolkit copy; move it aside first\)\. To fix it, run node repo\/scripts\/toolkit-cloud-workflows\.cjs --repo/);
+  assert.match(refused.warning, /cloud workflow copies were not refreshed in this pull request \(.*is not a Toolkit copy; move it aside first\)\. To fix it, run node repo\/scripts\/toolkit-cloud-workflows\.cjs --repo/);
   // A folder that is not a git checkout stops it too.
   assert.match(cloudWorkflowFiles(path.join(f.root, 'empty'), { commit }).warning || '', /not refreshed/);
 });
 
+test('answering again updates the open turn-on branch, and guard settings already on it stay as they are', () => {
+  const repository = 'example-owner/example-repo', config = '.github/personal-data-guard.json', script = '.github/scripts/personal-data-guard.cjs';
+  const { REQUIRED_FILES } = require('../scripts/toolkit-governance-proposal.cjs');
+  const binding = { schema: 'toolkit.programme-binding.v2', repository, governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
+  const text = JSON.stringify(binding);
+  const files = { ...Object.fromEntries(REQUIRED_FILES.map(name => [name, `new ${name}\n`])), [config]: 'the Toolkit default\n', [script]: 'new guard\n' };
+  const held = { ...Object.fromEntries(Object.keys(files).map(name => [name, 'old\n'])), '.github/toolkit-programme.json': text, [config]: 'the owner\'s own\n' };
+  let tree = null;
+  const json = value => JSON.stringify(value), blob = value => ({ type: 'file', encoding: 'base64', content: Buffer.from(value).toString('base64') });
+  const transport = new GitHubProposalTransport({ run(args, input) {
+    const endpoint = args[1];
+    if (args[0] === 'auth') return '';
+    if (endpoint === 'user') return json({ login: 'example-owner' });
+    if (endpoint === `repos/${repository}`) return json({ default_branch: 'main' });
+    if (endpoint.endsWith('/pulls/1')) return input ? '{}' : json({ number: 1, html_url: `https://github.com/${repository}/pull/1`, state: 'open', body: '<!-- toolkit-governance-decision -->', head: { ref: 'toolkit/governance-on-x', repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main', sha: '9'.repeat(40) } });
+    if (endpoint.includes('/compare/')) return json({ merge_base_commit: { sha: '9'.repeat(40) }, files: Object.keys(held).map(filename => ({ filename, status: 'added' })) });
+    if (endpoint.includes('/git/commits/')) return json({ tree: { sha: 'b'.repeat(40) } });
+    if (endpoint.endsWith(`/git/trees/${'b'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] });
+    if (endpoint.endsWith(`/git/trees/${'d'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] });
+    if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ ...blob(text), sha: 'c'.repeat(40), size: Buffer.byteLength(text) });
+    if (endpoint.includes('/contents/')) { const name = /\/contents\/([^?]+)/.exec(endpoint)[1]; return json(blob(held[name])); }
+    if (endpoint.endsWith('/git/trees')) { tree = input.tree; return json({ sha: 'e'.repeat(40) }); }
+    if (endpoint.endsWith('/git/commits')) return json({ sha: 'f'.repeat(40) });
+    if (endpoint.includes('/git/refs/heads/')) return '{}';
+    throw Error(`unexpected endpoint ${endpoint}`);
+  } });
+  assert.deepEqual(transport.update(repository, 1, binding, files), { number: 1, head: 'f'.repeat(40), updated: true });
+  assert.deepEqual(tree.map(entry => entry.path).sort(), Object.keys(files).filter(name => name !== config).sort());
+});
+
 test('no removes the marked cloud sweep copies in the same pull request, and only those', () => {
   const repository = 'example-owner/example-repo';
-  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
-  const [sweep, gate] = workflows.WORKFLOWS.map(row => row.file);
+  const [sweep, gate] = require('./support/default-cloud-workflows.cjs').SWEEPS.map(row => row.file);
   const off = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
   const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`).toString('base64');
   const shardsCopy = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED test-shards toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`).toString('base64');
@@ -722,7 +752,7 @@ test('no removes the marked cloud sweep copies in the same pull request, and onl
 
 test('an off pull request may remove the marked cloud sweep copies, and nothing else', () => {
   const repository = 'example-owner/example-repo';
-  const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
+  const [sweep, gate] = require('./support/default-cloud-workflows.cjs').SWEEPS.map(row => row.file);
   const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' });
   const marker = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`;
   const shards = '.github/workflows/shards.yml', other = '.github/workflows/other.yml';
@@ -739,7 +769,7 @@ test('an off pull request may remove the marked cloud sweep copies, and nothing 
     if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') });
     if (endpoint.includes('/pulls/1/files')) return json(files);
     if (endpoint.includes(`/contents/.github/workflows?ref=${'9'.repeat(40)}`)) return json(Object.keys(atBase).map(name => ({ type: 'file', name: name.split('/').pop() })));
-    for (const name of [sweep, gate, shards, other, ...require('../scripts/toolkit-cloud-workflows.cjs').SHARD_WORKFLOWS.map(row => row.file)]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
+    for (const name of [sweep, gate, shards, other, ...require('./support/default-cloud-workflows.cjs').SHARDS.map(row => row.file)]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
       if (atBase[name] === undefined) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
       return json({ type: 'file', encoding: 'base64', content: Buffer.from(atBase[name]).toString('base64') });
     }
@@ -760,7 +790,7 @@ test('an off pull request may remove the marked cloud sweep copies, and nothing 
 
 test('recovering an interrupted off branch needs every listed removal done, and nothing extra', () => {
   const repository = 'example-owner/example-repo';
-  const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
+  const [sweep, gate] = require('./support/default-cloud-workflows.cjs').SWEEPS.map(row => row.file);
   const binding = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
   const text = `${JSON.stringify(binding, null, 2)}\n`;
   const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\n`).toString('base64');

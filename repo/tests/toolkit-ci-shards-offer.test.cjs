@@ -379,10 +379,10 @@ test('installer: the shard workflows are copied only after a merged yes, with th
   const plan = answer => workflows.plan({ repo, root: ROOT, commit: COMMIT, ciShards: answer });
   for (const [value, reason] of [[null, /has no yes to parallel CI shards \(ci_shards\); say refresh governance to answer it/], ['not-now', /has no yes/], ['never', /answers never to parallel CI shards/]]) {
     const result = plan(value);
-    assert.deepEqual(result.rows.map(row => row.id), ['programme-sweep', 'programme-sweep-gate'], String(value));
+    assert.deepEqual(result.rows.filter(row => row.kind === 'rendered').map(row => row.id), ['programme-sweep', 'programme-sweep-gate'], String(value));
     assert.match(result.not_copied[0].reason, reason);
   }
-  assert.deepEqual(plan('yes').rows.map(row => row.id), ['programme-sweep', 'programme-sweep-gate', 'test-shards', 'shard-timings']);
+  assert.deepEqual(plan('yes').rows.filter(row => row.kind === 'rendered').map(row => row.id), ['programme-sweep', 'programme-sweep-gate', 'test-shards', 'shard-timings']);
   // Without an answer given, the installer reads the merged binding on this computer (none here).
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).ci_shards, null);
 });

@@ -20,9 +20,9 @@ const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 // The branch a parallel CI shards answer is prepared on (publishCiShards).
 const SHARDS_BRANCH = /^toolkit\/(?:switches-[a-z0-9-]+-)?ci-shards-(?:yes|never)-/;
-const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file);
-// The dependency security files the turn-on adds where missing (toolkit-governance-adopt.cjs).
-const securityFiles = () => { const security = require('./toolkit-governance-security.cjs'); return [security.DEPENDABOT_REL, '.github/dependabot.yaml', security.WORKFLOW_REL]; };
+const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').DEFAULT_FILES;
+// The Dependabot settings the turn-on adds where missing (toolkit-governance-adopt.cjs).
+const securityFiles = () => require('./toolkit-governance-security.cjs').DEPENDABOT_NAMES;
 const READBACK_TRIES = 4, READBACK_WAIT_MS = 500;
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
@@ -34,12 +34,14 @@ const PLAIN_TEXT_FILES = Object.freeze(['.github/plain-text.json', '.github/scri
 const REQUIRED_FILES = Object.freeze([cache.BINDING_PATH, ...PLAIN_TEXT_FILES]);
 function missingFiles(files) { return REQUIRED_FILES.filter(name => typeof files[name] !== 'string'); }
 
-// The cloud sweep copies a governed repository needs, pinned to this Toolkit checkout's own commit,
-// which must be on its main branch:
-// { files: { path: text }, warning }. Turning governance on carries them in the same pull request as
-// the binding, so a repository never gets one without the other. A Toolkit source checkout runs its
-// own workflow files, so it gets nothing and no warning. When the copies cannot be rendered, the
-// existing ones (if any) still travel and the warning names the reason and the fix.
+// Every default cloud workflow a governed repository needs (DEFAULT_CLOUD_WORKFLOWS), made from this
+// Toolkit checkout's own commit, which must be on its main branch:
+// { files: { path: text }, warning, notes, added }. Turning governance on carries them in the same pull
+// request as the binding, so a repository never gets one without the other. A Toolkit source checkout
+// runs its own workflow files, so it gets nothing and no warning. When the copies cannot be made, the
+// existing ones (if any) still travel and the warning names the reason and the fix. `notes` names a
+// workflow left out because a file Toolkit did not write is in its place, or because this repository
+// lacks what it needs, and `added` the workflows this repository did not have.
 const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run the governance check (toolkit-governance.cjs check) in this repository';
 // `ciShards` is the proposed binding's ci_shards answer, so the shard copies follow the pull request's
 // own answer rather than this computer's last read of the merged binding. `root` and `commit` (the
@@ -48,19 +50,23 @@ const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <thi
 // from a plugin copy).
 function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null, source: chosen = undefined } = {}) {
   // From a plugin copy the copies come from the managed checkout, rendered by that checkout's own
-  // installer, so the render logic always matches the commit the copies are pinned to.
+  // installer, so the render logic always matches the commit the copies are pinned to. Its rows are read
+  // with this copy's own helpers, since that checkout may be another Toolkit version.
   const own = require('./toolkit-cloud-workflows.cjs');
   const source = root ? null : chosen === undefined ? own.sourceRoot() : chosen;
   const workflows = own.installerAt(source);
   if (workflows.isToolkitCheckout(cwd)) return { files: {}, warning: null };
   try {
     const result = workflows.plan({ repo: cwd, ciShards, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
-    const unmanaged = result.rows.find(row => row.state === 'unmanaged');
-    if (unmanaged) throw new workflows.InstallError(`${unmanaged.file} exists and is not a Toolkit copy; move it aside first`);
-    return { files: Object.fromEntries(result.rows.map(row => [row.file, row.expected])), warning: null };
+    const missing = new Set(result.rows.filter(row => row.state === 'missing' && !row.held).map(row => row.file));
+    return {
+      files: Object.fromEntries(own.writableRows(result.rows).map(row => [row.file, row.expected])), warning: null,
+      notes: own.leftOutNotes(result),
+      added: own.DEFAULT_CLOUD_WORKFLOWS.filter(entry => missing.has(entry.file)).map(entry => entry.id),
+    };
   } catch (error) {
-    if (!(error instanceof workflows.InstallError)) throw error;
-    return { files: {}, warning: `Toolkit: the cloud sweep copies were not refreshed in this pull request (${String(error.message).replace(/\.$/, '')}). To fix it, ${CLOUD_FIX}.` };
+    if (!(error instanceof workflows.InstallError || error instanceof own.InstallError)) throw error;
+    return { files: {}, warning: `Toolkit: the cloud workflow copies were not refreshed in this pull request (${String(error.message).replace(/\.$/, '')}). To fix it, ${CLOUD_FIX}.` };
   }
 }
 
@@ -72,12 +78,11 @@ function bindingV2(binding) {
   return { schema: BINDING_V2, repository, governance: 'enabled', parents: [{ issue, record_prefix, ...(writer_prefix === undefined ? {} : { writer_prefix }) }], ...rest };
 }
 
-// The turn-on file set: the programme file, plus the CI files the working tree carries (the bank
-// installs the plain-text check and the dependency security files there first). Instruction files,
+// The turn-on file set: the programme file, the CI files the working tree carries (the bank installs the
+// plain-text check and the Dependabot settings there first) and the cloud workflows. Instruction files,
 // product files and backups never join it.
 function adoptionFiles(cwd, text, cloud = { files: {} }) {
-  const names = [...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
-    ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
+  const names = [...PLAIN_TEXT_FILES, '.github/plain-text-baseline.json', ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     const file = path.join(cwd, name);
@@ -286,7 +291,7 @@ class GovernanceProposals {
       value.requests = value.requests.map(item => item.run === run ? { ...item, proposal: readback.number, head: readback.head } : item);
       value.proposals = [readback]; value.checked_at = this.#now().toISOString(); value.error = null;
     });
-    return { proposal: readback, text: proposalText([readback]), files: files ? Object.keys(files) : null, reused: Boolean(matches[0]), updated: proposal.updated === true, ...(cloud.warning ? { warning: cloud.warning } : {}) };
+    return { proposal: readback, text: proposalText([readback]), files: files ? Object.keys(files) : null, reused: Boolean(matches[0]), updated: proposal.updated === true, ...(cloud.warning ? { warning: cloud.warning } : {}), ...(cloud.notes?.length ? { notes: cloud.notes } : {}), ...(cloud.added ? { added: cloud.added } : {}) };
   }
 }
 
@@ -572,6 +577,8 @@ class GitHubProposalTransport {
     if (!Array.isArray(diff.files) || diff.files.some(file => !Object.hasOwn(files, file.filename) && !TURN_ON_NAMES.some(test => test(file.filename)))) fail('PROPOSAL_BRANCH_CHANGED');
     const changed = Object.entries(files).filter(([name, content]) => {
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${read.head}`);
+      // The guard's settings on the branch may be the owner's, so they are never replaced.
+      if (file && name === require('./toolkit-cloud-workflows-copied.cjs').GUARD_CONFIG) return false;
       return !file || file.type !== 'file' || file.encoding !== 'base64' || Buffer.from(String(file.content), 'base64').toString('utf8') !== content;
     });
     // A file an earlier answer added that the new answers no longer make (shard workflows and the
@@ -605,8 +612,9 @@ class GitHubProposalTransport {
 }
 
 // Files a turn-on branch may hold beyond the current set: an earlier answer may have added shard
-// workflows or a shard list that the new answer no longer renders.
-const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name), name => name === require('./governed-test-shards.cjs').MANIFEST_REL];
+// workflows or a shard list that the new answer no longer renders, and a default cloud workflow's own
+// files stay when this run could not make the copies.
+const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name), name => name === require('./governed-test-shards.cjs').MANIFEST_REL, name => cloudFiles().includes(name)];
 
 function proposalBody(binding, files, removals, dropped = []) {
   return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled, with its CI checks; the installed Toolkit gives sessions the governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}${dropped.length ? `No longer in this pull request (the latest answers do not make them):\n${dropped.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;

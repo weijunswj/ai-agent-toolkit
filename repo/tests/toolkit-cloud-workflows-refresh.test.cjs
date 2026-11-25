@@ -17,6 +17,7 @@ const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.
 const refresh = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows-refresh.cjs'));
 const plainText = require(path.join(ROOT, 'skills/secure-ci-cd/scripts/install-plain-text-check.cjs'));
 const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
+const { SWEEPS, putCopied } = require('./support/default-cloud-workflows.cjs');
 const COMMIT = workflows.toolkitHead(ROOT);
 const BRANCH = 'toolkit/refresh-cloud-workflows';
 const REPOSITORY = 'acme/app';
@@ -36,10 +37,11 @@ function governedCheckout(t, { pinned = true, vendored = true, baseline = true }
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   git(dir, ['init', '--quiet', '-b', 'main']);
   const put = (file, text) => { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), text); };
-  for (const row of workflows.WORKFLOWS) {
+  for (const row of SWEEPS) {
     const text = workflows.render(row.id, source(row.file), COMMIT);
     put(row.file, pinned ? pinnedCopy(text, COMMIT) : text);
   }
+  putCopied(dir, { root: ROOT, commit: COMMIT });
   put('README.md', 'App\n');
   put('.github/plain-text.json', `${JSON.stringify({ schema: 'toolkit-plain-text-config/v1', rules: { 'github-link': true, 'number-reference': true, 'pr-number-label': true, 'codex-mode-name': false }, banned_terms: [], explained_terms: [], kept_terms: [] }, null, 2)}\n`);
   if (vendored) put('.github/scripts/plain-text-check.cjs', plainText.vendoredText(`${source('skills/secure-ci-cd/scripts/plain-text-check.cjs')}// an older check\n`));
@@ -242,9 +244,9 @@ test('refresh PR: one pull request with only Toolkit-made files, read back and n
   assert.match(pr.body, /`\.github\/plain-text-baseline\.json`: plain-text baseline moved to the fingerprint format \(--migrate-baseline\)/);
   assert.doesNotMatch(pr.body, /Generated with|Co-Authored-By|claude\.ai/, 'no tool attribution');
   const files = github.diff(github.refs.get('main'), github.refs.get(BRANCH)).map(entry => entry.filename);
-  assert.deepEqual(files, ['.github/plain-text-baseline.json', '.github/scripts/plain-text-check.cjs', ...workflows.WORKFLOWS.map(row => row.file)].sort());
+  assert.deepEqual(files, ['.github/plain-text-baseline.json', '.github/scripts/plain-text-check.cjs', ...SWEEPS.map(row => row.file)].sort());
   const head = github.filesOf(github.refs.get(BRANCH));
-  for (const row of workflows.WORKFLOWS) assert.equal(head[row.file], workflows.render(row.id, source(row.file), COMMIT), `${row.file} is today's render`);
+  for (const row of SWEEPS) assert.equal(head[row.file], workflows.render(row.id, source(row.file), COMMIT), `${row.file} is today's render`);
   assert.equal(JSON.parse(head['.github/plain-text-baseline.json']).schema, 'toolkit-plain-references-baseline/v2');
   assert.equal(JSON.parse(head['.github/plain-text-baseline.json']).allowed[0].count, 1, 'the same allowance');
   assert.equal(head['README.md'], 'App\n', 'nothing else changes');
@@ -325,8 +327,8 @@ test('refresh PR: it stops, with the step, on a stale or changed checkout, a cop
   const cases = [
     ['checkout behind main', (dir, github) => github.advanceMain('README.md', 'x\n') || git(dir, ['reset', '--quiet', '--hard', 'HEAD~1']), /not at main's head [0-9a-f]{7} on GitHub; update it/],
     ['local change under .github', dir => fs.appendFileSync(path.join(dir, '.github/plain-text.json'), '\n'), /local changes under \.github/],
-    ['copy from a newer Toolkit', dir => { const row = workflows.WORKFLOWS[0]; fs.writeFileSync(path.join(dir, row.file), pinnedCopy(workflows.render(row.id, source(row.file), 'f'.repeat(40)), 'f'.repeat(40))); git(dir, ['commit', '--quiet', '-am', 'newer']); }, /made by Toolkit commit fffffff, which this Toolkit checkout [^]*update the Toolkit checkout/],
-    ['not a Toolkit copy', dir => { fs.writeFileSync(path.join(dir, workflows.WORKFLOWS[0].file), 'name: Mine\non: push\n'); git(dir, ['commit', '--quiet', '-am', 'mine']); }, /is not a Toolkit copy; move it aside/],
+    ['copy from a newer Toolkit', dir => { const row = SWEEPS[0]; fs.writeFileSync(path.join(dir, row.file), pinnedCopy(workflows.render(row.id, source(row.file), 'f'.repeat(40)), 'f'.repeat(40))); git(dir, ['commit', '--quiet', '-am', 'newer']); }, /made by Toolkit commit fffffff, which this Toolkit checkout [^]*update the Toolkit checkout/],
+    ['not a Toolkit copy', dir => { fs.writeFileSync(path.join(dir, SWEEPS[0].file), 'name: Mine\non: push\n'); git(dir, ['commit', '--quiet', '-am', 'mine']); }, /is not a Toolkit copy; move it aside/],
   ];
   for (const [name, change, why] of cases) {
     const dir = governedCheckout(t);
@@ -390,6 +392,47 @@ test('refresh PR: current copies need no pull request; the command line wires --
   assert.equal(command.status, 0, command.stderr);
   assert.equal(command.stdout, 'No refresh pull request: its governance is off, and only governed repositories carry Toolkit copies.\n');
   assert.equal(command.stderr, '');
+});
+
+// Red on the parent: a refresh added only the sweep and its gate.
+test('refresh PR: a governed repository missing default workflows gets them in one pull request, and a rerun once merged changes nothing', t => {
+  const dir = governedCheckout(t, { pinned: false, vendored: false, baseline: false });
+  const missing = ['.github/personal-data-guard.json', '.github/scripts/personal-data-guard.cjs', '.github/workflows/dependency-auto-merge.yml', '.github/workflows/personal-data-guard.yml', '.github/workflows/personal-data-sweep.yml'];
+  git(dir, ['rm', '--quiet', ...missing]);
+  git(dir, ['commit', '--quiet', '-m', 'without two workflows']);
+  const github = new FakeGitHub(dir);
+  const first = runRefresh(dir, github);
+  assert.match(first.line, /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(5 files: /, first.line);
+  assert.deepEqual(github.diff(github.refs.get('main'), github.refs.get(BRANCH)).map(entry => entry.filename), missing);
+  for (const file of missing) assert.ok(github.pulls[0].body.includes(`- \`${file}\`: added`), file);
+  assert.match(github.pulls[0].body, /to list what is already here, start \.github\/workflows\/personal-data-sweep\.yml once by hand after the merge/);
+  assert.match(runRefresh(dir, github).line, /^Unchanged refresh pull request /);
+  assert.equal(github.pulls.length, 1, 'the open pull request is kept, never doubled');
+  // Settings someone changed on the open refresh branch stay theirs on a rerun.
+  const branch = github.refs.get(BRANCH), own = '{ "schema": "personal-data-guard/v1", "mine": true }\n';
+  github.commits.set('d'.repeat(40), { tree: github.treeSha({ ...github.filesOf(branch), [missing[0]]: own }), parents: [branch] });
+  github.refs.set(BRANCH, 'd'.repeat(40));
+  assert.match(runRefresh(dir, github).line, /^Unchanged refresh pull request /);
+  assert.equal(github.filesOf(github.refs.get(BRANCH))[missing[0]], own);
+  // Merged: nothing is left to do.
+  for (const file of missing) { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), github.filesOf(github.refs.get(BRANCH))[file]); }
+  github.advanceMain('README.md', 'App, merged\n');
+  github.pulls[0].state = 'closed';
+  const done = runRefresh(dir, github);
+  assert.equal(done.line, 'The Toolkit copies in acme/app are current; no refresh pull request is needed.');
+  assert.equal(github.pulls.length, 1);
+});
+
+test('refresh PR: an edited guard is brought back, and someone else\'s file in a copied workflow\'s place is left with a note', t => {
+  const dir = governedCheckout(t, { pinned: false, vendored: false, baseline: false });
+  fs.appendFileSync(path.join(dir, '.github/scripts/personal-data-guard.cjs'), '// mine\n');
+  fs.writeFileSync(path.join(dir, '.github/workflows/dependency-auto-merge.yml'), 'name: Mine\non: push\n');
+  git(dir, ['commit', '--quiet', '-am', 'local changes']);
+  const github = new FakeGitHub(dir);
+  assert.match(runRefresh(dir, github).line, /\(1 file: \.github\/scripts\/personal-data-guard\.cjs\)/);
+  assert.match(github.pulls[0].body, /`\.github\/scripts\/personal-data-guard\.cjs`: edited by hand, rewritten/);
+  assert.match(github.pulls[0].body, /dependency-auto-merge\.yml is not a Toolkit copy, so it is left as it is/);
+  assert.equal(github.filesOf(github.refs.get(BRANCH))['.github/workflows/dependency-auto-merge.yml'], 'name: Mine\non: push\n');
 });
 
 // The command once had no test past the commit check without an injected commit (a change that handed

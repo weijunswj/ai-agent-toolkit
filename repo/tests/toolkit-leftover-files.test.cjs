@@ -140,7 +140,7 @@ for (const [label, state, agents, expected] of N8N_ADAPTER_ROWS) {
 
 test('cloud sweep copies with the Toolkit marker are listed; an edited one says so; an unmarked one is not', t => {
   const cloud = require('../scripts/toolkit-cloud-workflows.cjs');
-  const [sweep, gate] = cloud.WORKFLOWS;
+  const [sweep, gate] = require('./support/default-cloud-workflows.cjs').SWEEPS;
   const commit = 'c'.repeat(40);
   const copy = (id, text = 'name: X\non: push\njobs: {}\n') => {
     const body = `# A copy\n${text}`;
@@ -314,7 +314,8 @@ test('a governed repository lists its instruction copies, including earlier and 
   const history = { 'safety-gates.md': [hash(older)], 'managed-memory.md': [hash(retired)] };
   const cloud = require('../scripts/toolkit-cloud-workflows.cjs');
   const body = '# A copy\nname: X\non: push\njobs: {}\n';
-  const sweep = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${cloud.WORKFLOWS[0].id} toolkit=${'c'.repeat(40)} sha256=${cloud.bodyHash(body)}\n${body}`;
+  const { SWEEPS } = require('./support/default-cloud-workflows.cjs');
+  const sweep = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${SWEEPS[0].id} toolkit=${'c'.repeat(40)} sha256=${cloud.bodyHash(body)}\n${body}`;
   const playbooks = Object.fromEntries(Object.entries(PLAYBOOKS).map(([name, text]) => [`docs/agent-playbooks/${name}`, text]));
   const w = world(t, {
     adopter: { state: 'ENABLED', files: {
@@ -325,7 +326,7 @@ test('a governed repository lists its instruction copies, including earlier and 
       'docs/agent-playbooks/git-completion.md': `${PLAYBOOKS['git-completion.md']}\nMy own addition.\n`,
       'docs/agent-playbooks/my-team.md': '# Our own playbook\n',
       '.github/scripts/plain-text-check.cjs': CHECK,
-      [cloud.WORKFLOWS[0].file]: sweep,
+      [SWEEPS[0].file]: sweep,
       '.github/toolkit-programme.json': '{ "governance": "enabled" }\n',
     } },
     // Nothing of its own is left once the block goes, so the one-line CLAUDE.md goes too.
@@ -340,7 +341,7 @@ test('a governed repository lists its instruction copies, including earlier and 
   assert.equal(adopter.files[0].empties, false, 'the adopter keeps its own rules in AGENTS.md');
   assert.deepEqual(adopter.files.filter(item => ['safety-gates.md', 'managed-memory.md'].some(name => item.file.endsWith(name))).map(item => item.proof), ['same as an earlier Toolkit copy', 'same as an earlier Toolkit copy']);
   assert.deepEqual(adopter.unproven, [{ file: 'docs/agent-playbooks/git-completion.md', reason: "it differs from every Toolkit copy" }]);
-  assert.deepEqual(adopter.kept.map(item => item.file), ['.github/scripts/plain-text-check.cjs', cloud.WORKFLOWS[0].file, '.github/toolkit-programme.json']);
+  assert.deepEqual(adopter.kept.map(item => item.file), ['.github/scripts/plain-text-check.cjs', SWEEPS[0].file, '.github/toolkit-programme.json']);
   assert.ok(!listed.includes('docs/agent-playbooks/my-team.md'));
   const plain = w.of(report, 'template');
   assert.deepEqual(plain.files.map(item => [item.file, item.kind, item.empties ?? null]), [
