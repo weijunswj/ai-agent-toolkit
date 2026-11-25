@@ -31,7 +31,7 @@ const REQUIRED_JOBS = Object.freeze(['gate', 'personal-data', 'issue-closure']);
 const LEG_SETS = Object.freeze({ validate: REQUIRED_JOBS, gate: TEST_JOBS });
 const JOB_ORDER = Object.freeze(['route', ...TEST_JOBS, 'personal-data', 'issue-closure', 'gate', 'validate']);
 // The Windows hook-pack groups: each matrix member runs the families joined by +.
-const HOOK_PACK_WINDOWS_GROUPS = Object.freeze(['attribution+closure-matrix+env-edit', 'closure-shell+push', 'governance+issue-closure', 'fault+merge+task-governance']);
+const HOOK_PACK_WINDOWS_GROUPS = Object.freeze(['attribution+issue-closure', 'closure-matrix', 'closure-shell', 'env-edit+merge-sequence+push+task-governance', 'fault+governance', 'merge']);
 
 function platformSystem(platform = process.platform) {
   if (platform === 'win32') return 'windows';
@@ -487,10 +487,11 @@ const CLOCK_AHEAD_JOB = [
 ].join('\n');
 
 // Linux runs the full hook pack. Windows starts its hooks far more slowly, so it splits the pack
-// into four groups of families with about the same measured time, each in its own job: four jobs
-// instead of one per family, since every job waits for one of the account's 20 concurrent runner
-// slots. A group joins its families with + (a comma would split the YAML flow list, and PowerShell
-// would split an unquoted comma list into an array); the value is quoted so the shell passes one word.
+// into groups of families balanced by measured time, each in its own job: not one job per family,
+// since every job waits for one of the account's 20 concurrent runner slots. A slow runner takes up
+// to 1.4 times the usual time, so a group's usual time stays well under its budget. A group joins its
+// families with + (a comma would split the YAML flow list, and PowerShell would split an unquoted
+// comma list into an array); the value is quoted so the shell passes one word.
 // Both jobs are required, and fail-fast stays off for every group.
 const HOOK_PACK_JOB = [
   '  hook-pack:',
@@ -716,7 +717,7 @@ const WORKFLOW_HEADER = [
   '# attempt of each shard, so re-running a failed shard can clear it. The tests-clock-ahead job runs',
   '# the test files that pin a calendar date with Node\'s clock 400 days ahead, so a test that only',
   '# passes near the date it pins fails now rather than months later. The hook-pack job runs the full',
-  '# pack on Linux; hook-pack-windows runs it in four groups of families. The personal-data job checks every',
+  '# pack on Linux; hook-pack-windows runs it in groups of families. The personal-data job checks every',
   '# commit of the pull request or push, the commit messages, the branch name and the pull request',
   '# title and body for email addresses, phone numbers and WhatsApp links, and the title and body for',
   '# home-folder paths and AI attribution (values are never printed). The issue-closure job checks',
