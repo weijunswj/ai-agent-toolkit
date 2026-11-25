@@ -183,7 +183,7 @@ test('--session-copy: not given is said so, and a folder that is no Toolkit copy
     const run = fx.takeover(argsFor(folder), { apply, deps: { toolkitGit: checkout(MAIN) } });
     assert.equal(run.error?.code, 'USAGE', label);
     assert.match(run.error.message, /^--session-copy takes the folder of the Toolkit copy this chat loaded/, label);
-    assert.doesNotMatch(run.error.message, new RegExp(TOOLKIT_VERSION.replace(/\./g, '\\.')), `${label}: never the running copy's version`);
+    assert.equal(run.error.message.includes(TOOLKIT_VERSION), false, `${label}: never the running copy's version`);
     assert.deepEqual(run.calls, [], `${label}: nothing is read`);
     wroteNothing(fx, run, label);
   }
