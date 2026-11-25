@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const commands = require('../scripts/toolkit-commands.cjs');
+const gate = require('../scripts/toolkit-governance-gate.cjs');
 const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
 
 const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
@@ -173,7 +174,7 @@ test('the how-to guide shows the same commands', () => {
 // INT-TK421-1323: the host delivers the user's message and the skill reads it; the hook adds no line.
 // The Codex prompt hook is held to the same by the hook pack (CMD.typed-command-adds-no-note).
 function prompt(decision, text, environment = {}) {
-  const stubGate = { PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session' };
+  const stubGate = { ...gate, PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session' };
   const mergeHold = { recordPromptNote: () => ({ count: 0, note: '' }) };
   return claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: text }, { gate: stubGate, mergeHold, environment });
 }
