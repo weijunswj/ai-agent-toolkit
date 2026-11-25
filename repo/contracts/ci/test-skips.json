@@ -1212,6 +1212,14 @@
       "reason": "Windows-only behaviour (Windows only); the test runs on the Windows leg"
     },
     {
+      "file": "repo/tests/toolkit-controller-settings.test.cjs",
+      "test": "a linked settings file stays a link",
+      "systems": [
+        "windows"
+      ],
+      "reason": "POSIX-only behaviour (symlinks, executable bits or a Linux-only step); the test runs on the Linux leg"
+    },
+    {
       "file": "repo/tests/toolkit-env-store-names-only.test.cjs",
       "test": "names-only listing: the names-only listing returns names only, through a real Credential Manager child",
       "systems": [
@@ -1286,6 +1294,14 @@
     {
       "file": "repo/tests/toolkit-leftover-files.test.cjs",
       "test": "a symbolic link is never followed",
+      "systems": [
+        "windows"
+      ],
+      "reason": "POSIX-only behaviour (symlinks, executable bits or a Linux-only step); the test runs on the Linux leg"
+    },
+    {
+      "file": "repo/tests/toolkit-owner-lines.test.cjs",
+      "test": "a linked owner file stays a link",
       "systems": [
         "windows"
       ],
