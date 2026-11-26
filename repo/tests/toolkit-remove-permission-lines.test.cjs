@@ -49,6 +49,13 @@ test('the Toolkit folder stays while Toolkit lines are left, and goes once they 
   const held = folder.apply(folder.plan());
   assert.deepEqual(held, [{ what: '~/.ai-agent-toolkit', result: 'kept', reason: 'Toolkit\'s permission lines are still in your settings; run the toolkit permissions --remove command listed above first, then say remove toolkit again' }]);
   assert.ok(fs.existsSync(path.join(pc.home, '.ai-agent-toolkit', 'current', 'state.json')));
+  // The closing lines name the waiting folder with this reason, not a plugin.
+  const { ToolkitRemoval, describeResult } = require('../scripts/toolkit-remove.cjs');
+  const make = () => new ToolkitRemoval({ home: pc.home, parts: [lines, new parts.ToolkitFolderPart({ home: pc.home, environment: pc.environment, plugins: () => ({}), linesLeft: () => lines.left() })], plugins: () => ({}) });
+  const closing = describeResult(make().apply(make().plan().code)).join('\n');
+  assert.match(closing, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: Toolkit's permission lines are still in your settings/);
+  assert.match(closing, /- \*\*Still to do:\*\* the Toolkit folder stays for the reason under Kept\./);
+  assert.doesNotMatch(closing, /Nothing of Toolkit's was left|plugin is still installed/);
   fs.writeFileSync(pc.settings, JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }));
   assert.deepEqual(lines.plan(), [], 'nothing to list once the owner ran the command');
   const gone = folder.apply(folder.plan());
@@ -69,5 +76,6 @@ test('a settings file that cannot be read holds the folder and says so', t => {
 test('the default parts list the permission lines before anything else is removed', () => {
   const keys = parts.defaultParts({ environment: { CLAUDE_CONFIG_DIR: '/x/.claude', CODEX_HOME: '/x/.codex' }, home: '/x' }).map(part => part.key);
   assert.equal(keys.indexOf('permission_lines'), 1);
-  assert.equal(keys.at(-1), 'toolkit_folder');
+  // The Toolkit folder is the last part that removes anything; only the MCP report runs after it.
+  assert.deepEqual(keys.slice(-2), ['toolkit_folder', 'mcp_key_helpers']);
 });

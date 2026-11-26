@@ -52,7 +52,13 @@ test('tasks in three folders: the two Toolkit tasks and their empty folders go, 
   const plan = owner(w).plan();
   assert.deepEqual(plan.tasks.map(item => [item.folder, item.kind, item.action]).sort(), [[two.entry.folder, 'toolkit', 'remove'], ['MINE', 'adopted', 'keep'], [one.entry.folder, 'toolkit', 'remove']].sort());
   assert.deepEqual(plan.folders.map(item => item.expected), ['removed', 'removed']);
-  assert.match(removal.describePlan(plan).join('\n'), /Plan code: [a-f0-9]{64}/);
+  const text = removal.describePlan(plan).join('\n');
+  assert.match(text, /\*\*Removed\*\*\n- \*\*Old scheduled tasks:\*\* \\[^\n]+ and \\[^\n]+, from an earlier Toolkit; their task files and empty Task Scheduler folders go too/);
+  assert.match(text, /\*\*Kept\*\*\n- \*\*Scheduled task:\*\* \\MINE\\Nightly backup: yours \(only listed by Toolkit\); delete it in Task Scheduler yourself if you want it gone/);
+  // The plan code is for the agent only, below the owner's screen.
+  const [screen, agent] = text.split(removal.AGENT_LINE);
+  assert.doesNotMatch(screen, /[a-f0-9]{64}/);
+  assert.match(agent, new RegExp(`apply --app all --confirm ${plan.code}\\.`));
   assert.ok(w.scheduler.calls.slice(before).every(call => ['list', 'marked-folders'].includes(call[0])), `plan is read-only: ${JSON.stringify(w.scheduler.calls.slice(before))}`);
 
   const result = owner(w).apply(plan.code);
@@ -131,10 +137,12 @@ for (const row of MATRIX.filter(item => item.kind === 'changed' && !item.include
   row.arrange(w, e);
   const text = removal.describePlan(owner(w).plan()).join('\n');
   const marked = row.row === 'changed by hand';
-  assert.equal(text.includes(`Add --include ${e.entry.id}`), marked);
-  if (marked) assert.equal(owner(w, { include: [e.entry.id] }).plan().tasks.find(task => task.id === e.entry.id).action, 'remove');
-  else {
-    assert.match(text, /Delete it in Task Scheduler yourself/);
+  assert.equal(text.includes(`say to remove ${e.entry.id} too if you want it gone`), marked);
+  if (marked) {
+    assert.equal(owner(w, { include: [e.entry.id] }).plan().tasks.find(task => task.id === e.entry.id).action, 'remove');
+    assert.match(removal.describePlan(owner(w, { include: [e.entry.id] }).plan()).join('\n'), new RegExp(`apply --app all --include ${e.entry.id} --confirm`));
+  } else {
+    assert.match(text, /delete it in Task Scheduler yourself/);
     assert.throws(() => owner(w, { include: [e.entry.id] }).plan(), /no longer carries Toolkit's marker .* Delete it in Task Scheduler/);
     assert.ok(e.live(), 'the task is untouched');
   }
@@ -203,8 +211,8 @@ test('global rules: a present block is removed through the rules owner, a broken
   const plan = owner(w, { rules: rules.factory }).plan();
   assert.deepEqual(plan.rules.map(file => file.action), ['remove', 'held']);
   const text = removal.describePlan(plan).join('\n');
-  assert.match(text, /the Toolkit block is removed \(a backup is saved first/);
-  assert.match(text, /left alone, the Toolkit markers are broken/);
+  assert.match(text, /- \*\*Global rules:\*\* the Toolkit block in ~\/claude-code\/rules\.md \(the rest of the file stays\)/);
+  assert.match(text, /\*\*Kept\*\*\n- \*\*Global rules:\*\* ~\/codex\/rules\.md: left alone, the Toolkit markers are broken; fix or remove the Toolkit lines by hand/);
   const result = owner(w, { rules: rules.factory }).apply(plan.code);
   assert.deepEqual(result.rules.map(file => file.result), ['removed', 'held']);
   assert.deepEqual(result.held_rules.map(file => file.harness), ['codex']);
@@ -235,18 +243,22 @@ test('an unreadable task record plans nothing and removes nothing', t => {
   assert.ok(e.live());
 });
 
-test('without a Task Scheduler the plan says so and leaves task records alone', t => {
+// Only true lines: a system with no Task Scheduler never had Toolkit's Windows tasks, so the plan says
+// nothing about them.
+test('without a Task Scheduler the plan has no task line and leaves task records alone', t => {
   const w = world(t), e = enrol(t, w, 'widget');
   const plan = new removal.ToolkitRemoval({ home: w.home, scheduler: null, rules: null }).plan();
   assert.equal(plan.scheduler, 'not available on this system');
   assert.deepEqual([plan.tasks, plan.stale_records, plan.state], [[], [], []]);
-  assert.match(removal.describePlan(plan).join('\n'), /not checked, because this system has no Windows Task Scheduler/);
+  assert.doesNotMatch(removal.describePlan(plan).join('\n'), /[Ss]cheduled task|Task Scheduler/);
   assert.ok(tasks.readRegistry(w.home).tasks.some(entry => entry.id === e.entry.id));
 });
 
 test('command line: plan prints the list and the code, apply needs the code, bad arguments print usage', t => {
   const w = world(t); enrol(t, w, 'widget');
-  const run = argv => { const out = [], err = []; const code = removal.main(argv, { home: w.home, scheduler: w.scheduler, rules: null, plugins: () => ({}), platform: 'win32', log: line => out.push(line), error: line => err.push(line) }); return { code, out: out.join('\n'), err: err.join('\n') }; };
+  // The default parts would read this computer's own temp folder and Claude app folder, so the command
+  // line runs over none of them here; the parts have their own tests.
+  const run = argv => { const out = [], err = []; const code = removal.main(argv, { home: w.home, scheduler: w.scheduler, rules: null, parts: [], plugins: () => ({}), platform: 'win32', environment: { HOME: w.home, USERPROFILE: w.home }, log: line => out.push(line), error: line => err.push(line) }); return { code, out: out.join('\n'), err: err.join('\n') }; };
   // The agent asks the owner first whether to remove from this app only or every app; without the answer nothing runs.
   const unasked = run(['plan']);
   assert.equal(unasked.code, 1);
@@ -254,13 +266,15 @@ test('command line: plan prints the list and the code, apply needs the code, bad
   assert.equal(run(['plan', '--app', 'everywhere']).code, 1);
   // No other app has the plugin here, so a one-app plan says the shared parts go too.
   const codexOnly = run(['plan', '--app', 'codex']).out;
-  assert.match(codexOnly, /From: Codex only\. Claude Code's own Toolkit files stay; run plan with --app all to remove them too\./);
-  assert.match(codexOnly, /Also removed, because no other app has the Toolkit plugin: old scheduled tasks from an earlier Toolkit with their files/);
-  assert.doesNotMatch(codexOnly, /Kept, because/);
+  assert.match(codexOnly, /\*\*From:\*\* Codex only; no other app has the Toolkit plugin, so the shared parts below go too\./);
+  assert.match(codexOnly, /- \*\*Old scheduled tasks:\*\* [^\n]+, from an earlier Toolkit/);
+  assert.doesNotMatch(codexOnly, /Shared parts|--app all/);
   const plan = run(['plan', '--app', 'all']);
   assert.equal(plan.code, 0);
-  const code = /Plan code: ([a-f0-9]{64})/.exec(plan.out)[1];
-  assert.match(plan.out, /From: every app on this computer\./);
+  const code = /--confirm ([a-f0-9]{64})/.exec(plan.out)[1];
+  assert.match(plan.out, /\*\*From:\*\* every app on this computer\./);
+  assert.equal(run(['plan', '--app', 'all', '--full']).out, plan.out, 'nothing folded here, so --full shows the same list');
+  assert.equal(run(['apply', '--app', 'all', '--full', '--confirm', code]).code, 1, '--full is a plan option only');
   assert.equal(JSON.parse(run(['plan', '--app', 'all', '--json']).out).code, code);
   assert.notEqual(JSON.parse(run(['plan', '--app', 'codex', '--json']).out).code, code, 'the app is in the plan code');
   assert.deepEqual([run(['apply', '--app', 'all']).code, run(['apply', '--app', 'all', '--confirm', 'nope']).code, run(['sweep']).code, run(['plan', '--app', 'all', '--confirm', code]).code, run(['apply', '--confirm', code]).code], [1, 1, 1, 1, 1]);
@@ -268,7 +282,7 @@ test('command line: plan prints the list and the code, apply needs the code, bad
   const wrong = run(['apply', '--app', 'all', '--confirm', '0'.repeat(64)]);
   assert.equal(wrong.code, 1); assert.match(wrong.err, /nothing was removed/);
   const done = run(['apply', '--app', 'all', '--confirm', code]);
-  assert.equal(done.code, 0); assert.match(done.out, /: removed/); assert.match(done.out, /Done\./);
+  assert.equal(done.code, 0); assert.match(done.out, /\*\*Toolkit removal done\*\*/); assert.match(done.out, /\*\*Removed\*\*\n- \*\*Old scheduled tasks:\*\* /);
 });
 
 test('the real scheduler removes a launcher-disabled task only with its exact recorded definition', () => {
@@ -304,9 +318,8 @@ test('Codex settings: the plan lists the raised project_doc_max_bytes line, its 
   const plan = owner(w, { rules: rules.factory }).plan();
   assert.deepEqual(plan.codex_settings, { file: '~/.codex/config.toml', action: 'restore', previous: '32768' });
   const text = removal.describePlan(plan).join('\n');
-  assert.match(text, /Codex settings:\n- ~\/\.codex\/config\.toml: Toolkit's project_doc_max_bytes line is taken out and the earlier value 32768 comes back; the rest of the file stays \(a backup is saved first, then Codex is asked to load the file\)/);
-  assert.doesNotMatch(text, /Not touched:[^\n]*app settings files,/);
-  assert.match(text, /Not touched: your repositories, your keys/);
+  assert.match(text, /- \*\*Codex instruction limit:\*\* project_doc_max_bytes in ~\/\.codex\/config\.toml goes back to 32768\n/);
+  assert.match(text, /\*\*Never touched\*\*\n- Your repositories, your keys \(in the credential store\)/);
   // The line is in the plan code: a list read without it removes nothing.
   const raised = fs.readFileSync(rules.codex);
   fs.writeFileSync(rules.codex, original);
@@ -322,7 +335,7 @@ test('Codex settings: the plan lists the raised project_doc_max_bytes line, its 
   assert.equal(fs.readFileSync(rules.codex, 'utf8'), original);
   assert.deepEqual(result.codex_settings, { file: '~/.codex/config.toml', result: 'restored-previous', backup: 'saved', load_check: 'verified' });
   assert.deepEqual(probes, [rules.codex]);
-  assert.match(removal.describeResult(result).join('\n'), /Codex settings ~\/\.codex\/config\.toml: put back to the earlier value; Codex load check: verified/);
+  assert.match(removal.describeResult(result).join('\n'), /- \*\*Codex instruction limit:\*\* ~\/\.codex\/config\.toml: put back to the earlier value; Codex load check: verified/);
   assert.deepEqual(fs.readFileSync(rules.claude), settings, 'other app settings stay byte for byte');
   assert.equal(owner(w, { rules: rules.factory }).plan().nothing, true);
 });
@@ -334,7 +347,7 @@ test('Codex settings: a config.toml Toolkit created for the line is deleted, and
   fs.writeFileSync(rules.codex, `${limitBlock('none')}\n`);
   const plan = owner(w, { rules: rules.factory }).plan();
   assert.deepEqual(plan.codex_settings, { file: '~/.codex/config.toml', action: 'delete-file', previous: 'none' });
-  assert.match(removal.describePlan(plan).join('\n'), /the file is deleted, because Toolkit created it for its project_doc_max_bytes line and nothing else is in it/);
+  assert.match(removal.describePlan(plan).join('\n'), /- \*\*Codex instruction limit:\*\* ~\/\.codex\/config\.toml, which Toolkit created for its project_doc_max_bytes line alone/);
   assert.equal(plan.nothing, false);
   const result = owner(w, { rules: rules.factory }).apply(plan.code);
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -344,7 +357,7 @@ test('Codex settings: a config.toml Toolkit created for the line is deleted, and
   fs.writeFileSync(rules.codex, damaged);
   const held = owner(w, { rules: rules.factory }).plan();
   assert.equal(held.codex_settings.action, 'held');
-  assert.match(removal.describePlan(held).join('\n'), /~\/\.codex\/config\.toml: left alone, the Toolkit markers are not one intact pair/);
+  assert.match(removal.describePlan(held).join('\n'), /\*\*Kept\*\*\n- \*\*Codex instruction limit:\*\* ~\/\.codex\/config\.toml: left alone, the Toolkit markers are not one intact pair/);
   const after = owner(w, { rules: rules.factory }).apply(held.code);
   assert.equal(fs.readFileSync(rules.codex, 'utf8'), damaged);
   assert.equal(after.codex_settings, null);
@@ -365,8 +378,8 @@ test('Codex settings: damaged markers left alone while the rules blocks go is th
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.codex_settings, null);
   const text = removal.describeResult(result).join('\n');
-  assert.equal((text.match(/Codex settings/g) || []).length, 1, text);
-  assert.match(text, /Done\./);
+  assert.equal((text.match(/Codex instruction limit/g) || []).length, 1, text);
+  assert.match(text, /\*\*Toolkit removal done\*\*/);
   assert.equal(fs.readFileSync(rules.codex, 'utf8'), damaged);
 });
 
@@ -398,7 +411,10 @@ function fullHome(t) {
   assert.ok(n8n.install().copied.length > 0);
   fs.mkdirSync(path.join(home, '.claude', 'skills', 'my-skill'), { recursive: true });
   const folder = path.join(home, '.ai-agent-toolkit');
-  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'antigravity-refresh/source.json', 'antigravity-refresh/update.lock', 'notes/mine.txt',
+  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'antigravity-refresh/source.json', 'antigravity-refresh/update.lock', 'notes/mine.txt', 'recovery-identities/r.json',
+    // The bridge's short-lived lock and staging leftovers.
+    'update.lock.recovery', 'update.lock.recovery.claim-0123456789abcdef', 'update.lock.displaced.01234567-89ab-cdef-0123-456789abcdef', '.staging-01234567-89ab-cdef-0123-456789abcdef/x',
+    '.toolkit-staging-generation-01234567-89ab-cdef-0123-456789abcdef.json', '.current.backup-123-456/x',
     // The update records the bridge keeps beside its hub snapshot.
     'remote-check.json', 'agent-rules-notices.json', 'hook-skips.json', 'update.readers/123-abc', 'update.lock', 'update.tree-moving']) {
     fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x');
@@ -415,27 +431,42 @@ function fullHome(t) {
   return { home, environment, depth, agents, folder, installed, delegation, make };
 }
 
-test('full removal: settings, helper files and skill copies go after the OK; the folder waits for the plugins, then goes keeping env and backups', t => {
+test('full removal: settings, helper files and skill copies go after the OK; the folder waits for the plugins, then goes keeping only the key list, the recovery records and the last removal\'s backup', t => {
   const h = fullHome(t);
   const plan = h.make().plan();
   const text = removal.describePlan(plan).join('\n');
+  const [screen, agent] = text.split(removal.AGENT_LINE);
   assert.equal(plan.nothing, false);
   assert.deepEqual(plan.plugins, ['claude-code']);
-  assert.match(text, /Claude Code subagent limit:\n- ~\/\.claude\/settings\.json: the subagent limit CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: removed/);
-  assert.match(text, /Claude Code settings left as they are:\n- ~\/\.claude\/settings\.json: No AI attribution in commits and pull requests \(attribution\): kept, set at setup; a Claude Code setting, so it stays as it is/);
-  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on/);
-  assert.match(text, /Codex helper limit:\n- ~\/\.codex\/config\.toml: Toolkit's helper limit block: removed \(toolkit-managed-v2, 2 helpers; Codex may then use its own higher default/);
-  assert.match(text, /- ~\/\.claude\/agents\/toolkit-g0\.md: removed\n- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
-  assert.doesNotMatch(text, /my-reviewer|my-skill/);
-  assert.match(text, /Skill folders Toolkit copied:\n- ~\/\.claude\/skills\/[^\n]+: removed/);
-  assert.match(text, /Toolkit folder \(goes last, once no Toolkit plugin is installed\):/);
-  assert.match(text, /~\/\.ai-agent-toolkit\/agent-control: removed \(its backups folder stays\)/);
-  assert.match(text, /~\/\.ai-agent-toolkit\/env: kept, the list of your keys/);
-  assert.match(text, /~\/\.ai-agent-toolkit\/antigravity-refresh: removed/, 'the Antigravity refresh stamp and lock are Toolkit files');
-  assert.match(text, /~\/\.ai-agent-toolkit\/notes: kept, not a Toolkit file/);
-  for (const name of ['remote-check.json', 'agent-rules-notices.json', 'hook-skips.json', 'update.readers', 'update.lock', 'update.tree-moving']) assert.match(text, new RegExp(`~/\\.ai-agent-toolkit/${name.replace('.', '\\.')}: removed`), name);
-  assert.match(text, /Plugins to uninstall[^\n]*\n- Claude Code: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`\n- Claude Code: `claude plugin marketplace remove ai-agent-toolkit-local`/);
-  assert.doesNotMatch(text, /codex plugin remove/);
+  assert.match(screen, /^\*\*Remove Toolkit from this computer\*\*\n\n\*\*From:\*\* every app on this computer\.\n\n\*\*Removed\*\*\n- \*\*Plugin:\*\* AI Agent Toolkit in Claude Code, uninstalled after your yes\n/);
+  assert.match(screen, /- \*\*Claude Code subagent limit:\*\* CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH in ~\/\.claude\/settings\.json \(Toolkit's value; Claude Code goes back to its default\)/);
+  // The owner's wording for the attribution setting setup turned on.
+  assert.match(screen, /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*No AI credit in commits:\*\* a Claude Code setting setup turned on; change it in ~\/\.claude\/settings\.json\n/);
+  assert.doesNotMatch(screen, /Claude Code settings from setup/, 'no other setting from setup is set here');
+  assert.match(screen, /- \*\*Codex helper limit:\*\* Toolkit's block in ~\/\.codex\/config\.toml \(2 helpers; Codex may then use its own higher default\)/);
+  assert.match(screen, /- \*\*Helper agents:\*\* ~\/\.claude\/agents\/toolkit-g0\.md and ~\/\.codex\/agents\/toolkit-g1\.toml\n/);
+  assert.doesNotMatch(screen, /my-reviewer|my-skill/);
+  // Long lists fold into a count; --full unfolds them, and the code stays the same.
+  assert.match(screen, /- \*\*Skill copies:\*\* \d+ skill folders Toolkit copied in ~\/\.claude\/skills \(full list on request\)/);
+  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout, its records and locks, and \d+ older backup files of Toolkit's own \(\d+ items, full list on request\); it goes last, once no Toolkit plugin is installed/);
+  assert.match(screen, /- \*\*Your key list:\*\* ~\/\.ai-agent-toolkit\/env: the keys themselves stay in the credential store/);
+  assert.match(screen, /- \*\*Recovery records:\*\* ~\/\.ai-agent-toolkit\/recovery-identities: the evidence of outside resources checked before a live change/);
+  assert.match(screen, /- \*\*Not Toolkit's:\*\* ~\/\.ai-agent-toolkit\/notes\n/);
+  assert.match(screen, /- \*\*This removal's backup:\*\* ~\/\.ai-agent-toolkit\/backups\/remove-toolkit, the copies of the files this removal changes/);
+  assert.match(agent, /The full lists, when the owner asks: run plan --app all --full\./);
+  const full = removal.describePlan(plan, { full: true }).join('\n');
+  assert.match(full, /- \*\*Skill copies:\*\*\n  - ~\/\.claude\/skills\//);
+  assert.match(full, /  - ~\/\.ai-agent-toolkit\/agent-control \(\d+ older backup files?\)\n/);
+  assert.match(full, /  - ~\/\.ai-agent-toolkit\/backups \(1 older backup file\)\n/);
+  assert.match(full, /  - ~\/\.ai-agent-toolkit\/antigravity-refresh\n/);
+  for (const name of ['remote-check.json', 'agent-rules-notices.json', 'hook-skips.json', 'update.readers', 'update.lock', 'update.lock.recovery', 'update.tree-moving', 'source', 'current', 'user-state',
+    'update.lock.recovery.claim-0123456789abcdef', 'update.lock.displaced.01234567-89ab-cdef-0123-456789abcdef', '.staging-01234567-89ab-cdef-0123-456789abcdef',
+    '.toolkit-staging-generation-01234567-89ab-cdef-0123-456789abcdef.json', '.current.backup-123-456']) assert.ok(full.includes(`  - ~/.ai-agent-toolkit/${name}\n`), name);
+  assert.doesNotMatch(full, /The full lists/);
+  // The plugin uninstall lines are the agent's own step, never on the owner's screen.
+  assert.doesNotMatch(screen, /`claude plugin|codex plugin|--confirm|[a-f0-9]{64}/);
+  assert.match(agent, /- After the owner's yes, first:\n  - Uninstall the Claude Code plugin: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`, then `claude plugin marketplace remove ai-agent-toolkit-local`\. Without its command line, ask the owner to type \/plugin, open AI Agent Toolkit and choose Uninstall\./);
+  assert.doesNotMatch(agent, /codex plugin remove/);
   // The plugin state is not in the code: the agent uninstalls between plan and apply.
   h.installed['claude-code'] = false;
   assert.equal(h.make().plan().code, plan.code);
@@ -452,21 +483,190 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.ok(fs.existsSync(path.join(h.folder, 'source', 'repo', 'README.md')), 'the folder waits while a plugin is installed');
   assert.equal(first.folder_kept, true);
   const after = removal.describeResult(first).join('\n');
-  assert.match(after, /~\/\.ai-agent-toolkit: kept \(the Claude Code plugin is still installed/);
-  assert.match(after, /Last step, uninstall the plugin[^\n]*\n- Claude Code: `claude plugin uninstall/);
-  assert.match(after, /say `remove toolkit` again, or run this in PowerShell and follow it:\nnode "[^"]*toolkit-remove\.cjs" plan/);
-  // Once the plugin is gone, a second run lists only the folder and removes Toolkit's entries.
+  const [closing, steps] = after.split(removal.AGENT_LINE);
+  assert.match(closing, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Claude Code plugin is still installed and reads its records there/);
+  assert.match(closing, /\*\*Next\*\*\n- \*\*Still to do:\*\* the Toolkit plugin is still installed in Claude Code, so the Toolkit folder stays\. Once it is uninstalled, say `remove toolkit` again to remove the folder/);
+  assert.doesNotMatch(closing, /`claude plugin|node "/);
+  assert.match(steps, /- Uninstall the Claude Code plugin: `claude plugin uninstall/);
+  assert.match(steps, /the skill is gone, run: node "[^"]*toolkit-remove\.cjs" plan --app all/);
+  // This removal's backup (the subagent limit's settings copy) was gathered although the folder stays.
+  const gathered = fs.readdirSync(path.join(h.folder, 'backups', 'remove-toolkit'));
+  assert.equal(gathered.length, 1);
+  assert.ok(fs.readdirSync(path.join(h.folder, 'backups', 'remove-toolkit', gathered[0], 'agent-control', 'claude-settings')).length > 0);
+  // Once the plugin is gone, a second run lists only the folder and removes Toolkit's entries; it saves
+  // no backup of its own, so the last removal's backup stays and every older one goes.
   h.installed['claude-code'] = false;
   const second = h.make().plan();
   assert.deepEqual(second.parts.filter(part => part.items.some(item => item.action === 'remove')).map(part => part.key), ['toolkit_folder']);
+  assert.match(removal.describePlan(second).join('\n'), /- \*\*The last removal's backup:\*\* ~\/\.ai-agent-toolkit\/backups\/remove-toolkit\n/);
   const done = h.make().apply(second.code);
   assert.equal(done.ok, true, JSON.stringify(done));
   assert.equal(done.folder_kept, false);
-  assert.deepEqual(fs.readdirSync(h.folder).sort(), ['agent-control', 'backups', 'env', 'notes']);
-  assert.deepEqual(fs.readdirSync(path.join(h.folder, 'agent-control')), ['backups']);
+  assert.deepEqual(fs.readdirSync(h.folder).sort(), ['backups', 'env', 'notes', 'recovery-identities']);
+  assert.deepEqual(fs.readdirSync(path.join(h.folder, 'backups')), ['remove-toolkit']);
+  assert.deepEqual(fs.readdirSync(path.join(h.folder, 'backups', 'remove-toolkit')), gathered);
   assert.equal(fs.readFileSync(path.join(h.folder, 'env', 'manifest.json'), 'utf8'), 'x');
-  assert.match(removal.describeResult(done).join('\n'), /Start a new session in each app/);
+  assert.equal(fs.readFileSync(path.join(h.folder, 'recovery-identities', 'r.json'), 'utf8'), 'x');
+  assert.match(removal.describeResult(done).join('\n'), /- \*\*New session:\*\* start a new session in each app/);
   assert.equal(h.make().plan().nothing, true);
+});
+
+// Owner decision INT-TK421-1364: a full removal leaves only the key list, the recovery records and
+// this removal's backup, which replaces the last removal's.
+test('the Toolkit folder: a removal that saves a backup replaces the last removal\'s and every older backup goes', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  for (const file of ['backups/remove-toolkit/2026-01-01T00-00-00-000Z/old.json', 'backups/global-rules/2026-01-01T00-00-00-000Z/AGENTS.md', 'agent-control/backups/claude-settings/s.json', 'env/manifest.json', 'source/x'])
+    { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'old'); }
+  const writer = { key: 'writer', title: 'Writer', plan: () => [{ what: 'a setting', action: 'remove', backup: true }],
+    apply: () => { const file = path.join(folder, 'backups', 'global-rules', '2026-11-26T00-00-00-000Z', 'AGENTS.md'); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'new'); return [{ what: 'a setting', result: 'removed' }]; } };
+  const folderPart = new parts.ToolkitFolderPart({ home, plugins: () => ({}), now: () => new Date('2026-11-26T12:00:00Z') });
+  const make = () => new removal.ToolkitRemoval({ home, parts: [writer, folderPart], plugins: () => ({}) });
+  const plan = make().plan();
+  const items = plan.parts.find(part => part.key === 'toolkit_folder').items;
+  assert.deepEqual(items.filter(item => item.action === 'remove').map(item => [item.what, item.older || 0]),
+    [['~/.ai-agent-toolkit/agent-control', 1], ['~/.ai-agent-toolkit/backups', 2], ['~/.ai-agent-toolkit/source', 0]]);
+  assert.deepEqual(items.filter(item => item.action === 'save').map(item => item.label), ["This removal's backup"]);
+  assert.equal(items.some(item => item.label === "The last removal's backup"), false, 'it is replaced, so it is not listed as kept');
+  const result = make().apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(treeOf(folder), {
+    [path.join('backups', 'remove-toolkit', '2026-11-26T12-00-00-000Z', 'global-rules', '2026-11-26T00-00-00-000Z', 'AGENTS.md')]: Buffer.from('new').toString('hex'),
+    [path.join('env', 'manifest.json')]: Buffer.from('old').toString('hex'),
+  });
+  assert.match(removal.describeResult(result).join('\n'), /- \*\*This removal's backup:\*\* ~\/\.ai-agent-toolkit\/backups\/remove-toolkit\n/);
+});
+
+// Owner decision INT-TK421-1364: an MCP server whose key helper runs from the Toolkit folder is named
+// only when this removal deletes that helper, and the closing lines say how to connect it again.
+test('MCP servers: named only when the removal deletes their key helper; the closing lines say how to reconnect, and their settings stay', t => {
+  const home = s.tempHome(t);
+  const environment = { CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') };
+  const script = path.join(home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit', 'repo', 'scripts', 'toolkit-env.cjs');
+  fs.mkdirSync(path.dirname(script), { recursive: true }); fs.writeFileSync(script, '');
+  const claudeJson = path.join(home, '.claude.json');
+  fs.writeFileSync(claudeJson, JSON.stringify({ mcpServers: { github: { type: 'http', url: 'https://example.test/mcp', headersHelper: `node "${script}" header GITHUB_TOKEN` } } }));
+  const before = fs.readFileSync(claudeJson);
+  const installed = { 'claude-code': false, codex: true };
+  const make = app => {
+    const folder = new parts.ToolkitFolderPart({ home, environment, plugins: () => installed });
+    return new removal.ToolkitRemoval({ home, app, parts: [folder, new parts.McpKeyHelpersPart({ environment, home, folder })], plugins: () => installed });
+  };
+  // Codex still has Toolkit, so a Claude Code removal keeps the folder and the helper: no MCP line.
+  assert.doesNotMatch(removal.describePlan(make('claude-code').plan()).join('\n'), /MCP|github/);
+  installed.codex = false;
+  const plan = make('all').plan();
+  assert.match(removal.describePlan(plan).join('\n'), /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*MCP servers:\*\* github \(Claude Code\) keeps its settings and key, but its key helper runs from the Toolkit folder, which goes; the closing lines say how to connect it again\n/);
+  const result = make('all').apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const closing = removal.describeResult(result).join('\n');
+  assert.match(closing, /\*\*Next\*\*\n- \*\*Reconnect MCP servers:\*\* github \(Claude Code\) keeps its settings and key, but lost the key helper with the Toolkit folder\. To use it again, give it its key another way \(in its own settings or the service's sign-in\), or say `setup toolkit` and then `toolkit env`/);
+  assert.doesNotMatch(closing.split('**Next**')[0], /github/, 'named once, in the closing lines');
+  assert.deepEqual(fs.readFileSync(claudeJson), before, 'its settings stay byte for byte');
+});
+
+// G2 round 1 M1 (PR 1552): the backups other Toolkit features keep for the owner are the owner's data,
+// not Toolkit's rebuildable copies: the retired ~/.codex/.env (toolkit env says it never deletes it), the
+// feeder backups `toolkit env revoke --feeders` restores from (the kept env record points at them) and
+// memory tidy's backups (its restore reads them). A full removal keeps and names them.
+test('the Toolkit folder: a full removal keeps the backups Toolkit holds for the owner, names them, and revoke still finds its feeder backup', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  const feederBackup = path.join(folder, 'backups', 'env-feeders', '2026-11-02T00-00-00-000Z-github');
+  const owned = {
+    'backups/env-retire-2026-11-01T00-00-00-000Z/codex.env': '# my own note about the staging key\nEXAMPLE_TOKEN=fake-value-for-test\n',
+    'backups/env-feeders/2026-11-02T00-00-00-000Z-github/claude-code-github.json': JSON.stringify({ server: 'github', entry: { type: 'http', url: 'https://example.test/mcp' } }),
+    'backups/memory-tidy/folder-1/preview-abc/MEMORY.md': '- [A note](a.md) - owner memory\n',
+    'env/manifest.json': JSON.stringify({ bindings: [{ harness: 'claude-code', server: 'github', name: 'GITHUB_TOKEN', backup: feederBackup }] }),
+  };
+  for (const [file, text] of Object.entries({ ...owned, 'backups/global-rules/2026-01-01T00-00-00-000Z/AGENTS.md': 'old', 'source/repo/README.md': 'x' }))
+    { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), text); }
+  const make = () => new removal.ToolkitRemoval({ home, parts: [new parts.ToolkitFolderPart({ home, plugins: () => ({}) })], plugins: () => ({}) });
+  const plan = make().plan();
+  const screen = removal.describePlan(plan).join('\n').split(removal.AGENT_LINE)[0];
+  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout, and 1 older backup file of Toolkit's own; it goes last/);
+  assert.match(screen, /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*Your old Codex \.env:\*\* ~\/\.ai-agent-toolkit\/backups\/env-retire-2026-11-01T00-00-00-000Z: the file toolkit env moved there; it may be your only copy of its comment lines\n/);
+  assert.match(screen, /- \*\*Key connection backups:\*\* ~\/\.ai-agent-toolkit\/backups\/env-feeders: the MCP settings toolkit env changed, which `toolkit env` can put back\n/);
+  assert.match(screen, /- \*\*Memory tidy backups:\*\* ~\/\.ai-agent-toolkit\/backups\/memory-tidy: your memory notes from before a tidy, which memory tidy can put back\n/);
+  const result = make().apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  for (const [file, text] of Object.entries(owned)) assert.equal(fs.readFileSync(path.join(folder, file), 'utf8'), text, file);
+  assert.equal(fs.existsSync(path.join(folder, 'backups', 'global-rules')), false, "Toolkit's own older backups go");
+  assert.equal(fs.existsSync(path.join(folder, 'source')), false);
+  // The route the closing lines give (`setup toolkit`, then `toolkit env`) still finds the feeder backup.
+  const { ClaudeCodeFeeder } = require('../scripts/toolkit-env-feeders.cjs');
+  const restored = [];
+  const feeder = new ClaudeCodeFeeder({ home, claudeJson: path.join(home, '.claude.json'), claudeCommand: 'claude-not-run', spawn: (...call) => { restored.push(call); return { status: 0, stdout: '', stderr: '' }; } });
+  assert.doesNotThrow(() => { try { feeder.revoke({ harness: 'claude-code', server: 'github', name: 'GITHUB_TOKEN', backup: feederBackup }); } catch (error) { if (/backup[^\n]*missing/i.test(error.message)) throw error; } });
+  assert.equal(make().plan().nothing, true, 'a second run finds nothing: the owner\'s backups are not Toolkit\'s to remove');
+});
+
+// G2 round 1 L1: the folded folder line names what actually goes.
+test('the Toolkit folder: the folded line names only what goes', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  for (const file of ['backups/global-rules/2026-01-01T00-00-00-000Z/AGENTS.md', 'env/manifest.json']) { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x'); }
+  const plan = new removal.ToolkitRemoval({ home, parts: [new parts.ToolkitFolderPart({ home, plugins: () => ({}) })], plugins: () => ({}) }).plan();
+  const line = removal.describePlan(plan).find(entry => entry.startsWith('- **Toolkit folder:**'));
+  assert.equal(line, "- **Toolkit folder:** ~/.ai-agent-toolkit: 1 older backup file of Toolkit's own; it goes last, once no Toolkit plugin is installed");
+});
+
+// G2 round 1 L3: a one-app removal while another app keeps Toolkit gathers its own backup too, so a
+// later last-app removal that saves none keeps the whole of it as the last removal's backup.
+test('the Toolkit folder: a one-app removal gathers its backup, and a later removal that saves none keeps all of it', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  fs.mkdirSync(path.join(folder, 'source'), { recursive: true }); fs.writeFileSync(path.join(folder, 'source', 'x'), 'x');
+  const installed = { 'claude-code': true, codex: true };
+  let stamp = 0;
+  const writer = { key: 'writer', title: 'Writer', app: 'codex', plan: () => (installed.codex ? [{ what: 'a Codex setting', action: 'remove', backup: true }] : []),
+    apply: () => { for (const dir of ['global-rules', 'codex-delegation']) { const file = path.join(folder, 'backups', dir, `b${stamp}`, 'f.txt'); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, dir); } stamp += 1; installed.codex = false; return [{ what: 'a Codex setting', result: 'removed' }]; } };
+  const make = app => new removal.ToolkitRemoval({ home, app, parts: [writer, new parts.ToolkitFolderPart({ home, plugins: () => installed, now: () => new Date('2026-11-26T00:00:00Z') })], plugins: () => installed });
+  const first = make('codex');
+  const plan = first.plan();
+  assert.equal(first.apply(plan.code).ok, true);
+  assert.deepEqual(Object.keys(treeOf(path.join(folder, 'backups'))).sort(), [path.join('remove-toolkit', '2026-11-26T00-00-00-000Z', 'codex-delegation', 'b0', 'f.txt'), path.join('remove-toolkit', '2026-11-26T00-00-00-000Z', 'global-rules', 'b0', 'f.txt')].sort(), 'gathered although the folder stays for Claude Code');
+  installed['claude-code'] = false;
+  const last = make('all');
+  const result = last.apply(last.plan().code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(Object.keys(treeOf(path.join(folder, 'backups'))).length, 2, 'the last removal\'s backup stays whole');
+});
+
+// G2 round 1 M2: when the folder waits for a plugin that was not uninstalled, the closing lines say the
+// folder stays and why, and say nothing that is no longer true (the MCP helper going, nothing left).
+test('closing lines: a folder that waits for a plugin is named with its reason, and the MCP server keeps its key helper until then', t => {
+  const home = s.tempHome(t);
+  const environment = { CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') };
+  const script = path.join(home, '.ai-agent-toolkit', 'source', 'repo', 'scripts', 'toolkit-env.cjs');
+  fs.mkdirSync(path.dirname(script), { recursive: true }); fs.writeFileSync(script, '');
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { github: { type: 'http', url: 'https://example.test/mcp', headersHelper: `node "${script}" header GITHUB_TOKEN` } } }));
+  const installed = { 'claude-code': true, codex: false };
+  const make = () => { const folder = new parts.ToolkitFolderPart({ home, environment, plugins: () => installed }); return new removal.ToolkitRemoval({ home, parts: [folder, new parts.McpKeyHelpersPart({ environment, home, folder })], plugins: () => installed }); };
+  const plan = make().plan();
+  const result = make().apply(plan.code);
+  assert.equal(result.folder_kept, true);
+  const closing = removal.describeResult(result).join('\n').split(removal.AGENT_LINE)[0];
+  assert.match(closing, /^\*\*Toolkit removal: the Toolkit folder stays for now\*\*\n/);
+  assert.doesNotMatch(closing, /Nothing of Toolkit's was left to remove|which goes|Reconnect|New session/);
+  assert.match(closing, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Claude Code plugin is still installed and reads its records there\n/);
+  assert.match(closing, /- \*\*MCP servers:\*\* github \(Claude Code\): its key helper stays until the Toolkit folder goes\n/);
+  assert.match(closing, /- \*\*Still to do:\*\* the Toolkit plugin is still installed in Claude Code, so the Toolkit folder stays\. Once it is uninstalled, say `remove toolkit` again to remove the folder/);
+});
+
+test('the Toolkit folder: an older backup that changes after the plan read is not deleted, and apply without its own plan read removes nothing', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  const file = path.join(folder, 'backups', 'claude-settings', 'a.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'old');
+  const part = new parts.ToolkitFolderPart({ home, plugins: () => ({}) });
+  assert.throws(() => part.apply([{ what: '~/.ai-agent-toolkit/backups', action: 'remove' }]), /not read before its removal/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'old');
+  const items = part.plan();
+  fs.writeFileSync(file, 'rewritten after the plan');
+  part.apply(items);
+  // A file that changed is this removal's own: it is gathered, never deleted.
+  assert.deepEqual(Object.values(treeOf(folder)), [Buffer.from('rewritten after the plan').toString('hex')]);
 });
 
 // Rules for the harnesses the removal asks for, so a one-app removal is seen to leave the other app's file.
@@ -500,12 +700,11 @@ test('removal from Codex only, while Claude Code keeps Toolkit: nothing of Claud
   assert.deepEqual(plan.rules.map(file => file.harness), ['codex'], "only Codex's global rules file");
   // Antigravity's file is only read, so the kept line can name it.
   assert.deepEqual(rules.asked, [['codex'], ['antigravity']]);
-  assert.match(text, /From: Codex only\./);
-  assert.doesNotMatch(text, /Also removed, because/);
-  assert.match(text, /^Kept, because Claude Code still has the Toolkit plugin: old scheduled tasks from an earlier Toolkit with their files, Antigravity's global rules and the Toolkit folder\.$/m);
-  assert.match(text, /- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
-  assert.match(text, /Codex helper limit:/);
-  assert.doesNotMatch(text, /\.claude\/|claude plugin|Claude Code subagent limit|Toolkit folder \(goes last/);
+  assert.match(text, /\*\*From:\*\* Codex only\.\n/);
+  assert.match(text, /^- \*\*Shared parts:\*\* old scheduled tasks from an earlier Toolkit with their files, Antigravity's global rules and the Toolkit folder stay, because Claude Code still has the Toolkit plugin$/m);
+  assert.match(text, /- \*\*Helper agents:\*\* ~\/\.codex\/agents\/toolkit-g1\.toml\n/);
+  assert.match(text, /- \*\*Codex helper limit:\*\* /);
+  assert.doesNotMatch(text, /\.claude\/|claude plugin|Claude Code subagent limit|\*\*Toolkit folder:\*\*|MCP servers/);
   const result = make().apply(plan.code);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(h.depth.inspect().state, 'toolkit-one-layer', "Claude Code's subagent limit stays");
@@ -526,8 +725,8 @@ test('removal from Codex only, with no other app keeping Toolkit: the shared par
   assert.deepEqual(plan.kept_for, []);
   assert.deepEqual(rules.asked, [['codex', 'antigravity']]);
   const text = removal.describePlan(plan).join('\n');
-  assert.match(text, /Toolkit folder \(goes last/);
-  assert.match(text, /Also removed, because no other app has the Toolkit plugin/);
+  assert.match(text, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: [^\n]*it goes last, once no Toolkit plugin is installed/);
+  assert.match(text, /\*\*From:\*\* Codex only; no other app has the Toolkit plugin, so the shared parts below go too\./);
   assert.doesNotMatch(text, /\.claude\/agents|Claude Code subagent limit|\.claude\/skills/);
 });
 
@@ -536,7 +735,7 @@ test('full removal: a Claude Code subagent limit you set yourself is listed as k
   const file = path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json');
   fs.writeFileSync(file, '{\n  "env": {\n    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "3"\n  }\n}\n');
   const plan = h.make().plan();
-  assert.match(removal.describePlan(plan).join('\n'), /CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: kept, you set this value yourself/);
+  assert.match(removal.describePlan(plan).join('\n'), /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*Claude Code subagent limit:\*\* CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH in ~\/\.claude\/settings\.json: your own value\n/);
   h.make().apply(plan.code);
   assert.equal(fs.readFileSync(file, 'utf8'), '{\n  "env": {\n    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "3"\n  }\n}\n');
 });
@@ -555,7 +754,7 @@ test('full removal: a part that cannot be read is held and the rest of the plan 
   const home = s.tempHome(t);
   const broken = { key: 'broken', title: 'Broken part', plan() { throw new Error('unreadable'); }, apply() { throw new Error('must not run'); } };
   const plan = new removal.ToolkitRemoval({ home, parts: [broken] }).plan();
-  assert.match(removal.describePlan(plan).join('\n'), /Broken part:\n- Broken part: left alone, could not be read \(unreadable\)/);
+  assert.match(removal.describePlan(plan).join('\n'), /\*\*Kept\*\*\n- \*\*Broken part:\*\* Broken part: left alone, could not be read \(unreadable\)/);
 });
 
 // ---- What Toolkit added after the first removal: Codex's setup record, the update reports, the
@@ -595,8 +794,8 @@ for (const [journal, app, expected] of JOURNAL_ROWS) {
     const items = itemsOf(plan, 'codex_setup_journal');
     assert.deepEqual(items.map(item => item.action), expected === 'none' ? [] : [expected]);
     const text = removal.describePlan(plan).join('\n');
-    if (expected === 'remove') assert.match(text, /Codex setup record:\n- ~\/\.codex\/ai-agent-toolkit-setup-journal\.json: removed \(its last setup step finished/);
-    if (expected === 'keep') assert.match(text, /ai-agent-toolkit-setup-journal\.json: kept, it records a setup step that did not finish or cannot be read; kept as the evidence of what was attempted/);
+    if (expected === 'remove') assert.match(text, /\*\*Removed\*\*\n(- [^\n]+\n)*- \*\*Codex setup record:\*\* ~\/\.codex\/ai-agent-toolkit-setup-journal\.json\n/);
+    if (expected === 'keep') assert.match(text, /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*Codex setup record:\*\* ~\/\.codex\/ai-agent-toolkit-setup-journal\.json: it records a setup step that did not finish or cannot be read, so it stays as the evidence of what was attempted/);
     const result = h.make({ app }).apply(plan.code);
     assert.equal(result.ok, true, JSON.stringify(result));
     if (expected === 'remove') assert.equal(fs.existsSync(h.journalFile), false);
@@ -627,7 +826,7 @@ for (const [name, { app, installed }, expected] of REPORT_ROWS) {
     const plan = h.make({ app }).plan();
     const items = itemsOf(plan, 'update_reports');
     assert.deepEqual(items.map(item => item.action), expected === 'not listed' ? [] : ['remove']);
-    if (items.length) assert.match(removal.describePlan(plan).join('\n'), /Toolkit update reports:\n- ~\/AppData\/Local\/Temp\/ai-agent-toolkit\/update-reports: removed \(Toolkit's update report files, once no Toolkit plugin is installed/);
+    if (items.length) assert.match(removal.describePlan(plan).join('\n'), /- \*\*Update reports:\*\* ~\/AppData\/Local\/Temp\/ai-agent-toolkit\/update-reports \(Toolkit's report files; any other file there stays\)/);
     const result = h.make({ app }).apply(plan.code);
     assert.equal(result.ok, true, JSON.stringify(result));
     const left = fs.existsSync(h.reportDir) ? fs.readdirSync(h.reportDir).sort() : null;
@@ -635,7 +834,7 @@ for (const [name, { app, installed }, expected] of REPORT_ROWS) {
       assert.equal(left, null, 'the folder goes once empty');
       assert.equal(fs.existsSync(path.dirname(h.reportDir)), false, 'and its ai-agent-toolkit parent');
     } else assert.equal(left.length, 2, 'the reports stay');
-    if (expected === 'kept') assert.match(removal.describeResult(result).join('\n'), /update-reports: kept \(the Claude Code plugin is still installed and writes its reports there\)/);
+    if (expected === 'kept') assert.match(removal.describeResult(result).join('\n'), /- \*\*Update reports:\*\* ~\/AppData\/Local\/Temp\/ai-agent-toolkit\/update-reports: the Claude Code plugin is still installed and writes its reports there/);
   });
 }
 
@@ -645,26 +844,29 @@ test('update reports: a file that is not a Toolkit report stays, with its folder
   const plan = h.make().plan();
   const result = h.make().apply(plan.code);
   assert.deepEqual(fs.readdirSync(h.reportDir), ['my-notes.md']);
-  assert.match(removal.describeResult(result).join('\n'), /update-reports: kept \(it still holds files that are not Toolkit reports\)/);
+  assert.match(removal.describeResult(result).join('\n'), /update-reports: it still holds files that are not Toolkit reports/);
 });
 
-test('the default parts include the Codex setup record and the update reports, before the Toolkit folder', () => {
+test('the default parts include the Codex setup record and the update reports before the Toolkit folder, and only the MCP report after it', () => {
   const keys = parts.defaultParts({ environment: { CLAUDE_CONFIG_DIR: '/x/.claude', CODEX_HOME: '/x/.codex' }, home: '/x' }).map(part => part.key);
   assert.ok(keys.includes('codex_setup_journal'));
   assert.ok(keys.indexOf('update_reports') < keys.indexOf('toolkit_folder'));
-  assert.equal(keys.at(-1), 'toolkit_folder');
+  assert.deepEqual(keys.slice(-2), ['toolkit_folder', 'mcp_key_helpers']);
 });
 
-test('the Toolkit folder: recovery records are kept as evidence, never called someone else\'s file', t => {
+test('the Toolkit folder: recovery records and the key list are kept, never called someone else\'s file', t => {
   const home = s.tempHome(t);
   const folder = path.join(home, '.ai-agent-toolkit');
-  fs.mkdirSync(path.join(folder, 'recovery-identities'), { recursive: true });
-  fs.writeFileSync(path.join(folder, 'recovery-identities', 'r.json'), '{}');
+  for (const file of ['recovery-identities/r.json', 'env/manifest.json']) { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), '{}'); }
   const part = new parts.ToolkitFolderPart({ home, plugins: () => ({}) });
   const items = part.plan();
-  assert.deepEqual(items, [{ what: '~/.ai-agent-toolkit/recovery-identities', action: 'keep', detail: 'the records of outside resources checked before a live change; kept as evidence' }]);
+  assert.deepEqual(items, [
+    { what: '~/.ai-agent-toolkit/env', action: 'keep', label: 'Your key list', detail: 'the keys themselves stay in the credential store' },
+    { what: '~/.ai-agent-toolkit/recovery-identities', action: 'keep', label: 'Recovery records', detail: 'the evidence of outside resources checked before a live change' },
+  ]);
   part.apply(items);
   assert.ok(fs.existsSync(path.join(folder, 'recovery-identities', 'r.json')));
+  assert.ok(fs.existsSync(path.join(folder, 'env', 'manifest.json')));
 });
 
 test('Claude Code settings setup turned on stay byte for byte, and the n8n Skills plugin gets no step', t => {
@@ -686,11 +888,15 @@ test('Claude Code settings setup turned on stay byte for byte, and the n8n Skill
   const before = { settings: fs.readFileSync(settingsFile), plugins: fs.readFileSync(pluginsFile) };
   const plan = h.make().plan();
   const text = removal.describePlan(plan).join('\n');
-  assert.match(text, /Claude Code settings left as they are:\n- ~\/\.claude\/settings\.json: [^\n]*: kept, set at setup; a Claude Code setting, so it stays as it is; edit settings\.json to change it/);
-  for (const id of set) assert.match(text, new RegExp(`\\(${id}\\): kept, set at setup`), id);
-  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on other than the subagent limit Toolkit set \(they stay as they are[^\n]*other plugins/);
+  const line = text.split('\n').find(entry => entry.startsWith('- **Claude Code settings from setup:** '));
+  assert.match(line, /: Claude Code's own settings, so they stay as they are; change them in ~\/\.claude\/settings\.json$/);
+  for (const id of set.filter(entry => entry !== 'attribution')) assert.ok(line.includes(`(${id})`), id);
+  assert.ok(set.includes('attribution'));
+  assert.doesNotMatch(line, /\(attribution\)/);
+  assert.ok(text.includes('\n- **No AI credit in commits:** a Claude Code setting setup turned on; change it in ~/.claude/settings.json\n'));
   assert.doesNotMatch(text, /n8n-skills@|plugin enable|preferences you chose/);
-  assert.match(text, /Skill folders Toolkit copied:\n- ~\/\.claude\/skills\/n8n-[^\n]+: removed/, 'the copied n8n skills go');
+  assert.match(text, /\*\*Never touched\*\*\n- Your repositories, your keys \(in the credential store\), other plugins, and every setting, agent, skill and file you made yourself\./);
+  assert.match(removal.describePlan(plan, { full: true }).join('\n'), /- \*\*Skill copies:\*\*\n(  - [^\n]+\n)*  - ~\/\.claude\/skills\/n8n-/, 'the copied n8n skills go');
   const result = h.make().apply(plan.code);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(fs.readFileSync(settingsFile), before.settings, 'settings.json is byte for byte as it was');
@@ -733,6 +939,14 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   const afterYes = section.slice(section.indexOf('Only after a yes'));
   assert.equal(section.split("an app's own uninstall tool may do this step").length, 2, 'the allowance appears once');
   assert.match(afterYes.split('. ')[0], /an app's own uninstall tool may do this step for that app/, 'the allowance sits in the step after the yes');
+  // Owner test of 26 Nov 2026 ("why code block though"): the plan is shown as ordinary text, and only
+  // what sits above the agent's own steps, whose first line the skill names exactly.
+  assert.ok(section.includes(`above its \`${removal.AGENT_LINE}\` line exactly as printed, as ordinary text, never in a code block`));
+  assert.match(section, /Show apply's closing lines the same way/);
+  // G2 1543 L4: the shared parts are old tasks from an earlier Toolkit, and the folder keeps only the key list,
+  // the recovery records and this removal's backup.
+  assert.doesNotMatch(section, /the scheduled tasks, Antigravity's copies|keeping `env` and the backups/);
+  assert.match(section, /old scheduled tasks from an earlier Toolkit, Antigravity's copies, the update reports and the Toolkit folder/);
 });
 
 // The legacy cleaner's own guards. The fake scheduler above stands in for Task Scheduler, so these
@@ -945,7 +1159,7 @@ for (const [app, listed] of [['claude-code', true], ['all', true], ['codex', fal
     assert.deepEqual(items.map(item => item.action), listed ? ['keep'] : []);
     const text = removal.describePlan(plan).join('\n');
     if (listed) {
-      assert.match(text, /The Claude app's Toolkit copy from your claude\.ai account:\n- ~\/AppData\/Local\/Claude-Data\/claude_pkg\/rpm\/acct\/org\/plugin_01abc: kept, only claude\.ai can remove it/);
+      assert.match(text, /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*The Claude app's claude\.ai copy:\*\* only claude\.ai can remove it/);
       assert.match(text, /removes Toolkit from the Claude app on every computer and cloud session signed in to that account/);
       assert.match(text, /Until then the Claude app keeps running Toolkit's hooks from it/);
       assert.match(text, /on claude\.ai in a web browser, open Customize > Plugins and remove the ai-agent-toolkit plugin and then its marketplace \(while the marketplace stays, Sync automatically can put the plugin back\), then fully quit and reopen the Claude app/);
@@ -955,8 +1169,13 @@ for (const [app, listed] of [['claude-code', true], ['all', true], ['codex', fal
     assert.deepEqual(treeOf(copy), before, 'the account copy is never changed');
     const after = removal.describeResult(result).join('\n');
     if (listed) {
-      assert.match(after, /plugin_01abc: kept, only claude\.ai can remove it/);
-      assert.match(after, /The Claude app still runs the Toolkit copy from your claude\.ai account until you remove it there \(steps above\)\./);
+      // The owner's change: the full explanation only on the first plan; one line on every later screen.
+      const short = "- **The Claude app's claude.ai copy:** remove it on claude.ai under Customize > Plugins (plugin, then marketplace), then restart the app";
+      assert.ok(after.includes(`${short}\n`), after);
+      assert.doesNotMatch(after, /only claude\.ai can remove it/);
+      assert.ok(removal.describePlan(plan, { full: true }).includes(short));
+      assert.doesNotMatch(removal.describePlan(plan, { full: true }).join('\n'), /only claude\.ai can remove it/);
+      assert.match(after, /- \*\*The Claude app:\*\* it still runs Toolkit from your claude\.ai account until you remove it there \(the step is above\)/);
     } else assert.doesNotMatch(after, /claude\.ai/);
   });
 }
@@ -982,25 +1201,32 @@ test('a one-app removal names only the shared parts that are there: no scheduled
   const rules = scopedRules();
   rules.states.antigravity = 'absent';
   const kept = removal.describePlan(h.make({ app: 'claude-code', scheduler: s.fakeScheduler(), rules: rules.factory }).plan()).join('\n');
-  assert.match(kept, /^Kept, because Codex still has the Toolkit plugin: the Toolkit folder\.$/m);
+  assert.match(kept, /^- \*\*Shared parts:\*\* the Toolkit folder stays, because Codex still has the Toolkit plugin$/m);
   assert.doesNotMatch(kept, /scheduled task|Antigravity/);
   h.installed.codex = false;
   const goes = removal.describePlan(h.make({ app: 'claude-code', scheduler: s.fakeScheduler(), rules: rules.factory }).plan()).join('\n');
-  assert.match(goes, /^Also removed, because no other app has the Toolkit plugin: the Toolkit folder\.$/m);
-  assert.doesNotMatch(goes, /scheduled task|Antigravity/);
+  assert.match(goes, /^\*\*From:\*\* Claude Code only; no other app has the Toolkit plugin, so the shared parts below go too\.$/m);
+  assert.doesNotMatch(goes, /scheduled task|Antigravity|Shared parts/);
 });
 
 test('a one-app removal with nothing shared on the computer has no shared line at all', t => {
   const home = s.tempHome(t);
   for (const installed of [{ codex: true }, {}]) {
     const text = removal.describePlan(new removal.ToolkitRemoval({ home, app: 'claude-code', scheduler: s.fakeScheduler(), parts: [], plugins: () => installed }).plan()).join('\n');
-    assert.doesNotMatch(text, /Kept, because|Also removed, because/);
+    assert.doesNotMatch(text, /Shared parts|shared parts below go too/);
+    assert.match(text, /^\*\*From:\*\* Claude Code only\.$/m);
   }
 });
 
-test('the Not touched line names the subagent limit as the one Claude Code setting that goes', t => {
-  const text = removal.describePlan(fullHome(t).make().plan()).join('\n');
-  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on other than the subagent limit Toolkit set \(they stay as they are/);
+// Only true lines: the Never touched line is fixed and true for every removal; the Claude Code settings
+// setup turned on are listed under Kept only when there are any.
+test('the Never touched line holds only what no removal touches, and the settings from setup show only when set', t => {
+  const h = fullHome(t);
+  const text = removal.describePlan(h.make().plan()).join('\n');
+  assert.ok(text.includes(`**Never touched**\n${removal.NEVER_TOUCHED}\n`));
+  assert.match(text, /- \*\*No AI credit in commits:\*\* /);
+  const bare = removal.describePlan(new removal.ToolkitRemoval({ home: s.tempHome(t), parts: [new parts.ClaudeUserSettingsPart({ environment: h.environment, home: s.tempHome(t), settings: { inspect: () => [] } })] }).plan()).join('\n');
+  assert.doesNotMatch(bare, /Claude Code settings|AI credit/);
 });
 
 test('an update reports folder with no Toolkit report left is not listed again', t => {

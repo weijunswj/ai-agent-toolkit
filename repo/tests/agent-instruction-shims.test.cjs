@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { controllerText } = require('./support/controller-text.cjs');
-const { findBlocks } = require('../scripts/toolkit-managed-block.cjs');
+const { findBlocks, hasLineOutsideFences } = require('../scripts/toolkit-managed-block.cjs');
 const { antigravityBootstrapCopy, managedAgentsCopy } = require('./support/retired-instruction-copies.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -548,4 +548,15 @@ test('the global rules say to open a given link yourself and name what was not i
   const accuracy = fs.readFileSync(path.join(repoRoot, globalPath), 'utf8').split(/\r?\n/).filter(line => line.startsWith('- **Accuracy first:**'));
   assert.equal(accuracy.length, 1);
   assert.ok(accuracy[0].includes('Open a given link yourself (a PR: metadata, files, diff, checks, comments, review threads); say what you did not inspect.'));
+});
+
+// Claude Code ignores imports inside fenced code blocks: the bridge's shim check and the leftover scan
+// share this one reader, so a fenced `@AGENTS.md` never counts as the live import.
+test('the @AGENTS.md import counts only on its own line outside fenced code', () => {
+  const rows = [
+    ['@AGENTS.md\n', true], ['  @AGENTS.md  \r\n', true], ['# Rules\n\n@AGENTS.md\n', true],
+    ['```\n@AGENTS.md\n```\n', false], ['~~~md\n@AGENTS.md\n~~~\n', false], ['see @AGENTS.md here\n', false],
+    ['```\nx\n```\n@AGENTS.md\n', true], ['```\nunclosed\n@AGENTS.md\n', false], ['', false],
+  ];
+  for (const [text, expected] of rows) assert.equal(hasLineOutsideFences(text, '@AGENTS.md'), expected, JSON.stringify(text));
 });

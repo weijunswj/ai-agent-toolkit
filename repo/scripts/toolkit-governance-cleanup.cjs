@@ -100,12 +100,15 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
   for (const item of scan.files) (byFile.get(item.file) || byFile.set(item.file, []).get(item.file)).push(item);
   for (const [file, items] of byFile) {
     // An older marked CLAUDE.md shim that loads the repository's own AGENTS.md becomes the one line,
-    // as a repository-agent-rules refresh does; the rest of the file stays.
+    // as a repository-agent-rules refresh does; the file's other listed blocks go in the same run, and
+    // the rest of the file stays.
     const shim = items.find(item => item.kind === 'shim-block');
     if (shim) {
-      const text = fs.readFileSync(path.join(root, file), 'utf8');
+      let text = fs.readFileSync(path.join(root, file), 'utf8');
+      for (const item of items.filter(entry => entry !== shim)) text = blocks.removeBlock(text, item.block);
       const block = blocks.findBlocks(text).blocks.find(entry => entry.name === shim.block);
-      changes.push({ file, action: 'replace-shim', text: text.slice(0, block.start) + SHIM_LINE + text.slice(block.end), edited: shim.edited });
+      const others = items.filter(entry => entry !== shim).map(entry => entry.block);
+      changes.push({ file, action: 'replace-shim', text: text.slice(0, block.start) + SHIM_LINE + text.slice(block.end), edited: items.some(item => item.edited), ...(others.length ? { others } : {}) });
       continue;
     }
     if (items[0].kind !== 'block' || items[0].empties) { changes.push({ file, action: 'delete' }); continue; }
@@ -138,7 +141,7 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
   const words = { delete: 'remove the file', 'remove-block': 'remove the Toolkit block, keeping the rest of the file',
     'replace-shim': `replace the old Toolkit shim block with the line ${SHIM_LINE}, keeping the rest of the file`, 'set-min-toolkit': `set min_toolkit to ${MIN_TOOLKIT}` };
   const lines = [changes.length ? `${write ? 'Changed' : 'Would change'} in ${scan.name}:` : `Nothing to clean in ${scan.name}.`,
-    ...changes.map(change => `- ${change.file}: ${words[change.action]}${change.retired?.length ? `, and delete the retired ${change.retired.join(' and ')}, which nothing reads any more` : ''}${change.edited ? ' (the block was edited by hand since Toolkit wrote it, and those edits go with it)' : ''}.`),
+    ...changes.map(change => `- ${change.file}: ${words[change.action]}${change.others?.length ? `, and remove the Toolkit ${change.others.join(' and ')} ${change.others.length === 1 ? 'block' : 'blocks'}` : ''}${change.retired?.length ? `, and delete the retired ${change.retired.join(' and ')}, which nothing reads any more` : ''}${change.edited ? ' (the block was edited by hand since Toolkit wrote it, and those edits go with it)' : ''}.`),
     ...scan.unproven.map(item => `- Left in place: ${item.file}, because ${item.reason}.`)];
   if (write) {
     for (const change of changes) {

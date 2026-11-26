@@ -102,21 +102,45 @@ test('a cache folder that still holds files is kept', (t) => {
   assert.deepEqual(part.apply(part.plan()), [{ what: '~/.codex/plugins/cache/ai-agent-toolkit-local', result: 'kept', reason: 'it still holds files' }]);
 });
 
-test('the plan lists each MCP key helper that runs toolkit-env.cjs from the Toolkit folder, and changes nothing', (t) => {
+// Owner decision INT-TK421-1364: an MCP server is named only when this removal deletes the folder entry
+// its key helper runs from, and after the removal the closing lines say how to connect it again.
+function mcpHome(t, helperEntry = 'source') {
   const h = home(t);
-  const inside = `"C:/node.exe" "${path.join(h.dir, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit', 'repo', 'scripts', 'toolkit-env.cjs').replace(/\\/g, '/')}" header COOLIFY_TOKEN`;
+  const script = path.join(h.dir, '.ai-agent-toolkit', helperEntry, 'ai-agent-toolkit', 'repo', 'scripts', 'toolkit-env.cjs');
+  fs.mkdirSync(path.dirname(script), { recursive: true }); fs.writeFileSync(script, '');
+  const inside = `"C:/node.exe" "${script.replace(/\\/g, '/')}" header COOLIFY_TOKEN`;
   const outside = '"node" "/work/clone/repo/scripts/toolkit-env.cjs" header OTHER';
   const claude = { mcpServers: { coolify: { type: 'http', url: 'https://x.invalid', headersHelper: inside }, other: { headersHelper: outside }, plain: { command: 'npx' } },
     projects: { '/work/app': { mcpServers: { local: { command: 'node', args: [inside.split(' ')[1].replace(/"/g, ''), 'run', 'KEY'] } } } } };
   fs.writeFileSync(path.join(h.dir, '.claude.json'), JSON.stringify(claude));
   fs.writeFileSync(h.config, `[mcp_servers.coolify]\nurl = "https://x.invalid"\nhttp_headers_helper = '${inside}'\n\n[mcp_servers."two words"]\nhttp_headers_helper = '${outside}'\n`);
-  const before = [fs.readFileSync(path.join(h.dir, '.claude.json'), 'utf8'), fs.readFileSync(h.config, 'utf8')];
-  const part = new parts.McpKeyHelpersPart({ environment: h.environment, home: h.dir });
+  const read = () => [fs.readFileSync(path.join(h.dir, '.claude.json'), 'utf8'), fs.readFileSync(h.config, 'utf8')];
+  return { ...h, read };
+}
+
+test('the plan names each MCP server whose key helper runs from a Toolkit folder entry this removal deletes, and changes nothing', (t) => {
+  const h = mcpHome(t);
+  const before = h.read();
+  const folder = new parts.ToolkitFolderPart({ home: h.dir, environment: h.environment, plugins: () => ({}) });
+  const part = new parts.McpKeyHelpersPart({ environment: h.environment, home: h.dir, folder });
+  assert.equal(part.app, 'shared', 'it goes with the Toolkit folder, so it waits while another app keeps Toolkit');
   const items = part.plan();
-  assert.deepEqual(items.map(item => item.what), ['Claude Code server in /work/app: local', 'Claude Code user server: coolify', 'Codex server: coolify']);
-  assert.ok(items.every(item => item.action === 'keep' && /no key until Toolkit is reinstalled; the key stays in the credential store/.test(item.detail)));
-  assert.deepEqual(part.apply(items), []);
-  assert.deepEqual([fs.readFileSync(path.join(h.dir, '.claude.json'), 'utf8'), fs.readFileSync(h.config, 'utf8')], before);
+  assert.deepEqual(items.map(item => item.what), ['coolify (Claude Code)', 'coolify (Codex)', 'local (Claude Code, in /work/app)']);
+  assert.ok(items.every(item => item.action === 'keep' && item.entry === 'source'
+    && item.text === `${item.what} keeps its settings and key, but its key helper runs from the Toolkit folder, which goes; the closing lines say how to connect it again`));
+  // While the helper is still there (the folder waited for a plugin), each server keeps it until then.
+  assert.deepEqual(part.apply(items), items.map(item => ({ what: item.what, result: 'kept', reason: 'its key helper stays until the Toolkit folder goes' })));
+  folder.apply(folder.plan());
+  assert.deepEqual(part.apply(items).map(item => [item.what, item.result, item.reconnect]), items.map(item => [item.what, 'lost its key helper', true]));
+  assert.deepEqual(h.read(), before, 'their settings stay byte for byte');
+});
+
+test('an MCP key helper is not named when its folder entry stays: one that is not Toolkit\'s, or no entry at all', (t) => {
+  for (const entry of ['my-own-tools', 'env']) {
+    const h = mcpHome(t, entry);
+    const folder = new parts.ToolkitFolderPart({ home: h.dir, environment: h.environment, plugins: () => ({}) });
+    assert.deepEqual(new parts.McpKeyHelpersPart({ environment: h.environment, home: h.dir, folder }).plan(), [], entry);
+  }
 });
 
 // Installs each app's helpers the way the generators do, in a temporary home. Each app renders only
@@ -140,7 +164,7 @@ test('remove, then setup: the helpers come back for the stack they had, and the 
   const removal = [new parts.ReinstallNotePart({ environment: h.environment, home: h.dir, registry }), new parts.HelperAgentFilesPart({ environment: h.environment, home: h.dir })];
   const planned = removal.map(part => part.plan());
   assert.equal(planned[0][0].action, 'save');
-  assert.match(planned[0][0].detail, /Claude Code helpers \(stack owner-claude\) and the Codex helpers \(stack owner-gpt\)/);
+  assert.match(planned[0][0].text, /Claude Code helpers \(stack owner-claude\) and the Codex helpers \(stack owner-gpt\)/);
   removal.forEach((part, index) => part.apply(planned[index]));
   assert.equal(claude().check().status, 'not-installed');
   assert.equal(codex().check().status, 'not-installed');
@@ -190,7 +214,7 @@ test('the removal note never records scheduled tasks, even when Toolkit tasks ar
   assert.deepEqual(new parts.ReinstallNotePart({ home: h.dir, registry, helpers: () => ({ 'claude-code': null, codex: null }) }).plan(), []);
   const part = new parts.ReinstallNotePart({ home: h.dir, registry, helpers: () => ({ 'claude-code': null, codex: 'owner-gpt' }) });
   const [item] = part.plan();
-  assert.doesNotMatch(item.detail, /scheduled task/);
+  assert.doesNotMatch(item.text, /scheduled task/);
   assert.deepEqual(part.apply([item]), [{ what: item.what, result: 'saved' }]);
   assert.equal('tasks' in JSON.parse(fs.readFileSync(note.notePath(h.dir), 'utf8')), false);
 });
@@ -233,11 +257,12 @@ test('the removal plan and result show the reinstall note as saved, not kept', (
   const notePart = new parts.ReinstallNotePart({ home: h.dir, registry, helpers: () => ({ 'claude-code': 'owner-claude' }) });
   const removal = new ToolkitRemoval({ home: h.dir, registry, parts: [notePart] });
   const plan = removal.plan();
-  assert.ok(describePlan(plan).some(line => /reinstall\.json: saved, so setup toolkit can put back the Claude Code helpers \(stack owner-claude\); no keys/.test(line)));
+  const text = describePlan(plan).join('\n');
+  assert.match(text, /\*\*Kept\*\*\n- \*\*Reinstall note:\*\* saved with this removal's backup, so `setup toolkit` can put back the Claude Code helpers \(stack owner-claude\); it holds no keys\n/);
   const result = removal.apply(plan.code);
   assert.ok(result.ok);
   const lines = describeResult(result);
-  assert.ok(lines.some(line => /reinstall\.json: saved$/.test(line)));
-  assert.ok(!lines.some(line => /reinstall\.json: kept/.test(line)));
+  assert.ok(lines.includes('- **Reinstall note:** ~/.ai-agent-toolkit/backups/remove-toolkit/reinstall.json'), lines.join('\n'));
+  assert.ok(!lines.some(line => /reinstall\.json: kept|Removed/.test(line)));
   assert.deepEqual(note.readNote(h.dir).helpers, { 'claude-code': 'owner-claude' });
 });

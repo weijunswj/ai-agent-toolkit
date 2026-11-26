@@ -1277,11 +1277,7 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
     return [{ file: spec.target, kind: 'stale-block', block: 'CLAUDE.SHIM', detail: `the Toolkit shim is now the single line ${expected}` }];
   }
   // Claude Code ignores imports inside fenced code blocks, so only a line outside a fence counts.
-  let fenced = false;
-  for (const line of text.split('\n')) {
-    if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; continue; }
-    if (!fenced && line.trim() === expected) return [];
-  }
+  if (require('./toolkit-managed-block.cjs').hasLineOutsideFences(text, expected)) return [];
   return [{ file: spec.target, kind: 'unmanaged', detail: `no ${expected} import line found` }];
 }
 

@@ -148,4 +148,15 @@ function removeBlock(text, name) {
   return block ? removeRange(text, block.start, block.end) : text;
 }
 
-module.exports = Object.freeze({ FORMAT, bodyDigest, beginLine, endLine, renderBlock, findBlocks, blockState, sameText, upsertBlock, removeBlock, normalizeBody });
+// Whether an instruction file holds `line` on a line of its own outside fenced code: Claude Code
+// ignores imports inside fenced code blocks (``` or ~~~), so a fenced line loads nothing.
+function hasLineOutsideFences(text, line) {
+  let fenced = false;
+  for (const entry of String(text).split(/\r?\n/)) {
+    if (/^\s*(?:```|~~~)/.test(entry)) { fenced = !fenced; continue; }
+    if (!fenced && entry.trim() === line) return true;
+  }
+  return false;
+}
+
+module.exports = Object.freeze({ FORMAT, bodyDigest, beginLine, endLine, renderBlock, findBlocks, blockState, sameText, upsertBlock, removeBlock, normalizeBody, hasLineOutsideFences });

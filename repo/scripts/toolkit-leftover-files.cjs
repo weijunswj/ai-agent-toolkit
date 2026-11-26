@@ -194,10 +194,10 @@ class LeftoverScan {
 
   // Whether a marked CLAUDE.md shim still loads the repository's own rules, as the one-line CLAUDE.md
   // does (#pointer): AGENTS.md is there with text of its own, and the rest of CLAUDE.md does not already
-  // hold the line. Then the block is to be replaced by the line, not removed.
+  // hold the line outside fenced code. Then the block is to be replaced by the line, not removed.
   #shimLoadsOwnRules(root, result, rest) {
     if (!readInside(root, 'AGENTS.md') || result.files.some(item => item.file === 'AGENTS.md' && item.empties)) return false;
-    return !rest.split(/\r?\n/).some(line => line.trim() === SHIM_LINE);
+    return !blocks.hasLineOutsideFences(rest, SHIM_LINE);
   }
 
   // CLAUDE.md that is exactly Toolkit's one-line pointer. It is a leftover only when AGENTS.md is
