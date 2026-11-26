@@ -470,3 +470,102 @@ test('existingShards names the workflow whose job matrix already splits the test
   assert.equal(offer.existingShards(root), '.github/workflows/validate.yml');
   assert.equal(offer.existingShards(ROOT), '.github/workflows/validate.yml', 'this repository\'s own CI shards');
 });
+
+// ---- a split the owner closed without merging (INT-TK421-1360) ---------------------------------
+
+// `closed` is what closedCiShards reads: the newest shard split closed without merging, or null.
+function closedRecorder(closed) {
+  const transport = recorder();
+  transport.closedCiShards = () => closed;
+  return transport;
+}
+
+test('bank: a split closed without merging is asked about once, no plain reply reopens it, and the answer is remembered', async t => {
+  const ctx = governedFixture(t);
+  const url = `https://github.com/${SLUG}/pull/11`;
+  const asked = closedRecorder({ number: 11, url });
+  const first = await answer(ctx, 'all recommended', { transport: asked });
+  // This fixture reads no GitHub, so the App is unknown: one part could not be checked.
+  assert.match(first.shown.out, /^# Toolkit governance choices - ON, not ready, 1 step left; 1 part could not be checked$/m);
+  assert.match(first.shown.out, /^\| \d\.\d \| Parallel CI shards \| Not ready: Pull request #11 closed without merging \| Next step: answer once: shards=yes opens a new pull request, shards=never stops the offer, anything else keeps them off \| shards=yes or shards=never in your reply \|$/m);
+  assert.equal(first.code, 0, first.err);
+  assert.equal(asked.calls.length, 0, 'slow CI alone does not reopen a split the owner closed');
+  // The next bank says it was answered and asks nothing; a plain reply still opens nothing.
+  const again = closedRecorder({ number: 11, url });
+  const second = await answer(ctx, 'all recommended', { transport: again });
+  assert.match(second.shown.out, /^\| \d\.\d \| Parallel CI shards \| Ready: Off: pull request #11 was closed \| /m);
+  assert.match(second.shown.out, /^# Toolkit governance choices - ON, ready; 1 part could not be checked$/m);
+  assert.equal(again.calls.length, 0);
+  // shards=yes still opens a new one when the owner asks for it.
+  const yes = closedRecorder({ number: 11, url });
+  assert.equal((await answer(ctx, 'shards=yes', { transport: yes })).code, 0);
+  assert.equal(yes.calls.length, 1);
+  assert.equal(yes.calls[0][3], 'yes');
+  // A later split closed again is a new close: asked once more.
+  const newer = closedRecorder({ number: 15, url: `https://github.com/${SLUG}/pull/15` });
+  assert.match((await answer(ctx, 'shards=never', { transport: newer })).shown.out, /Not ready: Pull request #15 closed without merging/);
+  assert.equal(newer.calls[0][3], 'never');
+  assert.equal(offer.closedSplitAnswer(ctx.registryOptions, governance.governanceState(ctx.repo, ctx.registryOptions).repository_id, 15).answer, 'never');
+});
+
+test('bank: an answer that is not used remembers nothing, and an open split is shown before any closed one', async t => {
+  const ctx = governedFixture(t);
+  const url = `https://github.com/${SLUG}/pull/11`;
+  // A reply the bank cannot read is not an answer: the close is asked about again.
+  const unread = closedRecorder({ number: 11, url });
+  assert.match((await answer(ctx, 'maybe later perhaps', { transport: unread })).out, /Nothing was written/);
+  const repositoryId = governance.governanceState(ctx.repo, ctx.registryOptions).repository_id;
+  assert.equal(offer.closedSplitAnswer(ctx.registryOptions, repositoryId, 11), null);
+  // An open split is the one to merge or close; the closed one is not read.
+  const both = recorder([{ number: 12, url: `https://github.com/${SLUG}/pull/12` }]);
+  both.closedCiShards = () => assert.fail('the closed list is not read while one is open');
+  assert.match((await answer(ctx, 'all recommended', { transport: both })).shown.out, /Not ready: Pull request #12 open/);
+  // A closed list that cannot be read is no ask, as an unread open list is.
+  const failing = recorder();
+  failing.closedCiShards = () => { throw new Error('gh-unavailable'); };
+  assert.match((await answer(ctx, 'shards=not-now', { transport: failing })).shown.out, /Not ready: Yes \(Toolkit default\)/);
+});
+
+test('bank: a remembered answer still holds once that split leaves the closed list or the list cannot be read; only a newer close is asked', async t => {
+  const ctx = governedFixture(t);
+  const url = `https://github.com/${SLUG}/pull/11`;
+  assert.equal((await answer(ctx, 'all recommended', { transport: closedRecorder({ number: 11, url }) })).code, 0);
+  const off = /^\| \d\.\d \| Parallel CI shards \| Ready: Off: pull request #11 was closed \| /m;
+  // Newer pull requests pushed #11 off the closed list's page; the list cannot be read; or only an
+  // older close is found: the answer for #11 stands, and a plain reply opens nothing.
+  const failing = recorder();
+  failing.closedCiShards = () => { throw new Error('gh-unavailable'); };
+  for (const [name, transport] of [['not found', closedRecorder(null)], ['unreadable', failing], ['older close', closedRecorder({ number: 9, url: `https://github.com/${SLUG}/pull/9` })]]) {
+    const result = await answer(ctx, 'all recommended', { transport });
+    assert.match(result.shown.out, off, name);
+    assert.ok(result.shown.out.includes(`You closed ${url} without merging`), name);
+    assert.equal(result.code, 0, result.err);
+    assert.equal(transport.calls.length, 0, `${name}: a plain reply prepared a new shard split`);
+  }
+  // A newer close is a new close: asked once more.
+  const newer = closedRecorder({ number: 15, url: `https://github.com/${SLUG}/pull/15` });
+  assert.match((await answer(ctx, 'all recommended', { transport: newer })).shown.out, /Not ready: Pull request #15 closed without merging/);
+  assert.equal(newer.calls.length, 0);
+});
+
+test('transport: the closed split read takes only this repository\'s own unmerged shards-yes branches, newest first', () => {
+  const pulls = [
+    { number: 20, url: 'u20', ref: 'toolkit/ci-shards-yes-0123456789ab', repo: SLUG, merged: true },
+    { number: 19, url: 'u19', ref: 'toolkit/ci-shards-never-0123456789ab', repo: SLUG, merged: false },
+    { number: 18, url: 'u18', ref: 'toolkit/ci-shards-yes-0123456789ab', repo: 'someone/fork', merged: false },
+    { number: 17, url: 'u17', ref: 'feature/ci-shards-yes-x', repo: SLUG, merged: false },
+    { number: 13, url: 'u13', ref: 'toolkit/ci-shards-yes-aaaaaaaaaaaa', repo: SLUG, merged: false },
+    { number: 16, url: 'u16', ref: 'toolkit/switches-task-auto-merge-on-ci-shards-yes-bbbbbbbbbbbb', repo: SLUG, merged: false },
+  ];
+  const asked = [];
+  const transport = list => new GitHubProposalTransport({ run: args => {
+    asked.push(args[1]);
+    if (args[0] === 'auth') return '';
+    if (args[1] === 'user') return JSON.stringify({ login: 'toolkit-test-fixture' });
+    return JSON.stringify(list);
+  } });
+  assert.deepEqual(transport(pulls).closedCiShards(SLUG), { number: 16, url: 'u16' });
+  assert.ok(asked.some(endpoint => endpoint === `repos/${SLUG}/pulls?state=closed&sort=updated&direction=desc&per_page=100`));
+  assert.equal(transport(pulls.slice(0, 4)).closedCiShards(SLUG), null);
+  assert.throws(() => transport({ message: 'nope' }).closedCiShards(SLUG), { code: 'PROPOSAL_LIST_INCOMPLETE' });
+});

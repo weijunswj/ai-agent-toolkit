@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "1d7d8746e81e",
+      "rule_sha": "e5094df79c06",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -422,7 +422,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Plain owner posts:**",
-      "rule_sha": "3a594f32c1f0",
+      "rule_sha": "dc3719f897f2",
       "instruction_only": {
         "basis": "judgement",
         "why": "What the owner needs to read, and the wording of each post, is a judgement."
