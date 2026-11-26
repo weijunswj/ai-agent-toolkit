@@ -453,6 +453,17 @@ class GitHubProposalTransport {
     return prs.filter(pr => String(pr.repo).toLowerCase() === repository.toLowerCase() && SHARDS_BRANCH.test(String(pr.ref)))
       .map(pr => ({ number: pr.number, url: pr.url }));
   }
+  // The newest shard split this repository's owner closed without merging: a closed, unmerged
+  // toolkit/...ci-shards-yes-... pull request of its own (publishCiShards), or null. Reads the 100 most
+  // recently updated closed pull requests; an older close is not asked about.
+  closedCiShards(repository) {
+    this.#auth();
+    const prs = this.#api(`repos/${repository}/pulls?state=closed&sort=updated&direction=desc&per_page=100`, undefined, null, 'map({number, url: .html_url, ref: .head.ref, repo: .head.repo.full_name, merged: (.merged_at != null)})');
+    if (!Array.isArray(prs)) fail('PROPOSAL_LIST_INCOMPLETE');
+    const split = prs.filter(pr => pr.merged === false && Number.isInteger(pr.number) && String(pr.repo).toLowerCase() === repository.toLowerCase()
+      && SHARDS_BRANCH.test(String(pr.ref)) && /ci-shards-yes-/.test(String(pr.ref))).sort((a, b) => b.number - a.number)[0];
+    return split ? { number: split.number, url: split.url } : null;
+  }
   list(repository) {
     const prs = this.#api(`repos/${repository}/pulls?state=open&per_page=100`, undefined, null, `map({number, marked: ((.body // "") | contains("${MARKER}"))})`);
     if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');

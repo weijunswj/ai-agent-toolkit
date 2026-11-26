@@ -40,7 +40,9 @@ function fixture(t, { governed = true } = {}) {
   const fx = {
     dir, home, work, sessions, transcript, repository: 'toolkit-test-fixture/owed',
     deps: { home, nowMs: NOW, localAppData: path.join(dir, 'local'), startRefresh: () => {}, governanceState: () => (governed ? { state: 'ENABLED', programme_records_bind: true } : { state: 'DISABLED' }),
-      env: { CLAUDE_CODE_HOST_SESSION_ID: SELF } },
+      env: { CLAUDE_CODE_HOST_SESSION_ID: SELF },
+      // This computer's Toolkit permission lines, up to date unless a test says otherwise.
+      permissions: () => ({ checked: true, app: 'Claude Code', missing: 0, stale: 0 }) },
     rows: [],
     // Transcript rows, in order; each call is { name, input, at (hours ago), result, error }.
     brief(text) { fx.rows.unshift({ type: 'user', sessionId: SESSION, message: { role: 'user', content: text }, timestamp: iso(NOW - 30 * HOUR) }); return fx; },
@@ -258,9 +260,15 @@ test('O-11 the per-session memory holds hashes only: no session IDs, titles, fin
   const fx = fixture(t).launch(1).writeTranscript().desktop({}, [finished()]).net([{ id: 'aaaaaaaaaaaa', code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) }]);
   assert.equal(fx.run().outcome, 'BLOCK');
   const folder = path.join(fx.home, '.ai-agent-toolkit', 'user-state', 'owed-check');
-  const files = fs.readdirSync(folder);
+  // The memory file, and the empty once-per-chat stamp of the permissions line, both named by hash.
+  const all = fs.readdirSync(folder);
+  assert.equal(all.length, 2);
+  for (const name of all) assert.equal(name.includes(SESSION), false, name);
+  const stamps = all.filter(name => name.endsWith('.permissions'));
+  assert.equal(stamps.length, 1);
+  assert.equal(fs.readFileSync(path.join(folder, stamps[0]), 'utf8'), '');
+  const files = all.filter(name => name.endsWith('.json'));
   assert.equal(files.length, 1);
-  assert.equal(files[0].includes(SESSION), false);
   const text = fs.readFileSync(path.join(folder, files[0]), 'utf8');
   for (const secret of ['local_', 'Gate 1', 'Side 100', 'aaaaaaaaaaaa', fx.dir.replace(/\\/g, '\\\\'), SESSION]) assert.equal(text.includes(secret), false, secret);
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['keys', 'notes', 'schema']);
@@ -666,6 +674,71 @@ test('O-31 the gate session cache keeps hashes only, the newest session last, an
   assert.equal(kept.at(-1), cache.gateSessionHash(CHILD(24)));
   cache.writeGateSession('acme/app', { issue: 9, assignment: 'a2', session: CHILD(4) }, { home: dir, now: () => iso(NOW + cache.GATE_KEEP_MS + HOUR / 2) });
   assert.deepEqual(cache.readGateSessions('acme/app', { home: dir }).map(record => `${record.issue} ${record.assignment}`).sort(), ['9 a1', '9 a2'], 'the month-old record of #8 is gone');
+});
+
+test('O-32 out-of-date permission lines get one line to the owner at the first turn end of each governed local chat, never a stop', t => {
+  const outdated = () => ({ checked: true, app: 'Claude Code', missing: 3, stale: 1 });
+  const LINE = /^Toolkit permissions: Claude Code's Toolkit permission lines on this computer are out of date \(3 missing, 1 old\)\. Say toolkit permissions for the one command that brings them up to date; nothing waits on it\.$/m;
+  // A session that is not the controller: the line alone, as a note, never a block.
+  const plain = fixture(t).brief('Fix the typo.').writeTranscript();
+  plain.deps.permissions = outdated;
+  const first = plain.run();
+  assert.equal(first.outcome, 'NOT_CONTROLLER');
+  assert.equal(first.output.decision, undefined);
+  assert.match(first.output.systemMessage, LINE);
+  // Once per chat: later turn ends return at once, before the permission lines are read again.
+  plain.deps.permissions = () => { throw new Error('read again'); };
+  assert.deepEqual(plain.run(), { outcome: 'NOT_CONTROLLER', output: null });
+  // A new chat in the same checkout gets it once more.
+  plain.deps.permissions = outdated;
+  assert.match(plain.run({ session_id: PARENT }).output.systemMessage, LINE);
+  // The controller's stop carries it beside the block on that chat's first turn end.
+  const controller = fixture(t).controller().writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) }]).desktop();
+  controller.deps.permissions = outdated;
+  const stopped = controller.run();
+  assert.equal(stopped.outcome, 'BLOCK');
+  assert.match(stopped.output.reason, /Findings due \(1\)/);
+  assert.match(stopped.output.systemMessage, LINE);
+  // A gate session started by a launcher gets it too: the owner may read any chat.
+  const gate = fixture(t).brief('Gate: G1\nRoute: owner-claude BUILDER opus-5.5/high\nBuild it.').writeTranscript();
+  gate.deps.permissions = outdated;
+  gate.deps.env = { CLAUDE_CODE_HOST_SESSION_ID: SELF, [LAUNCHER_MARKERS[0]]: '1' };
+  assert.match(gate.run().output.systemMessage, LINE);
+});
+
+test('O-33 the permissions line is never read in cloud, ungoverned or up-to-date chats, and any failure drops it', t => {
+  const outdated = () => ({ checked: true, app: 'Claude Code', missing: 2, stale: 0 });
+  const silent = (fx, input = {}) => assert.equal(String(fx.run(input).output?.systemMessage || '').includes('Toolkit permissions'), false);
+  // A cloud session (Claude Code on the web) is not checked.
+  const cloud = fixture(t).brief('Fix the typo.').writeTranscript();
+  cloud.deps.permissions = outdated;
+  cloud.deps.env = { CLAUDE_CODE_HOST_SESSION_ID: SELF, CLAUDE_CODE_REMOTE: 'true' };
+  silent(cloud);
+  // Governance off, or a folder outside any governed checkout.
+  const off = fixture(t, { governed: false }).brief('Fix the typo.').writeTranscript();
+  off.deps.permissions = outdated;
+  silent(off);
+  cloud.deps.env = { CLAUDE_CODE_HOST_SESSION_ID: SELF };
+  silent(cloud, { cwd: cloud.dir });
+  // Up to date at the first turn end: nothing now, and the chat is not read again.
+  const fine = fixture(t).brief('Fix the typo.').writeTranscript();
+  let reads = 0;
+  fine.deps.permissions = () => { reads += 1; return { checked: true, app: 'Claude Code', missing: 0, stale: 0 }; };
+  assert.deepEqual(fine.run(), { outcome: 'NOT_CONTROLLER', output: null });
+  fine.deps.permissions = outdated;
+  silent(fine);
+  assert.equal(reads, 1);
+  // Unchecked, throwing, or a stamp that cannot be saved: no line (it would repeat every turn).
+  for (const reader of [() => ({ checked: false }), () => null, () => { throw new Error('boom'); }]) {
+    const fx = fixture(t).brief('Fix the typo.').writeTranscript();
+    fx.deps.permissions = reader;
+    silent(fx);
+  }
+  const stuck = fixture(t).brief('Fix the typo.').writeTranscript();
+  stuck.deps.permissions = outdated;
+  stuck.deps.home = path.join(stuck.dir, 'home-is-a-file');
+  fs.writeFileSync(stuck.deps.home, 'not a folder');
+  silent(stuck);
 });
 
 // Whether the route check itself reads a first prompt as a gate.

@@ -22,9 +22,9 @@
     "order": "after the turn-end hook, in the same Stop group",
     "exit_code": 0,
     "input_fields": ["session_id", "transcript_path", "cwd", "stop_hook_active"],
-    "stdout": "a block decision listing the owed steps when the controller's turn leaves an owed entry it has not shown this session; a systemMessage note once when something could not be read; otherwise empty",
-    "silent": "when stop_hook_active is true, in a gate session, in a session with a Toolkit launcher marker, outside a governed repository, and in a session whose own rows do not show it acted as the controller (side sessions included; rows copied from another chat do not count); the same in every Claude Code entry point, and no variable the host sets decides it",
-    "reads": "the attention cache, the gate sessions recorded from this computer, this session's transcript, the end of a transcript it continues and the Claude desktop app's session files; no git, gh or network call",
+    "stdout": "a block decision listing the owed steps when the controller's turn leaves an owed entry it has not shown this session; a systemMessage note once when something could not be read; at the first turn end of each governed local chat, a systemMessage line to the owner while this computer's Toolkit permission lines for Claude Code are out of date; otherwise empty",
+    "silent": "when stop_hook_active is true, in a gate session, in a session with a Toolkit launcher marker, outside a governed repository, and in a session whose own rows do not show it acted as the controller (side sessions included; rows copied from another chat do not count); the same in every Claude Code entry point, and no variable the host sets decides it. The permissions line is the one exception: any governed local chat may get it once, never as a block, and never in a cloud session",
+    "reads": "the attention cache, the gate sessions recorded from this computer, this session's transcript, the end of a transcript it continues and the Claude desktop app's session files; no git, gh or network call, except once per chat for the permissions line: this computer's Claude Code settings files and one local git read that finds the Toolkit folder",
     "refresh": "with no attention cache, or one over an hour old, starts programme.cjs refresh in the background, at most once per 15 minutes per repository and never in a cloud session"
   },
   "after_tool_hook": {

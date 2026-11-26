@@ -25,8 +25,11 @@
 // It never stops a turn when the host says this stop already follows a hook block. Anything it cannot
 // read is one visible note and never a block.
 //
+// Separately, any governed local chat (not only the controller's) gets one line to the owner at its first
+// turn end while this computer's Toolkit permission lines are out of date (permissionsNote); never a stop.
+//
 // Codex is not covered: it runs toolkit-programme-checkpoint-hook.cjs alone at turn end, which never
-// prints.
+// prints; its session start carries the permissions line.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -388,8 +391,47 @@ function writeState(file, value) {
 
 // ---- entry -----------------------------------------------------------------------------------------
 
-// Returns { output } (the JSON the host reads, or null to stay silent) and an outcome for tests.
+// ---- permissions line ------------------------------------------------------------------------------
+
+// Once per chat, at its first turn end in a governed repository on this computer: while this computer's
+// Toolkit permission lines for Claude Code are missing or old, one line to the owner (a systemMessage,
+// never a block; only the owner can add them). The session start gives the agent the same fact
+// (toolkit-governance-gate.cjs permissionsLine); this reaches the owner even when the agent did not pass it
+// on (INT-TK421-1360). A stamp per chat, saved before the line is shown, makes every later turn end return
+// before anything is read; a stamp that cannot be saved shows nothing, so the line never repeats. Cloud
+// sessions are not checked, and any failure drops the line.
+function permissionsNote(input, deps = {}) {
+  try {
+    const env = deps.env || process.env;
+    if (!input || typeof input !== 'object' || (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop')) return null;
+    if (env.CLAUDE_CODE_REMOTE === 'true') return null;
+    const sessionId = typeof input.session_id === 'string' && input.session_id.trim() ? input.session_id : null;
+    if (!sessionId) return null;
+    const stamp = `${stateFile(sessionId, deps).replace(/\.json$/, '')}.permissions`;
+    if (fs.existsSync(stamp)) return null;
+    const root = require(path.join(SCRIPTS, 'programme-refresh-trigger.cjs')).governedRoot(input.cwd);
+    if (!root || !require(path.join(SCRIPTS, 'programme-checkpoint.cjs')).githubGovernanceOn(root, deps)) return null;
+    fs.mkdirSync(path.dirname(stamp), { recursive: true });
+    fs.writeFileSync(stamp, '', { flag: 'wx', mode: 0o600 });
+    const found = (deps.permissions || (where => require('./toolkit-permissions.cjs').permissionsState(where, { host: 'claude' })))(root);
+    if (!found || found.checked !== true || !(found.missing > 0 || found.stale > 0)) return null;
+    const what = [found.missing > 0 ? `${found.missing} missing` : '', found.stale > 0 ? `${found.stale} old` : ''].filter(Boolean).join(', ');
+    return `Toolkit permissions: ${found.app || 'Claude Code'}'s Toolkit permission lines on this computer are out of date (${what}). Say toolkit permissions for the one command that brings them up to date; nothing waits on it.`;
+  } catch { return null; }
+}
+
+// The owed check, with the permissions line added to whatever it says.
 function check(input, deps = {}) {
+  const result = owedCheck(input, deps);
+  const line = permissionsNote(input, deps);
+  if (!line) return result;
+  const output = { ...(result.output || {}) };
+  output.systemMessage = [output.systemMessage, line].filter(Boolean).join('\n');
+  return { ...result, output };
+}
+
+// Returns { output } (the JSON the host reads, or null to stay silent) and an outcome for tests.
+function owedCheck(input, deps = {}) {
   const env = deps.env || process.env;
   if (!input || typeof input !== 'object') return { outcome: 'NO_INPUT', output: null };
   if (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop') return { outcome: 'NOT_STOP', output: null };

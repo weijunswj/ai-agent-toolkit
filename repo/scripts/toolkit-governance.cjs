@@ -544,6 +544,16 @@ class ToolkitGovernanceCli {
     // be read leaves the question asked, and publishing then still refuses a second one.
     let open = [];
     if (offered && state.state === 'ENABLED' && this.#switchTransport && state.repository) { try { open = this.#switchTransport.openCiShards(state.repository); } catch { open = []; } }
+    // A split the owner closed without merging is asked about once. A list that cannot be read counts
+    // as none, as the open list does: GitHub that cannot be read now also refuses the publish that
+    // would reopen it (accepted gap: a read that fails here and a publish that works moments later).
+    let closed = null;
+    if (offered && state.state === 'ENABLED' && !open.length && this.#switchTransport && state.repository) {
+      try {
+        closed = this.#switchTransport.closedCiShards(state.repository);
+        if (closed) closed = { ...closed, answered: Boolean(ciOffer.closedSplitAnswer(this.#registryOptions, state.repository_id, closed.number)) };
+      } catch { closed = null; }
+    }
     // A repository whose CI already runs its tests in parallel is never offered a shard list.
     let existing = null;
     if (offered) { try { existing = ciOffer.existingShards(state.root); } catch { existing = null; } }
@@ -551,12 +561,14 @@ class ToolkitGovernanceCli {
     // not applicable, with the reason, rather than a default that could not be built.
     let usable = null;
     if (offered && !existing) { try { const list = ciOffer.firstList(state.root, estimate); usable = list.ok ? { ok: true } : { ok: false, reason: list.reason }; } catch { usable = null; } }
-    const ciShards = offered ? { measured: estimate, open, existing, usable } : null;
+    const ciShards = offered ? { measured: estimate, open, existing, usable, closed } : null;
     this.#lastCiEstimate = estimate;
     // The App row reads its variable and secret wherever governance is on or can be turned on (again) here.
     const app = state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies) });
+    // The store's last background check (toolkit-governance-parts.cjs), read from this computer only.
+    const storeCheck = merged?.store?.repository ? require('./toolkit-governance-parts.cjs').savedStore(this.#registryOptions, state.repository_id, merged.store.repository) : null;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies), storeCheck });
     const reference = governanceBank.bankReference(specs);
     if (explain) {
       this.#print(false, {}, this.#explainShown(state, specs, reference, explain));
@@ -580,7 +592,9 @@ class ToolkitGovernanceCli {
           let chosen;
           try { chosen = governanceBank.parseBankAnswer(reply, specs, { requireBankReference: false }); }
           catch (error) { this.#print(false, {}, [`${error.message} Nothing was written. ${governanceBank.REPLY_AGAIN}`]); continue; }
-          return this.#applyBank(state, task, chosen, found, permissions);
+          const code = this.#applyBank(state, task, chosen, found, permissions);
+          if (code === 0) this.#settleClosedSplit(state, specs, chosen);
+          return code;
         }
       }
       return this.#showBank(specs, state);
@@ -620,8 +634,11 @@ class ToolkitGovernanceCli {
     // row that does not exist) gets a new one-use ticket and its own line, never a spent ticket. An
     // answer that did what it said is noted as used, so that next message is never told it was lost.
     let code = null;
-    try { code = this.#applyBank(state, task, chosen, found, permissions); return code; }
-    finally {
+    try {
+      code = this.#applyBank(state, task, chosen, found, permissions);
+      if (code === 0) this.#settleClosedSplit(state, specs, chosen);
+      return code;
+    } finally {
       try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, rows: governanceBank.rowDigests(specs), used: code === 0 }); } catch { /* the owner can type toolkit governance */ }
     }
   }
@@ -744,6 +761,15 @@ class ToolkitGovernanceCli {
     this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
     if (!noted) this.#stdout.write(`\nToolkit could not note this bank for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
     return BANK_SHOWN;
+  }
+
+  // A used answer to a bank that asked about a closed, unmerged shard split: remembered on this computer
+  // (shards=yes, shards=never, or not-now for any other reply), so that close is not asked about again.
+  #settleClosedSplit(state, specs, chosen) {
+    const row = specs.find(spec => spec.id === 'ci-shards' && Number.isInteger(spec.closed_split));
+    if (!row) return;
+    try { ciOffer.rememberClosedSplit(this.#registryOptions, state.repository_id, row.closed_split, ciOffer.ANSWERS.includes(chosen.ciShards) ? chosen.ciShards : 'not-now'); }
+    catch { /* not remembered: the next bank asks once more */ }
   }
 
   // The owner's answer: at most one governance pull request, then the permission blocks.

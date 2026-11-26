@@ -249,3 +249,25 @@ test('a part GitHub could not read, even in half, is unknown and never a step le
   assert.match(unread, /^\| 1\.3 \| Parallel CI shards \| Unknown: Not read \| /m);
   assert.match(unread, /^\| 1\.6 \| Evidence store \| Unknown: Not read \| /m);
 });
+
+// INT-TK421-1360 part 3: the store row reads the last background check of the store
+// (toolkit-governance-parts.cjs). One that cannot be used is a step left; unread, none saved or a
+// result for another store keeps the row as the programme file sets it.
+test('an evidence store the last check could not use is not ready, with its one step; unread or unchecked stays as set', () => {
+  const merged = { store: { repository: 'owner/TRANSPORT-app' }, parents: [{ issue: 7 }], required_checks: ['validate'] };
+  const specs = storeCheck => bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', train: 'on', merged,
+    permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, ciShards: { measured: { minutes: 4 }, open: [], existing: null, usable: { ok: true } }, storeCheck });
+  const missing = bank.renderGovernanceBank(specs({ state: 'missing', checked_at: '2026-11-26T09:00:00.000Z' }));
+  assert.match(missing, /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
+  assert.match(missing, /^\| 1\.6 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: say change store, and the controller sets up a store with you \| Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer \|$/m);
+  assert.match(bank.explainText(specs({ state: 'missing' }), '1.6'), /Set in the programme file, but at the last daily check it cannot be found with this computer's GitHub sign-in, so programme records and evidence cannot be saved/);
+  assert.match(bank.renderGovernanceBank(specs({ state: 'not-private' })), /^\| 1\.6 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: make it private again on GitHub, or say change store \|/m);
+  assert.match(bank.renderGovernanceBank(specs({ state: 'read-only' })), /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
+  for (const fine of [null, { state: 'usable' }, { state: 'unverified' }]) {
+    const shown = bank.renderGovernanceBank(specs(fine));
+    assert.match(shown, /^# Toolkit governance choices - ON, ready$/m, JSON.stringify(fine));
+    assert.match(shown, /^\| 1\.6 \| Evidence store \| Ready: owner\/TRANSPORT-app \| Set in the programme file \|/m, JSON.stringify(fine));
+  }
+  // The row takes no answer either way.
+  assert.throws(() => bank.parseBankAnswer('1.6=A', specs({ state: 'missing' }), { requireBankReference: false }), /takes no answer/);
+});

@@ -184,4 +184,45 @@ function ciShardsText(mergedText, parsed, value) {
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
 
-module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, detectNodeTests, existingShards, firstList, oldSweepCopies, readEstimate, readersReady });
+// A shard split the owner closed without merging is asked about once (INT-TK421-1360): the bank's
+// shards row asks, and the owner's answer to that bank is remembered here, on this computer, per
+// repository and pull request number, so a later bank does not ask again about the same close. A
+// later split closed again is a new number, asked once more. The file holds repository ids, numbers,
+// answers and times only; one that cannot be read counts as not answered.
+const CLOSED_SCHEMA = 'toolkit.ci-shards-closed.v1';
+const CLOSED_BASENAME = 'ci-shards-closed.v1.json';
+const CLOSED_MAX = 64;
+
+function closedFile(registryOptions) {
+  return path.join(require('./toolkit-user-state.cjs').userStateDirectory(registryOptions), CLOSED_BASENAME);
+}
+
+function closedAnswers(registryOptions) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(closedFile(registryOptions), 'utf8'));
+    if (parsed && parsed.schema === CLOSED_SCHEMA && parsed.answers && typeof parsed.answers === 'object' && !Array.isArray(parsed.answers)) return parsed.answers;
+  } catch { /* none yet */ }
+  return {};
+}
+
+const closedKey = (repositoryId, number) => `${repositoryId}#${number}`;
+
+// The remembered answer for that closed pull request, or null.
+function closedSplitAnswer(registryOptions, repositoryId, number) {
+  const entry = closedAnswers(registryOptions)[closedKey(repositoryId, number)];
+  return entry && ANSWERS.includes(entry.answer) ? entry : null;
+}
+
+function rememberClosedSplit(registryOptions, repositoryId, number, answer, { now = new Date() } = {}) {
+  if (typeof repositoryId !== 'string' || !repositoryId || !Number.isInteger(number) || !ANSWERS.includes(answer)) return false;
+  const answers = { ...closedAnswers(registryOptions), [closedKey(repositoryId, number)]: { answer, at: now.toISOString() } };
+  const kept = Object.entries(answers).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, CLOSED_MAX);
+  const file = closedFile(registryOptions);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  try { fs.writeFileSync(temp, `${JSON.stringify({ schema: CLOSED_SCHEMA, answers: Object.fromEntries(kept) }, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temp, file); }
+  finally { fs.rmSync(temp, { force: true }); }
+  return true;
+}
+
+module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, CLOSED_BASENAME, ciShardsText, closedSplitAnswer, detectNodeTests, existingShards, firstList, oldSweepCopies, readEstimate, readersReady, rememberClosedSplit });
