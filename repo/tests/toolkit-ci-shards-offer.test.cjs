@@ -65,7 +65,7 @@ test('offer: the estimate reads the default branch\'s last green runs', () => {
   assert.deepEqual(offer.readEstimate('/repo', { run }), { minutes: 18, workflow: 'Build', run: 8 });
   assert.ok(calls.some(call => call.startsWith('run list --branch trunk ')), 'the run list is limited to the default branch');
   assert.deepEqual(calls.filter(call => call.startsWith('run view')).map(call => call.split(' ')[2]), ['9', '8'], 'only the newest default-branch run of each workflow is read');
-  assert.equal(offer.readEstimate('/repo', { run: () => ({ status: 1, stdout: '' }) }), null, 'an unreadable run is unknown, never a guess');
+  assert.deepEqual(offer.readEstimate('/repo', { run: () => ({ status: 1, stdout: '' }) }), { minutes: null, unread: 'the CI runs could not be read' }, 'an unreadable run is unknown, never a guess, and says it was not read');
 });
 
 test('offer: the first list is one rest shard plus one named shard per 10 measured minutes, two shards without timings', t => {
@@ -199,7 +199,7 @@ test('bank: the minutes are display-only, so a CI run that finishes before the a
   const specsFor = minutes => bankSpecs({ state: { state: 'ENABLED' }, task: 'off', merged: JSON.parse(bindingText()), ciShards: { measured: { minutes, workflow: 'CI' } } });
   assert.equal(bankReference(specsFor(12.2)), bankReference(specsFor(13.1)), 'two estimates on the same side give the same bank reference');
   assert.notEqual(bankReference(specsFor(9)), bankReference(specsFor(12)), 'crossing 10 minutes changes the default, so the reference changes');
-  assert.match(renderGovernanceBank(specsFor(13.1)), /^\| \d\.\d \| Parallel CI shards \| (?:(?:Not ready|Ready|Unknown): )?Yes \(Toolkit default\) \(CI about 13 min\) \| /m, 'the bank still shows the minutes');
+  assert.match(renderGovernanceBank(specsFor(13.1)), /^\| \d\.\d \| Parallel CI shards \| Not ready: Yes \(Toolkit default\) \(CI about 13 min\) \| /m, 'the bank still shows the minutes');
   // End to end: the bank is shown at 12 minutes and answered after a run that measured 31.
   const ctx = governedFixture(t);
   const transport = recorder();
@@ -245,7 +245,7 @@ test('bank: shards are the default only for slow CI; fast or unknown CI defaults
   assert.equal(byDefault({ minutes: 42, workflow: 'CI' }), 'yes');
   assert.equal(byDefault({ minutes: 9.4, workflow: 'CI' }), 'not-now');
   assert.equal(byDefault(null), 'not-now', 'an unknown time is never guessed slow');
-  assert.match(renderGovernanceBank(specsFor({ minutes: 4, workflow: 'CI' })), /^\| \d\.\d \| Parallel CI shards \| (?:(?:Not ready|Ready|Unknown): )?Not needed \(Toolkit default\) \(CI about 4 min\) \| CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh\. To add them anyway, add shards=yes to your reply; shards=never stops the check \| shards=yes or shards=never in your reply \|$/m);
+  assert.match(renderGovernanceBank(specsFor({ minutes: 4, workflow: 'CI' })), /^\| \d\.\d \| Parallel CI shards \| Ready: Not needed \(Toolkit default\) \(CI about 4 min\) \| CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh\. To add them anyway, add shards=yes to your reply; shards=never stops the check \| shards=yes or shards=never in your reply \|$/m);
 });
 
 test('bank: not now writes nothing and checks again; shards=never records the answer and the default stops', async t => {
@@ -262,7 +262,7 @@ test('bank: not now writes nothing and checks again; shards=never records the an
   assert.equal(transport.calls[0][4], null, 'never writes no list');
   // A merged not-now is the default again; a merged never or yes is only a status line.
   ctx.merge(bindingText({ ci_shards: { answer: 'not-now' } }));
-  assert.match((await run(ctx, ['setup'])).out, /^\| \d\.\d \| Parallel CI shards \| (?:(?:Not ready|Ready|Unknown): )?Yes \(Toolkit default\) \(CI about 25 min\) \|/m);
+  assert.match((await run(ctx, ['setup'])).out, /^\| \d\.\d \| Parallel CI shards \| Not ready: Yes \(Toolkit default\) \(CI about 25 min\) \|/m);
   for (const [merged, line] of [['never', /^\| \d\.\d \| Parallel CI shards \| Ready: Never ask \| Set in the programme file; Toolkit does not ask again \| - \|$/m], ['yes', /^\| \d\.\d \| Parallel CI shards \| Ready: Yes \| Set in the programme file; [^|]*refreshed once a day \(explain 1\.1\) \| - \|$/m]]) {
     ctx.merge(bindingText({ ci_shards: { answer: merged } }));
     let estimated = 0;
@@ -356,7 +356,7 @@ test('bank: an answer waiting in its pull request shows as that pull request, sh
   // Slow CI makes shards the default, but shards=not-now skips them: nothing is written for them.
   const quiet = recorder();
   const left = await answer(ctx, 'shards=not-now', { transport: quiet });
-  assert.match(left.shown.out, /^\| \d\.\d \| Parallel CI shards \| (?:(?:Not ready|Ready|Unknown): )?Yes \(Toolkit default\) \(CI about 25 min\) \|/m);
+  assert.match(left.shown.out, /^\| \d\.\d \| Parallel CI shards \| Not ready: Yes \(Toolkit default\) \(CI about 25 min\) \|/m);
   assert.equal(left.code, 0, left.err);
   assert.equal(quiet.calls.length, 0);
   assert.doesNotMatch(left.out, /Parallel CI shards|toolkit-test-shards/);

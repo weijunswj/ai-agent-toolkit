@@ -539,7 +539,7 @@ class ToolkitGovernanceCli {
     // a repository not on yet, where an answer joins the turn-on pull request.
     const offered = state.state === 'ENABLED' ? Boolean(merged) && !['yes', 'never'].includes(merged.ci_shards?.answer) : Boolean(state.root);
     let estimate = null;
-    if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = null; } }
+    if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = { minutes: null, unread: 'the CI time read failed' }; } }
     // An answer already waiting in its own pull request shows as that pull request; GitHub that cannot
     // be read leaves the question asked, and publishing then still refuses a second one.
     let open = [];
@@ -1062,10 +1062,6 @@ function copiesRow(copies) {
 // A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
 // quotes, never curly ones) with a copy button.
 const fenced = command => ['```', command, '```'];
-
-// This app's Toolkit permission lines, read from the settings files the blocks name: how many are
-// missing or stale, and the owner's one command that brings them up to date or takes them out. Only
-// the app the bank runs in is read; another app keeps its own lines.
 
 function label(state) {
   return state.state.replace(/_/g, ' ');

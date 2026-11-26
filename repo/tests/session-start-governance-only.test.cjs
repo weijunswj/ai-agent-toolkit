@@ -142,3 +142,14 @@ test('S-3 a governed session start names out-of-date Toolkit permissions in one 
   const off = gate.sessionLine(root, { stateReader: () => ({ ...enabled, state: 'DISABLED' }), programmeDeps: { permissions: () => ({ checked: true, host: 'claude', missing: 3, stale: 0 }) } });
   assert.doesNotMatch(off, /Toolkit permissions:/);
 });
+
+// The entry point that knows its app names it, and the shared gate passes it to the permissions check
+// (G2 round 1 of PR 1545, L5), rather than guessing from shell markers.
+test('S-4 the session line passes the calling app to the permissions check', () => {
+  const root = tmp();
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: false, root };
+  const seen = [];
+  gate.sessionLine(root, { stateReader: () => enabled, host: 'codex', programmeDeps: { permissions: (folder, host) => { seen.push(host); return { checked: true, missing: 0, stale: 0 }; } } });
+  assert.deepEqual(seen, ['codex']);
+  assert.equal(require('../scripts/toolkit-permissions.cjs').permissionsState(root, { host: 'codex' }).app, 'Codex');
+});

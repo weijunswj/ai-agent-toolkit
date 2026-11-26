@@ -43,11 +43,13 @@ function readEstimate(root, { run = spawnSync } = {}) {
     if (result.error || result.status !== 0) return null;
     try { return JSON.parse(result.stdout); } catch { return null; }
   };
+  // A read that fails is { minutes: null, unread }, apart from null for no green run yet.
+  const unread = { minutes: null, unread: 'the CI runs could not be read' };
   const repo = gh(['api', 'repos/{owner}/{repo}']);
   const branch = repo && typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null;
-  if (!branch) return null;
+  if (!branch) return unread;
   const runs = gh(['run', 'list', '--branch', branch, '--status', 'success', '--event', 'push', '--limit', '40', '--json', 'databaseId,workflowName,headBranch']);
-  if (!Array.isArray(runs)) return null;
+  if (!Array.isArray(runs)) return unread;
   const newest = new Map();
   for (const item of runs) {
     if (!item || !Number.isInteger(item.databaseId) || typeof item.workflowName !== 'string') continue;
@@ -65,7 +67,7 @@ function readEstimate(root, { run = spawnSync } = {}) {
     }
     if (ms > 0 && (!best || ms / 60000 > best.minutes)) best = { minutes: ms / 60000, workflow: chosen.workflowName, run: chosen.databaseId };
   }
-  return best;
+  return best || (newest.size ? unread : null);
 }
 
 function readText(file) {

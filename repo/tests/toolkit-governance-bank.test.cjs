@@ -222,3 +222,30 @@ test('shards with no usable test list are not applicable, with the reason, and n
   assert.equal(bank.parseBankAnswer('all recommended', specs, { requireBankReference: false }).ciShards, undefined, 'slow CI alone turns nothing on');
   assert.throws(() => bank.parseBankAnswer('all recommended, shards=yes', specs, { requireBankReference: false }), /shards= does not apply/);
 });
+
+// G2 round 1 of PR 1545 (evidence/g2-1545-r1): a half-read App is unknown, never a step left (M1); a CI
+// time that could not be read is unknown (L1); explain of a shards row says how an answer changes it
+// (L2); an unread programme file keeps the store and shards rows, unknown (L3).
+test('a part GitHub could not read, even in half, is unknown and never a step left', () => {
+  const merged = { store: { repository: 'owner/TRANSPORT-app' }, parents: [{ issue: 7 }], required_checks: ['validate'] };
+  const specs = extra => bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', train: 'on', merged,
+    permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, ciShards: { measured: { minutes: 4 }, open: [], existing: null, usable: { ok: true } }, ...extra });
+  for (const half of [{ variable: 'found', secret: 'unverified', reason: 'reader-failed' }, { variable: 'unverified', secret: 'found', reason: 'reader-failed' }]) {
+    const shown = bank.renderGovernanceBank(specs({ app: half }));
+    assert.match(shown, /^# Toolkit governance choices - ON, ready; 1 part could not be checked$/m, JSON.stringify(half));
+    assert.match(shown, /^\| 1\.5 \| Governance App \| Unknown: GitHub could not be read \(reader-failed\) \| /m);
+    assert.equal(bank.parseBankAnswer('all recommended', specs({ app: half }), { requireBankReference: false }).governanceApp, 'keep');
+  }
+  // Partly set up only when the other half reads missing.
+  assert.match(bank.renderGovernanceBank(specs({ app: { variable: 'found', secret: 'missing' } })), /^\| 1\.5 \| Governance App \| Not ready: Partly set up \| /m);
+  const unreadCi = bank.renderGovernanceBank(specs({ ciShards: { measured: { minutes: null, unread: 'the CI runs could not be read' }, open: [], existing: null, usable: { ok: true } } }));
+  assert.match(unreadCi, /^\| 1\.3 \| Parallel CI shards \| Unknown: CI time could not be read \| GitHub could not be read just now \(the CI runs could not be read\), /m);
+  assert.match(unreadCi, /^# Toolkit governance choices - ON, ready; 1 part could not be checked$/m);
+  const slow = specs({ ciShards: { measured: { minutes: 25 }, open: [], existing: null, usable: { ok: true } } });
+  assert.equal(bank.parseBankAnswer('all recommended, shards=not-now', slow, { requireBankReference: false }).ciShards, 'not-now');
+  assert.match(bank.explainText(slow, '1.3'), /Toolkit keeps this part itself: only shards=not-now or shards=never in your reply changes it\.$/);
+  const unread = bank.renderGovernanceBank(specs({ merged: null, mergedRead: { fresh: false, refresh_error: 'read-timed-out' }, ciShards: null }));
+  assert.match(unread, /^# Toolkit governance choices - ON, ready; 2 parts could not be checked$/m, "the store and shards");
+  assert.match(unread, /^\| 1\.3 \| Parallel CI shards \| Unknown: Not read \| /m);
+  assert.match(unread, /^\| 1\.6 \| Evidence store \| Unknown: Not read \| /m);
+});

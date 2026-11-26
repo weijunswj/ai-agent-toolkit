@@ -49,16 +49,16 @@ const EPOCH = /^[0-9a-f]{32}$/;
 const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // The script the agent is told to run: the managed checkout's when there is one, else this copy's.
 const script = () => managedScript('toolkit-governance.cjs');
-// Questions are numbered in the order they are built, without gaps; status rows take no answer and
-// have no number. A question's number can move between runs (the evidence store becoming a status row
-// moves the App row up), so a reply to an older bank where any number moved is never applied: the row
-// digests are keyed by number too (rowDigests), and the owner gets the new bank instead.
-// The rows the merged programme file binds (`bound`, the few words each adds) are shown as one line,
-// in this order, with how to change them said once.
+// Questions are numbered in the order they are built, without gaps; the table numbers the parts Toolkit
+// keeps itself after them (tableRows), and those take no answer. A number can move between runs, so a
+// reply to an older bank where any number moved is never applied: the row digests are keyed by number
+// too (rowDigests), and the owner gets the new bank instead.
+// The rows left out of the table that the merged programme file binds (`bound`, the few words each adds)
+// are shown as one line under it, in this order, with how to change them said once.
 const BOUND = 'Bound in the merged programme file';
-const BOUND_ORDER = Object.freeze(['evidence-store', 'parent-issue', 'required-checks', 'merge-train', 'ci-shards']);
-// How a shard split stays current. The shards row has no number to explain, so this joins the governance
-// row's explain text where shards are on, as the App's removal steps do.
+const BOUND_ORDER = Object.freeze(['parent-issue', 'required-checks']);
+// How a shard split stays current. The shards row takes no answer, so this joins the governance row's
+// explain text where shards are on, as the App's removal steps do.
 const SHARDS_REFRESH = '**Parallel CI shards, daily refresh:** once a day Shard Timings measures the tests and, when the shards have drifted, opens one pull request with the new split (this needs the governance App). Nothing changes until it is merged, and the programme flags it after 24 hours with no owner.';
 // What a table row the programme file sets says in its Recommended column.
 const SET_IN = 'Set in the programme file';
@@ -199,6 +199,11 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     // No test list Toolkit can split (such as a Python suite): not applicable, with why; no shards= override.
     specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not applicable',
       text: `Toolkit can split only Node tests, and ${ciShards.usable.reason}. It looks again at the next refresh` }), required: { ready: true } });
+  } else if (ciShards && ciShards.measured?.unread && (governed || turnsOn || state.state === 'DISABLED')) {
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'CI time could not be read',
+      text: `GitHub could not be read just now (${ciShards.measured.unread}), so Toolkit adds no shards and checks again at the next refresh`,
+      change: 'To add them anyway, add shards=yes to your reply; shards=never stops the check' }),
+    shards_default: 'not-now', other: 'shards=yes or shards=never in your reply', required: { ready: null } });
   } else if (ciShards && (governed || turnsOn || state.state === 'DISABLED')) {
     const slow = Number.isFinite(ciShards.measured?.minutes) && ciShards.measured.minutes >= SLOW_CI_MINUTES;
     shardsOn = slow;
@@ -236,6 +241,9 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: checks.length ? checks.join(', ') : 'none listed', text: BOUND,
       bound: checks.length ? `${checks.length === 1 ? 'required check' : 'required checks'} ${checks.join(', ')}` : 'no required checks' }));
   } else if (governed) {
+    // The store and shards rows stay in the table, unknown, so the top line counts them.
+    specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: 'Not read', text: 'The programme file that holds it could not be read just now' }), required: { ready: null } });
+    if (!specs.some(spec => spec.id === 'ci-shards')) specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not read', text: 'The programme file that holds it could not be read just now' }), required: { ready: null } });
     specs.push(statusRow({ id: 'programme-file', section, title: 'Programme file', current: 'Could not be read',
       text: `This computer could not read the merged .github/toolkit-programme.json just now${mergedRead?.refresh_error ? ` (${mergedRead.refresh_error})` : ''}, so what it sets is not shown. Type toolkit governance again in a moment` }));
   }
@@ -245,8 +253,8 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   // While governance is on, or turns on with this answer, the result gives that command by default.
   // Its removal steps are in the governance row's explain text where there is one.
   // GitHub that could not be read leaves the App unknown, never missing (presence says unverified).
-  const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
-  const appUnknown = app && !appSet && !appPart && (app.variable === 'unverified' || app.secret === 'unverified');
+  const appUnknown = app && !appSet && (app.variable === 'unverified' || app.secret === 'unverified');
+  const appPart = app && !appSet && !appUnknown && (app.variable === 'found' || app.secret === 'found');
   const appNone = app && app.variable === 'missing' && app.secret === 'missing';
   if (appSet || appPart) {
     specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
@@ -332,7 +340,7 @@ function topLine(specs) {
   if (!isOn(specs)) return 'OFF';
   const parts = specs.filter(spec => spec.required);
   const steps = parts.filter(spec => spec.required.ready === false).length;
-  const unknown = parts.filter(spec => spec.required.ready === null).length + (specs.some(spec => spec.id === 'programme-file') ? 1 : 0);
+  const unknown = parts.filter(spec => spec.required.ready === null).length;
   const left = steps ? `ON, not ready, ${steps} step${steps === 1 ? '' : 's'} left` : 'ON, ready';
   return unknown ? `${left}; ${unknown} part${unknown === 1 ? '' : 's'} could not be checked` : left;
 }
@@ -398,7 +406,7 @@ function explainText(specs, ref) {
   const kept = row.spec;
   return [`${ref} ${kept.title}`, `Current: ${currentText(kept)}.`, ...(kept.recommended_text ? [`${kept.recommended_text}.`] : []),
     ...(kept.required?.ready === false ? [`Next step: ${kept.required.step}.`] : []), ...(kept.other ? [`Other choice: ${kept.other}.`] : []),
-    'Toolkit keeps this part itself: no answer changes it.'].join('\n');
+    kept.shards_default ? `Toolkit keeps this part itself: only ${kept.other} changes it.` : 'Toolkit keeps this part itself: no answer changes it.'].join('\n');
 }
 
 // The row number a reply asks to explain ("explain 1.4", with or without the bank reference), or null.
