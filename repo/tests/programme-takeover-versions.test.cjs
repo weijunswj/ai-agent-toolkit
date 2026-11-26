@@ -230,3 +230,62 @@ test('the versions cost a fixed number of requests and one read of Toolkit main'
   const of = part => calls.filter(call => call.path.includes(part)).length;
   assert.deepEqual([of('ai-agent-toolkit/commits/main'), of(VERSION_REL_PATH), of(SWEEP_FILE), of('variables/TOOLKIT_REF')], [1, 1, 1, 1]);
 });
+
+// The controller settings (#1242 S5): a takeover by any controller type, Claude Code here, reads the
+// settings the store keeps for this repository with one request and shows them in its dry run and done
+// line, never their device or folder; none, another repository's or an unreadable file is said as such.
+const settingsModule = require('../scripts/toolkit-controller-settings.cjs');
+const SETTINGS_PATH = `repos/acme/state-store/contents/state/${REPO}/controller-settings.json?ref=main`;
+function settingsText(repository = REPO) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'takeover-settings-'));
+  temps.push(dir);
+  const file = path.join(dir, 'controller-settings.json');
+  const quiet = { write: () => true };
+  const code = settingsModule.main(['set', '--file', file, '--repository', repository, '--stack-profile', 'owner-claude', '--live-lanes', '2', '--placement', 'remote_control,G2=cloud',
+    '--device', 'desk-1', '--folder', 'C:\\work\\app', '--owner-said', 'fixture'], { stdout: quiet, stderr: quiet, environment: {}, now: () => new Date('2026-11-26T00:00:00.000Z') });
+  assert.equal(code, 0);
+  return fs.readFileSync(file, 'utf8');
+}
+function withSettings(fx, text) {
+  fx.github.intercept(call => (call.method === 'GET' && call.path === SETTINGS_PATH
+    ? (text === null ? { status: 404, json: {} } : { status: 200, json: { encoding: 'base64', sha: 'e'.repeat(40), content: Buffer.from(text, 'utf8').toString('base64') } }) : undefined));
+  return fx;
+}
+
+test('a takeover shows this repository\'s controller settings, and says when there are none or they cannot be used', () => {
+  const surface = ['--surface', 'Claude Code desktop (host evidence read)', '--next', 'read the repository map'];
+  for (const [label, text, said] of [
+    ['set', settingsText(), 'stack owner-claude, 2 live lanes, gates remote_control, G2 cloud'],
+    ['none', null, 'none saved yet; step 5 sets them on the owner\'s word'],
+    ['another repository', settingsText('acme/other'), 'saved for acme/other, not this repository, so not used'],
+    ['edited by hand', settingsText().replace('"live_lanes": 2', '"live_lanes": 2 '), 'not readable: The controller settings file has another form than the one set writes (a repeated key, or a hand edit); step 5 sets them again on the owner\'s word'],
+  ]) {
+    const fx = withSettings(world(fixture()), text);
+    const dry = fx.run(['takeover', '--session', NEW, ...surface, '--json']);
+    assert.equal(dry.error, null, `${label}: ${dry.error?.message}`);
+    assert.equal(dry.result.settings.text, said, label);
+    assert.deepEqual([dry.result.ready, dry.result.holds], [true, []], `${label}: a settings fact is never a hold`);
+    assert.equal(dry.calls.filter(call => call.path === SETTINGS_PATH).length, 1, `${label}: read once`);
+    const plain = fx.run(['takeover', '--session', NEW, ...surface]);
+    assert.ok(plain.result.includes(`\nController settings: ${said}\n`), plain.result);
+    const done = fx.run(['takeover', '--session', NEW, ...surface, '--apply', '--controller', '--json']);
+    assert.equal(done.error, null, `${label}: ${done.error?.message}`);
+    assert.ok(done.result.done_line.includes(`; controller settings: ${said}; `), done.result.done_line);
+    assert.doesNotMatch(done.result.done_line, /desk-1|work\\app/, `${label}: no device or folder`);
+  }
+});
+
+test('a session that cannot use the store claims nothing and says to run the takeover where it can', () => {
+  const fx = fixture();
+  fx.github.repos.delete('acme/state-store');
+  const dry = fx.dry();
+  assert.equal(dry.error, null, dry.error?.message);
+  const hold = dry.result.holds.find(entry => entry.code === 'STORE_UNREACHABLE');
+  assert.match(hold.detail, / This session cannot use the evidence store, so it reads no programme state and claims nothing: run controller takeover in a session that can, such as one on the owner's computer, and continue there\.$/);
+  assert.equal(dry.result.settings, null);
+  wroteNothing(fx, dry, 'dry run');
+  const apply = fx.takeover();
+  assert.equal(apply.error?.code, 'STORE_UNREACHABLE');
+  assert.match(apply.error.message, /run controller takeover in a session that can/);
+  wroteNothing(fx, apply, 'apply');
+});
