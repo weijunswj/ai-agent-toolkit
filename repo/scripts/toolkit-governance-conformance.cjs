@@ -357,8 +357,12 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', 'The Toolkit copies could not be checked: origin\'s default branch has not been read on this computer yet; run toolkit-governance.cjs status online, then check again.')];
   }
   const refresher = require('./toolkit-cloud-workflows-refresh.cjs');
+  // Test files are listed by name (a whole-tree read) only where the shard copies render: a yes to
+  // parallel CI shards in the merged binding.
+  let shardsYes = false;
+  try { shardsYes = (options.mergedBinding || governance.mergedBinding)(state.root, options)?.ci_shards?.answer === 'yes'; } catch { shardsYes = false; }
   let files;
-  try { files = new refresher.BranchSnapshot(state.root, fetched.commit, fetched.default_branch, { fetch: false }).write(); } catch (error) {
+  try { files = new refresher.BranchSnapshot(state.root, fetched.commit, fetched.default_branch, { fetch: false, testNames: shardsYes }).write(); } catch (error) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The Toolkit copies could not be checked: ${error.name === 'RefreshError' ? error.message : 'origin\'s default branch could not be read from this checkout.'}`)];
   }
   try { return copyFindings({ state, files, branch: fetched.default_branch, toolkitRoot, workflows, refresher, options }); } finally { fs.rmSync(files, { recursive: true, force: true }); }

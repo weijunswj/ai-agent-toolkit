@@ -5,14 +5,15 @@
 // commit its head commit names, with that commit on Toolkit main. Such a pull request only puts
 // Toolkit main's own reviewed text in place, so it may land under the repository's task auto-merge
 // switch with a notice after, instead of waiting for the owner's typed merge as every other change to
-// a CI workflow does (scopeWithProof below, read by the merge hold, and `--land-refresh`). The failure it prevents: a pull request that rewrites a governed repository's CI
+// a CI workflow does (scopeWithProof below, read by the merge hold, and `--land-refresh`). The
+// failure it prevents: a pull request that rewrites a governed repository's CI
 // (its checks, the guard, what dependency updates may merge) landing with no owner's eyes on it
 // because it looks like a refresh. Anything the proof cannot show exactly fails it, with the reason,
 // and the pull request waits for the owner's typed merge as before.
 //
 // It reads only local git: the repository's checkout (the pull request's head and its merge base with
-// origin's default branch must be fetched there) and this computer's Toolkit checkout (the managed one
-// for a plugin copy). No network read, nothing written outside one scratch folder it removes.
+// origin's default branch must be fetched there) and this computer's Toolkit checkout (the managed
+// one for a plugin copy). No network read, nothing written outside one scratch folder it removes.
 //
 // The proof holds only when all of these do:
 //   - the repository is governed (ENABLED, its merged binding read in the last 24 hours) and is not the
@@ -81,11 +82,15 @@ class RefreshProof {
     this.#ciShards = ciShards;
   }
 
-  // { proved: true, commit, files } or { proved: false, reason, hold } (hold: try again later). `base` is origin's default branch
-  // head and `head` the pull request's head, both full commits in the repository's checkout.
-  prove(base, head) {
+  // { proved: true, commit, files } or { proved: false, reason, hold } (hold: try again later).
+  // `base` is origin's default branch head and `head` the pull request's head, both full commits in the
+  // repository's checkout. `deadline` (performance.now() time) stops the proof between its steps, so a
+  // hook call keeps time for the reads after it; a proof that runs out says so and holds.
+  prove(base, head, { deadline = Infinity } = {}) {
     // `hold`: a later read may prove it (something is not fetched or read yet), so no typed merge yet.
     const no = (reason, hold = false) => ({ proved: false, reason, hold });
+    const late = () => globalThis.performance.now() > deadline;
+    const LATE = 'the copy proof did not finish within this call\'s time; run the same merge again';
     if (!SHA.test(String(base)) || !SHA.test(String(head))) return no('the base and head must be full commits');
     if (this.#workflows.isToolkitCheckout(this.#root)) return no('this is the Toolkit repository, whose copies are its own source');
     let state;
@@ -106,20 +111,25 @@ class RefreshProof {
     if (!listed.ok) return no('the pull request\'s changes could not be read here');
     const changed = rawEntries(listed.stdout);
     if (!changed || !changed.length) return no('the pull request\'s changes could not be read here, or it changes nothing');
+    if (late()) return no(LATE, true);
+    // Test files are listed by name only where the shard copies render (a yes to parallel CI shards).
+    const ciShards = this.#ciShardsAnswer();
     let snapshot;
-    try { snapshot = new this.#refresh.BranchSnapshot(this.#root, from, branch, { fetch: false }).write(); } catch (error) {
+    try { snapshot = new this.#refresh.BranchSnapshot(this.#root, from, branch, { fetch: false, testNames: ciShards === 'yes' }).write(); } catch (error) {
       return no(error?.name === 'RefreshError' ? error.message : 'the merge base\'s files could not be read');
     }
     try {
+      if (late()) return no(LATE, true);
       let expected;
       try {
-        expected = this.#refresh.changes({ target: snapshot, root: this.#toolkitRoot, commit, ciShards: this.#ciShardsAnswer(), defaultBranch: branch, workflows: this.#workflows }).files;
+        expected = this.#refresh.changes({ target: snapshot, root: this.#toolkitRoot, commit, ciShards, defaultBranch: branch, workflows: this.#workflows }).files;
       } catch (error) {
         if (error?.name === 'RefreshError' || error?.name === 'InstallError') return no(`a refresh at ${commit.slice(0, 7)} would not run here: ${error.message}`);
         throw error;
       }
       const texts = new Map(expected.map(entry => [entry.file, entry.text]));
       const guardConfig = this.#refresh.GUARD_CONFIG;
+      if (late()) return no(LATE, true);
       for (const entry of changed) {
         if (entry.status !== 'A' && entry.status !== 'M') return no(`${entry.file} is ${entry.status === 'D' ? 'deleted' : 'changed in a way a refresh never makes'}`);
         if (entry.mode !== '100644') return no(`${entry.file} has file mode ${entry.mode}, not the plain mode a refresh writes`);
@@ -147,14 +157,15 @@ class RefreshProof {
 // The proof is tried only when the head commit's message has a `Toolkit commit:` line, as every refresh
 // commit does, so other pull requests read exactly as before. Returns the scope, with
 // `proved_refresh: { toolkit_commit, files }` when lifted or `proof: <why not>` when the proof was tried
-// and failed; null when git cannot read the scope. `registryOptions` pass to the governance read.
-function scopeWithProof(cwd, base, head, { prove = null, registryOptions = {} } = {}) {
+// and failed; null when git cannot read the scope. `registryOptions` pass to the governance read;
+// `deadline` bounds the proof (RefreshProof prove).
+function scopeWithProof(cwd, base, head, { prove = null, registryOptions = {}, deadline = Infinity } = {}) {
   const scope = require('./toolkit-auto-merge-eligible.cjs').eligibilityOf(cwd, base, head);
   if (!scope || scope.eligible || !scope.reasons.every(entry => entry.why === 'a CI workflow')) return scope;
   if (!/^Toolkit commit: /m.test(git(cwd, ['log', '-1', '--format=%B', head]).stdout)) return scope;
   let proof;
   try {
-    proof = prove ? prove(base, head) : new RefreshProof({ root: cwd, governance: target => require('./toolkit-governance-state.cjs').governanceState(target, registryOptions) }).prove(base, head);
+    proof = prove ? prove(base, head) : new RefreshProof({ root: cwd, governance: target => require('./toolkit-governance-state.cjs').governanceState(target, registryOptions) }).prove(base, head, { deadline });
   } catch { proof = { proved: false, reason: 'the copy proof could not run' }; }
   if (!proof?.proved) return { ...scope, proof: proof?.reason || 'the copy proof did not hold' };
   if (!scope.reasons.every(entry => proof.files.includes(entry.path))) return { ...scope, proof: 'the proof does not cover every changed workflow' };

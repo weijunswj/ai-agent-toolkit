@@ -2018,7 +2018,7 @@ function nestedRefusal(text) {
 // started this session;
 // otherwise a structured failure. `scope(head)` is the merge-scope verdict against this folder's copy of
 // the remote's default branch, or null when git cannot read it.
-function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
+function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null, deadline = Infinity, scopeProofs = new Map() } = {}) {
   const repository = typeof cwd === 'string' && cwd ? repositoryOf(cwd) : null;
   let root;
   try { root = repository ? governance.findGitRoot(cwd) : null; } catch { root = null; }
@@ -2049,13 +2049,23 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   // a cloud thread, which approves through the Projects card, or with no native session context).
   const typedBlock = cloud || !checks.nativeSessionContext ? null : sessionBlock(checks);
   if (reason) return { eligible: false, reason, checks, typedBlock };
+  // One scope per repository, base and head for the whole hook call (`scopeProofs`, which the hook
+  // shares between its pre-pass and final pass), so a refresh's copy proof runs once; the proof stops
+  // short of the call's deadline, leaving time for the closure reads after it.
   const scope = head => {
     const branch = pushTarget(root, 'origin', registryOptions)?.default;
     const base = branch ? mergeScope.commitOf(root, `refs/remotes/origin/${branch}`) : null;
-    return base ? require('./toolkit-copies-proof.cjs').scopeWithProof(root, base, head, { registryOptions }) : null;
+    if (!base) return null;
+    const key = `${root}\n${base}\n${head}`;
+    if (!scopeProofs.has(key)) scopeProofs.set(key, require('./toolkit-copies-proof.cjs').scopeWithProof(root, base, head, { registryOptions, deadline: deadline - PROOF_RESERVE_MS }));
+    return scopeProofs.get(key);
   };
   return { eligible: true, reason: null, checks, repository, scope };
 }
+
+// The part of a hook call's deadline a copy proof leaves for the reads after it (the pull request and
+// issue closure reads of the final pass).
+const PROOF_RESERVE_MS = 2500;
 
 const RECORD_LOST = "at a later start of this chat, Toolkit's record of how it started was missing or could not be read, so nothing shows the user started it";
 
@@ -2253,7 +2263,7 @@ function readClosureFile(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, scopeProofs, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
   deadline ??= globalThis.performance.now() + (host === 'claude' ? 7500 : host === 'codex' ? 50000 : deadlineMs);
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
@@ -2301,7 +2311,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   else return null;
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
-  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
+  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host, deadline, scopeProofs });
   const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, deadline });
   const used = [];
   for (const merge of merges) {

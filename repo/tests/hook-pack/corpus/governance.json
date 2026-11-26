@@ -14,6 +14,17 @@
       "status": "pass"
     },
     {
+      "id": "GOV.stale-copies-origin-ahead",
+      "source": "owner test 27 Nov 2026 (B1) and G2 round 1 of the proved-refresh landing (M1): a checkout two commits behind origin was told its Toolkit copies were missing; origin's default branch, as the binding read fetched it, holds every copy current, so the session start names none",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled","origin_copies":true}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository."],"context_excludes":["Stale Toolkit copies"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.repo-check-enabled-no-block",
       "source": "plug-and-play S2 review: an enabled repository with no Toolkit block still has its vendored checks compared at session start",
       "kind": "benign",

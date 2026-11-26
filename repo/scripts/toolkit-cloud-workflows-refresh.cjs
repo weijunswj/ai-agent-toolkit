@@ -141,7 +141,10 @@ class BranchSnapshot {
   #commit;
   #branch;
   #fetch;
-  constructor(target, commit, branch, { fetch = true } = {}) { this.#target = target; this.#commit = commit; this.#branch = branch; this.#fetch = fetch; }
+  #testNames;
+  // `testNames`: write the shard list's test files by name (#testNames); only a repository whose shard
+  // copies render (a yes to parallel CI shards) needs them, and listing them costs a whole-tree read.
+  constructor(target, commit, branch, { fetch = true, testNames = true } = {}) { this.#target = target; this.#commit = commit; this.#branch = branch; this.#fetch = fetch; this.#testNames = testNames; }
 
   // The folder holding the commit's files. The commit is fetched from origin's default branch first
   // when the checkout does not have it (unless `fetch` is false); a fetch only adds objects and moves
@@ -153,7 +156,7 @@ class BranchSnapshot {
       this.#copy(folder, [SNAPSHOT_FOLDER]);
       const baseline = baselineFile(folder);
       if (baseline && !baseline.startsWith(`${SNAPSHOT_FOLDER}/`)) this.#copy(folder, [baseline]);
-      this.#testNames(folder);
+      if (this.#testNames) this.#listTestNames(folder);
       return folder;
     } catch (error) {
       fs.rmSync(folder, { recursive: true, force: true });
@@ -174,7 +177,7 @@ class BranchSnapshot {
   // so each file of the commit a glob matches is written as an empty file: names only, no contents.
   // Without them a valid list would read as finding no test file. No list, or one that does not read,
   // writes nothing (the shard check then reports the list itself).
-  #testNames(folder) {
+  #listTestNames(folder) {
     const shards = require('./governed-test-shards.cjs');
     let manifest;
     try { manifest = JSON.parse(fs.readFileSync(path.join(folder, ...shards.MANIFEST_REL.split('/')), 'utf8')); } catch { return; }
@@ -284,9 +287,10 @@ function prepare({ target, root, commit, ci, ciShards, workflows, governance, gi
   const branch = repo.default_branch;
   const base = github(`repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`).object.sha;
   if (!/^[0-9a-f]{40}$/.test(String(base || '')) || !/^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/.test(String(branch || ''))) throw new RefreshError('the default branch and its head could not be read from GitHub.');
-  const snapshot = new BranchSnapshot(target, base, branch).write();
+  const answer = ciShards !== undefined ? ciShards : mergedCiShards(target);
+  const snapshot = new BranchSnapshot(target, base, branch, { testNames: answer === 'yes' }).write();
   try {
-    const { files, notes } = changes({ target: snapshot, root, commit: at, ci, ciShards: ciShards !== undefined ? ciShards : mergedCiShards(target), defaultBranch: branch, workflows });
+    const { files, notes } = changes({ target: snapshot, root, commit: at, ci, ciShards: answer, defaultBranch: branch, workflows });
     if (!files.length) return { note: `The Toolkit copies in ${repository} are current; no refresh pull request is needed.${notes.length ? ` ${notes.join(' ')}` : ''}` };
     return { repository, base, branch, files, notes, commit: at };
   } finally {

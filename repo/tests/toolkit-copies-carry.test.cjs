@@ -108,7 +108,11 @@ function github(ctx, head, { checks = [['validate', 'completed', 'success']], pi
     calls.push({ endpoint, method: options.method || 'GET' });
     if (endpoint.startsWith(`repos/${SLUG}/pulls?state=open`)) return open ? [{ number: 7, head: { ref: refresh.BRANCH, sha: head, repo: { full_name: SLUG } }, base: { ref: 'main' } }] : [];
     if (endpoint === `repos/${SLUG}/actions/variables/TOOLKIT_REF`) return pin;
-    if (endpoint === `repos/${SLUG}/commits/${head}/check-runs?per_page=100`) return { check_runs: checks.map(([name, status, conclusion], id) => ({ id: id + 1, name, status, conclusion })) };
+    const page = new RegExp(`^repos/${SLUG}/commits/${head}/check-runs\\?per_page=100&page=(\\d+)$`).exec(endpoint);
+    if (page) {
+      const runs = checks.map(([name, status, conclusion], id) => ({ id: id + 1, name, status, conclusion }));
+      return { total_count: runs.length, check_runs: runs.slice((Number(page[1]) - 1) * 100, Number(page[1]) * 100) };
+    }
     if (endpoint === `repos/${SLUG}/commits/${head}/status`) return { statuses: [] };
     throw new Error(`unexpected read ${endpoint}`);
   };
@@ -154,6 +158,8 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
     ['6', 'the named Toolkit commit is not on Toolkit main', () => ctx.refreshHead({ commit: ctx.toolkit.off }), {}, 'owner', /is not on Toolkit main/],
     ['7', 'the named Toolkit commit is not in this computer\'s Toolkit checkout', () => ctx.refreshHead({ commit: UNKNOWN }), {}, 'hold', /not in this computer's Toolkit checkout/],
     ['10', 'TOOLKIT_REF is set', () => head, { pin: { name: 'TOOLKIT_REF', value: ctx.toolkit.main } }, 'owner', /TOOLKIT_REF variable is set/],
+    // G2 round 1, L3: a busy head's required check on the second page of check runs still counts.
+    ['1', 'the required check on the second page of 150 check runs', () => head, { checks: [...Array.from({ length: 149 }, (_, i) => [`sweep-${i}`, 'completed', 'success']), ['validate', 'completed', 'success']] }, 'land', /is proved/],
     ['18', 'another actor\'s commit with any other message, the same files', () => ctx.refreshHead({ text: 'Update workflows\n' }), {}, 'owner', /message is not exactly the refresh's/],
     ['18', 'another actor\'s commit with the refresh message and the exact render', () => ctx.refreshHead({ text: message(ctx.toolkit.main) }), {}, 'land', /is proved/],
   ];
@@ -196,6 +202,12 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
     assert.equal(off.route, 'owner', off.line);
     assert.match(off.line, /Task auto-merge is off for owner\/a/);
   }
+  // G2 round 1, L2: a binding that lists no required check never lands on its own.
+  ctx.merged(bindingFor({ required_checks: [] }));
+  const unchecked = land(ctx, head);
+  assert.equal(unchecked.route, 'attention', unchecked.line);
+  assert.match(unchecked.line, /lists no required check, so nothing shows the copies pass this repository's CI/);
+  ctx.merged();
   // Row 9: the binding read over 24 hours ago.
   ctx.merged(bindingFor(), { ageMs: 25 * 60 * 60 * 1000 });
   assert.equal(land(ctx, head).route, 'hold');
@@ -282,6 +294,53 @@ test('the merge hold lets an owner-started session merge a proved refresh pinned
   // Switch off: no standing at all.
   ctx.merged(bindingFor({ task_prs: { auto_merge: 'off' } }));
   assert.match(decide(`gh pr merge 7 --merge --match-head-commit ${head}`)?.deny || '', /Standing task auto-merge is unavailable/);
+});
+
+// Red on the first round (G2 H1): the hook ran the merge hold twice per call, each pass with its own
+// full copy proof, inside one 7.5-second deadline the proof never looked at, so on a repository with a
+// shard list and 600 test files the pinned merge `--land-refresh` names was refused for lack of time.
+// Now the proof runs once per hook call, stops short of the deadline, and lists test files only where
+// the shard copies render.
+test('the hook lets a proved refresh merge through within its own deadline on a large repository, proving it once', t => {
+  const ctx = context(t);
+  const named = git(ROOT, ['merge-base', 'HEAD', 'refs/remotes/origin/main']);
+  ctx.toolkit = { dir: ROOT, main: named };
+  // The reviewer's large fixture: a shard list and 600 test files on the default branch.
+  git(ctx.repo, ['checkout', '-q', '-B', 'large', ctx.main]);
+  fs.mkdirSync(path.join(ctx.repo, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json'), JSON.stringify({ schema: 'toolkit-test-shards/v2', systems: { linux: { discover: 'tests/**/*.test.js' } } }));
+  for (let i = 0; i < 600; i += 1) {
+    const folder = path.join(ctx.repo, 'tests', `d${i % 50}`);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, `t${i}.test.js`), `// ${i}\n`);
+  }
+  git(ctx.repo, ['add', '-A']);
+  git(ctx.repo, ['commit', '-q', '-m', 'tests']);
+  ctx.main = git(ctx.repo, ['rev-parse', 'HEAD']);
+  git(ctx.repo, ['checkout', '-q', 'feature']);
+  git(ctx.repo, ['update-ref', 'refs/remotes/origin/main', ctx.main]);
+  ctx.merged();
+  const head = ctx.refreshHead({ commit: named });
+  const session = 'owner-session';
+  gate.startSession({ session_id: session, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions, environment: {}, host: 'claude' });
+  const transport = { request(method, endpoint) {
+    const pr = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(endpoint);
+    if (pr) return { status: 200, json: { number: Number(pr[1]), title: refresh.TITLE, body: 'Refresh', commits: 0, head: { sha: head } } };
+    if (/\/pulls\/\d+\/commits\?/.test(endpoint)) return { status: 200, json: [] };
+    return { status: 404 };
+  } };
+  const hook = require('../scripts/toolkit-governance-hook.cjs');
+  const scopeProofs = new Map();
+  const started = Date.now();
+  const out = hook.respond('PreToolUse', { cwd: ctx.repo, session_id: session, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: `gh pr merge 7 --merge --match-head-commit ${head}` } },
+    { registryOptions: ctx.registryOptions, environment: {}, transport, scopeProofs });
+  assert.deepEqual(out, {}, `allowed through both passes (${Date.now() - started} ms): ${JSON.stringify(out)}`);
+  assert.equal(scopeProofs.size, 1, 'one scope for both passes');
+  assert.equal([...scopeProofs.values()][0].proved_refresh.toolkit_commit, named);
+  // A proof with no time left stops at once, holds and says why; the merge then waits.
+  const late = scopeWithProof(ctx.repo, ctx.main, head, { registryOptions: ctx.registryOptions, deadline: globalThis.performance.now() - 1 });
+  assert.equal(late.eligible, false);
+  assert.match(late.proof, /the copy proof did not finish within this call's time; run the same merge again/);
 });
 
 test('the refresh body carries the UAT line the auto-merge check accepts and says who lands it', () => {

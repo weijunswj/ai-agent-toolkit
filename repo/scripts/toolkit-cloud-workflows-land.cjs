@@ -113,8 +113,16 @@ class RefreshLanding {
     if (!proof.proved) return done(proof.hold ? 'hold' : 'owner', `Refresh pull request #${pr.number} is not proved, so it ${proof.hold ? 'waits for a later turn' : 'waits for the owner\'s typed merge'}: ${proof.reason}.`, facts);
     const required = this.#requiredChecks();
     if (!required) return done('hold', 'The merged binding\'s required checks could not be read here; try again at a later turn.', facts);
+    // With no required check listed, nothing shows the copies pass this repository's CI.
+    if (!required.length) return done('attention', `Refresh pull request #${pr.number}: the merged binding lists no required check, so nothing shows the copies pass this repository's CI. Controller: set the required checks (refresh governance) or ask the owner to merge it.`, facts);
     try {
-      checks = (this.#github(`repos/${repository}/commits/${head}/check-runs?per_page=100`) || {}).check_runs || [];
+      checks = [];
+      // Every page of check runs (a busy head holds more than one page of 100), up to ten.
+      for (let page = 1; page <= 10; page += 1) {
+        const read = this.#github(`repos/${repository}/commits/${head}/check-runs?per_page=100&page=${page}`) || {};
+        checks.push(...(read.check_runs || []));
+        if ((read.check_runs || []).length < 100 || checks.length >= Number(read.total_count || 0)) break;
+      }
       statuses = (this.#github(`repos/${repository}/commits/${head}/status`) || {}).statuses || [];
     } catch { return done('hold', 'The pull request\'s checks could not be read; try again at a later turn.', facts); }
     const states = checkStates(required, checks, statuses);
