@@ -8,8 +8,10 @@
 // - gate sessions due: open CLOSE_DUE findings (a finished gate whose session close is not recorded);
 // - finished side sessions: sessions this one started in the Claude desktop app that are not archived,
 //   not running, have every pull request merged or closed and no step waiting on the owner;
-// - gate records owed: a gate this session launched with no `programme.cjs gate-session` record after
-//   it, and an archived gate session whose close is not recorded.
+// - gate records owed: a gate this session launched with no `programme.cjs gate-session` record, and an
+//   archived gate session whose close is not recorded. A record is what programme.cjs accepted, read
+//   from this computer's own cache (programme-attention-cache.cjs), never the words of a command. A
+//   gate held at its first turn (HELD_LINE) owes its record only once it was sent its go-ahead.
 // It reads only local files (no git, gh or network) and stops a turn only when the list has an entry it
 // has not shown this session before.
 //
@@ -63,15 +65,12 @@ function toolText(content) {
   return Array.isArray(content) ? content.map(part => (part && typeof part.text === 'string' ? part.text : '')).join('\n') : '';
 }
 
-function flagValue(command, flag) {
-  const match = new RegExp(`(?:^|\\s)${flag}(?:=|\\s+)(?:"([^"]*)"|'([^']*)'|(\\S+))`).exec(command);
-  return match ? (match[1] ?? match[2] ?? match[3]) : null;
-}
-
 // Whether a shell call runs programme.cjs with --controller: `node <...>/programme.cjs ... --controller`
 // as a command it executes, with the script or the flags written out or held in a variable the same call
 // sets. A command that only mentions them (a search, a commit message, a file it writes, --help) does
-// not count. Accepted gap: a script file that runs it is not read, so it does not count either.
+// not count. Accepted gaps, each toward silence: a script file that runs it, a variable set in a loop, by
+// `export`, as an array or as a PowerShell splat, a PowerShell variable whose path holds a space, a node
+// flag that takes a value, and `cmd //c`. A controller that launched a gate counts without this.
 function runsAsController(name, command) {
   if (!/programme\.cjs/.test(command) || !/--controller\b/.test(command)) return false;
   const { scriptCommands, scriptContext } = require('./toolkit-shell-call.cjs');
@@ -106,20 +105,35 @@ function wentOn(file, sessionId, sinceMs) {
   return (tail ? tail.entries : []).some(row => (row.type === 'user' || row.type === 'assistant') && !row.isSidechain && Date.parse(row.timestamp) > sinceMs);
 }
 
+// A brief line, labelled as the Gate and Route lines are, that holds the started session at its first turn:
+// `First turn: reply only READY, then stop.` Any other wording holds nothing, so its record is owed.
+const HELD_LINE = /^[ \t]*(?:[-*][ \t]+)?(?:\*\*)?first turn:.*$/im;
+const heldBrief = brief => /\bREADY\b/.test((HELD_LINE.exec(brief) || [''])[0]);
+
+// The session a message was sent to: its id, the name or title the app gave it, or that title with the
+// `[ref]` the agent listing adds. A message with no text (a bare idle subscription) sends nothing on.
+function messageTarget(name, input) {
+  if (/(?:^|__)send_message$/.test(name)) return String(input.session_id || '');
+  return /(?:^|__)SendMessage$/.test(name) && String(input.message || '').trim() ? String(input.to || '').replace(/ \[[0-9a-f]+\]$/, '') : '';
+}
+
 // What this session's own transcript rows show: whether it acted as the controller (a gate it launched,
-// or programme.cjs run with --controller), the gate sessions it launched, the gate-session records and
-// closes it ran, and the sessions it archived. Calls the host refused (is_error) do not count.
+// or programme.cjs run with --controller), the gate sessions it launched, when a held one was sent its
+// go-ahead, and the sessions it archived. Calls the host refused (is_error) do not count.
 //
 // Rows Claude Code copied from another chat do not count:
 // - a file copy (the desktop app's Fork, /btw and forked side sessions) keeps the other chat's sessionId;
 // - a branch rewrites sessionId and writes forkedFrom on every copied row;
 // - a continuation under a new id (the desktop app's rewind of a chat, or a CLI resume with
 //   --fork-session) rewrites sessionId and names the old id in requestSessionId on assistant rows. The
-//   rows do not say which it was, so they count as this chat's own unless the old chat went on after
-//   this one began (accepted gap: a --fork-session copy counts until the old chat next goes on).
+//   rows do not say which it was, so they count as this chat's own unless a chat they name went on after
+//   this one began; then none of them counts. Accepted gaps, one wrong stop of one chat each: a terminal
+//   `/fork` or --fork-session copy, or a desktop side chat the owner rewinds, counts while the
+//   controller's chat idles; such a copy in another project folder or worktree counts for good, because
+//   the old transcript is not beside it.
 // A resume after a restart, and a compaction, keep the session id, so those rows are the chat's own.
 function scanTranscript(file, sessionId, nowMs = Date.now()) {
-  const out = { controller: false, launches: [], recorded: new Map(), closed: new Set(), archived: [] };
+  const out = { controller: false, launches: [], archived: [] };
   const size = fs.statSync(file).size;
   if (size > TRANSCRIPT_MAX_BYTES) throw Object.assign(new Error('too large'), { note: 'this session\'s transcript is too large to scan' });
   const lines = fs.readFileSync(file, 'utf8').split('\n');
@@ -130,7 +144,7 @@ function scanTranscript(file, sessionId, nowMs = Date.now()) {
   let beganMs = null;
   for (const line of lines) {
     const began = beganMs === null && line.includes('"type":"assistant"') && line.includes(sessionId) && !line.includes('"requestSessionId"');
-    if (!began && !/start_session|Started session|archive_session|gate-session|--controller|"is_error":true/.test(line)) continue;
+    if (!began && !/start_session|Started session|archive_session|SendMessage|send_message|--controller|"is_error":true|\\"success\\":\s*false/.test(line)) continue;
     let row;
     try { row = JSON.parse(line); } catch { continue; }
     if (!row || row.isSidechain || row.forkedFrom !== undefined || (typeof row.sessionId === 'string' && row.sessionId !== sessionId)) continue;
@@ -148,35 +162,33 @@ function scanTranscript(file, sessionId, nowMs = Date.now()) {
     }
   }
   const { parseBrief, declaredGate } = require('./toolkit-gate-route.cjs');
-  const elsewhere = new Map();
+  const copied = [...new Set(calls.map(call => call.from).filter(Boolean))].some(from => wentOn(file, from, beganMs ?? nowMs));
   for (const call of calls) {
-    if (errors.has(call.id)) continue;
-    if (call.from) {
-      if (!elsewhere.has(call.from)) elsewhere.set(call.from, wentOn(file, call.from, beganMs ?? nowMs));
-      if (elsewhere.get(call.from)) continue;
-    }
+    if (errors.has(call.id) || (call.from && copied)) continue;
     const name = String(call.name || '');
     const input = call.input && typeof call.input === 'object' ? call.input : {};
     const age = Number.isFinite(call.at) ? nowMs - call.at : Infinity;
     if (/(?:^|__)start_session$/.test(name)) {
-      // The brief as the started session reads it; a proposal nobody started is not a launch.
-      const gate = declaredGate(parseBrief([input.context === 'fork' ? null : input.background, input.prompt].filter(text => typeof text === 'string').join('\n\n')));
-      const started = /\(session_id: (local_[0-9a-f-]{36})\b/.exec(results.get(call.id) || '');
+      // The brief as the started session reads it. A proposal nobody started is not a launch, nor is a
+      // cloud start, whose result names no session of this app (accepted gap).
+      const brief = [input.context === 'fork' ? null : input.background, input.prompt].filter(text => typeof text === 'string').join('\n\n');
+      const gate = declaredGate(parseBrief(brief));
+      const started = /\(session_id: (local_[0-9a-f-]{36})(?:, name: ([^)\n]+))?/.exec(results.get(call.id) || '');
       if (!gate || !started) continue;
       out.controller = true;
-      if (age <= LAUNCH_WINDOW_MS && CLAUDE_SESSION.test(started[1])) out.launches.push({ session: started[1], gate, title: oneLine(input.title) });
+      if (CLAUDE_SESSION.test(started[1])) out.launches.push({ session: started[1], gate, title: oneLine(input.title), names: [started[1], started[2], input.title].filter(Boolean), held: heldBrief(brief), age });
+    } else if (/(?:^|__)(?:SendMessage|send_message)$/.test(name)) {
+      if (/^\s*\{"success":\s*false/.test(results.get(call.id) || '')) continue;
+      const target = messageTarget(name, input);
+      // The first message after the launch is the go-ahead, and the day to record in starts there.
+      for (const launch of out.launches) if (launch.held && target && launch.names.includes(target)) Object.assign(launch, { held: false, age });
     } else if (/(?:^|__)archive_session$/.test(name)) {
       if (age <= ARCHIVE_WINDOW_MS && CLAUDE_SESSION.test(String(input.session_id))) out.archived.push(input.session_id);
-    } else if (/^(?:Bash|PowerShell)$/.test(name) && typeof input.command === 'string' && /programme\.cjs/.test(input.command)) {
-      const command = input.command;
-      if (!out.controller && runsAsController(name, command)) out.controller = true;
-      if (!/\sgate-session\b/.test(command)) continue;
-      const assignment = flagValue(command, '--assignment');
-      const session = flagValue(command, '--host-session');
-      if (assignment && session) out.recorded.set(session, assignment);
-      if (assignment && /\s--closed\b/.test(command)) out.closed.add(assignment);
+    } else if (!out.controller && /^(?:Bash|PowerShell)$/.test(name) && typeof input.command === 'string' && runsAsController(name, input.command)) {
+      out.controller = true;
     }
   }
+  out.launches = out.launches.filter(launch => launch.age <= LAUNCH_WINDOW_MS);
   return out;
 }
 
@@ -207,10 +219,11 @@ const FORMAT_NOTE = 'the Claude desktop app\'s session files are not in the form
 
 // Sessions this one started that look finished: not archived, every pull request merged or closed, the
 // last turn's summary current, and nothing waiting on the owner. A session with no pull request is left
-// to the programme's CLOSE_DUE finding and never guessed.
+// to the programme's CLOSE_DUE finding and never guessed. Also which of them are archived, and which
+// went on past their first turn.
 function finishedSideSessions(self, env, deps) {
   const files = sessionFiles(env, deps);
-  const none = note => ({ due: [], archived: new Set(), note });
+  const none = note => ({ due: [], archived: new Set(), movedOn: new Set(), note });
   if (files.length > SESSION_FILES_MAX) return none(`there are over ${SESSION_FILES_MAX} desktop session files, so finished side sessions were not checked`);
   const ownFile = files.find(file => path.basename(file) === `${self}.json`);
   if (!ownFile) return none('this session\'s own file was not found among the Claude desktop app\'s session files, so finished side sessions were not checked');
@@ -219,6 +232,7 @@ function finishedSideSessions(self, env, deps) {
   if (own?.sessionId !== self || typeof own.isArchived !== 'boolean' || !Number.isFinite(own.createdAt)) return none(FORMAT_NOTE);
   const due = [];
   const archived = new Set();
+  const movedOn = new Set();
   for (const file of files) {
     if (file === ownFile) continue;
     // A file last written before this session started cannot be a session it started.
@@ -231,6 +245,8 @@ function finishedSideSessions(self, env, deps) {
     if (doc?.spawnedFrom?.sessionId !== self) continue;
     if (typeof doc.isArchived !== 'boolean' || (doc.prs !== undefined && !Array.isArray(doc.prs)) || !CLAUDE_SESSION.test(String(doc.sessionId))) return none(FORMAT_NOTE);
     if (doc.isArchived) archived.add(doc.sessionId);
+    // Past its first turn: a second turn ended, or a message came after the first one did.
+    if (doc.completedTurns >= 2 || (doc.completedTurns >= 1 && doc.latestUserFrameAt > doc.lastTurnEdgeAt)) movedOn.add(doc.sessionId);
     // autoArchiveExempt: the owner asked the app to keep this session.
     if (doc.isArchived || doc.autoArchiveExempt === true || !Array.isArray(doc.prs) || !doc.prs.length) continue;
     if (doc.prs.some(pr => !PR_STATES.has(pr?.state))) return none(FORMAT_NOTE);
@@ -243,7 +259,7 @@ function finishedSideSessions(self, env, deps) {
     if (!(Number(doc.lastTurnEdgeAt) >= Number(doc.latestUserFrameAt || 0))) continue;
     due.push({ session: doc.sessionId, title: oneLine(doc.spawnedFrom.title || doc.title), prs: doc.prs.map(pr => Number(pr.prNumber)).filter(Number.isInteger) });
   }
-  return { due, archived, note: null };
+  return { due, archived, movedOn, note: null };
 }
 
 // ---- the owed list ---------------------------------------------------------------------------------
@@ -265,7 +281,7 @@ function startRefresh({ root, repository, cache, cacheModule, env, deps }) {
   } catch { return false; }
 }
 
-function owedList({ repository, transcript, cache, refreshing = false, self, env, deps }) {
+function owedList({ repository, transcript, cache, cacheModule, refreshing = false, self, env, deps }) {
   const state = require(path.join(SCRIPTS, 'programme-state.cjs'));
   const command = args => require('./toolkit-user-state.cjs').programmeCommand(args, { userHome: deps.home });
   const attention = command('attention');
@@ -289,24 +305,30 @@ function owedList({ repository, transcript, cache, refreshing = false, self, env
     }
   }
   let archived = new Set();
+  let movedOn = new Set();
   if (self) {
     const side = finishedSideSessions(self, env, deps);
-    archived = side.archived;
+    ({ archived, movedOn } = side);
     if (side.note) notes.push(side.note);
     for (const entry of side.due) {
       items.push({ key: `side:${entry.session}`, section: 'side',
         text: `${entry.title || '(no title)'}: session_id ${entry.session}${entry.prs.length ? `, PR ${entry.prs.map(n => `#${n}`).join(', ')} merged or closed` : ''}` });
     }
   }
-  if (transcript) {
+  const owing = transcript && (transcript.launches.length || transcript.archived.length);
+  const recorded = owing ? cacheModule.readGateSessions(repository, deps) : [];
+  if (recorded === null) notes.push('the gate sessions recorded on this computer could not be read, so gate launches and closes were not checked');
+  else if (transcript) {
     for (const launch of transcript.launches) {
-      // A launch whose session is already archived owes no launch record any more.
-      if (transcript.recorded.has(launch.session) || archived.has(launch.session)) continue;
+      // A session still held at its first turn owes no record yet, and one already archived none any more.
+      if ((launch.held && !movedOn.has(launch.session)) || archived.has(launch.session)) continue;
+      if (recorded.some(record => record.sessions.includes(cacheModule.gateSessionHash(launch.session)))) continue;
       items.push({ key: `record:${launch.session}`, section: 'record', text: `${launch.gate} "${launch.title || '(no title)'}": session_id ${launch.session}` });
     }
-    for (const session of transcript.archived) {
-      const assignment = transcript.recorded.get(session);
-      if (!assignment || transcript.closed.has(assignment)) continue;
+    // Only an assignment whose current session was archived owes a close, not one that went on in another.
+    const gone = new Set(transcript.archived.map(session => cacheModule.gateSessionHash(session)));
+    for (const { assignment, sessions, closed } of recorded) {
+      if (closed || !gone.has(sessions.at(-1))) continue;
       items.push({ key: `closed:${assignment}`, section: 'closed', text: `assignment ${assignment} (its session was archived)` });
     }
   }
@@ -318,13 +340,14 @@ const CLOSED = '--issue <n> --assignment <id> --closed';
 const SECTIONS = Object.freeze({
   findings: { title: 'Findings due', step: command => `Answer each as the parent's holder: fix it, or run ${command('ack --finding <id> --next "<step>"')} or ${command('dispose --finding <id> --reason "<why>"')} (${command('attention')} lists them).` },
   close: { title: 'Gate sessions due to close', step: command => `Run ${command('attention')} for each session, archive it with the app's archive_session tool (never this session), then run ${command(`gate-session ${CLOSED}`)}.` },
-  side: { title: 'Finished side sessions, not archived', step: () => 'Archive each with the app\'s archive_session tool once its report is stored, or say in your reply why it stays open.' },
-  record: { title: 'Gate launches with no gate-session record', step: command => `Record each: ${command('gate-session --issue <n> --assignment <id> --host claude-code --host-session <session_id>')}. If it answers STALE_ASSIGNMENT, the assignment predates session records: say so in your reply.` },
+  side: { title: 'Finished side sessions, not archived', step: () => 'Archive each with the app\'s archive_session tool once its report is stored; one whose work goes on stays open, with no message about it.' },
+  record: { title: 'Gate launches with no gate-session record', step: command => `Record each: ${command('gate-session --issue <n> --assignment <id> --host claude-code --host-session <session_id>')}. If it answers STALE_ASSIGNMENT, the assignment predates session records and needs nothing more.` },
   closed: { title: 'Archived gate sessions with no close record', step: command => `Record each: ${command(`gate-session ${CLOSED}`)}.` },
 });
 
 function reasonText(items, notes, command, cacheAge = null) {
-  const lines = ['Toolkit owed check: this turn leaves work owed. Do it now, or say in your reply why it waits.'];
+  // The owner reads none of this (INT-TK421-1365): a stop that changes nothing for them ends with no message.
+  const lines = ['Toolkit owed check: this turn leaves work owed. Do each owed item now, or record the reason it waits. If nothing needs the owner, end the turn with no message to them; write to the owner only for a step or decision that is theirs. Never repeat your last message or ask its question again.'];
   for (const [section, spec] of Object.entries(SECTIONS)) {
     const rows = items.filter(item => item.section === section);
     if (!rows.length) continue;
@@ -403,7 +426,7 @@ function check(input, deps = {}) {
   const cacheModule = require(path.join(SCRIPTS, 'programme-attention-cache.cjs'));
   const cache = cacheModule.readCache(repository, deps);
   const refreshing = startRefresh({ root, repository, cache, cacheModule, env, deps });
-  const owed = transcript ? owedList({ repository, transcript, cache, refreshing, self, env, deps }) : { items: [], notes: [], command: null };
+  const owed = transcript ? owedList({ repository, transcript, cache, cacheModule, refreshing, self, env, deps }) : { items: [], notes: [], command: null };
   owed.notes.unshift(...notes);
   const file = stateFile(sessionId, deps);
   const previous = readState(file);

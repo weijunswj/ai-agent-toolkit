@@ -20,7 +20,8 @@
 //                     one of them is known not to be the user typing, and records the run's session
 //                     mark, so a later process that resumes the session cannot answer. When the
 //                     check crashes, it still blocks nothing but gives one line inside a repository
-//                     naming the governed rules file (toolkit-governance-unavailable.cjs).
+//                     naming the governed rules file (toolkit-governance-unavailable.cjs). In the
+//                     desktop app it ends with ASKING_LINE, in any folder.
 // The gate module loads inside the guarded path, so a missing or broken module still holds in a
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
@@ -43,6 +44,27 @@ function readInput(text) {
 }
 
 const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in the session context that opens its transcript forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
+
+// How to ask the owner in the Claude desktop app. The failure it prevents: the app shows only a turn's
+// closing message in full and cuts text written earlier in the turn to one line, so a card opened in the
+// same turn as its context reaches the owner without it (25 November 2026, twice). Wording confirmed by
+// the owner. It is a note to the agent: no card is refused. The terminal and the IDE extensions show a
+// turn's text as it is written, so only the desktop app's own entry points get it; the host names the
+// entry point in CLAUDE_CODE_ENTRYPOINT. Cloud sessions and SSH sessions are left out until they are
+// checked live (an accepted gap).
+const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. A simple question may use the app\'s end-of-turn box in that turn. 3. A merge or three or more choices uses the question card, on your next turn. 4. A card holds only the question and its choices, clear alone, with "(my pick)" on one. 5. Never write the context and open a card in the same turn: the app cuts it short. Toolkit\'s exact merge card keeps its own text.';
+const DESKTOP_APP = /^claude-desktop(?:-3p)?$/;
+const asksHere = environment => DESKTOP_APP.test(String(environment.CLAUDE_CODE_ENTRYPOINT || ''));
+// The host's limit on one hook's session-start text (gate.SESSION_TEXT_LIMIT), spelled out because the
+// gate module may be what failed to load. Text over it is lost, so the governance text goes first.
+const HOST_TEXT_LIMIT = 10000;
+
+// Called for a computer's session start only, never for a cloud session's.
+function withAskingLine(output, environment) {
+  if (!asksHere(environment)) return output;
+  const text = [output.hookSpecificOutput?.additionalContext, ASKING_LINE].filter(Boolean).join('\n\n');
+  return Buffer.byteLength(text) > HOST_TEXT_LIMIT ? output : { ...output, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } };
+}
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
@@ -80,8 +102,9 @@ function respond(event, input, options = {}) {
   // The bridge hook may be fast-forwarding the Toolkit checkout this hook runs from at this same
   // session start: the whole session-start read runs as a reader, so no move runs during it.
   if (event === 'SessionStart' && !cloud) {
-    const read = whileReading(options.environment || process.env, () => respondSteady(event, input, options));
-    return read.steady ? read.value : { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: TREE_MOVING } };
+    const environment = options.environment || process.env;
+    const read = whileReading(environment, () => respondSteady(event, input, options));
+    return withAskingLine(read.steady ? read.value : { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: TREE_MOVING } }, environment);
   }
   return respondSteady(event, input, options);
 }
@@ -147,7 +170,9 @@ function respondSteady(event, input, options) {
     } else {
       // The catch-up moves the checkout first, so the governance line reads the moved tree.
       const caughtUp = catchUpLine(fresh, options);
-      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude' })].filter(Boolean).join('\n');
+      const beside = [caughtUp ? `${caughtUp}\n` : '', asksHere(options.environment || process.env) ? `\n\n${ASKING_LINE}` : ''].join('');
+      const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(beside, 'utf8');
+      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude', limit })].filter(Boolean).join('\n');
     }
     return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch (error) {
@@ -257,4 +282,4 @@ function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'ut
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, STATE_CHANGING_TOOLS, TREE_MOVING, exportHostSession, respond, main });
+module.exports = Object.freeze({ EVENTS, ASKING_LINE, CLOUD_LINE, NEVER_OWNER, STATE_CHANGING_TOOLS, TREE_MOVING, exportHostSession, respond, main });

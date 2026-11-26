@@ -573,6 +573,13 @@ function cacheAttention(context, parentDoc, complete, deps = {}) {
   attentionCache.writeCache(context.repository, { complete, net }, deps);
 }
 
+// The gate session entry an accepted gate-session left, kept for the turn-end owed check as above.
+function cacheGateSession(context, args, doc, deps = {}) {
+  if (deps.rehearsal || (deps.originUrl && !deps.attentionDir)) return;
+  const entry = (doc?.private?.gate_sessions || []).find(item => item.assignment === args.assignment);
+  if (entry) attentionCache.writeGateSession(context.repository, { issue: args.issue, assignment: entry.assignment, session: entry.session, closed: Boolean(entry.closed_at) }, deps);
+}
+
 const TERMINAL = ['DONE', 'RETIRED'];
 
 // ack and dispose: only the session holding the parent document answers a finding. A dispose reason
@@ -1087,6 +1094,7 @@ const commands = {
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.recordGateSession(doc, {
       assignment: args.assignment, host: args.host || null, session: args['host-session'] || null, closed: Boolean(args.closed),
       replace: Boolean(args.replace), reason: args.reason || null, now: nowText(deps), controllerSessions }) });
+    cacheGateSession(context, args, result.doc, deps);
     return { ...writeResult('child', args.issue, result, writer),
       next_action: args.closed ? 'Controller: the next pass resolves its CLOSE_DUE finding' : 'Controller: once the gate is finished and its report stored, archive its session and run gate-session --closed' };
   },

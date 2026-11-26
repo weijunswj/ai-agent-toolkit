@@ -32,7 +32,7 @@
       "script": "repo/scripts/toolkit-governance-hook.cjs",
       "rules": ["merge-hold", "push-floor", "issue-closure", "owner-only", "gate-routes"],
       "events": {
-        "SessionStart": "Session start: this chat needs governance on or off and the governed rules before its first step, and again after compaction erases them.",
+        "SessionStart": "Session start: this chat needs governance on or off, the governed rules and (in the desktop app) how to ask the owner before its first step, and again after compaction erases them.",
         "UserPromptSubmit": "Turn start: only the owner's own message carries a merge approval or a governance answer.",
         "PreToolUse": "Before the tool runs: a merge, push, closure, owner-only answer, user-state edit or off-route gate write is refused before it happens.",
         "PostToolUse": "Right after AskUserQuestion returns: the owner's tap on a Toolkit card is recorded from that card's own answer."
@@ -87,7 +87,7 @@
       "rules": ["gate-routes"],
       "events": {
         "PreToolUse": "Before a start_session call runs: a gate brief missing its Gate, Route or Assignment line, or a launch off the route's model and effort, is refused before the session starts.",
-        "PostToolUse": "Right after a gate start returns: the next steps (effort raise, assignment record) need that call's own session id."
+        "PostToolUse": "Right after a gate start returns: the next steps (effort raise, assignment record, wake) need that call's own session id."
       }
     },
     {

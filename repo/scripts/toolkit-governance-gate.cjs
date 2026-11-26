@@ -1529,15 +1529,16 @@ class ToolGate {
 
 // `refresh` is this session start's own refresh result (startSession's onRefresh), so a "couldn't check
 // governance" line names why that read failed.
-function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null, host = null } = {}) {
+function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null, host = null, limit = SESSION_TEXT_LIMIT } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   // Toolkit runs no scheduled tasks on a computer any more (the cloud sweep does that work), so the
   // session line reads no task registry and names no computer task.
-  return verdictLine(verdict, registryOptions, programmeDeps, refresh, host);
+  return verdictLine(verdict, registryOptions, programmeDeps, refresh, host, limit);
 }
 
-// `host` is the app the calling entry point runs in, for the permissions line (permissionsLine).
-function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, host = null) {
+// `host` is the app the calling entry point runs in, for the permissions line (permissionsLine);
+// `limit` is the room the calling hook leaves for this text.
+function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, host = null, limit = SESSION_TEXT_LIMIT) {
   const state = verdict.state;
   if (verdict.pending) return verdict.pending.text;
   if (verdict.reason === 'unavailable') return unavailableText(causeOf(state, refresh));
@@ -1554,7 +1555,7 @@ function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, ho
   return fitLines(checkpoints, (kept, leftOut) => {
     const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
     return `${[decidedLine(state, refresh), ...finish, ...permissionsLine(state, programmeDeps, host), ...lines, ...kept, ...more].join(' ')}${rules}`;
-  });
+  }, limit);
 }
 
 // One line at session start, in a governed repository, while this computer's Toolkit permission lines

@@ -108,6 +108,68 @@ test('cloud sessions are not asked about an undecided repository and write no go
   writesNothingIn(repo);
 });
 
+// The Claude desktop app shows only a turn's closing message in full: on 25 November 2026 the owner saw
+// two question cards whose context, written in the same turn, was cut to one line.
+test('the desktop app\'s session start says how to ask the owner, governance on, off, undecided or no repository, on every source', (t) => {
+  const ctx = scratch(t);
+  const seed = require('./support/governance-observations.cjs').seedMerged;
+  const repo = (name, answer) => { const made = gitRepo(ctx, name, { remote: `https://github.com/example-owner/${name}.git` }); if (answer) seed(made, answer, { registryOptions: ctx.options }); return made; };
+  const folders = { on: repo('on', 'enable'), off: repo('off', 'disable'), undecided: repo('undecided') };
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  const start = (cwd, environment, source = 'startup', options = {}) => claudeHook.respond('SessionStart', { cwd, session_id: 's1', source }, { registryOptions: ctx.options, refreshBinding: () => {}, environment, ...options }).hookSpecificOutput?.additionalContext || '';
+  const desktop = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' };
+  const words = [
+    'Asking the owner (the Claude desktop app; this stands over your own notes and memories):',
+    '1. Put the full context, options and your pick in your closing message and end the turn.',
+    '2. A simple question may use the app\'s end-of-turn box in that turn.',
+    '3. A merge or three or more choices uses the question card, on your next turn.',
+    '4. A card holds only the question and its choices, clear alone, with "(my pick)" on one.',
+    '5. Never write the context and open a card in the same turn: the app cuts it short.',
+    'Toolkit\'s exact merge card keeps its own text.',
+  ].join(' ');
+  for (const [name, cwd] of Object.entries({ ...folders, plain })) {
+    const text = start(cwd, desktop);
+    assert.equal(text.split(words).length, 2, `${name}: the line, once`);
+    assert.equal(text, `${start(cwd, {})}\n\n${words}`, `${name}: nothing else changes`);
+  }
+  // Every source and entry point, with the governance text itself left out.
+  const quiet = { gate: { SESSION_TEXT_LIMIT: gate.SESSION_TEXT_LIMIT, startSession() {}, sessionIdOf: gate.sessionIdOf, sessionLine: () => '' }, repoCatchUp: { catchUp: () => null } };
+  for (const source of ['startup', 'resume', 'clear', 'compact']) assert.equal(start(plain, desktop, source, quiet), words, source);
+  assert.equal(start(plain, { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop-3p' }, 'startup', quiet), words);
+  // Only the desktop app: the terminal, the IDE extensions, headless runs, and a cloud session (a
+  // Projects thread included) never get it.
+  for (const environment of [{}, ...['cli', 'claude-vscode', 'sdk-cli', 'sdk-ts', 'remote', 'remote_desktop', 'ssh-remote', 'not-claude-desktop', 'claude-desktopx', ''].map(CLAUDE_CODE_ENTRYPOINT => ({ CLAUDE_CODE_ENTRYPOINT }))]) {
+    assert.equal(start(plain, environment, 'startup', quiet), '', JSON.stringify(environment));
+  }
+  assert.doesNotMatch(start(plain, { ...desktop, CLAUDE_CODE_REMOTE: 'true' }), /Asking the owner/);
+  // It survives a failed governance check, and it refuses no card.
+  const broken = { sessionLine() { throw new Error('boom'); }, startSession() {}, insideRepository: gate.insideRepository };
+  assert.match(start(folders.on, desktop, 'startup', { gate: broken }), /\n\nAsking the owner/);
+  assert.equal(start(plain, desktop, 'startup', { gate: broken }), words);
+  const card = { tool_name: 'AskUserQuestion', tool_use_id: 'toolu_1', cwd: folders.on, session_id: 's1', tool_input: { questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red', description: 'a' }, { label: 'Blue', description: 'b' }] }] } };
+  assert.deepEqual(claudeHook.respond('PreToolUse', card, { registryOptions: ctx.options, environment: desktop }), {});
+  for (const event of ['UserPromptSubmit', 'PostToolUse']) {
+    assert.doesNotMatch(JSON.stringify(claudeHook.respond(event, { ...card, prompt: 'go' }, { registryOptions: ctx.options, environment: desktop })), /Asking the owner/, event);
+  }
+});
+
+test('the line never pushes a session start past the host limit: the governance text makes room, and the rules come first', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const desktop = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' };
+  let limit = null;
+  const start = length => claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { environment: desktop, repoCatchUp: { catchUp: () => 'Caught up.' },
+    gate: { SESSION_TEXT_LIMIT: gate.SESSION_TEXT_LIMIT, startSession() {}, sessionIdOf: gate.sessionIdOf, sessionLine(_cwd, given) { limit = given.limit; return 'x'.repeat(Math.min(length, 20000)); } } }).hookSpecificOutput.additionalContext;
+  const fits = start(100);
+  const line = fits.split('\n\n').at(-1);
+  assert.match(line, /^Asking the owner/);
+  assert.equal(limit, gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`Caught up.\n\n\n${line}`), 'the governance text is told what is left');
+  assert.ok(Buffer.byteLength(start(limit)) <= gate.SESSION_TEXT_LIMIT);
+  assert.equal(start(limit).endsWith(line), true, 'a governance text of exactly that size still has the line');
+  assert.equal(start(limit + 1).includes('Asking the owner'), false, 'one that does not fit keeps the governance text whole instead');
+});
+
 // A Claude Projects thread starts in /home/user, outside any repository, with each repository cloned
 // directly under it; without this scan it gets no governed rules once AGENTS.md carries none.
 test('a cloud session started above its repositories gets the governed rules once, for the enabled ones only', (t) => {
