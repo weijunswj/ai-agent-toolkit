@@ -45,7 +45,12 @@ const find = (f, live, extra = []) => {
 test('build makes the train in a temporary worktree and leaves the caller\'s checkout on its own branch', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  // The 27 November case: a clean primary checkout on its own branch was left on the train branch.
   f.git('switch', '--quiet', '-c', 'my-work', f.main);
+  const clean = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }, 'clean.json'), '--branch', 'toolkit-train/clean', '--main', 'main', '--live', f.noTrains], f.repo, f.opts);
+  assert.equal(clean.ok, true, JSON.stringify(clean));
+  assert.equal(f.git('rev-parse', '--abbrev-ref', 'HEAD'), 'my-work', 'a clean checkout stays on its branch');
+  // Unsaved files stay as they were too.
   f.write('notes.txt', 'unsaved\n');
   const { result } = built(f, [f.member(1, one)]);
   assert.equal(result.ok, true, JSON.stringify(result));

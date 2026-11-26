@@ -328,7 +328,7 @@ function find(cwd, options, maxMembers) {
   if (!members.length || (members.length < 2 && !tip && !running)) {
     return { ok: true, written: false, ready: members.map(member => `#${member.pr}`), skipped, main_ci: running ? 'running' : 'done',
       next: members.length ? [`merge #${members[0].pr} alone: one ready pull request makes no train while nothing is landing`]
-        : later.length ? [`train #${tip.pr} is full: ${later.join(', ')} start${later.length === 1 ? 's' : ''} the next train behind it once it lands (find --next-train)`] : [] };
+        : later.length ? [`train #${tip.pr} is full: ${later.join(', ')} start${later.length === 1 ? 's' : ''} the next train behind it (find --next-train)`] : [] };
   }
   if (!options.out) throw new Error('--out is required');
   if (open) {
