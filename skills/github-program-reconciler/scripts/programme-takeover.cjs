@@ -71,6 +71,7 @@ const VOIDS_RECORD = new Set(['OLD_WRITER_ACTIVE', FENCE_LOST, 'ACCOUNT_MISMATCH
 // Why governance does not let a takeover write here; a dry run still reports and prints the record line.
 const GOVERNANCE_CODES = new Set(['GITHUB_GOVERNANCE_OFF', 'GOVERNANCE_STATE_UNAVAILABLE', 'BINDING_DISABLED', 'BINDING_MISSING', 'BINDING_INVALID']);
 const STORE_CODES = new Set(['STATE_STORE_UNVERIFIED', 'STORE_NOT_PRIVATE']);
+const STORE_HANDOFF = 'This session cannot use the evidence store, so it reads no programme state and claims nothing: run controller takeover in a session that can, such as one on the owner\'s computer, and continue there.';
 
 const usage = message => new ProgrammeError('USAGE', message);
 const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase() && String(a || '') !== '';
@@ -292,6 +293,33 @@ function versionsOf({ get, main, chat = null, repository = null, branch = 'main'
     refresh, chat: loaded, ran, main: { version: mainVersion, commit: main }, sweep };
 }
 
+// ---- the controller settings ----------------------------------------------------------------
+
+// The controller settings this repository keeps in its evidence store (toolkit-controller-settings.cjs),
+// read with one request: { state, text }, a fact the controller acts on at step 5, never a hold. The
+// text names no device or folder, so the done line stays safe to post.
+function settingsOf(get, binding) {
+  const store = binding.store || {};
+  if (store.kind !== 'github' || !store.repository) return { state: 'unread', text: 'not read here (the evidence store is not on GitHub)' };
+  const file = `state/${binding.repository}/controller-settings.json`;
+  const answer = readOnce(get, `repos/${store.repository}/contents/${file}?ref=${encodeURIComponent(store.branch || 'main')}`);
+  if (answer.status === 404) return { state: 'none', text: 'none saved yet; step 5 sets them on the owner\'s word' };
+  const text = fileText(answer);
+  if (text === null) return { state: 'unread', text: `not read (${unread(answer.status)})` };
+  const settings = require('../../../repo/scripts/toolkit-controller-settings.cjs');
+  let value;
+  try {
+    const profiles = Object.keys(JSON.parse(fs.readFileSync(path.join(TOOLKIT_ROOT, 'repo', 'contracts', 'controller-kernel', 'stack-registry-v3.json'), 'utf8')).profiles || {});
+    value = settings.readSettings(Buffer.from(text, 'utf8'), profiles);
+  } catch (error) {
+    if (error.code !== 'SETTINGS_INVALID') throw error;
+    return { state: 'unreadable', text: `not readable: ${error.message.replace(/\.$/, '')}; step 5 sets them again on the owner's word` };
+  }
+  if (!same(value.repository, binding.repository)) return { state: 'unreadable', text: `saved for ${value.repository}, not this repository, so not used` };
+  const gates = Object.entries(value.placement.gates || {}).sort(([a], [b]) => a.localeCompare(b)).map(([gate, place]) => `, ${gate} ${place}`).join('');
+  return { state: 'set', text: `stack ${value.stack_profile}, ${value.live_lanes} live lane${value.live_lanes === 1 ? '' : 's'}, gates ${value.placement.default}${gates}` };
+}
+
 // ---- one takeover ---------------------------------------------------------------------------
 
 class TakeoverRun {
@@ -490,7 +518,7 @@ class TakeoverRun {
     const branch = repo.json?.default_branch || 'main';
     const get = path => this.get(path);
     const toolkit = readToolkit(get);
-    const facts = { login, permission, branch, holds, stop: null, oldName: null, fence: null, attention: null, appointment: false, toolkit, sweep: this.sweep(branch),
+    const facts = { login, permission, branch, holds, stop: null, oldName: null, fence: null, attention: null, appointment: false, toolkit, sweep: this.sweep(branch), settings: settingsOf(get, this.binding),
       versions: versionsOf({ get, main: toolkit.main, chat: this.input.chat, repository: this.repository, branch, git: this.git }) };
     if (this.writer.prefix !== this.prefix) hold('ROLE_REFUSED', `A lane controller (${this.writer.prefix}) never holds the parent document.`);
     if (!login || permission === 'read') {
@@ -780,7 +808,7 @@ class TakeoverRun {
     return {
       schema: SCHEMA, mode, ready: !facts.holds.length, repository: { name: this.repository, default_branch: facts.branch },
       governance: { state: 'ENABLED' }, account: { login: facts.login || null, permission: facts.permission },
-      toolkit: { main: facts.toolkit.main, controller_blob: facts.toolkit.controller_blob }, versions: facts.versions, sweep: facts.sweep, attention: facts.attention,
+      toolkit: { main: facts.toolkit.main, controller_blob: facts.toolkit.controller_blob }, versions: facts.versions, sweep: facts.sweep, settings: facts.settings, attention: facts.attention,
       parent: { issue: this.parent, epoch: fence?.epoch ?? null, held: Boolean(fence?.holder_session), holder_prefix: fence?.holder_prefix ?? null, holder: facts.oldName,
         next_epoch: fence ? fence.epoch + 1 : null },
       stop: !fence || facts.appointment ? null : { proven: Boolean(stop) && !this.stopHold(stop, this.clock()), by: this.input.ownerStop ? 'owner' : 'quiet',
@@ -844,7 +872,7 @@ class TakeoverRun {
     const handover = require('./programme-handover.cjs').handoverUrl(this.binding.store, this.parent);
     return [`Takeover done: ${this.writer.session} holds #${this.parent} at epoch ${result.parent.epoch} (was ${facts.fence.epoch}${facts.oldName ? `, ${facts.oldName}` : ''})`,
       `record ${result.record.record_id} ${result.record.url}`, `Toolkit main ${short(facts.toolkit.main)}, Controller blob ${short(facts.toolkit.controller_blob)}`,
-      facts.versions.line, `latest sweep run: ${facts.sweep.status}`, `handover file ${handover}`, `next: ${this.input.next}`].join('; ') + '.';
+      facts.versions.line, `latest sweep run: ${facts.sweep.status}`, `controller settings: ${facts.settings.text}`, `handover file ${handover}`, `next: ${this.input.next}`].join('; ') + '.';
   }
 }
 
@@ -871,7 +899,8 @@ function openTakeover(args, deps, openContext) {
   const input = takeoverInput(args);
   try { return { ...openContext(args, deps), input }; }
   catch (error) {
-    const closed = STORE_CODES.has(error.code) ? new ProgrammeError('STORE_UNREACHABLE', error.message) : GOVERNANCE_CODES.has(error.code) ? error : null;
+    // A session that cannot reach the store (a cloud one, often) claims nothing and says where to go on.
+    const closed = STORE_CODES.has(error.code) ? new ProgrammeError('STORE_UNREACHABLE', `${error.message} ${STORE_HANDOFF}`) : GOVERNANCE_CODES.has(error.code) ? error : null;
     if (!closed) throw error;
     if (args.apply) throw closed;
     return { closed, input, transport: deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }) };
@@ -887,7 +916,7 @@ function closedReport({ closed, input, transport }, git) {
   const line = toolkit.controller_blob ? recordLine({ input, toolkit, old }) : null;
   const holds = [{ code: closed.code, detail: closed.message }, ...(line ? [] : [{ code: 'TOOLKIT_UNREADABLE', detail: `Toolkit main or its CONTROLLER.md could not be read (${toolkit.reason}).` }])];
   return { schema: SCHEMA, mode: 'dry-run', ready: false, repository: null, governance: { state: store ? 'ENABLED' : closed.details?.governance || 'UNREADABLE' }, account: null,
-    toolkit: { main: toolkit.main, controller_blob: toolkit.controller_blob }, versions: versionsOf({ get, main: toolkit.main, chat: input.chat, git }), sweep: null, attention: null, parent: null, stop: null,
+    toolkit: { main: toolkit.main, controller_blob: toolkit.controller_blob }, versions: versionsOf({ get, main: toolkit.main, chat: input.chat, git }), sweep: null, settings: null, attention: null, parent: null, stop: null,
     record: line && !store ? { line, ready: false, carrier: 'evidence store' } : null, holds, done_line: null };
 }
 
@@ -905,6 +934,7 @@ function formatTakeover(result) {
     ...(result.account ? [`Account: ${result.account.login || 'not read'} (${result.account.permission})`] : []),
     `Toolkit main ${result.toolkit.main || 'not read'}; CONTROLLER.md blob ${result.toolkit.controller_blob || 'not read'}`,
     `Versions: ${result.versions.line.slice('versions: '.length)}`,
+    ...(result.settings ? [`Controller settings: ${result.settings.text}`] : []),
     ...(result.sweep ? [`Latest sweep run: ${result.sweep.status}${result.sweep.url ? ` (${result.sweep.url})` : ''}`] : []),
     ...(parent?.epoch === null || !parent ? [] : [`Parent #${parent.issue}: epoch ${parent.epoch}, ${parent.held ? `held by ${parent.holder || `a ${parent.holder_prefix} controller no earlier record names`}` : 'held by nobody'}; a takeover makes it epoch ${parent.next_epoch}`]),
     ...(stop?.last_write ? [`Old controller's last own write: ${stop.last_write.what} at ${stop.last_write.at} (${stop.last_write.url})`] : []),
