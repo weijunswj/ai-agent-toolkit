@@ -439,6 +439,10 @@ const CLAUDE_SHIM_ROWS = [
   ['on, AGENTS.md holds only a governed copy: both go', 'ENABLED', `${BLOCK}\n`, `${CLAUDE_SHIM}\n`, [['AGENTS.md', 'block', 'TOOLKIT-GOVERNED-RULES'], ['CLAUDE.md', 'block', 'CLAUDE.SHIM']]],
   ['off, own AGENTS.md: replaced by the line', 'DISABLED', '# Mine\n', `${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'shim-block', 'CLAUDE.SHIM']]],
   ['off, no AGENTS.md: the block loads nothing, so it goes', 'UNDECIDED', null, `${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'block', 'CLAUDE.SHIM']]],
+  // G2 1543 L1: Claude Code ignores imports inside fenced code blocks, so a fenced line loads nothing
+  // and the block still has to become the line.
+  ['on, the line only inside a fenced code block: replaced by the line', 'ENABLED', '# Mine\n', `\`\`\`\n@AGENTS.md\n\`\`\`\n\n${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'shim-block', 'CLAUDE.SHIM']]],
+  ['on, the line inside a tilde fence: replaced by the line', 'ENABLED', '# Mine\n', `~~~md\n@AGENTS.md\n~~~\n\n${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'shim-block', 'CLAUDE.SHIM']]],
 ];
 for (const [label, state, agents, claude, expected] of CLAUDE_SHIM_ROWS) {
   test(`scan gap: a marker-wrapped CLAUDE.md is listed (governance ${label})`, t => {
@@ -456,7 +460,8 @@ test('scan gap: a CLAUDE.md that is a link, or holds no Toolkit block, is not na
   assert.deepEqual(w.of(w.scan(), 'repo').files, []);
   const root = path.join(w.folder, 'repo');
   fs.rmSync(path.join(root, 'CLAUDE.md'));
-  try { fs.symlinkSync(path.join(root, 'AGENTS.md'), path.join(root, 'CLAUDE.md')); } catch { return; }
+  // A file link needs the symbolic link privilege on Windows; without it the link half is skipped out loud.
+  try { fs.symlinkSync(path.join(root, 'AGENTS.md'), path.join(root, 'CLAUDE.md')); } catch (error) { t.skip(`a file link could not be made here (${error.code}), so the linked CLAUDE.md half did not run`); return; }
   const row = w.of(w.scan(), 'repo');
   assert.deepEqual([row.files, row.unproven], [[], []], 'a linked CLAUDE.md is left quietly, as a linked GEMINI.md is');
 });
