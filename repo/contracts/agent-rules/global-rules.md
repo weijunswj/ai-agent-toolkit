@@ -140,4 +140,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, a question-only card clear alone, "(my pick)" on one. Failing that, ask in one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, a question-only card clear alone, best option marked. Failing that, ask in one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
