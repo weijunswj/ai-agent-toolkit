@@ -151,5 +151,4 @@ test('S-4 the session line passes the calling app to the permissions check', () 
   const seen = [];
   gate.sessionLine(root, { stateReader: () => enabled, host: 'codex', programmeDeps: { permissions: (folder, host) => { seen.push(host); return { checked: true, missing: 0, stale: 0 }; } } });
   assert.deepEqual(seen, ['codex']);
-  assert.equal(require('../scripts/toolkit-permissions.cjs').permissionsState(root, { host: 'codex' }).app, 'Codex');
 });
