@@ -33,6 +33,7 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
   Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
   Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
+  Object.freeze({ group: 'Setup', type: ['toolkit memory tidy'], does: "Compare this repository's Claude memory notes with Toolkit. You see exactly what would change before anything does, keep everything is always an answer, and a backup comes first." }),
   Object.freeze({ group: 'Keys', type: ['toolkit env', 'toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
   Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Show this repository's governance choices, answered like setup toolkit: governance on or off, task auto-merge and permission blocks. Each change is one pull request for you to merge." }),
   Object.freeze({ group: 'Controller', type: ['controller takeover'], does: "Make this new chat the controller of the repository it is open in, where Toolkit's GitHub governance is on. It ends in one short status." }),
@@ -47,6 +48,7 @@ const ACTIONS = {
   'toolkit env': 'env',
   'toolkit show env': 'env',
   'controller takeover': 'takeover',
+  'toolkit memory tidy': 'memory',
 };
 // The governance question bank: the one governance entry. `setup governance` and `refresh governance`,
 // which Toolkit's own messages tell the user to say, open the same bank. `toolkit governance enable` and `disable`
@@ -141,6 +143,7 @@ const CONTEXT = Object.freeze({
       + 'Never answer the bank for the user.';
   },
   takeover: takeoverContext,
+  memory: () => "Follow the Memory tidy section of the toolkit-setup skill for the repository of the folder this chat is open in. Only that repository's controller runs it: in a gate, helper or launched session, say so in one line and stop.",
 });
 
 // The line for a message the user typed, or '' when it is not a typed command. `options` is where the

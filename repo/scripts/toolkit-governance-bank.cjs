@@ -125,7 +125,7 @@ function statusRow({ id, section, title, current, text = '', change = '', bound 
 // auto-merge. Everything else is a status row: what is set, or the Toolkit default the answer applies
 // (parallel CI shards by CI time, the evidence store, the App and permission commands, the copies
 // cleanup). Merge trains keep their stored value and are not asked.
-function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null }) {
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null, storeCheck = null }) {
   // Only a state read from the merged binding has words here; any other (GitHub could not be read)
   // gets the CLI's line to type it again, never a bank.
   if (!Object.hasOwn(STATE_LABEL, String(state.state))) throw new Error(`The governance bank cannot show the state ${state.state}.`);
@@ -200,6 +200,17 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     // No test list Toolkit can split (such as a Python suite): not applicable, with why; no shards= override.
     specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not applicable',
       text: `Toolkit can split only Node tests, and ${ciShards.usable.reason}. It looks again at the next refresh` }), required: { ready: true } });
+  } else if (governed && ciShards && ciShards.closed && Number.isInteger(ciShards.closed.number)) {
+    // A split the owner closed without merging (INT-TK421-1360): asked once, here; the answer to this
+    // bank is remembered on this computer (closed_split), so a later bank says so and asks nothing. No
+    // reply reopens it unless it says shards=yes.
+    const { number, url, answered } = ciShards.closed;
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered ? `Off: pull request #${number} was closed` : `Pull request #${number} closed without merging`,
+      text: answered ? `You closed ${url} without merging it and answered once; Toolkit does not ask again and adds no shards unless you say so`
+        : `You closed ${url} without merging it, so Toolkit asks once: shards=yes opens a new one, shards=never stops the offer, and any other reply keeps them off; your answer is remembered and this is not asked again`,
+      change: 'To add them, add shards=yes to your reply; shards=never stops the offer' }),
+    shards_default: 'not-now', other: 'shards=yes or shards=never in your reply', ...(answered ? {} : { closed_split: number }),
+    required: answered ? { ready: true } : { ready: false, step: 'answer once: shards=yes opens a new pull request, shards=never stops the offer, anything else keeps them off' } });
   } else if (ciShards && ciShards.measured?.unread && (governed || turnsOn || state.state === 'DISABLED')) {
     specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'CI time could not be read',
       text: `GitHub could not be read just now (${ciShards.measured.unread}), so Toolkit adds no shards and checks again at the next refresh`,
@@ -235,8 +246,14 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   if (governed && merged) {
     const parents = merged.parents || [];
     const checks = merged.required_checks;
-    specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: SET_IN, bound: `evidence store ${merged.store.repository}` }),
-      required: { ready: true }, other: STORE_MOVE });
+    // The bank's own read of the store, else its last background check (toolkit-governance-parts.cjs):
+    // one that cannot be used is not ready; none, or one GitHub could not read, keeps the row as the
+    // programme file sets it.
+    const parts = require('./toolkit-governance-parts.cjs');
+    const broken = parts.STORE_WHY[storeCheck?.state];
+    specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository,
+      text: broken ? `${SET_IN}, but at the last check it ${broken}, so programme records and evidence cannot be saved` : SET_IN, bound: `evidence store ${merged.store.repository}` }),
+    required: broken ? { ready: false, step: parts.STORE_STEP[storeCheck.state] } : { ready: true }, other: STORE_MOVE });
     if (parents.length) specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: parents.map(parent => `#${parent.issue}`).join(', '), text: BOUND,
       bound: `${parents.length === 1 ? 'parent' : 'parents'} ${parents.map(parent => `#${parent.issue}`).join(', ')}` }));
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: checks.length ? checks.join(', ') : 'none listed', text: BOUND,
