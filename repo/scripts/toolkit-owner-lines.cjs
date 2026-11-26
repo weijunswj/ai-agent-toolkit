@@ -61,6 +61,11 @@ const PLACES = Object.freeze({
   any: 'wherever the controller starts them',
 });
 const PLACE = `(?:${Object.values(PLACES).join('|')})`;
+// "This device", "my computer", "the machine" and "by Remote Control" are the device the controller works
+// from. The other computer words in PLACES are kinds of computer that may be different ones, so a line
+// naming one is the same place as another line only when both name the same kinds (computerKinds).
+const COMPUTER_KINDS = /\b(laptop|desktop|pc)\b/gi;
+const computerKinds = text => [...new Set((text.match(COMPUTER_KINDS) || []).map(word => word.toLowerCase()))].sort().join(' and ');
 const PLACEMENT = shape(`(?:all )?(?:the )?(?:gates run|gate work runs) (${PLACE})((?:; G[012] ${PLACE})*)(?: \\(([^()]+)\\))?`);
 const GATE_PLACE = new RegExp(`; (G[012]) (${PLACE})`, 'gi');
 // A folder in the brackets after a placement; a device there is read only when it is the settings' own.
@@ -251,16 +256,17 @@ const placementLabel = (standard, gates) => [standard, ...Object.keys(gates).sor
 const sameText = body => body.toLowerCase().replace(/\.$/, '');
 const sha = text => crypto.createHash('sha256').update(text).digest('hex');
 
-// The setting a whole line states, as { key, value, tail }, or null. `value` is how it is printed and
-// compared; `tail` is the device and folder a placement line names, or null.
+// The setting a whole line states, as { key, value, tail, computer, where }, or null. `value` is how it
+// is printed and compared; `tail` is the device and folder a placement line names, or null; `computer`
+// the kinds of computer a placement line names ('' for this device) and `where` its place words as written.
 function statedSetting(body, profiles, ownTail) {
   for (const pattern of LANES) {
     const lanes = pattern.exec(body);
-    if (lanes) return { key: 'live_lanes', value: String(NUMBER_WORDS[lanes[1].toLowerCase()] || lanes[1]), tail: null };
+    if (lanes) return { key: 'live_lanes', value: String(NUMBER_WORDS[lanes[1].toLowerCase()] || lanes[1]), tail: null, computer: '' };
   }
   for (const pattern of PROFILE) {
     const profile = pattern.exec(body);
-    if (profile && profiles.includes(profile[1])) return { key: 'stack_profile', value: profile[1], tail: null };
+    if (profile && profiles.includes(profile[1])) return { key: 'stack_profile', value: profile[1], tail: null, computer: '' };
   }
   const place = PLACEMENT.exec(body);
   if (!place) return null;
@@ -271,7 +277,7 @@ function statedSetting(body, profiles, ownTail) {
   }
   const tail = place[3] && !/^owner(?:, \d{4}-\d{2}-\d{2})?$/i.test(place[3]) ? place[3] : null;
   if (tail && tail !== ownTail.text && !FOLDER_ONLY.test(tail) && !(ownTail.device && tail.startsWith(`${ownTail.device}, `) && FOLDER_ONLY.test(tail.slice(ownTail.device.length + 2)))) return null;
-  return { key: 'placement', value: placementLabel(placeName(place[1]), gates), tail };
+  return { key: 'placement', value: placementLabel(placeName(place[1]), gates), tail, computer: computerKinds(`${place[1]}${place[2]}`), where: `${place[1]}${place[2]}` };
 }
 
 class OwnerLineLint {
@@ -337,7 +343,9 @@ class OwnerLineLint {
       }
       const same = sameText(body);
       if (overlaps.has(number)) {
-        if (!line.hold && blockSame.has(same)) add('repeats-block', `It is the same as line ${overlaps.get(number)} of Toolkit's block.`, { action: 'delete' });
+        // The heading hold counts here as for a settings line: "## Not in this project" turns it round.
+        if (!line.hold && !line.headingHold && blockSame.has(same)) add('repeats-block', `It is the same as line ${overlaps.get(number)} of Toolkit's block.`, { action: 'delete' });
+        else if (!line.hold && blockSame.has(same)) add('repeats-block', `It is the same as line ${overlaps.get(number)} of Toolkit's block, but ${line.headingHold}, so no fix is offered: read both.`);
         else add('repeats-block', `It shares most of its words with line ${overlaps.get(number)} of Toolkit's block, but ${blockSame.has(same) ? 'its place may matter' : 'is not the same line'}, so no fix is offered: read both, and trim what it repeats.`);
         continue;
       }
@@ -360,8 +368,12 @@ class OwnerLineLint {
     const current = this.#current(says.key);
     const isRendered = current && line.body === current.body;
     const first = stated.get(says.key);
-    if (first && first.value === says.value && first.tail === says.tail) {
+    if (first && first.value === says.value && first.tail === says.tail && first.computer === says.computer) {
       add('duplicate', `It says ${label} ${says.value} again (first on line ${first.number}).`, { action: 'delete' });
+      return;
+    }
+    if (first && first.value === says.value && first.tail === says.tail) {
+      if (!isRendered) add('conflicts-line', `It says ${label} ${says.value} ${says.where}, but line ${first.number} says ${first.where}: they may be two computers. Ask the owner which one stands; no fix is offered.`);
       return;
     }
     if (first) {
@@ -372,6 +384,12 @@ class OwnerLineLint {
     stated.set(says.key, { ...says, number: line.number });
     if (!current) { add('setting', `It states the ${label}, which belongs in the controller settings: set it there on the owner's word, then this line can be rendered from them.`); return; }
     if (isRendered) return;
+    // A kind of computer is the settings' device only where the line names that device too.
+    const device = says.key === 'placement' ? this.#settings.placement.device : null;
+    if (device && says.computer && !(says.tail === device || String(says.tail).startsWith(`${device}, `))) {
+      add('conflicts-setting', `It says ${label} ${says.value} ${says.where}, but the controller settings ${says.value === current.value ? '' : `say ${current.value} and `}name the device ${device}: it may be another computer. Ask the owner which one stands, or change the settings on the owner's word; no fix is offered.`);
+      return;
+    }
     const fix = { action: 'replace', with: `${line.bullet}${current.body}` };
     if (says.value === current.value && (!says.tail || says.tail === current.tail)) add('repeats-setting', 'It says what the controller settings already say; the settings line replaces it.', fix);
     else add('conflicts-setting', `It says ${label} ${says.value}${says.tail ? ` (${says.tail})` : ''}, but the controller settings say ${current.value}${says.tail && current.tail ? ` (${current.tail})` : ''}. Replace it with the settings line, or change the settings on the owner's word.`, fix);
@@ -450,7 +468,7 @@ function report(result, settings) {
   return lines;
 }
 
-const NEEDS_ATTENTION = new Set(['setting', 'conflicts-line']);
+const NEEDS_ATTENTION = new Set(['setting', 'conflicts-line', 'conflicts-setting']);
 
 function main(argv = process.argv.slice(2), { stdout = process.stdout, stderr = process.stderr, environment = process.env, root = path.resolve(__dirname, '..', '..') } = {}) {
   let options;
