@@ -131,10 +131,10 @@ test('S-3 a governed session start names out-of-date Toolkit permissions in one 
   const root = tmp();
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: false, root };
   const line = permissions => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps: { permissions } });
-  const outdated = line(() => ({ checked: true, host: 'claude', missing: 3, stale: 1 }));
+  const outdated = line(() => ({ checked: true, host: 'claude', app: 'Claude Code', missing: 3, stale: 1 }));
   assert.match(outdated, /Toolkit permissions: Claude Code's Toolkit permission lines on this computer are out of date \(3 missing, 1 old\)\. In your first reply, tell the user once, in one line, that saying `toolkit permissions` gives the one command that brings them up to date; nothing waits on it\./);
   assert.equal(outdated.split('Toolkit permissions:').length, 2, 'one line');
-  assert.match(line(() => ({ checked: true, host: 'codex', missing: 0, stale: 2 })), /Codex's Toolkit permission lines on this computer are out of date \(2 old\)/);
+  assert.match(line(() => ({ checked: true, host: 'codex', app: 'Codex', missing: 0, stale: 2 })), /Codex's Toolkit permission lines on this computer are out of date \(2 old\)/);
   for (const [label, permissions] of [['up to date', () => ({ checked: true, host: 'claude', missing: 0, stale: 0 })], ['not checked', () => ({ checked: false })], ['the check fails', () => { throw new Error('boom'); }]]) {
     assert.doesNotMatch(line(permissions), /Toolkit permissions:/, label);
   }

@@ -419,7 +419,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
 // How this computer's Toolkit permission lines for this app compare with what Toolkit would write:
-// { checked, host, missing, stale, update, remove }. Reads local files only, so the governance bank and the
+// { checked, host, app (its name for the owner), missing, stale, update, remove }. Reads local files only, so the governance bank and the
 // session-start line both use it.
 function permissionsState(root, { host = require('./agent-host-markers.cjs').detectAgentHost() === 'codex' ? 'codex' : 'claude' } = {}) {
   const owner = new PermissionBlocks();
@@ -442,7 +442,7 @@ function permissionsState(root, { host = require('./agent-host-markers.cjs').det
       stale += report.stale.length + report.stale_ask.length;
     }
   }
-  return { checked: true, host, missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
+  return { checked: true, host, app: host === 'codex' ? 'Codex' : 'Claude Code', missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
 }
 
 module.exports = Object.freeze({ PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });

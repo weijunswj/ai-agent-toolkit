@@ -1566,7 +1566,7 @@ function permissionsLine(state, deps = {}) {
     const found = (deps.permissions || (root => require('./toolkit-permissions.cjs').permissionsState(root)))(state.root);
     if (!found || found.checked !== true || !(found.missing > 0 || found.stale > 0)) return [];
     const what = [found.missing > 0 ? `${found.missing} missing` : '', found.stale > 0 ? `${found.stale} old` : ''].filter(Boolean).join(', ');
-    return [`Toolkit permissions: ${found.host === 'codex' ? 'Codex' : 'Claude Code'}'s Toolkit permission lines on this computer are out of date (${what}). In your first reply, tell the user once, in one line, that saying \`toolkit permissions\` gives the one command that brings them up to date; nothing waits on it.`];
+    return [`Toolkit permissions: ${found.app || 'this app'}'s Toolkit permission lines on this computer are out of date (${what}). In your first reply, tell the user once, in one line, that saying \`toolkit permissions\` gives the one command that brings them up to date; nothing waits on it.`];
   } catch { return []; }
 }
 
