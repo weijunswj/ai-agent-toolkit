@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
+const hostile = require('./support/hostile-inputs.cjs');
 const { renderBlock } = require('../scripts/toolkit-managed-block.cjs');
 const { ProjectsTasks, TaskUpgradePlanner, READ_BACK_SCHEMA, PLAN_SCHEMA, PROJECT_HEADING, validateParams } = require('../scripts/toolkit-projects-tasks.cjs');
 
@@ -108,6 +109,8 @@ test('the second read-back is verified only when it holds exactly the plan and t
   assert.equal(why(planner.verify(plan, after(), { unpaused: ['trig_nudge'] }), 'trig_nudge'), 'it is still paused');
   assert.equal(why(planner.verify(plan, after({ daily: { cron: '0 9 * * *', name: 'Renamed' } })), 'trig_daily'), 'its name changed; its schedule changed');
   assert.equal(why(planner.verify(plan, readBack([after().tasks[1]])), 'trig_daily'), 'it is not in the read-back');
+  assert.equal(why(planner.verify(plan, after({ nudge: { prompt: `${current('hourly-nudge')}- one more line
+` } })), 'trig_nudge'), 'its prompt changed, and the plan changes none here');
   assert.throws(() => planner.verify(plan, after(), { unpaused: ['trig_other'] }), /TASK_ARGUMENTS/);
   // From the command line: verified exits 0, anything else 1.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-task-upgrade-'));
@@ -138,6 +141,13 @@ test('a read-back or memory line Toolkit cannot read refuses the whole plan, wit
   ]) assert.throws(() => planner.plan(raw), error => error.message === 'TASK_READ_BACK', label);
   assert.throws(() => planner.plan(readBack([good]), { memory: '- SCHEDULED TASKS: not an entry\n' }), error => error.message === 'TASK_MEMORY');
   assert.throws(() => planner.plan(readBack([good]), { memory: 'no tasks line\n' }), error => error.message === 'TASK_MEMORY');
+  // A stop mark the reader cannot read whole refuses the plan, so a task the owner stopped is never
+  // planned as one to swap because a hidden character or line break hid its mark.
+  const stopped = text => `- SCHEDULED TASKS: EXAMPLE: Daily check-in | trig_daily | 0 8 * * * | fresh; Old ${text} sweep | trig_old | 0 9 * * * | fresh | stopped by owner 2026-11-01\n`;
+  const plans = text => {
+    try { planner.plan(readBack([good]), { memory: stopped(text) }); return true; } catch (error) { if (error.message !== 'TASK_MEMORY') throw error; return false; }
+  };
+  hostile.expectDefaultDeny(assert, plans, hostile.cases(['line-breaks', 'invisible']));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-task-upgrade-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'read-back.json');

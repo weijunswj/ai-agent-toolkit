@@ -480,6 +480,8 @@ const TASK_ID = /^trig_[A-Za-z0-9]{1,64}$/;
 const MAX_TASKS = 50;
 const MAX_PROMPT = 64 * 1024;
 const READ_BACK_KEYS = Object.freeze(['id', 'name', 'enabled', 'cron', 'prompt']);
+// A task the plan leaves as it is must read back with the same prompt (line ends aside).
+const promptDigest = prompt => createHash('sha256').update(lfText(prompt)).digest('hex');
 const plainText = (value, max) => typeof value === 'string' && value.length >= 1 && value.length <= max && /^[\x20-\x7e]+$/.test(value);
 
 // The read-back, default-deny: one object with the schema and a list of tasks, each exactly the five
@@ -503,6 +505,8 @@ function stoppedIds(memory) {
   if (memory === undefined) return new Set();
   const lines = String(memory).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, '')).filter(line => /^[-*\s]*SCHEDULED TASKS:/.test(line));
   if (lines.length !== 1) throw new TaskInputError('TASK_MEMORY', 'the memory file must hold exactly one SCHEDULED TASKS line');
+  // Plain printable ASCII only: a hidden character or another line break could hide a stop mark.
+  if (!/^[\x20-\x7e]+$/.test(lines[0])) throw new TaskInputError('TASK_MEMORY', 'the SCHEDULED TASKS line holds a character other than plain printable ASCII; retype it');
   const entries = lines[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').split(';').map(entry => entry.trim()).filter(Boolean);
   if (entries.some(entry => !validEntry(entry))) throw new TaskInputError('TASK_MEMORY', 'the SCHEDULED TASKS line is not in the current format; fix it with --check-memory first');
   return new Set(entries.filter(entry => / \| stopped by owner \d{4}-\d{2}-\d{2}$/.test(entry)).map(entry => TASK_ENTRY.exec(entry).groups.id));
@@ -527,7 +531,7 @@ class TaskUpgradePlanner {
   plan(raw, { memory, additions } = {}) {
     const stopped = stoppedIds(memory);
     const rows = readBack(raw).map(task => {
-      const row = { id: task.id, name: task.name, cron: task.cron, kind: this.#kindOf(task), paused: !task.enabled };
+      const row = { id: task.id, name: task.name, cron: task.cron, prompt_sha256: promptDigest(task.prompt), kind: this.#kindOf(task), paused: !task.enabled };
       if (stopped.has(task.id)) return { ...row, state: 'stopped', why: 'stopped by owner: never swapped, rebuilt or unpaused; only the owner restarts it' };
       if (!row.kind) return { ...row, state: 'not-toolkit', why: 'no Toolkit block: the project\'s own task, left as it is' };
       const { state } = this.#tasks.check(row.kind, task.prompt);
@@ -549,7 +553,7 @@ class TaskUpgradePlanner {
   }
 
   // Checks the second read-back, taken after the swaps and the owner's unpauses, against the plan:
-  // every planned replacement is the stored prompt, nothing else about a task moved, and a task is
+  // every planned replacement is the stored prompt, every other prompt is as it was, nothing else moved, and a task is
   // enabled only where it was, or where the owner said to unpause it (`unpaused`, ids).
   verify(plan, raw, { unpaused = [] } = {}) {
     if (!plan || plan.schema !== PLAN_SCHEMA || !Array.isArray(plan.tasks)) throw new TaskInputError('TASK_PLAN', 'the plan file is not one --upgrade-plan wrote');
@@ -564,6 +568,7 @@ class TaskUpgradePlanner {
         if (task.name !== row.name) wrong.push('its name changed');
         if (task.cron !== row.cron) wrong.push('its schedule changed');
         if (row.replacement !== undefined && lfText(task.prompt) !== lfText(row.replacement)) wrong.push('its prompt is not the planned replacement');
+        if (row.replacement === undefined && promptDigest(task.prompt) !== row.prompt_sha256) wrong.push('its prompt changed, and the plan changes none here');
         const enabled = !row.paused || named.has(row.id);
         if (task.enabled !== enabled) wrong.push(enabled ? 'it is still paused' : 'it is no longer paused');
       }
