@@ -109,7 +109,7 @@ const ROWS = Object.freeze([
 // AUTO_MODE_MARK and is not today's is an old Toolkit rule. Evidence store merges are left out: the
 // store command merges on its own.
 const AUTO_MODE_MARK = 'Toolkit: ';
-const AUTO_MODE_ALLOW = Object.freeze([`${AUTO_MODE_MARK}merging a pull request with the GitHub command line is allowed when Toolkit's merge hold hook let the command through. That hook runs first and lets a merge through only after the owner typed merge with its number, tapped Toolkit's merge card, or turned task auto-merge on for a pull request with a ready answer.`]);
+const AUTO_MODE_ALLOW = Object.freeze([`${AUTO_MODE_MARK}merging a pull request with the GitHub command line is allowed when Toolkit's merge hold hook let the command through. That hook runs first and lets a merge through only for that exact head, after the owner typed merge with its number, tapped Toolkit's merge card, or turned task auto-merge on for a pull request with a ready answer.`]);
 
 // Scripts Toolkit shipped in a block once and no longer does (from the blocks' git history). A node
 // line for one of these, or for a script in today's rows, is an old Toolkit line wherever it points;
@@ -430,13 +430,19 @@ function applyLine(built, flag = '--apply', host = null) {
 // --review, --apply and --remove run toolkit-permissions-cli.cjs as their own process, in this
 // terminal: hooks load this file, and that one holds Claude Code's own tool names (see its header).
 const CLI_FLAGS = Object.freeze(['--review', ...OWNER_FLAGS]);
+// Set only for the CLI process this file starts; the CLI refuses to run as a script without it.
+const CLI_MARK = 'TOOLKIT_PERMISSIONS_CLI';
 function runCli(argv) {
-  const result = spawnSync(process.execPath, [path.join(__dirname, 'toolkit-permissions-cli.cjs'), ...argv], { stdio: 'inherit', windowsHide: false });
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'toolkit-permissions-cli.cjs'), ...argv], { stdio: 'inherit', windowsHide: false, env: { ...process.env, [CLI_MARK]: '1' } });
   return Number.isInteger(result.status) ? result.status : 1;
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
-  if (CLI_FLAGS.includes(argv[0])) return runCli(argv);
+  if (CLI_FLAGS.includes(argv[0])) {
+    // Handed deps (a test's temporary computer) would be lost in the child, which reads the real files.
+    if (Object.keys(deps).length) throw new Error(`${argv[0]} runs in toolkit-permissions-cli.cjs: call its main with these deps.`);
+    return runCli(argv);
+  }
   const out = deps.stdout || (text => process.stdout.write(text));
   const err = deps.stderr || (text => process.stderr.write(text));
   let options;
@@ -495,6 +501,6 @@ function permissionsState(root, { host = require('./agent-host-markers.cjs').det
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ AUTO_MODE_MARK, AUTO_MODE_ALLOW, RETIRED_SCRIPTS, USAGE, nodeScript, shippedScripts, oldToolkitLine, ruleKeys, PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
+module.exports = Object.freeze({ CLI_MARK, AUTO_MODE_MARK, AUTO_MODE_ALLOW, RETIRED_SCRIPTS, USAGE, nodeScript, shippedScripts, oldToolkitLine, ruleKeys, PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

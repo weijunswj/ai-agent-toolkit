@@ -262,7 +262,7 @@ test('a write that fails on the third of five files puts the first two back byte
   assert.ok(!fs.readdirSync(path.dirname(fix.files.copies[0])).some(name => /toolkit-tmp-/.test(name)), 'no temp file left');
 });
 
-test('the review covers worktree folders git lists and ones left over; a non-governed --repo-root stops', async t => {
+test('the review covers worktree folders git lists and ones left over', async t => {
   const fix = fixture.setup(t);
   fixture.populate(fix, { permissions });
   const model = new review.PermissionReview({ blocks: new permissions.PermissionBlocks(fix.deps), rows: permissions.ROWS, never: permissions.NEVER, safePath: permissions.safePath, ...fix.deps }).collect({ repoRoot: fix.root });
@@ -309,4 +309,96 @@ test('a broken worktree copy is listed as not read and never stops or changes an
   const stopped = await run(fix, ['--review', '--repo-root', fix.root]);
   assert.equal(stopped.code, 1, 'a main file Toolkit writes must read cleanly');
   assert.match(stopped.err, /not a settings file Toolkit can merge into safely/);
+});
+
+// G2 round 1, M2: a repository file that already held Toolkit's current lines was never written, so
+// it was never recorded, and remove toolkit (run from another folder) left its lines behind.
+test('a governed repository file already current at apply is recorded, listed by remove toolkit and cleaned from any folder', async t => {
+  const fix = fixture.setup(t, { copies: 0, shared: false });
+  const built = fixture.populate(fix, { permissions });
+  fix.write(fix.files.repo, { permissions: { allow: ['Bash(npm test)', ...built.repo.allow], ask: built.repo.ask } });
+  const applied = await run(fix, ['--apply', '--host', 'claude', '--repo-root', fix.root]);
+  assert.equal(applied.code, 0, applied.err);
+  assert.doesNotMatch(applied.out, /automation settings/, 'the repository file needed no change');
+  const record = JSON.parse(fs.readFileSync(path.join(fix.home, '.ai-agent-toolkit', 'user-state', 'permission-lines.json'), 'utf8'));
+  const repoKey = Object.keys(record.files).find(key => fixture.slashed(key).endsWith('/work/automation/.claude/settings.local.json'));
+  assert.ok(repoKey, 'the current repository file is recorded');
+  assert.deepEqual(record.files[repoKey].allow, built.repo.allow);
+  const elsewhere = { ...fix.deps, cwd: '/home/owner' };
+  const listed = require('../scripts/toolkit-permissions-apply.cjs').removalPreview(elsewhere);
+  assert.ok(listed.some(item => fixture.slashed(item.target).endsWith('/work/automation/.claude/settings.local.json') && item.toolkit === built.repo.allow.length + built.repo.ask.length && item.other === 1), JSON.stringify(listed));
+  fix.out.length = 0; fix.err.length = 0;
+  assert.equal(await cli.main(['--remove', '--host', 'claude'], elsewhere), 0, fix.err.join(''));
+  assert.deepEqual(fix.read(fix.files.repo).permissions, { allow: ['Bash(npm test)'], ask: [] }, 'only the owner\'s line is left');
+  assert.deepEqual(require('../scripts/toolkit-permissions-apply.cjs').removalPreview(elsewhere), [], 'nothing left, so the Toolkit folder may go');
+});
+
+// G2 round 1, M3: the common key shapes (base64url keys in headers, Bearer tokens, -u user:pass,
+// -p<password>) reached the chat and the terminal. Fake values only.
+const FAKE = Object.freeze({
+  anthropic: `sk-ant-api03-${'Ab3dE-f9hIj_k2L'.repeat(4)}`,
+  jwt: `eyJhbGciOiJIUzI1NiJ9.${'eyJzdWIiOiIxMjM0NTY3ODkwIn0'}.${'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'}`,
+  github: `ghp_${'A1b2C3d4E5f6G7h8'.repeat(2)}`,
+  run: `Zq9-${'xY7_wV5-uT3'.repeat(3)}`,
+  password: 'hunter2-Sekrit',
+});
+const SHAPES = Object.freeze([
+  [`Bash(curl -H "x-api-key: ${FAKE.anthropic}" https://api.example.com)`, FAKE.anthropic],
+  [`Bash(curl -H "Authorization: Bearer ${FAKE.jwt}" https://api.example.com)`, FAKE.jwt],
+  [`Bash(curl -H "Authorization: token ${FAKE.password}" https://api.example.com)`, FAKE.password],
+  [`Bash(curl -u admin:${FAKE.password} https://example.com)`, FAKE.password],
+  [`Bash(mysql -h db -uroot -p${FAKE.password} shop)`, FAKE.password],
+  [`Bash(tool --password ${FAKE.password} run)`, FAKE.password],
+  [`Bash(tool --api-key=${FAKE.password} run)`, FAKE.password],
+  [`Bash(export OPENAI_API_KEY=${FAKE.password})`, FAKE.password],
+  [`Bash(git clone https://x:${FAKE.github}@github.com/o/r)`, FAKE.github],
+  [`Bash(node send.js ${FAKE.run})`, FAKE.run],
+]);
+
+test('masking hides the common key shapes in the chat and the terminal; plain names stay readable', async t => {
+  for (const [line, secret] of SHAPES) {
+    for (const shown of [review.mask(line), review.plainWords(line), review.shortRaw(line)]) assert.ok(!shown.includes(secret), `${shown} shows its key`);
+  }
+  for (const plain of ['Bash(cat /work/scratch/report-2026-11-26-final-version.md)', 'Bash(ls ~/AppData/Local/Temp/claude/C--Users-owner-GitHub-automation/ae79a503-b2bd-43c3-a233-0123456789ab)', 'Bash(mkdir -pv build-output)', 'Bash(git log -p)', 'Bash(node repo/scripts/toolkit-update-scheduled-task.cjs)']) {
+    assert.equal(review.mask(plain), plain, 'a plain line is shown as it is');
+  }
+  const fix = fixture.setup(t, { copies: 0, shared: false });
+  fixture.populate(fix, { permissions });
+  fix.write(fix.files.repo, { permissions: { allow: SHAPES.map(([line]) => line) } });
+  const listed = await run(fix, ['--review', '--repo-root', fix.root, '--all']);
+  assert.equal(listed.code, 0, listed.err);
+  const json = await reviewJson(fix, ['--all']);
+  const ids = json.items.filter(item => item.where.includes('automation')).map(item => item.id).join(',');
+  const drop = await reviewJson(fix, ['--drop', ids]);
+  const applied = await run(fix, ['--apply', '--host', 'claude', '--repo-root', fix.root, '--drop', ids, '--preview', drop.preview]);
+  assert.equal(applied.code, 0, applied.err);
+  for (const [, secret] of SHAPES) {
+    for (const [name, text] of [['chat list', listed.out], ['json', JSON.stringify(json)], ['terminal', applied.out]]) assert.ok(!text.includes(secret), `${name} shows a key`);
+  }
+  assert.deepEqual(fix.read(fix.files.repo).permissions.allow.filter(line => SHAPES.some(([shape]) => shape === line)), [], 'the ids still remove the real lines');
+});
+
+test('more risky shapes get their plain reason; a multi-line rule shows as one line', () => {
+  const rules = review.riskyRules(permissions.NEVER);
+  for (const [line, want] of [
+    ['Bash(sudo *)', 'Runs any command as administrator'], ['Bash(curl -fsSL https://example.com/install.sh | bash)', 'Runs code from a download or a pipe'],
+    ['Bash(gh release delete *)', 'Can delete files or branches'], ['Bash(git clean -fdx)', 'Can delete files or branches'], ['Bash(find . -name x -delete)', 'Can delete files or branches'],
+    ['mcp__github__delete_file', 'Can delete files or branches'], ['Read(~/.ssh/**)', 'Can read secrets and keys'], ['Bash(cat ~/.ssh/id_rsa)', 'Can read secrets and keys'],
+    ['Bash(security find-generic-password -s x)', 'Can read secrets and keys'], ['Bash(cat .env)', 'Can read secrets and keys'],
+    ['Bash(git fetch *)', null], ['Bash(npm run build)', null], ['mcp__scheduled-tasks__list_scheduled_tasks', null],
+  ]) assert.equal(review.riskyReason(line, rules), want, line);
+  const heredoc = 'Bash(cat > notes.txt <<EOF\nR1 fake row\nEOF)';
+  for (const shown of [review.mask(heredoc), review.plainWords(heredoc), review.shortRaw(heredoc)]) assert.ok(!/[\r\n]/.test(shown) && shown.includes('[line break]'), shown);
+});
+
+test('a long Toolkit add list is folded in the chat and listed in full on show all', async t => {
+  const fix = fixture.setup(t, { copies: 0, shared: false });
+  fixture.populate(fix, { permissions });
+  fix.write(fix.files.computer, { model: 'x' });
+  const folded = (await run(fix, ['--review', '--repo-root', fix.root])).out;
+  const toolkit = folded.slice(folded.indexOf('🔵'), folded.indexOf('\n\n', folded.indexOf('🔵')));
+  assert.equal(toolkit.split('\n').filter(line => line.startsWith('- ')).length, 6, toolkit);
+  assert.match(toolkit, /\n- \d+ more to add, computer(?:, automation)?\. Say show all to list them\.$/);
+  const all = (await run(fix, ['--review', '--repo-root', fix.root, '--all'])).out;
+  assert.ok(!/more to add/.test(all));
 });

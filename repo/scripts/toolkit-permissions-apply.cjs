@@ -184,22 +184,23 @@ class PermissionsApply {
   backup(plans) {
     const fs = this.#fs;
     const parent = path.join(this.#home, '.ai-agent-toolkit', 'backups', 'permissions');
-    fs.mkdirSync(parent, { recursive: true });
+    fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
     let folder = null;
     for (let attempt = 1; attempt <= 50 && !folder; attempt += 1) {
       const name = path.join(parent, `${this.#stamp()}${attempt > 1 ? `-${attempt}` : ''}`);
-      try { fs.mkdirSync(name); folder = name; } catch (error) { if (!error || error.code !== 'EEXIST') throw error; }
+      try { fs.mkdirSync(name, { mode: 0o700 }); folder = name; } catch (error) { if (!error || error.code !== 'EEXIST') throw error; }
     }
     if (!folder) throw new ApplyStop('no free backup folder name.', 'run it again in a moment. Nothing was written.');
     const list = [];
     plans.forEach((plan, index) => {
       if (plan.before === null) { list.push(`(new file) ${plan.target}  <- delete it to undo`); plan.saved = null; return; }
       const name = `${index + 1}-${path.basename(plan.target)}`;
-      fs.writeFileSync(path.join(folder, name), plan.before, { flag: 'wx' });
+      // A copy keeps the file's mode, so a 0600 settings file holding keys never gets a readable copy.
+      fs.copyFileSync(fs.realpathSync(plan.target), path.join(folder, name), fs.constants.COPYFILE_EXCL);
       list.push(`${name}  ->  ${plan.target}`);
       plan.saved = path.join(folder, name);
     });
-    fs.writeFileSync(path.join(folder, 'list.txt'), `${list.join('\n')}\n`, { flag: 'wx' });
+    fs.writeFileSync(path.join(folder, 'list.txt'), `${list.join('\n')}\n`, { flag: 'wx', mode: 0o600 });
     for (const plan of plans) if (plan.saved && fs.readFileSync(plan.saved, 'utf8') !== plan.before) throw new ApplyStop(`the backup of ${plan.target} did not read back.`, `check the disk, then run it again. Nothing was written. Backup folder: ${folder}`);
     return folder;
   }
@@ -357,10 +358,21 @@ async function main(argv, deps = {}) {
       ? review.terminalScreen(model, claudePlans.filter(plan => !plan.current).map(plan => ({ file: plan.file, add: plan.add, remove: screenEntries(plan) })), { picked, codex: codexEntries, notes })
       : otherScreen(options.mode, claudePlans, codexEntries, notes, deps.home || require('node:os').homedir());
     const lines = [ownerTerminal.title(screen.text.split('\n')[0], look), ...screen.text.split('\n').slice(1)];
+    // Toolkit's record names every governed main file in scope with the Toolkit lines it holds, current
+    // files included, so remove finds them later from any folder (toolkit-remove-parts.cjs).
+    const saveRecord = () => {
+      if (!record) return '';
+      const next = nextRecord(record, claudePlans, options.mode);
+      if (JSON.stringify(next) === JSON.stringify(record)) return '';
+      try { applier.writeRecord(next); return ''; } catch (error) {
+        return `Toolkit could not save which lines are its own (${error && error.code ? error.code : 'error'}); a later remove treats Toolkit's current lines as its own.`;
+      }
+    };
     if (!pending.length) {
       const codexOnly = codexPlans.filter(plan => plan.skip).map(codexScreen).flat();
-      out(`${[ownerTerminal.title(options.mode === 'remove' ? 'Toolkit permissions: take Toolkit\'s lines out' : 'Toolkit permissions: bring Toolkit\'s lines up to date', look), ...codexOnly, ...notes, `Nothing to change: ${options.mode === 'remove' ? 'no Toolkit lines found' : 'Toolkit\'s lines are up to date'}. Nothing was written.`].join('\n')}\n`);
-      return 0;
+      const recordNote = saveRecord();
+      out(`${[ownerTerminal.title(options.mode === 'remove' ? 'Toolkit permissions: take Toolkit\'s lines out' : 'Toolkit permissions: bring Toolkit\'s lines up to date', look), ...codexOnly, ...notes, `Nothing to change: ${options.mode === 'remove' ? 'no Toolkit lines found' : 'Toolkit\'s lines are up to date'}. No settings file was changed.`, ...(recordNote ? [`Note: ${recordNote}`] : [])].join('\n')}\n`);
+      return recordNote ? 1 : 0;
     }
     out(`${lines.join('\n')}\n\n`);
     const confirmed = await (deps.confirm || (effect => ownerTerminal.pressEnter(effect, { output: process.stdout, environment })))(screen.effect);
@@ -378,12 +390,7 @@ async function main(argv, deps = {}) {
         throw new ApplyStop(`${plan.target} ${what}. ${failed.length ? `Toolkit could not put back ${failed.join(', ')}; copy them from the backup folder by hand.` : `Every file Toolkit wrote is back as it was.`} Backup folder: ${folder}`, 'check the file and its folder, then run it again.');
       }
     }
-    let recordNote = '';
-    if (record) {
-      try { applier.writeRecord(nextRecord(record, claudePlans.filter(plan => !plan.current), options.mode)); } catch (error) {
-        recordNote = `Toolkit could not save which lines it added (${error && error.code ? error.code : 'error'}); a later remove treats Toolkit's current lines as its own.`;
-      }
-    }
+    const recordNote = saveRecord();
     const added = pending.reduce((sum, plan) => sum + (plan.host === 'claude' ? count(plan.add) : (plan.added || []).length), 0);
     const removed = pending.reduce((sum, plan) => sum + (plan.host === 'claude' ? count(plan.remove) : (plan.removed || []).length), 0);
     const apps = [...new Set(pending.map(plan => APPS[plan.host]))];
@@ -414,14 +421,16 @@ function verify(plan) {
   }
 }
 
-// The record after a write: per main file, the Toolkit lines it holds that Toolkit added (or that were
-// there before any record, which count as Toolkit's), less the lines taken out.
+// The record after a run: per governed main file in scope (changed or already current), the Toolkit
+// lines it holds that Toolkit added (or that were there before any record, which count as Toolkit's),
+// less the lines taken out. Remove drops each file it covered.
 function nextRecord(record, plans, mode) {
   const files = { ...record.files };
   for (const plan of plans) {
+    if (plan.host !== 'claude') continue;
     const key = sameKey(plan.target);
     if (mode === 'remove') { delete files[key]; continue; }
-    if (!plan.file || !plan.file.main) continue;
+    if (!plan.file || !plan.file.main || plan.file.block.governed === false || plan.before === null && plan.current) continue;
     const was = list => (plan.before === null ? [] : listOf(plan.before, list));
     const had = files[key] || { allow: plan.file.block.allow.filter(line => was('allow').includes(line)), ask: plan.file.block.ask.filter(line => was('ask').includes(line)), autoMode: (plan.file.block.autoMode || []).filter(rule => was('autoMode').includes(rule)) };
     const entry = Object.fromEntries(['allow', 'ask', 'autoMode'].map(list => [list, [...new Set([...(had[list] || []), ...(plan.add[list] || [])])].filter(line => !(plan.remove[list] || []).includes(line))]));

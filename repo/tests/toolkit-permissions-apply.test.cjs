@@ -86,7 +86,7 @@ test('a second run finds nothing to change, asks nothing and writes nothing', as
   pc.out.length = 0;
   assert.equal(await cli.main(['--apply'], pc.deps), 0);
   assert.deepEqual(pc.asked, []);
-  assert.match(pc.out.join(''), /Nothing to change: Toolkit's lines are up to date\. Nothing was written\./);
+  assert.match(pc.out.join(''), /Nothing to change: Toolkit's lines are up to date\. No settings file was changed\./);
   assert.doesNotMatch(pc.out.join(''), /no Toolkit lines found/);
   assert.deepEqual(files(pc.home), listed);
   assert.equal(fs.readFileSync(pc.settings, 'utf8'), text);
@@ -247,6 +247,10 @@ test('M1 and L4: a rewrite keeps the file mode, indent, line endings and byte or
   fs.chmodSync(pc.settings, 0o600);
   assert.equal(await cli.main(['--apply'], pc.deps), 0, pc.err.join(''));
   assert.equal(fs.statSync(pc.settings).mode & 0o777, 0o600);
+  // G2 round 1, L1: the backup of a 0600 file is 0600 too, in a folder only the owner reads.
+  const folder = path.join(pc.home, '.ai-agent-toolkit', 'backups', 'permissions', '20261112T110000Z');
+  assert.equal(fs.statSync(path.join(folder, '1-settings.json')).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(folder).mode & 0o077, 0, 'no group or other access to the backup folder');
   const text = fs.readFileSync(pc.settings, 'utf8');
   assert.ok(text.startsWith('﻿{\r\n\t"model"'), 'BOM, CRLF and tab indent kept');
   assert.ok(!/[^\r]\n/.test(text), 'every line ends in CRLF');
@@ -435,7 +439,7 @@ test('--remove takes every Toolkit line out, keeps the owner\'s own, and deletes
   assert.ok(fs.readdirSync(path.join(pc.home, '.ai-agent-toolkit', 'backups', 'permissions')).some(folder => fs.readdirSync(path.join(pc.home, '.ai-agent-toolkit', 'backups', 'permissions', folder)).includes('2-toolkit.rules')), 'the deleted rules file keeps a backup');
   pc.out.length = 0;
   assert.equal(await cli.main(['--remove'], pc.deps), 0);
-  assert.match(pc.out.join(''), /Nothing to change: no Toolkit lines found\. Nothing was written\./, 'a second run finds nothing to take out');
+  assert.match(pc.out.join(''), /Nothing to change: no Toolkit lines found\. No settings file was changed\./, 'a second run finds nothing to take out');
   const quiet = { ...pc.deps, environment: { CLAUDECODE: '1' }, stdout: () => {}, stderr: text => pc.err.push(text) };
   assert.equal(await cli.main(['--remove'], quiet), 1);
   assert.match(pc.err.join(''), /Agents never run --remove/);
@@ -581,4 +585,15 @@ test('a --drop run in a real terminal: a typed-ahead blank line never confirms, 
   const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8')).permissions.allow;
   assert.ok(!after.includes(gone) && after.includes('Bash(npm test)'), 'only the picked line went');
   assert.equal(fs.readdirSync(path.join(pc.home, '.ai-agent-toolkit', 'backups', 'permissions')).length, 1);
+});
+
+// G2 round 1, L6 and L9: the CLI runs as a script only when toolkit-permissions.cjs started it (the file
+// its ask line names); toolkit-permissions.cjs never drops a test's deps for the CLI flags.
+test('the CLI refuses to run as a script on its own; test deps never reach the real files', t => {
+  const pc = computer(t, { codex: false });
+  const direct = spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions-cli.cjs'), '--apply'], { encoding: 'utf8', input: '', env: { PATH: process.env.PATH, HOME: pc.home, USERPROFILE: pc.home }, cwd: os.tmpdir() });
+  assert.equal(direct.status, 2, direct.stderr);
+  assert.match(direct.stderr, /run this through toolkit-permissions\.cjs/);
+  for (const flag of ['--review', '--apply', '--remove']) assert.throws(() => permissions.main([flag], pc.deps), /runs in toolkit-permissions-cli\.cjs: call its main with these deps/, flag);
+  assert.equal(fs.existsSync(pc.settings), false);
 });

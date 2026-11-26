@@ -94,4 +94,11 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 module.exports = Object.freeze({ main, permissionsWithReview, parseReviewArgs });
 
-if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });
+// Toolkit's ask line names toolkit-permissions.cjs, so this file runs as a script only when that file
+// started it. A speed bump like the agent-shell check, not a lock.
+if (require.main === module) {
+  if (process.env[permissions.CLI_MARK] !== '1') {
+    process.stderr.write('Stopped: run this through toolkit-permissions.cjs, the command its permission lines name. Next: node "<Toolkit>/repo/scripts/toolkit-permissions.cjs" with the same arguments.\n');
+    process.exitCode = 2;
+  } else Promise.resolve(main()).then((code) => { process.exitCode = code; });
+}

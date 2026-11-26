@@ -119,6 +119,11 @@ function riskyRules(NEVER) {
     ['Any GitHub call, merges and deletes included', /^(?:Bash|PowerShell)\(\s*gh(?:\s+[A-Za-z-]+)?\s*(?::?\*)\s*\)$/],
     ['Runs any code', never('an interpreter with no script')],
     ['Runs any code', /^(?:Bash|PowerShell)\(\s*(?:(?:python[0-9.]*|py|node|bash|sh|zsh|pwsh|powershell)\s+-\s*(?:\)|$)|(?:python[0-9.]*|py)\s+(?:-\w+\s+)*-c\b|(?:bash|sh|zsh)\s+-c\b|(?:pwsh|powershell)(?:\.exe)?\s+(?:-\w+\s+)*-(?:Command|c|EncodedCommand)\b|node\s+(?:-e|--eval|-p|--print)\b|cmd(?:\.exe)?\s+\/c\b)/i],
+    ['Runs any command as administrator', /^(?:Bash|PowerShell)\(\s*(?:sudo|doas|runas)\b/i],
+    ['Runs code from a download or a pipe', /^(?:Bash|PowerShell)\([^)]*\|\s*(?:sudo\s+)?(?:bash|sh|zsh|pwsh|powershell|iex|Invoke-Expression|python[0-9.]*|node)\b/i],
+    ['Can delete files or branches', /^(?:Bash|PowerShell)\(\s*(?:gh\s+[a-z-]+\s+delete\b|git\s+clean\b|find\b[^)]*\s-delete\b)/i],
+    ['Can delete files or branches', /^mcp__\S*?delete/i],
+    ['Can read secrets and keys', /(?:[\\/]\.ssh(?:[\\/]|\b)|\bid_(?:rsa|ed25519|ecdsa)\b|[\\/]\.aws[\\/]credentials|(?:^|[\s\\/(])\.env\b|security\s+find-(?:generic|internet)-password)/i],
     ['Any command that ends this way', never('a wildcard before the command')],
   ]);
 }
@@ -130,10 +135,32 @@ function riskyReason(line, rules) {
 
 // ---- masking and short forms (pure) ---------------------------------------------------------------
 
+// A value in a command: quoted, or a run up to a space, quote, comma or bracket.
+const VALUE = String.raw`("[^"]*"|'[^']*'|[^\s"',)]+)`;
+const HIDE = Object.freeze([
+  // A header that carries a key: x-api-key: <value>, Authorization: Bearer <value>, Cookie: <value>.
+  [new RegExp(String.raw`\b((?:x-)?api[-_]?key|authorization|proxy-authorization|x-auth-token|private-token|cookie)(\s*[:=]\s*)(?:(bearer|basic|token|digest)\s+)?${VALUE}`, 'gi'),
+    (all, name, sep, scheme) => `${name}${sep}${scheme ? `${scheme} ` : ''}<hidden>`],
+  // NAME=value where the name says it is a key, token, secret or password.
+  [new RegExp(String.raw`\b([A-Za-z_][A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|AUTH|CREDENTIAL)[A-Za-z0-9_]*)=${VALUE}`, 'gi'), '$1=<hidden>'],
+  // A flag that carries one: --password x, --token=x, --api-key x, --client-secret x.
+  [new RegExp(String.raw`((?:^|\s)--?(?:password|passwd|pass|token|api-?key|secret|client-secret|auth(?:-token)?)(?:=|\s+))${VALUE}`, 'gi'), '$1<hidden>'],
+  // -u user:password and --user user:password; -p<password> written onto the flag (mysql style).
+  [new RegExp(String.raw`((?:^|\s)(?:-u|--user)\s+[^\s:"']+:)${VALUE}`, 'g'), '$1<hidden>'],
+  [/(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]*?\s-p)([^\s"',)]+)/g, '$1<hidden>'],
+  // Known key shapes: sk-..., GitHub, Slack, AWS keys and JSON web tokens.
+  [/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|xox[abprs]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){1,2})/g, '<hidden>'],
+  // Any other long run that looks random: 24 or more base64url characters with an upper-case letter,
+  // a lower-case letter and a digit, or 32 or more letters and digits. Plain names stay readable.
+  [/[A-Za-z0-9_+-]{24,}={0,2}/g, run => ((/[A-Z]/.test(run) && /[a-z]/.test(run) && /[0-9]/.test(run)) || /^[A-Za-z0-9]{32,}$/.test(run) ? '<hidden>' : run)],
+]);
+
+// What the owner may see of a line: secrets hidden, and line breaks shown as one line, so a saved
+// multi-line rule never splits across the screens or looks like other rows.
 function mask(text) {
-  return String(text)
-    .replace(/\b([A-Za-z_][A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|AUTH)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi, '$1=<hidden>')
-    .replace(/[A-Za-z0-9]{32,}/g, '<hidden>');
+  let shown = String(text).replace(/\r\n|[\r\n\u0085\u2028\u2029]/g, ' [line break] ').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '?');
+  for (const [pattern, to] of HIDE) shown = shown.replace(pattern, to);
+  return shown;
 }
 
 const base = value => String(value).replace(/[\\/]+$/, '').split(/[\\/]/).pop();
@@ -446,7 +473,14 @@ function chatList(model, { all = false } = {}) {
   if (summary.adds.length || summary.old) {
     // The heading counts the bullets below it, with the lines they stand for in brackets.
     lines.push('', `${DOTS.toolkit} **Toolkit: ${[summary.adds.length ? `${summary.adds.length} to add (${plural(model.missing, 'line')})` : '', summary.old ? `1 to remove (${plural(summary.old, 'old line')})` : ''].filter(Boolean).join(', ')}**`);
-    for (const add of summary.adds) lines.push(`- ${add.words}${add.tools.size > 1 ? ` (${[...add.tools].join(' and ')})` : ''}${add.ask ? ', with its ask line' : ''} · ${add.place}`);
+    // A first install adds many: fold past FOLD_AT like the other groups.
+    const adds = all || summary.adds.length <= FOLD_AT + 1 ? summary.adds : summary.adds.slice(0, FOLD_AT);
+    for (const add of adds) lines.push(`- ${add.words}${add.tools.size > 1 ? ` (${[...add.tools].join(' and ')})` : ''}${add.ask ? ', with its ask line' : ''} · ${add.place}`);
+    if (adds.length < summary.adds.length) {
+      const rest = summary.adds.slice(adds.length);
+      const places = [...new Set(rest.map(add => add.place))];
+      lines.push(`- ${rest.length} more to add, ${places.join(', ')}. Say show all to list them.`);
+    }
     if (summary.old) lines.push(`- ${plural(summary.old, 'old Toolkit line')} for a retired command or another Toolkit folder · ${[...new Set(model.files.filter(file => file.old.allow.length + file.old.ask.length + (file.auto ? file.auto.remove.length : 0)).map(file => file.place))].join(', ')}`);
   }
   for (const cls of CLASS_ORDER) {

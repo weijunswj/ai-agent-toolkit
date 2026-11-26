@@ -33,6 +33,8 @@ test('merge-authority paths and a major bump wait for the owner; everything else
     'repo/docs/agent-playbooks/safety-gates.md',
     'skills/toolkit-playbooks/safety-gates.md',
     'repo/scripts/toolkit-permissions.cjs', 'repo/scripts/toolkit-permissions-apply.cjs', 'repo/scripts/toolkit-cleanup.cjs', 'repo/scripts/toolkit-store.cjs',
+    // The permission review (what each line is, what a pick removes) and the CLI that runs review, apply and remove.
+    'repo/scripts/toolkit-permissions-review.cjs', 'repo/scripts/toolkit-permissions-cli.cjs',
     'repo/scripts/toolkit-remove.cjs', 'repo/scripts/toolkit-remove-parts.cjs', 'repo/scripts/toolkit-commands.cjs',
     'repo/tests/toolkit-permissions.test.cjs',
   ];
