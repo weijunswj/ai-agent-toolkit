@@ -275,18 +275,19 @@ function parseArgs(argv) {
 
 // The plan for one repository: each workflow's path, expected text and current state.
 // `ciShards` is the merged binding's ci_shards answer ('yes', 'not-now', 'never' or null); by default it
-// is read from this computer's copy of the merged binding.
-function plan({ repo, ci = null, root = sourceRoot(), commit = toolkitCommit(root), ciShards = undefined }) {
+// is read from this computer's copy of the merged binding. `defaultBranch` is given when `repo` is a
+// snapshot of the default branch's files (the refresh pull request's), not a git checkout.
+function plan({ repo, ci = null, root = sourceRoot(), commit = toolkitCommit(root), ciShards = undefined, defaultBranch = null }) {
   const target = path.resolve(repo);
-  if (!fs.existsSync(path.join(target, '.git'))) throw new InstallError(`${target} is not a git checkout.`);
+  if (!defaultBranch && !fs.existsSync(path.join(target, '.git'))) throw new InstallError(`${target} is not a git checkout.`);
   if (isToolkitCheckout(target)) {
     throw new InstallError('this is a Toolkit source checkout, which runs its own workflow files.');
   }
   // The sweep and its gate run only on main, so on another default branch they are left out, and the
   // shard copies with them (they are rendered for the default branch all the same, so they are ready for
   // one). The copied workflows run on any default branch.
-  const head = git(target, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).stdout.trim();
-  const branch = head ? head.replace('refs/remotes/origin/', '') : 'main';
+  const head = defaultBranch ? '' : git(target, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).stdout.trim();
+  const branch = defaultBranch || (head ? head.replace('refs/remotes/origin/', '') : 'main');
   const offMain = branch === 'main' ? null : `the default branch is ${branch}; the cloud sweep runs only on a main branch`;
   // Without --ci-workflow, an installed gate copy keeps the CI workflow it already follows, while that
   // workflow is still there with a plain name; otherwise the CI trigger is left out.
