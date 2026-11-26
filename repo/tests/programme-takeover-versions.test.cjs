@@ -242,7 +242,7 @@ function settingsText(repository = REPO) {
   const file = path.join(dir, 'controller-settings.json');
   const quiet = { write: () => true };
   const code = settingsModule.main(['set', '--file', file, '--repository', repository, '--stack-profile', 'owner-claude', '--live-lanes', '2', '--placement', 'remote_control,G2=cloud',
-    '--device', 'desk-1', '--folder', 'C:\work\app', '--owner-said', 'fixture'], { stdout: quiet, stderr: quiet, environment: {}, now: () => new Date('2026-11-26T00:00:00.000Z') });
+    '--device', 'desk-1', '--folder', 'C:\\work\\app', '--owner-said', 'fixture'], { stdout: quiet, stderr: quiet, environment: {}, now: () => new Date('2026-11-26T00:00:00.000Z') });
   assert.equal(code, 0);
   return fs.readFileSync(file, 'utf8');
 }
@@ -271,7 +271,7 @@ test('a takeover shows this repository\'s controller settings, and says when the
     const done = fx.run(['takeover', '--session', NEW, ...surface, '--apply', '--controller', '--json']);
     assert.equal(done.error, null, `${label}: ${done.error?.message}`);
     assert.ok(done.result.done_line.includes(`; controller settings: ${said}; `), done.result.done_line);
-    assert.doesNotMatch(done.result.done_line, /desk-1|work\app/, `${label}: no device or folder`);
+    assert.doesNotMatch(done.result.done_line, /desk-1|work\\app/, `${label}: no device or folder`);
   }
 });
 

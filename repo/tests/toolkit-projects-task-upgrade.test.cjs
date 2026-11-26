@@ -70,10 +70,10 @@ test('the plan names each task\'s state, gives the exact replacement and never t
 test('a task whose prompt still holds project lines waits until they are saved word for word', () => {
   const lines = `${PROJECT_HEADING}\n- Also list the example sweep.`;
   const back = readBack([task('trig_daily', 'EXAMPLE: Daily check-in', full('daily-check-in', lines))]);
-  const waiting = planner.plan(back).tasks[0];
+  const waiting = planner.plan(back, { memory: MEMORY }).tasks[0];
   assert.deepEqual([waiting.state, waiting.replacement, waiting.additions], ['additions-unsaved', undefined, lines]);
-  assert.equal(planner.plan(back, { additions: '- something else\n' }).tasks[0].state, 'additions-unsaved', 'a saved file without the lines does not count');
-  const ready = planner.plan(back, { additions: `${lines}\n` }).tasks[0];
+  assert.equal(planner.plan(back, { memory: MEMORY, additions: '- something else\n' }).tasks[0].state, 'additions-unsaved', 'a saved file without the lines does not count');
+  const ready = planner.plan(back, { memory: MEMORY, additions: `${lines}\n` }).tasks[0];
   assert.deepEqual([ready.state, ready.replacement], ['outdated', current('daily-check-in')]);
 });
 
@@ -81,12 +81,18 @@ test('with nothing to upgrade or unpause the plan says so, and the CLI exits 0',
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-task-upgrade-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'read-back.json');
+  const memory = path.join(dir, 'memory.md');
+  fs.writeFileSync(memory, MEMORY);
   fs.writeFileSync(file, JSON.stringify(readBack([task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge'))])));
-  const quiet = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file], { encoding: 'utf8' });
+  // Without the project memory a stopped task could be planned as a swap, so the plan refuses.
+  const bare = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file], { encoding: 'utf8' });
+  assert.equal(bare.status, 2);
+  assert.match(bare.stderr, /Upgrade plan refused \(TASK_ARGUMENTS\): an upgrade plan needs --memory with the project memory/);
+  const quiet = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file, '--memory', memory], { encoding: 'utf8' });
   assert.equal(quiet.status, 0, quiet.stderr);
   assert.equal(JSON.parse(quiet.stdout).unpause, null);
   fs.writeFileSync(file, JSON.stringify(readBack([task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge'), false)])));
-  const paused = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file], { encoding: 'utf8' });
+  const paused = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file, '--memory', memory], { encoding: 'utf8' });
   assert.equal(paused.status, 1, 'a paused task is one question for the owner');
   assert.equal(JSON.parse(paused.stdout).unpause.question, 'Unpause "EXAMPLE: Hourly nudge"? It is paused now. Reply with the ones to unpause, all, or none.');
 });
@@ -96,7 +102,7 @@ test('the second read-back is verified only when it holds exactly the plan and t
     task('trig_daily', 'EXAMPLE: Daily check-in', full('daily-check-in'), false),
     task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge'), false),
   ]);
-  const plan = planner.plan(before);
+  const plan = planner.plan(before, { memory: MEMORY });
   const after = (changes = {}) => readBack([
     { ...task('trig_daily', 'EXAMPLE: Daily check-in', current('daily-check-in').replace(/\n/g, '\r\n'), false), ...changes.daily },
     { ...task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge'), false), ...changes.nudge },
@@ -138,7 +144,7 @@ test('a read-back or memory line Toolkit cannot read refuses the whole plan, wit
     ['an id of another shape', readBack([{ ...good, id: 'trig_a/b' }])],
     ['a name with a line break', readBack([{ ...good, name: 'EXAMPLE:\nDaily check-in' }])],
     ['a list, not an object', [good]],
-  ]) assert.throws(() => planner.plan(raw), error => error.message === 'TASK_READ_BACK', label);
+  ]) assert.throws(() => planner.plan(raw, { memory: MEMORY }), error => error.message === 'TASK_READ_BACK', label);
   assert.throws(() => planner.plan(readBack([good]), { memory: '- SCHEDULED TASKS: not an entry\n' }), error => error.message === 'TASK_MEMORY');
   assert.throws(() => planner.plan(readBack([good]), { memory: 'no tasks line\n' }), error => error.message === 'TASK_MEMORY');
   // A stop mark the reader cannot read whole refuses the plan, so a task the owner stopped is never
@@ -147,13 +153,59 @@ test('a read-back or memory line Toolkit cannot read refuses the whole plan, wit
   const plans = text => {
     try { planner.plan(readBack([good]), { memory: stopped(text) }); return true; } catch (error) { if (error.message !== 'TASK_MEMORY') throw error; return false; }
   };
-  hostile.expectDefaultDeny(assert, plans, hostile.cases(['line-breaks', 'invisible']));
+  // A look-alike letter in a task's name is a name, as --check-memory reads it; one inside the stop mark
+  // fails the entry pattern, so it refuses rather than hiding the mark.
+  hostile.expectDefaultDeny(assert, plans, hostile.cases(['line-breaks', 'invisible']), { allow: ['cyrillic-look-alike', 'non-breaking-hyphen'] });
+  assert.throws(() => planner.plan(readBack([good]), { memory: '- SCHEDULED TASKS: Old sweep | trig_old | 0 9 * * * | fresh | stopped by \u043ewner 2026-11-01\n' }), error => error.message === 'TASK_MEMORY');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-task-upgrade-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'read-back.json');
   fs.writeFileSync(file, JSON.stringify({ tasks: [{ ...good, name: 'SECRET-NAME-1' }] }));
-  const refused = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file], { encoding: 'utf8' });
+  const memory = path.join(dir, 'memory.md');
+  fs.writeFileSync(memory, MEMORY);
+  const refused = spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file, '--memory', memory], { encoding: 'utf8' });
   assert.equal(refused.status, 2);
   assert.match(refused.stderr, /^Task prompt could not be processed \(PROJECT_TASKS_INVALID\)\.\nUpgrade plan refused \(TASK_READ_BACK\): /);
   assert.doesNotMatch(refused.stderr, /SECRET-NAME-1/);
+});
+
+// G2 round 1 of PR 1544 (evidence/g2-1544-r1), red at 2b62a77: the stop guard is never opt-in, a
+// hand-rendered task verifies once it checks current, a task the plan does not hold is reported, a
+// person's own task name may hold any character a person types, and a store that is not private gets
+// no advice to move sessions.
+test('M1: without the project memory the plan refuses, and a memory line --check-memory calls current is read', () => {
+  const back = readBack([task('trig_old', 'EXAMPLE: Hourly nudge', full('hourly-nudge'), false)]);
+  assert.throws(() => planner.plan(back), error => error.message === 'TASK_MEMORY' && /needs the project memory/.test(error.rule));
+  assert.equal(planner.plan(back, { memory: MEMORY }).tasks.find(row => row.id === 'trig_old').state, 'stopped');
+  const accented = '- SCHEDULED TASKS: Caf\u00e9 sweep | trig_old | 0 9 * * * | fresh | stopped by owner 2026-11-01\n';
+  assert.deepEqual(require('../scripts/toolkit-projects-tasks.cjs').checkMemory(`- BINDING: example-owner/example-repo main commit ${'a'.repeat(40)} CONTROLLER.md blob ${'b'.repeat(40)} toolkit 3.1.0 skill x bound 2026-11-01\n${accented}`).lines, ['current']);
+  const read = planner.plan(back, { memory: accented });
+  assert.deepEqual([read.tasks[0].state, read.unpause], ['stopped', null]);
+});
+
+test('M2: a hand-made or damaged task rendered by hand verifies once it checks current, and only then', () => {
+  const back = readBack([task('trig_hand', 'EXAMPLE: Daily check-in', 'Check the repository every morning.')]);
+  const plan = planner.plan(back, { memory: MEMORY });
+  assert.equal(plan.tasks[0].state, 'hand-made');
+  const rendered = tasks.refresh('daily-check-in', 'Check the repository every morning.', { params: PARAMS['daily-check-in'], session: 'bound', additions: '- none\n' });
+  assert.equal(tasks.check('daily-check-in', rendered).state, 'current');
+  assert.equal(planner.verify(plan, readBack([task('trig_hand', 'EXAMPLE: Daily check-in', rendered)])).verified, true);
+  assert.equal(planner.verify(plan, readBack([task('trig_hand', 'EXAMPLE: Daily check-in', 'Check it every evening.')])).tasks[0].why, 'its prompt changed, and it does not check current');
+  assert.equal(planner.verify(plan, readBack([task('trig_hand', 'EXAMPLE: Daily check-in', rendered, false)])).verified, false, 'paused by the swap: not verified');
+});
+
+test('L1: a task in the second read-back that the plan does not hold is reported', () => {
+  const back = readBack([task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge'))]);
+  const plan = planner.plan(back, { memory: MEMORY });
+  const result = planner.verify(plan, readBack([...back.tasks, task('trig_extra', 'EXAMPLE: Hourly nudge', current('hourly-nudge'))]));
+  assert.equal(result.verified, false);
+  assert.deepEqual(result.tasks.at(-1), { id: 'trig_extra', name: 'EXAMPLE: Hourly nudge', verified: false, why: 'it is not in the plan' });
+});
+
+test('L4: a project task named in any language is read; a name with a hidden or line-break character is not', () => {
+  const back = readBack([task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge')), task('trig_mine', 'Caf\u00e9 reminder \u2013 weekly', 'Remind me.')]);
+  assert.equal(planner.plan(back, { memory: MEMORY }).tasks[1].state, 'not-toolkit');
+  for (const name of ['Caf\u200be', 'two\u2028lines', 'tab\there', ' padded']) {
+    assert.throws(() => planner.plan(readBack([task('trig_mine', name, 'Remind me.')]), { memory: MEMORY }), error => error.message === 'TASK_READ_BACK', JSON.stringify(name));
+  }
 });

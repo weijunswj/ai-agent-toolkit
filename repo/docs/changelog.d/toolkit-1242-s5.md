@@ -1,7 +1,7 @@
 ### Added
 
 - **Takeover shows the controller settings:** a controller takeover's dry run and done line now show the stack profile, live lanes and where gates run, read from the evidence store with one request, or say that none are saved yet, that they belong to another repository or that they cannot be read. They never name the device or folder.
-- **Scheduled task upgrade at a takeover:** `toolkit-projects-tasks.cjs --upgrade-plan` reads a project's scheduled tasks as the host read them back and names each one current, outdated (with its exact replacement prompt), waiting for its project additions, hand-made, damaged, not Toolkit's or stopped by the owner, and lists the paused ones in one unpause question. `--upgrade-verify` checks the read-back after the swaps: each replacement is stored, nothing else moved, and only the tasks the owner named were unpaused. A task stopped by the owner is never touched.
+- **Scheduled task upgrade at a takeover:** `toolkit-projects-tasks.cjs --upgrade-plan` reads a project's scheduled tasks as the host read them back, with the project memory (`--memory`, required, so a task the owner stopped is never planned as a swap), and names each one current, outdated (with its exact replacement prompt), waiting for its project additions, hand-made, damaged, not Toolkit's or stopped by the owner, and lists the paused ones in one unpause question. `--upgrade-verify` checks the read-back after the swaps: each replacement is stored, a task rendered by hand checks current, nothing else moved, no task was added, and only the tasks the owner named were unpaused. A task stopped by the owner is never touched.
 
 ### Changed
 

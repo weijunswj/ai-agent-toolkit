@@ -900,7 +900,8 @@ function openTakeover(args, deps, openContext) {
   try { return { ...openContext(args, deps), input }; }
   catch (error) {
     // A session that cannot reach the store (a cloud one, often) claims nothing and says where to go on.
-    const closed = STORE_CODES.has(error.code) ? new ProgrammeError('STORE_UNREACHABLE', `${error.message} ${STORE_HANDOFF}`) : GOVERNANCE_CODES.has(error.code) ? error : null;
+    const unreachable = /is not reachable from this cloud session|it could not be read \((?:401|403|404)\)/.test(error.message);
+    const closed = STORE_CODES.has(error.code) ? new ProgrammeError('STORE_UNREACHABLE', unreachable ? `${error.message} ${STORE_HANDOFF}` : error.message) : GOVERNANCE_CODES.has(error.code) ? error : null;
     if (!closed) throw error;
     if (args.apply) throw closed;
     return { closed, input, transport: deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }) };

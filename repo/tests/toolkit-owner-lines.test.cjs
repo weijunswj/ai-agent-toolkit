@@ -227,6 +227,9 @@ test('M-A: a line naming a kind of computer is never what the settings say when 
   assert.deepEqual(found.findings.map(finding => [finding.kind, finding.fix]), [['conflicts-setting', undefined]]);
   assert.equal(found.findings[0].message, 'It says placement remote_control on the desktop, but the controller settings name the device laptop-1: it may be another computer. Ask the owner which one stands, or change the settings on the owner\'s word; no fix is offered.');
   assert.equal(found.code, 1, 'a conflict with no fix still needs the owner');
+  // When the place differs too, both are named (G2 round 1 of PR 1544, L3).
+  const cloud = ['--settings', settingsIn(dir, ['--live-lanes', '2', '--placement', 'cloud', '--device', 'laptop-1'], 'example-owner/cloud-repo')];
+  assert.match(check(dir, '- Gates run on my desktop.\n', cloud).findings[0].message, /^It says placement remote_control on my desktop, but the controller settings say cloud and name the device laptop-1: it may be another computer\./);
   // The device itself, named in the brackets, is the same computer; "this device" is too.
   assert.deepEqual(check(dir, '- Gates run on my laptop (laptop-1).\n', withDevice).findings.map(finding => finding.kind), ['repeats-setting']);
   assert.deepEqual(check(dir, '- Gates run on this device.\n', withDevice).findings.map(finding => finding.kind), ['repeats-setting']);

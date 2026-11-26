@@ -387,7 +387,7 @@ class OwnerLineLint {
     // A kind of computer is the settings' device only where the line names that device too.
     const device = says.key === 'placement' ? this.#settings.placement.device : null;
     if (device && says.computer && !(says.tail === device || String(says.tail).startsWith(`${device}, `))) {
-      add('conflicts-setting', `It says ${label} ${says.value} ${says.where}, but the controller settings name the device ${device}: it may be another computer. Ask the owner which one stands, or change the settings on the owner's word; no fix is offered.`);
+      add('conflicts-setting', `It says ${label} ${says.value} ${says.where}, but the controller settings ${says.value === current.value ? '' : `say ${current.value} and `}name the device ${device}: it may be another computer. Ask the owner which one stands, or change the settings on the owner's word; no fix is offered.`);
       return;
     }
     const fix = { action: 'replace', with: `${line.bullet}${current.body}` };
