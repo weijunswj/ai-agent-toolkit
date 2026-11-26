@@ -487,7 +487,7 @@ test('bank: a split closed without merging is asked about once, no plain reply r
   const first = await answer(ctx, 'all recommended', { transport: asked });
   // This fixture reads no GitHub, so the App is unknown: one part could not be checked.
   assert.match(first.shown.out, /^# Toolkit governance choices - ON, not ready, 1 step left; 1 part could not be checked$/m);
-  assert.match(first.shown.out, new RegExp(`^\| \d\.\d \| Parallel CI shards \| Not ready: Pull request #11 closed without merging \| Next step: answer once: shards=yes opens a new pull request, shards=never stops the offer, anything else keeps them off \| shards=yes or shards=never in your reply \|$`, 'm'));
+  assert.match(first.shown.out, /^\| \d\.\d \| Parallel CI shards \| Not ready: Pull request #11 closed without merging \| Next step: answer once: shards=yes opens a new pull request, shards=never stops the offer, anything else keeps them off \| shards=yes or shards=never in your reply \|$/m);
   assert.equal(first.code, 0, first.err);
   assert.equal(asked.calls.length, 0, 'slow CI alone does not reopen a split the owner closed');
   // The next bank says it was answered and asks nothing; a plain reply still opens nothing.
