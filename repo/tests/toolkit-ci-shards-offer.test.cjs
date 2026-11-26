@@ -526,6 +526,28 @@ test('bank: an answer that is not used remembers nothing, and an open split is s
   assert.match((await answer(ctx, 'shards=not-now', { transport: failing })).shown.out, /Not ready: Yes \(Toolkit default\)/);
 });
 
+test('bank: a remembered answer still holds once that split leaves the closed list or the list cannot be read; only a newer close is asked', async t => {
+  const ctx = governedFixture(t);
+  const url = `https://github.com/${SLUG}/pull/11`;
+  assert.equal((await answer(ctx, 'all recommended', { transport: closedRecorder({ number: 11, url }) })).code, 0);
+  const off = /^\| \d\.\d \| Parallel CI shards \| Ready: Off: pull request #11 was closed \| /m;
+  // Newer pull requests pushed #11 off the closed list's page; the list cannot be read; or only an
+  // older close is found: the answer for #11 stands, and a plain reply opens nothing.
+  const failing = recorder();
+  failing.closedCiShards = () => { throw new Error('gh-unavailable'); };
+  for (const [name, transport] of [['not found', closedRecorder(null)], ['unreadable', failing], ['older close', closedRecorder({ number: 9, url: `https://github.com/${SLUG}/pull/9` })]]) {
+    const result = await answer(ctx, 'all recommended', { transport });
+    assert.match(result.shown.out, off, name);
+    assert.ok(result.shown.out.includes(`You closed ${url} without merging`), name);
+    assert.equal(result.code, 0, result.err);
+    assert.equal(transport.calls.length, 0, `${name}: a plain reply prepared a new shard split`);
+  }
+  // A newer close is a new close: asked once more.
+  const newer = closedRecorder({ number: 15, url: `https://github.com/${SLUG}/pull/15` });
+  assert.match((await answer(ctx, 'all recommended', { transport: newer })).shown.out, /Not ready: Pull request #15 closed without merging/);
+  assert.equal(newer.calls.length, 0);
+});
+
 test('transport: the closed split read takes only this repository\'s own unmerged shards-yes branches, newest first', () => {
   const pulls = [
     { number: 20, url: 'u20', ref: 'toolkit/ci-shards-yes-0123456789ab', repo: SLUG, merged: true },

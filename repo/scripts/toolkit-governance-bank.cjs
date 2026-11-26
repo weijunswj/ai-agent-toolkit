@@ -246,12 +246,14 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   if (governed && merged) {
     const parents = merged.parents || [];
     const checks = merged.required_checks;
-    // The last background check of the store (toolkit-governance-parts.cjs): one that cannot be used is
-    // not ready; none saved, or one GitHub could not read, keeps the row as the programme file sets it.
-    const broken = require('./toolkit-governance-parts.cjs').STORE_WHY[storeCheck?.state];
+    // The bank's own read of the store, else its last background check (toolkit-governance-parts.cjs):
+    // one that cannot be used is not ready; none, or one GitHub could not read, keeps the row as the
+    // programme file sets it.
+    const parts = require('./toolkit-governance-parts.cjs');
+    const broken = parts.STORE_WHY[storeCheck?.state];
     specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository,
-      text: broken ? `${SET_IN}, but at the last daily check it ${broken}, so programme records and evidence cannot be saved` : SET_IN, bound: `evidence store ${merged.store.repository}` }),
-    required: broken ? { ready: false, step: storeCheck.state === 'not-private' ? 'make it private again on GitHub, or say change store' : 'say change store, and the controller sets up a store with you' } : { ready: true }, other: STORE_MOVE });
+      text: broken ? `${SET_IN}, but at the last check it ${broken}, so programme records and evidence cannot be saved` : SET_IN, bound: `evidence store ${merged.store.repository}` }),
+    required: broken ? { ready: false, step: parts.STORE_STEP[storeCheck.state] } : { ready: true }, other: STORE_MOVE });
     if (parents.length) specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: parents.map(parent => `#${parent.issue}`).join(', '), text: BOUND,
       bound: `${parents.length === 1 ? 'parent' : 'parents'} ${parents.map(parent => `#${parent.issue}`).join(', ')}` }));
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: checks.length ? checks.join(', ') : 'none listed', text: BOUND,

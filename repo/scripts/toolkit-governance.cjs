@@ -544,15 +544,18 @@ class ToolkitGovernanceCli {
     // be read leaves the question asked, and publishing then still refuses a second one.
     let open = [];
     if (offered && state.state === 'ENABLED' && this.#switchTransport && state.repository) { try { open = this.#switchTransport.openCiShards(state.repository); } catch { open = []; } }
-    // A split the owner closed without merging is asked about once. A list that cannot be read counts
-    // as none, as the open list does: GitHub that cannot be read now also refuses the publish that
-    // would reopen it (accepted gap: a read that fails here and a publish that works moments later).
+    // A split the owner closed without merging is asked about once. This computer's newest remembered
+    // answer holds until a newer split is closed, even when GitHub no longer lists that close among the
+    // newest closed pull requests or the list cannot be read. With nothing remembered, a list that
+    // cannot be read counts as none, as the open list does.
     let closed = null;
     if (offered && state.state === 'ENABLED' && !open.length && this.#switchTransport && state.repository) {
-      try {
-        closed = this.#switchTransport.closedCiShards(state.repository);
-        if (closed) closed = { ...closed, answered: Boolean(ciOffer.closedSplitAnswer(this.#registryOptions, state.repository_id, closed.number)) };
-      } catch { closed = null; }
+      let remembered = null;
+      try { remembered = ciOffer.latestClosedSplit(this.#registryOptions, state.repository_id); } catch { remembered = null; }
+      let found = null;
+      try { found = this.#switchTransport.closedCiShards(state.repository); } catch { found = null; }
+      if (found && !(remembered && remembered.number >= found.number)) closed = { ...found, answered: false };
+      else if (remembered) closed = { number: remembered.number, url: found?.number === remembered.number ? found.url : `https://github.com/${state.repository}/pull/${remembered.number}`, answered: true };
     }
     // A repository whose CI already runs its tests in parallel is never offered a shard list.
     let existing = null;
@@ -566,8 +569,10 @@ class ToolkitGovernanceCli {
     // The App row reads its variable and secret wherever governance is on or can be turned on (again) here.
     const app = state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
-    // The store's last background check (toolkit-governance-parts.cjs), read from this computer only.
-    const storeCheck = merged?.store?.repository ? require('./toolkit-governance-parts.cjs').savedStore(this.#registryOptions, state.repository_id, merged.store.repository) : null;
+    // The store, read as the App is; where GitHub could not answer, its last background check. Both
+    // reads GitHub answered are saved (toolkit-governance-parts.cjs), so a part the owner fixed and sees
+    // here as ready no longer gets its session-start line.
+    const storeCheck = merged?.store?.repository ? this.#storeCheck(state, merged.store.repository, app) : null;
     const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies), storeCheck });
     const reference = governanceBank.bankReference(specs);
     if (explain) {
@@ -761,6 +766,17 @@ class ToolkitGovernanceCli {
     this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
     if (!noted) this.#stdout.write(`\nToolkit could not note this bank for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
     return BANK_SHOWN;
+  }
+
+  #storeCheck(state, store, app) {
+    const parts = require('./toolkit-governance-parts.cjs');
+    const read = this.#appRead();
+    let live = null;
+    try { live = read.offline ? null : parts.storeState(store, { reader: read.reader }); } catch { live = null; }
+    if (state.state === 'ENABLED') {
+      try { parts.recordRead(this.#registryOptions, state.repository_id, { app, store: live, storeRepository: store }); } catch { /* not saved: the background check catches up */ }
+    }
+    return live && live.state !== 'unverified' ? live : parts.savedStore(this.#registryOptions, state.repository_id, store);
   }
 
   // A used answer to a bank that asked about a closed, unmerged shard split: remembered on this computer

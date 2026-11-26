@@ -64,11 +64,19 @@ test('P-2 a missing or partly set up App gives one line; set up or unknown gives
 
 test('P-3 a store that cannot be used gives one line naming it and what is wrong; usable, unknown or another store gives none', t => {
   const fx = fixture(t);
-  for (const [state, why] of [['missing', 'cannot be found with this computer\'s GitHub sign-in'], ['not-private', 'is not private'], ['read-only', 'cannot be written with this computer\'s GitHub sign-in']]) {
+  // The fix named here is the same one step the governance bank's store row gives.
+  const another = 'or say change store and the controller sets up another with you';
+  for (const [state, why, fix] of [['missing', 'cannot be found with this computer\'s GitHub sign-in', `sign in to GitHub on this computer with an account that can see it, ${another}`],
+    ['not-private', 'is not private', `make it private again on GitHub, ${another}`],
+    ['read-only', 'cannot be written with this computer\'s GitHub sign-in', `give this computer's GitHub account write access to it, ${another}`]]) {
     fx.save({ app: APP_SET, store: { state } });
     const lines = fx.lines();
     assert.equal(lines.length, 1, state);
-    assert.equal(lines[0], `Toolkit governance: the evidence store ${STORE} named in the programme file ${why}, so programme records and evidence cannot be saved and every governance step that writes them stops until it is fixed. In your first reply, tell the user once, in one line, what is wrong and that saying \`change store\` sets up a store with the controller.`);
+    assert.equal(lines[0], `Toolkit governance: the evidence store ${STORE} named in the programme file ${why}, so programme records and evidence cannot be saved and every governance step that writes them stops until it is fixed. In your first reply, tell the user once, in one line, what is wrong and the fix: ${fix}.`);
+    const bankRow = require('../scripts/toolkit-governance-bank.cjs').governanceBankSpecs({ state: { state: 'ENABLED', repository: 'acme/app', root: '/x' }, task: 'off', train: 'on',
+      merged: { store: { repository: STORE }, parents: [], required_checks: [] }, permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: APP_SET,
+      ciShards: { measured: { minutes: 4 }, open: [], existing: null, usable: { ok: true } }, storeCheck: { state } }).find(spec => spec.id === 'evidence-store');
+    assert.equal(bankRow.required.step, fix, `the bank's store row gives the same fix (${state})`);
   }
   fx.save({ app: APP_SET, store: { state: 'unverified', reason: 'gh-unavailable' } });
   assert.deepEqual(fx.lines(), []);
@@ -105,6 +113,72 @@ test('P-4 GitHub is checked in the background at most once a day, once an hour w
   fz.save({ app: APP_SET, store: USABLE });
   fz.lines(0, { store: 'acme/TRANSPORT-new' });
   assert.equal(fz.started.length, 1);
+});
+
+test('P-9 a missing App or an unusable store is checked again after an hour, so a fix made on GitHub ends its line; a session start that starts no check writes nothing', t => {
+  for (const result of [{ app: APP_MISSING, store: USABLE }, { app: { variable: 'found', secret: 'missing' }, store: USABLE }, { app: APP_SET, store: { state: 'not-private' } }]) {
+    const fx = fixture(t);
+    fx.save(result);
+    assert.equal(fx.lines(0.5).length, 1);
+    assert.equal(fx.started.length, 0, 'not due within the hour');
+    fx.lines(1);
+    assert.equal(fx.started.length, 1, `checked again after an hour, not a day (${JSON.stringify(result)})`);
+  }
+  // Not due: the saved file is only read, so a check finishing at that moment is never overwritten.
+  const fy = fixture(t);
+  fy.save({ app: APP_SET, store: USABLE });
+  const file = path.join(fy.registryOptions.stateDirectory, parts.BASENAME);
+  const before = fs.readFileSync(file, 'utf8');
+  fs.utimesSync(file, new Date(0), new Date(0));
+  fy.lines(2);
+  assert.equal(fs.statSync(file).mtimeMs, 0, 'a session start that is not due does not write');
+  // Due but claimed by another session: nothing written either.
+  fy.lines(25);
+  assert.equal(fy.started.length, 1);
+  const claimed = fs.readFileSync(file, 'utf8');
+  assert.notEqual(claimed, before);
+  fs.utimesSync(file, new Date(0), new Date(0));
+  fy.lines(25.5);
+  assert.equal(fy.started.length, 1);
+  assert.equal(fs.statSync(file).mtimeMs, 0, 'a claim held by another session is not rewritten');
+});
+
+test('P-10 once the governance bank reads the App as set up and the store as usable, the next session start says nothing about them', async t => {
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  const { APP } = require('../scripts/toolkit-governance-app.cjs');
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'governance-parts-bank-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const home = path.join(dir, 'home');
+  const repo = support.makeGoverned(path.join(dir, 'work'), 'parts', { home });
+  const registryOptions = { testOnly: true, userHome: home };
+  const state = require('../scripts/toolkit-governance-state.cjs').governanceState(repo, registryOptions);
+  assert.equal(state.programme_records_bind, true);
+  // The daily check, an hour ago: App missing, store not private.
+  parts.record(registryOptions, state.repository_id, { app: APP_MISSING, store: { state: 'not-private' }, storeRepository: 'toolkit-test-fixture/store' }, { now: new Date(Date.now() - HOUR) });
+  const lines = () => parts.sessionLines(state, registryOptions, { startCheck: () => {} });
+  assert.equal(lines().length, 2, 'precondition: both lines from the saved result');
+  // The owner fixes both and opens the bank: its own reads find them set up.
+  const reader = ([url]) => url.includes('/variables') ? { ok: true, value: { total_count: 1, variables: [{ name: APP.variable }] } }
+    : url.includes('/secrets') ? { ok: true, value: { total_count: 1, secrets: [{ name: APP.secret }] } }
+      : url === 'repos/toolkit-test-fixture/store' ? { ok: true, value: { private: true, permissions: { push: true } } } : { ok: false, reason: 'gh-unavailable' };
+  let out = '';
+  const cli = new ToolkitGovernanceCli({ stdout: { write: s => { out += s; return true; } }, stderr: { write: () => true }, cwd: repo, interactive: false,
+    registryOptions, ask: async () => '', refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null, appReader: reader,
+    permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0, update: 'x', remove: 'y' }),
+    environment: { TOOLKIT_HOST_SESSION: 'parts-session' }, ciEstimator: () => ({ minutes: 2, workflow: 'CI' }), ciReaders: () => ({ ok: true }) });
+  await cli.main(['setup']);
+  assert.match(out, /\| Governance App \| Ready: Set up \|/);
+  assert.match(out, /\| Evidence store \| Ready: toolkit-test-fixture\/store \|/, 'the bank shows its own store read, not the saved one');
+  assert.deepEqual(lines(), [], 'the session start agrees with the bank the owner just read');
+  // A bank read GitHub could not answer keeps the saved result: unknown is never "fixed".
+  parts.record(registryOptions, state.repository_id, { app: APP_MISSING, store: { state: 'not-private' }, storeRepository: 'toolkit-test-fixture/store' });
+  const offline = new ToolkitGovernanceCli({ stdout: { write: () => true }, stderr: { write: () => true }, cwd: repo, interactive: false,
+    registryOptions, ask: async () => '', refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null, appReader: () => ({ ok: false, reason: 'gh-unavailable' }),
+    permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0, update: 'x', remove: 'y' }),
+    environment: { TOOLKIT_HOST_SESSION: 'parts-session' }, ciEstimator: () => ({ minutes: 2, workflow: 'CI' }), ciReaders: () => ({ ok: true }) });
+  await offline.main(['setup']);
+  assert.equal(lines().length, 2);
 });
 
 test('P-5 offline and test runs start nothing; a broken state folder drops the lines and never throws', t => {

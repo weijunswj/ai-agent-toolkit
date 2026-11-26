@@ -706,6 +706,24 @@ test('O-32 out-of-date permission lines get one line to the owner at the first t
   assert.match(gate.run().output.systemMessage, LINE);
 });
 
+test('O-34 a new chat\'s stamp removes stamps older than a month, and only stamps', t => {
+  const fx = fixture(t).brief('Fix the typo.').writeTranscript();
+  fx.deps.permissions = () => ({ checked: true, app: 'Claude Code', missing: 0, stale: 0 });
+  const folder = path.join(fx.home, '.ai-agent-toolkit', 'user-state', 'owed-check');
+  fs.mkdirSync(folder, { recursive: true });
+  const nowMs = fx.deps.nowMs ?? Date.now();
+  const plant = (name, daysAgo) => { const file = path.join(folder, name); fs.writeFileSync(file, ''); const at = new Date(nowMs - daysAgo * 24 * HOUR); fs.utimesSync(file, at, at); };
+  plant('old.permissions', 31);
+  plant('recent.permissions', 29);
+  plant('old.json', 90);
+  fx.run();
+  const left = fs.readdirSync(folder);
+  assert.equal(left.includes('old.permissions'), false, 'a month-old stamp is removed');
+  assert.ok(left.includes('recent.permissions'));
+  assert.ok(left.includes('old.json'), 'other files are left alone');
+  assert.equal(left.filter(name => name.endsWith('.permissions')).length, 2, 'this chat\'s own stamp and the recent one');
+});
+
 test('O-33 the permissions line is never read in cloud, ungoverned or up-to-date chats, and any failure drops it', t => {
   const outdated = () => ({ checked: true, app: 'Claude Code', missing: 2, stale: 0 });
   const silent = (fx, input = {}) => assert.equal(String(fx.run(input).output?.systemMessage || '').includes('Toolkit permissions'), false);

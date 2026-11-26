@@ -413,11 +413,25 @@ function permissionsNote(input, deps = {}) {
     if (!root || !require(path.join(SCRIPTS, 'programme-checkpoint.cjs')).githubGovernanceOn(root, deps)) return null;
     fs.mkdirSync(path.dirname(stamp), { recursive: true });
     fs.writeFileSync(stamp, '', { flag: 'wx', mode: 0o600 });
+    pruneStamps(path.dirname(stamp), deps.nowMs ?? Date.now());
     const found = (deps.permissions || (where => require('./toolkit-permissions.cjs').permissionsState(where, { host: 'claude' })))(root);
     if (!found || found.checked !== true || !(found.missing > 0 || found.stale > 0)) return null;
     const what = [found.missing > 0 ? `${found.missing} missing` : '', found.stale > 0 ? `${found.stale} old` : ''].filter(Boolean).join(', ');
     return `Toolkit permissions: ${found.app || 'Claude Code'}'s Toolkit permission lines on this computer are out of date (${what}). Say toolkit permissions for the one command that brings them up to date; nothing waits on it.`;
   } catch { return null; }
+}
+
+// Stamps of chats older than a month are removed when a new chat writes its own, so they never pile up;
+// a month-old chat that resumes gets the line once more.
+const STAMP_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+function pruneStamps(folder, nowMs) {
+  try {
+    for (const name of fs.readdirSync(folder)) {
+      if (!name.endsWith('.permissions')) continue;
+      const file = path.join(folder, name);
+      try { if (nowMs - fs.statSync(file).mtimeMs > STAMP_KEEP_MS) fs.rmSync(file, { force: true }); } catch { /* the next new chat tries again */ }
+    }
+  } catch { /* nothing to prune */ }
 }
 
 // The owed check, with the permissions line added to whatever it says.

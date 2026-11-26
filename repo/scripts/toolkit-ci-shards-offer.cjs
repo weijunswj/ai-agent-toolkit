@@ -187,7 +187,8 @@ function ciShardsText(mergedText, parsed, value) {
 // A shard split the owner closed without merging is asked about once (INT-TK421-1360): the bank's
 // shards row asks, and the owner's answer to that bank is remembered here, on this computer, per
 // repository and pull request number, so a later bank does not ask again about the same close. A
-// later split closed again is a new number, asked once more. The file holds repository ids, numbers,
+// later split closed again is a higher number, asked once more; until then the newest answer holds,
+// even once GitHub's closed list no longer shows that pull request or cannot be read. The file holds repository ids, numbers,
 // answers and times only; one that cannot be read counts as not answered.
 const CLOSED_SCHEMA = 'toolkit.ci-shards-closed.v1';
 const CLOSED_BASENAME = 'ci-shards-closed.v1.json';
@@ -213,6 +214,17 @@ function closedSplitAnswer(registryOptions, repositoryId, number) {
   return entry && ANSWERS.includes(entry.answer) ? entry : null;
 }
 
+// The newest close remembered for the repository ({ number, answer, at }), or null. It keeps holding
+// when that pull request is no longer among the closed ones GitHub lists, or the list cannot be read.
+function latestClosedSplit(registryOptions, repositoryId) {
+  let latest = null;
+  for (const [key, entry] of Object.entries(closedAnswers(registryOptions))) {
+    const number = key.startsWith(`${repositoryId}#`) ? Number(key.slice(repositoryId.length + 1)) : NaN;
+    if (Number.isInteger(number) && entry && ANSWERS.includes(entry.answer) && (!latest || number > latest.number)) latest = { number, answer: entry.answer, at: entry.at };
+  }
+  return latest;
+}
+
 function rememberClosedSplit(registryOptions, repositoryId, number, answer, { now = new Date() } = {}) {
   if (typeof repositoryId !== 'string' || !repositoryId || !Number.isInteger(number) || !ANSWERS.includes(answer)) return false;
   const answers = { ...closedAnswers(registryOptions), [closedKey(repositoryId, number)]: { answer, at: now.toISOString() } };
@@ -225,4 +237,4 @@ function rememberClosedSplit(registryOptions, repositoryId, number, answer, { no
   return true;
 }
 
-module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, CLOSED_BASENAME, ciShardsText, closedSplitAnswer, detectNodeTests, existingShards, firstList, oldSweepCopies, readEstimate, readersReady, rememberClosedSplit });
+module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, closedSplitAnswer, detectNodeTests, existingShards, firstList, latestClosedSplit, oldSweepCopies, readEstimate, readersReady, rememberClosedSplit });

@@ -1548,7 +1548,7 @@ function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, ho
   const { lines, checkpoints } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
   // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
   const finish = state.programme_records_bind === true ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
-  // A missing Governance App or an evidence store that cannot be used, from the last daily check.
+  // A missing Governance App or an evidence store that cannot be used, from the last check.
   const parts = state.programme_records_bind === true ? require('./toolkit-governance-parts.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.

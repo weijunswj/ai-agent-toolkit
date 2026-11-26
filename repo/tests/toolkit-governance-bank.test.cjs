@@ -259,9 +259,9 @@ test('an evidence store the last check could not use is not ready, with its one 
     permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, ciShards: { measured: { minutes: 4 }, open: [], existing: null, usable: { ok: true } }, storeCheck });
   const missing = bank.renderGovernanceBank(specs({ state: 'missing', checked_at: '2026-11-26T09:00:00.000Z' }));
   assert.match(missing, /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
-  assert.match(missing, /^\| 1\.6 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: say change store, and the controller sets up a store with you \| Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer \|$/m);
-  assert.match(bank.explainText(specs({ state: 'missing' }), '1.6'), /Set in the programme file, but at the last daily check it cannot be found with this computer's GitHub sign-in, so programme records and evidence cannot be saved/);
-  assert.match(bank.renderGovernanceBank(specs({ state: 'not-private' })), /^\| 1\.6 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: make it private again on GitHub, or say change store \|/m);
+  assert.match(missing, /^\| 1\.6 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: sign in to GitHub on this computer with an account that can see it, or say change store and the controller sets up another with you \| Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer \|$/m);
+  assert.match(bank.explainText(specs({ state: 'missing' }), '1.6'), /Set in the programme file, but at the last check it cannot be found with this computer's GitHub sign-in, so programme records and evidence cannot be saved/);
+  assert.match(bank.renderGovernanceBank(specs({ state: 'not-private' })), /^\| 1\.6 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: make it private again on GitHub, or say change store and the controller sets up another with you \|/m);
   assert.match(bank.renderGovernanceBank(specs({ state: 'read-only' })), /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
   for (const fine of [null, { state: 'usable' }, { state: 'unverified' }]) {
     const shown = bank.renderGovernanceBank(specs(fine));
