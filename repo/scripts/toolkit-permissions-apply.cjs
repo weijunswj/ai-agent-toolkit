@@ -36,6 +36,7 @@
 const nodeFs = require('node:fs');
 const path = require('node:path');
 const ownerTerminal = require('./owner-terminal.cjs');
+const permissions = require('./toolkit-permissions.cjs');
 const review = require('./toolkit-permissions-review.cjs');
 
 const { AGENT_MARKERS } = ownerTerminal;
@@ -63,7 +64,6 @@ function parseApplyArgs(argv, mode = 'apply') {
   return options;
 }
 
-const ruleKeys = text => [...String(text || '').matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => `${match[2]} ${JSON.parse(match[1]).join(' ')}`);
 
 // Parses a Claude Code settings file Toolkit may merge into, or stops.
 function settingsOf(target, before) {
@@ -170,10 +170,10 @@ class PermissionsApply {
     const before = this.read(block.target);
     const codexHome = this.#environment.CODEX_HOME || path.join(this.#home, '.codex');
     if (!this.#fs.existsSync(codexHome)) return { host: 'codex', target: block.target, skip: `Codex has no settings folder on this computer (${codexHome}).` };
-    const old = ruleKeys(before);
+    const old = permissions.ruleKeys(before);
     if (mode === 'remove') return { host: 'codex', target: block.target, before, after: null, current: before === null, added: [], removed: old, deleted: before !== null };
     const same = before !== null && before.replace(/\r\n/g, '\n') === block.text;
-    const next = ruleKeys(block.text);
+    const next = permissions.ruleKeys(block.text);
     return { host: 'codex', target: block.target, before, after: block.text, current: same, added: next.filter(key => !old.includes(key)), removed: old.filter(key => !next.includes(key)), replaced: before !== null && !same };
   }
 
@@ -266,8 +266,6 @@ class PermissionsApply {
 }
 
 const sameKey = file => path.resolve(file);
-// toolkit-permissions.cjs's tables: handed over when it runs this as a script, else required.
-const tablesOf = deps => deps.permissions || require('./toolkit-permissions.cjs');
 // A path under the home folder, shown from ~ with forward slashes.
 function homeShort(file, home) {
   const target = String(file).replace(/\\/g, '/');
@@ -322,11 +320,7 @@ async function main(argv, deps = {}) {
     const tty = (deps.tty || (() => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })))();
     if (!tty.stdin || !tty.stdout) throw new ApplyStop(`${flag} needs a terminal you type into; it does not read answers from a pipe or print into a file.`, 'run it yourself in PowerShell or a terminal window. Nothing was written.');
 
-    // Run as a script, toolkit-permissions.cjs is still loading here and hands its exports over: a
-    // require of a loading module with frozen exports throws.
-    const permissions = tablesOf(deps);
-    const PermissionBlocks = deps.PermissionBlocks || permissions.PermissionBlocks;
-    const blocks = new PermissionBlocks(deps);
+    const blocks = new permissions.PermissionBlocks(deps);
     const applier = new PermissionsApply(deps);
     const lister = new review.PermissionReview({ blocks, rows: permissions.ROWS, never: permissions.NEVER, safePath: permissions.safePath, cwd: deps.cwd, fs: deps.fs, home: deps.home || require('node:os').homedir(), platform: deps.platform || process.platform, environment, run: deps.run || require('node:child_process').spawnSync });
     const notes = [];
@@ -350,7 +344,7 @@ async function main(argv, deps = {}) {
           picked = picks.ids.map(id => model.items.find(item => item.id === id));
         }
         claudePlans = claudeApplyPlans(model, applier, picked);
-      } else claudePlans = claudeRemovePlans({ permissions, blocks, applier, record, repoRoot: options.repoRoot, deps, notes });
+      } else claudePlans = claudeRemovePlans({ blocks, applier, record, repoRoot: options.repoRoot, deps, notes });
     }
     for (const host of options.hosts.filter(name => name === 'codex')) {
       const built = blocks.build({ host, scope: 'computer' });
@@ -441,7 +435,7 @@ function nextRecord(record, plans, mode) {
 // record names, the recorded lines (or, with no record for that file, Toolkit's current lines) plus
 // old Toolkit lines. A line the owner had before Toolkit's record said so stays. The managed checkout
 // may be gone: the lines are built from the recorded Toolkit folder without reading it.
-function claudeRemovePlans({ permissions, blocks, applier, record, repoRoot, deps, notes, repo: withRepo = true }) {
+function claudeRemovePlans({ blocks, applier, record, repoRoot, deps, notes, repo: withRepo = true }) {
   const shipped = review.shippedScripts(permissions.ROWS);
   let built = null;
   try { built = blocks.build({ host: 'claude', scope: withRepo ? 'all' : 'computer', repoRoot, requireScripts: false }); } catch (error) {
@@ -490,12 +484,11 @@ function otherScreen(mode, claudePlans, codexEntries, notes, home) {
 // Read-only: what --remove would take out on this computer, for `remove toolkit`'s list.
 // [{ host: 'claude'|'codex', target, toolkit: lines that go, other: lines that stay }]. It writes nothing.
 function removalPreview(deps = {}) {
-  const permissions = tablesOf(deps);
   const blocks = new permissions.PermissionBlocks(deps);
   const applier = new PermissionsApply(deps);
   const found = [];
   // The computer file and every recorded file; not whatever repository the shell is in.
-  const plans = claudeRemovePlans({ permissions, blocks, applier, record: applier.readRecord(), repoRoot: null, deps, notes: [], repo: false });
+  const plans = claudeRemovePlans({ blocks, applier, record: applier.readRecord(), repoRoot: null, deps, notes: [], repo: false });
   for (const plan of plans.filter(item => !item.current)) {
     const settings = settingsOf(plan.target, plan.before);
     const held = ['allow', 'ask'].reduce((sum, key) => sum + (Array.isArray(settings.permissions?.[key]) ? settings.permissions[key].length : 0), 0);
@@ -510,4 +503,4 @@ function removalPreview(deps = {}) {
   return found;
 }
 
-module.exports = Object.freeze({ PermissionsApply, ApplyStop, AGENT_MARKERS, RECORD_SCHEMA, parseApplyArgs, ruleKeys, nextRecord, removalPreview, main });
+module.exports = Object.freeze({ PermissionsApply, ApplyStop, AGENT_MARKERS, RECORD_SCHEMA, parseApplyArgs, nextRecord, removalPreview, main });

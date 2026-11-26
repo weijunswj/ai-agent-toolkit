@@ -111,6 +111,29 @@ const ROWS = Object.freeze([
 const AUTO_MODE_MARK = 'Toolkit: ';
 const AUTO_MODE_ALLOW = Object.freeze([`${AUTO_MODE_MARK}merging a pull request with the GitHub command line is allowed when Toolkit's merge hold hook let the command through. That hook runs first and lets a merge through only after the owner typed merge with its number, tapped Toolkit's merge card, or turned task auto-merge on for a pull request with a ready answer.`]);
 
+// Scripts Toolkit shipped in a block once and no longer does (from the blocks' git history). A node
+// line for one of these, or for a script in today's rows, is an old Toolkit line wherever it points;
+// any other node line is the owner's.
+const RETIRED_SCRIPTS = Object.freeze(['repo/scripts/toolkit-windows-tasks.cjs', 'repo/scripts/toolkit-tasks.cjs', 'repo/scripts/toolkit-update-scheduled-task.cjs']);
+
+// The script a `node "<path>"` line runs, as a forward-slash path, or null.
+function nodeScript(line) {
+  const match = /^(?:Bash|PowerShell)\(\s*node\s+(?:"([^"]+)"|([^\s")]+))/.exec(String(line));
+  return match ? (match[1] || match[2]).replace(/\\/g, '/') : null;
+}
+
+function shippedScripts(rows) {
+  return Object.freeze([...new Set([...rows.filter(row => row.kind === 'script').map(row => row.script), ...RETIRED_SCRIPTS])]);
+}
+
+function oldToolkitLine(line, shipped) {
+  const script = nodeScript(line);
+  return Boolean(script) && shipped.some(name => script === name || script.endsWith(`/${name}`));
+}
+
+// The decision and pattern of each rule in a Codex rules file, as `<decision> <tokens>`.
+const ruleKeys = text => [...String(text || '').matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => `${match[2]} ${JSON.parse(match[1]).join(' ')}`);
+
 // `--apply` writes the owner's own app settings: only the owner runs it, so every block asks for it.
 const APPLY_WHY = 'Writing the app\'s permission settings is the owner\'s own step, typed in their own terminal; agents never run it.';
 const OWNER_FLAGS = Object.freeze(['--apply', '--remove']);
@@ -304,7 +327,6 @@ class PermissionBlocks {
     const list = key => (Array.isArray(settings.permissions?.[key]) ? settings.permissions[key].filter(item => typeof item === 'string') : []);
     // An old Toolkit line is a node line for a script Toolkit has shipped in a block (today's rows or a
     // retired one), in any folder, that the block no longer holds. Any other node line is the owner's.
-    const { oldToolkitLine, shippedScripts } = require('./toolkit-permissions-review.cjs');
     const shipped = shippedScripts(ROWS);
     const auto = Array.isArray(settings.autoMode?.allow) ? settings.autoMode.allow.filter(item => typeof item === 'string') : [];
     return built.blocks.map(block => ({
@@ -405,13 +427,18 @@ function applyLine(built, flag = '--apply', host = null) {
   return { command, what };
 }
 
+// --review, --apply and --remove run toolkit-permissions-cli.cjs as their own process, in this
+// terminal: hooks load this file, and that one holds Claude Code's own tool names (see its header).
+const CLI_FLAGS = Object.freeze(['--review', ...OWNER_FLAGS]);
+function runCli(argv) {
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'toolkit-permissions-cli.cjs'), ...argv], { stdio: 'inherit', windowsHide: false });
+  return Number.isInteger(result.status) ? result.status : 1;
+}
+
 function main(argv = process.argv.slice(2), deps = {}) {
-  // The class is handed over, not required back: run as a script, this file is still loading here,
-  // and a require of a loading module with frozen exports throws.
-  if (OWNER_FLAGS.includes(argv[0])) return require('./toolkit-permissions-apply.cjs').main(argv.slice(1), { ...deps, PermissionBlocks, permissions: module.exports, mode: argv[0].slice(2) });
+  if (CLI_FLAGS.includes(argv[0])) return runCli(argv);
   const out = deps.stdout || (text => process.stdout.write(text));
   const err = deps.stderr || (text => process.stderr.write(text));
-  if (argv[0] === '--review') return reviewMain(argv.slice(1), deps, out, err);
   let options;
   try { options = parseArgs(argv); }
   catch (error) { err(`${error.message}\n${USAGE}`); return 2; }
@@ -440,69 +467,17 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-// `--review`: the list of every permission line in scope (toolkit-permissions-review.cjs); with
-// --drop, the owner's picks and the one command that carries them. Read-only.
-function parseReviewArgs(argv) {
-  const options = { repoRoot: null, all: false, drop: null, json: false };
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === '--all' && !options.all) { options.all = true; continue; }
-    if (arg === '--json' && !options.json) { options.json = true; continue; }
-    if (arg === '--host' && argv[index + 1] === 'claude') { index += 1; continue; }
-    const value = argv[index + 1];
-    if ((arg === '--repo-root' || arg === '--drop') && typeof value === 'string' && value && !value.startsWith('--')) {
-      const key = arg === '--drop' ? 'drop' : 'repoRoot';
-      if (options[key] === null) { options[key] = value; index += 1; continue; }
-    }
-    throw new PermissionsError(`--review takes only --host claude, --repo-root <checkout>, --all, --drop <ids> and --json, not ${JSON.stringify(arg)}.`, 'see the usage line.', 2);
-  }
-  return options;
-}
-
-function reviewer(deps) {
-  const review = require('./toolkit-permissions-review.cjs');
-  const owner = new PermissionBlocks(deps);
-  return { review, owner, list: new review.PermissionReview({ blocks: owner, rows: ROWS, never: NEVER, safePath, cwd: deps.cwd, fs: deps.fs, home: deps.home || os.homedir(), platform: deps.platform || process.platform, environment: deps.environment, run: deps.run || spawnSync }) };
-}
-
-function reviewMain(argv, deps, out, err) {
-  let options;
-  try { options = parseReviewArgs(argv); } catch (error) { err(`${error.message}\n${USAGE}`); return 2; }
-  const { review, list } = reviewer(deps);
-  try {
-    const model = list.collect({ repoRoot: options.repoRoot });
-    if (options.drop !== null) {
-      const picks = review.readDrop(options.drop, model);
-      if (!picks.ok) throw new review.ReviewStop(picks.reason, 'name ids from the list, such as D1 or D1-D5. Nothing was written.');
-      if (options.json) out(`${JSON.stringify({ picks: picks.ids, preview: review.previewCode(model, picks.ids), command: review.applyCommand(model, ` --drop ${picks.ids.join(',')} --preview ${review.previewCode(model, picks.ids)}`) }, null, 2)}\n`);
-      else out(`${review.picksText(model, picks.ids)}\n`);
-      return 0;
-    }
-    if (options.json) {
-      out(`${JSON.stringify({ toolkit: { missing: model.missing, old: model.old, status: review.toolkitStatus(model) }, counts: model.counts,
-        items: model.items.map(item => ({ id: item.id, class: item.cls, list: item.list, line: review.mask(item.line), where: [...new Set(item.files.map(index => model.files[index].place))] })),
-        chat: review.chatList(model, { all: options.all }), command: model.missing || model.old ? review.applyCommand(model) : null }, null, 2)}\n`);
-    } else out(`${review.chatList(model, { all: options.all })}\n`);
-    return 0;
-  } catch (error) {
-    if (error instanceof review.ReviewStop || error instanceof PermissionsError) { err(`${error.message}\n`); return error.exitCode; }
-    throw error;
-  }
-}
-
 // How this computer's Toolkit permission lines for this app compare with what Toolkit would write:
 // { checked, host, app (its name for the owner), missing, stale, update, remove }. Reads local files only, so the governance bank and the
-// session-start line both use it. With `others` (the bank, Claude Code only) it also reads every
-// settings file the review covers and adds { other, risky, dead, review }: the count of lines that are
-// not Toolkit's and the review's chat list. Ready stays on Toolkit's own lines.
-function permissionsState(root, { host = require('./agent-host-markers.cjs').detectAgentHost() === 'codex' ? 'codex' : 'claude', others = false } = {}) {
+// session-start line both use it. The lines that are not Toolkit's: toolkit-permissions-cli.cjs
+// permissionsWithReview.
+function permissionsState(root, { host = require('./agent-host-markers.cjs').detectAgentHost() === 'codex' ? 'codex' : 'claude' } = {}) {
   const owner = new PermissionBlocks();
   const built = owner.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: root });
   let missing = 0;
   let stale = 0;
   for (const block of built.blocks) {
     if (host === 'codex') {
-      const { ruleKeys } = require('./toolkit-permissions-apply.cjs');
       let text = null;
       try { text = nodeFs.readFileSync(block.target, 'utf8'); } catch { text = null; }
       const have = ruleKeys(text);
@@ -516,20 +491,10 @@ function permissionsState(root, { host = require('./agent-host-markers.cjs').det
       stale += report.stale.length + report.stale_ask.length + report.auto_old.length;
     }
   }
-  const found = { checked: true, host, app: host === 'codex' ? 'Codex' : 'Claude Code', missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
-  if (!others || host !== 'claude') return found;
-  // The repository's lines are read only where it is governed (as its block is); elsewhere, the computer's.
-  const { review, list } = reviewer({ cwd: root || process.cwd() });
-  try {
-    const model = list.collect({});
-    return { ...found, other: model.counts.other, risky: model.counts.risky, dead: model.counts.dead, review: review.chatList(model) };
-  } catch (error) {
-    if (!(error instanceof review.ReviewStop)) throw error;
-    return { ...found, other: null, review_error: error.message };
-  }
+  return { checked: true, host, app: host === 'codex' ? 'Codex' : 'Claude Code', missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ AUTO_MODE_MARK, AUTO_MODE_ALLOW, PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
+module.exports = Object.freeze({ AUTO_MODE_MARK, AUTO_MODE_ALLOW, RETIRED_SCRIPTS, USAGE, nodeScript, shippedScripts, oldToolkitLine, ruleKeys, PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

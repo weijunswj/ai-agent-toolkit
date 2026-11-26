@@ -14,6 +14,8 @@
 // Claude Code reads user, shared and local settings and merges their permission lists
 // (https://code.claude.com/docs/en/settings, read 26 Nov 2026).
 //
+// Not loaded by any hook: toolkit-permissions-cli.cjs and toolkit-permissions-apply.cjs load it.
+//
 // Line classes, in this order (allow and ask lines only; deny, autoMode, env and every other key are
 // never listed and never written):
 //   toolkit  the exact line is in Toolkit's block for that file: kept, not listed.
@@ -33,10 +35,8 @@
 const crypto = require('node:crypto');
 const nodeFs = require('node:fs');
 const path = require('node:path');
+const { RETIRED_SCRIPTS, nodeScript, shippedScripts, oldToolkitLine } = require('./toolkit-permissions.cjs');
 
-// Scripts Toolkit shipped in a block once and no longer does (from the blocks' git history). A node
-// line for one of these, or for a script in today's rows, is an old Toolkit line wherever it points.
-const RETIRED_SCRIPTS = Object.freeze(['repo/scripts/toolkit-windows-tasks.cjs', 'repo/scripts/toolkit-tasks.cjs', 'repo/scripts/toolkit-update-scheduled-task.cjs']);
 const CLASS_ORDER = Object.freeze(['risky', 'dead', 'own']);
 const LETTER = Object.freeze({ risky: 'R', dead: 'D', own: 'Y' });
 const MAX_DROP = 500;
@@ -50,22 +50,6 @@ class ReviewStop extends Error {
 
 const SHELL = /^(Bash|PowerShell)\(([\s\S]*)\)$/;
 const FILE_TOOLS = /^(Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep)\(([\s\S]*)\)$/;
-
-// The script a `node "<path>"` line runs, as a forward-slash path, or null.
-function nodeScript(line) {
-  const match = /^(?:Bash|PowerShell)\(\s*node\s+(?:"([^"]+)"|([^\s")]+))/.exec(String(line));
-  return match ? (match[1] || match[2]).replace(/\\/g, '/') : null;
-}
-
-function shippedScripts(rows) {
-  return Object.freeze([...new Set([...rows.filter(row => row.kind === 'script').map(row => row.script), ...RETIRED_SCRIPTS])]);
-}
-
-// An old Toolkit line: a node line whose script is one Toolkit has shipped, in any folder.
-function oldToolkitLine(line, shipped) {
-  const script = nodeScript(line);
-  return Boolean(script) && shipped.some(name => script === name || script.endsWith(`/${name}`));
-}
 
 // The absolute paths a line names, read default-deny: only paths made of letters, digits, space and
 // _ . - / \ : in the forms below are returned; anything else is not checked, so a line is never called

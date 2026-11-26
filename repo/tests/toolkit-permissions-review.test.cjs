@@ -10,6 +10,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const permissions = require('../scripts/toolkit-permissions.cjs');
+// --review, --apply and --remove run in toolkit-permissions-cli.cjs (its own process when typed); the
+// tests call it in this process so they can hand it a temporary computer.
+const cli = require('../scripts/toolkit-permissions-cli.cjs');
 const review = require('../scripts/toolkit-permissions-review.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const fixture = require('./support/permission-fixture.cjs');
@@ -17,7 +20,7 @@ const fixture = require('./support/permission-fixture.cjs');
 async function run(fix, args) {
   fix.out.length = 0;
   fix.err.length = 0;
-  const code = await permissions.main(args, fix.deps);
+  const code = await cli.main(args, fix.deps);
   return { code, out: fix.out.join(''), err: fix.err.join('') };
 }
 const reviewJson = async (fix, extra = []) => JSON.parse((await run(fix, ['--review', '--repo-root', fix.root, '--json', ...extra])).out);
@@ -186,8 +189,8 @@ test('--apply --drop: one backup folder first, picked lines gone everywhere, eve
   assert.deepEqual(settings.env, { A: '1' });
   for (const line of ['WebFetch', 'WebSearch', 'mcp__scheduled-tasks__list_scheduled_tasks']) assert.ok(settings.permissions.allow.includes(line), `keeps ${line}`);
   assert.equal(fs.readFileSync(fix.files.shared, 'utf8'), before[fix.files.shared], 'the shared file in Git is never written');
-  assert.equal(permissions.main(['--check', fix.files.computer, '--scope', 'computer'], { ...fix.deps, stdout: () => {} }), 0, 'Toolkit lines current on the computer');
-  assert.equal(permissions.main(['--check', fix.files.repo, '--scope', 'repo', '--repo-root', fix.root], { ...fix.deps, stdout: () => {} }), 0, 'and in the repository');
+  assert.equal(cli.main(['--check', fix.files.computer, '--scope', 'computer'], { ...fix.deps, stdout: () => {} }), 0, 'Toolkit lines current on the computer');
+  assert.equal(cli.main(['--check', fix.files.repo, '--scope', 'repo', '--repo-root', fix.root], { ...fix.deps, stdout: () => {} }), 0, 'and in the repository');
   for (const copy of fix.files.copies) assert.ok(!lines(fix, copy).some(line => /gh pr comment/.test(line)), 'nothing is added to a worktree copy');
   const again = await reviewJson(fix);
   assert.deepEqual(again.counts, { risky: 3, dead: 0, own: 11, other: 14 });
@@ -251,7 +254,7 @@ test('a write that fails on the third of five files puts the first two back byte
   let renames = 0;
   const failing = new Proxy(fix.deps.fs, { get: (target, name) => (name === 'renameSync' ? (...args) => { renames += 1; if (renames === 3) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); return target.renameSync(...args); } : target[name]) });
   fix.out.length = 0; fix.err.length = 0;
-  const code = await permissions.main(['--apply', '--host', 'claude', '--repo-root', fix.root, '--drop', 'D1-D8,R2', '--preview', preview], { ...fix.deps, fs: failing });
+  const code = await cli.main(['--apply', '--host', 'claude', '--repo-root', fix.root, '--drop', 'D1-D8,R2', '--preview', preview], { ...fix.deps, fs: failing });
   assert.equal(code, 1);
   const message = fix.err.join('');
   assert.match(message, /could not be written \(ENOSPC\)\. Every file Toolkit wrote is back as it was\. Backup folder: .*20261126T101500Z/);

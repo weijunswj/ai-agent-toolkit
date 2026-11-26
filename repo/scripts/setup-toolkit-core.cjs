@@ -3782,7 +3782,7 @@ function subagentDepthOutcomeSummary(result) {
 // The governance bank's permissions row, said the same way at the end of setup: Toolkit's own lines
 // and the other lines to review, with the owner's one command when Toolkit's lines are out of date.
 // No question is asked and nothing is written; it reads this computer's settings files only.
-function permissionsSummaryLines(host, check = (app) => require('./toolkit-permissions.cjs').permissionsState(process.cwd(), { host: app, others: app === 'claude' })) {
+function permissionsSummaryLines(host, check = (app) => require('./toolkit-permissions-cli.cjs').permissionsWithReview(process.cwd(), { host: app })) {
   const app = host === 'codex' ? 'codex' : 'claude';
   let found = null;
   try { found = check(app); } catch { found = null; }

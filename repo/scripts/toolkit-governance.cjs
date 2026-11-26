@@ -165,7 +165,7 @@ class ToolkitGovernanceCli {
     this.#ciEstimator = ciEstimator || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? () => null : root => ciOffer.readEstimate(root));
     // The pinned copies are checked against the Toolkit git checkout (the managed one from a plugin copy).
     this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, require('./toolkit-cloud-workflows.cjs').sourceRoot()));
-    this.#permissionsChecker = permissionsChecker || (root => require('./toolkit-permissions.cjs').permissionsState(root, { others: true }));
+    this.#permissionsChecker = permissionsChecker || (root => require('./toolkit-permissions-cli.cjs').permissionsWithReview(root));
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
     this.#plainTextInstaller = plainTextInstaller;
