@@ -136,12 +136,26 @@ test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists
 test('the CLAUDE.md shim is expected only where Claude Code would otherwise miss AGENTS.md', () => {
   const skill = readText('skills/repository-agent-rules/SKILL.md');
   const check = skill.split('## Cheap state check')[1].split('\n## ')[0];
-  assert.match(check, /A `CLAUDE\.md` that loads `AGENTS\.md` is expected only when Claude Code would otherwise miss it: the repository has its own `AGENTS\.md` and its own `CLAUDE\.md` \(or `\.claude\/CLAUDE\.md` or `CLAUDE\.local\.md`\), and Claude Code's "Read AGENTS\.md as well as CLAUDE\.md" setting is off\./);
+  assert.match(check, /A `CLAUDE\.md` that loads `AGENTS\.md` is expected only when Claude Code would otherwise miss it: the repository has its own `AGENTS\.md` and its own `CLAUDE\.md` \(or `\.claude\/CLAUDE\.md` or `CLAUDE\.local\.md`\), and Claude Code's "Read AGENTS\.md as well as CLAUDE\.md" setting is off,/);
   assert.doesNotMatch(skill, /where the repository has its own `AGENTS\.md`, a `CLAUDE\.md` that loads it/);
   assert.match(skill, /A missing `CLAUDE\.md` is created from its template only when the user asks for one/);
   // The setting's name as Toolkit's own Claude Code settings show it.
   const { SETTINGS } = require('../scripts/toolkit-claude-user-settings.cjs');
   assert.ok(SETTINGS.some(spec => spec.label === 'Read AGENTS.md as well as CLAUDE.md'), 'the skill names the setting by its label');
+});
+
+// Checked against the code on 26 Nov 2026: Claude Code below 2.1.277 reads only CLAUDE.md and has no
+// such setting (toolkit-claude-user-settings.cjs host limits), and the session-start preflight compares
+// CLAUDE.md with its template only in a Toolkit source checkout (toolkit-local-bridge.cjs).
+test('the shim wording is true to Claude Code versions and to what the preflight compares', () => {
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  const check = skill.split('## Cheap state check')[1].split('\n## ')[0];
+  assert.match(check, /setting is off, or Claude Code is older than 2\.1\.277, which reads only `CLAUDE\.md`\. From 2\.1\.277 Claude Code reads `AGENTS\.md` itself when the repository has no `CLAUDE\.md`/);
+  assert.doesNotMatch(check, /compare only the managed blocks a repository still carries with the bundled templates/);
+  assert.match(check, /in a Toolkit source checkout they compare only `CLAUDE\.md` with its template, the line `@AGENTS\.md`; anywhere else they report a governed-rules, n8n or Antigravity bootstrap block an older setup left/);
+  const howTo = readText('repo/docs/HOW-TO-USE.md');
+  assert.doesNotMatch(howTo, /Claude Code loads it through a one-line `CLAUDE\.md`/);
+  assert.match(howTo, /a one-line `CLAUDE\.md` \(`@AGENTS\.md`\) is needed only where the repository has its own `CLAUDE\.md` and that setting is off, or Claude Code is older than 2\.1\.277/);
 });
 
 test('the n8n adapter source, which the global rules carry, stays compact and fail-closed', () => {
