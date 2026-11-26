@@ -86,7 +86,7 @@ test('the bank is one typed list of its two questions, answered in one line, and
     '| 1.3 | Parallel CI shards | Ready: Not applicable | Toolkit can split only Node tests, and no Node test files were found (such as *.test.js using node:test). It looks again at the next refresh | - |',
     '| 1.4 | Toolkit permissions (Claude Code) | Not ready: Outdated: 2 missing, 1 old | Next step: run the one command Toolkit gives after your answer | Leave: do not run the command |',
     '| 1.5 | Governance App | Unknown: GitHub could not be read (offline) | Toolkit checks it again next time; nothing is set up from this answer | - |',
-    '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: not by this answer; the controller\'s state move shows its plan first and asks its own confirmation |',
+    '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer |',
   ], 'one table: the two questions, then the four parts Toolkit keeps itself');
   assert.match(shown.out, /^Reply all recommended, or only your changes such as 1\.1=B\. Rows you leave out stay as they are; each change is a pull request you merge\. Say "explain 1\.1" for the full text of a row\.$/m);
   assert.match(shown.out, /Agents: this line is for you alone\. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop\..*never show this bank again after they reply\./);
@@ -172,7 +172,7 @@ test('with nothing left to do the block is one line for the programme file and o
     '| 1.3 | Parallel CI shards | Ready: Not applicable | Toolkit can split only Node tests, and no Node test files were found (such as *.test.js using node:test). It looks again at the next refresh | - |',
     '| 1.4 | Toolkit permissions (Claude Code) | Ready: Up to date | Keep | - |',
     '| 1.5 | Governance App | Ready: Set up | Say "explain 1.1" for how to stop using it | - |',
-    '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: not by this answer; the controller\'s state move shows its plan first and asks its own confirmation |',
+    '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer |',
   ]);
   assert.equal(tail[0], [
     'Also:',
@@ -249,7 +249,7 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
     ['1.12=A', /^This bank has no row 1\.12\. Nothing was written\.$/m],
     // A governed repository is asked two questions; 1.3 is a part Toolkit keeps itself.
     ['1.3=A', /^Row 1\.3 Parallel CI shards takes no answer: Toolkit keeps it itself\. Nothing was written\.$/m],
-    ['1.6=B', /^Row 1\.6 Evidence store takes no answer: Change location: not by this answer; [^\n]*confirmation\. Nothing was written\.$/m],
+    ['1.6=B', /^Row 1\.6 Evidence store takes no answer: Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer\. Nothing was written\.$/m],
     ['explain 1.12', /^This bank has no row 1\.12\.$/m],
   ]) {
     const wrong = await reply(ctx, reference, answer);

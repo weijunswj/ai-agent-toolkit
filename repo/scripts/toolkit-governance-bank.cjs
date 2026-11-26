@@ -63,8 +63,9 @@ const SHARDS_REFRESH = '**Parallel CI shards, daily refresh:** once a day Shard 
 // What a table row the programme file sets says in its Recommended column.
 const SET_IN = 'Set in the programme file';
 const BOUND_CHANGE = 'To change them, edit that file in a pull request and merge it.';
-// The evidence store's other choice: the state move, never this bank's answer.
-const STORE_MOVE = 'Change location: not by this answer; the controller\'s state move shows its plan first and asks its own confirmation';
+// The evidence store's other choice: the controller sets up a new store with the owner. No command moves
+// a store yet, so nothing is promised to move, and this bank's answer moves nothing.
+const STORE_MOVE = 'Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer';
 // The one table's rows, in order; every other row is a line under it.
 const TABLE_ORDER = Object.freeze(['governance', 'task-auto-merge', 'ci-shards', 'permission-blocks', 'governance-app', 'evidence-store']);
 // Where governance is decided the bank has one section and builds the GitHub governance question

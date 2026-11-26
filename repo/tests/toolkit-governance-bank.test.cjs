@@ -206,7 +206,7 @@ test('the governed bank is one table whose top line counts the steps left, and a
   assert.match(bank.renderGovernanceBank(unread), /^\| 1\.5 \| Governance App \| Unknown: GitHub could not be read \(gh-unavailable\) \| /m);
   assert.equal(bank.parseBankAnswer('all recommended', unread, { requireBankReference: false }).governanceApp, 'keep');
   // A part Toolkit keeps itself takes no answer, and says how it changes instead.
-  assert.throws(() => bank.parseBankAnswer('1.6=B', unread, { requireBankReference: false }), /^Error: Row 1\.6 Evidence store takes no answer: Change location: not by this answer; the controller's state move shows its plan first and asks its own confirmation\.$/);
+  assert.throws(() => bank.parseBankAnswer('1.6=B', unread, { requireBankReference: false }), /^Error: Row 1\.6 Evidence store takes no answer: Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer\.$/);
   assert.match(bank.explainText(unread, '1.5'), /^1\.5 Governance App\nCurrent: GitHub could not be read \(gh-unavailable\)\./);
 });
 
