@@ -237,7 +237,7 @@ const fileText = answer => (answer.status === 200 && answer.json?.encoding === '
 function sweepOf(get, repository, branch, main) {
   const workflows = require('../../../repo/scripts/toolkit-cloud-workflows.cjs');
   if (same(repository, workflows.TOOLKIT_REPOSITORY)) return { state: 'own', text: 'runs this repository\'s own commit' };
-  const [{ id, file }] = workflows.WORKFLOWS;
+  const { id, file } = workflows.DEFAULT_CLOUD_WORKFLOWS.find(row => row.id === 'programme-sweep');
   const answer = readOnce(get, `repos/${repository}/contents/${file}?ref=${encodeURIComponent(branch)}`);
   const text = fileText(answer);
   if (text === null && answer.status !== 404) return { state: 'unread', text: `not read (${unread(answer.status)})`, unread: 'the sweep' };

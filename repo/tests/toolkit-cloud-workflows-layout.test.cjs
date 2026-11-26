@@ -22,7 +22,7 @@ const source = file => spawnSync('git', ['show', `${COMMIT}:${file}`], { cwd: RO
 // Every copy, with every optional part present: the gate following a CI workflow, both shard systems.
 function renders() {
   const inputs = { 'programme-sweep': null, 'programme-sweep-gate': { file: 'ci.yml', name: 'CI' }, 'test-shards': { systems: { linux: ['linux-1'], windows: ['windows-1'] } }, 'shard-timings': {} };
-  return [...workflows.WORKFLOWS, ...workflows.SHARD_WORKFLOWS].map(row => ({ id: row.id, text: workflows.render(row.id, source(row.source || row.file), COMMIT, inputs[row.id]) }));
+  return workflows.DEFAULT_CLOUD_WORKFLOWS.filter(row => row.kind === 'rendered').map(row => ({ id: row.id, text: workflows.render(row.id, source(row.source), COMMIT, inputs[row.id]) }));
 }
 
 // The Toolkit script a run line calls, with the script's own text and the text of the Toolkit modules

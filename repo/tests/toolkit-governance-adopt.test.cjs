@@ -85,7 +85,7 @@ function writePlainText(root) {
 const PROPOSAL = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
 
 // `opened` is what GitHub lists as open governance pull requests when the run starts.
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [] } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [], cloudFiles = () => ({ files: {}, warning: null }) } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = opened;
@@ -100,7 +100,7 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(root); },
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [{ ...proposal, answer: binding.governance === 'disabled' ? 'no' : 'yes' }]; return open[0]; }, read: () => open[0] || proposal },
-    cloudWorkflows: (cwd, options) => { cloud.push(options); return { files: {}, warning: null }; },
+    cloudWorkflows: (cwd, options) => { cloud.push(options); return cloudFiles(cwd, options); },
     ...(estimate ? { ciEstimator: () => estimate } : {}),
   });
   const code = await cli.main(argv);
@@ -139,13 +139,13 @@ test('a fresh repository after the card\'s yes asks only task auto-merge, names 
   assert.deepEqual(JSON.parse(files['.github/toolkit-programme.json']), binding);
   // The installed Toolkit delivers the governed rules, so the pull request carries the programme file
   // and the CI checks only: no AGENTS.md, CLAUDE.md, Antigravity bootstrap or playbooks.
+  // (The fake renders no cloud workflows; toolkit-default-cloud-workflows.test.cjs covers those.)
   assert.deepEqual(Object.keys(files).sort(), ['.github/dependabot.yml', '.github/plain-text.json', '.github/scripts/plain-text-check.cjs',
-    '.github/toolkit-programme.json', '.github/workflows/dependency-auto-merge.yml', '.github/workflows/plain-text.yml']);
-  // The dependency security files join the same pull request, so governance never starts with its own
-  // security check failing.
+    '.github/toolkit-programme.json', '.github/workflows/plain-text.yml']);
+  // The Dependabot settings join the same pull request, so governance never starts with its own security
+  // check failing.
   assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/);
-  assert.match(files['.github/workflows/dependency-auto-merge.yml'], /^# Toolkit dependency auto-merge v/m);
-  assert.match(result.out, /Added \.github\/dependabot\.yml and \.github\/workflows\/dependency-auto-merge\.yml to the working tree/);
+  assert.match(result.out, /Added \.github\/dependabot\.yml to the working tree; it travels in the turn-on pull request/);
   assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the repository\'s own AGENTS.md is not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
@@ -156,6 +156,38 @@ test('a fresh repository after the card\'s yes asks only task auto-merge, names 
   const auto = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=B'] });
   assert.equal(auto.code, 0, auto.err + auto.out);
   assert.deepEqual(auto.published[0].binding.task_prs, { auto_merge: 'after-gates', merge_train: 'off' });
+});
+
+// Red on the parent: the pull request carried no guard, and nothing said a sweep follows.
+test('the one turn-on pull request carries every default cloud workflow, says what the guard never scans, and notes the first sweep', async t => {
+  const workflows = require(path.join(scripts, 'toolkit-cloud-workflows.cjs'));
+  const finishing = require(path.join(scripts, 'toolkit-governance-finish.cjs'));
+  const { cloudWorkflowFiles } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
+  const ROOT = path.resolve(scripts, '..', '..');
+  const { SWEEPS, COPIED_FILES } = require('./support/default-cloud-workflows.cjs');
+  const cloudFiles = (cwd, options) => cloudWorkflowFiles(cwd, { ...options, root: ROOT, commit: workflows.toolkitHead(ROOT) });
+  const noted = ctx => finishing.entryFor(ctx.registryOptions, governance.governanceState(ctx.repo, ctx.registryOptions).repository_id).first_sweep;
+  const ctx = fixture(t);
+  const result = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], cloudFiles });
+  assert.equal(result.code, 0, result.err + result.out);
+  assert.equal(result.published.length, 1, 'one pull request');
+  for (const file of [...SWEEPS.map(row => row.file), ...COPIED_FILES]) assert.equal(typeof result.published[0].files[file], 'string', file);
+  assert.match(result.out, /^Personal data guard: checks each pull request and push on GitHub \(on a private repository that uses Actions minutes\), with no hooks on any computer\. It never scans commit author or committer addresses, and it passes images and fonts unread and names each one\.$/m);
+  assert.match(result.out, /After the merge, Toolkit also turns on, [^\n]*that check lets images and fonts through without reading them and names each one; any other file it cannot read fails until its path is listed\.$/m, 'the bank says it before the answer');
+  assert.match(result.out, /After the merge, the next session here finishes on its own: [^\n]*one report-only sweep of what is already there/);
+  for (const name of ['personal-data-guard.yml', 'dependency-auto-merge.yml']) assert.equal(fs.existsSync(path.join(ctx.repo, '.github', 'workflows', name)), false, 'the working tree is not written');
+  assert.equal(noted(ctx), true);
+  // Someone's own file in the guard's place: it stays, the rest is carried, the owner is told, and no sweep is noted.
+  const clash = fixture(t);
+  fs.mkdirSync(path.join(clash.repo, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(clash.repo, '.github', 'workflows', 'personal-data-guard.yml'), 'name: Mine\n');
+  const kept = await run(clash, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], cloudFiles });
+  assert.equal(kept.code, 0, kept.err + kept.out);
+  assert.match(kept.out, /^\.github\/workflows\/personal-data-guard\.yml is not a Toolkit copy, so it is left as it is/m);
+  assert.doesNotMatch(kept.out, /^Personal data guard: checks/m);
+  assert.equal(kept.published[0].files['.github/scripts/personal-data-guard.cjs'], undefined);
+  assert.equal(typeof kept.published[0].files['.github/workflows/dependency-auto-merge.yml'], 'string');
+  assert.equal(noted(clash), false);
 });
 
 test('answering no store makes nothing: no pull request, store or parent issue, and governance stays off', async t => {

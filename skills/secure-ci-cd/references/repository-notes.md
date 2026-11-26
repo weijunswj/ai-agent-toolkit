@@ -10,6 +10,7 @@ These notes hold the parts of this skill that depend on the AI Agent Toolkit: it
 ## Personal-Data Guard
 
 - The attribution check's session and project-thread link patterns match claude.ai links.
+- The default cloud workflow list is `DEFAULT_CLOUD_WORKFLOWS` in `repo/scripts/toolkit-cloud-workflows.cjs`; turning governance on, the refresh pull request and `toolkit-governance.cjs check` read it.
 - A repository counts as the Toolkit only when it has both the guard source and `repo/scripts/toolkit-governance-conformance.cjs`.
 
 ## Check Before A Push
@@ -23,4 +24,4 @@ These notes hold the parts of this skill that depend on the AI Agent Toolkit: it
 ## Dependency Auto-Merge
 
 - The settings file read by the auto-merge template is `.github/toolkit-programme.json` on the default branch, and the template reads its `dependency_updates` block.
-- In a Toolkit-governed repository, `toolkit-governance.cjs check` reports it with the other dependency and security settings, and `toolkit governance security` installs it once the settings file (the programme binding) allows auto-merge.
+- In a Toolkit-governed repository, `toolkit-governance.cjs check` reports it with the other dependency and security settings. It is one of the default cloud workflows, and `toolkit governance security` also writes it into the working tree where it is missing and the settings file (the programme binding) allows auto-merge.

@@ -2,7 +2,8 @@
 
 // The post-merge finish of a governance turn-on. Some settings can only follow the merge: the
 // default-branch protection ruleset (its required checks come from the merged binding), the
-// no-force-push ruleset and the free dependency and security settings. When the governance bank
+// no-force-push ruleset, the free dependency and security settings and, where the turn-on added the
+// personal data guard, one report-only sweep of what was already there (toolkit-governance-first-sweep.cjs). When the governance bank
 // publishes a turn-on pull request it notes the repository here as finish pending. Once that binding
 // is merged and read back, the session-start line starts the finish once in the background
 // (`toolkit-governance.cjs finish`, which asks nothing: the owner's yes in the bank covers these
@@ -25,7 +26,7 @@ const FINISH_GAP_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 32;
 const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // What the finish turns on, as the bank's end lines and the session line say it.
-const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, and the free dependency and security settings';
+const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 
@@ -54,10 +55,11 @@ function update(registryOptions, repositoryId, change) {
   return next;
 }
 
-// Noted when the bank publishes a turn-on pull request.
-function markPending(registryOptions, repositoryId, { proposal = null, now = new Date() } = {}) {
+// Noted when the bank publishes a turn-on pull request. `firstSweep` is whether that pull request adds
+// the personal data guard; null (the publish did not say) keeps what an earlier note says.
+function markPending(registryOptions, repositoryId, { proposal = null, firstSweep = null, now = new Date() } = {}) {
   if (typeof repositoryId !== 'string' || !repositoryId) return null;
-  return update(registryOptions, repositoryId, () => ({ status: 'pending', proposal, at: now.toISOString(), started_at: null, line: null }));
+  return update(registryOptions, repositoryId, entry => ({ status: 'pending', proposal, first_sweep: firstSweep === null ? entry?.first_sweep === true : firstSweep === true, at: now.toISOString(), started_at: null, line: null }));
 }
 
 function entryFor(registryOptions, repositoryId) { return read(registryOptions).repositories[repositoryId] || null; }
@@ -65,17 +67,18 @@ function entryFor(registryOptions, repositoryId) { return read(registryOptions).
 function listed(items) { return items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items[0] || ''; }
 
 // The finish result, built from what actually happened (GovernanceMaintenance.finish):
-// { result: 'done' | 'failed', reason, on, unavailable, held: [{ name, step }], files }.
+// { result: 'done' | 'failed', reason, on, unavailable, held: [{ name, step }], reports, files }.
 // 'done' is final and shown once by the next session, then dropped; 'failed' (something to retry)
 // stays pending. `files` are security files the finish wrote into this working tree, which still
 // need a pull request.
 function resultLine(outcome) {
-  const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], files = outcome.files || [];
+  const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], reports = outcome.reports || [], files = outcome.files || [];
   const parts = [outcome.result === 'done'
     ? `Toolkit: governance setup finished here${held.length ? ', apart from what waits for you below' : ''}.`
     : `Toolkit: governance setup could not finish here yet (${outcome.reason || 'GitHub could not be written'}); it is tried again in a later session.`];
   if (on.length) parts.push(`On and read back: ${listed(on)}.`);
   if (unavailable.length) parts.push(`Not set: GitHub cannot enforce ${listed(unavailable)} on a private repository on GitHub Free, so nothing was written for ${unavailable.length > 1 ? 'them' : 'it'}; the local guards stay the fallback.`);
+  parts.push(...reports);
   for (const entry of held) parts.push(`Waiting for you, ${entry.name}: ${entry.step}`);
   if (files.length) parts.push(`It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.`);
   return parts.join(' ');

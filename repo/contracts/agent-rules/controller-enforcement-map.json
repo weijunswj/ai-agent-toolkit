@@ -856,7 +856,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "There are no handover packets.",
-      "rule_sha": "507c2d1ca360",
+      "rule_sha": "6f4ae192faae",
       "instruction_only": {
         "basis": "judgement",
         "why": "Keeping work recoverable (pushed branches, current pull requests, posted decisions) is a habit checked by reading; the programme handover command records it but cannot judge it."
@@ -977,7 +977,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "G2 starts after the working result",
-      "rule_sha": "99bcd328c711",
+      "rule_sha": "ab0d8dc053eb",
       "instruction_only": {
         "basis": "judgement",
         "why": "Coverage, adversarial depth and rating findings are the reviewers' judgement; the train finder reads only each verdict's first line and route stamps."
@@ -999,7 +999,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "**Early returns keep the guards:**",
-      "rule_sha": "e61db17691d8",
+      "rule_sha": "5617a491b885",
       "instruction_only": {
         "basis": "judgement",
         "why": "Whether an early return skips a generic guard is a code review reading."
@@ -1043,7 +1043,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "Correction rechecks use fresh contexts",
-      "rule_sha": "4324348b5b5b",
+      "rule_sha": "513dba5c4ff9",
       "instruction_only": {
         "basis": "judgement",
         "why": "Which reviewers recheck, what a fix reaches and when a family closure record holds are reviewer judgements."
@@ -1106,7 +1106,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "**Route proof:**",
-      "rule_sha": "dc49d66ebba6",
+      "rule_sha": "7155b7971076",
       "covers": "The gate route check reads the host's launch record and refuses a gate session whose model or effort is inherited, missing or off its pin, and refuses a verdict or builder body with the wrong Route stamp.",
       "enforced_by": [
         {

@@ -307,11 +307,10 @@ function leftoverBlockFindings(repoRoot, toolkitRoot, enabled) {
   return out;
 }
 
-// The cloud workflow copies a governed repository carries (toolkit-cloud-workflows.cjs): the sweep and
-// its gate, plus the test shards workflow and Shard Timings where the repository has a usable shard
-// list. A missing or hand-edited copy is drift; one rendered from an older Toolkit commit or an older
-// shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
-// own files and is skipped.
+// The default cloud workflows a governed repository carries (DEFAULT_CLOUD_WORKFLOWS in
+// toolkit-cloud-workflows.cjs). A missing or hand-edited copy, or someone else's file in its place, is
+// drift; an older copy is only noted, since every refresh updates it. The Toolkit's own checkout runs
+// its own files and is skipped.
 // Whether a rules refresh from this Toolkit checkout moves a copy pinned to `pin` forward: true only
 // when the checkout's HEAD is on origin/main and already contains the pin. A newer pin (another
 // computer refreshed from a later main) or a checkout off main would roll the copy back, or the
@@ -347,17 +346,22 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     head = options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot);
     result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: head, ciShards: merged?.ci_shards?.answer || null });
   } catch (error) {
-    return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud sweep workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
+    return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
   }
   const out = [];
   const direction = pinDirection(toolkitRoot, head);
   for (const row of result.rows) {
-    if (row.state === 'current') continue;
+    // A held row's workflow clashes with a file Toolkit did not write, which its own row reports.
+    if (row.state === 'current' || row.held) continue;
+    // A copied workflow names no Toolkit commit, so the session-start note below leaves it to this check.
+    if (row.state === 'outdated' && row.kind === 'copied') { out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} ${row.why ? 'holds a setting no guard reads any more' : 'is an older Toolkit copy'}; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`)); continue; }
     // The file, the copy's pin and whether a refresh from this checkout moves it forward ride along for
     // the session-start note (toolkit-governance-gate.cjs stalePinLines).
     if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), file: row.file, pin: row.toolkit || null, pinned: Boolean(row.pinned), head, refreshable: direction(row.toolkit) }));
-    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
+    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence}. ${row.state === 'unmanaged' ? 'Move it aside in a pull request, then refresh the repository rules.' : 'Refresh the repository rules to fix it.'}`));
   }
+  // A default branch other than main: the sweep cannot run there, so it is not expected.
+  for (const row of result.not_copied || []) if (row.id.startsWith('programme-sweep')) out.push(finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The ${row.id} workflow is not expected here: ${row.reason}.`));
   // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:
   // nothing refreshes it, and the test shards copy runs a list it no longer matches.
   for (const row of result.not_copied || []) {

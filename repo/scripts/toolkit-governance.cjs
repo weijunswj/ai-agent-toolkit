@@ -31,6 +31,7 @@ const ciOffer = require('./toolkit-ci-shards-offer.cjs');
 const governedShards = require('./governed-test-shards.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 const finishing = require('./toolkit-governance-finish.cjs');
+const { FirstInstallSweep } = require('./toolkit-governance-first-sweep.cjs');
 const { managedToolkitFile } = require('./toolkit-user-state.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -102,6 +103,8 @@ function turnOnSummary(result, binding, storeNote = null) {
     'Merging it turns governance on for this repository on every computer. It changes no credentials or deployment. Anything listed above as made on GitHub was made now; everything else applies only after you merge it.',
     ...(binding?.store?.repository ? [`Store: ${binding.store.repository}, a private GitHub repository${storeNote ? ` (${storeNote})` : ''}, for programme records and evidence.`] : []),
     ...(result.files?.length ? [`It holds: ${result.files.join(', ')}.`] : []),
+    ...(result.added?.includes('personal-data-guard') ? ['Personal data guard: checks each pull request and push on GitHub (on a private repository that uses Actions minutes), with no hooks on any computer. It never scans commit author or committer addresses, and it passes images and fonts unread and names each one.'] : []),
+    ...(result.notes || []),
     `After the merge, the next session here finishes on its own: ${finishing.WHAT}. On a private repository on GitHub Free, GitHub cannot enforce the protection or the rulesets; that session says so and the local guards stay the fallback.`,
     ...(noChecks ? [`This repository has no required checks yet, so default-branch protection waits: once a pull request adds the check names to required_checks in ${governance.BINDING_FILE} and merges, run ${CMD('migrate')} in your own terminal to add it.`] : []),
     'After the merge, before pulling, compare any prepared untracked files with the merged copies; keep local differences and clear only verified duplicates.',
@@ -117,7 +120,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
+  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders; #firstSweep;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -127,8 +130,8 @@ class ToolkitGovernanceCli {
   // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
-  // ticket is bound to) are for tests too.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, ciEstimator = null, ciReaders = null } = {}) {
+  // ticket is bound to) are for tests too, as is `firstSweep` (the finish's first-install sweep).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, ciEstimator = null, ciReaders = null, firstSweep = null } = {}) {
     const pulls = proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: pulls });
     // The turn-on pull request's outcome, read before a post-merge finish (offline and in tests: unread).
@@ -153,6 +156,7 @@ class ToolkitGovernanceCli {
     this.#securityReader = securityReader;
     this.#securityWriter = securityWriter;
     this.#securityFileWriter = securityFileWriter;
+    this.#firstSweep = firstSweep;
     this.#hookReader = hookReader || (() => hookCapability.hookCapability());
     this.#appReader = appReader;
     this.#switchTransport = switchTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
@@ -384,7 +388,8 @@ class ToolkitGovernanceCli {
       rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
       protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
       securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
-    }).finish(state.root || this.#cwd);
+      firstSweep: this.#firstSweep || (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new FirstInstallSweep()),
+    }).finish(state.root || this.#cwd, { sweep: finishing.entryFor(this.#registryOptions, state.repository_id)?.first_sweep === true });
     const lines = said.split('\n').map(line => line.trim()).filter(Boolean);
     if (outcome.result === 'not-ready') {
       finishing.touch(this.#registryOptions, state.repository_id);
@@ -422,7 +427,7 @@ class ToolkitGovernanceCli {
     const result = this.#proposals.publish(this.#cwd, run, binding, bank);
     // A bank turn-on is finished after its merge: protection, rulesets and security settings.
     if (bank && result.proposal?.answer === 'yes') {
-      try { finishing.markPending(this.#registryOptions, this.#state().repository_id, { proposal: result.proposal.number }); } catch { /* the owner can run migrate */ }
+      try { finishing.markPending(this.#registryOptions, this.#state().repository_id, { proposal: result.proposal.number, firstSweep: result.added ? result.added.includes('personal-data-guard') : null }); } catch { /* the owner can run migrate */ }
     }
     const turnOn = bank && result.proposal?.answer === 'yes';
     if (turnOn) this.#turnOnUrl = result.proposal.url;

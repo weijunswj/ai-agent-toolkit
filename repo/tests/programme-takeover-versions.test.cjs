@@ -16,7 +16,7 @@ const { TOOLKIT_VERSION, VERSION_REL_PATH } = require('../scripts/toolkit-versio
 const ROOT = path.resolve(__dirname, '../..');
 const MAIN = '1'.repeat(40);
 const OLD = '3'.repeat(40);
-const SWEEP_FILE = workflows.WORKFLOWS[0].file;
+const SWEEP_FILE = workflows.DEFAULT_CLOUD_WORKFLOWS.find(row => row.id === 'programme-sweep').file;
 const temps = [];
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
 
