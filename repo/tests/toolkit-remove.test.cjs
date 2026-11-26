@@ -448,7 +448,7 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.doesNotMatch(screen, /my-reviewer|my-skill/);
   // Long lists fold into a count; --full unfolds them, and the code stays the same.
   assert.match(screen, /- \*\*Skill copies:\*\* \d+ skill folders Toolkit copied in ~\/\.claude\/skills \(full list on request\)/);
-  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout with its records and locks, and \d+ older backup files \(\d+ items, full list on request\); it goes last, once no Toolkit plugin is installed/);
+  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout, its records and locks, and \d+ older backup files of Toolkit's own \(\d+ items, full list on request\); it goes last, once no Toolkit plugin is installed/);
   assert.match(screen, /- \*\*Your key list:\*\* ~\/\.ai-agent-toolkit\/env: the keys themselves stay in the credential store/);
   assert.match(screen, /- \*\*Recovery records:\*\* ~\/\.ai-agent-toolkit\/recovery-identities: the evidence of outside resources checked before a live change/);
   assert.match(screen, /- \*\*Not Toolkit's:\*\* ~\/\.ai-agent-toolkit\/notes\n/);
@@ -563,6 +563,95 @@ test('MCP servers: named only when the removal deletes their key helper; the clo
   assert.match(closing, /\*\*Next\*\*\n- \*\*Reconnect MCP servers:\*\* github \(Claude Code\) keeps its settings and key, but lost the key helper with the Toolkit folder\. To use it again, give it its key another way \(in its own settings or the service's sign-in\), or say `setup toolkit` and then `toolkit env`/);
   assert.doesNotMatch(closing.split('**Next**')[0], /github/, 'named once, in the closing lines');
   assert.deepEqual(fs.readFileSync(claudeJson), before, 'its settings stay byte for byte');
+});
+
+// G2 round 1 M1 (PR 1552): the backups other Toolkit features keep for the owner are the owner's data,
+// not Toolkit's rebuildable copies: the retired ~/.codex/.env (toolkit env says it never deletes it), the
+// feeder backups `toolkit env revoke --feeders` restores from (the kept env record points at them) and
+// memory tidy's backups (its restore reads them). A full removal keeps and names them.
+test('the Toolkit folder: a full removal keeps the backups Toolkit holds for the owner, names them, and revoke still finds its feeder backup', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  const feederBackup = path.join(folder, 'backups', 'env-feeders', '2026-11-02T00-00-00-000Z-github');
+  const owned = {
+    'backups/env-retire-2026-11-01T00-00-00-000Z/codex.env': '# my own note about the staging key\nEXAMPLE_TOKEN=fake-value-for-test\n',
+    'backups/env-feeders/2026-11-02T00-00-00-000Z-github/claude-code-github.json': JSON.stringify({ server: 'github', entry: { type: 'http', url: 'https://example.test/mcp' } }),
+    'backups/memory-tidy/folder-1/preview-abc/MEMORY.md': '- [A note](a.md) - owner memory\n',
+    'env/manifest.json': JSON.stringify({ bindings: [{ harness: 'claude-code', server: 'github', name: 'GITHUB_TOKEN', backup: feederBackup }] }),
+  };
+  for (const [file, text] of Object.entries({ ...owned, 'backups/global-rules/2026-01-01T00-00-00-000Z/AGENTS.md': 'old', 'source/repo/README.md': 'x' }))
+    { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), text); }
+  const make = () => new removal.ToolkitRemoval({ home, parts: [new parts.ToolkitFolderPart({ home, plugins: () => ({}) })], plugins: () => ({}) });
+  const plan = make().plan();
+  const screen = removal.describePlan(plan).join('\n').split(removal.AGENT_LINE)[0];
+  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout, and 1 older backup file of Toolkit's own; it goes last/);
+  assert.match(screen, /\*\*Kept\*\*\n(- [^\n]+\n)*- \*\*Your old Codex \.env:\*\* ~\/\.ai-agent-toolkit\/backups\/env-retire-2026-11-01T00-00-00-000Z: the file toolkit env moved there; it may be your only copy of its comment lines\n/);
+  assert.match(screen, /- \*\*Key connection backups:\*\* ~\/\.ai-agent-toolkit\/backups\/env-feeders: the MCP settings toolkit env changed, which `toolkit env` can put back\n/);
+  assert.match(screen, /- \*\*Memory tidy backups:\*\* ~\/\.ai-agent-toolkit\/backups\/memory-tidy: your memory notes from before a tidy, which memory tidy can put back\n/);
+  const result = make().apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  for (const [file, text] of Object.entries(owned)) assert.equal(fs.readFileSync(path.join(folder, file), 'utf8'), text, file);
+  assert.equal(fs.existsSync(path.join(folder, 'backups', 'global-rules')), false, "Toolkit's own older backups go");
+  assert.equal(fs.existsSync(path.join(folder, 'source')), false);
+  // The route the closing lines give (`setup toolkit`, then `toolkit env`) still finds the feeder backup.
+  const { ClaudeCodeFeeder } = require('../scripts/toolkit-env-feeders.cjs');
+  const restored = [];
+  const feeder = new ClaudeCodeFeeder({ home, claudeJson: path.join(home, '.claude.json'), claudeCommand: 'claude-not-run', spawn: (...call) => { restored.push(call); return { status: 0, stdout: '', stderr: '' }; } });
+  assert.doesNotThrow(() => { try { feeder.revoke({ harness: 'claude-code', server: 'github', name: 'GITHUB_TOKEN', backup: feederBackup }); } catch (error) { if (/backup[^\n]*missing/i.test(error.message)) throw error; } });
+  assert.equal(make().plan().nothing, true, 'a second run finds nothing: the owner\'s backups are not Toolkit\'s to remove');
+});
+
+// G2 round 1 L1: the folded folder line names what actually goes.
+test('the Toolkit folder: the folded line names only what goes', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  for (const file of ['backups/global-rules/2026-01-01T00-00-00-000Z/AGENTS.md', 'env/manifest.json']) { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x'); }
+  const plan = new removal.ToolkitRemoval({ home, parts: [new parts.ToolkitFolderPart({ home, plugins: () => ({}) })], plugins: () => ({}) }).plan();
+  const line = removal.describePlan(plan).find(entry => entry.startsWith('- **Toolkit folder:**'));
+  assert.equal(line, "- **Toolkit folder:** ~/.ai-agent-toolkit: 1 older backup file of Toolkit's own; it goes last, once no Toolkit plugin is installed");
+});
+
+// G2 round 1 L3: a one-app removal while another app keeps Toolkit gathers its own backup too, so a
+// later last-app removal that saves none keeps the whole of it as the last removal's backup.
+test('the Toolkit folder: a one-app removal gathers its backup, and a later removal that saves none keeps all of it', t => {
+  const home = s.tempHome(t);
+  const folder = path.join(home, '.ai-agent-toolkit');
+  fs.mkdirSync(path.join(folder, 'source'), { recursive: true }); fs.writeFileSync(path.join(folder, 'source', 'x'), 'x');
+  const installed = { 'claude-code': true, codex: true };
+  let stamp = 0;
+  const writer = { key: 'writer', title: 'Writer', app: 'codex', plan: () => (installed.codex ? [{ what: 'a Codex setting', action: 'remove', backup: true }] : []),
+    apply: () => { for (const dir of ['global-rules', 'codex-delegation']) { const file = path.join(folder, 'backups', dir, `b${stamp}`, 'f.txt'); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, dir); } stamp += 1; installed.codex = false; return [{ what: 'a Codex setting', result: 'removed' }]; } };
+  const make = app => new removal.ToolkitRemoval({ home, app, parts: [writer, new parts.ToolkitFolderPart({ home, plugins: () => installed, now: () => new Date('2026-11-26T00:00:00Z') })], plugins: () => installed });
+  const first = make('codex');
+  const plan = first.plan();
+  assert.equal(first.apply(plan.code).ok, true);
+  assert.deepEqual(Object.keys(treeOf(path.join(folder, 'backups'))).sort(), [path.join('remove-toolkit', '2026-11-26T00-00-00-000Z', 'codex-delegation', 'b0', 'f.txt'), path.join('remove-toolkit', '2026-11-26T00-00-00-000Z', 'global-rules', 'b0', 'f.txt')].sort(), 'gathered although the folder stays for Claude Code');
+  installed['claude-code'] = false;
+  const last = make('all');
+  const result = last.apply(last.plan().code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(Object.keys(treeOf(path.join(folder, 'backups'))).length, 2, 'the last removal\'s backup stays whole');
+});
+
+// G2 round 1 M2: when the folder waits for a plugin that was not uninstalled, the closing lines say the
+// folder stays and why, and say nothing that is no longer true (the MCP helper going, nothing left).
+test('closing lines: a folder that waits for a plugin is named with its reason, and the MCP server keeps its key helper until then', t => {
+  const home = s.tempHome(t);
+  const environment = { CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') };
+  const script = path.join(home, '.ai-agent-toolkit', 'source', 'repo', 'scripts', 'toolkit-env.cjs');
+  fs.mkdirSync(path.dirname(script), { recursive: true }); fs.writeFileSync(script, '');
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { github: { type: 'http', url: 'https://example.test/mcp', headersHelper: `node "${script}" header GITHUB_TOKEN` } } }));
+  const installed = { 'claude-code': true, codex: false };
+  const make = () => { const folder = new parts.ToolkitFolderPart({ home, environment, plugins: () => installed }); return new removal.ToolkitRemoval({ home, parts: [folder, new parts.McpKeyHelpersPart({ environment, home, folder })], plugins: () => installed }); };
+  const plan = make().plan();
+  const result = make().apply(plan.code);
+  assert.equal(result.folder_kept, true);
+  const closing = removal.describeResult(result).join('\n').split(removal.AGENT_LINE)[0];
+  assert.match(closing, /^\*\*Toolkit removal: the Toolkit folder stays for now\*\*\n/);
+  assert.doesNotMatch(closing, /Nothing of Toolkit's was left to remove|which goes|Reconnect|New session/);
+  assert.match(closing, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Claude Code plugin is still installed and reads its records there\n/);
+  assert.match(closing, /- \*\*MCP servers:\*\* github \(Claude Code\): its key helper stays until the Toolkit folder goes\n/);
+  assert.match(closing, /- \*\*Still to do:\*\* the Toolkit plugin is still installed in Claude Code, so the Toolkit folder stays\. Once it is uninstalled, say `remove toolkit` again to remove the folder/);
 });
 
 test('the Toolkit folder: an older backup that changes after the plan read is not deleted, and apply without its own plan read removes nothing', t => {

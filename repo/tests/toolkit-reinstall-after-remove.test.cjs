@@ -128,8 +128,8 @@ test('the plan names each MCP server whose key helper runs from a Toolkit folder
   assert.deepEqual(items.map(item => item.what), ['coolify (Claude Code)', 'coolify (Codex)', 'local (Claude Code, in /work/app)']);
   assert.ok(items.every(item => item.action === 'keep' && item.entry === 'source'
     && item.text === `${item.what} keeps its settings and key, but its key helper runs from the Toolkit folder, which goes; the closing lines say how to connect it again`));
-  // While the helper is still there (the folder waited for a plugin), nothing is reported.
-  assert.deepEqual(part.apply(items), []);
+  // While the helper is still there (the folder waited for a plugin), each server keeps it until then.
+  assert.deepEqual(part.apply(items), items.map(item => ({ what: item.what, result: 'kept', reason: 'its key helper stays until the Toolkit folder goes' })));
   folder.apply(folder.plan());
   assert.deepEqual(part.apply(items).map(item => [item.what, item.result, item.reconnect]), items.map(item => [item.what, 'lost its key helper', true]));
   assert.deepEqual(h.read(), before, 'their settings stay byte for byte');

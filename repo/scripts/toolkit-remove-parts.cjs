@@ -34,8 +34,8 @@ const PLUGIN_ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
 const MARKETPLACE = 'ai-agent-toolkit-local';
 // Top-level entries of ~/.ai-agent-toolkit that Toolkit makes: the managed checkout, the hub snapshot,
 // its records, ledgers and locks, the bridge's update markers, and the backups. A full removal (or the
-// last app's) removes them all, keeping only KEPT_ENTRIES and this removal's backup. Anything else
-// found there is not Toolkit's: it is kept and listed.
+// last app's) removes them all, keeping only KEPT_ENTRIES, the backups Toolkit holds for the owner and
+// this removal's backup. Anything else found there is not Toolkit's: it is kept and listed.
 const FOLDER_ENTRIES = Object.freeze(['source', 'current', 'user-state', 'agent-control', 'backups', 'global-rules.json', 'n8n-official-skills.json', 'antigravity-toolkit-skills.json', 'antigravity-refresh',
   'remote-check.json', 'update.readers', 'update.lock', 'update.lock.recovery', 'update.tree-moving', 'agent-rules-notices.json', 'hook-skips.json']);
 // The names the bridge gives its short-lived entries (toolkit-local-bridge.cjs, toolkit-staging-generations.cjs):
@@ -53,9 +53,20 @@ const KEPT_LABELS = Object.freeze({
   'recovery-identities': { label: 'Recovery records', detail: 'the evidence of outside resources checked before a live change' },
 });
 // The folders that hold backups, relative to the Toolkit folder. Files a removal writes there are its
-// own backup: they are gathered into REMOVAL_BACKUP; every other file there is an older backup and goes.
+// own backup: they are gathered into REMOVAL_BACKUP; every other file there is an older backup of
+// Toolkit's own and goes, except the backups below that other features keep for the owner.
 const BACKUP_TREES = Object.freeze(['backups', 'agent-control/backups']);
 const REMOVAL_BACKUP = 'backups/remove-toolkit';
+// Backups Toolkit holds for the owner, which a removal keeps and names: the owner's own ~/.codex/.env
+// that `toolkit env retire-codex-env` moved (it never deletes it), the MCP entries `toolkit env
+// revoke --feeders` puts back (the kept env record points at them), and memory tidy's backups, which
+// its restore reads. Matched on the folder directly under backups/.
+const OWNER_BACKUPS = Object.freeze([
+  { match: name => /^env-retire-[0-9A-Za-z-]+$/.test(name), label: 'Your old Codex .env', detail: 'the file toolkit env moved there; it may be your only copy of its comment lines' },
+  { match: name => name === 'env-feeders', label: 'Key connection backups', detail: 'the MCP settings toolkit env changed, which `toolkit env` can put back' },
+  { match: name => name === 'memory-tidy', label: 'Memory tidy backups', detail: 'your memory notes from before a tidy, which memory tidy can put back' },
+]);
+const ownerBackupOf = file => { const [top, name] = file.split('/'); return top === 'backups' && name ? OWNER_BACKUPS.find(entry => entry.match(name)) || null : null; };
 
 // A list longer than this is folded on the owner's screen into a count, with the full list on request.
 const FOLD_AT = 3;
@@ -476,10 +487,12 @@ class McpKeyHelpersPart {
     return [...this.#claude(), ...this.#codex()].filter(item => going.includes(item.entry)).sort((a, b) => a.what.localeCompare(b.what))
       .map(item => ({ ...item, action: 'keep', text: `${item.what} keeps its settings and key, but its key helper runs from the Toolkit folder, which goes; the closing lines say how to connect it again` }));
   }
-  // After the folder part: a server whose helper's folder entry is gone has lost its key helper.
+  // After the folder part: a server whose helper's folder entry is gone has lost its key helper; one
+  // whose entry is still there (the folder waits for a plugin) keeps it until the folder goes.
   apply(items) {
-    return items.filter(item => item.action === 'keep' && item.entry && !fs.existsSync(path.join(this.#root, item.entry)))
-      .map(item => ({ what: item.what, result: 'lost its key helper', reconnect: true }));
+    return items.filter(item => item.action === 'keep' && item.entry).map(item => (fs.existsSync(path.join(this.#root, item.entry))
+      ? { what: item.what, result: 'kept', reason: 'its key helper stays until the Toolkit folder goes' }
+      : { what: item.what, result: 'lost its key helper', reconnect: true }));
   }
 }
 
@@ -546,8 +559,8 @@ function filesUnder(base, relative) {
 }
 
 // Toolkit's own entries in ~/.ai-agent-toolkit. Removed only when no Toolkit plugin is installed.
-// What stays: KEPT_ENTRIES, anything that is not Toolkit's, and the backup this removal writes, which
-// is gathered into backups/remove-toolkit. That folder holds the last removal's backup, so a removal
+// What stays: KEPT_ENTRIES, the backups Toolkit holds for the owner (OWNER_BACKUPS), anything that is
+// not Toolkit's, and the backup this removal writes, which is gathered into backups/remove-toolkit. That folder holds the last removal's backup, so a removal
 // that saves no backup of its own keeps it; one that does replaces it.
 class ToolkitFolderPart {
   key = 'toolkit_folder'; title = 'Toolkit folder'; label = 'Toolkit folder'; unit = 'items'; app = 'shared'; shared = 'the Toolkit folder';
@@ -568,12 +581,15 @@ class ToolkitFolderPart {
     return all;
   }
   #lastRemoval(file) { return file.startsWith(`${REMOVAL_BACKUP}/`); }
-  // The top-level entries this removal deletes, read-only. An entry that holds only the last removal's
-  // backup, kept, has nothing to delete.
+  // An older backup of Toolkit's own, which a full removal deletes: never one Toolkit holds for the
+  // owner, and the last removal's only when this removal saves a backup of its own.
+  #older(file, savesBackup) { return file.startsWith('backups/') ? !ownerBackupOf(file) && (savesBackup || !this.#lastRemoval(file)) : true; }
+  // The top-level entries this removal deletes, read-only. A backups folder that holds only what is
+  // kept has nothing to delete.
   goingEntries({ savesBackup = this.#savesBackup } = {}) {
     const backups = this.#backups();
     return this.#present().filter(name => isToolkitEntry(name)
-      && (name !== 'backups' || [...backups.keys()].some(file => file.startsWith('backups/') && (savesBackup || !this.#lastRemoval(file)))));
+      && (name !== 'backups' || [...backups.keys()].some(file => file.startsWith('backups/') && this.#older(file, savesBackup))));
   }
   // context.savesBackup: whether an earlier step of this removal saves a backup, which then replaces
   // the last removal's.
@@ -582,31 +598,39 @@ class ToolkitFolderPart {
     this.#planned = true;
     // Read again at apply's own plan read, before any step writes: what is here now is older.
     this.#before = this.#backups();
-    const older = [...this.#before.keys()].filter(file => this.#savesBackup || !this.#lastRemoval(file));
+    const older = [...this.#before.keys()].filter(file => this.#older(file, this.#savesBackup));
     const lastKept = !this.#savesBackup && [...this.#before.keys()].some(file => this.#lastRemoval(file));
     const going = this.goingEntries();
     const names = this.#present();
     const shown = name => display(this.#home, path.join(this.#root, name));
     const olderIn = name => older.filter(file => file.startsWith(`${name}/`)).length;
+    const ownerFolders = [...new Set([...this.#before.keys()].filter(ownerBackupOf).map(file => file.split('/').slice(0, 2).join('/')))].sort();
     return [
       ...going.map(name => ({ what: shown(name), action: 'remove',
         ...(BACKUP_TREES.some(tree => tree.split('/')[0] === name) && olderIn(name) ? { detail: `${olderIn(name)} older backup ${olderIn(name) === 1 ? 'file' : 'files'}`, older: olderIn(name) } : {}) })),
-      ...(this.#savesBackup ? [{ what: shown(REMOVAL_BACKUP), action: 'save', label: "This removal's backup", text: `${shown(REMOVAL_BACKUP)}, the copies of the files this removal changes` }] : []),
+      // This removal gathers its backup in a one-app removal too, so the line shows in every scope.
+      ...(this.#savesBackup ? [{ what: shown(REMOVAL_BACKUP), action: 'save', app: 'any', label: "This removal's backup", text: `${shown(REMOVAL_BACKUP)}, the copies of the files this removal changes` }] : []),
       ...(lastKept ? [{ what: shown(REMOVAL_BACKUP), action: 'keep', label: "The last removal's backup", text: shown(REMOVAL_BACKUP) }] : []),
+      ...ownerFolders.map(folder => { const { label, detail } = ownerBackupOf(`${folder}/x`); return { what: shown(folder), action: 'keep', label, detail }; }),
       ...names.filter(name => !isToolkitEntry(name)).map(name => ({ what: shown(name), action: 'keep', ...(KEPT_LABELS[name] || { label: "Not Toolkit's" }) })),
     ];
   }
-  // The owner's one line for the folder's removals; the full list is shown on request.
+  // The owner's one line for the folder's removals, naming what goes; the full list is shown on request.
   summary(items) {
+    const names = items.map(item => item.what.split('/').pop());
     const older = items.reduce((sum, item) => sum + (item.older || 0), 0);
-    const what = ['the Toolkit checkout with its records and locks', ...(older ? [`${older} older backup ${older === 1 ? 'file' : 'files'}`] : [])];
-    return `${display(this.#home, this.#root)}: ${what.join(', and ')}${items.length > FOLD_AT ? ` (${items.length} items, full list on request)` : ''}; it goes last, once no Toolkit plugin is installed`;
+    const what = [...(names.includes('source') ? ['the Toolkit checkout'] : []),
+      ...(names.some(name => !['source', 'backups'].includes(name)) ? ['its records and locks'] : []),
+      ...(older ? [`${older} older backup ${older === 1 ? 'file' : 'files'} of Toolkit's own`] : [])];
+    const said = what.length < 2 ? what.join('') : `${what.slice(0, -1).join(', ')}, and ${what.at(-1)}`;
+    return `${display(this.#home, this.#root)}: ${said}${items.length > FOLD_AT ? ` (${items.length} items, full list on request)` : ''}; it goes last, once no Toolkit plugin is installed`;
   }
   // Runs last. Entries a removal step wrote after the plan (such as the global rules record) go too,
   // because they are on the same fixed list. This removal's backup files are moved into
-  // backups/remove-toolkit before anything goes.
+  // backups/remove-toolkit before anything goes, also in a one-app removal that keeps the folder.
   apply(items) {
-    if (!items.some(item => item.action === 'remove')) return [];
+    const removes = items.some(item => item.action === 'remove');
+    if (!removes && !items.some(item => item.action === 'save')) return [];
     // Without its own plan read it cannot tell this removal's backup from the older ones.
     if (!this.#planned) throw new Error('the Toolkit folder was not read before its removal');
     // This removal's backup is gathered first, also when the folder waits for a plugin, so a later run
@@ -614,6 +638,7 @@ class ToolkitFolderPart {
     const gathered = attempt({ what: display(this.#home, path.join(this.#root, REMOVAL_BACKUP)) }, () => this.#gather());
     if (gathered.result === 'failed') return [gathered];
     const fresh = gathered.result === 'saved';
+    if (!removes) return fresh ? [gathered] : [];
     const installed = Object.entries(this.#plugins()).filter(([, on]) => on).map(([host]) => PLUGIN_STEPS[host].app);
     if (installed.length) return [...(fresh ? [gathered] : []), { what: display(this.#home, this.#root), result: 'kept', reason: `the ${installed.join(' and ')} plugin is still installed and reads its records there` }];
     // A process whose folder is inside what goes could not remove it on Windows.
@@ -635,7 +660,8 @@ class ToolkitFolderPart {
   // they are.
   #gather() {
     const now = this.#backups();
-    const fresh = [...now.keys()].filter(file => this.#before.get(file) !== now.get(file));
+    // A file another feature keeps for the owner is never this removal's backup.
+    const fresh = [...now.keys()].filter(file => this.#before.get(file) !== now.get(file) && !ownerBackupOf(file));
     if (!fresh.length) return { result: 'none' };
     const stamp = this.#now().toISOString().replace(/[:.]/g, '-');
     for (const file of fresh.filter(entry => !this.#lastRemoval(entry))) {
@@ -645,13 +671,14 @@ class ToolkitFolderPart {
     }
     return { result: 'saved' };
   }
-  // Deletes the older backup files, unchanged since the plan read; the last removal's backup goes only
-  // when this removal saved one of its own. Empty folders go after.
+  // Deletes Toolkit's own older backup files, unchanged since the plan read; the last removal's backup
+  // goes only when this removal saved one of its own, and the owner's backups never. Empty folders go
+  // after.
   #clearBackups(fresh) {
     let count = 0;
     const now = this.#backups();
     for (const [file, mark] of this.#before) {
-      if (!file.startsWith('backups/') || (!fresh && this.#lastRemoval(file)) || now.get(file) !== mark) continue;
+      if (!file.startsWith('backups/') || !this.#older(file, fresh) || now.get(file) !== mark) continue;
       fs.rmSync(path.join(this.#root, ...file.split('/')), { force: true });
       count += 1;
     }

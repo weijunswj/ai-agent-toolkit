@@ -495,12 +495,15 @@ function describeResult(result) {
   }
   if (reconnect.length) next.push(bullet('Reconnect MCP servers', `${listOf(reconnect)} ${reconnect.length === 1 ? 'keeps its' : 'keep their'} settings and ${reconnect.length === 1 ? 'key' : 'keys'}, but lost the key helper with the Toolkit folder. To use ${reconnect.length === 1 ? 'it' : 'one'} again, give it its key another way (in its own settings or the service's sign-in), or say \`setup toolkit\` and then \`toolkit env\``));
   if (result.plugins?.length) next.push(bullet('Still to do', `the Toolkit plugin is still installed in ${appsOf(result.plugins)}${result.folder_kept ? ', so the Toolkit folder stays' : ''}. Once it is uninstalled, say \`remove toolkit\` again${result.folder_kept ? ' to remove the folder' : ''}`));
+  else if (result.folder_kept) next.push(bullet('Still to do', 'the Toolkit folder stays while a Toolkit plugin is installed. Once none is, say `remove toolkit` again to remove the folder'));
   const account = (result.parts || []).some(part => part.key === 'claude_account_copy' && part.held.length);
   if (account) next.push(bullet('The Claude app', 'it still runs Toolkit from your claude.ai account until you remove it there (the step is above)'));
   if (!result.plugins?.length && !result.folder_kept) next.push(bullet('New session', 'start a new session in each app so nothing of Toolkit stays loaded'));
   if (!result.ok) next.push(bullet('Some steps failed', 'nothing else was changed; say `remove toolkit` again to see what is left'));
-  const nothing = !removed.length && !failed.length;
-  const lines = [result.ok ? '**Toolkit removal done**' : '**Toolkit removal: some steps failed**', '', fromLine(result.app, result.kept_for, result.shared_parts), ''];
+  // A folder that waits for a plugin is still to remove, so nothing-left is not true then.
+  const nothing = !removed.length && !failed.length && !result.folder_kept;
+  const title = !result.ok ? '**Toolkit removal: some steps failed**' : result.folder_kept ? '**Toolkit removal: the Toolkit folder stays for now**' : '**Toolkit removal done**';
+  const lines = [title, '', fromLine(result.app, result.kept_for, result.shared_parts), ''];
   if (nothing) lines.push("Nothing of Toolkit's was left to remove.", '');
   if (removed.length) lines.push('**Removed**', ...removed, '');
   if (failed.length) lines.push('**Failed**', ...failed, '');
