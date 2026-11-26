@@ -117,6 +117,7 @@ const row = (sheet, file) => sheet.notes.find(entry => entry.file === file);
 
 // check, then the agent's verdicts for the standard notes; `change` edits the filled sheet.
 function filled(w, change = () => {}) {
+  fs.rmSync(sheetFile(w), { force: true });
   const checked = cli(w, ['check', '--out', sheetFile(w)]);
   assert.equal(checked.code, 0, checked.err);
   const sheet = readSheet(w);
@@ -155,7 +156,8 @@ function snapshot(folder) {
   walk(folder, '');
   return out;
 }
-const backups = w => `${w.memory}-tidy-backups`;
+const backups = w => path.join(w.home, '.ai-agent-toolkit', 'backups', 'memory-tidy');
+const backupOf = (w, code, memory = w.memory) => path.join(backups(w), tidyModule.folderId(memory), code);
 
 // ---- find ----
 
@@ -221,6 +223,10 @@ test('check: refuses a worksheet inside the repository unless Git ignores it (G0
   assert.match(cli(w, ['check', '--out', path.join(w.memory, 'sheet.json')]).err, /may not go inside Claude Code's project folders/);
   const ignored = cli(w, ['check', '--out', path.join(w.main, '.tmp', 'worksheet.json')]);
   assert.equal(ignored.code, 0, ignored.err);
+  fs.mkdirSync(w.scratchDir, { recursive: true });
+  fs.writeFileSync(sheetFile(w), 'not a worksheet');
+  assert.match(cli(w, ['check', '--out', sheetFile(w)]).err, /already exists, so it was not overwritten/);
+  assert.equal(fs.readFileSync(sheetFile(w), 'utf8'), 'not a worksheet');
 });
 
 test('check: a duplicate line, a missing target, an unindexed note and an index past 200 lines give four index rows (G0 test 5)', t => {
@@ -247,12 +253,14 @@ test('verify: refuses invented, history, short and still-present evidence, missi
     ['invented quote', sheet => { row(sheet, 'a-default.md').evidence.quote = 'Toolkit always adds a friendly footer to every single pull request body.'; }, /does not hold that quote word for word/],
     ['changelog quote', sheet => { row(sheet, 'a-default.md').evidence = { file: 'repo/docs/CHANGELOG.md', quote: changelog }; }, /not a changelog, audit or third-party file/],
     ['five-word quote', sheet => { row(sheet, 'a-default.md').evidence.quote = 'No AI attribution in commits'; }, /under 8 words and is not a whole line/],
+    ['short heading', sheet => { row(sheet, 'a-default.md').evidence.quote = 'Safety Gates'; }, /under 8 words and is not a whole line/],
     ['path outside the release', sheet => { row(sheet, 'a-default.md').evidence.file = '../AGENTS.md'; }, /must be a current rule/],
     ['missing path still present', sheet => { row(sheet, 'b-outdated.md').evidence.missing_path = 'repo/scripts/toolkit-memory-tidy.cjs'; }, /is still in this release/],
     ['missing path the note never names', sheet => { row(sheet, 'b-outdated.md').evidence.missing_path = 'repo/scripts/toolkit-never-named.cjs'; }, /does not name repo\/scripts\/toolkit-never-named\.cjs/],
     ['no verdict', sheet => { row(sheet, 'd-pref.md').verdict = null; }, /give exactly one verdict/],
     ['two verdicts', sheet => { row(sheet, 'd-pref.md').verdict = ['owner-preference', 'keep']; }, /give exactly one verdict/],
     ['a field another verdict uses', sheet => { row(sheet, 'f-keep.md').evidence = { file: RULE_FILE, quote: RULE_QUOTE }; }, /evidence does not go with the verdict keep/],
+    ['owner preference with a move', sheet => { row(sheet, 'd-pref.md').move = { to: 'owner', line: 'Plain words, short replies.' }; }, /move does not go with the verdict owner-preference/],
     ['keep without why', sheet => { row(sheet, 'f-keep.md').why = null; }, /needs a one-line why/],
     ['index row the tool cannot fix', sheet => { sheet.index[0].fixable = false; }, /memory changed since this worksheet was made/],
     ['edited note facts', sheet => { row(sheet, 'c-fact.md').sha256 = '0'.repeat(64); }, /memory changed since this worksheet was made/],
@@ -309,7 +317,8 @@ test('verify: prints the grouped owner list and a plan code; the store summary h
   const { out } = verified(w);
   for (const heading of ['Already a Toolkit default', 'Out of date or against Toolkit', "This repository's own fact", "The owner's own preference", 'Toolkit gap', 'Kept as memory, with why', 'Index fixes', 'Your answer']) assert.match(out, new RegExp(`\\*\\*${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*`), heading);
   assert.ok(out.includes(`- **1. a-default.md**: No attribution footers in commits or PRs.\n  - **Toolkit already says:** "${RULE_QUOTE}" (\`${RULE_FILE}\`)`));
-  assert.match(out, /\*\*Can be picked:\*\* 1, 2, 3, 7, 8/);
+  assert.match(out, /\*\*Can be picked:\*\* 1, 2, 3, 4, 7, 8/);
+  assert.ok(out.includes('- **4. d-pref.md**: Short replies.\n  - **Stays unless you pick it:** it is yours to decide; Toolkit never moves or writes it'));
   assert.match(out, /For GitHub \(counts only\): 6 notes in 1 folder: 1 already a toolkit default, 1 out of date or against toolkit, 1 this repository's own fact, 1 the owner's own preference, 1 toolkit gap, 1 kept as memory, with why; 2 index rows\./);
   assert.doesNotMatch(out, /```/, 'the owner list is never a code block');
   const summary = fs.readFileSync(path.join(w.scratchDir, 'store-summary.md'), 'utf8');
@@ -346,13 +355,13 @@ test('preview: shows each change in full, names the backup folder and changes no
   assert.ok(out.includes('- **Line 7** (links a-default.md): - [A again](a-default.md) - duplicate'));
   assert.ok(out.includes('- **Line 8** (links z-gone.md, which is not there): - [Z gone](z-gone.md) - missing'));
   assert.ok(out.includes('- **f-keep.md:** a-default.md'), 'a [[link]] that would dangle is listed');
-  assert.match(out, new RegExp(`copied first to \`${path.join(backups(w), '[0-9a-f]{16}').replace(/\\/g, '\\\\')}\``));
+  assert.ok(out.includes(`copied first to \`${backupOf(w, previewCode(out))}\``), 'the preview names the backup folder under the Toolkit backups folder');
   assert.doesNotMatch(out, /```/);
   assert.deepEqual(snapshot(w.memory), before);
   assert.equal(fs.existsSync(backups(w)), false);
   const stale = cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', '0'.repeat(16), '--pick', '1']);
   assert.match(stale.err, /not the one for this worksheet/);
-  assert.match(cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', '4']).err, /Not a row that can change: 4/);
+  assert.match(cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', '5']).err, /Not a row that can change: 5/);
 });
 
 test('the owner is always offered keep everything first, also when every note would go (G0 test 15)', t => {
@@ -457,7 +466,7 @@ test('apply: backs up first, then makes exactly the previewed removal, rewrite a
   const code = previewCode(cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', '1,2,7,8']).out);
   const result = cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', '1,2,7,8', '--preview', code]);
   assert.equal(result.code, 0, result.err);
-  const backup = path.join(backups(w), code);
+  const backup = backupOf(w, code);
   assert.ok(result.out.includes(`- **Backup (read back):** \`${backup}\``));
   assert.ok(result.out.includes(`restore --backup "${backup}"`));
   assert.match(result.out, /- \*\*Removed:\*\* a-default\.md\n- \*\*Rewritten:\*\* b-outdated\.md\n- \*\*MEMORY\.md lines removed:\*\* 3/);
@@ -477,9 +486,16 @@ test('apply: backs up first, then makes exactly the previewed removal, rewrite a
   assert.match(cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', '1,2,7,8', '--preview', code]).err, /memory changed since this worksheet was made/, 'a preview applies once');
 
   assert.match(cli(w, ['restore', '--backup', backup], { env: { ...w.env, TOOLKIT_GATE_ROLE: 'G2' } }).err, /^A G2 session cannot restore/);
-  const elsewhere = path.join(w.base, 'other-tidy-backups', code);
+  const elsewhere = path.join(w.base, 'copied-backup', code);
   fs.cpSync(backup, elsewhere, { recursive: true });
-  assert.match(cli(w, ['restore', '--backup', elsewhere]).err, /is not a memory folder of this repository/);
+  assert.match(cli(w, ['restore', '--backup', elsewhere]).err, /Name a backup folder as apply printed it/);
+  // A backup whose manifest names another repository's memory folder is not restored here.
+  const other = path.join(w.base, 'other-memory');
+  const foreign = backupOf(w, code, other);
+  fs.cpSync(backup, foreign, { recursive: true });
+  const manifestFile = path.join(foreign, 'manifest.json');
+  fs.writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(manifestFile, 'utf8')), folder: other }));
+  assert.match(cli(w, ['restore', '--backup', foreign]).err, /is not a memory folder of this repository/);
   const restored = cli(w, ['restore', '--backup', backup]);
   assert.equal(restored.code, 0, restored.err);
   assert.match(restored.out, /\*\*Restored\*\* .* from the backup: 7 files read back\./);
@@ -526,8 +542,70 @@ test('apply: a failure part-way puts the folder back from the backup byte for by
   };
   const result = cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', '1,2', '--preview', code], { files });
   assert.equal(result.code, 1);
-  assert.match(result.err, /failed \(the note is held open\)\. The folder was put back from the backup and read back\. Backup: /);
-  assert.ok(result.err.includes(path.join(backups(w), code)));
+  assert.match(result.err, /failed \(the note is held open\)\. Nothing stays changed: every folder this run changed was put back from its backup and read back\.\n- .*: put back and read back \(backup /);
+  assert.ok(result.err.includes(backupOf(w, code)));
+  assert.deepEqual(snapshot(w.memory), before);
+});
+
+test('apply: all or nothing across folders; a failure in a later folder puts every folder back and says so (G2 M1)', t => {
+  const w = world(t, { extras: true });
+  const second = w.project(tidyModule.projectName(w.worktree), w.worktree);
+  fs.writeFileSync(path.join(second, 'old-default.md'), note('old-default', 'No footers in pull requests.'));
+  fs.writeFileSync(path.join(second, 'old-keep.md'), note('old-keep', 'Keep this one.'));
+  fs.writeFileSync(path.join(second, 'MEMORY.md'), '- [Old default](old-default.md)\n- [Old keep](old-keep.md)\n');
+  const { sheet, plan } = verified(w, filledSheet => {
+    for (const entry of filledSheet.notes.filter(item => item.file.startsWith('old-'))) {
+      Object.assign(entry, entry.file === 'old-default.md' ? { verdict: 'default', gist: 'A default.', evidence: { file: RULE_FILE, quote: RULE_QUOTE } } : { verdict: 'keep', gist: 'Kept.', why: 'One computer.' });
+    }
+  });
+  const picks = [row(sheet, 'a-default.md').n, row(sheet, 'old-default.md').n].join(',');
+  const code = previewCode(cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', picks]).out);
+  const before = [snapshot(w.memory), snapshot(second)];
+  const real = require('../scripts/toolkit-controller-settings.cjs');
+  const files = {
+    write: (file, from, next) => real.replaceFile(file, from, next),
+    remove: file => { if (file.startsWith(second)) { const error = new Error('the note is held open'); error.code = 'EBUSY'; throw error; } fs.unlinkSync(file); },
+  };
+  const result = cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', picks, '--preview', code], { files });
+  assert.equal(result.code, 1);
+  assert.deepEqual([snapshot(w.memory), snapshot(second)], before, 'both folders are as they were');
+  assert.match(result.err, /Nothing stays changed: every folder this run changed was put back from its backup and read back/);
+  for (const memory of [w.memory, second]) assert.ok(result.err.includes(backupOf(w, code, memory)), memory);
+  assert.match(fs.readFileSync(path.join(w.scratchDir, 'store-summary.md'), 'utf8'), new RegExp(`preview ${code} failed .*; every changed folder was put back`));
+  // A link in a later folder stops the run before any folder changes, and leaves no backup behind.
+  const fresh = cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', picks]);
+  fs.symlinkSync(w.scratchDir, path.join(second, 'attachments'), 'junction');
+  fs.rmSync(backups(w), { recursive: true, force: true });
+  const linked = cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', picks, '--preview', previewCode(fresh.out)]);
+  assert.equal(linked.code, 1);
+  assert.match(linked.err, /holds a link \(attachments\), so nothing was changed in any folder/);
+  assert.deepEqual(snapshot(w.memory), before[0]);
+  assert.equal(fs.existsSync(backups(w)) && fs.readdirSync(backups(w)).length > 0, false, 'no backup is left from a run that changed nothing');
+});
+
+test('an owner preference is only marked, and goes only on the owner own pick (G2 L2)', t => {
+  const w = world(t);
+  const { sheet, out, plan } = verified(w);
+  const n = row(sheet, 'd-pref.md').n;
+  assert.ok(!/does not hold|own instructions hold/.test(out));
+  const preview = cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', String(n)]);
+  assert.ok(preview.out.includes(`**Goes: ${n}. d-pref.md**`));
+  assert.ok(preview.out.includes("- **Why:** The owner's own preference, on the owner's own pick"));
+  const applied = cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', String(n), '--preview', previewCode(preview.out)]);
+  assert.equal(applied.code, 0, applied.err);
+  assert.equal(fs.existsSync(path.join(w.memory, 'd-pref.md')), false);
+  assert.match(fs.readFileSync(path.join(w.config, 'CLAUDE.md'), 'utf8'), /Plain words, short replies\./, "the owner's own instructions are untouched");
+});
+
+test('restore: works when the memory folder holds no note any more (G2 L3)', t => {
+  const w = world(t);
+  const { plan } = verified(w);
+  const before = snapshot(w.memory);
+  const code = previewCode(cli(w, ['preview', '--worksheet', sheetFile(w), '--plan', plan, '--pick', '1']).out);
+  assert.equal(cli(w, ['apply', '--worksheet', sheetFile(w), '--pick', '1', '--preview', code]).code, 0);
+  for (const name of fs.readdirSync(w.memory)) fs.rmSync(path.join(w.memory, name));
+  const restored = cli(w, ['restore', '--backup', backupOf(w, code)]);
+  assert.equal(restored.code, 0, restored.err);
   assert.deepEqual(snapshot(w.memory), before);
 });
 

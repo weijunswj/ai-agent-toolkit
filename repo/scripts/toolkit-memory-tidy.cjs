@@ -24,17 +24,19 @@
 //
 // Verdicts: default (already a Toolkit default: goes), outdated (out of date or against Toolkit: goes
 // or is rewritten), repo-fact (this repository's own fact: stays, or goes once its new home in the
-// repository holds it), owner-preference (the owner's own preference: stays, or goes once the
-// owner's own instructions hold it), gap (a Toolkit gap: stays until Toolkit fixes it), keep (kept as
+// repository holds its line), owner-preference (the owner's own preference: only marked; it stays
+// unless the owner picks it), gap (a Toolkit gap: stays until Toolkit fixes it), keep (kept as
 // memory, with why). A note goes only with a quote this release holds verbatim in its rules, docs,
 // skills or hooks (or, for outdated, a Toolkit path the note names that this release lacks).
 //
 // Scope: only the memory folders of the repository it runs for (by Git identity), never another
 // repository's, a parent folder's, Projects or Codex. It writes no file outside those memory folders
-// except the worksheet and its store summary at the path the agent names, and its backups beside the
-// memory folder (`<memory folder>-tidy-backups/<preview code>/`, never inside it, so no chat loads
-// them). It never writes AGENTS.md, the owner's instructions or Toolkit's own folders: a moved note
-// goes only once its new home already holds its line. apply and restore refuse gate and helper sessions.
+// except the worksheet and its store summary at the path the agent names, and its backups in
+// Toolkit's backups folder (~/.ai-agent-toolkit/backups/memory-tidy/<folder id>/<preview code>/,
+// outside every memory folder and Claude Code's cleanup, and kept by remove toolkit). It never writes
+// AGENTS.md or the owner's instructions: a moved note goes only once its new home already holds its
+// line. apply is all or nothing: it backs up every folder it will change before changing any, and on
+// any failure puts every changed folder back. apply and restore refuse gate and helper sessions.
 //
 // Host facts, from the Claude Code memory docs (https://code.claude.com/docs/en/memory, sections
 // "Auto memory", "How it works" and "Storage location", read 26 Nov 2026): each git repository has
@@ -209,7 +211,7 @@ function filesIn(folder) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isSymbolicLink()) throw new TidyError('TIDY_LINK', `The memory folder holds a link (${rel}), so this tool does not change it. Look at it by hand.`);
+      if (entry.isSymbolicLink()) throw new TidyError('TIDY_LINK', `The memory folder ${folder} holds a link (${rel}), so nothing was changed in any folder. Look at it by hand.`);
       if (entry.isDirectory()) walk(full, rel);
       else if (entry.isFile()) out.push({ rel, full });
     }
@@ -336,17 +338,39 @@ class MemoryTidy {
       try { hasNotes = fs.readdirSync(memory).some(name => name.endsWith('.md')); } catch { continue; }
       const mine = entry.name === mainName || entry.name.startsWith(`${mainName}-`);
       if (!hasNotes) { if (mine) empty += 1; continue; }
-      const cwds = transcriptFolders(project);
-      const live = cwds.filter(cwd => fs.existsSync(cwd));
-      const ids = live.map(identity).filter(Boolean);
-      if (ids.some(id => id.common === repository.common)) { add(included, memory, entry.name === mainName ? 'main' : 'worktree'); continue; }
-      if (repository.origin() && ids.some(id => !inside(canon(id.main), canon(repository.main)) && id.origin() === repository.origin())) { add(included, memory, 'clone'); continue; }
-      if (entry.name === mainName && !ids.length) { add(included, memory, 'main'); continue; }
-      const gone = cwds.filter(cwd => !fs.existsSync(cwd));
-      if (!live.length && (gone.some(cwd => inside(canon(cwd), canon(repository.main))) || (mine && !cwds.length))) { add(unresolved, memory, 'unresolved'); continue; }
-      if (mine) others += 1;
+      const kind = this.#classify(project, repository, identity);
+      if (kind === 'unresolved') add(unresolved, memory, kind);
+      else if (kind) add(included, memory, kind);
+      else if (mine) others += 1;
     }
-    return { repository, included, unresolved, empty, others, setting };
+    return { repository, included, unresolved, empty, others, setting, named, identity };
+  }
+
+  // Whose memory a Claude Code project folder holds, from the working folders its chats recorded:
+  // 'main', 'worktree' or 'clone' (this repository), 'unresolved' (no chat names a folder that still
+  // exists, but one named a folder inside this checkout, or none did and the name is this checkout's), or null.
+  #classify(project, repository, identity) {
+    const name = path.basename(project);
+    const mainName = projectName(repository.main);
+    const cwds = transcriptFolders(project);
+    const live = cwds.filter(cwd => fs.existsSync(cwd));
+    const ids = live.map(identity).filter(Boolean);
+    if (ids.some(id => id.common === repository.common)) return name === mainName ? 'main' : 'worktree';
+    if (repository.origin() && ids.some(id => !inside(canon(id.main), canon(repository.main)) && id.origin() === repository.origin())) return 'clone';
+    if (name === mainName && !ids.length) return 'main';
+    const mine = name === mainName || name.startsWith(`${mainName}-`);
+    if (!live.length && (cwds.some(cwd => inside(canon(cwd), canon(repository.main))) || (mine && !cwds.length))) return 'unresolved';
+    return null;
+  }
+
+  // Whether `folder` is a memory folder of this repository, notes or not (restore's scope).
+  #belongs(folder) {
+    const found = this.find();
+    const target = canon(folder);
+    if ([...found.included, ...found.unresolved].some(entry => canon(entry.path) === target)) return true;
+    if (found.setting && canon(found.setting.folder) === target) return true;
+    const project = path.dirname(folder);
+    return path.basename(folder) === 'memory' && canon(path.dirname(project)) === canon(path.join(this.#configDir, 'projects')) && Boolean(this.#classify(project, found.repository, found.identity));
   }
 
   // Each folder's counts and index health, for find's list (no note text).
@@ -367,7 +391,7 @@ class MemoryTidy {
       out.push(`- **${title}** \`${folder.path}\`: ${plural(info.notes, 'note')}; ${INDEX} ${plural(info.index_lines, 'line')}, ${kb(info.index_bytes)} (up to ${START_LINES} lines or ${START_BYTES / 1024} KB load at start); index: ${health}.`);
     };
     for (const folder of found.included) describe(folder, capital(FOLDER_KINDS[folder.kind]) + (folder.from ? ` (from ${folder.from})` : ''));
-    for (const folder of found.unresolved) describe(folder, 'Unresolved (its chat folder no longer exists; left out unless check gets --include with this path)');
+    for (const folder of found.unresolved) describe(folder, 'Unresolved (no chat in it names a folder that still exists; left out unless check gets --include with this path)');
     if (!found.included.length && !found.unresolved.length) out.push('- **No memory notes** for this repository on this computer.');
     out.push(`- **Empty memory folders:** ${found.empty} (left alone).`);
     if (found.others) out.push(`- **Folders of other repositories with a similar name:** ${found.others} (left alone).`);
@@ -444,7 +468,10 @@ class MemoryTidy {
       index: facts.index.map(row => ({ ...row, verdict: null })),
     };
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, `${JSON.stringify(sheet, null, 2)}\n`, { flag: 'w' });
+    try { fs.writeFileSync(target, `${JSON.stringify(sheet, null, 2)}\n`, { flag: 'wx' }); } catch (error) {
+      if (error.code === 'EEXIST') throw new TidyError('TIDY_OUT', `${target} already exists, so it was not overwritten. Name a new file for the worksheet.`);
+      throw error;
+    }
     return { file: target, sheet };
   }
 
@@ -491,7 +518,7 @@ class MemoryTidy {
     const out = [];
     if (!Object.hasOwn(VERDICTS, row.verdict)) return [`${at}: give exactly one verdict: ${VERDICT_ORDER.join(', ')}.`];
     if (!plain(row.gist, 240)) out.push(`${at}: the gist is one line of plain text, up to 240 characters.`);
-    const wants = { default: ['evidence'], outdated: ['evidence', 'rewrite'], 'repo-fact': ['move'], 'owner-preference': ['move'], gap: ['gap'], keep: ['why'] }[row.verdict];
+    const wants = { default: ['evidence'], outdated: ['evidence', 'rewrite'], 'repo-fact': ['move'], 'owner-preference': [], gap: ['gap'], keep: ['why'] }[row.verdict];
     for (const key of ['why', 'evidence', 'gap', 'move', 'rewrite']) if (row[key] !== null && !wants.includes(key)) out.push(`${at}: ${key} does not go with the verdict ${row.verdict}; leave it null.`);
     if (row.verdict === 'keep' && !plain(row.why, 240)) out.push(`${at}: kept as memory needs a one-line why.`);
     if (row.verdict === 'gap') {
@@ -502,12 +529,10 @@ class MemoryTidy {
       const front = typeof row.rewrite === 'string' ? frontmatter(row.rewrite) : null;
       if (typeof row.rewrite !== 'string' || Buffer.byteLength(row.rewrite) > MAX_NOTE || !front || !front.name || !front.description || INVISIBLE.test(row.rewrite.replace(/[\r\n\t]/g, ' '))) out.push(`${at}: a rewrite is the note's whole new text, starting with frontmatter that has a name and a description.`);
     }
-    if (row.move !== null) {
-      const to = row.verdict === 'repo-fact' ? 'repository' : 'owner';
-      const keys = to === 'repository' ? ['to', 'file', 'line'] : ['to', 'line'];
-      if (!exactKeys(row.move, keys) || row.move.to !== to || !plain(row.move.line, 500) || wordCount(row.move.line) < 3
-        || (to === 'repository' && (typeof row.move.file !== 'string' || !RELATIVE_PATH.test(row.move.file) || row.move.file.split('/').includes('..') || !row.move.file.endsWith('.md')))) {
-        out.push(`${at}: a move is ${to === 'repository' ? '{ to: "repository", file: "<path in the repository>.md", line }' : '{ to: "owner", line }'}, with the line its new home must hold (3 words or more).`);
+    if (row.verdict === 'repo-fact' && row.move !== null) {
+      if (!exactKeys(row.move, ['to', 'file', 'line']) || row.move.to !== 'repository' || !plain(row.move.line, 500) || wordCount(row.move.line) < 3
+        || typeof row.move.file !== 'string' || !RELATIVE_PATH.test(row.move.file) || row.move.file.split('/').includes('..') || !row.move.file.endsWith('.md')) {
+        out.push(`${at}: a move is { to: "repository", file: "<path in the repository>.md", line }, with the whole line its new home must hold (3 words or more).`);
       }
     }
     return out;
@@ -533,7 +558,8 @@ class MemoryTidy {
     try { text = fs.readFileSync(path.join(this.#root, file), 'utf8'); } catch { return [`${at}: ${file} is not in this release.`]; }
     const wanted = fold(quote);
     if (!fold(text).includes(wanted)) return [`${at}: ${file} does not hold that quote word for word.`];
-    if (wordCount(wanted) < 8 && !text.split(/\r?\n/).some(line => fold(line.replace(/^\s*(?:[-*+]|\d+[.)]|#+)\s+/, '')) === wanted)) return [`${at}: the quote is under 8 words and is not a whole line of ${file}.`];
+    // A short quote counts only as a whole line of rule text of 4 words or more, never a heading.
+    if (wordCount(wanted) < 8 && (wordCount(wanted) < 4 || !text.split(/\r?\n/).some(line => !/^\s*#/.test(line) && fold(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')) === wanted))) return [`${at}: the quote is under 8 words and is not a whole line of ${file}.`];
     return [];
   }
 
@@ -573,7 +599,7 @@ class MemoryTidy {
         const note = byFile.get(row.file);
         const action = actionOf(row);
         if (action === 'rewrite') change.rewrites.push({ row, before: note.text, after: row.rewrite });
-        else if (action === 'remove') change.removes.push({ row, text: note.text, why: VERDICTS[row.verdict] });
+        else if (action === 'remove') change.removes.push({ row, text: note.text, why: row.verdict === 'owner-preference' ? `${VERDICTS[row.verdict]}, on the owner's own pick` : VERDICTS[row.verdict] });
         else {
           const holds = this.#destinationHolds(row.move);
           if (holds.holds) change.removes.push({ row, text: note.text, why: `${VERDICTS[row.verdict]}, now held by ${holds.label}`, moved: holds });
@@ -601,6 +627,7 @@ class MemoryTidy {
         const dangling = change.removes.filter(entry => note.links_out.includes(byFile.get(entry.row.file).link_name)).map(entry => entry.row.file);
         if (dangling.length) change.links.push({ file: note.file, to: dangling });
       }
+      if (change.removes.length || change.rewrites.length || change.drops.length) filesIn(folder.path);
       plans.push(change);
     }
     const preview = code16({
@@ -618,26 +645,17 @@ class MemoryTidy {
     return { changes: plans, preview };
   }
 
-  // Whether a move's new home already holds its line. The repository's file is read from the default
-  // branch as this clone last fetched it (a merged, reviewed change); the owner's own file outside
-  // Toolkit's blocks. This tool never writes either.
+  // Whether a move's new home already holds its line, as a whole line (a list marker aside). The
+  // repository's file is read from the default branch as this clone last fetched it (a merged,
+  // reviewed change). This tool never writes it.
   #destinationHolds(move) {
     const wanted = fold(move.line);
-    if (move.to === 'owner') {
-      const file = path.join(this.#configDir, 'CLAUDE.md');
-      let text = '';
-      try { text = fs.readFileSync(file, 'utf8'); } catch { /* none */ }
-      const { blocks, errors } = findBlocks(text);
-      let own = text;
-      if (!errors.length) for (const block of [...blocks].sort((a, b) => b.start - a.start)) own = own.slice(0, block.start) + own.slice(block.end);
-      return { holds: !errors.length && fold(own).includes(wanted), label: 'your own instructions', where: file, line: move.line };
-    }
     const { main } = this.#repository();
     const head = git(main, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
     const label = `${move.file} on ${head || 'the default branch'}`;
     if (!head) return { holds: false, label, where: move.file, line: move.line, why: 'this clone does not know its default branch (run git remote set-head origin --auto)' };
     const text = git(main, ['show', `${head}:${move.file}`]);
-    return { holds: text !== null && fold(text).includes(wanted), label, where: move.file, line: move.line };
+    return { holds: text !== null && text.split(/\r?\n/).some(line => fold(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')) === wanted), label, where: move.file, line: move.line };
   }
 
   previewReport({ worksheet, plan, picks }) {
@@ -647,8 +665,12 @@ class MemoryTidy {
     return { preview, text: previewText(checked.sheet, changes, picks, preview, this.#backupDir.bind(this)), changes };
   }
 
+  #backupRoot() {
+    return path.join(this.#home, '.ai-agent-toolkit', 'backups', 'memory-tidy');
+  }
+
   #backupDir(folder, preview) {
-    return path.join(`${folder.path}-tidy-backups`, preview);
+    return path.join(this.#backupRoot(), folder.id, preview);
   }
 
   // ---- keep-all ----
@@ -674,31 +696,51 @@ class MemoryTidy {
     const checked = this.#checked(worksheet);
     const { changes, preview: now } = this.#changes(checked, picks);
     if (now !== preview) throw new TidyError('TIDY_PREVIEW', 'That preview code does not match these picks and the memory as it is now, so nothing was changed. Run preview again and show the owner exactly what would change.');
-    const done = [];
-    for (const change of changes) {
-      if (!change.removes.length && !change.rewrites.length && !change.drops.length) { done.push({ change, backup: null }); continue; }
-      const backup = this.#backup(change.folder, preview);
-      try {
+    const summaryFile = path.join(path.dirname(path.resolve(worksheet)), 'store-summary.md');
+    const record = line => { if (fs.existsSync(summaryFile)) fs.appendFileSync(summaryFile, line); };
+    const touched = changes.filter(change => change.removes.length || change.rewrites.length || change.drops.length);
+    // Every folder that will change is backed up and read back before any of them changes.
+    const backups = new Map();
+    try {
+      for (const change of touched) backups.set(change, this.#backup(change.folder, preview));
+    } catch (error) {
+      for (const made of backups.values()) if (made.created) fs.rmSync(made.dir, { recursive: true, force: true });
+      const said = String(error.message || error.code);
+      throw new TidyError(/^TIDY_/.test(String(error.code)) ? error.code : 'TIDY_BACKUP', /nothing was changed/i.test(said) ? said : `The backup failed (${said}). Nothing was changed in any folder.`);
+    }
+    const written = [];
+    try {
+      for (const change of touched) {
+        written.push(change);
         this.#write(change);
         const after = readFolder(change.folder.path);
         const before = new Set(change.problemsBefore || []);
         const added = indexProblems(after.index, after.notes).filter(row => ['missing', 'unindexed', 'duplicate'].includes(row.kind)).map(row => `${row.kind} ${row.target}`).filter(key => !before.has(key));
         if (added.length) throw new TidyError('TIDY_HEALTH', `the index check after the change found: ${added.join(', ')}`);
-      } catch (error) {
-        let state;
-        try { this.#putBack(backup, change.folder.path); state = 'The folder was put back from the backup and read back.'; } catch (restoreError) { state = `Putting the folder back failed too (${restoreError.message}); restore it by hand from the backup.`; }
-        throw new TidyError('TIDY_APPLY', `The change to ${change.folder.path} failed (${error.message || error.code}). ${state} Backup: ${backup}`);
       }
-      done.push({ change, backup });
+    } catch (error) {
+      const states = written.map(change => {
+        const dir = backups.get(change).dir;
+        try { this.#putBack(dir, change.folder.path); return `- ${change.folder.path}: put back and read back (backup ${dir})`; } catch (restoreError) {
+          return `- ${change.folder.path}: NOT put back (${restoreError.message}); restore it with node "${__filename}" restore --backup "${dir}"`;
+        }
+      });
+      const all = states.every(state => !state.includes('NOT put back'));
+      record(`- ${this.#now().toISOString()}: preview ${preview} failed (${error.message || error.code}); ${all ? 'every changed folder was put back from its backup' : 'some folders were not put back'}: ${written.map(change => change.folder.id).join(', ')}.\n`);
+      throw new TidyError('TIDY_APPLY', `The change failed (${error.message || error.code}). ${all ? 'Nothing stays changed: every folder this run changed was put back from its backup and read back.' : 'Some folders could not be put back: restore each one with its command below.'}\n${states.join('\n')}`);
     }
-    const summaryFile = path.join(path.dirname(path.resolve(worksheet)), 'store-summary.md');
-    if (fs.existsSync(summaryFile)) fs.appendFileSync(summaryFile, applySummary(done, preview, this.#now()));
+    const done = changes.map(change => ({ change, backup: backups.has(change) ? backups.get(change).dir : null }));
+    record(applySummary(done, preview, this.#now()));
     return { done, text: appliedText(done, preview) };
   }
 
   #write(change) {
     const folder = change.folder.path;
     const { index, notes } = readFolder(folder);
+    const shown = [...change.rewrites.map(entry => [entry.row.file, entry.before]), ...change.removes.map(entry => [entry.row.file, entry.text])];
+    const moved = shown.filter(([name, was]) => !notes.some(note => note.file === name && note.bytes.equals(Buffer.from(was)))).map(([name]) => name);
+    if ((index ? sha(index.bytes) : null) !== change.index_sha256) moved.push(INDEX);
+    if (moved.length) throw new TidyError('FILE_CHANGED', `${moved.join(', ')} changed after the preview`);
     change.problemsBefore = indexProblems(index, notes).filter(row => ['missing', 'unindexed', 'duplicate'].includes(row.kind)).map(row => `${row.kind} ${row.target}`);
     const byFile = new Map(notes.map(note => [note.file, note]));
     for (const entry of change.rewrites) this.#files.write(path.join(folder, entry.row.file), byFile.get(entry.row.file).bytes, Buffer.from(entry.after));
@@ -717,8 +759,15 @@ class MemoryTidy {
   // Copies the whole folder to its backup with a checksum manifest, and reads it all back.
   #backup(folder, preview) {
     const dir = this.#backupDir(folder, preview);
-    if (fs.existsSync(dir)) throw new TidyError('TIDY_PREVIEW', `A backup for this preview already exists (${dir}): this preview was applied already. Run check and preview again for any further change.`);
     const files = filesIn(folder.path);
+    if (fs.existsSync(dir)) {
+      // A run of this preview that failed and was put back left this backup; it still serves when
+      // the folder holds exactly what it holds.
+      const kept = this.#readBackup(dir, folder.path);
+      const now = files.map(entry => [entry.rel, sha(fs.readFileSync(entry.full))]);
+      if (JSON.stringify(now) === JSON.stringify(Object.entries(kept.files))) return { dir, created: false };
+      throw new TidyError('TIDY_PREVIEW', `A backup for this preview already exists (${dir}) and the folder no longer matches it. Run check and preview again. Nothing was changed in any folder.`);
+    }
     const manifest = { schema: MANIFEST_SCHEMA, folder: folder.path, preview, made_at: this.#now().toISOString(), files: {} };
     fs.mkdirSync(dir, { recursive: true });
     for (const entry of files) {
@@ -730,8 +779,8 @@ class MemoryTidy {
     }
     fs.writeFileSync(path.join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     this.#readBackup(dir, folder.path);
-    for (const entry of files) if (sha(fs.readFileSync(entry.full)) !== manifest.files[entry.rel]) throw new TidyError('TIDY_BACKUP', `${entry.rel} changed while it was backed up, so nothing was changed. Run check again.`);
-    return dir;
+    for (const entry of files) if (sha(fs.readFileSync(entry.full)) !== manifest.files[entry.rel]) throw new TidyError('TIDY_BACKUP', `${entry.rel} changed while it was backed up. Nothing was changed in any folder. Run check again.`);
+    return { dir, created: true };
   }
 
   // The backup's manifest, with every copy checked against it.
@@ -774,11 +823,16 @@ class MemoryTidy {
   restore({ backup }) {
     this.#requireController('restore memory notes');
     const dir = path.resolve(backup);
-    const match = /^(.*)-tidy-backups$/.exec(path.dirname(dir));
-    if (!match || !CODE.test(path.basename(dir))) throw new TidyError('TIDY_BACKUP', 'Name a backup folder as apply printed it: <memory folder>-tidy-backups/<preview code>.');
-    const folderPath = match[1];
-    const found = this.find();
-    if (![...found.included, ...found.unresolved].some(folder => canon(folder.path) === canon(folderPath))) throw new TidyError('TIDY_SCOPE', `${folderPath} is not a memory folder of this repository, so nothing was restored.`);
+    const id = path.basename(path.dirname(dir));
+    if (canon(path.dirname(path.dirname(dir))) !== canon(this.#backupRoot()) || !/^f[0-9a-f]{8}$/.test(id) || !CODE.test(path.basename(dir))) {
+      throw new TidyError('TIDY_BACKUP', `Name a backup folder as apply printed it: ${this.#backupRoot()}${path.sep}<folder id>${path.sep}<preview code>.`);
+    }
+    let named;
+    try { named = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')).folder; } catch { throw new TidyError('TIDY_BACKUP', `The backup ${dir} has no readable manifest, so it is not used.`); }
+    if (typeof named !== 'string' || !path.isAbsolute(named) || folderId(named) !== id) throw new TidyError('TIDY_BACKUP', `The backup ${dir} does not belong to the folder its manifest names, so it is not used.`);
+    const folderPath = path.resolve(named);
+    if (!this.#belongs(folderPath)) throw new TidyError('TIDY_SCOPE', `${folderPath} is not a memory folder of this repository, so nothing was restored.`);
+    fs.mkdirSync(folderPath, { recursive: true });
     const { manifest, extra } = this.#putBack(dir, folderPath);
     return { folder: folderPath, files: Object.keys(manifest.files).length, extra };
   }
@@ -790,7 +844,8 @@ function actionOf(row) {
   if (!Object.hasOwn(row, 'file')) return row.verdict === 'fix' ? 'fix' : 'keep';
   if (row.verdict === 'default') return 'remove';
   if (row.verdict === 'outdated') return row.rewrite ? 'rewrite' : 'remove';
-  if (['repo-fact', 'owner-preference'].includes(row.verdict) && row.move) return 'move';
+  if (row.verdict === 'owner-preference') return 'remove';
+  if (row.verdict === 'repo-fact' && row.move) return 'move';
   return 'keep';
 }
 
@@ -830,7 +885,7 @@ function ownerList(sheet, folders, plan) {
       if (verdict === 'default' || (verdict === 'outdated' && action === 'remove')) out.push('  - **If you pick it:** the note goes');
       if (action === 'rewrite') out.push('  - **If you pick it:** the note is rewritten; you see the new text before anything changes');
       if (verdict === 'repo-fact') out.push(row.move ? `  - **If you pick it:** the note goes once \`${row.move.file}\` on the default branch holds "${row.move.line}" (a normal reviewed change; this tool never writes it)` : '  - **Stays** as memory');
-      if (verdict === 'owner-preference') out.push(row.move ? `  - **If you pick it:** the note goes once your own instructions hold "${row.move.line}" (you decide; Toolkit never writes them)` : '  - **Stays:** it is yours, and your own instructions are its home; you decide');
+      if (verdict === 'owner-preference') out.push('  - **Stays unless you pick it:** it is yours to decide; Toolkit never moves or writes it');
       if (verdict === 'gap') out.push(`  - **Stays until Toolkit fixes it:** ${row.gap.failure} (${row.gap.route === 'new' ? 'a new Toolkit issue' : `Toolkit ${row.gap.route}`})`);
       if (verdict === 'keep') out.push(`  - **Why it stays:** ${row.why}`);
     }
@@ -860,7 +915,7 @@ function storeSummary(sheet, plan, now) {
     if (row.evidence && row.evidence.quote) line += `. Toolkit: \`${row.evidence.file}\`, "${fold(row.evidence.quote)}"`;
     if (row.evidence && row.evidence.missing_path) line += `. Toolkit no longer has \`${row.evidence.missing_path}\``;
     if (row.rewrite) line += '; proposed rewrite';
-    if (row.move) line += `; moves to ${row.move.to === 'owner' ? "the owner's own instructions" : `the repository's \`${row.move.file}\``} once it holds the line`;
+    if (row.move) line += `; moves to the repository's \`${row.move.file}\` once it holds the line`;
     if (row.gap) line += `; routed to ${row.gap.route === 'new' ? 'a new Toolkit issue' : row.gap.route}`;
     out.push(/[."]$/.test(line) ? line : `${line}.`);
   }
@@ -889,7 +944,7 @@ function previewText(sheet, changes, picks, preview, backupDir) {
       out.push('- **Its full text now:**', '', quoteBlock(entry.before), '', '- **Its full text after:**', '', quoteBlock(entry.after));
     }
     for (const entry of change.held) {
-      out.push('', `**Held, nothing changes: ${entry.row.n}. ${entry.row.file}**`, `- **Why:** its new home (${entry.holds.label}) does not hold "${entry.holds.line}" yet${entry.holds.why ? `, and ${entry.holds.why}` : ''}`, '- **Next:** once that line is there (a reviewed change for the repository, or your own edit for your instructions), preview again');
+      out.push('', `**Held, nothing changes: ${entry.row.n}. ${entry.row.file}**`, `- **Why:** its new home (${entry.holds.label}) does not hold "${entry.holds.line}" yet${entry.holds.why ? `, and ${entry.holds.why}` : ''}`, '- **Next:** once a reviewed change puts that line there, fetch and preview again');
     }
     if (change.drops.length) {
       out.push('', `**${INDEX} lines that go** (\`${path.join(change.folder.path, INDEX)}\`)`);
@@ -1003,4 +1058,4 @@ function main(argv = process.argv.slice(2), { stdout = process.stdout, stderr = 
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = Object.freeze({ MemoryTidy, VERDICTS, frontmatter, indexLines, indexProblems, normOrigin, projectName, main });
+module.exports = Object.freeze({ MemoryTidy, VERDICTS, folderId, frontmatter, indexLines, indexProblems, normOrigin, projectName, main });
