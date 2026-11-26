@@ -412,3 +412,51 @@ test('discovery reports an unreadable folder as held without hiding readable nei
   assert.ok(found.includes(good));
   assert.ok(found.some(row => row.root === blocked && row.held && /could not be read/.test(row.reason)));
 });
+
+// The shim blocks older setups wrote, which a `repository-agent-rules` refresh removes (GEMINI.SHIM)
+// or replaces with the line `@AGENTS.md` (CLAUDE.SHIM). The scan lists both in every governance state.
+const { renderBlock } = require('../scripts/toolkit-managed-block.cjs');
+const GEMINI_SHIM = renderBlock({ source: 'repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md', name: 'GEMINI.SHIM', version: '3.5.0', body: '@AGENTS.md' });
+const CLAUDE_SHIM = renderBlock({ source: 'repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md', name: 'CLAUDE.SHIM', version: '3.5.0', body: '# Claude Code Instructions\n\n@AGENTS.md\n\nRoot `AGENTS.md` is canonical.' });
+
+test('scan gap: a GEMINI.SHIM block is listed where governance is on, as it is where governance is off', t => {
+  const w = world(t, {
+    alone: { state: 'ENABLED', files: { 'AGENTS.md': '# Mine\n', 'GEMINI.md': `${GEMINI_SHIM}\n` } },
+    beside: { state: 'ENABLED', files: { 'AGENTS.md': '# Mine\n', 'GEMINI.md': `# My Gemini notes\n\n${GEMINI_SHIM}\n` } },
+    off: { state: 'DISABLED', files: { 'AGENTS.md': '# Mine\n', 'GEMINI.md': `${GEMINI_SHIM}\n` } },
+  });
+  const report = w.scan();
+  for (const [name, empties] of [['alone', true], ['beside', false], ['off', true]]) {
+    assert.deepEqual(w.of(report, name).files.map(item => [item.file, item.kind, item.block, item.empties]), [['GEMINI.md', 'block', 'GEMINI.SHIM', empties]], name);
+  }
+});
+
+// [governance, AGENTS.md, CLAUDE.md, expected listing of CLAUDE.md].
+const CLAUDE_SHIM_ROWS = [
+  ['on, own AGENTS.md: the block loads it, so it is replaced by the line', 'ENABLED', '# Mine\n', `${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'shim-block', 'CLAUDE.SHIM']]],
+  ['on, own text beside the block: replaced by the line', 'ENABLED', '# Mine\n', `# My Claude notes\n\n${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'shim-block', 'CLAUDE.SHIM']]],
+  ['on, the line already outside the block: the block alone goes', 'ENABLED', '# Mine\n', `@AGENTS.md\n\n${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'block', 'CLAUDE.SHIM']]],
+  ['on, AGENTS.md holds only a governed copy: both go', 'ENABLED', `${BLOCK}\n`, `${CLAUDE_SHIM}\n`, [['AGENTS.md', 'block', 'TOOLKIT-GOVERNED-RULES'], ['CLAUDE.md', 'block', 'CLAUDE.SHIM']]],
+  ['off, own AGENTS.md: replaced by the line', 'DISABLED', '# Mine\n', `${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'shim-block', 'CLAUDE.SHIM']]],
+  ['off, no AGENTS.md: the block loads nothing, so it goes', 'UNDECIDED', null, `${CLAUDE_SHIM}\n`, [['CLAUDE.md', 'block', 'CLAUDE.SHIM']]],
+];
+for (const [label, state, agents, claude, expected] of CLAUDE_SHIM_ROWS) {
+  test(`scan gap: a marker-wrapped CLAUDE.md is listed (governance ${label})`, t => {
+    const w = world(t, { repo: { state, files: { ...(agents === null ? {} : { 'AGENTS.md': agents }), 'CLAUDE.md': claude } } });
+    const row = w.of(w.scan(), 'repo');
+    assert.deepEqual(row.files.map(item => [item.file, item.kind, item.block]), expected);
+    assert.deepEqual([row.kept, row.unproven], [[], []]);
+    const text = leftovers.describe({ folder: w.folder, readable: true, repositories: [row] }).join('\n');
+    if (expected.some(item => item[1] === 'shim-block')) assert.match(text, /- CLAUDE\.md: an older marked form of Toolkit's one-line shim \(block CLAUDE\.SHIM\)\. It loads your AGENTS\.md, so replace the block with the line `@AGENTS\.md` rather than removing it\. The rest of the file is yours\./);
+  });
+}
+
+test('scan gap: a CLAUDE.md that is a link, or holds no Toolkit block, is not named', t => {
+  const w = world(t, { repo: { state: 'ENABLED', files: { 'AGENTS.md': '# Mine\n', 'CLAUDE.md': '# My own Claude rules\n' } } });
+  assert.deepEqual(w.of(w.scan(), 'repo').files, []);
+  const root = path.join(w.folder, 'repo');
+  fs.rmSync(path.join(root, 'CLAUDE.md'));
+  try { fs.symlinkSync(path.join(root, 'AGENTS.md'), path.join(root, 'CLAUDE.md')); } catch { return; }
+  const row = w.of(w.scan(), 'repo');
+  assert.deepEqual([row.files, row.unproven], [[], []], 'a linked CLAUDE.md is left quietly, as a linked GEMINI.md is');
+});

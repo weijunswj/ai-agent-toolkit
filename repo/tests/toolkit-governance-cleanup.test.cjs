@@ -376,6 +376,39 @@ test('a cleanup whose write fails exits 1', async t => {
 
 // The floor the cleanup writes is the first release with S2, S3 and the session-start truncation fix,
 // so it can never be newer than this Toolkit; Toolkit's own binding carries the same floor first.
+// The shim blocks older setups wrote, as a `repository-agent-rules` refresh treats them: GEMINI.SHIM goes
+// (the file too when nothing else is in it), and CLAUDE.SHIM becomes the line `@AGENTS.md` while the
+// repository has its own AGENTS.md for it to load.
+const { renderBlock } = require('../scripts/toolkit-managed-block.cjs');
+const GEMINI_SHIM = renderBlock({ source: 'repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md', name: 'GEMINI.SHIM', version: '3.5.0', body: '@AGENTS.md' });
+const CLAUDE_SHIM = renderBlock({ source: 'repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md', name: 'CLAUDE.SHIM', version: '3.5.0', body: '# Claude Code Instructions\n\n@AGENTS.md\n\nRoot `AGENTS.md` is canonical.' });
+// [label, files, expected files after --write (null: deleted)].
+const SHIM_CLEANUP_ROWS = [
+  ['a GEMINI.md holding only the shim block goes', { 'AGENTS.md': '# Mine\n', 'GEMINI.md': `${GEMINI_SHIM}\n` }, { 'AGENTS.md': '# Mine\n', 'GEMINI.md': null }],
+  ['a GEMINI.md with own text loses only the block', { 'AGENTS.md': '# Mine\n', 'GEMINI.md': `# My Gemini notes\n\n${GEMINI_SHIM}\n` }, { 'GEMINI.md': '# My Gemini notes\n' }],
+  ['a CLAUDE.md holding only the shim block becomes the line', { 'AGENTS.md': '# Mine\n', 'CLAUDE.md': `${CLAUDE_SHIM}\n` }, { 'AGENTS.md': '# Mine\n', 'CLAUDE.md': '@AGENTS.md\n' }],
+  ['a CLAUDE.md with own text keeps it, the block becoming the line', { 'AGENTS.md': '# Mine\n', 'CLAUDE.md': `# My Claude notes\r\n\r\n${CLAUDE_SHIM.replace(/\n/g, '\r\n')}\r\n` }, { 'CLAUDE.md': '# My Claude notes\r\n\r\n@AGENTS.md\r\n' }],
+  ['a CLAUDE.md that already has the line loses only the block', { 'AGENTS.md': '# Mine\n', 'CLAUDE.md': `@AGENTS.md\n\n${CLAUDE_SHIM}\n` }, { 'CLAUDE.md': '@AGENTS.md\n' }],
+  ['a block-only AGENTS.md goes with its marked CLAUDE.md', { 'AGENTS.md': `${BLOCK}\n`, 'CLAUDE.md': `${CLAUDE_SHIM}\n` }, { 'AGENTS.md': null, 'CLAUDE.md': null }],
+];
+for (const [label, files, expected] of SHIM_CLEANUP_ROWS) {
+  test(`scan gap cleanup: ${label}`, t => {
+    const r = repo(t, { ...files, '.github/toolkit-programme.json': BINDING });
+    const done = cleanup.run({ root: r.root, write: true, governance: r.governance, sweepReaders: NONE_OLD });
+    assert.equal(done.ok, true, done.lines.join('\n'));
+    for (const [file, text] of Object.entries(expected)) assert.equal(read(r.root, file), text, file);
+    assert.deepEqual(cleanup.run({ root: r.root, write: false, governance: r.governance, sweepReaders: NONE_OLD }).changes, [], 'a second run finds nothing more');
+  });
+}
+
+test('scan gap cleanup: the preview names the shim replacement in plain words', t => {
+  const r = repo(t, { 'AGENTS.md': '# Mine\n', 'CLAUDE.md': `${CLAUDE_SHIM}\n`, '.github/toolkit-programme.json': BINDING });
+  const preview = cleanup.run({ root: r.root, write: false, governance: r.governance, sweepReaders: NONE_OLD });
+  assert.deepEqual(preview.changes.find(change => change.file === 'CLAUDE.md'), { file: 'CLAUDE.md', action: 'replace-shim' });
+  assert.match(preview.lines.join('\n'), /- CLAUDE\.md: replace the old Toolkit shim block with the line @AGENTS\.md, keeping the rest of the file\./);
+  assert.equal(read(r.root, 'CLAUDE.md'), `${CLAUDE_SHIM}\n`, 'a preview writes nothing');
+});
+
 test('MIN_TOOLKIT is no newer than this Toolkit, and Toolkit\'s own binding carries it', () => {
   const ROOT = path.join(__dirname, '..', '..');
   const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;

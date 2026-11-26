@@ -11,6 +11,8 @@
 //   app           whose part it is: 'codex', 'claude-code', 'shared' (used by every app) or 'any' (always
 //                 runs). An item's own `app` wins, for parts that span apps. `remove toolkit` runs in one
 //                 app and plans only that app's items; shared items wait while another app keeps Toolkit.
+//   shared        optional: what the part's shared items are called in the plan's scope line, which names
+//                 only the shared parts found on the computer (default: the title).
 //
 // The Toolkit folder (~/.ai-agent-toolkit) goes last, and only once neither the Claude Code nor the
 // Codex plugin is installed, because a plugin that is still installed reads its records there.
@@ -138,7 +140,7 @@ class CodexSetupJournalPart {
 // the bridge's report name go; the folder goes once empty, and its ai-agent-toolkit parent too. Like
 // the Toolkit folder, it waits while a Toolkit plugin is installed, because the plugin writes there.
 class UpdateReportsPart {
-  key = 'update_reports'; title = 'Toolkit update reports'; app = 'shared';
+  key = 'update_reports'; title = 'Toolkit update reports'; app = 'shared'; shared = "Toolkit's update reports";
   #home; #dir; #isReport; #plugins;
   constructor({ environment = process.env, home = os.homedir(), reportDir, isReport, plugins } = {}) {
     this.#home = home;
@@ -152,8 +154,12 @@ class UpdateReportsPart {
     try { names = fs.readdirSync(this.#dir); } catch { return []; }
     return names.map(name => path.join(this.#dir, name)).filter(file => this.#isReport(file));
   }
+  // Listed while a Toolkit report is there, or the folder is empty; a folder left holding only other
+  // files is not listed again after a removal that kept it.
   plan() {
-    if (!fs.existsSync(this.#dir)) return [];
+    let names;
+    try { names = fs.readdirSync(this.#dir); } catch { return []; }
+    if (names.length && !this.#reports().length) return [];
     return [{ what: display(this.#home, this.#dir), action: 'remove', detail: "Toolkit's update report files, once no Toolkit plugin is installed; any other file there stays" }];
   }
   apply(items) {
@@ -241,7 +247,7 @@ class HelperAgentFilesPart {
 
 // Skill folders Toolkit copied and recorded: the official n8n skills and the Antigravity copies.
 class SkillCopiesPart {
-  key = 'skill_copies'; title = 'Skill folders Toolkit copied';
+  key = 'skill_copies'; title = 'Skill folders Toolkit copied'; shared = "Antigravity's skill copies";
   #owners; #home; #apps;
   constructor({ environment = process.env, home = os.homedir(), toolkitRoot = path.resolve(__dirname, '..', '..'), owners } = {}) {
     this.#home = home;
@@ -440,6 +446,26 @@ class McpKeyHelpersPart {
   apply() { return []; }
 }
 
+// The Claude desktop app's Toolkit copy from the user's claude.ai account. Listed, never changed: it is
+// not this computer's install but the account's, synced by claude.ai to every computer and cloud session
+// signed in to it, so only the owner can remove it there. Until they do, the Claude app keeps running
+// Toolkit's hooks from it, so the list says so and gives the steps.
+const ACCOUNT_COPY_STEPS = "only claude.ai can remove it, and that removes Toolkit from the Claude app on every computer and cloud session signed in to that account. Until then the Claude app keeps running Toolkit's hooks from it. To remove it: on claude.ai in a web browser, open Customize > Plugins and remove the ai-agent-toolkit plugin and then its marketplace (while the marketplace stays, Sync automatically can put the plugin back), then fully quit and reopen the Claude app.";
+class ClaudeAccountCopyPart {
+  key = 'claude_account_copy'; title = "The Claude app's Toolkit copy from your claude.ai account"; app = 'claude-code';
+  #home; #find;
+  constructor({ environment = process.env, home = os.homedir(), find } = {}) {
+    this.#home = home;
+    this.#find = find || (() => require('./toolkit-hook-capability.cjs').accountHookCopy(environment));
+  }
+  plan() {
+    const folder = this.#find();
+    if (!folder) return [];
+    return [{ what: display(this.#home, folder), action: 'keep', detail: ACCOUNT_COPY_STEPS }];
+  }
+  apply() { return []; }
+}
+
 // Whether the Toolkit plugin is installed in each app. Read from the apps' own files, never by
 // starting an app.
 function pluginState({ environment = process.env, home = os.homedir() } = {}) {
@@ -465,7 +491,7 @@ const PLUGIN_STEPS = Object.freeze({
 
 // Toolkit's own entries in ~/.ai-agent-toolkit. Removed only when no Toolkit plugin is installed.
 class ToolkitFolderPart {
-  key = 'toolkit_folder'; title = 'Toolkit folder'; app = 'shared';
+  key = 'toolkit_folder'; title = 'Toolkit folder'; app = 'shared'; shared = 'the Toolkit folder';
   #home; #root; #plugins;
   constructor({ home = os.homedir(), environment = process.env, plugins } = {}) {
     this.#home = home;
@@ -523,9 +549,9 @@ function removeExcept(target, keep) {
 // The parts in the order apply runs them: the reinstall note first, then settings, then files, then
 // the folder last.
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
-  return [new ReinstallNotePart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
+  return [new ReinstallNotePart({ environment, home }), new ClaudeAccountCopyPart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
     new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new CodexSetupJournalPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
     new SkillCopiesPart({ environment, home }), new UpdateReportsPart({ environment, home }), new ToolkitFolderPart({ home, environment })];
 }
 
-module.exports = { ReinstallNotePart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, KEPT_LABELS, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
+module.exports = { ReinstallNotePart, ClaudeAccountCopyPart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, KEPT_LABELS, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };

@@ -260,7 +260,8 @@ class ToolkitInstallHealthCheck {
     if (result.status === 'updated') {
       return { ...this.#check('helpers', label, STATUS.PASSED, `updated this run (backup: ${slash(result.backup_dir)}).${note}`), updated: true };
     }
-    if (result.status === 'not-installed') return this.#check('helpers', label, STATUS.PASSED, `not installed${note}`);
+    // Setup never installs them: agents set a subagent's route when they start it.
+    if (result.status === 'not-installed') return this.#check('helpers', label, STATUS.PASSED, `not installed; none are needed, because each subagent's model and effort are set when it is started (agent-cost-control skill)${note}`);
     return this.#check('helpers', label, STATUS.PASSED, `current${note}`);
   }
 
