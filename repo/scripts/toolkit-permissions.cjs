@@ -11,7 +11,9 @@
 //   node repo/scripts/toolkit-permissions.cjs [--host claude|codex] [--scope computer|repo|all]
 //                                             [--repo-root <checkout>] [--format text|allowed-tools] [--json]
 //   node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]
-//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>]    (the owner only)
+//   node repo/scripts/toolkit-permissions.cjs --review [--repo-root <checkout>] [--all] [--drop <ids>] [--json]   (read-only list
+//                                             of every line in scope: toolkit-permissions-review.cjs)
+//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>] [--drop <ids> --preview <code>]    (the owner only)
 //   node repo/scripts/toolkit-permissions.cjs --remove [--host claude|codex] [--repo-root <checkout>]   (the owner only)
 //
 // Two blocks:
@@ -98,6 +100,40 @@ const ROWS = Object.freeze([
   Object.freeze({ id: 'gh-issue-comment', scope: 'repo', kind: 'command', command: 'gh issue comment', guard: GUARDS.comment, codex: false }),
 ]);
 
+// Auto mode (Claude Code): one plain rule in the computer file's autoMode.allow, so the auto mode
+// classifier does not block a merge Toolkit's merge hold has already let through (the hook still checks
+// every merge). Claude Code reads autoMode from user or managed settings only, as prose rules, and an
+// allow list without the literal "$defaults" replaces its built-in rules
+// (https://code.claude.com/docs/en/auto-mode-config, read 26 Nov 2026). So Toolkit writes it to the
+// computer file only and puts "$defaults" first in a list it creates. A rule that starts with
+// AUTO_MODE_MARK and is not today's is an old Toolkit rule. Evidence store merges are left out: the
+// store command merges on its own.
+const AUTO_MODE_MARK = 'Toolkit: ';
+const AUTO_MODE_ALLOW = Object.freeze([`${AUTO_MODE_MARK}merging a pull request with the GitHub command line is allowed when Toolkit's merge hold hook let the command through. That hook runs first and lets a merge through only for that exact head, after the owner typed merge with its number, tapped Toolkit's merge card, or turned task auto-merge on for a pull request with a ready answer.`]);
+
+// Scripts Toolkit shipped in a block once and no longer does (from the blocks' git history). A node
+// line for one of these, or for a script in today's rows, is an old Toolkit line wherever it points;
+// any other node line is the owner's.
+const RETIRED_SCRIPTS = Object.freeze(['repo/scripts/toolkit-windows-tasks.cjs', 'repo/scripts/toolkit-tasks.cjs', 'repo/scripts/toolkit-update-scheduled-task.cjs']);
+
+// The script a `node "<path>"` line runs, as a forward-slash path, or null.
+function nodeScript(line) {
+  const match = /^(?:Bash|PowerShell)\(\s*node\s+(?:"([^"]+)"|([^\s")]+))/.exec(String(line));
+  return match ? (match[1] || match[2]).replace(/\\/g, '/') : null;
+}
+
+function shippedScripts(rows) {
+  return Object.freeze([...new Set([...rows.filter(row => row.kind === 'script').map(row => row.script), ...RETIRED_SCRIPTS])]);
+}
+
+function oldToolkitLine(line, shipped) {
+  const script = nodeScript(line);
+  return Boolean(script) && shipped.some(name => script === name || script.endsWith(`/${name}`));
+}
+
+// The decision and pattern of each rule in a Codex rules file, as `<decision> <tokens>`.
+const ruleKeys = text => [...String(text || '').matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => `${match[2]} ${JSON.parse(match[1]).join(' ')}`);
+
 // `--apply` writes the owner's own app settings: only the owner runs it, so every block asks for it.
 const APPLY_WHY = 'Writing the app\'s permission settings is the owner\'s own step, typed in their own terminal; agents never run it.';
 const OWNER_FLAGS = Object.freeze(['--apply', '--remove']);
@@ -177,13 +213,14 @@ class PermissionBlocks {
   }
 
   // The managed checkout Toolkit runs from on this computer, as a safe forward-slash path.
-  managedCheckout() {
+  // requireScripts: false lets --remove name the lines of a recorded Toolkit folder that is gone.
+  managedCheckout({ requireScripts = true } = {}) {
     const state = this.#readJson(path.join(this.#home, '.ai-agent-toolkit', 'current', 'state.json'));
     const recorded = state && typeof state.repo_path === 'string' ? state.repo_path : '';
     if (!recorded) throw new PermissionsError('this computer has no recorded Toolkit folder, so no line can be pinned to it.', 'run setup toolkit, then toolkit permissions again.');
     const safe = safePath(recorded, this.#platform);
     if (!safe) throw new PermissionsError('the Toolkit folder path holds a character a permission line cannot carry safely (only letters, digits, space, _ . - are printed).', 'move the Toolkit folder to a plain path with setup toolkit, then run toolkit permissions again.');
-    if (!this.#fs.existsSync(this.#path.join(recorded, ...PROGRAMME.split('/')))) throw new PermissionsError('the recorded Toolkit folder does not hold the Toolkit scripts.', 'run setup toolkit to repair it, then toolkit permissions again.');
+    if (requireScripts && !this.#fs.existsSync(this.#path.join(recorded, ...PROGRAMME.split('/')))) throw new PermissionsError('the recorded Toolkit folder does not hold the Toolkit scripts.', 'run setup toolkit to repair it, then toolkit permissions again.');
     return { recorded, safe };
   }
 
@@ -208,8 +245,8 @@ class PermissionBlocks {
   }
 
   // Builds the blocks. Returns { blocks: [...], stops: [...], coverage: [...] }.
-  build({ host = 'claude', scope = 'all', repoRoot = null } = {}) {
-    const managed = this.managedCheckout();
+  build({ host = 'claude', scope = 'all', repoRoot = null, requireScripts = true } = {}) {
+    const managed = this.managedCheckout({ requireScripts });
     const windows = this.#platform === 'win32';
     const tools = host === 'claude' ? (windows ? ['Bash', 'PowerShell'] : ['Bash']) : ['codex'];
     const stops = [];
@@ -270,8 +307,9 @@ class PermissionBlocks {
   #block({ host, scope, made, excluded, target, root = null }) {
     if (host === 'claude') {
       const ask = [...made.ask];
-      const settings = { permissions: { allow: made.allow, ...(ask.length ? { ask } : {}) } };
-      return { host, scope, target, ...(scope === 'repo' ? { root } : {}), allow: made.allow, ask, excluded, text: JSON.stringify(settings, null, 2) };
+      const autoMode = scope === 'computer' ? [...AUTO_MODE_ALLOW] : [];
+      const settings = { permissions: { allow: made.allow, ...(ask.length ? { ask } : {}) }, ...(autoMode.length ? { autoMode: { allow: ['$defaults', ...autoMode] } } : {}) };
+      return { host, scope, target, ...(scope === 'repo' ? { root } : {}), allow: made.allow, ask, autoMode, autoMark: AUTO_MODE_MARK, excluded, text: JSON.stringify(settings, null, 2) };
     }
     const rule = (tokens, decision, why) => `prefix_rule(\n    pattern = ${JSON.stringify(tokens)},\n    decision = "${decision}",\n    justification = ${JSON.stringify(why)},\n    match = [${JSON.stringify(tokens)}],\n)`;
     const rules = [
@@ -287,16 +325,20 @@ class PermissionBlocks {
     const settings = this.#readJson(path.resolve(file));
     if (!settings) throw new PermissionsError('that file could not be read as JSON.', 'name a Claude Code settings file.');
     const list = key => (Array.isArray(settings.permissions?.[key]) ? settings.permissions[key].filter(item => typeof item === 'string') : []);
-    return built.blocks.map(block => {
-      const stalePrefix = block.scope === 'computer' ? /^(?:Bash|PowerShell)\(node "?[^)]*\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs/ : null;
-      return {
-        scope: block.scope,
-        missing: [...block.allow.filter(line => !list('allow').includes(line)), ...block.ask.filter(line => !list('ask').includes(line))],
-        stale: stalePrefix ? list('allow').filter(line => stalePrefix.test(line) && !block.allow.includes(line)) : [],
-        // Old Toolkit ask lines the block no longer carries (an earlier block's asks).
-        stale_ask: stalePrefix ? list('ask').filter(line => stalePrefix.test(line) && !block.ask.includes(line)) : [],
-      };
-    });
+    // An old Toolkit line is a node line for a script Toolkit has shipped in a block (today's rows or a
+    // retired one), in any folder, that the block no longer holds. Any other node line is the owner's.
+    const shipped = shippedScripts(ROWS);
+    const auto = Array.isArray(settings.autoMode?.allow) ? settings.autoMode.allow.filter(item => typeof item === 'string') : [];
+    return built.blocks.map(block => ({
+      scope: block.scope,
+      missing: [...block.allow.filter(line => !list('allow').includes(line)), ...block.ask.filter(line => !list('ask').includes(line))],
+      stale: list('allow').filter(line => oldToolkitLine(line, shipped) && !block.allow.includes(line)),
+      // Old Toolkit ask lines the block no longer carries (an earlier block's asks).
+      stale_ask: list('ask').filter(line => oldToolkitLine(line, shipped) && !block.ask.includes(line)),
+      // Toolkit's auto mode rule (computer file only): missing, or an old Toolkit rule.
+      auto_missing: (block.autoMode || []).filter(rule => !auto.includes(rule)),
+      auto_old: block.scope === 'computer' ? auto.filter(rule => rule.startsWith(AUTO_MODE_MARK) && !(block.autoMode || []).includes(rule)) : [],
+    }));
   }
 }
 
@@ -304,7 +346,8 @@ class PermissionBlocks {
 
 const USAGE = 'Usage: node repo/scripts/toolkit-permissions.cjs [--host claude|codex] [--scope computer|repo|all] [--repo-root <checkout>] [--format text|allowed-tools] [--json]\n'
   + '       node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]\n'
-  + '       node repo/scripts/toolkit-permissions.cjs --apply|--remove [--host claude|codex] [--repo-root <checkout>]   (the owner, in their own terminal)\n';
+  + '       node repo/scripts/toolkit-permissions.cjs --review [--host claude] [--repo-root <checkout>] [--all] [--drop <ids>] [--json]   (read-only)\n'
+  + '       node repo/scripts/toolkit-permissions.cjs --apply|--remove [--host claude|codex] [--repo-root <checkout>] [--drop <ids> --preview <code>]   (the owner, in their own terminal)\n';
 
 function parseArgs(argv) {
   const options = { host: 'claude', scope: 'all', format: 'text', json: false, repoRoot: null, check: null };
@@ -384,10 +427,22 @@ function applyLine(built, flag = '--apply', host = null) {
   return { command, what };
 }
 
+// --review, --apply and --remove run toolkit-permissions-cli.cjs as their own process, in this
+// terminal: hooks load this file, and that one holds Claude Code's own tool names (see its header).
+const CLI_FLAGS = Object.freeze(['--review', ...OWNER_FLAGS]);
+// Set only for the CLI process this file starts; the CLI refuses to run as a script without it.
+const CLI_MARK = 'TOOLKIT_PERMISSIONS_CLI';
+function runCli(argv) {
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'toolkit-permissions-cli.cjs'), ...argv], { stdio: 'inherit', windowsHide: false, env: { ...process.env, [CLI_MARK]: '1' } });
+  return Number.isInteger(result.status) ? result.status : 1;
+}
+
 function main(argv = process.argv.slice(2), deps = {}) {
-  // The class is handed over, not required back: run as a script, this file is still loading here,
-  // and a require of a loading module with frozen exports throws.
-  if (OWNER_FLAGS.includes(argv[0])) return require('./toolkit-permissions-apply.cjs').main(argv.slice(1), { ...deps, PermissionBlocks, mode: argv[0].slice(2) });
+  if (CLI_FLAGS.includes(argv[0])) {
+    // Handed deps (a test's temporary computer) would be lost in the child, which reads the real files.
+    if (Object.keys(deps).length) throw new Error(`${argv[0]} runs in toolkit-permissions-cli.cjs: call its main with these deps.`);
+    return runCli(argv);
+  }
   const out = deps.stdout || (text => process.stdout.write(text));
   const err = deps.stderr || (text => process.stderr.write(text));
   let options;
@@ -401,10 +456,11 @@ function main(argv = process.argv.slice(2), deps = {}) {
       const wanted = report.filter(item => options.scope === 'all' || item.scope === options.scope);
       if (options.json) out(`${JSON.stringify({ check: wanted }, null, 2)}\n`);
       else for (const item of wanted) {
-        const stale = [...item.stale, ...item.stale_ask];
-        out(`${item.scope} block: ${item.missing.length} missing, ${stale.length} stale.\n${[...item.missing.map(line => `- missing: ${line}`), ...stale.map(line => `- stale (points at another Toolkit folder or a retired line): ${line}`)].join('\n')}${item.missing.length + stale.length ? '\n' : ''}`);
+        const missing = [...item.missing, ...item.auto_missing.map(rule => `auto mode rule: ${rule}`)];
+        const stale = [...item.stale, ...item.stale_ask, ...item.auto_old.map(rule => `auto mode rule: ${rule}`)];
+        out(`${item.scope} block: ${missing.length} missing, ${stale.length} stale.\n${[...missing.map(line => `- missing: ${line}`), ...stale.map(line => `- stale (points at another Toolkit folder or a retired line): ${line}`)].join('\n')}${missing.length + stale.length ? '\n' : ''}`);
       }
-      return wanted.some(item => item.missing.length || item.stale.length || item.stale_ask.length) ? 1 : 0;
+      return wanted.some(item => item.missing.length || item.stale.length || item.stale_ask.length || item.auto_missing.length || item.auto_old.length) ? 1 : 0;
     }
     if (options.json) out(`${JSON.stringify(built, null, 2)}\n`);
     else if (options.format === 'allowed-tools') out(`${built.blocks.flatMap(block => block.allow).join('\n')}\n`);
@@ -419,7 +475,8 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 // How this computer's Toolkit permission lines for this app compare with what Toolkit would write:
 // { checked, host, app (its name for the owner), missing, stale, update, remove }. Reads local files only, so the governance bank and the
-// session-start line both use it.
+// session-start line both use it. The lines that are not Toolkit's: toolkit-permissions-cli.cjs
+// permissionsWithReview.
 function permissionsState(root, { host = require('./agent-host-markers.cjs').detectAgentHost() === 'codex' ? 'codex' : 'claude' } = {}) {
   const owner = new PermissionBlocks();
   const built = owner.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: root });
@@ -427,24 +484,23 @@ function permissionsState(root, { host = require('./agent-host-markers.cjs').det
   let stale = 0;
   for (const block of built.blocks) {
     if (host === 'codex') {
-      const { ruleKeys } = require('./toolkit-permissions-apply.cjs');
       let text = null;
       try { text = nodeFs.readFileSync(block.target, 'utf8'); } catch { text = null; }
       const have = ruleKeys(text);
       const want = ruleKeys(block.text);
       missing += want.filter(key => !have.includes(key)).length;
       stale += have.filter(key => !want.includes(key)).length;
-    } else if (!nodeFs.existsSync(block.target)) missing += block.allow.length + block.ask.length;
+    } else if (!nodeFs.existsSync(block.target)) missing += block.allow.length + block.ask.length + (block.autoMode || []).length;
     else {
       const report = owner.check(block.target, { blocks: [block] })[0];
-      missing += report.missing.length;
-      stale += report.stale.length + report.stale_ask.length;
+      missing += report.missing.length + report.auto_missing.length;
+      stale += report.stale.length + report.stale_ask.length + report.auto_old.length;
     }
   }
   return { checked: true, host, app: host === 'codex' ? 'Codex' : 'Claude Code', missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
+module.exports = Object.freeze({ CLI_MARK, AUTO_MODE_MARK, AUTO_MODE_ALLOW, RETIRED_SCRIPTS, USAGE, nodeScript, shippedScripts, oldToolkitLine, ruleKeys, PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

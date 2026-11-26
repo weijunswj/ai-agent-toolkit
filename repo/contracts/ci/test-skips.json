@@ -1317,6 +1317,14 @@
     },
     {
       "file": "repo/tests/toolkit-permissions-apply.test.cjs",
+      "test": "a --drop run in a real terminal: a typed-ahead blank line never confirms, Ctrl+C writes nothing, a fresh Enter removes the pick",
+      "systems": [
+        "windows"
+      ],
+      "reason": "Linux-only behaviour (needs util-linux script on Linux); the test runs on the Linux leg"
+    },
+    {
+      "file": "repo/tests/toolkit-permissions-apply.test.cjs",
       "test": "M1 and L4: a rewrite keeps the file mode, indent, line endings and byte order mark",
       "systems": [
         "windows"

@@ -1583,20 +1583,25 @@ function permissionsLine(state, deps = {}, host = null) {
 const SESSION_TEXT_LIMIT = 10000;
 const sizeOf = text => Buffer.byteLength(text, 'utf8');
 
-// Keeps `lines` in order within `limit`. From the end, a line first gives way to its short form
-// ({ full, short }), then lines are left out from the end; render(kept, leftOut) words the text and
-// counts what it left out. A plain string line has no short form.
+// Keeps `lines` in order within `limit`. From the end, a line first gives way to its middle form when
+// it has one ({ full, middle, short }), then, again from the end, to its short form ({ full, short }),
+// then lines are left out from the end; render(kept, leftOut) words the text and counts what it left
+// out. A plain string line has no short form.
 function fitLines(lines, render, limit = SESSION_TEXT_LIMIT) {
-  const forms = lines.map(line => (typeof line === 'string' ? { full: line, short: null } : line));
+  const forms = lines.map(line => (typeof line === 'string' ? { full: line, middle: null, short: null } : { middle: null, ...line }));
   const fits = kept => {
     const text = render(kept, forms.length - kept.length);
     return sizeOf(text) <= limit ? text : null;
   };
-  for (let full = forms.length; full >= 0; full -= 1) {
-    const rest = forms.slice(full);
-    if (rest.some(form => form.short === null)) break;
-    const text = fits([...forms.slice(0, full).map(form => form.full), ...rest.map(form => form.short)]);
-    if (text !== null) return text;
+  // Each step keeps the first `count` lines at one form and the rest at the next shorter one.
+  const steps = [[form => form.full, form => form.middle ?? form.short], ...(forms.some(form => form.middle !== null) ? [[form => form.middle ?? form.full, form => form.short]] : [])];
+  for (const [kept, shorter] of steps) {
+    for (let count = forms.length; count >= 0; count -= 1) {
+      const rest = forms.slice(count);
+      if (rest.some(form => shorter(form) === null)) break;
+      const text = fits([...forms.slice(0, count).map(kept), ...rest.map(shorter)]);
+      if (text !== null) return text;
+    }
   }
   const shortest = forms.map(form => form.short ?? form.full);
   for (let count = forms.length - 1; count > 0; count -= 1) {
@@ -1620,10 +1625,12 @@ const FINDING_ACTIONS = Object.freeze({
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
   const checkpoints = [];
-  // Stale copies: the governance check's CLOUD_WORKFLOW_OUTDATED rows (the sweep, its gate and the test
-  // shards copies). Copies run Toolkit main, but a layout change (or a copy still pinned to one
-  // commit) reaches the repository only through a refresh pull request. Local reads only: git on the
-  // Toolkit checkout and the repository (about ten short processes), no gh or network call.
+  // Stale copies: every row of the governance check that a refresh pull request changes (the sweep, its
+  // gate and the test shards copies; the personal data guard and dependency auto-merge, copied as they
+  // are; the vendored plain-text check), missing, edited or outdated. Rendered copies run Toolkit main,
+  // but a layout change reaches the repository only through a refresh pull request, and a copied file
+  // only ever changes that way. Local reads only: git on the Toolkit checkout and the repository (about
+  // a dozen short processes), no gh or network call.
   lines.push(...staleCopyLines(state, registryOptions, deps));
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
@@ -1639,23 +1646,35 @@ function staleCopyLines(state, registryOptions = {}, deps = {}) {
   try {
     const toolkitRoot = deps.toolkitRoot || path.join(__dirname, '..', '..');
     const check = deps.cloudWorkflowFindings || (target => require('./toolkit-governance-conformance.cjs').cloudWorkflowFindings(target, toolkitRoot, deps.toolkitRoot ? { ...registryOptions, toolkitRoot } : registryOptions));
-    return stalePinLines(check(state).filter(entry => entry.id === 'CLOUD_WORKFLOW_OUTDATED' && entry.file), state.root);
+    return stalePinLines(check(state).filter(entry => entry.file && 'refreshable' in entry), state.root);
   } catch { return []; }
 }
 
-// The refresh command only when it moves every outdated copy forward (each copy's commit is already in
+// How each row's state reads in the line.
+const COPY_STATE_WORDS = Object.freeze({ missing: 'missing', edited: 'edited by hand', outdated: 'older copy' });
+
+// The refresh command only when it moves every copy forward (each pinned copy's commit is already in
 // this computer's Toolkit checkout, which is on main). Otherwise a refresh from here would roll a newer
-// copy back, so the line asks for the checkout to be updated first and names no refresh.
+// copy back, so the line asks for the checkout to be updated first and names no refresh. The
+// controller acts this session without asking: the refresh only opens or updates a pull request.
 function stalePinLines(rows, root) {
   if (!rows.length) return [];
-  const files = rows.map(entry => entry.file).join(', ');
-  const verb = rows.length === 1 ? 'is' : 'are';
-  const pinned = rows.filter(entry => entry.pinned).map(entry => entry.file);
-  if (rows.every(entry => entry.refreshable === true)) return [`⚠️ Stale Toolkit copies: ${files} ${verb} behind the Toolkit's current layout${pinned.length ? `, and ${pinned.join(', ')} ${pinned.length === 1 ? 'is' : 'are'} pinned to one older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since` : ''}. Controller: this session, update the Toolkit checkout to the latest main, then run \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root} --refresh-pr\` from it; it opens or updates one pull request for the owner to merge.`];
+  const list = entries => entries.map(entry => entry.file).join(', ');
+  const verb = entries => (entries.length === 1 ? 'is' : 'are');
+  const command = `\`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root} --refresh-pr\``;
+  if (rows.every(entry => entry.refreshable === true)) {
+    const pinned = rows.filter(entry => entry.pinned);
+    const named = rows.map(entry => `${entry.file}${COPY_STATE_WORDS[entry.state] ? ` (${COPY_STATE_WORDS[entry.state]})` : ''}`).join(', ');
+    return [`⚠️ Stale Toolkit copies: a refresh would change ${named}${pinned.length ? `; ${list(pinned)} ${verb(pinned)} pinned to one older Toolkit commit, so this repository's cloud sweep and checks still run that older code and miss every fix since` : ''}. Controller: this session, without asking, update the Toolkit checkout to the latest main, then run ${command} from it; it opens or updates one pull request for the owner to merge.`];
+  }
   const head = rows.find(entry => entry.head)?.head;
+  const at = head ? ` (${head.slice(0, 7)})` : '';
   // On main but shallow: fetching the rest of its history settles it, not updating the checkout.
-  if (rows.every(entry => entry.refreshable === true || entry.refreshable === 'shallow')) return [`⚠️ Toolkit checkout shallow: ${files} ${verb} made by a Toolkit commit that this computer's Toolkit checkout${head ? ` (${head.slice(0, 7)})` : ''} cannot reach, because it is a shallow clone whose history may stop before that commit. Controller: run \`git fetch --unshallow origin\` in the Toolkit checkout, then run \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root} --refresh-pr\` from it; it opens or updates one pull request for the owner to merge, or says what else it needs.`];
-  return [`⚠️ Toolkit checkout behind: ${files} ${verb} made by a Toolkit commit that this computer's Toolkit checkout${head ? ` (${head.slice(0, 7)})` : ''} does not contain, or the checkout is not on main, so a refresh from it would roll them back. Controller: update the Toolkit checkout to the latest main before any refresh here; the next session start then says whether the copies are stale.`];
+  const shallow = rows.filter(entry => entry.refreshable === 'shallow');
+  if (rows.every(entry => entry.refreshable === true || entry.refreshable === 'shallow')) return [`⚠️ Toolkit checkout shallow: ${list(shallow)} ${verb(shallow)} made by a Toolkit commit that this computer's Toolkit checkout${at} cannot reach, because it is a shallow clone whose history may stop before that commit. Controller: this session, without asking, run \`git fetch --unshallow origin\` in the Toolkit checkout, then run ${command} from it; it opens or updates one pull request for the owner to merge, or says what else it needs.`];
+  const behind = rows.filter(entry => entry.refreshable !== true && entry.refreshable !== 'shallow' && entry.pin);
+  const why = behind.length ? `does not contain the Toolkit commit that made ${list(behind)}, or is not on main, so a refresh from it would roll ${behind.length === 1 ? 'that copy' : 'those copies'} back` : 'is not on main, so a refresh cannot run from it';
+  return [`⚠️ Toolkit checkout behind: this computer's Toolkit checkout${at} ${why}. Controller: update the Toolkit checkout to the latest main before any refresh here; the next session start then says whether the copies are stale.`];
 }
 
 // Why governance could not be checked, as fixed words (toolkit-governance-binding.cjs refreshCause):
@@ -1763,6 +1782,8 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
     const text = state.state === 'UNDECIDED' ? CLOUD_UNDECIDED : state.state === 'UNAVAILABLE' ? unavailableText(causeOf(state, own)) : decidedLine(state, own);
     lines.push({
       full: `- ${name}: ${text}${stale.map(line => `\n  ${line}`).join('')}`,
+      // With many repositories the copy list gives way first: one short pointer to the read-only list.
+      middle: stale.length ? `- ${name}: ${text}\n  ⚠️ Toolkit copies here need a refresh (list left out to fit): \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root} --check\` lists them; then act on it this session, without asking.` : null,
       short: `- ${name}: ${shortState(state, own)}`,
     });
   }

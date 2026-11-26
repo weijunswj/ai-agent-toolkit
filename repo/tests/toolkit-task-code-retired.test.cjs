@@ -22,9 +22,19 @@ test('no live script, skill, workflow or contract names a deleted task module', 
   const listed = spawnSync('git', ['ls-files', '-z', 'repo/scripts', 'repo/contracts', 'skills', '.github', 'hooks'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
   const pattern = new RegExp(`\\b(?:${DELETED.join('|')})\\.cjs\\b`);
+  // One named exception: toolkit permissions lists retired script paths in RETIRED_SCRIPTS only to
+  // recognise an old Toolkit permission line that points at one; it never loads them (checked below).
+  const LISTER = 'repo/scripts/toolkit-permissions.cjs';
+  const textOf = file => {
+    const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    return file === LISTER ? text.split(/\r?\n/).filter(line => !line.startsWith('const RETIRED_SCRIPTS = ')).join('\n') : text;
+  };
   const named = listed.stdout.split('\0').filter(Boolean)
-    .filter(file => fs.existsSync(path.join(ROOT, file)) && pattern.test(fs.readFileSync(path.join(ROOT, file), 'utf8')));
+    .filter(file => fs.existsSync(path.join(ROOT, file)) && pattern.test(textOf(file)));
   assert.deepEqual(named, []);
+  const lister = fs.readFileSync(path.join(ROOT, LISTER), 'utf8');
+  assert.match(lister, /^const RETIRED_SCRIPTS = /m, 'the exception still has its one line');
+  assert.doesNotMatch(lister, new RegExp(`require\\([^)]*(?:${DELETED.join('|')})`), 'it never loads a deleted module');
 });
 
 test('the task registry keeps only what remove toolkit and setup read; no session-start task line is left', () => {

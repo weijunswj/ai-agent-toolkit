@@ -197,10 +197,27 @@ test('--check reads a settings file and reports missing and stale lines without 
   const before = fs.readFileSync(file, 'utf8');
   const out = [];
   assert.equal(permissions.main(['--check', file, '--scope', 'computer', '--json'], { ...deps, stdout: text => out.push(text) }), 1);
-  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0], ...built.blocks[0].ask], stale: [stale], stale_ask: [staleAsk] }]);
+  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0], ...built.blocks[0].ask], stale: [stale], stale_ask: [staleAsk], auto_missing: [...permissions.AUTO_MODE_ALLOW], auto_old: [] }]);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
   fs.writeFileSync(file, built.blocks[0].text);
   assert.equal(permissions.main(['--check', file, '--scope', 'computer'], { ...deps, stdout: () => {} }), 0);
+});
+
+test('a node line for another repository\'s own script is the owner\'s, never an old Toolkit line', t => {
+  const deps = { ...computer(t), fs: governedFs(), run: fakeGit() };
+  const built = new permissions.PermissionBlocks(deps).build({ scope: 'computer' });
+  const file = path.join(deps.home, 'settings.json');
+  const own = ['Bash(node "/work/other/repo/scripts/build.cjs" *)', 'Bash(node "C:/work/other/skills/x/scripts/report.cjs" run *)'];
+  fs.writeFileSync(file, JSON.stringify({ permissions: { allow: [...built.blocks[0].allow, ...own], ask: built.blocks[0].ask }, autoMode: { allow: ['$defaults', ...permissions.AUTO_MODE_ALLOW] } }));
+  const out = [];
+  assert.equal(permissions.main(['--check', file, '--scope', 'computer', '--json'], { ...deps, stdout: text => out.push(text) }), 0);
+  assert.deepEqual(JSON.parse(out.join('')).check[0].stale, []);
+  const retired = 'Bash(node "/old/place/repo/scripts/toolkit-update-scheduled-task.cjs" *)';
+  const moved = `Bash(node "/moved/toolkit/${'skills/github-program-reconciler/scripts/programme.cjs'}" show *)`;
+  fs.writeFileSync(file, JSON.stringify({ permissions: { allow: [...built.blocks[0].allow, ...own, retired, moved], ask: built.blocks[0].ask }, autoMode: { allow: ['$defaults', ...permissions.AUTO_MODE_ALLOW] } }));
+  out.length = 0;
+  assert.equal(permissions.main(['--check', file, '--scope', 'computer', '--json'], { ...deps, stdout: text => out.push(text) }), 1);
+  assert.deepEqual(JSON.parse(out.join('')).check[0].stale, [retired, moved], 'a retired script and a Toolkit script in another folder are old');
 });
 
 test('the real script prints the allowed-tools form and refuses unknown arguments', t => {
