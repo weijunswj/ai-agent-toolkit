@@ -12,7 +12,7 @@ const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
 
 test('exactly these typed commands are recognised', () => {
   assert.deepEqual([...commands.PHRASES].sort(), ['controller takeover', 'governance setup', 'refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit env', 'toolkit governance',
-    'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
+    'toolkit memory tidy', 'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
 });
 
 test('the governance tools are no longer typed commands: agents, setup and CI run them', () => {
@@ -110,7 +110,7 @@ test('the context line names the phrase and the one action to take', () => {
 test('the list shows only the commands a user types, and is what the script prints', () => {
   const list = commands.listText();
   const rows = commands.COMMANDS.flatMap(command => command.type);
-  assert.deepEqual(rows, ['toolkit cmd', 'toolkit command', 'setup toolkit', 'toolkit setup', 'refresh toolkit', 'toolkit refresh', 'remove toolkit', 'toolkit env', 'toolkit show env',
+  assert.deepEqual(rows, ['toolkit cmd', 'toolkit command', 'setup toolkit', 'toolkit setup', 'refresh toolkit', 'toolkit refresh', 'remove toolkit', 'toolkit memory tidy', 'toolkit env', 'toolkit show env',
     'toolkit governance', 'governance setup', 'controller takeover', 'merge N']);
   for (const phrase of rows) assert.ok(list.includes(`\`${phrase}\``), phrase);
   // Other governance phrases and older commands still work when typed, but the list leaves them out.

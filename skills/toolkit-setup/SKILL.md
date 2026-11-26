@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: "`setup toolkit`, `refresh toolkit`, `remove toolkit` (full uninstall: `toolkit-remove.cjs plan` first, never the app's uninstall alone), `controller takeover`, `toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/store/cleanup. Also when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Of the commands, cmd lists them, permissions gives paste-once permission blocks, store the evidence store steps and cleanup removes rebuildable scraps; remove toolkit asks this app or every app, then lists and removes after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work."
+description: "`setup toolkit`, `refresh toolkit`, `remove toolkit` (full uninstall: `toolkit-remove.cjs plan` first, never the app's uninstall alone), `controller takeover`, `toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/store/cleanup/memory tidy. Also when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Of the commands, cmd lists them, permissions gives paste-once permission blocks, store the evidence store steps and cleanup removes rebuildable scraps; remove toolkit asks this app or every app, then lists and removes after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work."
 ---
 
 
@@ -32,6 +32,10 @@ Where the command cannot run:
 - **Claude Projects:** the coordinator, host-named, takes the sentence and runs its own guided setup; a project thread never takes over.
 - **OpenCode and Antigravity** (copied skills): where node and git run, the same script; otherwise the sentence.
 - **A gate session, helper or any session another session started:** never; it says so and goes on with its own brief.
+
+## Memory tidy
+
+For `toolkit memory tidy`, only the controller of the repository this chat is open in runs it, from that folder: `node "<Toolkit>/repo/scripts/toolkit-memory-tidy.cjs" <find|check|verify|preview|keep-all|apply|restore>` (the script header says each step). `find` lists the repository's Claude Code memory folders on this computer; `check --out <scratch file outside the repository>` writes a worksheet; you give each note one verdict with its evidence (a removal needs a quote the script finds in this Toolkit release); `verify` prints the owner's list. Show that list exactly as printed, never in a code block, and say the Toolkit version it printed beside the one your session started with. "Keep everything" is always an answer (`keep-all`). For the numbers the owner picks, run `preview` and show it whole; only after the owner's yes to that exact preview, run `apply` with the same picks and its preview code. Give the owner the backup path it prints; `restore` puts a backup back on their OK. The tool never writes AGENTS.md, the owner's own instructions or another repository's memory: a moved note goes only once its new home holds its line, by a normal reviewed change. The evidence store gets the store summary it writes; GitHub gets counts only.
 
 ## Old scheduled tasks
 
