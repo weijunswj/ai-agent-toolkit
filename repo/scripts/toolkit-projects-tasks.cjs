@@ -30,8 +30,10 @@
 //   --additions-from <kind> <prompt-file>   the project additions a Toolkit task's old prompt holds
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
-//   --upgrade-plan <read-back-file> --memory <memory-file> [--additions-saved <file>]
-//                                       a takeover's upgrade plan for every task read back (JSON)
+//   --upgrade-plan <read-back-file> --memory <memory-file> [--additions-saved <file>] [--daily]
+//                                       the upgrade plan for every task read back (JSON): a takeover's,
+//                                       or with --daily the daily check-in's, which asks no unpause
+//                                       question and lists the paused tasks it keeps paused
 //   --upgrade-verify <plan-file> <read-back-file> [--unpaused <id>[,<id>...]]
 //                                       checks the read-back after the swaps against that plan
 //
@@ -464,7 +466,7 @@ function checkMemory(text) {
   return faults.length ? { lines: faults, exitCode: 1 } : { lines: ['current'], exitCode: 0 };
 }
 
-// ---- The upgrade at a takeover ----
+// ---- The upgrade at a takeover and at each daily check-in ----
 //
 // A takeover reads the project's scheduled tasks back with the host's own tool (get_trigger for each,
 // copied into one read-back file) and plans their upgrade here: per task current, outdated with the
@@ -473,6 +475,9 @@ function checkMemory(text) {
 // question. The coordinator swaps in place as reference/recurring-tasks.md says (a paused task stays
 // paused), unpauses only the ones the owner names, reads every task back again and checks that second
 // read-back against the plan with --upgrade-verify. Nothing here calls the host or writes a task.
+// The daily check-in runs the same plan (daily mode): the owner gave tasks on Toolkit's shell their
+// shell updates without asking, so it swaps the same tasks, but it asks no unpause question: a paused
+// task stays paused and is only listed (`paused`), so its check exits 0 when nothing needs a swap.
 
 const READ_BACK_SCHEMA = 'toolkit.projects-task-read-back.v1';
 const PLAN_SCHEMA = 'toolkit.projects-task-plan.v1';
@@ -522,16 +527,20 @@ class TaskUpgradePlanner {
     this.#tasks = tasks;
   }
 
-  // The kind a read-back task is, by its name for the two Toolkit tasks and by its pointer for a
-  // project's own task; null when it is not Toolkit's.
+  // The kind a read-back task is, by its name for the two Toolkit tasks and by its shell for a
+  // project's own task: the pointer, or the full shell from before pointers (run setup and delivery
+  // only); null when it is not Toolkit's.
   #kindOf(task) {
     for (const kind of ['daily-check-in', 'hourly-nudge']) if (task.name.endsWith(`: ${KINDS[kind].title}`)) return kind;
-    return findBlocks(lfText(task.prompt)).blocks.some(block => block.source === SOURCE && block.name === POINTER.name) ? 'custom' : null;
+    const own = findBlocks(lfText(task.prompt)).blocks.filter(block => block.source === SOURCE);
+    const shell = new Set([POINTER.name, SHELL.setup.name, SHELL.delivery.name]);
+    return own.length && own.every(block => shell.has(block.name)) ? 'custom' : null;
   }
 
-  // { schema, toolkit, tasks: [{ id, name, kind, state, paused, replacement?, additions?, why? }], unpause }
+  // { schema, mode, toolkit, tasks: [{ id, name, kind, state, paused, replacement?, additions?, why? }], unpause, paused? }
   // `additions` is the text of <report_dir>/project-additions.md as read back, when it was saved.
-  plan(raw, { memory, additions } = {}) {
+  // `daily`: the daily check-in's plan, with no unpause question; its paused tasks are listed instead.
+  plan(raw, { memory, additions, daily = false } = {}) {
     const stopped = stoppedIds(memory);
     const rows = readBack(raw).map(task => {
       const row = { id: task.id, name: task.name, cron: task.cron, prompt_sha256: promptDigest(task.prompt), kind: this.#kindOf(task), paused: !task.enabled };
@@ -549,9 +558,10 @@ class TaskUpgradePlanner {
       return { ...row, state: 'outdated', from: state, replacement };
     });
     const paused = rows.filter(row => row.paused && row.state !== 'stopped' && row.state !== 'not-toolkit');
+    if (daily) return { schema: PLAN_SCHEMA, mode: 'daily', toolkit: this.#tasks.version(), tasks: rows, unpause: null, paused: paused.map(row => ({ id: row.id, name: row.name })) };
     return {
-      schema: PLAN_SCHEMA, toolkit: this.#tasks.version(), tasks: rows,
-      unpause: paused.length ? { ids: paused.map(row => row.id), question: `Unpause ${paused.map(row => `"${row.name}"`).join(', ')}? ${paused.length === 1 ? 'It is' : 'They are'} paused now${rows.some(row => row.paused && row.replacement) ? ', and an upgrade keeps a paused task paused' : ''}. Reply with the ones to unpause, all, or none.` } : null,
+      schema: PLAN_SCHEMA, mode: 'takeover', toolkit: this.#tasks.version(), tasks: rows,
+      unpause: paused.length ?{ ids: paused.map(row => row.id), question: `Unpause ${paused.map(row => `"${row.name}"`).join(', ')}? ${paused.length === 1 ? 'It is' : 'They are'} paused now${rows.some(row => row.paused && row.replacement) ? ', and an upgrade keeps a paused task paused' : ''}. Reply with the ones to unpause, all, or none.` } : null,
     };
   }
 
@@ -589,11 +599,15 @@ class TaskUpgradePlanner {
 function parseArgs(args) {
   const [mode, ...rest] = args;
   const options = {};
-  const take = (allowed) => {
+  // switches: options that take no value (true when given once).
+  const take = (allowed, switches = []) => {
     const positional = [];
     for (let index = 0; index < rest.length; index += 1) {
       const arg = rest[index];
-      if (arg.startsWith('--')) {
+      if (switches.includes(arg)) {
+        if (options[arg] !== undefined) throw new TaskInputError('TASK_ARGUMENTS', 'an option is unknown, repeated or has no value');
+        options[arg] = true;
+      } else if (arg.startsWith('--')) {
         if (!allowed.includes(arg) || options[arg] !== undefined || !rest[index + 1] || rest[index + 1].startsWith('--')) throw new TaskInputError('TASK_ARGUMENTS', 'an option is unknown, repeated or has no value');
         options[arg] = rest[index += 1];
       } else positional.push(arg);
@@ -614,10 +628,10 @@ function parseArgs(args) {
     return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'], additions: options['--additions-saved'] };
   }
   if (mode === '--upgrade-plan') {
-    const positional = take(['--memory', '--additions-saved']);
+    const positional = take(['--memory', '--additions-saved'], ['--daily']);
     if (positional.length !== 1) throw new TaskInputError('TASK_ARGUMENTS', 'an upgrade plan takes one read-back file');
     if (!options['--memory']) throw new TaskInputError('TASK_ARGUMENTS', 'an upgrade plan needs --memory with the project memory, so a task the owner stopped is never planned as a swap');
-    return { mode: 'upgrade-plan', file: positional[0], memory: options['--memory'], additions: options['--additions-saved'] };
+    return { mode: 'upgrade-plan', file: positional[0], memory: options['--memory'], additions: options['--additions-saved'], daily: options['--daily'] === true };
   }
   if (mode === '--upgrade-verify') {
     const positional = take(['--unpaused']);
@@ -699,7 +713,7 @@ function main(args = process.argv.slice(2)) {
       const moved = tasks.additions(options.kind, read(options.file));
       output = moved ? `${moved}\n` : '';
     } else if (options.mode === 'upgrade-plan') {
-      const plan = new TaskUpgradePlanner({ tasks }).plan(readJson(options.file), { memory: read(options.memory), additions: read(options.additions) });
+      const plan = new TaskUpgradePlanner({ tasks }).plan(readJson(options.file), { memory: read(options.memory), additions: read(options.additions), daily: options.daily });
       output = `${JSON.stringify(plan, null, 2)}
 `;
       exitCode = plan.unpause || plan.tasks.some(row => !['current', 'stopped', 'not-toolkit'].includes(row.state)) ? 1 : 0;
