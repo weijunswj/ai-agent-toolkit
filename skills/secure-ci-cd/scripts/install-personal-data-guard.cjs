@@ -3,12 +3,16 @@
 
 // Installs the personal-data guard into a repository on the owner's opt-in:
 //   - copies personal-data-guard.cjs to .github/scripts/ with a managed header (version and hash),
-//   - writes .github/personal-data-guard.json when it is missing (the owner names the identity
-//     choice; nothing is defaulted silently),
+//   - writes .github/personal-data-guard.json when it is missing (every scope on; commit author and
+//     committer addresses are never scanned and have no setting),
 //   - installs pre-commit, commit-msg and pre-push hooks in the folder git actually runs hooks from
 //     (git rev-parse --git-path hooks, which follows core.hooksPath). A hook that is already there
 //     and is not this guard's is kept as <name>.pre-personal-data-guard and runs after the guard.
-//   - with --workflow, adds .github/workflows/personal-data-guard.yml from the template if absent.
+//   - with --workflow, adds .github/workflows/personal-data-guard.yml (the check) and
+//     personal-data-sweep.yml (the report-only sweep, started by hand) from the templates with a managed
+//     header, and brings its own older copies up to date. A hand-edited copy or someone else's is kept.
+// A governed repository gets the config, guard copy and workflows by default, without hooks
+// (repo/scripts/toolkit-cloud-workflows.cjs, which uses the texts and states exported here).
 // --check changes nothing and reports drift: a hand-edited or outdated copy, missing hooks.
 // --uninstall removes this clone's guard hooks and puts back any hook they had set aside. The committed
 // files (guard copy, config, workflow) are listed, to remove through a pull request.
@@ -17,8 +21,8 @@
 // at .github/scripts/ first, then at that in-repo path, and block when neither is there. A leftover guard or
 // plain-text check copy under .github/scripts/ there would run instead of the source: a warning and drift.
 //
-// Usage: node install-personal-data-guard.cjs --repo <dir> [--identity excluded|included]
-//          [--identity-reason <text>] [--required-check validate|personal-data|none] [--workflow] [--check]
+// Usage: node install-personal-data-guard.cjs --repo <dir>
+//          [--required-check validate|personal-data|none] [--workflow] [--check]
 //        node install-personal-data-guard.cjs --repo <dir> --uninstall
 // Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed or not removed (the reason is printed).
 
@@ -28,13 +32,17 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const GUARD_SOURCE = path.join(__dirname, 'personal-data-guard.cjs');
-const WORKFLOW_TEMPLATE = path.join(__dirname, '..', 'templates', 'github-actions', 'personal-data-guard.yml');
-const { GUARD_VERSION, CONFIG_SCHEMA, validateConfig } = require('./personal-data-guard.cjs');
+// The check's workflow and the sweep's. The sweep is a workflow of its own, so running it never adds a
+// passing result to the check.
+const WORKFLOWS = ['personal-data-guard', 'personal-data-sweep'];
+const workflowTemplate = name => path.join(__dirname, '..', 'templates', 'github-actions', `${name}.yml`);
+const { GUARD_VERSION, CONFIG_SCHEMA, PASS_UNREAD, validateConfig } = require('./personal-data-guard.cjs');
 
 const VENDORED_PATH = path.join('.github', 'scripts', 'personal-data-guard.cjs');
 const CONFIG_PATH = path.join('.github', 'personal-data-guard.json');
-const WORKFLOW_PATH = path.join('.github', 'workflows', 'personal-data-guard.yml');
+const workflowPath = name => path.join('.github', 'workflows', `${name}.yml`);
 const VENDOR_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED personal-data-guard guard=(\d+) sha256=([0-9a-f]{12})$/m;
+const WORKFLOW_MARKER = /^# AI-AGENT-TOOLKIT:secure-ci-cd:WORKFLOW ([a-z-]+) sha256=([0-9a-f]{12})\n/;
 const HOOK_MARKER = 'AI-AGENT-TOOLKIT:secure-ci-cd:HOOK personal-data-guard';
 const HOOKS = ['pre-commit', 'commit-msg', 'pre-push'];
 const SAVED_SUFFIX = '.pre-personal-data-guard';
@@ -77,6 +85,66 @@ function vendoredState(text, source = fs.readFileSync(GUARD_SOURCE, 'utf8')) {
   if (sha12(body) !== marker[2]) return { state: 'edited' };
   if (marker[2] !== sha12(source.replace(/\r\n/g, '\n'))) return { state: 'outdated', guard: Number(marker[1]) };
   return { state: 'current' };
+}
+
+// Each action's pinned version left out, so a Dependabot bump of a pin reads as an older copy, not as a
+// hand edit. A pin that is not a full commit SHA is a hand edit.
+const withoutPins = text => text.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1');
+const pinsWhole = text => [...text.matchAll(/^\s+(?:- )?uses: ([^\n]*)$/gm)].every(([, value]) => /^[^@\s]+@[0-9a-f]{40}(?: # [^\n]*)?$/.test(value));
+
+// A CI workflow copy: one managed header line, then the template.
+function workflowText(name = WORKFLOWS[0], raw = fs.readFileSync(workflowTemplate(name), 'utf8')) {
+  const source = raw.replace(/\r\n/g, '\n');
+  return `# AI-AGENT-TOOLKIT:secure-ci-cd:WORKFLOW ${name} sha256=${sha12(withoutPins(source))}\n${source}`;
+}
+
+// { state: 'current' | 'outdated' | 'edited' | 'unmanaged' | 'missing' } for a CI workflow copy.
+function workflowState(text, name = WORKFLOWS[0], raw = fs.readFileSync(workflowTemplate(name), 'utf8')) {
+  if (text === null) return { state: 'missing' };
+  const normalised = text.replace(/\r\n/g, '\n');
+  if (normalised === workflowText(name, raw)) return { state: 'current' };
+  const marker = WORKFLOW_MARKER.exec(normalised);
+  // The template's own text without the header is a copy made before copies carried one.
+  if (!marker && withoutPins(normalised) === withoutPins(raw.replace(/\r\n/g, '\n')) && pinsWhole(normalised)) return { state: 'outdated' };
+  if (!marker || marker[1] !== name) return { state: 'unmanaged' };
+  const body = normalised.slice(marker[0].length);
+  if (sha12(withoutPins(body)) !== marker[2] || !pinsWhole(body)) return { state: 'edited' };
+  return { state: 'outdated' };
+}
+
+// The config a repository without one gets. Every scope is on, nothing is allowed, and images and fonts
+// (the guard's one list, PASS_UNREAD) pass unread and are named; any other file the guard cannot read fails
+// until its path is listed. A config without pass_unread lets none through, and an existing one is the
+// owner's: nothing adds the setting to it.
+function configText(requiredCheck = 'none') {
+  const config = {
+    schema: CONFIG_SCHEMA,
+    scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true },
+    allow: [],
+    not_scanned: [],
+    pass_unread: Object.keys(PASS_UNREAD),
+    required_check: requiredCheck,
+  };
+  validateConfig(config, CONFIG_PATH);
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+// Settings an older guard read and no guard reads now. They leave a config in the same refresh that brings
+// the current script, never before it: an older script refuses a config without them. Remove this list and
+// currentConfigText once no repository's guard config holds one.
+const RETIRED_CONFIG_KEYS = ['identity', 'identity_reason'];
+
+// A config's text without the retired settings, in its own indent and line endings, every other value
+// as it was; the same text when it holds none or is not JSON.
+function currentConfigText(text) {
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  let config;
+  try { config = JSON.parse(text.slice(bom.length)); } catch { return text; }
+  if (!config || typeof config !== 'object' || Array.isArray(config) || !RETIRED_CONFIG_KEYS.some(key => Object.hasOwn(config, key))) return text;
+  const kept = Object.fromEntries(Object.entries(config).filter(([key]) => !RETIRED_CONFIG_KEYS.includes(key)));
+  const indent = /^\s*\{\r?\n([ \t]+)"/.exec(text.slice(bom.length))?.[1] || '  ';
+  const lines = JSON.stringify(kept, null, indent);
+  return `${bom}${text.includes('\r\n') ? lines.replace(/\n/g, '\r\n') : lines}${/\r?\n$/.exec(text)?.[0] || ''}`;
 }
 
 function hookText(name) {
@@ -187,26 +255,15 @@ class GuardInstaller {
     return HOOKS.map(name => ({ name, file: path.join(hooks, name), text: readOrNull(path.join(hooks, name)), saved: readOrNull(path.join(hooks, `${name}${SAVED_SUFFIX}`)) }));
   }
 
-  install({ identity, identityReason, requiredCheck = 'none', workflow = false }) {
+  install({ requiredCheck = 'none', workflow = false }) {
     const { top, hooks } = this.locate();
     const toolkit = isToolkitCheckout(top);
     try { fs.mkdirSync(hooks, { recursive: true }); }
     catch (error) { throw new InstallError(`the hooks folder ${hooks} could not be created (${error.code || 'error'}), so nothing was installed.`); }
     const configFile = path.join(top, CONFIG_PATH);
     if (!fs.existsSync(configFile)) {
-      if (!identity) throw new InstallError('There is no .github/personal-data-guard.json yet. Ask the owner whether commit author and committer addresses are scanned, then pass --identity excluded or --identity included (with --identity-reason when excluded). Nothing was installed.');
-      const config = {
-        schema: CONFIG_SCHEMA,
-        scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true },
-        identity,
-        ...(identity === 'excluded' ? { identity_reason: identityReason } : {}),
-        allow: [],
-        not_scanned: [],
-        required_check: requiredCheck,
-      };
-      validateConfig(config, CONFIG_PATH);
-      writeFile(configFile, `${JSON.stringify(config, null, 2)}\n`);
-      this.#say(`Config written: ${CONFIG_PATH} (identity ${identity}, required check ${requiredCheck}).`);
+      writeFile(configFile, configText(requiredCheck));
+      this.#say(`Config written: ${CONFIG_PATH} (required check ${requiredCheck}). Commit author and committer addresses are never scanned.`);
     } else {
       this.#say(`Config kept: ${CONFIG_PATH}.`);
     }
@@ -226,18 +283,22 @@ class GuardInstaller {
     this.#say(`Hooks folder git uses: ${hooks}`);
     if (workflow && toolkit) this.#say('CI workflow skipped: the Toolkit\'s own CI already runs the guard.');
     else if (workflow) {
-      const target = path.join(top, WORKFLOW_PATH);
-      const template = fs.readFileSync(WORKFLOW_TEMPLATE, 'utf8');
-      const current = readOrNull(target);
-      if (current === null) { writeFile(target, template); this.#say(`CI workflow added: ${WORKFLOW_PATH}.`); }
-      else if (current.replace(/\r\n/g, '\n') === template) this.#say(`CI workflow already current: ${WORKFLOW_PATH}.`);
-      else this.#say(`CI workflow kept as it is (it differs from the template): ${WORKFLOW_PATH}.`);
+      for (const name of WORKFLOWS) this.#say(this.#installWorkflow(top, name));
     }
     if (toolkit) this.#say('Hooks stay local to this clone; CI is the check that cannot be skipped with --no-verify.');
     else {
       this.#say('Next: commit the config, the guard copy and the workflow through a pull request. Hooks stay local to');
       this.#say('this clone; CI is the check that cannot be skipped with --no-verify.');
     }
+  }
+
+  #installWorkflow(top, name) {
+    const rel = workflowPath(name);
+    const { state } = workflowState(readOrNull(path.join(top, rel)), name);
+    if (state === 'current') return `CI workflow already current: ${rel}.`;
+    if (state === 'edited' || state === 'unmanaged') return `CI workflow kept as it is (${state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}): ${rel}.`;
+    writeFile(path.join(top, rel), workflowText(name));
+    return `CI workflow ${state === 'missing' ? 'added' : 'updated'}: ${rel}.`;
   }
 
   #installHook(hooks, name) {
@@ -277,7 +338,7 @@ class GuardInstaller {
       } catch (error) { throw new InstallError(`${hook.name}: the hook could not be removed (${error.code || 'error'}); ${removed} hook(s) were removed before it.`); }
     }
     if (!removed) this.#say(`No guard hooks were installed in ${hooks}.`);
-    const committed = [VENDORED_PATH, CONFIG_PATH, WORKFLOW_PATH].filter(file => fs.existsSync(path.join(top, file)));
+    const committed = [VENDORED_PATH, CONFIG_PATH, ...WORKFLOWS.map(workflowPath)].filter(file => fs.existsSync(path.join(top, file)));
     if (committed.length) this.#say(`Still in the repository: ${committed.join(', ')}. Remove them through a pull request if the guard should go for everyone.`);
     return 0;
   }
@@ -335,7 +396,7 @@ function writeFile(file, text, mode) {
 }
 
 function main(argv, { out = process.stdout, err = process.stderr, spawn = spawnSync } = {}) {
-  const options = { repo: process.cwd(), identity: null, identityReason: null, requiredCheck: 'none', workflow: false, check: false, uninstall: false };
+  const options = { repo: process.cwd(), requiredCheck: 'none', workflow: false, check: false, uninstall: false };
   try {
     for (let index = 0; index < argv.length; index += 1) {
       const arg = argv[index];
@@ -346,8 +407,6 @@ function main(argv, { out = process.stdout, err = process.stderr, spawn = spawnS
         return next;
       };
       if (arg === '--repo') options.repo = path.resolve(value());
-      else if (arg === '--identity') options.identity = value();
-      else if (arg === '--identity-reason') options.identityReason = value();
       else if (arg === '--required-check') options.requiredCheck = value();
       else if (arg === '--workflow') options.workflow = true;
       else if (arg === '--check') options.check = true;
@@ -367,6 +426,6 @@ function main(argv, { out = process.stdout, err = process.stderr, spawn = spawnS
   }
 }
 
-module.exports = Object.freeze({ GuardInstaller, HOOKS, HOOK_MARKER, hookText, main, vendoredState, vendoredText });
+module.exports = Object.freeze({ GuardInstaller, HOOKS, HOOK_MARKER, WORKFLOWS, WORKFLOW_MARKER, configText, currentConfigText, hookText, main, vendoredState, vendoredText, workflowState, workflowText });
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

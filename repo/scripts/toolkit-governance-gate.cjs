@@ -1529,14 +1529,16 @@ class ToolGate {
 
 // `refresh` is this session start's own refresh result (startSession's onRefresh), so a "couldn't check
 // governance" line names why that read failed.
-function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null, limit = SESSION_TEXT_LIMIT } = {}) {
+function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null, host = null, limit = SESSION_TEXT_LIMIT } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   // Toolkit runs no scheduled tasks on a computer any more (the cloud sweep does that work), so the
   // session line reads no task registry and names no computer task.
-  return verdictLine(verdict, registryOptions, programmeDeps, refresh, limit);
+  return verdictLine(verdict, registryOptions, programmeDeps, refresh, host, limit);
 }
 
-function verdictLine(verdict, registryOptions, programmeDeps, refresh, limit) {
+// `host` is the app the calling entry point runs in, for the permissions line (permissionsLine);
+// `limit` is the room the calling hook leaves for this text.
+function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, host = null, limit = SESSION_TEXT_LIMIT) {
   const state = verdict.state;
   if (verdict.pending) return verdict.pending.text;
   if (verdict.reason === 'unavailable') return unavailableText(causeOf(state, refresh));
@@ -1552,8 +1554,22 @@ function verdictLine(verdict, registryOptions, programmeDeps, refresh, limit) {
   // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
   return fitLines(checkpoints, (kept, leftOut) => {
     const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
-    return `${[decidedLine(state, refresh), ...finish, ...lines, ...kept, ...more].join(' ')}${rules}`;
+    return `${[decidedLine(state, refresh), ...finish, ...permissionsLine(state, programmeDeps, host), ...lines, ...kept, ...more].join(' ')}${rules}`;
   }, limit);
+}
+
+// One line at session start, in a governed repository, while this computer's Toolkit permission lines
+// for this app are out of date: the agent tells the owner once, in one line. Only the owner can add
+// them, so nothing waits on it and nothing stops. It reads local files only, and any failure drops the
+// line. Cloud sessions (Projects included) never get it: their text is cloudSessionText.
+function permissionsLine(state, deps = {}, host = null) {
+  if (state.state !== 'ENABLED' || !state.root) return [];
+  try {
+    const found = (deps.permissions || ((root, app) => require('./toolkit-permissions.cjs').permissionsState(root, app ? { host: app } : {})))(state.root, host);
+    if (!found || found.checked !== true || !(found.missing > 0 || found.stale > 0)) return [];
+    const what = [found.missing > 0 ? `${found.missing} missing` : '', found.stale > 0 ? `${found.stale} old` : ''].filter(Boolean).join(', ');
+    return [`Toolkit permissions: ${found.app || 'this app'}'s Toolkit permission lines on this computer are out of date (${what}). In your first reply, tell the user once, in one line, that saying \`toolkit permissions\` gives the one command that brings them up to date; nothing waits on it.`];
+  } catch { return []; }
 }
 
 // ---- session-start size ----------------------------------------------------------------------

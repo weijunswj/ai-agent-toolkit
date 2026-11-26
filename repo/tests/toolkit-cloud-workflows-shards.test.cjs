@@ -19,8 +19,10 @@ const COMMIT = workflows.toolkitHead(ROOT);
 const OTHER = 'a'.repeat(40);
 const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
 const source = file => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
-const SHARDS = workflows.SHARD_WORKFLOWS.find(row => row.id === 'test-shards');
-const TIMINGS = workflows.SHARD_WORKFLOWS.find(row => row.id === 'shard-timings');
+const defaults = require('./support/default-cloud-workflows.cjs');
+const SHARDS = defaults.SHARDS.find(row => row.id === 'test-shards');
+const TIMINGS = defaults.SHARDS.find(row => row.id === 'shard-timings');
+const WITHOUT_SHARDS = [...defaults.SWEEPS.map(row => row.file), ...defaults.COPIED_FILES].sort();
 // The merged binding these tests assume: a yes to parallel CI shards, with the shard gate required.
 const YES = () => ({ ci_shards: { answer: 'yes' }, required_checks: ['Toolkit test shards'] });
 const BOTH = { systems: { linux: ['linux-1', 'linux-2'], windows: ['windows-1', 'windows-2', 'windows-3'] } };
@@ -135,7 +137,7 @@ test('cloud workflows: the shard copies go only to a repository with a usable sh
   // A list that does not validate copies nothing either, and says why.
   const broken = governedRepo(t, list([{ id: 'linux-1', files: ['tests/missing.test.js'] }, { id: 'linux-2', rest: true }]));
   const plan = workflows.plan({ ciShards: 'yes', repo: broken, root: ROOT, commit: COMMIT });
-  assert.deepEqual(plan.rows.map(row => row.id), ['programme-sweep', 'programme-sweep-gate']);
+  assert.deepEqual([...new Set(plan.rows.map(row => row.id))], ['programme-sweep', 'programme-sweep-gate', 'personal-data-guard', 'dependency-auto-merge']);
   assert.match(plan.not_copied[0].reason, /^the shard list \.github\/toolkit-test-shards\.json is not usable \(linux-1: tests\/missing\.test\.js is not a file discover finds\)$/);
   // A usable list: both copies, current on --check.
   const good = governedRepo(t);
@@ -169,7 +171,7 @@ test('cloud workflows: the shard copies go only to a repository with a usable sh
   // A list removed later leaves the copies alone and says so.
   fs.rmSync(path.join(good, governed.MANIFEST_REL));
   const after = workflows.plan({ ciShards: 'yes', repo: good, root: ROOT, commit: COMMIT });
-  assert.equal(after.rows.length, 2);
+  assert.deepEqual(after.rows.filter(row => row.kind === 'rendered').map(row => row.id), ['programme-sweep', 'programme-sweep-gate']);
   assert.deepEqual(after.not_copied.find(row => row.id === 'test-shards').left, ['.github/workflows/toolkit-test-shards.yml']);
   assert.deepEqual(after.not_copied.find(row => row.id === 'shard-timings').left, ['.github/workflows/toolkit-shard-timings.yml']);
   out.length = 0;
@@ -211,7 +213,7 @@ test('cloud workflows: a change to the list\'s shards makes the test shards copy
 function toolkitHistory(t) {
   const dir = tempRepo(t);
   const commit = message => { git(dir, ['add', '-A']); git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '--quiet', '-m', message]); return git(dir, ['rev-parse', 'HEAD']); };
-  for (const file of ['repo/scripts/toolkit-cloud-workflows-render.cjs', ...workflows.WORKFLOWS.map(row => row.file), ...workflows.SHARD_WORKFLOWS.map(row => row.source)]) put(dir, file, source(file));
+  for (const file of ['repo/scripts/toolkit-cloud-workflows-render.cjs', ...defaults.RENDERED.map(row => row.source), ...defaults.COPIED_SOURCES]) put(dir, file, source(file));
   const one = commit('one');
   put(dir, SHARDS.source, source(SHARDS.source).replace('# Toolkit Test Shards:', '# Toolkit Test Shards (two):'));
   const two = commit('two');
@@ -233,9 +235,9 @@ test('governance check: the shard copies flow through as drift and as outdated n
   const repo = governedRepo(t);
   const findings = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES });
   const ids = () => findings().map(entry => `${entry.id}:${entry.severity}`);
-  assert.deepEqual(ids(), Array(4).fill('CLOUD_WORKFLOW_DRIFT:drift'), 'all four copies are missing');
-  assert.match(findings()[2].message, /toolkit-test-shards\.yml is missing, so this repository's Toolkit test shards and their gate do not run as the Toolkit wrote them/);
-  assert.match(findings()[3].message, /toolkit-shard-timings\.yml is missing, so this repository's test shard timings are not refreshed/);
+  assert.deepEqual(ids(), Array(WITHOUT_SHARDS.length + 2).fill('CLOUD_WORKFLOW_DRIFT:drift'), 'every default copy is missing');
+  assert.match(findings().at(-2).message, /toolkit-test-shards\.yml is missing, so this repository's Toolkit test shards and their gate do not run as the Toolkit wrote them/);
+  assert.match(findings().at(-1).message, /toolkit-shard-timings\.yml is missing, so this repository's test shard timings are not refreshed/);
   assert.match(findings()[0].message, /programme board gets no cloud sweep/);
   workflows.apply(workflows.plan({ ciShards: 'yes', repo, root: ROOT, commit: COMMIT }));
   assert.deepEqual(ids(), []);
@@ -252,14 +254,14 @@ test('governance check: the shard copies flow through as drift and as outdated n
 test('governance enable proposal never carries the shard copies: they wait for the owner\'s yes in the merged binding', t => {
   const proposal = require(path.join(ROOT, 'repo/scripts/toolkit-governance-proposal.cjs'));
   const withList = proposal.cloudWorkflowFiles(governedRepo(t), { root: ROOT, commit: COMMIT });
-  assert.deepEqual(Object.keys(withList.files).sort(), workflows.WORKFLOWS.map(row => row.file).sort());
+  assert.deepEqual(Object.keys(withList.files).sort(), WITHOUT_SHARDS);
   const without = proposal.cloudWorkflowFiles(governedRepo(t, null), { root: ROOT, commit: COMMIT });
-  assert.deepEqual(Object.keys(without.files).sort(), workflows.WORKFLOWS.map(row => row.file).sort());
+  assert.deepEqual(Object.keys(without.files).sort(), WITHOUT_SHARDS);
 });
 
 test('L2: the shard copies are rendered for the default branch, and a branch change makes them outdated, never edited', t => {
   for (const id of ['test-shards', 'shard-timings']) {
-    const row = workflows.SHARD_WORKFLOWS.find(item => item.id === id);
+    const row = defaults.SHARDS.find(item => item.id === id);
     const input = branch => (id === 'test-shards' ? { ...BOTH, branch } : { branch });
     const trunk = workflows.render(id, source(row.source), COMMIT, input('trunk'));
     assert.match(trunk, /^  push:\n    branches: \[trunk\]$/m, `${id} pushes on trunk`);
@@ -282,12 +284,14 @@ test('L2: the shard copies are rendered for the default branch, and a branch cha
   assert.equal(rowState(repo, 'shard-timings'), 'edited');
 });
 
-test('L2: the sweep still refuses a default branch other than main, so no copy is written there', t => {
-  // Chosen: keep the install-wide refusal (the sweep runs only on main); the shard copies take the
-  // branch read from origin/HEAD, so they are ready once the sweep allows another branch.
+test('L2: on a default branch other than main the sweep and the shard copies are left out', t => {
+  // The sweep runs only on main; the shard copies take the branch read from origin/HEAD, so they are
+  // ready once the sweep allows another branch, and wait with it until then.
   const repo = governedRepo(t);
   git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk']);
-  assert.throws(() => workflows.plan({ ciShards: 'yes', repo, root: ROOT, commit: COMMIT }), /default branch is trunk/);
+  const trunk = workflows.plan({ ciShards: 'yes', repo, root: ROOT, commit: COMMIT });
+  assert.deepEqual(trunk.rows.filter(row => row.kind === 'rendered'), []);
+  assert.deepEqual(trunk.not_copied.map(row => [row.id, /default branch is trunk/.test(row.reason)]), defaults.RENDERED.map(row => [row.id, true]));
   git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
   const rows = workflows.plan({ ciShards: 'yes', repo, root: ROOT, commit: COMMIT }).rows;
   for (const id of ['test-shards', 'shard-timings']) assert.match(rows.find(row => row.id === id).expected, /^  push:\n    branches: \[main\]$/m);

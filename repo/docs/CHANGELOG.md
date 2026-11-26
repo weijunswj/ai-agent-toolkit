@@ -1,5 +1,65 @@
 # Toolkit Changelog
 
+## 3.192.0
+
+### Changed
+
+- **Governance bank as one table:** `toolkit governance` now shows one table: 1.1 GitHub governance and 1.2 Task auto-merge with merge train, the only two questions, then the parts Toolkit keeps itself: parallel CI shards, Toolkit permissions, the Governance App and the evidence store. Each part is marked Ready, Not ready or Unknown with its one next step while governance is on, and the top line says `ON, ready` or `ON, not ready, n steps left`. The parent issue and required checks are one line under the table, and merge trains show in row 1.2. A part takes no answer: replying to its row says how it changes instead, and the evidence store's other choice is to say change store, and the controller sets up the new store with you; nothing moves on the answer.
+- **Unknown is never missing:** when GitHub cannot be read, even for one of the App's two reads, the Governance App row is Unknown and the answer gives no setup line; a CI time that could not be read, or a programme file that could not be read, leaves the shards and store rows Unknown too, and an unknown part is never counted as a step left. A missing App holds no governance action; only the cloud jobs that need it do nothing.
+- **Shards not applicable:** where Toolkit cannot split the tests (no Node tests, such as a Python suite), the shards row says not applicable with the reason, and no answer turns shards on there. Fast CI says not needed.
+
+### Added
+
+- **Permissions line at session start:** while this computer's Toolkit permission lines are out of date, a governed repository's session start carries one line for the agent to pass on once, naming `toolkit permissions`. Nothing waits on it, and cloud sessions are not checked.
+
+## 3.191.0
+
+### Added
+
+- **Takeover shows the controller settings:** a controller takeover's dry run and done line now show the stack profile, live lanes and where gates run, read from the evidence store with one request, or say that none are saved yet, that they belong to another repository or that they cannot be read. They never name the device or folder.
+- **Scheduled task upgrade at a takeover:** `toolkit-projects-tasks.cjs --upgrade-plan` reads a project's scheduled tasks as the host read them back, with the project memory (`--memory`, required, so a task the owner stopped is never planned as a swap), and names each one current, outdated (with its exact replacement prompt), waiting for its project additions, hand-made, damaged, not Toolkit's or stopped by the owner, and lists the paused ones in one unpause question. `--upgrade-verify` checks the read-back after the swaps: each replacement is stored, a task rendered by hand checks current, nothing else moved, no task was added, and only the tasks the owner named were unpaused. A task stopped by the owner is never touched.
+
+### Changed
+
+- **Takeover without the evidence store:** a session that cannot use the store (often a cloud one) now says it claims nothing and to run the takeover in a session that can, such as one on the owner's computer.
+- **Owner-line lint and named computers:** two lines that name different kinds of computer (a desktop and a PC, say), or a line naming one while the controller settings name a device, are now a conflict to ask the owner about, never a duplicate or repeat with a fix.
+- **Owner-line lint under a turning heading:** a line that repeats Toolkit's block under a heading that may change what it means (such as "Not in this project") is no longer offered for removal.
+
+## 3.190.0 (remove toolkit and leftover scan fixes)
+
+### Fixed
+
+- **Remove toolkit:** the plan now lists the Claude app's Toolkit copy from the claude.ai account as kept, with the steps to remove it on claude.ai, and apply's closing lines say the Claude app keeps running it until then. Toolkit never changes that copy.
+- **Remove toolkit:** the line about parts every app shares names only what is on the computer (old scheduled tasks only when there are some), and says nothing when there are none.
+- **Remove toolkit:** the "Not touched" line no longer counts the subagent limit among the Claude Code settings left as they are, and the update reports folder is listed only while it holds a Toolkit report.
+- **Leftover scan:** an older marked `GEMINI.md` shim is listed where governance is on too, and an older marked `CLAUDE.md` shim is listed in every state; the governance cleanup replaces a marked `CLAUDE.md` shim that loads the repository's own `AGENTS.md` with the line `@AGENTS.md`, as a rules refresh does.
+- **Install check:** "Toolkit helpers: not installed" now says none are needed, because each subagent's model and effort are set when it is started.
+- **Wording:** the `CLAUDE.md` shim guidance names Claude Code 2.1.277 as the first version that reads `AGENTS.md` by itself, and says the session-start preflight compares `CLAUDE.md` only in a Toolkit source checkout.
+
+## 3.189.0 (every cloud workflow by default, and a first look at what is already there)
+
+### Added
+
+- **Every Toolkit cloud workflow by default:** turning governance on now carries the personal data guard (its check, sweep, script and settings, with no hooks on any computer) and dependency auto-merge with the programme sweep and its gate, in the same one pull request; the test shards and Shard Timings join where a usable shard list exists, as before. One list, `DEFAULT_CLOUD_WORKFLOWS`, is read by turn-on, the refresh pull request and the governance check.
+- **A missing workflow is drift:** the governance check names each default workflow file that is missing or edited, and the refresh pull request adds what is missing and brings an edited or older copy back. A rerun with nothing missing changes nothing. A file Toolkit did not write is never overwritten: that workflow is left out whole and named, and the rest still goes in. The cloud sweep's board call stays about the rendered copies, so an already governed repository is not told to change because of it.
+- **First-install sweep:** after a turn-on that adds the guard merges, Toolkit runs the new Personal data sweep workflow once over what is already there (files, commit messages, pull request text, and issue, pull request and review comments) and shows the counts and a link in the next session's result line. It lists places and rule names only, never a value, and changes and posts nothing. Run workflow on GitHub runs it again by hand.
+
+### Changed
+
+- **The personal data guard never scans commit author, committer or tagger addresses:** the `identity` setting, and the installer's `--identity` and `--identity-reason`, are gone. A config that still holds the key is read without it, and the refresh pull request that brings the new script takes the key out, keeping every other setting.
+- **The same addresses in commit messages:** the personal data guard leaves the address on an author line (Signed-off-by, Co-authored-by and the like) alone, and GitHub no-reply addresses everywhere. A co-author line naming an AI tool (Claude or anthropic.com, Codex, Cursor, Copilot, Gemini and the like) fails whatever its address: the no-reply exemption applies only after that rule. The default settings need no Dependabot entry any more.
+- **Images and fonts pass the personal data guard by default, named:** the settings a new install writes have `pass_unread`, so a PNG, JPEG, GIF, WebP, AVIF, ICO, WOFF, WOFF2, TTF or OTF file whose name and bytes agree passes unread and the report names it; the review steps have the reviewer open each one. Text under such a name is scanned as text, and settings that already exist are left as they are.
+- **The guard's refusal for a file it cannot read** (an archive, Office file or other binary) says it was not checked and how to list its path, instead of calling it a leak.
+- The guard's CI workflow copies have a managed header, and its installer brings an older copy up to date; a hand-edited one is kept.
+- A default branch other than main now leaves out only the sweep, its gate and the shard copies, with the reason, instead of every cloud workflow.
+- With governance off, the left-over files report also names the guard's marked workflows; like its script, they keep working and are the owner's choice to remove.
+- The turn-on no longer writes dependency auto-merge into the working tree; it travels in the pull request.
+
+### Fixed
+
+- A governance turn-on from a checkout behind the default branch no longer replaces files GitHub already holds: existing settings files and files Toolkit did not write are kept and named, and a hand-edited Toolkit copy it brings back is named.
+- A file name with a line break can no longer write a line of its own in the guard's report.
+
 ## 3.188.0
 
 ### Added

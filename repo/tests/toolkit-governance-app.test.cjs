@@ -243,13 +243,12 @@ test('removal ends by checking both halves: the App and the cloud sweep copies',
 });
 
 test('check reports cloud sweep copies left behind once governance is off, and only Toolkit copies', t => {
-  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
   const ctx = home(t), repo = governed(ctx, 'leftover');
   const options = { registryPath: ctx.registryPath, testOnly: true, offline: true, appReader: answering(missing) };
   recordMerged(repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/leftover', governance: 'disabled' }) });
   const left = () => conformance.checkConformance(repo, options).findings.filter(entry => entry.id === 'CLOUD_WORKFLOW_LEFT_OVER');
   assert.deepEqual(left(), []);
-  const [sweep, gate] = workflows.WORKFLOWS.map(row => row.file);
+  const [sweep, gate] = require('./support/default-cloud-workflows.cjs').SWEEPS.map(row => row.file);
   fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(repo, ...gate.split('/')), 'name: my own gate\n');
   assert.deepEqual(left(), [], 'a file without the Toolkit marker is not a Toolkit copy');

@@ -72,7 +72,7 @@ function sessionLines(input, dependencies) {
     try { caughtUp = (dependencies.catchUp || require('./toolkit-repo-catchup.cjs')).catchUp(fresh); } catch { caughtUp = null; }
     let governance = null;
     // Codex always sends the session's cwd; without one there is no repository to describe.
-    try { governance = input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null; } catch (error) { governance = unavailableLine(input, error); }
+    try { governance = input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input), host: 'codex' }) : null; } catch (error) { governance = unavailableLine(input, error); }
     return [caughtUp, governance].filter(Boolean);
   } catch (error) { return [unavailableLine(input, error)].filter(Boolean); }
 }

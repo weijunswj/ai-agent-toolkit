@@ -4,9 +4,11 @@
 // The cleanup route for a repository whose governance is on. The installed Toolkit gives its sessions
 // the governed rules and the playbooks, so the copies older setups wrote are leftovers. This removes
 // exactly what the leftover scan (toolkit-leftover-files.cjs) proves is Toolkit's, in the working tree:
-//   - a governed-rules block in AGENTS.md, or the Antigravity bootstrap block, keeping every byte
-//     outside the markers; a file left with nothing of the owner's is deleted;
-//   - a one-line CLAUDE.md, only when AGENTS.md has nothing of its own left;
+//   - a governed-rules block in AGENTS.md, the Antigravity bootstrap block, an older n8n block or a
+//     marked GEMINI.md shim, keeping every byte outside the markers; a file left with nothing of the
+//     owner's is deleted;
+//   - a one-line CLAUDE.md, only when AGENTS.md has nothing of its own left; an older marked CLAUDE.md
+//     shim is replaced by the line `@AGENTS.md` while AGENTS.md has text of its own, else goes the same way;
 //   - docs/agent-playbooks/ files that are a copy Toolkit shipped, now or earlier.
 // It also sets `min_toolkit` in the programme file, so a Toolkit copy too old to deliver the rules
 // says to update instead of running without them. The checks and workflow copies governance uses,
@@ -29,6 +31,7 @@ const { oldSweepCopies } = require('./toolkit-ci-shards-offer.cjs');
 // work continues. Toolkit's own binding carries the same floor.
 const MIN_TOOLKIT = '3.137.0';
 const BINDING_FILE = '.github/toolkit-programme.json';
+const SHIM_LINE = '@AGENTS.md';
 const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
 
 // A governed repository's sweep copies run the Toolkit commit they are pinned to, which reads the
@@ -96,6 +99,15 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
   const byFile = new Map();
   for (const item of scan.files) (byFile.get(item.file) || byFile.set(item.file, []).get(item.file)).push(item);
   for (const [file, items] of byFile) {
+    // An older marked CLAUDE.md shim that loads the repository's own AGENTS.md becomes the one line,
+    // as a repository-agent-rules refresh does; the rest of the file stays.
+    const shim = items.find(item => item.kind === 'shim-block');
+    if (shim) {
+      const text = fs.readFileSync(path.join(root, file), 'utf8');
+      const block = blocks.findBlocks(text).blocks.find(entry => entry.name === shim.block);
+      changes.push({ file, action: 'replace-shim', text: text.slice(0, block.start) + SHIM_LINE + text.slice(block.end), edited: shim.edited });
+      continue;
+    }
     if (items[0].kind !== 'block' || items[0].empties) { changes.push({ file, action: 'delete' }); continue; }
     let text = fs.readFileSync(path.join(root, file), 'utf8');
     for (const item of items) text = blocks.removeBlock(text, item.block);
@@ -123,7 +135,8 @@ function run({ root, write = false, governance = null, sweepReaders = sweepCopie
     changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: withMinToolkit(bindingText, binding), retired });
   }
 
-  const words = { delete: 'remove the file', 'remove-block': 'remove the Toolkit block, keeping the rest of the file', 'set-min-toolkit': `set min_toolkit to ${MIN_TOOLKIT}` };
+  const words = { delete: 'remove the file', 'remove-block': 'remove the Toolkit block, keeping the rest of the file',
+    'replace-shim': `replace the old Toolkit shim block with the line ${SHIM_LINE}, keeping the rest of the file`, 'set-min-toolkit': `set min_toolkit to ${MIN_TOOLKIT}` };
   const lines = [changes.length ? `${write ? 'Changed' : 'Would change'} in ${scan.name}:` : `Nothing to clean in ${scan.name}.`,
     ...changes.map(change => `- ${change.file}: ${words[change.action]}${change.retired?.length ? `, and delete the retired ${change.retired.join(' and ')}, which nothing reads any more` : ''}${change.edited ? ' (the block was edited by hand since Toolkit wrote it, and those edits go with it)' : ''}.`),
     ...scan.unproven.map(item => `- Left in place: ${item.file}, because ${item.reason}.`)];

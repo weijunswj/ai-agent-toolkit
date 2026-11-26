@@ -1,0 +1,37 @@
+name: Personal data sweep
+
+# One report-only look at what is already here, started by hand (Run workflow): every tracked file,
+# commit message, pull request title and body, and issue, pull request and review comment. It changes
+# and posts nothing, and its token can only read. The run's log and summary list places and rule names
+# only, never a value; on a public repository they are public.
+#
+# It is its own workflow, so a run never adds a passing result to the Personal data guard's check.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Sweep what is already here
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/personal-data-guard.cjs sweep

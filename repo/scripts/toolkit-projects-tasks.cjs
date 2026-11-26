@@ -30,8 +30,13 @@
 //   --additions-from <kind> <prompt-file>   the project additions a Toolkit task's old prompt holds
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
+//   --upgrade-plan <read-back-file> --memory <memory-file> [--additions-saved <file>]
+//                                       a takeover's upgrade plan for every task read back (JSON)
+//   --upgrade-verify <plan-file> <read-back-file> [--unpaused <id>[,<id>...]]
+//                                       checks the read-back after the swaps against that plan
 //
-// Exit 0 current or printed, 1 needs a change, 2 malformed input or bad arguments.
+// Exit 0 current or printed (a plan with nothing to do, a verified check), 1 needs a change, 2 malformed
+// input or bad arguments.
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -459,6 +464,128 @@ function checkMemory(text) {
   return faults.length ? { lines: faults, exitCode: 1 } : { lines: ['current'], exitCode: 0 };
 }
 
+// ---- The upgrade at a takeover ----
+//
+// A takeover reads the project's scheduled tasks back with the host's own tool (get_trigger for each,
+// copied into one read-back file) and plans their upgrade here: per task current, outdated with the
+// exact replacement prompt, waiting for its project additions to be saved first, hand-made, damaged,
+// not Toolkit's, or stopped by the owner (never touched); and the paused ones, listed for one unpause
+// question. The coordinator swaps in place as reference/recurring-tasks.md says (a paused task stays
+// paused), unpauses only the ones the owner names, reads every task back again and checks that second
+// read-back against the plan with --upgrade-verify. Nothing here calls the host or writes a task.
+
+const READ_BACK_SCHEMA = 'toolkit.projects-task-read-back.v1';
+const PLAN_SCHEMA = 'toolkit.projects-task-plan.v1';
+const TASK_ID = /^trig_[A-Za-z0-9]{1,64}$/;
+const MAX_TASKS = 50;
+const MAX_PROMPT = 64 * 1024;
+const READ_BACK_KEYS = Object.freeze(['id', 'name', 'enabled', 'cron', 'prompt']);
+// A task the plan leaves as it is must read back with the same prompt (line ends aside).
+const promptDigest = prompt => createHash('sha256').update(lfText(prompt)).digest('hex');
+// Control, line-break and hidden (format) characters, and the spaces that look like a plain one: a reader
+// could see a line or a mark here that another reader does not.
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/u;
+const plainText = (value, max) => typeof value === 'string' && value.length >= 1 && value.length <= max && value.trim() === value && !HIDDEN.test(value);
+
+// The read-back, default-deny: one object with the schema and a list of tasks, each exactly the five
+// keys with their own types, ids unique. Anything else refuses the whole file.
+function readBack(raw) {
+  const refuse = () => { throw new TaskInputError('TASK_READ_BACK', 'the read-back must be one JSON object with the schema and a tasks list, each task exactly id, name, enabled, cron and prompt, a name and cron with no control, line-break or hidden character'); };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).sort().join() !== 'schema,tasks' || raw.schema !== READ_BACK_SCHEMA || !Array.isArray(raw.tasks) || raw.tasks.length > MAX_TASKS) refuse();
+  const seen = new Set();
+  for (const task of raw.tasks) {
+    if (!task || typeof task !== 'object' || Array.isArray(task) || Object.keys(task).sort().join() !== [...READ_BACK_KEYS].sort().join()) refuse();
+    if (!TASK_ID.test(task.id) || seen.has(task.id) || !plainText(task.name, 200) || typeof task.enabled !== 'boolean' || !plainText(task.cron, 100)
+      || typeof task.prompt !== 'string' || task.prompt.length > MAX_PROMPT) refuse();
+    seen.add(task.id);
+  }
+  return raw.tasks;
+}
+
+// The ids the SCHEDULED TASKS memory line marks stopped by owner. A line Toolkit cannot read stops the
+// plan: a task the owner stopped must never be swapped by mistake.
+function stoppedIds(memory) {
+  if (memory === undefined) throw new TaskInputError('TASK_MEMORY', 'an upgrade plan needs the project memory (--memory), so a task the owner stopped is never planned as a swap');
+  const lines = String(memory).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, '')).filter(line => /^[-*\s]*SCHEDULED TASKS:/.test(line));
+  if (lines.length !== 1) throw new TaskInputError('TASK_MEMORY', 'the memory file must hold exactly one SCHEDULED TASKS line');
+  // What --check-memory accepts, less control, line-break and hidden characters, which could hide a stop mark.
+  if (HIDDEN.test(lines[0].replace(/\t/g, ' '))) throw new TaskInputError('TASK_MEMORY', 'the SCHEDULED TASKS line holds a control, line-break or hidden character; retype it');
+  const entries = lines[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').split(';').map(entry => entry.trim()).filter(Boolean);
+  if (entries.some(entry => !validEntry(entry))) throw new TaskInputError('TASK_MEMORY', 'the SCHEDULED TASKS line is not in the current format; fix it with --check-memory first');
+  return new Set(entries.filter(entry => / \| stopped by owner \d{4}-\d{2}-\d{2}$/.test(entry)).map(entry => TASK_ENTRY.exec(entry).groups.id));
+}
+
+class TaskUpgradePlanner {
+  #tasks;
+
+  constructor({ tasks = new ProjectsTasks() } = {}) {
+    this.#tasks = tasks;
+  }
+
+  // The kind a read-back task is, by its name for the two Toolkit tasks and by its pointer for a
+  // project's own task; null when it is not Toolkit's.
+  #kindOf(task) {
+    for (const kind of ['daily-check-in', 'hourly-nudge']) if (task.name.endsWith(`: ${KINDS[kind].title}`)) return kind;
+    return findBlocks(lfText(task.prompt)).blocks.some(block => block.source === SOURCE && block.name === POINTER.name) ? 'custom' : null;
+  }
+
+  // { schema, toolkit, tasks: [{ id, name, kind, state, paused, replacement?, additions?, why? }], unpause }
+  // `additions` is the text of <report_dir>/project-additions.md as read back, when it was saved.
+  plan(raw, { memory, additions } = {}) {
+    const stopped = stoppedIds(memory);
+    const rows = readBack(raw).map(task => {
+      const row = { id: task.id, name: task.name, cron: task.cron, prompt_sha256: promptDigest(task.prompt), kind: this.#kindOf(task), paused: !task.enabled };
+      if (stopped.has(task.id)) return { ...row, state: 'stopped', why: 'stopped by owner: never swapped, rebuilt or unpaused; only the owner restarts it' };
+      if (!row.kind) return { ...row, state: 'not-toolkit', why: 'no Toolkit block: the project\'s own task, left as it is' };
+      const { state } = this.#tasks.check(row.kind, task.prompt);
+      if (state === 'current') return { ...row, state };
+      if (state === 'malformed') return { ...row, state: 'damaged', why: 'a Toolkit block or the params block does not check: rebuild it by hand from --render' };
+      if (state === 'missing') return { ...row, state: 'hand-made', why: 'no Toolkit block: render it with --refresh and its --params, after saving its project additions' };
+      const lf = lfText(task.prompt);
+      const moved = pinged(row.kind) ? this.#tasks.additions(row.kind, lf) : '';
+      if (moved && (additions === undefined || !lfText(additions).includes(moved))) return { ...row, state: 'additions-unsaved', additions: moved, why: 'save these lines to <report_dir>/project-additions.md word for word, read it back, then plan again with --additions-saved' };
+      const session = pinged(row.kind) ? storedParams(row.kind, lf).params.session || KINDS[row.kind].session : undefined;
+      const replacement = this.#tasks.refresh(row.kind, task.prompt, { session, additions: moved ? additions : undefined });
+      return { ...row, state: 'outdated', from: state, replacement };
+    });
+    const paused = rows.filter(row => row.paused && row.state !== 'stopped' && row.state !== 'not-toolkit');
+    return {
+      schema: PLAN_SCHEMA, toolkit: this.#tasks.version(), tasks: rows,
+      unpause: paused.length ? { ids: paused.map(row => row.id), question: `Unpause ${paused.map(row => `"${row.name}"`).join(', ')}? ${paused.length === 1 ? 'It is' : 'They are'} paused now${rows.some(row => row.paused && row.replacement) ? ', and an upgrade keeps a paused task paused' : ''}. Reply with the ones to unpause, all, or none.` } : null,
+    };
+  }
+
+  // Checks the second read-back, taken after the swaps and the owner's unpauses, against the plan:
+  // every planned replacement is the stored prompt, every other prompt is as it was, nothing else moved, and a task is
+  // enabled only where it was, or where the owner said to unpause it (`unpaused`, ids).
+  verify(plan, raw, { unpaused = [] } = {}) {
+    if (!plan || plan.schema !== PLAN_SCHEMA || !Array.isArray(plan.tasks)) throw new TaskInputError('TASK_PLAN', 'the plan file is not one --upgrade-plan wrote');
+    const after = new Map(readBack(raw).map(task => [task.id, task]));
+    const named = new Set(unpaused);
+    for (const id of named) if (!plan.unpause || !plan.unpause.ids.includes(id)) throw new TaskInputError('TASK_ARGUMENTS', '--unpaused names only tasks the plan listed as paused');
+    const rows = plan.tasks.map(row => {
+      const task = after.get(row.id);
+      const wrong = [];
+      if (!task) wrong.push('it is not in the read-back');
+      else {
+        if (task.name !== row.name) wrong.push('its name changed');
+        if (task.cron !== row.cron) wrong.push('its schedule changed');
+        if (row.replacement !== undefined && lfText(task.prompt) !== lfText(row.replacement)) wrong.push('its prompt is not the planned replacement');
+        // A hand-made or damaged task is rendered by hand (reference/recurring-tasks.md): it may change, to a prompt that checks current.
+        const byHand = ['hand-made', 'damaged'].includes(row.state) && this.#tasks.check(row.kind, task.prompt).state === 'current';
+        if (row.replacement === undefined && promptDigest(task.prompt) !== row.prompt_sha256 && !byHand) wrong.push(['hand-made', 'damaged'].includes(row.state) ? 'its prompt changed, and it does not check current' : 'its prompt changed, and the plan changes none here');
+        const enabled = !row.paused || named.has(row.id);
+        if (task.enabled !== enabled) wrong.push(enabled ? 'it is still paused' : 'it is no longer paused');
+      }
+      return { id: row.id, name: row.name, verified: !wrong.length, ...(wrong.length ? { why: wrong.join('; ') } : {}) };
+    });
+    // A task the plan does not hold (a create retried twice, say) is reported too: the read-back must hold exactly the plan.
+    const planned = new Set(plan.tasks.map(row => row.id));
+    for (const [id, task] of after) if (!planned.has(id)) rows.push({ id, name: task.name, verified: false, why: 'it is not in the plan' });
+    return { verified: rows.every(row => row.verified), tasks: rows };
+  }
+}
+
 function parseArgs(args) {
   const [mode, ...rest] = args;
   const options = {};
@@ -486,6 +613,19 @@ function parseArgs(args) {
     if (mode === '--refresh' && KINDS[kind].session && !options['--session']) throw new TaskInputError('TASK_ARGUMENTS', 'a Toolkit task refresh needs --session bound or fresh, the session its replacement runs in');
     return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'], additions: options['--additions-saved'] };
   }
+  if (mode === '--upgrade-plan') {
+    const positional = take(['--memory', '--additions-saved']);
+    if (positional.length !== 1) throw new TaskInputError('TASK_ARGUMENTS', 'an upgrade plan takes one read-back file');
+    if (!options['--memory']) throw new TaskInputError('TASK_ARGUMENTS', 'an upgrade plan needs --memory with the project memory, so a task the owner stopped is never planned as a swap');
+    return { mode: 'upgrade-plan', file: positional[0], memory: options['--memory'], additions: options['--additions-saved'] };
+  }
+  if (mode === '--upgrade-verify') {
+    const positional = take(['--unpaused']);
+    if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS', 'an upgrade check takes the plan file and the second read-back file');
+    const unpaused = options['--unpaused'] === undefined ? [] : options['--unpaused'].split(',');
+    if (unpaused.some(id => !TASK_ID.test(id))) throw new TaskInputError('TASK_ARGUMENTS', '--unpaused takes task ids, comma separated');
+    return { mode: 'upgrade-verify', plan: positional[0], file: positional[1], unpaused };
+  }
   if (mode === '--params-from' || mode === '--check-memory') {
     const positional = take([]);
     if (positional.length !== 1) throw new TaskInputError('TASK_ARGUMENTS');
@@ -508,6 +648,10 @@ function readParamsFile(kind, file, { tolerant = false } = {}) {
   return validateParams(kind, migrateLegacy(known).raw);
 }
 
+function readJson(file, code = 'TASK_READ_BACK') {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch { throw new TaskInputError(code, 'the file could not be read as JSON'); }
+}
+
 const GENERIC_REFUSAL = 'Task prompt could not be processed (PROJECT_TASKS_INVALID).\n';
 
 // A refused refresh also names its task (the kind, when it is a known one) and the rule it broke.
@@ -523,6 +667,8 @@ function refreshKind(args) {
 }
 
 function refusal(args, error) {
+  if (['--upgrade-plan', '--upgrade-verify'].includes(args[0]) && error instanceof TaskInputError && error.rule) return `${GENERIC_REFUSAL}Upgrade ${args[0] === '--upgrade-plan' ? 'plan' : 'check'} refused (${error.message}): ${error.rule}.
+`;
   const kind = refreshKind(args);
   if (!(error instanceof TaskInputError) || !error.rule || !Object.hasOwn(KINDS, kind)) return GENERIC_REFUSAL;
   return `${GENERIC_REFUSAL}Refresh of ${kind} refused (${error.message}): ${error.rule}.\n`;
@@ -552,6 +698,16 @@ function main(args = process.argv.slice(2)) {
     } else if (options.mode === 'additions-from') {
       const moved = tasks.additions(options.kind, read(options.file));
       output = moved ? `${moved}\n` : '';
+    } else if (options.mode === 'upgrade-plan') {
+      const plan = new TaskUpgradePlanner({ tasks }).plan(readJson(options.file), { memory: read(options.memory), additions: read(options.additions) });
+      output = `${JSON.stringify(plan, null, 2)}
+`;
+      exitCode = plan.unpause || plan.tasks.some(row => !['current', 'stopped', 'not-toolkit'].includes(row.state)) ? 1 : 0;
+    } else if (options.mode === 'upgrade-verify') {
+      const result = new TaskUpgradePlanner({ tasks }).verify(readJson(options.plan, 'TASK_PLAN'), readJson(options.file), { unpaused: options.unpaused });
+      output = `${JSON.stringify(result, null, 2)}
+`;
+      exitCode = result.verified ? 0 : 1;
     } else if (options.mode === 'params-from') {
       const fence = findParams(read(options.file));
       if (!fence) throw new TaskInputError('TASK_PARAMS_FENCE');
@@ -572,4 +728,4 @@ function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = Object.freeze({ ProjectsTasks, KINDS, LEGACY_RAISE, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });
+module.exports = Object.freeze({ ProjectsTasks, TaskUpgradePlanner, READ_BACK_SCHEMA, PLAN_SCHEMA, KINDS, LEGACY_RAISE, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });

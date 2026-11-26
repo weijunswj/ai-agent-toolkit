@@ -172,7 +172,7 @@ function respondSteady(event, input, options) {
       const caughtUp = catchUpLine(fresh, options);
       const beside = [caughtUp ? `${caughtUp}\n` : '', asksHere(options.environment || process.env) ? `\n\n${ASKING_LINE}` : ''].join('');
       const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(beside, 'utf8');
-      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, limit })].filter(Boolean).join('\n');
+      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude', limit })].filter(Boolean).join('\n');
     }
     return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch (error) {

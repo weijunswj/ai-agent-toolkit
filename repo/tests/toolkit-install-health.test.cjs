@@ -123,7 +123,9 @@ test('a recorded version newer than the install is action-required with the one-
 
 test('helper definitions: refreshed passes, held or failed is action-required, never passed', (t) => {
   assert.match(byId(unit(t, { helpers: { status: 'updated', backup_dir: 'B' } }).run(), 'helpers').summary, /updated this run \(backup: B\)/);
-  assert.equal(byId(unit(t, { helpers: { status: 'not-installed' } }).run(), 'helpers').summary, 'not installed');
+  // Seen on a fresh computer (24 Nov 2026): "not installed" read as passed with nothing to say why. The
+  // presets are retiring (agents set a subagent's route at launch), so the line says none are needed.
+  assert.equal(byId(unit(t, { helpers: { status: 'not-installed' } }).run(), 'helpers').summary, "not installed; none are needed, because each subagent's model and effort are set when it is started (agent-cost-control skill)");
   const held = unit(t, { helpers: { status: 'held', detail: 'toolkit-g1-helper.md was not written by Toolkit.' } }).run();
   assert.equal(held.status, STATUS.ACTION);
   assert.equal(held.actions[0], 'toolkit-g1-helper.md was not written by Toolkit.');
@@ -193,7 +195,7 @@ test('a clean Claude setup passes the install check and exits 0', () => {
   // Codex refreshes its own file and limit at its own session start.
   const result = claudeSetup(root, setupRepo, origin, ['--enable-codex-doc-limit']);
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
+  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed; none are needed[^\n]*\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
   assert.match(fs.readFileSync(path.join(root, '.claude', 'CLAUDE.md'), 'utf8'), /^<!-- AI-AGENT-TOOLKIT:repo\/contracts\/agent-rules\/global-rules\.md:BEGIN GLOBAL-RULES v2 /);
   assert.equal(fs.existsSync(path.join(root, '.codex', 'AGENTS.md')), false, 'Claude setup leaves the Codex rules file alone');
   assert.equal(fs.existsSync(path.join(root, '.codex', 'config.toml')), false, 'Claude setup leaves Codex config alone');

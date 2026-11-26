@@ -6,9 +6,10 @@
 // never the governance App, so no Toolkit commit can rewrite a governed repository's workflows by
 // itself.
 //
-// It changes only Toolkit-made files: the rendered workflow copies (toolkit-cloud-workflows.cjs), the
-// vendored checks under .github/scripts that are outdated, and a plain-text baseline still in the old
-// format (migrated as --migrate-baseline does). Everything else in the repository stays as it is.
+// It changes only Toolkit-made files: the default cloud workflows (toolkit-cloud-workflows.cjs; a missing
+// one is added, an edited or outdated one brought back), the vendored plain-text check when it is
+// outdated, and a plain-text baseline still in the old format (migrated as --migrate-baseline does).
+// Everything else in the repository stays as it is.
 //
 //   - Governed repositories only: the merged binding must say ENABLED, read in the last 24 hours. Any
 //     other repository (off, undecided, an evidence store, the Toolkit itself) gets one note and
@@ -33,10 +34,9 @@ const { spawnSync } = require('node:child_process');
 const BRANCH = 'toolkit/refresh-cloud-workflows';
 const TITLE = 'Refresh the Toolkit copies';
 const GITHUB_LIMIT = 16 * 1024 * 1024;
-const VENDORED = Object.freeze([
-  Object.freeze({ file: '.github/scripts/plain-text-check.cjs', source: 'skills/secure-ci-cd/scripts/plain-text-check.cjs', installer: '../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs' }),
-  Object.freeze({ file: '.github/scripts/personal-data-guard.cjs', source: 'skills/secure-ci-cd/scripts/personal-data-guard.cjs', installer: '../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs' }),
-]);
+const { COPIED_FILES, GUARD_CONFIG, SWEEP_WORKFLOW, copiedState } = require('./toolkit-cloud-workflows-copied.cjs');
+const COPIED = Object.values(COPIED_FILES).flat();
+const PLAIN_TEXT = Object.freeze({ file: '.github/scripts/plain-text-check.cjs', source: 'skills/secure-ci-cd/scripts/plain-text-check.cjs' });
 
 class RefreshError extends Error {
   constructor(message) { super(message); this.name = 'RefreshError'; }
@@ -66,29 +66,28 @@ function ghApi(endpoint, { method = null, input = undefined, missing = false } =
 // for Toolkit files it leaves alone. `workflows` is the cloud workflows installer.
 function changes({ target, root, commit, ci, ciShards, workflows }) {
   const result = workflows.plan({ repo: target, root, commit, ...(ci ? { ci } : {}), ...(ciShards !== undefined ? { ciShards } : {}) });
-  const unmanaged = result.rows.find(row => row.state === 'unmanaged');
+  const unmanaged = result.rows.find(row => row.kind !== 'copied' && row.state === 'unmanaged');
   if (unmanaged) throw new RefreshError(`${unmanaged.file} exists and is not a Toolkit copy; move it aside in a pull request first.`);
   const out = [];
-  const notes = [];
-  for (const row of result.rows) {
-    if (row.state === 'current') continue;
+  const notes = workflows.leftOutNotes(result);
+  for (const row of result.rows.filter(workflows.refreshable)) {
     // A copy rendered by a newer Toolkit than this checkout would be rolled back.
     if (row.toolkit && !git(root, ['merge-base', '--is-ancestor', row.toolkit, commit]).ok) {
       // A shallow clone (cloud sessions clone 50 commits deep) may just not reach an older commit.
       if (git(root, ['rev-parse', '--is-shallow-repository']).stdout.trim() === 'true') throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this shallow Toolkit checkout (${commit.slice(0, 7)}) cannot reach; run git fetch --unshallow origin in the Toolkit checkout, then run this again.`);
       throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this Toolkit checkout (${commit.slice(0, 7)}) does not contain; update the Toolkit checkout to the latest main first.`);
     }
-    out.push({ file: row.file, text: row.expected, why: row.state === 'missing' ? 'added' : row.state === 'edited' ? 'edited by hand, rewritten' : row.pinned ? 'pinned to one Toolkit commit, now follows Toolkit main' : 'layout changed' });
+    out.push({ file: row.file, text: row.expected, why: row.state === 'missing' ? 'added' : row.state === 'edited' ? 'edited by hand, rewritten' : row.pinned ? 'pinned to one Toolkit commit, now follows Toolkit main' : row.kind === 'copied' ? row.why || 'Toolkit copy updated' : 'layout changed' });
   }
-  for (const vendored of VENDORED) {
-    const absolute = path.join(target, ...vendored.file.split('/'));
-    if (!fs.existsSync(absolute)) continue;
-    const shown = git(root, ['show', `${commit}:${vendored.source}`]);
-    if (!shown.ok) continue;
-    const installer = require(vendored.installer);
+  // Nothing sweeps what is already here after this pull request, as a turn-on's finish does.
+  if (out.some(entry => entry.file === SWEEP_WORKFLOW && entry.why === 'added')) notes.push(`The personal data guard checks new work only; to list what is already here, start ${SWEEP_WORKFLOW} once by hand after the merge (Actions, Personal data sweep, Run workflow). It changes and posts nothing; on a public repository anyone can read its list.`);
+  const absolute = path.join(target, ...PLAIN_TEXT.file.split('/'));
+  const shown = fs.existsSync(absolute) ? git(root, ['show', `${commit}:${PLAIN_TEXT.source}`]) : { ok: false };
+  if (shown.ok) {
+    const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
     const state = installer.vendoredState(fs.readFileSync(absolute, 'utf8'), shown.stdout).state;
-    if (state === 'outdated') out.push({ file: vendored.file, text: installer.vendoredText(shown.stdout), why: 'vendored check updated' });
-    else if (state !== 'current') notes.push(`${vendored.file} is ${state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so it is left as it is.`);
+    if (state === 'outdated') out.push({ file: PLAIN_TEXT.file, text: installer.vendoredText(shown.stdout), why: 'vendored check updated' });
+    else if (state !== 'current') notes.push(`${PLAIN_TEXT.file} is ${state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so it is left as it is.`);
   }
   const baseline = migratedBaseline(target, root, commit);
   if (baseline) out.push(baseline);
@@ -121,7 +120,7 @@ function bodyText(files, commit, notes) {
     '',
     'Changed files:',
     ...files.map(entry => `- \`${entry.file}\`: ${entry.why}`),
-    ...(notes.length ? ['', 'Left as they are:', ...notes.map(note => `- ${note}`)] : []),
+    ...(notes.length ? ['', 'Notes:', ...notes.map(note => `- ${note}`)] : []),
     '',
     `Made by \`toolkit-cloud-workflows.cjs --refresh-pr\` from Toolkit ${commit.slice(0, 7)}. It changes only Toolkit-made files. The workflow copies run Toolkit main; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable to that commit.`,
   ].join('\n');
@@ -163,18 +162,29 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
   const existing = github(`repos/${repository}/git/ref/heads/${BRANCH}`, { missing: true })?.object?.sha || null;
   const allowed = new Set(files.map(entry => entry.file));
   if (existing && existing !== base) {
-    // An older refresh branch may hold only Toolkit-made files; anything else is someone's work.
+    // An older refresh branch may hold only Toolkit-made files; anything else is someone's work: another
+    // path, a file at a copied workflow's path that Toolkit did not write, or guard settings this run
+    // would not carry on.
     const compared = github(`repos/${repository}/compare/${base}...${existing}`);
-    const foreign = (compared.files || []).map(entry => entry.filename).filter(name => !allowed.has(name) && !isToolkitFile(name, workflows));
+    const foreign = (compared.files || []).map(entry => entry.filename).filter(name => {
+      if (name === GUARD_CONFIG) return !allowed.has(name);
+      if (!allowed.has(name) && !isToolkitFile(name, workflows)) return true;
+      if (!COPIED.includes(name)) return false;
+      const held = github(`repos/${repository}/contents/${name.split('/').map(encodeURIComponent).join('/')}?ref=${existing}`, { missing: true });
+      return Boolean(held) && (held.encoding !== 'base64' || copiedState(name, Buffer.from(held.content, 'base64').toString('utf8')) === 'unmanaged');
+    });
     if (foreign.length) throw new RefreshError(`branch ${BRANCH} also changes ${foreign.slice(0, 3).join(', ')}${foreign.length > 3 ? ' and more' : ''}; land or remove that work first.`);
   }
   // A workflow copy the refresh branch already holds with this layout and body stays as it is: only
-  // its header's Toolkit commit would change, which is no reason for a new commit and CI run.
+  // its header's Toolkit commit would change, which is no reason for a new commit and CI run. So do the
+  // guard's settings the branch holds: they may be the owner's.
   const texts = files.map(entry => {
-    if (!existing || workflows.MARKER.exec(entry.text)?.index !== 0) return entry.text;
+    if (!existing || (entry.file !== GUARD_CONFIG && workflows.MARKER.exec(entry.text)?.index !== 0)) return entry.text;
     const held = github(`repos/${repository}/contents/${entry.file.split('/').map(encodeURIComponent).join('/')}?ref=${existing}`, { missing: true });
     const text = held?.encoding === 'base64' ? Buffer.from(held.content, 'base64').toString('utf8') : null;
-    return text !== null && workflows.copyState(text, entry.text).state === 'current' ? text : entry.text;
+    if (text === null) return entry.text;
+    if (entry.file === GUARD_CONFIG) return require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs').currentConfigText(text);
+    return workflows.copyState(text, entry.text).state === 'current' ? text : entry.text;
   });
   const baseCommit = github(`repos/${repository}/git/commits/${base}`);
   const tree = github(`repos/${repository}/git/trees`, { method: 'POST', input: { base_tree: baseCommit.tree.sha, tree: files.map((entry, index) => ({ path: entry.file, mode: '100644', type: 'blob', content: texts[index] })) } });
@@ -214,11 +224,11 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
   return { outcome, number, url: pr.html_url, head: headSha };
 }
 
-// The files a refresh may ever change, by path: the fixed workflow copy paths, the vendored checks
-// and the default baseline (a renamed test shards copy or baseline is allowed only when this run
+// The files a refresh may ever change, by path: the default cloud workflows' files, the vendored
+// plain-text check and the default baseline (a renamed test shards copy or baseline is allowed only when this run
 // chose it).
 function isToolkitFile(name, workflows) {
-  return [...workflows.WORKFLOWS, ...workflows.SHARD_WORKFLOWS].some(row => row.file === name) || VENDORED.some(entry => entry.file === name) || name === '.github/plain-text-baseline.json';
+  return workflows.DEFAULT_FILES.includes(name) || name === PLAIN_TEXT.file || name === '.github/plain-text-baseline.json';
 }
 
 // Runs the whole refresh: { code, line }. Every failure is one line and no pull request change.

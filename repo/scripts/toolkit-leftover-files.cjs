@@ -11,10 +11,11 @@
 //   - a file that is byte for byte a copy Toolkit shipped, now or earlier (playbook-history.json),
 //     line endings aside.
 // A repository whose governance is on gets its governed rules and playbooks from the installed
-// Toolkit, so only those instruction copies (and the retired n8n adapter block) are listed there; its checks and workflow copies are in
+// Toolkit, so only those instruction copies (and the retired n8n adapter and shim blocks) are listed there; its checks and workflow copies are in
 // use and shown as kept. The repository's programme file is its on/off decision, so it is always kept.
 // A one-line CLAUDE.md is listed only when AGENTS.md has nothing of its own left without the listed
-// blocks; otherwise it loads the repository's own rules and is kept.
+// blocks; otherwise it loads the repository's own rules and is kept. An older marked shim in CLAUDE.md
+// (CLAUDE.SHIM) that loads the repository's own AGENTS.md is listed to be replaced by that one line.
 //
 // It never deletes, writes, stages or fetches anything, and it prints no file contents. Removing a
 // leftover is a later step: one pull request per repository, with the owner's OK.
@@ -29,17 +30,23 @@ const cloud = require('./toolkit-cloud-workflows.cjs');
 
 const TEMPLATES = path.resolve(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
 const DECISION_FILE = '.github/toolkit-programme.json';
-const BLOCK_FILES = Object.freeze(['AGENTS.md', 'GEMINI.md', '.agents/rules/00-agent-toolkit-bootstrap.md']);
+// CLAUDE.md comes last, so whether AGENTS.md keeps text of its own is known when its shim is judged.
+const BLOCK_FILES = Object.freeze(['AGENTS.md', 'GEMINI.md', '.agents/rules/00-agent-toolkit-bootstrap.md', 'CLAUDE.md']);
+// Files many repositories make links or keep as their own, so one that cannot be read is not named.
+const QUIET_FILES = Object.freeze(['GEMINI.md', 'CLAUDE.md']);
+const SHIM_LINE = '@AGENTS.md';
 const VENDORED_CHECKS = Object.freeze(['plain-text-check', 'personal-data-guard']);
 const VENDORED_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=[0-9a-f]{12}$/m;
+const { WORKFLOWS: GUARD_WORKFLOWS, WORKFLOW_MARKER: GUARD_WORKFLOW_MARKER } = require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs');
 const LIMIT = 1024 * 1024;
 const SCANNED_STATES = Object.freeze({ DISABLED: 'governance off', UNDECIDED: 'no governance decision', ENABLED: 'governance on' });
 // The Toolkit blocks that copied governed rules into a repository. Only these are leftovers where
 // governance is on; any other block there is in use.
 const GOVERNED_COPY_BLOCKS = Object.freeze(['TOOLKIT-GOVERNED-RULES', 'GLOBAL-AGENTS.MD-TEMPLATE', 'ANTIGRAVITY.BOOTSTRAP']);
-// The n8n adapter block older setups copied into AGENTS.md. The global rules carry the n8n rules now,
-// so it is a leftover in every governance state.
-const RETIRED_COPY_BLOCKS = Object.freeze(['N8N-AGENT-RULES-ADAPTER']);
+// Blocks that are leftovers in every governance state: the n8n adapter block older setups copied into
+// AGENTS.md (the global rules carry the n8n rules now), and the marked GEMINI.md and CLAUDE.md shims
+// (no GEMINI.md shim is needed, and the CLAUDE.md shim is now the one unmarked line `@AGENTS.md`).
+const RETIRED_COPY_BLOCKS = Object.freeze(['N8N-AGENT-RULES-ADAPTER', 'GEMINI.SHIM', 'CLAUDE.SHIM']);
 const HISTORY = path.resolve(__dirname, '..', 'contracts', 'agent-rules', 'playbook-history.json');
 const IN_USE = 'governance is on, so it is in use';
 const BROKEN = "its Toolkit markers are broken, so Toolkit cannot tell its text from the rest; fixing them by hand is the owner's choice";
@@ -168,18 +175,29 @@ class LeftoverScan {
     for (const file of BLOCK_FILES) {
       const read = readInside(root, file);
       if (!read) continue;
-      if (read.skipped) { if (file !== 'GEMINI.md') result.unproven.push({ file, reason: read.skipped }); continue; }
+      if (read.skipped) { if (!QUIET_FILES.includes(file)) result.unproven.push({ file, reason: read.skipped }); continue; }
       const parsed = blocks.findBlocks(read.text);
       // With broken markers no block in the file is proven: where one ends cannot be told, so the
       // whole file stays until the owner fixes the markers by hand.
       if (parsed.errors.length) { result.unproven.push({ file, reason: BROKEN }); continue; }
       const listed = parsed.blocks.filter(block => !result.governed || GOVERNED_COPY_BLOCKS.includes(block.name) || RETIRED_COPY_BLOCKS.includes(block.name));
-      const empties = listed.length > 0 && !ownText(read.text, listed.map(block => block.name));
+      const rest = ownText(read.text, listed.map(block => block.name));
+      const empties = listed.length > 0 && !rest;
+      const shimReplaced = file === 'CLAUDE.md' && this.#shimLoadsOwnRules(root, result, rest);
       for (const block of listed) {
         const edited = block.format >= 2 && block.digest !== blocks.bodyDigest(block.body);
-        result.files.push({ file, kind: 'block', block: block.name, proof: 'Toolkit marker', edited, empties });
+        if (shimReplaced && block.name === 'CLAUDE.SHIM') result.files.push({ file, kind: 'shim-block', block: block.name, proof: 'Toolkit marker', edited });
+        else result.files.push({ file, kind: 'block', block: block.name, proof: 'Toolkit marker', edited, empties });
       }
     }
+  }
+
+  // Whether a marked CLAUDE.md shim still loads the repository's own rules, as the one-line CLAUDE.md
+  // does (#pointer): AGENTS.md is there with text of its own, and the rest of CLAUDE.md does not already
+  // hold the line. Then the block is to be replaced by the line, not removed.
+  #shimLoadsOwnRules(root, result, rest) {
+    if (!readInside(root, 'AGENTS.md') || result.files.some(item => item.file === 'AGENTS.md' && item.empties)) return false;
+    return !rest.split(/\r?\n/).some(line => line.trim() === SHIM_LINE);
   }
 
   // CLAUDE.md that is exactly Toolkit's one-line pointer. It is a leftover only when AGENTS.md is
@@ -213,12 +231,20 @@ class LeftoverScan {
     }
   }
 
-  // A vendored check that still carries Toolkit's first-line marker. The check works without governance.
+  // A vendored check that still carries Toolkit's first-line marker, and the personal data guard's marked
+  // workflows. The checks work without governance.
   #checks(root, result) {
     for (const name of VENDORED_CHECKS) {
       const file = `.github/scripts/${name}.cjs`, read = readInside(root, file);
       if (!read?.text) continue;
       if (VENDORED_MARKER.exec(unix(read.text))?.[1] !== name) continue;
+      if (result.governed) result.kept.push({ file, reason: IN_USE });
+      else result.files.push({ file, kind: 'check', proof: 'Toolkit marker' });
+    }
+    // The personal data guard's own workflows, which carry its marker.
+    for (const name of GUARD_WORKFLOWS) {
+      const file = `.github/workflows/${name}.yml`, read = readInside(root, file);
+      if (!read?.text || GUARD_WORKFLOW_MARKER.exec(unix(read.text))?.[1] !== name) continue;
       if (result.governed) result.kept.push({ file, reason: IN_USE });
       else result.files.push({ file, kind: 'check', proof: 'Toolkit marker' });
     }
@@ -233,7 +259,7 @@ class LeftoverScan {
     // folder only lists names that are then skipped.
     let names = null;
     try { names = fs.readdirSync(path.join(root, '.github', 'workflows')); } catch { names = null; }
-    const fixed = new Set([...cloud.WORKFLOWS, ...cloud.SHARD_WORKFLOWS].map(row => row.file));
+    const fixed = new Set(cloud.DEFAULT_CLOUD_WORKFLOWS.filter(row => row.kind === 'rendered').map(row => row.file));
     for (const file of cloud.copyCandidates(names)) {
       const read = readInside(root, file);
       if (!read) continue;
@@ -260,6 +286,7 @@ class LeftoverScan {
 }
 
 function describeFile(item) {
+  if (item.kind === 'shim-block') return `- ${item.file}: an older marked form of Toolkit's one-line shim (block ${item.block})${item.edited ? ', edited by hand since' : ''}. It loads your AGENTS.md, so replace the block with the line \`${SHIM_LINE}\` rather than removing it. The rest of the file is yours.`;
   if (item.kind === 'block') return `- ${item.file}: Toolkit block ${item.block} inside the file${item.edited ? ', edited by hand since' : ''}. The rest of the file is yours.`;
   if (item.kind === 'check') return `- ${item.file}: a Toolkit check copy. It keeps working without governance; removing it is your choice, together with its workflow and settings.`;
   if (item.kind === 'workflow' && item.copy) return `- ${item.file}: a Toolkit ${item.copy === 'test-shards' ? 'test shards workflow' : 'Shard Timings'} copy${item.edited ? ', edited by hand since' : ''}. Governance is off, so nothing refreshes it any more and removing it is suggested.`;

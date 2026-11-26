@@ -859,6 +859,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
 }
 
 module.exports = Object.freeze({
+  WORKFLOW_MARKER,
   WORKFLOW_REL,
   WORKFLOW_TEMPLATE_REL,
   DEPENDABOT_REL,
