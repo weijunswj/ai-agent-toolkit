@@ -3,7 +3,12 @@
 
 // Remove Toolkit from this computer: its old scheduled tasks and task records, its global rules, the
 // app settings it set, its helper agent files and skill copies (the n8n skills it copied included), its
-// Codex setup record and update reports, and its own folder.
+// Codex setup record and update reports, and its own folder, keeping only the key list, the recovery
+// records and this removal's backup there.
+//
+// The plan prints the owner's screen (Removed, Kept, Never touched; long lists folded, --full unfolds
+// them) and, after the AGENT_LINE, the agent's own steps: the plugin uninstall lines and the apply line
+// with the plan code. Every line is one this removal found and that is true for it.
 //
 // Earlier releases put scheduled tasks into Windows Task Scheduler for every repository they served;
 // Toolkit no longer does, and removing the plugin does not remove them. This command finds every task that carries Toolkit's
@@ -32,7 +37,7 @@
 // The Claude desktop app's Toolkit copy from the claude.ai account is listed with the owner's own
 // removal steps and never changed.
 //
-// Usage: node repo/scripts/toolkit-remove.cjs plan --app codex|claude-code|all [--include <task id>[,<task id>...]] [--json]
+// Usage: node repo/scripts/toolkit-remove.cjs plan --app codex|claude-code|all [--include <task id>[,<task id>...]] [--full] [--json]
 //        node repo/scripts/toolkit-remove.cjs apply --confirm <plan code> --app ... [--include ...] [--json]
 
 const crypto = require('node:crypto');
@@ -45,7 +50,7 @@ const parts = require('./toolkit-remove-parts.cjs');
 const { HOST_LABELS } = require('./agent-host-markers.cjs');
 
 const SCHEMA = 'toolkit.remove-plan.v1';
-const USAGE = 'Usage: node repo/scripts/toolkit-remove.cjs plan --app codex|claude-code|all [--include <task id>,...] [--json]\n'
+const USAGE = 'Usage: node repo/scripts/toolkit-remove.cjs plan --app codex|claude-code|all [--include <task id>,...] [--full] [--json]\n'
   + '       node repo/scripts/toolkit-remove.cjs apply --confirm <plan code> --app codex|claude-code|all [--include <task id>,...] [--json]';
 const NEEDS_APP = 'remove needs --app: ask the owner first whether to remove Toolkit from only this app (--app codex or --app claude-code) or from every app (--app all). Nothing was planned or removed.';
 const APPS = Object.freeze(['codex', 'claude-code', 'all']);
@@ -168,13 +173,19 @@ class ToolkitRemoval {
     if (sharedGoes ? rules.some(file => file.harness === 'antigravity' && file.action === 'remove') : this.#antigravityRulesKept()) sharedFound.push("Antigravity's global rules");
     // A part that cannot be read is held, so the rest of the plan still shows.
     // Only the items of the app being removed, and the shared ones once no other app keeps Toolkit.
+    // Each part learns whether an earlier step saves a backup: the Toolkit folder keeps the last
+    // removal's backup only when this removal saves none of its own.
+    let savesBackup = rules.some(file => file.action === 'remove') || CODEX_WRITES.includes(codexSettings?.action);
     const others = this.#parts.map(part => {
       let items;
-      try { items = part.plan(); } catch (error) { items = [{ what: part.title, action: 'held', detail: `could not be read (${tasks.safeText(error.message)})`, app: part.app }]; }
+      try { items = part.plan({ savesBackup }); } catch (error) { items = [{ what: part.title, action: 'held', detail: `could not be read (${tasks.safeText(error.message)})`, app: part.app }]; }
       const scoped = items.map(item => ({ item, app: item.app || part.app || 'shared' }));
       if (scoped.some(({ item, app }) => app === 'shared' && item.action === 'remove')) sharedFound.push(part.shared || part.title);
       items = scoped.filter(({ app }) => this.#inScope(app, sharedGoes)).map(({ item: { app: ignored, ...item } }) => item);
-      return { key: part.key, title: part.title, items };
+      if (items.some(item => item.action === 'save' || (item.action === 'remove' && item.backup === true))) savesBackup = true;
+      const removing = items.filter(item => item.action === 'remove');
+      return { key: part.key, title: part.title, label: part.label || part.title, ...(part.unit ? { unit: part.unit } : {}), items,
+        ...(typeof part.summary === 'function' && removing.length ? { summary: part.summary(removing) } : {}) };
     });
     const body = { app: this.#app, tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, codex_settings: codexSettings, parts: others, include: this.#include,
       kept_for: othersKeeping, shared_parts: sharedFound };
@@ -295,12 +306,15 @@ class ToolkitRemoval {
         }
       } catch (error) { rules = [{ result: 'failed', reason: tasks.safeText(error.message) }]; }
     }
-    // The other parts, in order; the Toolkit folder is last and checks the plugins itself.
+    // The other parts, in order; the Toolkit folder checks the plugins itself, and only the MCP report
+    // runs after it. Each result carries the label its planned item had.
     const others = this.#parts.map(part => {
-      const planned = plan.parts.find(item => item.key === part.key)?.items || [];
+      const planned = plan.parts.find(item => item.key === part.key) || { items: [] };
       let done;
-      try { done = part.apply(planned); } catch (error) { done = [{ what: part.title, result: 'failed', reason: tasks.safeText(error.message) }]; }
-      return { key: part.key, title: part.title, results: done, held: planned.filter(item => !['remove', 'save'].includes(item.action)) };
+      try { done = part.apply(planned.items); } catch (error) { done = [{ what: part.title, result: 'failed', reason: tasks.safeText(error.message) }]; }
+      const labelled = done.map(item => ({ label: planned.items.find(entry => entry.what === item.what)?.label || planned.label || part.title, ...item }));
+      return { key: part.key, title: part.title, label: planned.label || part.title, ...(planned.unit ? { unit: planned.unit } : {}), results: labelled,
+        held: planned.items.filter(item => !['remove', 'save'].includes(item.action) && !done.some(entry => entry.what === item.what)) };
     });
     const installed = this.#installed();
     const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installed[host] === true && (this.#app === 'all' || host === this.#app));
@@ -312,116 +326,202 @@ class ToolkitRemoval {
   }
 }
 
+// What removal never touches. Always true, whatever the removal finds.
+const NEVER_TOUCHED = '- Your repositories, your keys (in the credential store), other plugins, and every setting, agent, skill and file you made yourself.';
+// The line that starts what only the agent reads. The skill says to show the owner everything above it.
+const AGENT_LINE = "Agent steps (not for the owner's screen):";
+const FOLD_AT = parts.FOLD_AT;
+
+const listOf = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+const bullet = (label, text) => `- **${label}:** ${text}`;
+const parentOf = what => { const at = String(what).lastIndexOf('/'); return at > 0 ? String(what).slice(0, at) : null; };
+const appsOf = hosts => listOf(hosts.map(host => parts.PLUGIN_STEPS[host]?.app || HOST_LABELS[host] || host));
+
+// One group's lines for a list of [{ what, detail?, text?, label? }] under a label: each `text` item on
+// its own line; the rest folded into counts per folder when longer than FOLD_AT (unless full, or
+// noted with `onRequest` false for a result), else one line when they share a detail.
+// `brief` shows an item's `short` line in place of its `text`: every screen after the first plan.
+function groupLines(label, items, { unit = 'items', full = false, separator = ' (', onRequest = true, fold, brief = false } = {}) {
+  const out = [];
+  const byLabel = new Map();
+  for (const item of items) { const name = item.label || label; (byLabel.get(name) || byLabel.set(name, []).get(name)).push(item); }
+  let folded = false;
+  for (const [name, list] of byLabel) {
+    for (const item of list.filter(entry => entry.text)) out.push(bullet(name, brief && item.short ? item.short : item.text));
+    const plain = list.filter(entry => !entry.text);
+    if (!plain.length) continue;
+    const said = item => `${item.what}${item.detail ? (separator === ' (' ? ` (${item.detail})` : `${separator}${item.detail}`) : ''}`;
+    if (fold && name === label && !full) { out.push(bullet(name, fold)); folded = folded || plain.length > FOLD_AT; continue; }
+    if (plain.length > FOLD_AT && !full) {
+      folded = true;
+      for (const parent of [...new Set(plain.map(item => parentOf(item.what)))]) {
+        const count = plain.filter(item => parentOf(item.what) === parent).length;
+        out.push(bullet(name, `${count} ${unit}${parent ? ` in ${parent}` : ''}${onRequest ? ' (full list on request)' : ''}`));
+      }
+      continue;
+    }
+    if (plain.length > FOLD_AT) { out.push(`- **${name}:**`, ...plain.map(item => `  - ${said(item)}`)); continue; }
+    const details = [...new Set(plain.map(item => item.detail || ''))];
+    if (details.length === 1) out.push(bullet(name, said({ what: listOf(plain.map(item => item.what)), detail: details[0] })));
+    else for (const item of plain) out.push(bullet(name, said(item)));
+  }
+  return { lines: out, folded };
+}
+
+function taskWhere(item) {
+  return `\\${item.folder}\\${item.name}${item.repository ? ` (${item.repository})` : ''}`;
+}
+
+// Who the removal is for. The shared parts kept for another app are a Kept line.
+function fromLine(app, keptFor = [], shared = []) {
+  if (app === 'all') return '**From:** every app on this computer.';
+  const alone = !keptFor.length && shared.length ? '; no other app has the Toolkit plugin, so the shared parts below go too' : '';
+  return `**From:** ${HOST_LABELS[app]} only${alone}.`;
+}
+
+function sharedKeptLine(app, keptFor = [], shared = []) {
+  if (app === 'all' || !keptFor.length || !shared.length) return [];
+  return [bullet('Shared parts', `${listOf(shared)} ${shared.length === 1 ? 'stays' : 'stay'}, because ${appsOf(keptFor)} still ${keptFor.length === 1 ? 'has' : 'have'} the Toolkit plugin`)];
+}
+
+// What the plan says about Codex's config.toml.
+function codexPlanText(codex) {
+  if (codex.action === 'held') return `${codex.file}: left alone, ${codex.detail || 'its Toolkit lines are damaged'}; fix or remove the Toolkit lines by hand`;
+  if (codex.action === 'delete-file') return `${codex.file}, which Toolkit created for its project_doc_max_bytes line alone`;
+  return `project_doc_max_bytes in ${codex.file} goes back to ${codex.previous === 'none' ? "Codex's own default (Toolkit added the line)" : codex.previous}`;
+}
+
+// The owner's screen for a plan: Removed, Kept and Never touched, then the agent's own steps.
+function describePlan(plan, { full = false } = {}) {
+  const removed = [], kept = [];
+  let folded = false;
+  const add = (target, result) => { target.push(...result.lines); folded = folded || result.folded; };
+  if (plan.plugins?.length) removed.push(bullet('Plugin', `AI Agent Toolkit in ${appsOf(plan.plugins)}, uninstalled after your yes`));
+  const going = plan.tasks.filter(item => item.action === 'remove');
+  const extras = plan.state.length || plan.folders.some(item => item.expected === 'removed') ? '; their task files and empty Task Scheduler folders go too' : '';
+  if (going.length) {
+    if (going.length > FOLD_AT && !full) { folded = true; removed.push(bullet('Old scheduled tasks', `${going.length} from an earlier Toolkit (full list on request)${extras}`)); }
+    else removed.push(bullet('Old scheduled tasks', `${listOf(going.map(taskWhere))}, from an earlier Toolkit${extras}`));
+  } else if (plan.stale_records.length || plan.state.length) removed.push(bullet('Old task records', "Toolkit's records and files of old scheduled tasks that are already gone"));
+  const rules = plan.rules.filter(file => file.action === 'remove');
+  if (rules.length) removed.push(bullet('Global rules', `the Toolkit block in ${listOf(rules.map(file => file.file))} (the rest of ${rules.length === 1 ? 'the file' : 'each file'} stays)`));
+  const codex = plan.codex_settings;
+  if (codex && codex.action !== 'held') removed.push(bullet('Codex instruction limit', codexPlanText(codex)));
+  for (const part of plan.parts || []) {
+    add(removed, groupLines(part.label || part.title, part.items.filter(item => item.action === 'remove'), { unit: part.unit, full, fold: part.summary }));
+  }
+  for (const item of plan.tasks.filter(task => task.action === 'keep')) {
+    const hint = item.kind === 'changed' && !item.unmarked ? `say to remove ${item.id} too if you want it gone` : 'delete it in Task Scheduler yourself if you want it gone';
+    kept.push(bullet('Scheduled task', `${taskWhere(item)}: ${KINDS[item.kind].label}; ${hint}`));
+  }
+  for (const item of plan.folders.filter(entry => entry.expected === 'kept')) kept.push(bullet('Task Scheduler folder', `\\${item.folder}\\ stays, it still holds another task`));
+  for (const file of plan.rules.filter(entry => entry.action === 'held')) kept.push(bullet('Global rules', `${file.file}: left alone, ${file.detail || file.state}; fix or remove the Toolkit lines by hand`));
+  if (codex?.action === 'held') kept.push(bullet('Codex instruction limit', codexPlanText(codex)));
+  for (const part of plan.parts || []) {
+    const label = part.label || part.title;
+    add(kept, groupLines(label, part.items.filter(item => item.action === 'save' || item.action === 'keep'), { unit: part.unit, full, separator: ': ', brief: full }));
+    for (const item of part.items.filter(entry => entry.action === 'held')) kept.push(bullet(item.label || label, `${item.what}: left alone, ${item.detail || 'it could not be read'}`));
+  }
+  kept.push(...sharedKeptLine(plan.app, plan.kept_for, plan.shared_parts));
+  const lines = ['**Remove Toolkit from this computer**', '', fromLine(plan.app, plan.kept_for, plan.shared_parts), ''];
+  if (plan.nothing) lines.push("Nothing of Toolkit's is left to remove.", '');
+  if (removed.length) lines.push('**Removed**', ...removed, '');
+  if (kept.length) lines.push('**Kept**', ...kept, '');
+  lines.push('**Never touched**', NEVER_TOUCHED);
+  if (!plan.nothing) lines.push('', 'Nothing changes until you say yes.');
+  lines.push('', AGENT_LINE, ...agentPlanSteps(plan, { folded }));
+  return lines;
+}
+
+// The plugin uninstall lines for each app that still has the Toolkit plugin, and the app screen to
+// give the owner when that app's command line is not available.
+function uninstallSteps(hosts) {
+  return hosts.map(host => {
+    const step = parts.PLUGIN_STEPS[host];
+    return `- Uninstall the ${step.app} plugin: ${step.lines.map(line => `\`${line}\``).join(', then ')}. Without its command line, ask the owner to ${step.ui}.`;
+  });
+}
+
+function agentPlanSteps(plan, { folded }) {
+  const app = `--app ${plan.app}${plan.include.length ? ` --include ${plan.include.join(',')}` : ''}`;
+  const steps = [];
+  if (plan.plugins?.length) steps.push("- After the owner's yes, first:", ...uninstallSteps(plan.plugins).map(line => `  ${line}`));
+  if (!plan.nothing) steps.push(`- Then run apply ${app} --confirm ${plan.code}. A list that changed gets a new code and removes nothing: run plan again and ask again.`);
+  if (folded) steps.push(`- The full lists, when the owner asks: run plan ${app} --full.`);
+  if (!steps.length) steps.push('- None.');
+  return steps;
+}
+
 // The rules remover's result codes, in plain words.
 const RESULT_WORDS = Object.freeze({ removed: 'removed', 'deleted-file': 'put back; the file Toolkit created for it is deleted', 'restored-previous': 'put back to the earlier value',
   absent: 'nothing to remove', held: 'left alone', failed: 'failed', unchanged: 'unchanged', skipped: 'left alone', 'opted-out': 'already removed by you' });
 const words = code => RESULT_WORDS[code] || String(code).replace(/-/g, ' ');
 
-const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), the Claude Code settings setup turned on other than the subagent limit Toolkit set (they stay as they are; listed above when there are any), other plugins, and every setting, agent, skill and file you made yourself.';
-
-// The plugin uninstall lines for each app that still has the Toolkit plugin, and the app screen to use
-// when its command line is not available.
-function pluginLines(hosts, { after = false } = {}) {
-  if (!hosts.length) return [after ? 'Plugins: none installed.' : 'Plugins: none installed, so nothing to uninstall.'];
-  return [after ? 'Last step, uninstall the plugin (then start a new session):' : 'Plugins to uninstall (the agent runs these lines after your OK, before apply):',
-    ...hosts.flatMap(host => { const step = parts.PLUGIN_STEPS[host]; return step.lines.map(line => `- ${step.app}: \`${line}\``).concat(`- ${step.app} without its command line: ${step.ui}.`); })];
-}
-
-function partPlanLine(item) {
-  if (item.action === 'remove') return `- ${item.what}: removed${item.detail ? ` (${item.detail})` : ''}`;
-  if (item.action === 'held') return `- ${item.what}: left alone, ${item.detail || 'it could not be read'}`;
-  if (item.action === 'save') return `- ${item.what}: saved${item.detail ? `, ${item.detail}` : ''}`;
-  return `- ${item.what}: kept${item.detail ? `, ${item.detail}` : ''}`;
-}
-
-function taskLine(item) {
-  const where = `\\${item.folder}\\${item.name}`;
-  return `${where}${item.repository ? ` (${item.repository})` : ''}: ${KINDS[item.kind].label}; id ${item.id}`;
-}
-
-const listOf = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-
-// Who the removal is for, and what happens to the shared parts found on this computer (none: no line).
-function scopeLines(app, keptFor = [], shared = []) {
-  if (app === 'all') return ['From: every app on this computer.'];
-  const others = Object.keys(HOST_LABELS).filter(host => host !== app).map(host => HOST_LABELS[host]).join(' and ');
-  const lines = [`From: ${HOST_LABELS[app]} only. ${others}'s own Toolkit files stay; run plan with --app all to remove them too.`];
-  if (shared.length) lines.push(keptFor.length
-    ? `Kept, because ${keptFor.map(host => HOST_LABELS[host]).join(' and ')} still ${keptFor.length === 1 ? 'has' : 'have'} the Toolkit plugin: ${listOf(shared)}.`
-    : `Also removed, because no other app has the Toolkit plugin: ${listOf(shared)}.`);
-  return lines;
-}
-
-function describePlan(plan) {
-  const lines = ['# Remove Toolkit from this computer', '', ...scopeLines(plan.app, plan.kept_for, plan.shared_parts), ''];
-  const going = plan.tasks.filter(item => item.action === 'remove');
-  const kept = plan.tasks.filter(item => item.action === 'keep');
-  if (plan.scheduler === 'not available on this system') lines.push('Scheduled tasks: not checked, because this system has no Windows Task Scheduler.');
-  if (plan.nothing) lines.push("Nothing of Toolkit's is left to remove.");
-  if (going.length) lines.push('Scheduled tasks to stop and remove:', ...going.map(item => `- ${taskLine(item)}`));
-  if (kept.length) lines.push('Scheduled tasks kept:', ...kept.map(item => `- ${taskLine(item)}${item.kind === 'changed' && !item.unmarked ? `. Add --include ${item.id} to remove it too` : '. Delete it in Task Scheduler yourself if you want it gone'}`));
-  if (plan.folders.length) lines.push('Task Scheduler folders:', ...plan.folders.map(item => `- \\${item.folder}\\: ${item.expected === 'removed' ? 'removed once empty' : 'kept, it still holds a task'}`));
-  if (plan.stale_records.length) lines.push(`Records of tasks that are already gone: ${plan.stale_records.join(', ')}`);
-  if (plan.state.length) lines.push("Toolkit's own task files:", ...plan.state.map(file => `- ${file}`));
-  const rules = plan.rules.filter(file => file.action !== 'none');
-  const codex = plan.codex_settings;
-  if (codex) lines.push('Codex settings:', `- ${codex.file}: ${codexPlanLine(codex)}`);
-  if (rules.length) lines.push('Toolkit global rules:', ...rules.map(file => `- ${file.file}: ${file.action === 'remove' ? 'the Toolkit block is removed (a backup is saved first; the rest of the file stays)' : `left alone, ${file.detail || file.state}; fix or remove the Toolkit lines by hand`}`));
-  for (const part of plan.parts || []) {
-    if (!part.items.length) continue;
-    lines.push(part.key === 'toolkit_folder' ? `${part.title} (goes last, once no Toolkit plugin is installed):` : `${part.title}:`, ...part.items.map(partPlanLine));
-  }
-  lines.push('', ...pluginLines(plan.plugins || []), '', NOT_TOUCHED);
-  if (!plan.nothing) lines.push('', `Plan code: ${plan.code}`, 'Show the owner this list. After their OK, run apply with --confirm and this code. A list that changed gets a new code and removes nothing.');
-  return lines;
-}
-
-// What the plan says about Codex's config.toml.
-function codexPlanLine(codex) {
-  if (codex.action === 'held') return `left alone, ${codex.detail || 'its Toolkit lines are damaged'}; fix or remove the Toolkit lines by hand`;
-  const earlier = codex.previous === 'none' ? "Codex's own default (Toolkit added the line)" : `the earlier value ${codex.previous}`;
-  const what = codex.action === 'delete-file'
-    ? `the file is deleted, because Toolkit created it for its project_doc_max_bytes line and nothing else is in it`
-    : `Toolkit's project_doc_max_bytes line is taken out and ${earlier} comes back; the rest of the file stays`;
-  return `${what} (a backup is saved first, then Codex is asked to load the file)`;
-}
-
+// The closing lines after apply, in the same groups, then what is left to do.
 function describeResult(result) {
-  const lines = ['# Remove Toolkit from this computer', '', ...scopeLines(result.app, result.kept_for, result.shared_parts), ''];
-  for (const item of result.tasks) lines.push(`- ${taskLine(item)}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
-  for (const item of result.kept) lines.push(`- ${taskLine(item)}: kept`);
-  for (const item of result.folders) lines.push(`- Folder \\${item.folder}\\: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
-  for (const item of result.steps) lines.push(`- ${item.step}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
-  for (const item of result.rules) lines.push(`- Global rules ${item.file || ''}: ${words(item.result)}${item.reason ? ` (${item.reason})` : ''}`);
-  for (const item of result.held_rules) lines.push(`- Global rules ${item.file}: left alone, ${item.detail || item.state}`);
-  if (result.codex_settings) lines.push(`- Codex settings ${result.codex_settings.file || ''}: ${words(result.codex_settings.result)}${result.codex_settings.reason ? ` (${result.codex_settings.reason})` : ''}${result.codex_settings.load_check ? `; Codex load check: ${result.codex_settings.load_check}` : ''}`);
-  if (result.held_codex_settings) lines.push(`- Codex settings ${result.held_codex_settings.file}: left alone, ${result.held_codex_settings.detail || 'its Toolkit lines are damaged'}`);
+  const removed = [], kept = [], failed = [], next = [];
+  const fail = (label, what, reason) => failed.push(bullet(label, `${what}${reason ? ` (${reason})` : ''}`));
+  const tasksDone = result.tasks.filter(item => item.result === 'removed');
+  if (tasksDone.length) removed.push(bullet('Old scheduled tasks', tasksDone.length > FOLD_AT ? `${tasksDone.length} from an earlier Toolkit` : listOf(tasksDone.map(taskWhere))));
+  for (const item of result.tasks.filter(task => task.result === 'failed')) fail('Scheduled task', taskWhere(item), item.reason);
+  for (const item of result.kept) kept.push(bullet('Scheduled task', `${taskWhere(item)}: ${KINDS[item.kind].label}`));
+  const foldersGone = result.folders.filter(item => item.result === 'removed');
+  if (foldersGone.length) removed.push(bullet('Task Scheduler folders', listOf(foldersGone.map(item => `\\${item.folder}\\`))));
+  for (const item of result.folders.filter(entry => entry.result === 'failed')) fail('Task Scheduler folder', `\\${item.folder}\\`, item.reason);
+  for (const item of result.folders.filter(entry => entry.result === 'kept')) kept.push(bullet('Task Scheduler folder', `\\${item.folder}\\, it still holds a task`));
+  const stepsDone = result.steps.filter(item => item.result !== 'failed');
+  if (stepsDone.length) removed.push(bullet('Old task records', `Toolkit's records and files of the removed tasks (${stepsDone.length} ${stepsDone.length === 1 ? 'item' : 'items'})`));
+  for (const item of result.steps.filter(entry => entry.result === 'failed')) fail('Old task records', item.step, item.reason);
+  const rulesGone = result.rules.filter(item => item.result === 'removed');
+  if (rulesGone.length) removed.push(bullet('Global rules', `the Toolkit block in ${listOf(rulesGone.map(item => item.file))}`));
+  for (const item of result.rules.filter(entry => !['removed', 'absent', 'failed'].includes(entry.result))) kept.push(bullet('Global rules', `${item.file || 'the rules files'}: ${words(item.result)}`));
+  for (const item of result.rules.filter(entry => entry.result === 'failed')) fail('Global rules', item.file || 'the rules files', item.reason);
+  for (const item of result.held_rules) kept.push(bullet('Global rules', `${item.file}: left alone, ${item.detail || item.state}`));
+  const codex = result.codex_settings;
+  if (codex) (codex.result === 'failed' ? failed : removed).push(bullet('Codex instruction limit', `${codex.file || "Codex's config.toml"}: ${words(codex.result)}${codex.reason ? ` (${codex.reason})` : ''}${codex.load_check ? `; Codex load check: ${codex.load_check}` : ''}`));
+  if (result.held_codex_settings) kept.push(bullet('Codex instruction limit', `${result.held_codex_settings.file}: left alone, ${result.held_codex_settings.detail || 'its Toolkit lines are damaged'}`));
+  const reconnect = [];
   for (const part of result.parts || []) {
-    for (const item of part.results) lines.push(`- ${item.what}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
-    for (const item of part.held) lines.push(`- ${item.what}: ${item.action === 'held' ? `left alone, ${item.detail || 'it could not be read'}` : `kept${item.detail ? `, ${item.detail}` : ''}`}`);
+    const label = part.label || part.title;
+    const done = part.results.filter(item => item.result === 'removed');
+    removed.push(...groupLines(label, done.map(({ reason, ...item }) => ({ ...item, ...(reason ? { detail: reason } : {}) })), { unit: part.unit, onRequest: false }).lines);
+    const saved = part.results.filter(item => item.result === 'saved');
+    kept.push(...groupLines(label, saved.map(({ text, ...item }) => item), { separator: ': ' }).lines);
+    for (const item of part.results.filter(entry => entry.result === 'kept')) kept.push(bullet(item.label || label, `${item.what}${item.reason ? `: ${item.reason}` : ''}`));
+    for (const item of part.results.filter(entry => entry.result === 'failed')) fail(item.label || label, item.what, item.reason);
+    reconnect.push(...part.results.filter(entry => entry.reconnect).map(entry => entry.what));
+    kept.push(...groupLines(label, part.held.filter(item => item.action !== 'held'), { separator: ': ', brief: true }).lines);
+    for (const item of part.held.filter(entry => entry.action === 'held')) kept.push(bullet(item.label || label, `${item.what}: left alone, ${item.detail || 'it could not be read'}`));
   }
-  const partsDone = (result.parts || []).some(part => part.results.length);
-  if (!result.tasks.length && !result.steps.length && !result.rules.length && !result.codex_settings && !partsDone) lines.push("Nothing of Toolkit's was left to remove.");
-  lines.push('', result.ok ? 'Done.' : 'Some steps failed. Nothing else was changed; run plan again to see what is left.');
-  if (result.plugins?.length) lines.push('', ...pluginLines(result.plugins, { after: true }));
-  // After the plugin goes, the remove toolkit skill may be gone too, so the exact line is printed.
-  if (result.folder_kept) lines.push('', 'The Toolkit folder stays until the plugin is uninstalled. Then say `remove toolkit` again, or run this in PowerShell and follow it:',
-    `node "${path.resolve(__filename)}" plan --app ${result.app || 'all'}`);
-  // The Claude app keeps running its claude.ai account copy, which only the owner can remove.
-  const account = (result.parts || []).some(part => part.key === 'claude_account_copy' && part.held.length)
-    ? 'The Claude app still runs the Toolkit copy from your claude.ai account until you remove it there (steps above).' : '';
-  if (!result.plugins?.length && !result.folder_kept) lines.push('', account ? `Start a new session in each app. ${account}` : 'Start a new session in each app so nothing of Toolkit stays loaded.');
-  else if (account) lines.push('', account);
-  lines.push(NOT_TOUCHED);
+  if (reconnect.length) next.push(bullet('Reconnect MCP servers', `${listOf(reconnect)} ${reconnect.length === 1 ? 'keeps its' : 'keep their'} settings and ${reconnect.length === 1 ? 'key' : 'keys'}, but lost the key helper with the Toolkit folder. To use ${reconnect.length === 1 ? 'it' : 'one'} again, give it its key another way (in its own settings or the service's sign-in), or say \`setup toolkit\` and then \`toolkit env\``));
+  if (result.plugins?.length) next.push(bullet('Still to do', `the Toolkit plugin is still installed in ${appsOf(result.plugins)}${result.folder_kept ? ', so the Toolkit folder stays' : ''}. Once it is uninstalled, say \`remove toolkit\` again${result.folder_kept ? ' to remove the folder' : ''}`));
+  const account = (result.parts || []).some(part => part.key === 'claude_account_copy' && part.held.length);
+  if (account) next.push(bullet('The Claude app', 'it still runs Toolkit from your claude.ai account until you remove it there (the step is above)'));
+  if (!result.plugins?.length && !result.folder_kept) next.push(bullet('New session', 'start a new session in each app so nothing of Toolkit stays loaded'));
+  if (!result.ok) next.push(bullet('Some steps failed', 'nothing else was changed; say `remove toolkit` again to see what is left'));
+  const nothing = !removed.length && !failed.length;
+  const lines = [result.ok ? '**Toolkit removal done**' : '**Toolkit removal: some steps failed**', '', fromLine(result.app, result.kept_for, result.shared_parts), ''];
+  if (nothing) lines.push("Nothing of Toolkit's was left to remove.", '');
+  if (removed.length) lines.push('**Removed**', ...removed, '');
+  if (failed.length) lines.push('**Failed**', ...failed, '');
+  kept.push(...sharedKeptLine(result.app, result.kept_for, result.shared_parts));
+  if (kept.length) lines.push('**Kept**', ...kept, '');
+  lines.push('**Never touched**', NEVER_TOUCHED, '', '**Next**', ...next);
+  const agent = [];
+  if (result.plugins?.length) agent.push(...uninstallSteps(result.plugins));
+  // After the plugin goes, the remove toolkit skill may be gone too, so the exact line is given.
+  if (result.folder_kept) agent.push(`- Once the plugin is uninstalled and the owner says \`remove toolkit\` again, and the skill is gone, run: node "${path.resolve(__filename)}" plan --app ${result.app || 'all'}`);
+  if (agent.length) lines.push('', AGENT_LINE, ...agent);
   return lines;
 }
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!['plan', 'apply'].includes(command)) throw new RemovalError(USAGE);
-  const args = { command, include: [], confirm: null, json: false, app: null };
+  const args = { command, include: [], confirm: null, json: false, full: false, app: null };
   for (let i = 0; i < rest.length; i += 1) {
     if (rest[i] === '--json') args.json = true;
+    else if (rest[i] === '--full' && command === 'plan') args.full = true;
     else if (rest[i] === '--app' && rest[i + 1] && APPS.includes(rest[i + 1]) && !args.app) args.app = rest[++i];
     else if (rest[i] === '--include' && rest[i + 1]) args.include.push(...rest[++i].split(',').filter(Boolean));
     else if (rest[i] === '--confirm' && rest[i + 1] && command === 'apply') args.confirm = rest[++i];
@@ -454,7 +554,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
       parts: deps.parts !== undefined ? deps.parts : parts.defaultParts({ environment, home }),
       plugins: deps.plugins !== undefined ? deps.plugins : () => parts.pluginState({ environment, home }) });
     const output = args.command === 'plan' ? removal.plan() : removal.apply(args.confirm);
-    for (const line of args.json ? [JSON.stringify(output, null, 2)] : args.command === 'plan' ? describePlan(output) : describeResult(output)) log(line);
+    for (const line of args.json ? [JSON.stringify(output, null, 2)] : args.command === 'plan' ? describePlan(output, { full: args.full }) : describeResult(output)) log(line);
     return args.command === 'apply' && !output.ok ? 1 : 0;
   } catch (error) {
     // A task module's own error comes from the plan read and can carry a native line (PowerShell's
@@ -466,6 +566,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-module.exports = { ToolkitRemoval, RemovalError, KINDS, SCHEMA, describePlan, describeResult, parseArgs, main };
+module.exports = { ToolkitRemoval, RemovalError, KINDS, SCHEMA, AGENT_LINE, NEVER_TOUCHED, describePlan, describeResult, parseArgs, main };
 
 if (require.main === module) process.exitCode = main();

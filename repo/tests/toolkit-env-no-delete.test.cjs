@@ -548,10 +548,12 @@ test('row 20: the store\'s delete has one call site, in the edit-file save; remo
   assert.ok(start !== -1 && outside[0].at > start && outside[0].at < end, 'the call is inside the edit-file save');
   // The store module defines it twice (the Credential Manager store and the platform wrapper) and calls it once (the wrapper).
   assert.equal(calls.filter((call) => call.relative === 'repo/scripts/toolkit-env-store.cjs').length, 3);
-  // remove toolkit keeps the keys and the env folder, and says so.
+  // remove toolkit keeps the keys and the env folder (the key list), and says so.
   const remove = fs.readFileSync(path.join(SCRIPTS, 'toolkit-remove.cjs'), 'utf8');
-  assert.match(remove, /const NOT_TOUCHED = 'Not touched: your repositories, your keys \(the env store and the credential store\)/);
-  assert.match(fs.readFileSync(path.join(SCRIPTS, 'toolkit-remove-parts.cjs'), 'utf8'), /const KEPT_ENTRIES = Object\.freeze\(\['env', 'backups'\]\);/);
+  assert.match(remove, /const NEVER_TOUCHED = '- Your repositories, your keys \(in the credential store\)/);
+  const removeParts = fs.readFileSync(path.join(SCRIPTS, 'toolkit-remove-parts.cjs'), 'utf8');
+  assert.match(removeParts, /const KEPT_ENTRIES = Object\.freeze\(\['env', 'recovery-identities'\]\);/);
+  assert.match(removeParts, /env: \{ label: 'Your key list', detail: 'the keys themselves stay in the credential store' \}/);
 });
 
 test('row 21: in a test run the store refuses the real key store before PowerShell starts', async (t) => {

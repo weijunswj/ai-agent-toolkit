@@ -5,8 +5,16 @@
 //
 // Every part has:
 //   key, title
-//   plan()        read-only; [{ what, action: 'remove' | 'keep' | 'held', detail? }]. The plan code
-//                 covers this list, so a list that changes after the owner saw it removes nothing.
+//   label, unit   the bold label its lines carry on the owner's screen, and what its items are called
+//                 when a long list is folded into a count. An item's own `label` wins.
+//   plan(context) read-only; [{ what, action: 'remove' | 'keep' | 'held' | 'save', detail?, label?, text?,
+//                 short?, backup? }]. `text` replaces what and detail on the screen, and `short` replaces
+//                 `text` on every screen after the first plan (the full lists and the closing lines);
+//                 `backup: true` marks an
+//                 item whose removal saves a backup first. context.savesBackup says whether an earlier
+//                 step of this removal saves one. The plan code covers this list, so a list that
+//                 changes after the owner saw it removes nothing.
+//   summary(items) optional: the screen's one-line summary of a folded list of the part's removals.
 //   apply(items)  removes the items planned as 'remove'; [{ what, result, reason? }].
 //   app           whose part it is: 'codex', 'claude-code', 'shared' (used by every app) or 'any' (always
 //                 runs). An item's own `app` wins, for parts that span apps. `remove toolkit` runs in one
@@ -15,7 +23,8 @@
 //                 only the shared parts found on the computer (default: the title).
 //
 // The Toolkit folder (~/.ai-agent-toolkit) goes last, and only once neither the Claude Code nor the
-// Codex plugin is installed, because a plugin that is still installed reads its records there.
+// Codex plugin is installed, because a plugin that is still installed reads its records there. Only
+// the MCP report runs after it.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -23,21 +32,33 @@ const path = require('node:path');
 
 const PLUGIN_ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
 const MARKETPLACE = 'ai-agent-toolkit-local';
-// Top-level entries of ~/.ai-agent-toolkit that are Toolkit's own and can be rebuilt by setup, with
-// the update records the bridge keeps beside its hub snapshot. `env` (the list of your keys; the
-// values sit in the computer's credential store) and `backups` are never in this list, and anything
-// else found there is kept and listed.
-const FOLDER_ENTRIES = Object.freeze(['source', 'current', 'user-state', 'agent-control', 'global-rules.json', 'n8n-official-skills.json', 'antigravity-toolkit-skills.json', 'antigravity-refresh',
-  'remote-check.json', 'update.readers', 'update.lock', 'update.tree-moving', 'agent-rules-notices.json', 'hook-skips.json']);
-// Backup folders inside Toolkit's own entries that stay with the rest of the backups.
-const KEPT_INSIDE = Object.freeze({ 'agent-control': ['backups'] });
-const KEPT_ENTRIES = Object.freeze(['env', 'backups']);
-// What each kept entry is, as the plan says it. Anything else found there is not Toolkit's.
+// Top-level entries of ~/.ai-agent-toolkit that Toolkit makes: the managed checkout, the hub snapshot,
+// its records, ledgers and locks, the bridge's update markers, and the backups. A full removal (or the
+// last app's) removes them all, keeping only KEPT_ENTRIES and this removal's backup. Anything else
+// found there is not Toolkit's: it is kept and listed.
+const FOLDER_ENTRIES = Object.freeze(['source', 'current', 'user-state', 'agent-control', 'backups', 'global-rules.json', 'n8n-official-skills.json', 'antigravity-toolkit-skills.json', 'antigravity-refresh',
+  'remote-check.json', 'update.readers', 'update.lock', 'update.lock.recovery', 'update.tree-moving', 'agent-rules-notices.json', 'hook-skips.json']);
+// The names the bridge gives its short-lived entries (toolkit-local-bridge.cjs, toolkit-staging-generations.cjs):
+// lock claims, displaced locks and their tombstones, staging folders and their records, and the old hub
+// kept during a swap.
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const FOLDER_PATTERNS = Object.freeze([/^update\.lock\.recovery\.claim-[0-9a-f]{16}$/, new RegExp(`^update\\.lock\\.displaced\\.${UUID}(?:\\.retired-[0-9a-f]{16})?$`),
+  new RegExp(`^\\.staging-${UUID}$`), new RegExp(`^\\.toolkit-staging-generation-${UUID}(?:\\.(?:ready|completed|failed))?\\.json$`), /^\.current\.backup-\d+-\d+$/]);
+const isToolkitEntry = name => FOLDER_ENTRIES.includes(name) || FOLDER_PATTERNS.some(pattern => pattern.test(name));
+// What stays: the list of the owner's keys and the evidence of outside resources checked before a
+// live change.
+const KEPT_ENTRIES = Object.freeze(['env', 'recovery-identities']);
 const KEPT_LABELS = Object.freeze({
-  env: 'the list of your keys; the keys themselves stay in the credential store',
-  backups: 'copies of the files Toolkit changed, including this removal',
-  'recovery-identities': 'the records of outside resources checked before a live change; kept as evidence',
+  env: { label: 'Your key list', detail: 'the keys themselves stay in the credential store' },
+  'recovery-identities': { label: 'Recovery records', detail: 'the evidence of outside resources checked before a live change' },
 });
+// The folders that hold backups, relative to the Toolkit folder. Files a removal writes there are its
+// own backup: they are gathered into REMOVAL_BACKUP; every other file there is an older backup and goes.
+const BACKUP_TREES = Object.freeze(['backups', 'agent-control/backups']);
+const REMOVAL_BACKUP = 'backups/remove-toolkit';
+
+// A list longer than this is folded on the owner's screen into a count, with the full list on request.
+const FOLD_AT = 3;
 
 const safe = (error) => String(error?.message || error || 'error').replace(/[\r\n]+/g, ' ').slice(0, 300);
 const display = (home, file) => {
@@ -55,7 +76,7 @@ function attempt(item, run) {
 
 // Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, only while it holds the value Toolkit recorded.
 class ClaudeDepthPart {
-  key = 'claude_settings'; title = 'Claude Code subagent limit'; app = 'claude-code';
+  key = 'claude_settings'; title = 'Claude Code subagent limit'; label = 'Claude Code subagent limit'; app = 'claude-code';
   #setting; #what;
   constructor({ environment = process.env, home = os.homedir(), setting } = {}) {
     if (setting) this.#setting = setting;
@@ -63,12 +84,12 @@ class ClaudeDepthPart {
       const { ClaudeSubagentDepthSetting } = require('./toolkit-claude-subagent-depth.cjs');
       this.#setting = new ClaudeSubagentDepthSetting({ environment, controlRoot: environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(home, '.ai-agent-toolkit', 'agent-control') });
     }
-    this.#what = `${display(home, path.join(claudeConfigDir(environment, home), 'settings.json'))}: the subagent limit CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`;
+    this.#what = `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH in ${display(home, path.join(claudeConfigDir(environment, home), 'settings.json'))}`;
   }
   plan() {
     const state = this.#setting.inspect();
-    if (state.state === 'toolkit-one-layer') return [{ what: this.#what, action: 'remove', detail: 'set by Toolkit; Claude Code goes back to its default (a backup is saved first)' }];
-    if (state.state === 'owner-value') return [{ what: this.#what, action: 'keep', detail: 'you set this value yourself' }];
+    if (state.state === 'toolkit-one-layer') return [{ what: this.#what, action: 'remove', detail: "Toolkit's value; Claude Code goes back to its default", backup: true }];
+    if (state.state === 'owner-value') return [{ what: this.#what, action: 'keep', detail: 'your own value' }];
     if (state.state === 'unreadable') return [{ what: this.#what, action: 'held', detail: state.detail || 'the settings file could not be read' }];
     return [];
   }
@@ -86,7 +107,7 @@ class ClaudeDepthPart {
 // exactly as they are, and turning attribution back on would put trailers back in commits. The
 // listing says how to change one by hand.
 class ClaudeUserSettingsPart {
-  key = 'claude_preferences'; title = 'Claude Code settings left as they are'; app = 'claude-code';
+  key = 'claude_preferences'; title = 'Claude Code settings left as they are'; label = 'Claude Code settings from setup'; unit = 'settings'; app = 'claude-code';
   #settings; #file;
   constructor({ environment = process.env, home = os.homedir(), settings } = {}) {
     if (settings) this.#settings = settings;
@@ -98,7 +119,10 @@ class ClaudeUserSettingsPart {
   }
   plan() {
     return this.#settings.inspect().filter(entry => entry.state === 'toolkit-value' || (entry.state === 'off-value' && entry.toolkit))
-      .map(entry => ({ what: `${this.#file}: ${entry.label} (${entry.id})`, action: 'keep', detail: "set at setup; a Claude Code setting, so it stays as it is; edit settings.json to change it" }));
+      .map(entry => entry.id === 'attribution'
+        // The owner's wording for the one setting most owners know.
+        ? { what: `${entry.label} (${entry.id})`, action: 'keep', label: 'No AI credit in commits', text: `a Claude Code setting setup turned on; change it in ${this.#file}` }
+        : { what: `${entry.label} (${entry.id})`, action: 'keep', detail: `Claude Code's own settings, so they stay as they are; change them in ${this.#file}` });
   }
   apply() { return []; }
 }
@@ -107,7 +131,7 @@ class ClaudeUserSettingsPart {
 // whose last step finished goes. One that records an unfinished or unreadable step stays: it is the
 // evidence of what was attempted, and setup reads it so it never retries that step blindly.
 class CodexSetupJournalPart {
-  key = 'codex_setup_journal'; title = 'Codex setup record'; app = 'codex';
+  key = 'codex_setup_journal'; title = 'Codex setup record'; label = 'Codex setup record'; app = 'codex';
   #home; #journal;
   constructor({ environment = process.env, home = os.homedir(), journal } = {}) {
     this.#home = home;
@@ -120,8 +144,8 @@ class CodexSetupJournalPart {
   plan() {
     const what = display(this.#home, this.#journal.path);
     const state = this.#state();
-    if (state === 'finished') return [{ what, action: 'remove', detail: "its last setup step finished, so nothing needs it" }];
-    if (state === 'unfinished') return [{ what, action: 'keep', detail: 'it records a setup step that did not finish or cannot be read; kept as the evidence of what was attempted' }];
+    if (state === 'finished') return [{ what, action: 'remove' }];
+    if (state === 'unfinished') return [{ what, action: 'keep', detail: 'it records a setup step that did not finish or cannot be read, so it stays as the evidence of what was attempted' }];
     return [];
   }
   apply(items) {
@@ -140,7 +164,7 @@ class CodexSetupJournalPart {
 // the bridge's report name go; the folder goes once empty, and its ai-agent-toolkit parent too. Like
 // the Toolkit folder, it waits while a Toolkit plugin is installed, because the plugin writes there.
 class UpdateReportsPart {
-  key = 'update_reports'; title = 'Toolkit update reports'; app = 'shared'; shared = "Toolkit's update reports";
+  key = 'update_reports'; title = 'Toolkit update reports'; label = 'Update reports'; app = 'shared'; shared = "Toolkit's update reports";
   #home; #dir; #isReport; #plugins;
   constructor({ environment = process.env, home = os.homedir(), reportDir, isReport, plugins } = {}) {
     this.#home = home;
@@ -160,7 +184,7 @@ class UpdateReportsPart {
     let names;
     try { names = fs.readdirSync(this.#dir); } catch { return []; }
     if (names.length && !this.#reports().length) return [];
-    return [{ what: display(this.#home, this.#dir), action: 'remove', detail: "Toolkit's update report files, once no Toolkit plugin is installed; any other file there stays" }];
+    return [{ what: display(this.#home, this.#dir), action: 'remove', detail: "Toolkit's report files; any other file there stays" }];
   }
   apply(items) {
     return items.filter(item => item.action === 'remove').map(item => attempt(item, () => {
@@ -176,12 +200,12 @@ class UpdateReportsPart {
 
 // Toolkit's helper-capacity block in Codex's config.toml.
 class CodexHelperLimitPart {
-  key = 'codex_helper_limit'; title = 'Codex helper limit'; app = 'codex';
+  key = 'codex_helper_limit'; title = 'Codex helper limit'; label = 'Codex helper limit'; app = 'codex';
   #delegation; #configPath; #what;
   constructor({ environment = process.env, home = os.homedir(), delegation, configPath } = {}) {
     this.#delegation = delegation || require('./codex-delegation-config.cjs');
     this.#configPath = configPath || path.join(codexHomeDir(environment, home), 'config.toml');
-    this.#what = `${display(home, this.#configPath)}: Toolkit's helper limit block`;
+    this.#what = `Toolkit's block in ${display(home, this.#configPath)}`;
   }
   #state() {
     const { RUNTIMES } = this.#delegation;
@@ -192,7 +216,7 @@ class CodexHelperLimitPart {
   plan() {
     const { block } = this.#state();
     if (!String(block.ownership || '').startsWith('toolkit-managed')) return [];
-    return [{ what: this.#what, action: 'remove', detail: `${block.ownership}, ${Number.isInteger(block.helper_count) ? `${block.helper_count} helpers` : 'helper count unknown'}; Codex may then use its own higher default (a backup is saved first)` }];
+    return [{ what: this.#what, action: 'remove', detail: `${Number.isInteger(block.helper_count) ? `${block.helper_count} helpers; ` : ''}Codex may then use its own higher default`, backup: true }];
   }
   apply(items) {
     return items.filter(item => item.action === 'remove').map(item => attempt(item, () => {
@@ -207,7 +231,7 @@ class CodexHelperLimitPart {
 
 // Helper agent files Toolkit generated, found by their marker; any other file stays.
 class HelperAgentFilesPart {
-  key = 'helper_agents'; title = 'Toolkit helper agent files';
+  key = 'helper_agents'; title = 'Toolkit helper agent files'; label = 'Helper agents'; unit = 'Toolkit files';
   #folders; #home;
   constructor({ environment = process.env, home = os.homedir(), folders } = {}) {
     this.#home = home;
@@ -247,7 +271,7 @@ class HelperAgentFilesPart {
 
 // Skill folders Toolkit copied and recorded: the official n8n skills and the Antigravity copies.
 class SkillCopiesPart {
-  key = 'skill_copies'; title = 'Skill folders Toolkit copied'; shared = "Antigravity's skill copies";
+  key = 'skill_copies'; title = 'Skill folders Toolkit copied'; label = 'Skill copies'; unit = 'skill folders Toolkit copied'; shared = "Antigravity's skill copies";
   #owners; #home; #apps;
   constructor({ environment = process.env, home = os.homedir(), toolkitRoot = path.resolve(__dirname, '..', '..'), owners } = {}) {
     this.#home = home;
@@ -288,7 +312,7 @@ class SkillCopiesPart {
 // name, so `setup toolkit` can put them back later. Scheduled tasks are never noted. Saved
 // first, into the kept backups folder. Its content is in the plan, so the owner sees it.
 class ReinstallNotePart {
-  key = 'reinstall_note'; title = 'Kept for a later reinstall'; app = 'any';
+  key = 'reinstall_note'; title = 'Kept for a later reinstall'; label = 'Reinstall note'; app = 'any';
   #home; #helpers;
   constructor({ environment = process.env, home = os.homedir(), helpers } = {}) {
     this.#home = home;
@@ -306,7 +330,7 @@ class ReinstallNotePart {
     const note = require('./toolkit-reinstall-note.cjs');
     if (!Object.keys(helpers).length) return [];
     const said = Object.entries(helpers).map(([host, stack]) => `the ${host === 'codex' ? 'Codex' : 'Claude Code'} helpers (stack ${stack})`);
-    return [{ what: display(this.#home, note.notePath(this.#home)), action: 'save', detail: `so setup toolkit can put back ${said.join(' and ')}; no keys`, note: { helpers } }];
+    return [{ what: display(this.#home, note.notePath(this.#home)), action: 'save', text: `saved with this removal's backup, so \`setup toolkit\` can put back ${said.join(' and ')}; it holds no keys`, note: { helpers } }];
   }
   apply(items) {
     const note = require('./toolkit-reinstall-note.cjs');
@@ -320,7 +344,7 @@ class ReinstallNotePart {
 // The edit is checked with Python's tomllib: the new file must parse and equal the old one without
 // exactly those tables. Without Python, or on any difference, the file is left alone.
 class CodexHookStatePart {
-  key = 'codex_hook_state'; title = 'Codex hook records for Toolkit'; app = 'codex';
+  key = 'codex_hook_state'; title = 'Codex hook records for Toolkit'; label = 'Codex hook approvals'; app = 'codex';
   #home; #codexHome; #plugins; #parse; #now;
   constructor({ environment = process.env, home = os.homedir(), plugins, parse, now = () => new Date() } = {}) {
     this.#home = home;
@@ -336,9 +360,9 @@ class CodexHookStatePart {
     let text = null;
     try { text = fs.readFileSync(this.#config, 'utf8'); } catch { text = null; }
     const keys = text === null ? [] : require('./setup-codex-toolkit-plugin.cjs').toolkitHookStateTables(text).keys;
-    if (keys.length) items.push({ what: `${display(this.#home, this.#config)}: Codex's approval records for ${keys.length} Toolkit ${keys.length === 1 ? 'hook' : 'hooks'}`, action: 'remove',
-      detail: 'once the Codex plugin is uninstalled; a backup is saved first and the rest of the file stays', keys: [...keys].sort() });
-    if (fs.existsSync(this.#cache)) items.push({ what: display(this.#home, this.#cache), action: 'remove', detail: 'once the Codex plugin is uninstalled and the folder holds no files' });
+    if (keys.length) items.push({ what: `Codex's approval records for ${keys.length} Toolkit ${keys.length === 1 ? 'hook' : 'hooks'} in ${display(this.#home, this.#config)}`, action: 'remove',
+      detail: 'once the Codex plugin is uninstalled; the rest of the file stays', keys: [...keys].sort(), backup: true });
+    if (fs.existsSync(this.#cache)) items.push({ what: display(this.#home, this.#cache), action: 'remove', label: 'Codex plugin cache', detail: 'once the Codex plugin is uninstalled and the folder is empty' });
     return items;
   }
   apply(items) {
@@ -393,23 +417,30 @@ function withoutHookStates(doc, keys) {
   return copy;
 }
 
-// MCP servers whose key helper runs toolkit-env.cjs from inside the Toolkit folder. Listed, never
-// changed: their settings stay, but they get no key until Toolkit is reinstalled. The keys themselves
-// stay in the computer's credential store.
+// MCP servers whose key helper runs toolkit-env.cjs from inside a Toolkit folder entry that this
+// removal deletes (the managed checkout, as a rule). Listed only then, and never changed: their
+// settings and keys stay, but they get no key once the helper is gone. Shared, because the Toolkit
+// folder is; it runs after the folder, so apply reports each server whose helper is now gone, and the
+// closing lines say how to connect it again.
 class McpKeyHelpersPart {
-  key = 'mcp_key_helpers'; title = 'MCP servers that get their key through Toolkit';
-  #home; #claudeJson; #codexConfig; #folder;
-  constructor({ environment = process.env, home = os.homedir() } = {}) {
+  key = 'mcp_key_helpers'; title = 'MCP servers that get their key through Toolkit'; label = 'MCP servers'; app = 'shared';
+  #home; #claudeJson; #codexConfig; #root; #folder;
+  // folder: the ToolkitFolderPart, which says which of its entries this removal deletes.
+  constructor({ environment = process.env, home = os.homedir(), folder } = {}) {
     this.#home = home;
     this.#claudeJson = path.join(home, '.claude.json');
     this.#codexConfig = path.join(codexHomeDir(environment, home), 'config.toml');
-    this.#folder = path.join(home, '.ai-agent-toolkit');
+    this.#root = path.join(home, '.ai-agent-toolkit');
+    this.#folder = folder || new ToolkitFolderPart({ home, environment });
   }
-  // A command that runs toolkit-env.cjs from inside the Toolkit folder, compared with forward slashes
-  // and, as on Windows, without regard to case.
-  #inFolder(value) {
+  // The Toolkit folder entry a command runs toolkit-env.cjs from, or null. Compared with forward
+  // slashes and, as on Windows, without regard to case.
+  #entryOf(value) {
     const text = String(value || '').replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase();
-    return text.includes('toolkit-env.cjs') && text.includes(this.#folder.replace(/\\/g, '/').toLowerCase());
+    const root = `${this.#root.replace(/\\/g, '/').toLowerCase()}/`;
+    const at = text.indexOf(root);
+    if (!text.includes('toolkit-env.cjs') || at === -1) return null;
+    return text.slice(at + root.length).match(/^[^/"'\s]+/)?.[0] || null;
   }
   #claude() {
     let parsed;
@@ -418,32 +449,38 @@ class McpKeyHelpersPart {
     const scan = (servers, scope) => {
       if (!servers || typeof servers !== 'object') return;
       for (const [name, entry] of Object.entries(servers)) {
-        const parts = [entry?.headersHelper, entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])];
-        if (parts.some(part => this.#inFolder(part))) found.push({ what: `Claude Code ${scope}: ${name}`, app: 'claude-code' });
+        const entryName = [entry?.headersHelper, entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])].map(part => this.#entryOf(part)).find(Boolean);
+        if (entryName) found.push({ what: `${name} (Claude Code${scope})`, entry: entryName });
       }
     };
-    scan(parsed?.mcpServers, 'user server');
-    for (const [project, settings] of Object.entries(parsed?.projects || {})) scan(settings?.mcpServers, `server in ${project}`);
+    scan(parsed?.mcpServers, '');
+    for (const [project, settings] of Object.entries(parsed?.projects || {})) scan(settings?.mcpServers, `, in ${display(this.#home, project)}`);
     return found;
   }
   #codex() {
     let text;
     try { text = fs.readFileSync(this.#codexConfig, 'utf8'); } catch { return []; }
-    const found = new Set();
+    const found = new Map();
     let server = null;
     for (const line of text.split(/\r?\n/)) {
       const header = line.match(/^\s*\[\s*mcp_servers\.("([^"]+)"|'([^']+)'|[A-Za-z0-9_-]+)[\].]/);
       if (header) { server = header[2] || header[3] || header[1]; continue; }
       if (/^\s*\[/.test(line)) { server = null; continue; }
-      if (server && this.#inFolder(line)) found.add(`Codex server: ${server}`);
+      const entryName = server && this.#entryOf(line);
+      if (entryName && !found.has(server)) found.set(server, entryName);
     }
-    return [...found].map(what => ({ what, app: 'codex' }));
+    return [...found].map(([name, entryName]) => ({ what: `${name} (Codex)`, entry: entryName }));
   }
   plan() {
-    return [...this.#claude(), ...this.#codex()].sort((a, b) => a.what.localeCompare(b.what)).map(({ what, app }) => ({ what, app, action: 'keep',
-      detail: 'its settings stay, but it gets no key until Toolkit is reinstalled; the key stays in the credential store' }));
+    const going = this.#folder.goingEntries().map(name => name.toLowerCase());
+    return [...this.#claude(), ...this.#codex()].filter(item => going.includes(item.entry)).sort((a, b) => a.what.localeCompare(b.what))
+      .map(item => ({ ...item, action: 'keep', text: `${item.what} keeps its settings and key, but its key helper runs from the Toolkit folder, which goes; the closing lines say how to connect it again` }));
   }
-  apply() { return []; }
+  // After the folder part: a server whose helper's folder entry is gone has lost its key helper.
+  apply(items) {
+    return items.filter(item => item.action === 'keep' && item.entry && !fs.existsSync(path.join(this.#root, item.entry)))
+      .map(item => ({ what: item.what, result: 'lost its key helper', reconnect: true }));
+  }
 }
 
 // The Claude desktop app's Toolkit copy from the user's claude.ai account. Listed, never changed: it is
@@ -451,8 +488,10 @@ class McpKeyHelpersPart {
 // signed in to it, so only the owner can remove it there. Until they do, the Claude app keeps running
 // Toolkit's hooks from it, so the list says so and gives the steps.
 const ACCOUNT_COPY_STEPS = "only claude.ai can remove it, and that removes Toolkit from the Claude app on every computer and cloud session signed in to that account. Until then the Claude app keeps running Toolkit's hooks from it. To remove it: on claude.ai in a web browser, open Customize > Plugins and remove the ai-agent-toolkit plugin and then its marketplace (while the marketplace stays, Sync automatically can put the plugin back), then fully quit and reopen the Claude app.";
+// The one line every screen after the first plan shows.
+const ACCOUNT_COPY_SHORT = 'remove it on claude.ai under Customize > Plugins (plugin, then marketplace), then restart the app';
 class ClaudeAccountCopyPart {
-  key = 'claude_account_copy'; title = "The Claude app's Toolkit copy from your claude.ai account"; app = 'claude-code';
+  key = 'claude_account_copy'; title = "The Claude app's Toolkit copy from your claude.ai account"; label = "The Claude app's claude.ai copy"; app = 'claude-code';
   #home; #find;
   constructor({ environment = process.env, home = os.homedir(), find } = {}) {
     this.#home = home;
@@ -461,7 +500,7 @@ class ClaudeAccountCopyPart {
   plan() {
     const folder = this.#find();
     if (!folder) return [];
-    return [{ what: display(this.#home, folder), action: 'keep', detail: ACCOUNT_COPY_STEPS }];
+    return [{ what: display(this.#home, folder), action: 'keep', text: ACCOUNT_COPY_STEPS, short: ACCOUNT_COPY_SHORT }];
   }
   apply() { return []; }
 }
@@ -489,69 +528,152 @@ const PLUGIN_STEPS = Object.freeze({
   codex: Object.freeze({ app: 'Codex', lines: [`codex plugin remove ${PLUGIN_ID}`, `codex plugin marketplace remove ${MARKETPLACE}`], ui: 'open Plugins, find AI Agent Toolkit and remove it' }),
 });
 
+// The files under a folder, by path relative to `base` with forward slashes, each with what tells a
+// later read whether it changed. Links are listed as files and never followed.
+function filesUnder(base, relative) {
+  const out = new Map();
+  const walk = rel => {
+    const full = path.join(base, ...rel.split('/'));
+    let stat;
+    try { stat = fs.lstatSync(full); } catch { return; }
+    if (stat.isDirectory()) { for (const name of fs.readdirSync(full).sort()) walk(`${rel}/${name}`); return; }
+    let digest = '';
+    if (stat.isFile()) { try { digest = require('node:crypto').createHash('sha256').update(fs.readFileSync(full)).digest('hex'); } catch { digest = 'unreadable'; } }
+    out.set(rel, `${stat.size}:${stat.mtimeMs}:${digest}`);
+  };
+  walk(relative);
+  return out;
+}
+
 // Toolkit's own entries in ~/.ai-agent-toolkit. Removed only when no Toolkit plugin is installed.
+// What stays: KEPT_ENTRIES, anything that is not Toolkit's, and the backup this removal writes, which
+// is gathered into backups/remove-toolkit. That folder holds the last removal's backup, so a removal
+// that saves no backup of its own keeps it; one that does replaces it.
 class ToolkitFolderPart {
-  key = 'toolkit_folder'; title = 'Toolkit folder'; app = 'shared'; shared = 'the Toolkit folder';
-  #home; #root; #plugins;
-  constructor({ home = os.homedir(), environment = process.env, plugins } = {}) {
+  key = 'toolkit_folder'; title = 'Toolkit folder'; label = 'Toolkit folder'; unit = 'items'; app = 'shared'; shared = 'the Toolkit folder';
+  #home; #root; #plugins; #now; #before = new Map(); #savesBackup = false; #planned = false;
+  constructor({ home = os.homedir(), environment = process.env, plugins, now = () => new Date() } = {}) {
     this.#home = home;
     this.#root = path.join(home, '.ai-agent-toolkit');
     this.#plugins = plugins || (() => pluginState({ environment, home }));
+    this.#now = now;
   }
   get root() { return this.#root; }
   #present() {
     try { return fs.readdirSync(this.#root).sort(); } catch { return []; }
   }
-  // Toolkit's entries with something to remove: one that holds nothing but its kept backups has none.
-  #going() {
-    const onlyKept = name => { try { return fs.readdirSync(path.join(this.#root, name)).every(child => KEPT_INSIDE[name].includes(child)); } catch { return false; } };
-    return this.#present().filter(name => FOLDER_ENTRIES.includes(name) && !(KEPT_INSIDE[name] && onlyKept(name)));
+  #backups() {
+    const all = new Map();
+    for (const tree of BACKUP_TREES) for (const [file, mark] of filesUnder(this.#root, tree)) all.set(file, mark);
+    return all;
   }
-  plan() {
+  #lastRemoval(file) { return file.startsWith(`${REMOVAL_BACKUP}/`); }
+  // The top-level entries this removal deletes, read-only. An entry that holds only the last removal's
+  // backup, kept, has nothing to delete.
+  goingEntries({ savesBackup = this.#savesBackup } = {}) {
+    const backups = this.#backups();
+    return this.#present().filter(name => isToolkitEntry(name)
+      && (name !== 'backups' || [...backups.keys()].some(file => file.startsWith('backups/') && (savesBackup || !this.#lastRemoval(file)))));
+  }
+  // context.savesBackup: whether an earlier step of this removal saves a backup, which then replaces
+  // the last removal's.
+  plan(context = {}) {
+    this.#savesBackup = context.savesBackup === true;
+    this.#planned = true;
+    // Read again at apply's own plan read, before any step writes: what is here now is older.
+    this.#before = this.#backups();
+    const older = [...this.#before.keys()].filter(file => this.#savesBackup || !this.#lastRemoval(file));
+    const lastKept = !this.#savesBackup && [...this.#before.keys()].some(file => this.#lastRemoval(file));
+    const going = this.goingEntries();
     const names = this.#present();
-    const going = this.#going();
-    const kept = names.filter(name => !going.includes(name));
+    const shown = name => display(this.#home, path.join(this.#root, name));
+    const olderIn = name => older.filter(file => file.startsWith(`${name}/`)).length;
     return [
-      ...going.map(name => ({ what: display(this.#home, path.join(this.#root, name)), action: 'remove',
-        ...(KEPT_INSIDE[name] ? { detail: `its ${KEPT_INSIDE[name].join(', ')} folder stays` } : {}) })),
-      ...kept.map(name => ({ what: display(this.#home, path.join(this.#root, name)), action: 'keep',
-        detail: KEPT_LABELS[name] || (KEPT_INSIDE[name] ? KEPT_LABELS.backups : 'not a Toolkit file') })),
+      ...going.map(name => ({ what: shown(name), action: 'remove',
+        ...(BACKUP_TREES.some(tree => tree.split('/')[0] === name) && olderIn(name) ? { detail: `${olderIn(name)} older backup ${olderIn(name) === 1 ? 'file' : 'files'}`, older: olderIn(name) } : {}) })),
+      ...(this.#savesBackup ? [{ what: shown(REMOVAL_BACKUP), action: 'save', label: "This removal's backup", text: `${shown(REMOVAL_BACKUP)}, the copies of the files this removal changes` }] : []),
+      ...(lastKept ? [{ what: shown(REMOVAL_BACKUP), action: 'keep', label: "The last removal's backup", text: shown(REMOVAL_BACKUP) }] : []),
+      ...names.filter(name => !isToolkitEntry(name)).map(name => ({ what: shown(name), action: 'keep', ...(KEPT_LABELS[name] || { label: "Not Toolkit's" }) })),
     ];
   }
+  // The owner's one line for the folder's removals; the full list is shown on request.
+  summary(items) {
+    const older = items.reduce((sum, item) => sum + (item.older || 0), 0);
+    const what = ['the Toolkit checkout with its records and locks', ...(older ? [`${older} older backup ${older === 1 ? 'file' : 'files'}`] : [])];
+    return `${display(this.#home, this.#root)}: ${what.join(', and ')}${items.length > FOLD_AT ? ` (${items.length} items, full list on request)` : ''}; it goes last, once no Toolkit plugin is installed`;
+  }
   // Runs last. Entries a removal step wrote after the plan (such as the global rules record) go too,
-  // because they are on the same fixed list.
+  // because they are on the same fixed list. This removal's backup files are moved into
+  // backups/remove-toolkit before anything goes.
   apply(items) {
     if (!items.some(item => item.action === 'remove')) return [];
+    // Without its own plan read it cannot tell this removal's backup from the older ones.
+    if (!this.#planned) throw new Error('the Toolkit folder was not read before its removal');
+    // This removal's backup is gathered first, also when the folder waits for a plugin, so a later run
+    // that removes the folder keeps it as the last removal's backup.
+    const gathered = attempt({ what: display(this.#home, path.join(this.#root, REMOVAL_BACKUP)) }, () => this.#gather());
+    if (gathered.result === 'failed') return [gathered];
+    const fresh = gathered.result === 'saved';
     const installed = Object.entries(this.#plugins()).filter(([, on]) => on).map(([host]) => PLUGIN_STEPS[host].app);
-    if (installed.length) return [{ what: display(this.#home, this.#root), result: 'kept', reason: `the ${installed.join(' and ')} plugin is still installed and reads its records there` }];
+    if (installed.length) return [...(fresh ? [gathered] : []), { what: display(this.#home, this.#root), result: 'kept', reason: `the ${installed.join(' and ')} plugin is still installed and reads its records there` }];
     // A process whose folder is inside what goes could not remove it on Windows.
     const cwd = process.cwd();
     const inside = path.relative(this.#root, cwd);
     if (!inside.startsWith('..') && !path.isAbsolute(inside)) process.chdir(this.#home);
     const results = [];
-    for (const name of this.#going()) {
+    for (const name of this.goingEntries({ savesBackup: fresh })) {
       const target = path.join(this.#root, name);
-      results.push(attempt({ what: display(this.#home, target) }, () => { removeExcept(target, KEPT_INSIDE[name] || []); return { result: 'removed' }; }));
+      if (name === 'backups') { results.push(attempt({ what: display(this.#home, target) }, () => this.#clearBackups(fresh))); continue; }
+      results.push(attempt({ what: display(this.#home, target) }, () => { fs.rmSync(target, { recursive: true, force: true, maxRetries: 3 }); return { result: 'removed' }; }));
     }
+    if (fresh) results.push(gathered);
     try { if (fs.readdirSync(this.#root).length === 0) { fs.rmdirSync(this.#root); results.push({ what: display(this.#home, this.#root), result: 'removed' }); } } catch { /* kept; listed above */ }
     return results;
   }
-}
-
-// Removes a file or folder, keeping the named direct children of a folder.
-function removeExcept(target, keep) {
-  const stat = fs.lstatSync(target);
-  if (!stat.isDirectory() || !keep.length) { fs.rmSync(target, { recursive: true, force: true, maxRetries: 3 }); return; }
-  for (const name of fs.readdirSync(target)) if (!keep.includes(name)) fs.rmSync(path.join(target, name), { recursive: true, force: true, maxRetries: 3 });
-  if (fs.readdirSync(target).length === 0) fs.rmdirSync(target);
+  // Moves every backup file this removal wrote (new since the plan read, or changed) into
+  // backups/remove-toolkit/<time>/, keeping its path; files already in backups/remove-toolkit stay where
+  // they are.
+  #gather() {
+    const now = this.#backups();
+    const fresh = [...now.keys()].filter(file => this.#before.get(file) !== now.get(file));
+    if (!fresh.length) return { result: 'none' };
+    const stamp = this.#now().toISOString().replace(/[:.]/g, '-');
+    for (const file of fresh.filter(entry => !this.#lastRemoval(entry))) {
+      const to = path.join(this.#root, ...REMOVAL_BACKUP.split('/'), stamp, ...file.replace(/^agent-control\/backups\//, 'agent-control/').replace(/^backups\//, '').split('/'));
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.renameSync(path.join(this.#root, ...file.split('/')), to);
+    }
+    return { result: 'saved' };
+  }
+  // Deletes the older backup files, unchanged since the plan read; the last removal's backup goes only
+  // when this removal saved one of its own. Empty folders go after.
+  #clearBackups(fresh) {
+    let count = 0;
+    const now = this.#backups();
+    for (const [file, mark] of this.#before) {
+      if (!file.startsWith('backups/') || (!fresh && this.#lastRemoval(file)) || now.get(file) !== mark) continue;
+      fs.rmSync(path.join(this.#root, ...file.split('/')), { force: true });
+      count += 1;
+    }
+    const prune = dir => {
+      let stat;
+      try { stat = fs.lstatSync(dir); } catch { return; }
+      if (!stat.isDirectory()) return;
+      for (const name of fs.readdirSync(dir)) prune(path.join(dir, name));
+      if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
+    };
+    prune(path.join(this.#root, 'backups'));
+    return { result: 'removed', reason: `${count} older backup ${count === 1 ? 'file' : 'files'}` };
+  }
 }
 
 // The parts in the order apply runs them: the reinstall note first, then settings, then files, then
-// the folder last.
+// the Toolkit folder, and after it the MCP servers that lose their key helper with it (a report only).
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
-  return [new ReinstallNotePart({ environment, home }), new ClaudeAccountCopyPart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
+  const folder = new ToolkitFolderPart({ home, environment });
+  return [new ReinstallNotePart({ environment, home }), new ClaudeAccountCopyPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
     new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new CodexSetupJournalPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
-    new SkillCopiesPart({ environment, home }), new UpdateReportsPart({ environment, home }), new ToolkitFolderPart({ home, environment })];
+    new SkillCopiesPart({ environment, home }), new UpdateReportsPart({ environment, home }), folder, new McpKeyHelpersPart({ environment, home, folder })];
 }
 
-module.exports = { ReinstallNotePart, ClaudeAccountCopyPart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, KEPT_LABELS, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
+module.exports = { ReinstallNotePart, ClaudeAccountCopyPart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, BACKUP_TREES, REMOVAL_BACKUP, FOLD_AT, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState };

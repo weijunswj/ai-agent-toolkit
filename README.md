@@ -28,8 +28,8 @@ Toolkit checks for a newer `main` at each Codex or Claude Code session start and
 Say `remove toolkit` in Claude Code or Codex. It asks whether to remove Toolkit from only that app or from every app, lists what Toolkit put there, removes it after your OK, and uninstalls the plugin with the app's command line. Toolkit's old scheduled tasks and the Toolkit folder stay while another app still has the plugin. Details: [Remove Toolkit from this computer](repo/docs/TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 
 - **Left for you:** If an app's command line is not available, uninstall the plugin in that app (Claude Code: `/plugin`; Codex: Plugins), then say `remove toolkit` again to finish.
-- **Kept on purpose:** Your keys, the list of them in `~/.ai-agent-toolkit/env`, and the backups in `~/.ai-agent-toolkit/backups`. Delete those two folders yourself once you no longer need them.
-- **Coming back:** `setup toolkit` puts your helper agents back. Scheduled tasks do not come back: the cloud runs that work now. MCP servers that get their key through Toolkit are listed, because they get no key until you reinstall.
+- **Kept on purpose:** Your keys, the list of them in `~/.ai-agent-toolkit/env`, the recovery records in `~/.ai-agent-toolkit/recovery-identities`, and the backup of the last removal in `~/.ai-agent-toolkit/backups/remove-toolkit`. Everything else Toolkit made in that folder goes, older backups included. Delete what is left yourself once you no longer need it.
+- **Coming back:** `setup toolkit` puts your helper agents back. Scheduled tasks do not come back: the cloud runs that work now. An MCP server whose key helper ran from the Toolkit folder keeps its settings and key; the closing lines say how to connect it again.
 
 ## Skills
 
