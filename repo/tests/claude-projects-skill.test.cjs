@@ -1194,3 +1194,35 @@ test('Projects drops the suggest-improvements duty and keeps the never-change-se
   assert.ok(skill.split('\n').includes('- Never change Toolkit features or their settings yourself. The managed block carries this to threads.'));
   assert.ok(block.split('\n').includes('- The coordinator never changes Toolkit features or their settings itself.'));
 });
+
+// #1546 PR 3: the daily check-in brings every scheduled task in step, Toolkit tasks and the owner's
+// tasks on Toolkit's shell alike, with the takeover's read-back (INT-TK421-1378, answer 3). Red on main:
+// step 8 checks only the two Toolkit tasks with --check, and a shell update waits for the owner's word.
+test('the daily check-in runs the upgrade plan over every task and counts only a verified swap as done', () => {
+  const base = 'repo/contracts/claude-projects/web-controller-projects/';
+  const daily = read(`${base}tasks/daily-check-in.md`);
+  const step8 = daily.split('\n').find(line => line.startsWith('8. TOOL STEP'));
+  for (const required of ['read every task of this project back once', '"schema": "toolkit.projects-task-read-back.v1"',
+    '`toolkit-projects-tasks.cjs --upgrade-plan <read-back file> --memory MEMFILE --daily`',
+    'a project task on the Toolkit shell (kind `custom`)', '"<task name>: paused, kept paused"', 'a shell task included, without asking']) {
+    assert.ok(step8.includes(required), required);
+  }
+  assert.doesNotMatch(step8, /--check daily-check-in|--check hourly-nudge/, 'the plan replaces the per-task check');
+  const acting = read(`${base}reference/periodic-runs.md`).split('\n').find(line => line.startsWith('  - `TASKS OUTDATED`'));
+  for (const required of ['every task the plan names `outdated`', 'the project\'s own tasks on the Toolkit shell included', 'without asking', '--daily',
+    '`--upgrade-verify', 'only `verified` is done', 'a paused task stays paused', 'never one whose entry says `stopped by owner`', 'Post only what changed']) {
+    assert.ok(acting.includes(required), required);
+  }
+  const recurring = read(`${base}reference/recurring-tasks.md`);
+  assert.doesNotMatch(recurring, /a shell update waits for the owner's word/);
+  const own = recurring.split('\n').find(line => line.startsWith('**The project\'s own tasks**'));
+  for (const required of ['shell updates come without asking', 'the daily check-in', '--daily', 'a paused one stays paused and is listed', 'stopped by owner']) {
+    assert.ok(own.includes(required), required);
+  }
+  const upgrade = recurring.split('\n').find(line => line.startsWith('**Upgrade at a takeover.**'));
+  assert.ok(upgrade.includes('The daily check-in runs the same plan with `--daily`'), 'the takeover paragraph names the daily mode');
+  const rows = JSON.parse(read(`${base}setup-inventory.json`)).rows;
+  const shell = rows.find(row => row.id === 'shell-tasks');
+  assert.deepEqual([shell.check, shell.resync], ['TASKS OUTDATED', 'auto']);
+  assert.equal(rows.find(row => row.id === 'project-tasks').resync, 'report', 'a task not on the shell stays advice only');
+});
