@@ -1,5 +1,42 @@
 # Toolkit Changelog
 
+## 3.196.0
+
+### Added
+
+- **Memory tidy (`toolkit memory tidy`):** a controller compares its repository's Claude Code memory notes on this computer with the installed Toolkit release. Each note gets one verdict (already a Toolkit default, out of date or against Toolkit, the repository's own fact, the owner's own preference, a Toolkit gap, or kept as memory with why); a note goes only with a quote this release holds word for word. The owner sees a grouped list, can always answer "keep everything", and for the numbers they pick sees exactly what would change, note by note, before anything does. Only after their yes to that preview does the tool back up every folder it will change (in `~/.ai-agent-toolkit/backups/memory-tidy`), make exactly those changes, keep `MEMORY.md` in step and print the restore command; a failure in any folder puts every changed folder back. The owner's own preference notes are only marked and go only on the owner's pick. It touches only that repository's memory: never AGENTS.md, the owner's own instructions, Projects or Codex. The evidence store gets file names, verdicts and the cited Toolkit text; GitHub gets counts only.
+
+## 3.195.0 (Governance reminders for permissions, the App, the evidence store and a closed shard split)
+
+### Added
+
+- **Permissions line at turn end (Claude Code):** while this computer's Toolkit permission lines are out of date, the first turn end of each governed local chat shows the owner one line, naming `toolkit permissions`. It shows once per chat, never stops the turn, and cloud sessions are not checked. The session-start line for the agent stays.
+- **Governance App and evidence store at session start:** a governed session start carries one line for the agent to pass on when the Governance App is missing or partly set up, or when the evidence store cannot be found, is not private or cannot be written with this computer's GitHub sign-in. GitHub is checked at most once a day per repository, in the background, so a session start never waits; while a part is missing, unusable or could not be read it is checked again after an hour, and the governance bank saves its own reads, so a fix the owner sees there ends the line at once. GitHub that could not be read says nothing.
+- **Evidence store row:** the governance bank's evidence store row reads the store as it reads the App and shows Not ready when it cannot be used, with the same one step as the session line.
+- **A closed shard split is asked about once:** when the owner closed a shard split pull request without merging it, the bank's shards row asks once (shards=yes opens a new one, shards=never stops the offer, any other reply keeps shards off). The answer is remembered on that computer and holds until a newer split is closed, even once that pull request drops off GitHub's newest closed list or the list cannot be read, so no plain reply reopens it.
+
+### Changed
+
+- **How to ask, generic wording:** the global rules, the desktop asking line, the takeover playbook and the controller principles now say to mark the recommended option instead of naming the owner's own "(my pick)" style, and the principles no longer ask for bold section labels. The owner's own instructions keep their style; the Claude Projects controller skill keeps its post format.
+
+### Notes
+
+- A missing Governance App holds no governance action: programme records, gates, merges, the bank and this computer's own refresh use the owner's own GitHub sign-in. Only the cloud Programme Sweep and the Shard Timings pull request need the App, and they do nothing without it.
+- Codex keeps the session-start permissions line only; its turn-end hook prints nothing.
+
+## 3.194.0
+
+### Added
+
+- **Daily scheduled task sync in Projects:** the daily check-in now reads every scheduled task of the project back once and runs the upgrade plan in its daily mode (`toolkit-projects-tasks.cjs --upgrade-plan <read-back> --memory <memory> --daily`). Each outdated Toolkit task, and each of the project's own tasks on the Toolkit shell, is swapped in place without asking, then every task is read back again and checked with `--upgrade-verify`; only a verified task counts as done, and the run posts only what changed.
+- **No unpause question in the daily run:** the daily plan asks nothing; a paused task stays paused and is listed under `paused`, and a task stopped by the owner is never touched. A takeover keeps its one unpause question.
+
+### Changed
+
+- **Shell updates without asking:** a project's own task opted into the Toolkit shell now gets its shell updates from the daily check-in with the same read-back as a takeover, instead of waiting for the owner's word. Its own steps never change.
+- **Old full shells are recognised:** a project task still holding the full shell from before pointers (run setup and delivery only) now plans as a shell task and is brought to the pointer form, instead of reading as not Toolkit's.
+- **Setup inventory:** a new `shell-tasks` row (checked by TASKS OUTDATED, kept current automatically); the `project-tasks` row now covers only tasks not on the shell.
+
 ## 3.193.0
 
 ### Added

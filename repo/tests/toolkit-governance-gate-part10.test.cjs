@@ -124,7 +124,7 @@ test('the desktop app\'s session start says how to ask the owner, governance on,
     '1. Put the full context, options and your pick in your closing message and end the turn.',
     '2. A simple question may use the app\'s end-of-turn box in that turn.',
     '3. A merge or three or more choices uses the question card, on your next turn.',
-    '4. A card holds only the question and its choices, clear alone, with "(my pick)" on one.',
+    '4. A card holds only the question and its choices, clear alone, with your recommended option marked.',
     '5. Never write the context and open a card in the same turn: the app cuts it short.',
     'Toolkit\'s exact merge card keeps its own text.',
   ].join(' ');

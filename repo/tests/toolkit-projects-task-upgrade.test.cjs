@@ -209,3 +209,76 @@ test('L4: a project task named in any language is read; a name with a hidden or 
     assert.throws(() => planner.plan(readBack([task('trig_mine', name, 'Remind me.')]), { memory: MEMORY }), error => error.message === 'TASK_READ_BACK', JSON.stringify(name));
   }
 });
+
+// The daily check-in (#1546 PR 3): the same plan in its daily mode, over every task read back once.
+// The owner's answer (INT-TK421-1378, 3): tasks on Toolkit's shell get shell updates without asking,
+// with the same read-back as a takeover; a stopped task is never touched; a paused one stays paused and
+// is listed. Red on main: no daily mode (the CLI refuses --daily, the plan asks the unpause question)
+// and an old full shell reads as not Toolkit's, so it is never brought in step.
+test('the daily plan swaps every outdated Toolkit and shell task, never a stopped one, and keeps a paused one paused with no question', () => {
+  const back = readBack([
+    task('trig_daily', 'EXAMPLE: Daily check-in', full('daily-check-in')),
+    task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge')),
+    task('trig_sweep', 'EXAMPLE: Example sweep', full('custom', OWN_TEXT)),
+    task('trig_weekly', 'EXAMPLE: Weekly sweep', full('custom', OWN_TEXT), false),
+    task('trig_old', 'EXAMPLE: Hourly nudge', full('hourly-nudge'), false),
+    task('trig_mine', 'My own reminder', 'Remind me to water the plants.', false),
+  ]);
+  const plan = planner.plan(back, { memory: MEMORY, daily: true });
+  assert.equal(plan.mode, 'daily');
+  assert.deepEqual(plan.tasks.map(row => [row.id, row.kind, row.state, row.paused]), [
+    ['trig_daily', 'daily-check-in', 'outdated', false],
+    ['trig_nudge', 'hourly-nudge', 'current', false],
+    ['trig_sweep', 'custom', 'outdated', false],
+    ['trig_weekly', 'custom', 'outdated', true],
+    ['trig_old', 'hourly-nudge', 'stopped', true],
+    ['trig_mine', null, 'not-toolkit', true],
+  ]);
+  // Each replacement is the current prompt for that task; the shell task keeps its own steps word for word.
+  assert.equal(plan.tasks[0].replacement, current('daily-check-in'));
+  for (const row of [plan.tasks[2], plan.tasks[3]]) {
+    assert.equal(tasks.check('custom', row.replacement).state, 'current', row.id);
+    assert.ok(row.replacement.includes(OWN_TEXT), row.id);
+  }
+  assert.equal(plan.tasks[4].replacement, undefined, 'a stopped task is never planned as a swap');
+  // No unpause question in the daily run: the paused shell task is listed and stays paused.
+  assert.equal(plan.unpause, null);
+  assert.deepEqual(plan.paused, [{ id: 'trig_weekly', name: 'EXAMPLE: Weekly sweep' }]);
+  // The takeover keeps its one question.
+  assert.deepEqual(planner.plan(back, { memory: MEMORY }).unpause.ids, ['trig_weekly']);
+
+  const after = (changes = {}) => readBack(back.tasks.map(entry => {
+    const row = plan.tasks.find(planned => planned.id === entry.id);
+    return { ...entry, ...(row.replacement ? { prompt: row.replacement } : {}), ...changes[entry.id] };
+  }));
+  // Only the exact second read-back verifies: every swap in place, the paused task still paused.
+  assert.equal(planner.verify(plan, after()).verified, true);
+  const why = (result, id) => result.tasks.find(row => row.id === id).why;
+  assert.equal(why(planner.verify(plan, after({ trig_weekly: { enabled: true } })), 'trig_weekly'), 'it is no longer paused');
+  assert.equal(why(planner.verify(plan, after({ trig_old: { prompt: current('hourly-nudge') } })), 'trig_old'), 'its prompt changed, and the plan changes none here');
+  assert.equal(why(planner.verify(plan, after({ trig_sweep: { prompt: full('custom', OWN_TEXT) } })), 'trig_sweep'), 'its prompt is not the planned replacement');
+  assert.throws(() => planner.verify(plan, after({ trig_weekly: { enabled: true } }), { unpaused: ['trig_weekly'] }), /TASK_ARGUMENTS/, 'the daily run never unpauses');
+});
+
+test('from the command line the daily plan asks nothing: a paused task alone exits 0, a swap to make exits 1', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-task-upgrade-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'read-back.json');
+  const memory = path.join(dir, 'memory.md');
+  fs.writeFileSync(memory, MEMORY);
+  const plan = (...extra) => spawnSync(process.execPath, [SCRIPT, '--upgrade-plan', file, '--memory', memory, ...extra], { encoding: 'utf8' });
+  fs.writeFileSync(file, JSON.stringify(readBack([task('trig_nudge', 'EXAMPLE: Hourly nudge', current('hourly-nudge'), false)])));
+  const quiet = plan('--daily');
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.deepEqual([JSON.parse(quiet.stdout).mode, JSON.parse(quiet.stdout).unpause, JSON.parse(quiet.stdout).paused], ['daily', null, [{ id: 'trig_nudge', name: 'EXAMPLE: Hourly nudge' }]]);
+  assert.equal(plan().status, 1, 'the takeover still asks');
+  fs.writeFileSync(file, JSON.stringify(readBack([task('trig_sweep', 'EXAMPLE: Example sweep', full('custom', OWN_TEXT))])));
+  const swap = plan('--daily');
+  assert.equal(swap.status, 1);
+  assert.equal(JSON.parse(swap.stdout).tasks[0].state, 'outdated');
+  // --daily is a switch: a value after it, or on the check, is refused.
+  assert.equal(plan('--daily', 'yes').status, 2);
+  const planFile = path.join(dir, 'plan.json');
+  fs.writeFileSync(planFile, swap.stdout);
+  assert.equal(spawnSync(process.execPath, [SCRIPT, '--upgrade-verify', planFile, file, '--daily'], { encoding: 'utf8' }).status, 2);
+});

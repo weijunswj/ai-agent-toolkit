@@ -1548,13 +1548,15 @@ function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, ho
   const { lines, checkpoints } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
   // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
   const finish = state.programme_records_bind === true ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
+  // A missing Governance App or an evidence store that cannot be used, from the last check.
+  const parts = state.programme_records_bind === true ? require('./toolkit-governance-parts.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.
   const rules = state.state === 'ENABLED' ? `\n\n${governedRules()}` : '';
   // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
   return fitLines(checkpoints, (kept, leftOut) => {
     const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
-    return `${[decidedLine(state, refresh), ...finish, ...permissionsLine(state, programmeDeps, host), ...lines, ...kept, ...more].join(' ')}${rules}`;
+    return `${[decidedLine(state, refresh), ...finish, ...parts, ...permissionsLine(state, programmeDeps, host), ...lines, ...kept, ...more].join(' ')}${rules}`;
   }, limit);
 }
 
