@@ -173,8 +173,11 @@ test('H1: a line that says what the settings say is a repeat only when it says a
   const split = reader({ placement: { default: 'remote_control', gates: { G2: 'cloud' }, device: 'desk', folder: 'C:\\work' } });
   const kind = line => split.check(`${line}\n`).findings[0]?.kind;
   assert.equal(kind('- Gates run on this device by Remote Control; G2 in cloud threads (desk, C:\\work).'), undefined, 'the rendered line itself');
-  assert.equal(kind('- Gates run on my laptop; G2 in the cloud.'), 'repeats-setting');
-  assert.equal(kind('- Gates run on my laptop; G1 on my laptop; G2 in the cloud.'), 'repeats-setting', 'a gate at the default adds nothing');
+  // The settings name the device desk, so a laptop may be another computer (M-A): asked, not fixed.
+  assert.equal(kind('- Gates run on this device; G2 in the cloud.'), 'repeats-setting');
+  assert.equal(kind('- Gates run on my computer; G1 on my computer; G2 in the cloud.'), 'repeats-setting', 'a gate at the default adds nothing');
+  assert.equal(kind('- Gates run on my laptop; G2 in the cloud.'), 'conflicts-setting');
+  assert.equal(split.check('- Gates run on my laptop; G2 in the cloud.\n').findings[0].fix, undefined);
   for (const line of ['- Gates run on my laptop.', '- All gates run on my laptop.', '- Gates run on my laptop; G2 in the cloud (C:\\old).', '- Gates run on my laptop; G2 in the cloud (desk, C:\\old).', '- Gates run on my laptop; G1 in the cloud.']) assert.equal(kind(line), 'conflicts-setting', line);
   assert.equal(kind('- Gates run on my laptop; G2 in the cloud (other-desk, C:\\old).'), undefined, 'another device name is a word the reader does not know');
 });
@@ -195,6 +198,56 @@ test('H1: a second line with another value is a conflict naming both, and an equ
   assert.deepEqual(stale.findings.map(finding => [finding.line, finding.kind]), [[1, 'conflicts-setting']]);
   const equal = check(dir, '- Lanes: 2 working lanes (owner, 2026-11-25)\n- 2 working lanes\n', extra);
   assert.deepEqual(equal.findings.map(finding => [finding.line, finding.kind, finding.fix.action]), [[2, 'duplicate', 'delete']]);
+});
+
+// From the G2 round 2 of PR 1522 (M-A): "this device", "my computer" or "by Remote Control" is the
+// device the controller works from, but a laptop, a desktop and a PC are kinds of computer that may be
+// different ones. A line naming one is the same as another line only when both name the same kind, and
+// the same as the settings only when the settings name no device; anything else is asked, never fixed.
+test('M-A: two lines naming two kinds of computer are a conflict with no fix, never a duplicate', t => {
+  const dir = scratch(t);
+  for (const [first, second] of [['laptop', 'desktop'], ['desktop', 'pc'], ['desktop', 'laptop'], ['laptop', 'computer']]) {
+    const found = check(dir, `- Gates run on my ${first}.\n- Gates run on my ${second}.\n`);
+    const onLine2 = found.findings.filter(finding => finding.line === 2);
+    assert.deepEqual(onLine2.map(finding => [finding.kind, finding.fix]), [['conflicts-line', undefined]], `${first} then ${second}`);
+    assert.match(onLine2[0].message, new RegExp(`^It says placement remote_control on my ${second}, but line 1 says on my ${first}: they may be two computers\\. Ask the owner which one stands; no fix is offered\\.$`));
+    assert.equal(found.code, 1, 'a conflict needs the owner');
+  }
+  // The same kind said twice, or the device said two ways, is still one line too many.
+  for (const [first, second] of [['laptop', 'laptop'], ['computer', 'device'], ['machine', 'computer']]) {
+    const found = check(dir, `- Gates run on my ${first}.\n- Gates run on the ${second}.\n`);
+    assert.deepEqual(found.findings.filter(finding => finding.line === 2).map(finding => [finding.kind, finding.fix]), [['duplicate', { action: 'delete' }]], `${first} then ${second}`);
+  }
+});
+
+test('M-A: a line naming a kind of computer is never what the settings say when they name a device', t => {
+  const dir = scratch(t);
+  const withDevice = ['--settings', settingsIn(dir, ['--live-lanes', '2', '--placement', 'remote_control', '--device', 'laptop-1'])];
+  const found = check(dir, '- Gates run on the desktop.\n', withDevice);
+  assert.deepEqual(found.findings.map(finding => [finding.kind, finding.fix]), [['conflicts-setting', undefined]]);
+  assert.equal(found.findings[0].message, 'It says placement remote_control on the desktop, but the controller settings name the device laptop-1: it may be another computer. Ask the owner which one stands, or change the settings on the owner\'s word; no fix is offered.');
+  assert.equal(found.code, 1, 'a conflict with no fix still needs the owner');
+  // The device itself, named in the brackets, is the same computer; "this device" is too.
+  assert.deepEqual(check(dir, '- Gates run on my laptop (laptop-1).\n', withDevice).findings.map(finding => finding.kind), ['repeats-setting']);
+  assert.deepEqual(check(dir, '- Gates run on this device.\n', withDevice).findings.map(finding => finding.kind), ['repeats-setting']);
+  // With no device in the settings, a named kind keeps its one fix (the settings line replaces it).
+  const noDevice = ['--settings', settingsIn(dir, ['--live-lanes', '2', '--placement', 'remote_control'], 'example-owner/other-repo')];
+  const kept = check(dir, '- Gates run on my laptop.\n', noDevice);
+  assert.deepEqual(kept.findings.map(finding => [finding.kind, finding.fix?.action]), [['repeats-setting', 'replace']]);
+});
+
+// M-B: a block line under a heading that may turn its meaning round keeps the heading hold, as a
+// settings line does; under a heading that keeps its meaning, the same line still gets its fix.
+test('M-B: a block line under a heading that may change what it means is not offered for removal', t => {
+  const dir = scratch(t);
+  const line = BLOCK.split('\n').find(entry => /^- /.test(entry) && entry.length > 60);
+  for (const heading of ['## Toolkit lines I do not want here', '## Not in this project', '## Billing repository']) {
+    const found = check(dir, `${heading}\n\n${line}\n`, ['--block', 'projects']);
+    assert.deepEqual(found.findings.map(finding => [finding.kind, finding.fix]), [['repeats-block', undefined]], heading);
+    assert.match(found.findings[0].message, new RegExp(`^It is the same as line \\d+ of Toolkit's block, but its heading "${heading.slice(3)}" may change what it means, so no fix is offered: read both\\.$`));
+  }
+  const plain = check(dir, `## Project lines\n\n${line}\n`, ['--block', 'projects']);
+  assert.deepEqual(plain.findings.map(finding => [finding.kind, finding.fix]), [['repeats-block', { action: 'delete' }]]);
 });
 
 // A line gets a fix only where it stands on its own. Each entry: text with one settings line in it
