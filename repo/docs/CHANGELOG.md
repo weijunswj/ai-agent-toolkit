@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.196.0
+
+### Added
+
+- **Memory tidy (`toolkit memory tidy`):** a controller compares its repository's Claude Code memory notes on this computer with the installed Toolkit release. Each note gets one verdict (already a Toolkit default, out of date or against Toolkit, the repository's own fact, the owner's own preference, a Toolkit gap, or kept as memory with why); a note goes only with a quote this release holds word for word. The owner sees a grouped list, can always answer "keep everything", and for the numbers they pick sees exactly what would change, note by note, before anything does. Only after their yes to that preview does the tool back up every folder it will change (in `~/.ai-agent-toolkit/backups/memory-tidy`), make exactly those changes, keep `MEMORY.md` in step and print the restore command; a failure in any folder puts every changed folder back. The owner's own preference notes are only marked and go only on the owner's pick. It touches only that repository's memory: never AGENTS.md, the owner's own instructions, Projects or Codex. The evidence store gets file names, verdicts and the cited Toolkit text; GitHub gets counts only.
+
 ## 3.195.0 (Governance reminders for permissions, the App, the evidence store and a closed shard split)
 
 ### Added
