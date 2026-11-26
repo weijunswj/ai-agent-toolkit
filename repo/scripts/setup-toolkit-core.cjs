@@ -3779,6 +3779,23 @@ function subagentDepthOutcomeSummary(result) {
   return result.changed ? `changed; ${effect}` : `unchanged; ${effect}`;
 }
 
+// The governance bank's permissions row, said the same way at the end of setup: Toolkit's own lines
+// and the other lines to review, with the owner's one command when Toolkit's lines are out of date.
+// No question is asked and nothing is written; it reads this computer's settings files only.
+function permissionsSummaryLines(host, check = (app) => require('./toolkit-permissions-cli.cjs').permissionsWithReview(process.cwd(), { host: app })) {
+  const app = host === 'codex' ? 'codex' : 'claude';
+  let found = null;
+  try { found = check(app); } catch { found = null; }
+  const name = app === 'codex' ? 'Codex' : 'Claude Code';
+  if (!found || found.checked !== true) return ['## Toolkit permissions', `Toolkit permissions (${name}): not checked; say toolkit permissions to see them.`, ''];
+  const outdated = found.missing > 0 || found.stale > 0;
+  const status = outdated ? [found.missing ? `${found.missing} missing` : '', found.stale ? `${found.stale} old` : ''].filter(Boolean).join(', ') : 'up to date';
+  const other = Number.isInteger(found.other) && found.other > 0 ? found.other : 0;
+  return ['## Toolkit permissions', `Toolkit permissions (${name}): Toolkit lines: ${status}${other ? `. Other lines: ${other} to review` : ''}.`,
+    ...(outdated ? [`To bring Toolkit's lines up to date, run this once in your own PowerShell or terminal (it shows the changes, backs up and waits for your Enter): ${found.update}`] : []),
+    ...(other ? ['Say review permissions to see the other lines; nothing changes unless you pick lines.'] : []), ''];
+}
+
 function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, claudeAppSetting, n8nSkills, antigravitySkills, audit, questionBank, validationResults, installCheck }) {
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
@@ -3869,6 +3886,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');
   }
+  for (const line of permissionsSummaryLines(args.host)) console.log(line);
   if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
   if (antigravitySkills) console.log(`Toolkit skills in Antigravity: ${antigravitySkills}\n`);
   if (localClone) console.log(`Your local Toolkit clone: ${localCloneSummary(localClone)}\n`);
@@ -4241,6 +4259,7 @@ module.exports = {
   assertSupportedComputer,
   NewSessionNotice,
   leftoverTaskLines,
+  permissionsSummaryLines,
   cloudSweepSkipLines,
   gitFailureHint,
   nativePluginRebindFailure,

@@ -87,7 +87,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/scripts\/setup-[^/]+\.cjs$/, 'setup and its host bank helpers'],
   [/^repo\/scripts\/toolkit-governance(?:-[^/]+)?\.cjs$/, 'governance runtime and state'],
   [/^repo\/scripts\/toolkit-(?:repository-identity|user-state)\.cjs$/, 'governance identity and operational state'],
-  [/^repo\/scripts\/toolkit-(?:permissions|permissions-apply|cleanup|store)\.cjs$/, 'the permission blocks and the commands they allow'],
+  [/^repo\/scripts\/toolkit-(?:permissions(?:-[a-z]+)?|cleanup|store)\.cjs$/, 'the permission blocks and the commands they allow'],
   [/^repo\/scripts\/toolkit-(?:remove|remove-parts|commands)\.cjs$/, 'remove toolkit and the typed Toolkit commands'],
   [/^repo\/tests\/toolkit-permissions\.test\.cjs$/, 'the test that pins what the pasted permission lines allow'],
   [/^(?:repo\/docs\/agent-playbooks|skills\/toolkit-playbooks)\/safety-gates\.md$/, 'approval rules'],

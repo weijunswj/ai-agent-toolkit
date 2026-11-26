@@ -107,7 +107,7 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup is a Toolkit default.
     assert.match(result.out, /^\| \d\.\d \| Parallel CI shards \| Ready: Not applicable \|/m);
     assert.match(result.out, /^- Toolkit instruction copies: 1 file left \(Toolkit default: clean up\)\. /m);
-    assert.match(result.out, /^\| \d\.\d \| Toolkit permissions \(Claude Code\) \| Not ready: Outdated: 6 missing \| Next step: run the one command Toolkit gives after your answer \| /m);
+    assert.match(result.out, /^\| \d\.\d \| Toolkit permissions \(Claude Code\) \| Not ready: Toolkit lines: 6 missing \| Next step: run the one command Toolkit gives after your answer \| /m);
     assert.match(result.out, /^- Set in \.github\/toolkit-programme\.json: parent #1, required check validate\. To change them, edit that file in a pull request and merge it\.$/m);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
     assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.1=B\./m);

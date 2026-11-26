@@ -165,7 +165,7 @@ class ToolkitGovernanceCli {
     this.#ciEstimator = ciEstimator || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? () => null : root => ciOffer.readEstimate(root));
     // The pinned copies are checked against the Toolkit git checkout (the managed one from a plugin copy).
     this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, require('./toolkit-cloud-workflows.cjs').sourceRoot()));
-    this.#permissionsChecker = permissionsChecker || (root => require('./toolkit-permissions.cjs').permissionsState(root));
+    this.#permissionsChecker = permissionsChecker || (root => require('./toolkit-permissions-cli.cjs').permissionsWithReview(root));
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
     this.#plainTextInstaller = plainTextInstaller;
@@ -877,7 +877,9 @@ class ToolkitGovernanceCli {
       const command = permissions.checked ? permissions[chosen.permissionBlocks] : null;
       if (command) commanded += 1;
       const app = governanceBank.APP_NAMES[permissions.host] || 'this app';
-      this.#print(false, {}, command
+      // Claude Code's update prints the review list (house format), which ends with the one command.
+      const reviewList = chosen.permissionBlocks === 'update' && command && typeof permissions.review === 'string' && permissions.review ? permissions.review : null;
+      this.#print(false, {}, reviewList ? ['', ...reviewList.split('\n')] : command
         ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to press Enter.`, '', ...fenced(command)]
         : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;

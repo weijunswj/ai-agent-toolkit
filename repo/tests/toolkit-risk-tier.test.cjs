@@ -148,7 +148,7 @@ function riskyReach(tracked) {
     return found.filter(target => target && known.has(target) && counts(target));
   };
   const roots = tracked.filter(rel => tierOf(rel) === 'RISKY' && !rel.includes('/third-party/')
-    && (code.test(rel) || /hooks\/[^/]+\.json$/.test(rel) || rel === '.claude/settings.json' || rel.startsWith('.github/workflows/')));
+    && (code.test(rel) || /hooks\/[^/]+\.json$/.test(rel) || rel.startsWith('.github/workflows/')));
   const reached = new Map(roots.map(rel => [rel, 'a RISKY root']));
   for (const queue = [...roots]; queue.length;) {
     const rel = queue.shift();

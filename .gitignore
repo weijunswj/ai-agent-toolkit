@@ -9,7 +9,6 @@
 /.n8n-production-cloudflare/backups/
 **/n8n-production-*/
 **/.claude/*
-!/.claude/settings.json
 .tmp/
 # Toolkit local files (never committed)
 /.ai-agent-toolkit/
