@@ -84,7 +84,7 @@ test('the bank is one typed list of its two questions, answered in one line, and
     '| 1.1 | GitHub governance | On | A. Keep current | B. Turn off |',
     '| 1.2 | Task auto-merge with merge train | Off | A. Keep current | B. On |',
     '| 1.3 | Parallel CI shards | Ready: Not applicable | Toolkit can split only Node tests, and no Node test files were found (such as *.test.js using node:test). It looks again at the next refresh | - |',
-    '| 1.4 | Toolkit permissions (Claude Code) | Not ready: Outdated: 2 missing, 1 old | Next step: run the one command Toolkit gives after your answer | Leave: do not run the command |',
+    '| 1.4 | Toolkit permissions (Claude Code) | Not ready: Toolkit lines: 2 missing, 1 old | Next step: run the one command Toolkit gives after your answer | Leave: do not run the command |',
     '| 1.5 | Governance App | Unknown: GitHub could not be read (offline) | Toolkit checks it again next time; nothing is set up from this answer | - |',
     '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer |',
   ], 'one table: the two questions, then the four parts Toolkit keeps itself');
@@ -170,7 +170,7 @@ test('with nothing left to do the block is one line for the programme file and o
   assert.match(out, /^# Toolkit governance choices - ON, ready$/m);
   assert.deepEqual(out.split('\n').filter(line => /^\| \d/.test(line)).slice(2), [
     '| 1.3 | Parallel CI shards | Ready: Not applicable | Toolkit can split only Node tests, and no Node test files were found (such as *.test.js using node:test). It looks again at the next refresh | - |',
-    '| 1.4 | Toolkit permissions (Claude Code) | Ready: Up to date | Keep | - |',
+    '| 1.4 | Toolkit permissions (Claude Code) | Ready: Toolkit lines: up to date | Keep | - |',
     '| 1.5 | Governance App | Ready: Set up | Say "explain 1.1" for how to stop using it | - |',
     '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer |',
   ]);
@@ -512,7 +512,7 @@ test('explain after a row changed in place names the change, then the row', asyn
   assert.equal(result.code, 0, result.err);
   const [first, changed] = result.out.trim().split('\n');
   assert.equal(first, 'The governance state changed since that bank was shown; the numbers still mean the same rows.');
-  assert.equal(changed, 'Toolkit permissions (Claude Code) changed: now Up to date, with nothing to answer.');
+  assert.equal(changed, 'Toolkit permissions (Claude Code) changed: now Toolkit lines: up to date, with nothing to answer.');
   assert.match(result.out, /^### 1\.2 Task auto-merge with merge train$/m);
   agentsLast(result.out);
 });

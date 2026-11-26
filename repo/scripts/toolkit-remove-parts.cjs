@@ -489,14 +489,40 @@ const PLUGIN_STEPS = Object.freeze({
   codex: Object.freeze({ app: 'Codex', lines: [`codex plugin remove ${PLUGIN_ID}`, `codex plugin marketplace remove ${MARKETPLACE}`], ui: 'open Plugins, find AI Agent Toolkit and remove it' }),
 });
 
-// Toolkit's own entries in ~/.ai-agent-toolkit. Removed only when no Toolkit plugin is installed.
+// Toolkit's permission lines in the apps' settings: listed with the owner's own one command, never
+// written here (no agent writes or removes a permission line). That command (toolkit permissions
+// --remove) takes out only the lines Toolkit added and its old lines, backs up first and keeps every
+// other line. It runs from the managed checkout, so the Toolkit folder waits until no line is left.
+class PermissionLinesPart {
+  key = 'permission_lines'; title = "Toolkit's permission lines (run the command first, in your own PowerShell)"; app = 'any';
+  #home; #preview; #script;
+  constructor({ home = os.homedir(), environment = process.env, preview, script } = {}) {
+    this.#home = home;
+    this.#preview = preview || (() => require('./toolkit-permissions-apply.cjs').removalPreview({ home, environment }));
+    this.#script = script || (() => require('./toolkit-user-state.cjs').managedScript('toolkit-permissions.cjs', { userHome: home }));
+  }
+  // The lines still there, per file; throws when a file cannot be read.
+  left() { return this.#preview(); }
+  plan() {
+    let found;
+    try { found = this.#preview(); } catch (error) { return [{ what: 'Permission settings', action: 'held', detail: `could not be read (${String(error && error.message ? error.message : error).slice(0, 300)}); the Toolkit folder stays until they can`, app: 'shared' }]; }
+    const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+    return found.map(item => ({ what: `${display(this.#home, item.target)}: ${plural(item.toolkit, item.host === 'codex' ? 'Toolkit rule' : 'Toolkit line')}`, action: 'keep', app: item.host === 'codex' ? 'codex' : 'claude-code',
+      detail: `not removed by this list. Run this in your own PowerShell first; it shows the lines, backs up and waits for your Enter, then takes out only Toolkit's${item.other ? ` and keeps your ${plural(item.other, 'other line')}` : ''}: node "${this.#script()}" --remove --host ${item.host}` }));
+  }
+  apply() { return []; }
+}
+
+// Toolkit's own entries in ~/.ai-agent-toolkit. Removed only when no Toolkit plugin is installed, and
+// only once no Toolkit permission line is left (the owner's --remove command runs from it).
 class ToolkitFolderPart {
   key = 'toolkit_folder'; title = 'Toolkit folder'; app = 'shared'; shared = 'the Toolkit folder';
-  #home; #root; #plugins;
-  constructor({ home = os.homedir(), environment = process.env, plugins } = {}) {
+  #home; #root; #plugins; #linesLeft;
+  constructor({ home = os.homedir(), environment = process.env, plugins, linesLeft = () => [] } = {}) {
     this.#home = home;
     this.#root = path.join(home, '.ai-agent-toolkit');
     this.#plugins = plugins || (() => pluginState({ environment, home }));
+    this.#linesLeft = linesLeft;
   }
   get root() { return this.#root; }
   #present() {
@@ -524,6 +550,9 @@ class ToolkitFolderPart {
     if (!items.some(item => item.action === 'remove')) return [];
     const installed = Object.entries(this.#plugins()).filter(([, on]) => on).map(([host]) => PLUGIN_STEPS[host].app);
     if (installed.length) return [{ what: display(this.#home, this.#root), result: 'kept', reason: `the ${installed.join(' and ')} plugin is still installed and reads its records there` }];
+    let left;
+    try { left = this.#linesLeft(); } catch { left = null; }
+    if (left === null || left.length) return [{ what: display(this.#home, this.#root), result: 'kept', reason: left === null ? 'the permission settings could not be read, so Toolkit\'s permission lines may still point at it' : 'Toolkit\'s permission lines are still in your settings; run the toolkit permissions --remove command listed above first, then say remove toolkit again' }];
     // A process whose folder is inside what goes could not remove it on Windows.
     const cwd = process.cwd();
     const inside = path.relative(this.#root, cwd);
@@ -549,9 +578,10 @@ function removeExcept(target, keep) {
 // The parts in the order apply runs them: the reinstall note first, then settings, then files, then
 // the folder last.
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
-  return [new ReinstallNotePart({ environment, home }), new ClaudeAccountCopyPart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
+  const lines = new PermissionLinesPart({ environment, home });
+  return [new ReinstallNotePart({ environment, home }), lines, new ClaudeAccountCopyPart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
     new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new CodexSetupJournalPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
-    new SkillCopiesPart({ environment, home }), new UpdateReportsPart({ environment, home }), new ToolkitFolderPart({ home, environment })];
+    new SkillCopiesPart({ environment, home }), new UpdateReportsPart({ environment, home }), new ToolkitFolderPart({ home, environment, linesLeft: () => lines.left() })];
 }
 
-module.exports = { ReinstallNotePart, ClaudeAccountCopyPart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, KEPT_LABELS, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
+module.exports = { ReinstallNotePart, PermissionLinesPart, ClaudeAccountCopyPart, CodexHookStatePart, CodexSetupJournalPart, UpdateReportsPart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, KEPT_LABELS, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };

@@ -508,23 +508,25 @@ function openPrsOf(context, parentDoc, docs, deps) {
   }
 }
 
-// The cloud sweep's layout check: CLOUD_LAYOUT_STALE when this repository's rendered Toolkit workflow
-// copies (the sweep, its gate and the shard copies) differ from what a refresh writes from the Toolkit
-// this sweep runs (its `.toolkit` checkout). The workflows copied as they are (the personal data guard,
-// dependency auto-merge) have no layout: a missing or older one is the governance check's and the
-// refresh's business, never a call on the board. The
-// sweep never changes workflows itself (its App holds no workflow permission); a controller chat opens
-// the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). Local reads only; any failure
-// adds nothing, and the Toolkit's own repository is never checked.
+// The cloud sweep's copy check: CLOUD_LAYOUT_STALE (the id state documents already store) when a refresh
+// from the Toolkit this sweep runs (its `.toolkit` checkout) would change any of this repository's
+// Toolkit copies: the rendered ones (the sweep, its gate and the shard copies), the ones copied as they
+// are (the personal data guard and dependency auto-merge) or the vendored plain-text check, whether
+// missing, edited or older (toolkit-cloud-workflows-refresh.cjs pending, the same rows the refresh and
+// the session start read). A rendered copy's path holding someone else's file raises it too, since the
+// refresh stops there. The sweep never changes workflows itself (its App holds no workflow permission);
+// a controller chat opens the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). Local
+// reads only; any failure adds nothing, and the Toolkit's own repository is never checked.
 function cloudLayoutFindings(context, deps = {}) {
   if (deps.cloudLayoutFindings) return deps.cloudLayoutFindings(context);
   try {
     const toolkitRoot = path.resolve(__dirname, '..', '..', '..');
     const workflows = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
+    const refresh = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows-refresh.cjs'));
     let ciShards = null;
     try { ciShards = JSON.parse(fs.readFileSync(path.join(context.repoRoot, '.github', 'toolkit-programme.json'), 'utf8'))?.ci_shards?.answer || null; } catch { ciShards = null; }
-    const result = workflows.plan({ repo: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), ciShards });
-    return result.rows.some(row => row.kind === 'rendered' && row.state !== 'current') ? ['CLOUD_LAYOUT_STALE'] : [];
+    const found = refresh.pending({ target: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), ciShards, workflows });
+    return found.rows.length || found.unmanaged ? ['CLOUD_LAYOUT_STALE'] : [];
   } catch { return []; }
 }
 

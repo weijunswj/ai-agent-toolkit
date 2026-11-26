@@ -1,0 +1,253 @@
+{
+  "schema": "toolkit.governed-repository-inventory.v1",
+  "description": "Every part a governed repository gets from Toolkit, on the repository, on each controller's computer and on the Claude Projects side, and how each follows Toolkit main after a release. repo/tests/governed-repository-inventory.test.cjs fails when a default cloud workflow, a file a refresh may change or a governance check finding has no row here, so a part added later cannot be left without a way to follow main.",
+  "follows": {
+    "run-time": "Runs Toolkit main on every run; no pull request is needed for a script change.",
+    "refresh": "Reaches the repository only through the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). The controller's session start and the cloud sweep name every copy a refresh would change, and the controller opens the refresh that session without asking.",
+    "owner": "Only the owner can change it; agents find what is out of step and name the exact step for the owner's one yes.",
+    "plugin": "Delivered by the installed Toolkit at session start; the repository holds no copy.",
+    "auto": "Toolkit's own agents and scripts keep it current with no owner step."
+  },
+  "parts": [
+    {
+      "id": "R1",
+      "side": "repository",
+      "part": "Rendered workflow copies: the programme sweep and its gate, and the test shards and Shard Timings copies where parallel CI shards are answered yes",
+      "follows": "run-time",
+      "how": "Each copy checks out Toolkit main (or the TOOLKIT_REF pin) at run time; a layout change, an action pin, the CI workflow the gate follows or the shard ids reach it through the refresh pull request.",
+      "workflows": ["programme-sweep", "programme-sweep-gate", "test-shards", "shard-timings"],
+      "files": [".github/workflows/toolkit-programme-sweep.yml", ".github/workflows/toolkit-programme-sweep-gate.yml", ".github/workflows/toolkit-test-shards.yml", ".github/workflows/toolkit-shard-timings.yml"],
+      "findings": ["CLOUD_WORKFLOW_OUTDATED", "CLOUD_WORKFLOW_DRIFT", "CLOUD_WORKFLOWS_UNCHECKED", "CLOUD_WORKFLOW_LEFT_OVER", "CI_SHARDS_GATE_NOT_REQUIRED", "CLOUD_SWEEP_FOREIGN_STORE", "CLOUD_SWEEP_PUBLIC_STATE"]
+    },
+    {
+      "id": "R2",
+      "side": "repository",
+      "part": "Copied files: the personal data guard (its check and sweep workflows, its script, and its settings while missing) and the dependency auto-merge workflow",
+      "follows": "refresh",
+      "how": "Copied as they are, so every Toolkit change to them makes the copy older; missing, edited or older copies are named at session start and by the cloud sweep. The guard's settings file is the owner's once it exists.",
+      "workflows": ["personal-data-guard", "dependency-auto-merge"],
+      "files": [".github/workflows/personal-data-guard.yml", ".github/workflows/personal-data-sweep.yml", ".github/scripts/personal-data-guard.cjs", ".github/personal-data-guard.json", ".github/workflows/dependency-auto-merge.yml"],
+      "findings": ["CLOUD_WORKFLOW_OUTDATED", "CLOUD_WORKFLOW_DRIFT"]
+    },
+    {
+      "id": "R3",
+      "side": "repository",
+      "part": "Plain-text check: the vendored check script, its settings, its baseline and its workflow",
+      "follows": "refresh",
+      "how": "The vendored script and an old-format baseline change only through the refresh pull request, and an older script is named at session start and by the cloud sweep. The settings stay the owner's; the workflow file is written once when absent and not compared.",
+      "workflows": [],
+      "files": [".github/scripts/plain-text-check.cjs", ".github/plain-text.json", ".github/plain-text-baseline.json", ".github/workflows/plain-text.yml"],
+      "findings": ["PLAIN_TEXT_CHECK_COPY_OUTDATED", "PLAIN_TEXT_CHECK_DRIFT", "PLAIN_TEXT_CHECK_MISSING", "PLAIN_TEXT_CHECK_NOT_CHECKED", "PLAIN_TEXT_CHECK_OFF"]
+    },
+    {
+      "id": "R4",
+      "side": "repository",
+      "part": "Programme binding (.github/toolkit-programme.json) and the governance state it decides",
+      "follows": "owner",
+      "how": "Changed only by governance pull requests the owner merges. A key a newer Toolkit adds reads as its default until then, so a release never needs a binding change; a new owner choice shows in the governance question bank.",
+      "workflows": [],
+      "files": [".github/toolkit-programme.json"],
+      "findings": ["BINDING_FOREIGN", "BINDING_INVALID", "BINDING_V1", "MERGED_BINDING_INVALID", "MERGED_BINDING_STALE", "DECISION_PENDING", "REPOSITORY_DISABLED", "READ_ONLY_ACCOUNT", "GOVERNANCE_UNAVAILABLE", "STATE_ERROR", "NOT_A_REPOSITORY", "NOT_GITHUB", "EVIDENCE_STORE", "SCRATCH_CLONE", "TASK_AUTO_MERGE_ON", "TASK_AUTO_MERGE_OFF", "TASK_AUTO_MERGE_UNSET"]
+    },
+    {
+      "id": "R5",
+      "side": "repository",
+      "part": "Repository rules and settings: the no-force-push ruleset, merge commits only, required checks equal to the binding and pinned, up to date before merging, and the dependency and security settings",
+      "follows": "owner",
+      "how": "The once-a-day background read (toolkit-governance-parts.cjs) reads them as the governance check does and names drift at session start with the exact step; `toolkit governance migrate` (the owner's Enter) and `toolkit governance security` fix it after the owner's one yes.",
+      "workflows": [],
+      "files": [],
+      "findings": ["RULESET_NO_FORCE_PUSH_MISSING", "RULESET_BYPASS_ALLOWED", "RULESET_BYPASS_NOT_VISIBLE", "RULESET_NOT_ENFORCEABLE", "RULESET_UNVERIFIED", "RULESET_NOT_APPLICABLE", "RULESET_NOT_CHECKED", "PROTECTION_CHECKS_MISMATCH", "PROTECTION_CHECK_UNPINNED", "PROTECTION_PRODUCER", "PROTECTION_MASKING", "PROTECTION_MERGE_METHODS", "PROTECTION_UP_TO_DATE", "PROTECTION_NOT_ENFORCEABLE", "PROTECTION_UNVERIFIED", "SECURITY_DEPENDABOT_ALERTS", "SECURITY_DEPENDABOT_UPDATES", "SECURITY_VERSION_UPDATES", "SECURITY_SECRET_SCANNING", "SECURITY_CODE_SCANNING", "SECURITY_PRIVATE_REPORTING", "SECURITY_AUTO_MERGE", "SECURITY_UNVERIFIED"]
+    },
+    {
+      "id": "R6",
+      "side": "repository",
+      "part": "Instruction files: AGENTS.md, the CLAUDE.md shim and the governed rules",
+      "follows": "plugin",
+      "how": "The governed rules come from the installed Toolkit at session start; a leftover copy in AGENTS.md is named and removed by pull request on the owner's answer.",
+      "workflows": [],
+      "files": ["AGENTS.md", "CLAUDE.md"],
+      "findings": ["GOVERNED_BLOCK_IGNORED", "GOVERNED_BLOCK_LEFTOVER", "MARKERS_BROKEN"]
+    },
+    {
+      "id": "R7",
+      "side": "repository",
+      "part": "Sweep pin: the repository's TOOLKIT_REF variable",
+      "follows": "owner",
+      "how": "The owner's stop switch: unset means Toolkit main; a takeover names a pin.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "R8",
+      "side": "repository",
+      "part": "Governance App: its variable and secret on the repository",
+      "follows": "owner",
+      "how": "A new App permission needs the owner's accept on GitHub; a missing or partly set up App is named at session start from the background read.",
+      "workflows": [],
+      "files": [],
+      "findings": ["GOVERNANCE_APP_SET", "GOVERNANCE_APP_NOT_SET_UP", "GOVERNANCE_APP_LEFT_OVER", "GOVERNANCE_APP_UNVERIFIED"]
+    },
+    {
+      "id": "R9",
+      "side": "repository",
+      "part": "Evidence store contents: programme state documents, handover files and controller settings",
+      "follows": "auto",
+      "how": "Written by Toolkit scripts with schema versions; readers come before writers.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "R10",
+      "side": "repository",
+      "part": "Shard list and timings (.github/toolkit-test-shards.json)",
+      "follows": "auto",
+      "how": "A weekly bot pull request refreshes the timings where shards apply.",
+      "workflows": [],
+      "files": [".github/toolkit-test-shards.json"],
+      "findings": []
+    },
+    {
+      "id": "C1",
+      "side": "computer",
+      "part": "Managed Toolkit checkout, bridge and Claude Code CLI plugin",
+      "follows": "auto",
+      "how": "Fast-forwarded at every session start (Repo-Backed Auto-Update in TOOLKIT-LOCAL-BRIDGE.md).",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "C2",
+      "side": "computer",
+      "part": "The claude.ai account copy of Toolkit (desktop chats, Projects, cloud)",
+      "follows": "owner",
+      "how": "The owner refreshes it; the desktop session start names its version and the Projects check-in says when it is behind.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "C3",
+      "side": "computer",
+      "part": "Toolkit permission lines in each app's settings",
+      "follows": "owner",
+      "how": "An agent never widens its own permissions; session start and turn end name missing or old lines and `toolkit permissions` gives the one command.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "C4",
+      "side": "computer",
+      "part": "The session's own checkout of the governed repository",
+      "follows": "auto",
+      "how": "Fast-forwarded to origin's default branch at session start (toolkit-repo-catchup.cjs).",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "C5",
+      "side": "computer",
+      "part": "Antigravity skill copies",
+      "follows": "auto",
+      "how": "Copied at session start.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "C6",
+      "side": "computer",
+      "part": "Controller memory",
+      "follows": "owner",
+      "how": "Not Toolkit's; restated Toolkit defaults are tidied by the memory tidy tool on the owner's word.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P1",
+      "side": "projects",
+      "part": "Guidebook copy (the project library copy of the Projects skill)",
+      "follows": "auto",
+      "how": "The hourly nudge and the daily check-in refresh it from a fresh clone.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P2",
+      "side": "projects",
+      "part": "Managed project-instructions block",
+      "follows": "auto",
+      "how": "Applied by the coordinator with a saved copy and read-back when it is outdated or changed.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P3",
+      "side": "projects",
+      "part": "Project memory lines (binding, scheduled tasks, gate route)",
+      "follows": "auto",
+      "how": "Checked and rewritten by the check-in when their format or binding is stale.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P4",
+      "side": "projects",
+      "part": "Toolkit scheduled tasks (daily check-in, hourly nudge)",
+      "follows": "auto",
+      "how": "Their checklists are read from the guidebook copy; the daily check-in plans, swaps and reads back every outdated task.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P5",
+      "side": "projects",
+      "part": "The owner's own Projects tasks on the Toolkit shell",
+      "follows": "auto",
+      "how": "Each run expands its steps from main; a shell change is swapped by the daily check-in with the takeover's read-back, never touching a stopped task (INT-TK421-1378).",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P6",
+      "side": "projects",
+      "part": "Project tasks without the shell, and local or device tasks",
+      "follows": "owner",
+      "how": "Not Toolkit's: advice only.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P7",
+      "side": "projects",
+      "part": "The saved claude.ai copy of the Projects skill",
+      "follows": "owner",
+      "how": "Only the owner can accept its card; it stays with the account-copy refresh (INT-TK421-1378).",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    },
+    {
+      "id": "P8",
+      "side": "projects",
+      "part": "Other projects' Toolkit tasks",
+      "follows": "auto",
+      "how": "Reported only; each project's own check-in swaps its own tasks.",
+      "workflows": [],
+      "files": [],
+      "findings": []
+    }
+  ]
+}

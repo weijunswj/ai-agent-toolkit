@@ -227,8 +227,10 @@ test('P-8 the background check reads only the App names and the store, from the 
     if (url.endsWith('/secrets?per_page=100')) return { ok: true, value: { total_count: 0, secrets: [] } };
     return { ok: false, reason: 'repository-not-visible' };
   };
-  parts.check(repo, { registryOptions, reader, now: new Date(NOW) });
+  const settingsRead = [];
+  parts.check(repo, { registryOptions, reader, now: new Date(NOW), settings: state => { settingsRead.push(state.repository); return []; } });
   assert.deepEqual(asked, ['repos/toolkit-test-fixture/parts/actions/variables?per_page=100', 'repos/toolkit-test-fixture/parts/actions/secrets?per_page=100', 'repos/toolkit-test-fixture/store']);
+  assert.deepEqual(settingsRead, ['toolkit-test-fixture/parts'], 'the settings are read once, for this repository');
   const state = require('../scripts/toolkit-governance-state.cjs').governanceState(repo, registryOptions);
   assert.equal(state.programme_records_bind, true);
   const lines = parts.sessionLines(state, registryOptions, { now: () => new Date(NOW).toISOString() });
@@ -236,10 +238,45 @@ test('P-8 the background check reads only the App names and the store, from the 
   assert.match(lines[0], /Governance App is not set up on toolkit-test-fixture\/parts/);
   assert.match(lines[1], /evidence store toolkit-test-fixture\/store named in the programme file cannot be found/);
   // Governance off: nothing is read.
+  // By default the settings are the governance check's own reads (here offline, so nothing reaches
+  // GitHub and every setting is unread).
+  parts.check(repo, { registryOptions: { ...registryOptions, offline: true }, reader, now: new Date(NOW) });
+  const saved = JSON.parse(fs.readFileSync(path.join(require('../scripts/toolkit-user-state.cjs').userStateDirectory(registryOptions), parts.BASENAME), 'utf8'));
+  assert.deepEqual(saved.repositories[state.repository_id].settings, { drift: [], unread: true });
   asked.length = 0;
   support.recordAbsent(repo, { home });
-  assert.equal(parts.check(repo, { registryOptions, reader, now: new Date(NOW) }), null);
+  assert.equal(parts.check(repo, { registryOptions, reader, now: new Date(NOW), settings: () => { throw new Error('not read when governance is off'); } }), null);
   assert.deepEqual(asked, []);
+});
+
+// Red on the parent: nothing named settings drift after a release, so a repository's rulesets, merge
+// methods or security settings could fall behind what governance needs with no line to anyone (#1546).
+test('P-11 settings drift from the daily read gives one line with what drifted and the exact step; ok or unread gives none', t => {
+  const fx = fixture(t);
+  const finding = (id, severity = 'drift') => ({ id, severity, message: 'from the governance check' });
+  fx.save({ app: APP_SET, store: USABLE, settings: [finding('RULESET_NO_FORCE_PUSH_MISSING'), finding('PROTECTION_MERGE_METHODS'), finding('SECURITY_DEPENDABOT_ALERTS'),
+    finding('PROTECTION_PRODUCER'), finding('RULESET_BYPASS_ALLOWED', 'info'), finding('SECURITY_CODE_SCANNING_UNVERIFIED', 'unverified')] });
+  const lines = fx.lines();
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0], "Toolkit governance: acme/app's settings have drifted from what governance needs: no ruleset blocks force pushes; merge methods other than merge commits are allowed; Dependabot alerts are off. In your first reply, tell the user once, in one line, what drifted and that one yes from them fixes it: `toolkit governance migrate` gives the owner one command for their own terminal, where one Enter applies the rules; and the agent runs `toolkit governance security` (it names anything it cannot change itself, such as a missing Dependabot entry for a pull request). Never change these settings without that yes; nothing waits on it.");
+  // Only the saved ids, nothing else from the findings.
+  const entry = JSON.parse(fs.readFileSync(path.join(fx.registryOptions.stateDirectory, parts.BASENAME), 'utf8')).repositories['repo-id-1'];
+  assert.deepEqual(entry.settings, { drift: ['RULESET_NO_FORCE_PUSH_MISSING', 'PROTECTION_MERGE_METHODS', 'SECURITY_DEPENDABOT_ALERTS'], unread: true });
+  // One kind of step only.
+  fx.save({ settings: [finding('PROTECTION_CHECKS_MISMATCH')] });
+  assert.match(fx.lines()[0], /: the required checks differ from the programme file\. [^]*fixes it: `toolkit governance migrate` [^;]*\. Never change/);
+  // Drift is read again after an hour, so a fix made on GitHub ends the line.
+  assert.equal(fx.started.length, 0);
+  fx.lines(1);
+  assert.equal(fx.started.length, 1);
+  // Conformant, or nothing could be read: no line. A bank read that saves no settings keeps them.
+  for (const settings of [[], [finding('RULESET_UNVERIFIED', 'unverified'), finding('PROTECTION_MERGE_METHODS_UNVERIFIED', 'unverified')], [finding('RULESET_BYPASS_ALLOWED', 'info')]]) {
+    fx.save({ settings });
+    assert.deepEqual(fx.lines(), [], JSON.stringify(settings));
+  }
+  fx.save({ settings: [finding('SECURITY_PRIVATE_REPORTING')] });
+  parts.recordRead(fx.registryOptions, fx.state.repository_id, { app: APP_SET, store: USABLE, storeRepository: STORE });
+  assert.match(fx.lines()[0], /private vulnerability reporting is off/);
 });
 
 test('P-7 a governed session start carries the lines from the last check; off, undecided and cloud texts do not', t => {

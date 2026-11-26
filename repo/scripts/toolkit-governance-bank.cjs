@@ -305,9 +305,15 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const missing = permissions.checked ? permissions.missing : null;
   const stale = permissions.checked ? permissions.stale || 0 : 0;
   const outdated = missing !== null && (missing > 0 || stale > 0);
+  // Other lines (not Toolkit's) are counted and reviewed here but never block ready: each stays unless
+  // the owner names it in the review.
+  const other = permissions.checked && Number.isInteger(permissions.other) && permissions.other > 0 ? permissions.other : 0;
+  const otherText = other ? `. Other lines: ${other} to review` : '';
   specs.push({ ...statusRow({ id: 'permission-blocks', section, title: `Toolkit permissions (${appName})`,
-    current: missing === null ? 'Not checked' : outdated ? `Outdated: ${[missing ? `${missing} missing` : '', stale ? `${stale} old` : ''].filter(Boolean).join(', ')}` : 'Up to date',
-    text: outdated ? `After your answer, Toolkit gives you one command to run yourself that brings ${appName}'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter` : missing === 0 ? '' : 'They could not be checked here; setup toolkit checks them' }), permissions_update: outdated,
+    current: missing === null ? 'Not checked' : `Toolkit lines: ${outdated ? [missing ? `${missing} missing` : '', stale ? `${stale} old` : ''].filter(Boolean).join(', ') : 'up to date'}${otherText}`,
+    text: outdated ? `After your answer, Toolkit lists every permission line and gives you one command to run yourself that brings ${appName}'s Toolkit permission lines up to date; it shows what changes, backs the files up and waits for you to press Enter${other ? '. Other lines stay unless you pick them from the list' : ''}`
+      : missing === null ? 'They could not be checked here; setup toolkit checks them'
+        : other ? 'Say review permissions to see them; nothing changes unless you pick lines' : '' }), permissions_update: outdated,
     other: outdated ? 'Leave: do not run the command' : '', required: missing === null ? { ready: null } : outdated ? { ready: false, step: 'run the one command Toolkit gives after your answer' } : { ready: true } });
   return bank.withPresentationMetadata(specs, BANK_HOST);
 }

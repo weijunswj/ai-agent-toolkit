@@ -128,15 +128,31 @@ function checkConformance(cwd, options = {}) {
   // state, never something to refresh.
   if (state.materials.governed_block) findings.push(...leftoverBlockFindings(state.root, toolkitRoot, state.state === 'ENABLED'));
   if (state.state === 'ENABLED') findings.push(...plainTextFindings(state.root, toolkitRoot));
-  let rulesetResult = null;
-  if (state.state === 'ENABLED') {
-    rulesetResult = options.offline === true
-      ? Object.freeze({ status: 'not-checked', reason: 'offline', bypass: null })
-      : ruleset.noForcePushRuleset(state.root, options.rulesetReader ? { reader: options.rulesetReader } : {});
-    findings.push(...rulesetFindings(rulesetResult));
-  }
+  const { rulesetResult, protectionResult, securityResult, findings: settings } = state.state === 'ENABLED' ? settingsReads(state, options, toolkitRoot) : { rulesetResult: null, protectionResult: null, securityResult: null, findings: [] };
+  findings.push(...settings);
+  if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
+  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
+  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options), ...cloudSweepReachFindings(state, options));
+  const drift = findings.some(entry => entry.severity === 'drift');
+  // An online run whose GitHub reads could not confirm a setting is not conformant: it is unverified
+  // (exit 3) until a repository admin re-runs the check signed in. An offline or test run chose not to
+  // read, so its unverified items keep exit 0.
+  return report(drift ? 1 : unverifiedExit(findings, options), state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
+}
+
+// The repository settings an ENABLED repository needs, read from GitHub: the no-force-push ruleset,
+// the default branch's protection (required checks match the binding and are pinned, merge commits
+// only, up to date before merging) and the dependency and security settings. The governance check and
+// the daily background read (toolkit-governance-parts.cjs) both read them here.
+// { rulesetResult, protectionResult, securityResult, findings }.
+function settingsReads(state, options = {}, toolkitRoot = ROOT) {
+  const findings = [];
+  const rulesetResult = options.offline === true
+    ? Object.freeze({ status: 'not-checked', reason: 'offline', bypass: null })
+    : ruleset.noForcePushRuleset(state.root, options.rulesetReader ? { reader: options.rulesetReader } : {});
+  findings.push(...rulesetFindings(rulesetResult));
   let protectionResult = null;
-  const requiredChecks = state.state === 'ENABLED' && state.materials.binding ? governance.bindingRequiredChecks(state.root, options) : null;
+  const requiredChecks = state.materials?.binding ? governance.bindingRequiredChecks(state.root, options) : null;
   if (requiredChecks) {
     protectionResult = protection.defaultBranchProtection(state.root, {
       requiredChecks,
@@ -146,7 +162,7 @@ function checkConformance(cwd, options = {}) {
     findings.push(...protectionFindings(protectionResult));
   }
   let securityResult = null;
-  if (state.state === 'ENABLED' && state.materials.binding) {
+  if (state.materials?.binding) {
     securityResult = security.dependencySecurity(state.root, {
       offline: options.offline === true,
       protectionResult,
@@ -155,14 +171,7 @@ function checkConformance(cwd, options = {}) {
     });
     findings.push(...securityFindings(securityResult));
   }
-  if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
-  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
-  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options), ...cloudSweepReachFindings(state, options));
-  const drift = findings.some(entry => entry.severity === 'drift');
-  // An online run whose GitHub reads could not confirm a setting is not conformant: it is unverified
-  // (exit 3) until a repository admin re-runs the check signed in. An offline or test run chose not to
-  // read, so its unverified items keep exit 0.
-  return report(drift ? 1 : unverifiedExit(findings, options), state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
+  return { rulesetResult, protectionResult, securityResult, findings };
 }
 
 // The governance GitHub App: set up while governance is on, nothing left behind once it is off. Read
@@ -308,9 +317,9 @@ function leftoverBlockFindings(repoRoot, toolkitRoot, enabled) {
 }
 
 // The default cloud workflows a governed repository carries (DEFAULT_CLOUD_WORKFLOWS in
-// toolkit-cloud-workflows.cjs). A missing or hand-edited copy, or someone else's file in its place, is
-// drift; an older copy is only noted, since every refresh updates it. The Toolkit's own checkout runs
-// its own files and is skipped.
+// toolkit-cloud-workflows.cjs) and its vendored plain-text check. A missing or hand-edited copy, or
+// someone else's file in its place, is drift; an older copy is only noted, since every refresh updates
+// it. The Toolkit's own checkout runs its own files and is skipped.
 // Whether a rules refresh from this Toolkit checkout moves a copy pinned to `pin` forward: true only
 // when the checkout's HEAD is on origin/main and already contains the pin. A newer pin (another
 // computer refreshed from a later main) or a checkout off main would roll the copy back, or the
@@ -350,16 +359,23 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   }
   const out = [];
   const direction = pinDirection(toolkitRoot, head);
+  // Every row a refresh changes (rendered or copied; missing, edited or outdated; the vendored
+  // plain-text check) carries its file, state, pin and whether a refresh from this checkout moves it
+  // forward, for the session-start note (toolkit-governance-gate.cjs stalePinLines). A copy that names
+  // no Toolkit commit (missing, or copied as it is) cannot be rolled back. Someone else's file in a
+  // copy's place carries none: a refresh never writes over it.
+  const refresh = row => (row.state === 'unmanaged' ? {} : { file: row.file, state: row.state, pin: row.toolkit || null, pinned: Boolean(row.pinned), head, refreshable: row.toolkit ? direction(row.toolkit) : true });
   for (const row of result.rows) {
     // A held row's workflow clashes with a file Toolkit did not write, which its own row reports.
     if (row.state === 'current' || row.held) continue;
-    // A copied workflow names no Toolkit commit, so the session-start note below leaves it to this check.
-    if (row.state === 'outdated' && row.kind === 'copied') { out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} ${row.why ? 'holds a setting no guard reads any more' : 'is an older Toolkit copy'}; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`)); continue; }
-    // The file, the copy's pin and whether a refresh from this checkout moves it forward ride along for
-    // the session-start note (toolkit-governance-gate.cjs stalePinLines).
-    if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), file: row.file, pin: row.toolkit || null, pinned: Boolean(row.pinned), head, refreshable: direction(row.toolkit) }));
-    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence}. ${row.state === 'unmanaged' ? 'Move it aside in a pull request, then refresh the repository rules.' : 'Refresh the repository rules to fix it.'}`));
+    if (row.state === 'outdated' && row.kind === 'copied') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} ${row.why ? 'holds a setting no guard reads any more' : 'is an older Toolkit copy'}; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh(row) }));
+    else if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh(row) }));
+    else out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence}. ${row.state === 'unmanaged' ? 'Move it aside in a pull request, then refresh the repository rules.' : 'Refresh the repository rules to fix it.'}`), ...refresh(row) }));
   }
+  // The vendored plain-text check, compared with the check at the same Toolkit commit as the refresh does
+  // (an older one is also PLAIN_TEXT_CHECK_DRIFT above, against this Toolkit copy's own files).
+  const vendored = require('./toolkit-cloud-workflows-refresh.cjs').vendoredCheck({ target: state.root, root: toolkitRoot, commit: head });
+  if (vendored?.state === 'outdated') out.push(Object.freeze({ ...finding('PLAIN_TEXT_CHECK_COPY_OUTDATED', 'info', `${vendored.file} is an older Toolkit copy; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh({ file: vendored.file, state: 'outdated' }) }));
   // A default branch other than main: the sweep cannot run there, so it is not expected.
   for (const row of result.not_copied || []) if (row.id.startsWith('programme-sweep')) out.push(finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The ${row.id} workflow is not expected here: ${row.reason}.`));
   // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:
@@ -438,4 +454,4 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   });
 }
 
-module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, cloudSweepReachFindings, cloudSweepSkipReason, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, QUESTION_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, cloudSweepReachFindings, cloudSweepSkipReason, enforcementStatus, expectedGovernedBlock, settingsReads, unverifiedExit, report, QUESTION_HOOK });

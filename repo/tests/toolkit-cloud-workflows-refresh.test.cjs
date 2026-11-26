@@ -134,7 +134,7 @@ class FakeGitHub {
       }
       if (rest === '/git/commits' && verb === 'POST') {
         const sha = crypto.createHash('sha1').update(JSON.stringify([input.tree, input.parents, this.commits.size])).digest('hex');
-        this.commits.set(sha, { tree: input.tree, parents: input.parents });
+        this.commits.set(sha, { tree: input.tree, parents: input.parents, message: input.message });
         return { sha };
       }
       if (rest === '/git/refs' && verb === 'POST') { this.refs.set(input.ref.replace('refs/heads/', ''), input.sha); return {}; }
@@ -243,6 +243,10 @@ test('refresh PR: one pull request with only Toolkit-made files, read back and n
   assert.match(pr.body, /`\.github\/scripts\/plain-text-check\.cjs`: vendored check updated/);
   assert.match(pr.body, /`\.github\/plain-text-baseline\.json`: plain-text baseline moved to the fingerprint format \(--migrate-baseline\)/);
   assert.doesNotMatch(pr.body, /Generated with|Co-Authored-By|claude\.ai/, 'no tool attribution');
+  // The full Toolkit commit the copies were rendered from, on one line of the body and the commit.
+  assert.equal(pr.body.split('\n').at(-1), `Toolkit commit: ${COMMIT}`);
+  assert.equal(pr.body.match(/^Toolkit commit: /gm).length, 1);
+  assert.equal(github.commits.get(github.refs.get(BRANCH)).message, `Refresh the Toolkit copies\n\nToolkit commit: ${COMMIT}`);
   const files = github.diff(github.refs.get('main'), github.refs.get(BRANCH)).map(entry => entry.filename);
   assert.deepEqual(files, ['.github/plain-text-baseline.json', '.github/scripts/plain-text-check.cjs', ...SWEEPS.map(row => row.file)].sort());
   const head = github.filesOf(github.refs.get(BRANCH));
@@ -267,7 +271,8 @@ test('refresh PR: a rerun from a newer Toolkit commit with the same layout and c
   const before = github.refs.get(BRANCH);
   // The pull request was opened from an older Toolkit commit, and the next Toolkit commit renders the
   // same copies: only the header's toolkit= differs.
-  github.pulls[0].body = github.pulls[0].body.replace(` from Toolkit ${COMMIT.slice(0, 7)}. `, ' from Toolkit 0123456. ');
+  const older = '0123456'.padEnd(40, '0');
+  github.pulls[0].body = github.pulls[0].body.replace(`Toolkit commit: ${COMMIT}`, `Toolkit commit: ${older}`);
   const body = github.pulls[0].body;
   const newer = 'f'.repeat(40);
   const later = { ...workflows, plan: options => { const result = workflows.plan(options); return { ...result, rows: result.rows.map(row => ({ ...row, expected: row.expected.replace(`toolkit=${COMMIT}`, `toolkit=${newer}`) })) }; } };
@@ -281,6 +286,90 @@ test('refresh PR: a rerun from a newer Toolkit commit with the same layout and c
   const changed = { ...workflows, plan: options => { const result = workflows.plan(options); return { ...result, rows: result.rows.map(row => row.id === 'programme-sweep' ? { ...row, expected: workflows.render(row.id, `${source(row.file)}# one more line\n`, newer) } : row) }; } };
   assert.match(runRefresh(dir, github, { workflows: changed }).line, /^Updated refresh pull request /);
   assert.notEqual(github.refs.get(BRANCH), before);
+});
+
+// A Toolkit checkout on its origin/main one commit after COMMIT, with the same files: its renders differ
+// from COMMIT's only in the header's toolkit=. { root, commit } for runRefresh.
+function laterToolkit(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-refresh-later-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  git(root, ['init', '--quiet', '-b', 'main']);
+  fs.writeFileSync(path.join(root, '.git', 'objects', 'info', 'alternates'), `${path.resolve(ROOT, git(ROOT, ['rev-parse', '--git-path', 'objects']))}\n`);
+  const head = git(root, ['commit-tree', git(ROOT, ['rev-parse', 'HEAD^{tree}']), '-p', COMMIT, '-m', 'later']);
+  git(root, ['update-ref', 'refs/heads/main', head]);
+  git(root, ['update-ref', 'refs/remotes/origin/main', head]);
+  git(root, ['remote', 'add', 'origin', 'https://github.com/weijunswj/ai-agent-toolkit.git']);
+  return { root, commit: head };
+}
+
+// Red on the parent: a branch that moved kept the workflow copies an earlier run made, so its files were
+// not all the render of the one Toolkit commit the pull request names.
+test('refresh PR: when the branch moves, every copy on it is the render of the Toolkit commit its commit line names', t => {
+  const dir = governedCheckout(t);
+  const github = new FakeGitHub(dir);
+  assert.equal(runRefresh(dir, github).code, 0);
+  // Main moves on (its readme changes, its vendored check gets older), and a later Toolkit commit
+  // refreshes again.
+  github.advanceMain('README.md', 'App, more\n');
+  fs.writeFileSync(path.join(dir, '.github/scripts/plain-text-check.cjs'), plainText.vendoredText(`${source('skills/secure-ci-cd/scripts/plain-text-check.cjs')}// an even older check\n`));
+  github.advanceMain('.github/scripts/plain-text-check.cjs', fs.readFileSync(path.join(dir, '.github/scripts/plain-text-check.cjs'), 'utf8'));
+  const later = laterToolkit(t);
+  assert.match(runRefresh(dir, github, later).line, /^Updated refresh pull request /);
+  const files = github.filesOf(github.refs.get(BRANCH));
+  for (const row of SWEEPS) assert.equal(files[row.file], workflows.render(row.id, source(row.file), later.commit), `${row.file} is the render of ${later.commit.slice(0, 7)}`);
+  assert.equal(github.pulls[0].body.split('\n').at(-1), `Toolkit commit: ${later.commit}`);
+  assert.equal(github.commits.get(github.refs.get(BRANCH)).message, `Refresh the Toolkit copies\n\nToolkit commit: ${later.commit}`);
+});
+
+// Red on the parent: the refresh refused unless the checkout sat at the default branch head with no
+// change under .github, so a controller working in a feature-branch worktree could not run it.
+test('refresh PR: works from any checkout of the repository, reading the default branch head, never the working tree', t => {
+  const dir = governedCheckout(t);
+  const github = new FakeGitHub(dir);
+  // A feature branch with its own change to a copy, and changes under .github not committed anywhere.
+  git(dir, ['checkout', '--quiet', '-b', 'feature']);
+  fs.writeFileSync(path.join(dir, SWEEPS[0].file), 'name: mine\non: push\n');
+  git(dir, ['commit', '--quiet', '-am', 'feature work']);
+  fs.appendFileSync(path.join(dir, '.github/plain-text.json'), '\n');
+  fs.rmSync(path.join(dir, '.github/scripts/plain-text-check.cjs'));
+  const status = git(dir, ['status', '--porcelain']);
+  const result = runRefresh(dir, github);
+  assert.equal(result.code, 0, result.line);
+  assert.match(result.line, /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(4 files: /);
+  assert.deepEqual(github.diff(github.refs.get('main'), github.refs.get(BRANCH)).map(entry => entry.filename), ['.github/plain-text-baseline.json', '.github/scripts/plain-text-check.cjs', ...SWEEPS.map(row => row.file)].sort());
+  assert.equal(github.filesOf(github.refs.get(BRANCH))[SWEEPS[0].file], workflows.render(SWEEPS[0].id, source(SWEEPS[0].file), COMMIT));
+  assert.equal(git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']), 'feature', 'the checkout stays on its branch');
+  assert.equal(git(dir, ['status', '--porcelain']), status, 'its local changes stay as they were');
+  // GitHub's default branch head is not in this checkout: one fetch from origin brings it, and the
+  // refresh compares that commit (here its vendored check is current, so it is not changed).
+  const fetched = governedCheckout(t);
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-refresh-origin-'));
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-refresh-other-'));
+  t.after(() => { fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(other, { recursive: true, force: true }); });
+  git(origin, ['clone', '--quiet', '--bare', fetched, '.']);
+  git(fetched, ['remote', 'add', 'origin', origin]);
+  git(other, ['clone', '--quiet', origin, '.']);
+  fs.writeFileSync(path.join(other, '.github/scripts/plain-text-check.cjs'), plainText.vendoredText(source('skills/secure-ci-cd/scripts/plain-text-check.cjs')));
+  git(other, ['commit', '--quiet', '-am', 'current check']);
+  git(other, ['push', '--quiet', 'origin', 'main']);
+  const ahead = git(other, ['rev-parse', 'HEAD']);
+  const later = new FakeGitHub(fetched);
+  later.seed(ahead, [later.refs.get('main')], treeOf(other, 'HEAD'));
+  later.refs.set('main', ahead);
+  const head = git(fetched, ['rev-parse', 'HEAD']);
+  const pulled = runRefresh(fetched, later);
+  assert.equal(pulled.code, 0, pulled.line);
+  assert.match(pulled.line, /\(3 files: /, 'the vendored check on the fetched head is current');
+  assert.equal(git(fetched, ['rev-parse', 'HEAD']), head, 'no local branch moved');
+  // Not in the checkout and origin cannot give it: one line, nothing written.
+  const lost = governedCheckout(t);
+  const missing = new FakeGitHub(lost);
+  missing.seed('a'.repeat(40), [missing.refs.get('main')], treeOf(lost, 'HEAD'));
+  missing.refs.set('main', 'a'.repeat(40));
+  const refused = runRefresh(lost, missing);
+  assert.equal(refused.code, 2);
+  assert.equal(refused.line, 'No refresh pull request: main\'s head aaaaaaa on GitHub is not in this checkout, and fetching main from origin did not bring it; run git fetch origin in the checkout, then run this again.');
+  assert.deepEqual(missing.writes(), []);
 });
 
 test('refresh PR: after main moves, the open pull request is updated by a merge commit, never doubled or forced; a branch left without one gets one', t => {
@@ -323,10 +412,8 @@ test('refresh PR: a failure at any step is one line and leaves no partial pull r
   }
 });
 
-test('refresh PR: it stops, with the step, on a stale or changed checkout, a copy it would roll back, someone else\'s copy or work on its branch', t => {
+test('refresh PR: it stops, with the step, on a copy it would roll back, someone else\'s copy or work on its branch', t => {
   const cases = [
-    ['checkout behind main', (dir, github) => github.advanceMain('README.md', 'x\n') || git(dir, ['reset', '--quiet', '--hard', 'HEAD~1']), /not at main's head [0-9a-f]{7} on GitHub; update it/],
-    ['local change under .github', dir => fs.appendFileSync(path.join(dir, '.github/plain-text.json'), '\n'), /local changes under \.github/],
     ['copy from a newer Toolkit', dir => { const row = SWEEPS[0]; fs.writeFileSync(path.join(dir, row.file), pinnedCopy(workflows.render(row.id, source(row.file), 'f'.repeat(40)), 'f'.repeat(40))); git(dir, ['commit', '--quiet', '-am', 'newer']); }, /made by Toolkit commit fffffff, which this Toolkit checkout [^]*update the Toolkit checkout/],
     ['not a Toolkit copy', dir => { fs.writeFileSync(path.join(dir, SWEEPS[0].file), 'name: Mine\non: push\n'); git(dir, ['commit', '--quiet', '-am', 'mine']); }, /is not a Toolkit copy; move it aside/],
   ];
@@ -334,7 +421,8 @@ test('refresh PR: it stops, with the step, on a stale or changed checkout, a cop
     const dir = governedCheckout(t);
     const github = new FakeGitHub(dir);
     change(dir, github);
-    if (name !== 'checkout behind main' && name !== 'local change under .github') { github.seed(git(dir, ['rev-parse', 'HEAD']), [github.refs.get('main')], treeOf(dir, 'HEAD')); github.refs.set('main', git(dir, ['rev-parse', 'HEAD'])); }
+    github.seed(git(dir, ['rev-parse', 'HEAD']), [github.refs.get('main')], treeOf(dir, 'HEAD'));
+    github.refs.set('main', git(dir, ['rev-parse', 'HEAD']));
     // A full Toolkit checkout, so the newer copy is known to be missing whatever this checkout's depth.
     const result = runRefresh(dir, github, name === 'copy from a newer Toolkit' ? unrelatedToolkit(t) : {});
     assert.equal(result.code, 2, name);
@@ -493,7 +581,7 @@ test('refresh PR: the command finds its own Toolkit commit, and a refusal goes t
   const github = new FakeGitHub(dir);
   assert.equal(workflows.main(['--repo', dir, '--refresh-pr'], { ...io, root, refresh: () => {}, governance: ENABLED, github: github.api() }), 0, err.join(''));
   assert.match(out.join(''), /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(4 files: /);
-  assert.match(github.pulls[0].body, new RegExp(`from Toolkit ${head.slice(0, 7)}\\.`), 'rendered at the checkout\'s own commit');
+  assert.equal(github.pulls[0].body.split('\n').at(-1), `Toolkit commit: ${head}`, 'rendered at the checkout\'s own commit');
   assert.deepEqual(err, []);
   out.length = 0;
   const held = () => ({ ...ENABLED(), governed_effects_hold: true });

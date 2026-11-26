@@ -11,6 +11,11 @@
 // - Evidence store: the store the merged programme file names cannot be found, is not private, or
 //   cannot be written with this computer's GitHub sign-in. Programme state lives there, so every
 //   programme write refuses until it is usable; the line says so.
+// - Repository settings (INT-TK421-1378): the settings governance needs, read as the governance check
+//   reads them (toolkit-governance-conformance.cjs settingsReads): the no-force-push ruleset, the
+//   default branch's required checks, merge methods and up-to-date rule, and the dependency and
+//   security settings. Drift gets one line naming what drifted and the exact step, which the owner
+//   says yes to once; agents never change them unasked. A setting that could not be read says nothing.
 //
 // GitHub is read at most once a day per repository, in a background process this file starts, so a
 // session start never waits on the network; the line reads the last result. While a part was missing,
@@ -39,6 +44,26 @@ const STORE_WHY = Object.freeze({ missing: 'cannot be found with this computer\'
 const ANOTHER = 'or say change store and the controller sets up another with you';
 const STORE_STEP = Object.freeze({ missing: `sign in to GitHub on this computer with an account that can see it, ${ANOTHER}`,
   'not-private': `make it private again on GitHub, ${ANOTHER}`, 'read-only': `give this computer's GitHub account write access to it, ${ANOTHER}` });
+// The settings drift the line names, by the governance check's finding id: what drifted, and which
+// step fixes it. Only these ids are saved.
+const SETTINGS = Object.freeze({
+  RULESET_NO_FORCE_PUSH_MISSING: ['no ruleset blocks force pushes', 'migrate'],
+  PROTECTION_CHECKS_MISMATCH: ['the required checks differ from the programme file', 'migrate'],
+  PROTECTION_CHECK_UNPINNED: ['a required check is not pinned to an app', 'migrate'],
+  PROTECTION_MERGE_METHODS: ['merge methods other than merge commits are allowed', 'migrate'],
+  PROTECTION_UP_TO_DATE: ['branches need not be up to date before merging', 'migrate'],
+  SECURITY_DEPENDABOT_ALERTS: ['Dependabot alerts are off', 'security'],
+  SECURITY_DEPENDABOT_UPDATES: ['Dependabot security updates are off', 'security'],
+  SECURITY_VERSION_UPDATES: ['Dependabot version updates miss a package ecosystem', 'security'],
+  SECURITY_SECRET_SCANNING: ['secret scanning or push protection is off', 'security'],
+  SECURITY_CODE_SCANNING: ['CodeQL code scanning is not set up', 'security'],
+  SECURITY_PRIVATE_REPORTING: ['private vulnerability reporting is off', 'security'],
+  SECURITY_AUTO_MERGE: ['Dependabot auto-merge is not fully set up', 'security'],
+});
+const SETTINGS_STEP = Object.freeze({
+  migrate: '`toolkit governance migrate` gives the owner one command for their own terminal, where one Enter applies the rules',
+  security: 'the agent runs `toolkit governance security` (it names anything it cannot change itself, such as a missing Dependabot entry for a pull request)',
+});
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 
@@ -97,24 +122,38 @@ function cleanStore(repository, store) {
   if (!store || !STORE_STATES.includes(store.state) || typeof repository !== 'string') return null;
   return { repository, state: store.state, ...(store.reason ? { reason: String(store.reason).slice(0, 60) } : {}) };
 }
+// { drift: [known ids], unread } from the settings findings (or a saved entry); null when there are none.
+function cleanSettings(settings) {
+  if (!settings) return null;
+  const findings = Array.isArray(settings) ? settings : null;
+  const drift = findings ? findings.filter(item => item && item.severity === 'drift' && SETTINGS[item.id]).map(item => item.id)
+    : Array.isArray(settings.drift) ? settings.drift.filter(id => typeof id === 'string' && SETTINGS[id]) : null;
+  if (!drift) return null;
+  return { drift: [...new Set(drift)], unread: findings ? findings.some(item => item && item.severity === 'unverified') : settings.unread === true };
+}
 
 // Saves a result of the background check, unread parts included (they are read again after an hour).
-function record(registryOptions, repositoryId, { app = null, store = null, storeRepository = null } = {}, { now = new Date() } = {}) {
+// `settings` is the governance check's settings findings.
+function record(registryOptions, repositoryId, { app = null, store = null, storeRepository = null, settings = null } = {}, { now = new Date() } = {}) {
   if (typeof repositoryId !== 'string' || !repositoryId) return null;
-  const saved = { app: cleanApp(app), store: cleanStore(storeRepository, store) };
-  if (!saved.app && !saved.store) return null;
+  const saved = { app: cleanApp(app), store: cleanStore(storeRepository, store), settings: cleanSettings(settings) };
+  if (!saved.app && !saved.store && !saved.settings) return null;
   return update(registryOptions, repositoryId, entry => ({ ...(entry || {}), ...Object.fromEntries(Object.entries(saved).filter(([, value]) => value)), checked_at: now.toISOString() }));
 }
 
-// The background check: reads both parts for the repository checked out at `root` and saves them.
-function check(root, { registryOptions = {}, reader, now = new Date() } = {}) {
+// The background check: reads the parts and the settings for the repository checked out at `root` and
+// saves them. `settings(state)` gives the settings findings (by default read from GitHub as the
+// governance check reads them).
+function check(root, { registryOptions = {}, reader, now = new Date(), settings = state => require('./toolkit-governance-conformance.cjs').settingsReads(state, registryOptions).findings } = {}) {
   const governance = require('./toolkit-governance-state.cjs');
   const state = governance.governanceState(root, registryOptions);
   if (state.state !== 'ENABLED' || !state.repository_id || !state.repository) return null;
   const storeRepository = governance.bindingStoreRepository(state.root, registryOptions);
   const app = require('./toolkit-governance-app.cjs').presence(state.repository, reader ? { reader } : {});
   const store = storeRepository ? storeState(storeRepository, reader ? { reader } : {}) : null;
-  return record(registryOptions, state.repository_id, { app, store, storeRepository }, { now });
+  let found = null;
+  try { found = settings(state); } catch { found = null; }
+  return record(registryOptions, state.repository_id, { app, store, storeRepository, settings: found }, { now });
 }
 
 // Saves the governance bank's own reads: only the parts GitHub answered, so a bank read that could not
@@ -160,6 +199,11 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     const why = STORE_WHY[kept?.state];
     if (why) {
       lines.push(`Toolkit governance: the evidence store ${store} named in the programme file ${why}, so programme records and evidence cannot be saved and every governance step that writes them stops until it is fixed. In your first reply, tell the user once, in one line, what is wrong and the fix: ${STORE_STEP[kept.state]}.`);
+    }
+    const settings = entry && cleanSettings(entry.settings);
+    if (settings && settings.drift.length) {
+      const steps = [...new Set(settings.drift.map(id => SETTINGS[id][1]))].map(step => SETTINGS_STEP[step]);
+      lines.push(`Toolkit governance: ${slug}'s settings have drifted from what governance needs: ${settings.drift.map(id => SETTINGS[id][0]).join('; ')}. In your first reply, tell the user once, in one line, what drifted and that one yes from them fixes it: ${steps.join('; and ')}. Never change these settings without that yes; nothing waits on it.`);
     }
     const checkedAt = Date.parse(entry?.checked_at || '');
     const unread = !app || unknown(app) || (store && (!kept || kept.state === 'unverified'));
