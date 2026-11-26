@@ -340,13 +340,14 @@ const CLOSED = '--issue <n> --assignment <id> --closed';
 const SECTIONS = Object.freeze({
   findings: { title: 'Findings due', step: command => `Answer each as the parent's holder: fix it, or run ${command('ack --finding <id> --next "<step>"')} or ${command('dispose --finding <id> --reason "<why>"')} (${command('attention')} lists them).` },
   close: { title: 'Gate sessions due to close', step: command => `Run ${command('attention')} for each session, archive it with the app's archive_session tool (never this session), then run ${command(`gate-session ${CLOSED}`)}.` },
-  side: { title: 'Finished side sessions, not archived', step: () => 'Archive each with the app\'s archive_session tool once its report is stored, or say in your reply why it stays open.' },
-  record: { title: 'Gate launches with no gate-session record', step: command => `Record each: ${command('gate-session --issue <n> --assignment <id> --host claude-code --host-session <session_id>')}. If it answers STALE_ASSIGNMENT, the assignment predates session records: say so in your reply.` },
+  side: { title: 'Finished side sessions, not archived', step: () => 'Archive each with the app\'s archive_session tool once its report is stored; one whose work goes on stays open, with no message about it.' },
+  record: { title: 'Gate launches with no gate-session record', step: command => `Record each: ${command('gate-session --issue <n> --assignment <id> --host claude-code --host-session <session_id>')}. If it answers STALE_ASSIGNMENT, the assignment predates session records and needs nothing more.` },
   closed: { title: 'Archived gate sessions with no close record', step: command => `Record each: ${command(`gate-session ${CLOSED}`)}.` },
 });
 
 function reasonText(items, notes, command, cacheAge = null) {
-  const lines = ['Toolkit owed check: this turn leaves work owed. Do each step now, or say in one line why it waits. Add only what you did: do not repeat your last message or ask its question again.'];
+  // The owner reads none of this (INT-TK421-1365): a stop that changes nothing for them ends with no message.
+  const lines = ['Toolkit owed check: this turn leaves work owed. Do each owed item now, or record the reason it waits. If nothing needs the owner, end the turn with no message to them; write to the owner only for a step or decision that is theirs. Never repeat your last message or ask its question again.'];
   for (const [section, spec] of Object.entries(SECTIONS)) {
     const rows = items.filter(item => item.section === section);
     if (!rows.length) continue;

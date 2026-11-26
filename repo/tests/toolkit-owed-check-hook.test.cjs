@@ -585,9 +585,14 @@ test('O-26 the desktop app\'s own file shows a held session that went on: it owe
   assert.match(run({ completedTurns: 2, lastTurnEdgeAt: NOW - HOUR, latestUserFrameAt: NOW - 2 * HOUR }).output.reason, /Gate launches with no gate-session record \(1\)/);
 });
 
-test('O-27 the stop text asks for what is owed only, never the last message or its question again', t => {
-  const { reason } = fixture(t).launch(1).writeTranscript().net([]).desktop().run().output;
-  assert.match(reason, /^Toolkit owed check: this turn leaves work owed\. Do each step now, or say in one line why it waits\. Add only what you did: do not repeat your last message or ask its question again\.\n/);
+// INT-TK421-1340 (no repeated question) and 1365 (silent when nothing needs the owner): after a stop that
+// changed nothing for the owner, the controller still wrote a paragraph of "already recorded" text.
+test('O-27 the stop text asks for the owed work only, and a message to the owner only for what is theirs', t => {
+  const { reason } = fixture(t).launch(1).archive(2).record(2, 'g1-9-a2').writeTranscript().net([{ code: 'TASK_IDLE', state: 'new', changed_at: iso(NOW - 5 * HOUR) }]).desktop({}, [finished()]).run().output;
+  assert.match(reason, /^Toolkit owed check: this turn leaves work owed\. Do each owed item now, or record the reason it waits\. If nothing needs the owner, end the turn with no message to them; write to the owner only for a step or decision that is theirs\. Never repeat your last message or ask its question again\.\n/);
+  // No step sends the agent to write the owner a reason.
+  assert.doesNotMatch(reason, /in your reply|say so|say in/i);
+  for (const section of ['Findings due', 'Finished side sessions, not archived', 'Gate launches with no gate-session record', 'Archived gate sessions with no close record']) assert.match(reason, new RegExp(`${section} \\(1\\)`), section);
 });
 
 test('O-28 no row carried over counts once any chat it names went on, however the copy was made', t => {
