@@ -55,7 +55,7 @@ function legacyAnswers(ctx) {
   return () => governance.LEGACY_TASK_ANSWERS.filter(name => fs.existsSync(path.join(folder, name)));
 }
 
-async function run(ctx, argv, { interactive = false, answers = [], switchTransport = null, proposalTransport = null, environment = { TOOLKIT_HOST_SESSION: SESSION }, missing = 0 } = {}) {
+async function run(ctx, argv, { interactive = false, answers = [], switchTransport = null, proposalTransport = null, environment = { TOOLKIT_HOST_SESSION: SESSION }, missing = 0, appReader = null } = {}) {
   let out = ''; let err = '';
   const asked = [];
   const cli = new ToolkitGovernanceCli({
@@ -65,6 +65,7 @@ async function run(ctx, argv, { interactive = false, answers = [], switchTranspo
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing, stale: 0, update: 'node fixture-apply.cjs --apply', remove: 'node fixture-apply.cjs --remove' }), environment,
     ...(switchTransport ? { switchTransport } : {}),
+    ...(appReader ? { appReader } : {}),
     ...(proposalTransport ? { proposalTransport, cloudWorkflows: () => ({ files: {}, warning: null }) } : {}),
   });
   const code = await cli.main(argv);
@@ -98,16 +99,16 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^# Toolkit governance choices - 2 questions across 1 section$/m);
-    assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
+    assert.match(result.out, /^# Toolkit governance choices - ON, /m);
+    assert.match(result.out, /\| # \| Setting \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
-    assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
-    assert.doesNotMatch(result.out, /\| (1\.[3-9]|2\.\d) \|/, 'status rows sit below the table and carry no number');
+    assert.match(result.out, /\| 1\.2 \| Task auto-merge with merge train \| Off \| A\. Keep current \| B\. On \|/);
+    assert.doesNotMatch(result.out, /\| (1\.[7-9]|2\.\d) \|/, 'one table of at most six rows: the two questions and the four parts Toolkit keeps');
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup is a Toolkit default.
-    assert.match(result.out, /^- Parallel CI shards: Not now \(Toolkit default\) \(CI time unknown\)\. /m);
+    assert.match(result.out, /^\| \d\.\d \| Parallel CI shards \| Ready: Not applicable \|/m);
     assert.match(result.out, /^- Toolkit instruction copies: 1 file left \(Toolkit default: clean up\)\. /m);
-    assert.match(result.out, /^- Toolkit permissions \(Claude Code\): Outdated: 6 missing\. After your answer, Toolkit gives you one command to run yourself /m);
-    assert.match(result.out, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parent #1, required check validate, merge trains on\. To change them, edit that file in a pull request and merge it\.$/m);
+    assert.match(result.out, /^\| \d\.\d \| Toolkit permissions \(Claude Code\) \| Not ready: Outdated: 6 missing \| Next step: run the one command Toolkit gives after your answer \| /m);
+    assert.match(result.out, /^- Set in \.github\/toolkit-programme\.json: parent #1, required check validate\. To change them, edit that file in a pull request and merge it\.$/m);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
     assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.1=B\./m);
     assert.doesNotMatch(result.out, /could not note this bank/);
@@ -132,7 +133,7 @@ test('once the merged switch is read back, refresh and status remove the old per
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }));
   const result = await run(ctx, ['refresh']);
   assert.equal(result.code, 0, result.err);
-  assert.match(result.out, /\| 1\.2 \| Task auto-merge \| On \| A\. Keep current \| B\. Off \|/);
+  assert.match(result.out, /\| 1\.2 \| Task auto-merge with merge train \| On \| A\. Keep current \| B\. Off \|/);
   assert.equal(present().length, 0, 'the bank read the merged switch back, so the old answers went');
   present = legacyAnswers(ctx);
   ctx.merge(bindingText({ task_prs: { auto_merge: 'off' } }));
@@ -171,7 +172,9 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
 
   // Keeping both questions prepares no pull request; the governance App's setup command is the Toolkit
   // default while governance is on and the App is not set up: the owner's command, no pull request.
-  const kept = await answerBank(ctx, '1.1=A', { switchTransport });
+  // GitHub lists no App variable or secret here (an App that could not be read is unknown, and gets no command).
+  const noApp = args => ({ ok: true, value: { total_count: 0, [/\/actions\/(variables|secrets)\?/.exec(args[0])[1]]: [] } });
+  const kept = await answerBank(ctx, '1.1=A', { switchTransport, appReader: noApp });
   assert.equal(kept.code, 0, kept.err);
   assert.doesNotMatch(kept.out, /Prepared /);
   assert.match(kept.out, new RegExp(`^node "[^"]+toolkit-governance-app-setup\\.cjs" --repo ${SLUG} --store \\S+$`, 'm'));
@@ -203,7 +206,7 @@ test('a ticket answers only the bank it was given for: a changed state names the
   const result = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport });
   assert.equal(result.code, 0);
   assert.match(result.out, /governance state changed since that bank was shown.*nothing was written/);
-  assert.match(result.out, /^1\.2 Task auto-merge changed: now On, recommended A\. Keep current\.$/m, 'only the changed row is named');
+  assert.match(result.out, /^1\.2 Task auto-merge with merge train changed: now On, recommended A\. Keep current\.$/m, 'only the changed row is named');
   assert.doesNotMatch(result.out, /^1\.(1|3|4|5|6|8) /m);
   assert.doesNotMatch(result.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
   assert.equal(calls.length, 0);
@@ -217,7 +220,7 @@ test('a cloud session shows the bank but says a chat answer cannot be recorded t
   const cloud = { TOOLKIT_HOST_SESSION: SESSION, CLAUDE_CODE_REMOTE: 'true' };
   const shown = await run(ctx, ['setup'], { environment: cloud });
   assert.equal(shown.code, 0, shown.err);
-  assert.match(shown.out, /\| 1\.2 \| Task auto-merge \|/);
+  assert.match(shown.out, /\| 1\.2 \| Task auto-merge with merge train \|/);
   assert.match(shown.out, /This is a cloud session, .* an answer in this chat cannot be recorded\. Answer this bank from a Remote Control session on your computer, or run .* in your own terminal\./);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
   assert.equal(new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch), null, 'the bank is not noted for a reply');
@@ -245,7 +248,7 @@ test('task auto-merge can be turned on only while governance is on, or in the an
   recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
   startOwnerSession(ctx);
   const shown = await run(ctx, ['setup']);
-  assert.match(shown.out, /\| 1\.2 \| Task auto-merge \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
+  assert.match(shown.out, /\| 1\.2 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
   const alone = await answerBank(ctx, '1.2=B');
   assert.match(alone.out, /Task auto-merge can be on only while governance is on.*Nothing was written/);
 });
@@ -255,16 +258,16 @@ test('merge trains are not asked: a governed bank shows the stored switch as bou
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 13, url: `https://github.com/${SLUG}/pull/13`, head: 'a'.repeat(40) }; } };
   startOwnerSession(ctx);
-  assert.match((await run(ctx, ['setup'])).out, /^- Set in \.github\/toolkit-programme\.json: .*, merge trains on\. /m, 'no key reads as on');
+  assert.match((await run(ctx, ['setup'])).out, /^\| 1\.2 \| Task auto-merge with merge train \| Off \|/m, 'no key reads as on');
   ctx.merge(bindingText({ task_prs: { auto_merge: 'off', merge_train: 'off' } }));
   startOwnerSession(ctx);
-  assert.match((await run(ctx, ['setup'])).out, /^- Set in \.github\/toolkit-programme\.json: .*, merge trains off\. /m);
+  assert.match((await run(ctx, ['setup'])).out, /^\| 1\.2 \| Task auto-merge with merge train \| Off, merge trains off \|/m);
   const answered = await answerBank(ctx, '1.2=B', { switchTransport });
   assert.equal(answered.code, 0, answered.err);
   assert.deepEqual(calls.at(-1)[3], { auto_merge: 'after-gates' }, 'only task auto-merge changes');
   assert.deepEqual(JSON.parse(calls.at(-1)[2]).task_prs, { auto_merge: 'after-gates', merge_train: 'off' }, 'the stored merge-train value stays');
   const named = await answerBank(ctx, '1.3=B', { switchTransport });
-  assert.match(named.out, /^This bank has no row 1\.3\. Nothing was written\.$/m);
+  assert.match(named.out, /^Row 1\.3 [^\n]* takes no answer: [^\n]*Nothing was written\.$/m);
   assert.equal(calls.length, 1);
 });
 
@@ -355,7 +358,7 @@ test('turning governance back on from off gives the App line, and staying off gi
   let open = [];
   const proposalTransport = { list: () => open, publish: () => { open = [proposal]; return proposal; }, read: () => proposal };
   const shown = await run(ctx, ['setup']);
-  assert.match(shown.out, /^- Governance App: Not checked\. Nothing is made while governance is off\. If your answer turns it back on, Toolkit then gives you one line to paste into PowerShell/m);
+  assert.match(shown.out, /^\| \d\.\d \| Governance App \| Not checked \| Nothing is made while governance is off\. If your answer turns it back on, Toolkit then gives you one line to paste into PowerShell/m);
   const kept = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=A'], proposalTransport });
   assert.equal(kept.code, 0, kept.err);
   assert.doesNotMatch(kept.out, /toolkit-governance-app-setup\.cjs|Governance App: paste/, 'staying off gives no App line');

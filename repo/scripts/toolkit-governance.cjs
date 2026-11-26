@@ -165,7 +165,7 @@ class ToolkitGovernanceCli {
     this.#ciEstimator = ciEstimator || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? () => null : root => ciOffer.readEstimate(root));
     // The pinned copies are checked against the Toolkit git checkout (the managed one from a plugin copy).
     this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, require('./toolkit-cloud-workflows.cjs').sourceRoot()));
-    this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
+    this.#permissionsChecker = permissionsChecker || (root => require('./toolkit-permissions.cjs').permissionsState(root));
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
     this.#plainTextInstaller = plainTextInstaller;
@@ -539,7 +539,7 @@ class ToolkitGovernanceCli {
     // a repository not on yet, where an answer joins the turn-on pull request.
     const offered = state.state === 'ENABLED' ? Boolean(merged) && !['yes', 'never'].includes(merged.ci_shards?.answer) : Boolean(state.root);
     let estimate = null;
-    if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = null; } }
+    if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = { minutes: null, unread: 'the CI time read failed' }; } }
     // An answer already waiting in its own pull request shows as that pull request; GitHub that cannot
     // be read leaves the question asked, and publishing then still refuses a second one.
     let open = [];
@@ -547,7 +547,11 @@ class ToolkitGovernanceCli {
     // A repository whose CI already runs its tests in parallel is never offered a shard list.
     let existing = null;
     if (offered) { try { existing = ciOffer.existingShards(state.root); } catch { existing = null; } }
-    const ciShards = offered ? { measured: estimate, open, existing } : null;
+    // Where Toolkit cannot make a usable first list (no Node tests, such as a Python suite), shards are
+    // not applicable, with the reason, rather than a default that could not be built.
+    let usable = null;
+    if (offered && !existing) { try { const list = ciOffer.firstList(state.root, estimate); usable = list.ok ? { ok: true } : { ok: false, reason: list.reason }; } catch { usable = null; } }
+    const ciShards = offered ? { measured: estimate, open, existing, usable } : null;
     this.#lastCiEstimate = estimate;
     // The App row reads its variable and secret wherever governance is on or can be turned on (again) here.
     const app = state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
@@ -1058,35 +1062,6 @@ function copiesRow(copies) {
 // A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
 // quotes, never curly ones) with a copy button.
 const fenced = command => ['```', command, '```'];
-
-// This app's Toolkit permission lines, read from the settings files the blocks name: how many are
-// missing or stale, and the owner's one command that brings them up to date or takes them out. Only
-// the app the bank runs in is read; another app keeps its own lines.
-function defaultPermissionsChecker(root) {
-  const host = detectAgentHost() === 'codex' ? 'codex' : 'claude';
-  const { PermissionBlocks, applyLine } = require('./toolkit-permissions.cjs');
-  const owner = new PermissionBlocks();
-  const built = owner.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: root });
-  let missing = 0;
-  let stale = 0;
-  for (const block of built.blocks) {
-    if (host === 'codex') {
-      const { ruleKeys } = require('./toolkit-permissions-apply.cjs');
-      let text = null;
-      try { text = fs.readFileSync(block.target, 'utf8'); } catch { text = null; }
-      const have = ruleKeys(text);
-      const want = ruleKeys(block.text);
-      missing += want.filter(key => !have.includes(key)).length;
-      stale += have.filter(key => !want.includes(key)).length;
-    } else if (!fs.existsSync(block.target)) missing += block.allow.length + block.ask.length;
-    else {
-      const report = owner.check(block.target, { blocks: [block] })[0];
-      missing += report.missing.length;
-      stale += report.stale.length + report.stale_ask.length;
-    }
-  }
-  return { checked: true, host, missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
-}
 
 function label(state) {
   return state.state.replace(/_/g, ' ');

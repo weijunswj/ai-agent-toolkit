@@ -49,18 +49,25 @@ const EPOCH = /^[0-9a-f]{32}$/;
 const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // The script the agent is told to run: the managed checkout's when there is one, else this copy's.
 const script = () => managedScript('toolkit-governance.cjs');
-// Questions are numbered in the order they are built, without gaps; status rows take no answer and
-// have no number. A question's number can move between runs (the evidence store becoming a status row
-// moves the App row up), so a reply to an older bank where any number moved is never applied: the row
-// digests are keyed by number too (rowDigests), and the owner gets the new bank instead.
-// The rows the merged programme file binds (`bound`, the few words each adds) are shown as one line,
-// in this order, with how to change them said once.
+// Questions are numbered in the order they are built, without gaps; the table numbers the parts Toolkit
+// keeps itself after them (tableRows), and those take no answer. A number can move between runs, so a
+// reply to an older bank where any number moved is never applied: the row digests are keyed by number
+// too (rowDigests), and the owner gets the new bank instead.
+// The rows left out of the table that the merged programme file binds (`bound`, the few words each adds)
+// are shown as one line under it, in this order, with how to change them said once.
 const BOUND = 'Bound in the merged programme file';
-const BOUND_ORDER = Object.freeze(['evidence-store', 'parent-issue', 'required-checks', 'merge-train', 'ci-shards']);
-// How a shard split stays current. The shards row has no number to explain, so this joins the governance
-// row's explain text where shards are on, as the App's removal steps do.
+const BOUND_ORDER = Object.freeze(['parent-issue', 'required-checks']);
+// How a shard split stays current. The shards row takes no answer, so this joins the governance row's
+// explain text where shards are on, as the App's removal steps do.
 const SHARDS_REFRESH = '**Parallel CI shards, daily refresh:** once a day Shard Timings measures the tests and, when the shards have drifted, opens one pull request with the new split (this needs the governance App). Nothing changes until it is merged, and the programme flags it after 24 hours with no owner.';
+// What a table row the programme file sets says in its Recommended column.
+const SET_IN = 'Set in the programme file';
 const BOUND_CHANGE = 'To change them, edit that file in a pull request and merge it.';
+// The evidence store's other choice: the controller sets up a new store with the owner. No command moves
+// a store yet, so nothing is promised to move, and this bank's answer moves nothing.
+const STORE_MOVE = 'Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer';
+// The one table's rows, in order; every other row is a line under it.
+const TABLE_ORDER = Object.freeze(['governance', 'task-auto-merge', 'ci-shards', 'permission-blocks', 'governance-app', 'evidence-store']);
 // Where governance is decided the bank has one section and builds the GitHub governance question
 // first, so it is always row 1.1 (a test pins it).
 const GOVERNANCE_REF = '1.1';
@@ -152,9 +159,9 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const on = task === 'after-gates';
   const turnsOn = !decided;
   specs.push(bank.resolvedQuestion({
-    id: 'task-auto-merge', key: 'taskAutoMerge', section, title: 'Task auto-merge',
-    whatThisControls: 'Whether finished task pull requests merge once their review, checks and testing pass. It applies only while governance is on.',
-    current: governed ? (on ? 'On' : 'Off') : 'Off (needs governance)',
+    id: 'task-auto-merge', key: 'taskAutoMerge', section, title: 'Task auto-merge with merge train',
+    whatThisControls: 'Whether finished task pull requests merge once their review, checks and testing pass, several at a time in one merge train. It applies only while governance is on.',
+    current: governed ? `${on ? 'On' : 'Off'}${merged && train !== 'on' ? ', merge trains off' : ''}` : 'Off (needs governance)',
     currentChoice: governed ? (on ? 'on' : 'off') : '',
     recommendation: { value: 'keep', outcome: 'Task auto-merge stays as it is.', reason: 'Nothing needs to change.' },
     choices: governed ? [
@@ -166,7 +173,6 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       bank.wizardChoice('on', turnsOn ? 'On' : 'On (needs governance on)', turnsOn ? 'The turn-on pull request sets it on: finished task pull requests merge once their gates pass.' : 'Only together with turning governance on in the same answer; the same pull request sets it.'),
     ],
   }));
-  if (governed && merged) specs.push(statusRow({ id: 'merge-train', section, title: 'Merge trains', current: train === 'on' ? 'On' : 'Off', text: BOUND, bound: `merge trains ${train === 'on' ? 'on' : 'off'}` }));
   // Parallel CI shards: no question. A repository whose CI already shards gets nothing; otherwise CI
   // this slow on its last green run (SLOW_CI_MINUTES or more) gets shards by default and faster or
   // unknown CI gets none, each overridden with shards=<yes|not-now|never>. The minutes are display
@@ -178,24 +184,36 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const where = turnsOn ? 'The turn-on pull request also adds a first shard list and the shard workflows'
     : governed ? 'Your answer also prepares one binding pull request with a first shard list; it applies only after you merge it'
       : 'If your answer turns governance on, its pull request also adds a first shard list and the shard workflows';
+  // Each shards row says whether this required part is ready (`required`), and the one step left when not.
   if (governed && (answered === 'yes' || answered === 'never')) {
     shardsOn = answered === 'yes';
-    specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
-      text: answered === 'yes' ? `${BOUND}; the next rules refresh copies the shard workflows while the shard list is usable` : `${BOUND}; Toolkit does not ask again`,
-      bound: answered === 'yes' ? `parallel CI shards yes (refreshed once a day: explain ${GOVERNANCE_REF})` : 'parallel CI shards never (not asked again)' }));
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
+      text: answered === 'yes' ? `${SET_IN}; the next rules refresh copies the shard workflows while the shard list is usable, and the split is refreshed once a day (explain ${GOVERNANCE_REF})` : `${SET_IN}; Toolkit does not ask again`,
+      bound: answered === 'yes' ? 'parallel CI shards yes' : 'parallel CI shards never' }), required: { ready: true } });
   } else if (pending) {
     // An answer already waits in its own pull request: that one is merged or closed, never a second.
-    specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Pull request #${pending.number} open`,
-      text: `Your answer waits in ${pending.url}: merge it, or close it to answer again. Toolkit prepares no second one` }));
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Pull request #${pending.number} open`,
+      text: `Your answer waits in ${pending.url}: merge it, or close it to answer again. Toolkit prepares no second one` }), required: { ready: false, step: `merge pull request #${pending.number} (${pending.url})` } });
   } else if (ciShards && ciShards.existing) {
-    specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Already in your CI (${ciShards.existing})` }));
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Already in your CI (${ciShards.existing})` }), required: { ready: true } });
+  } else if (ciShards && ciShards.usable && !ciShards.usable.ok && (governed || turnsOn || state.state === 'DISABLED')) {
+    // No test list Toolkit can split (such as a Python suite): not applicable, with why; no shards= override.
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not applicable',
+      text: `Toolkit can split only Node tests, and ${ciShards.usable.reason}. It looks again at the next refresh` }), required: { ready: true } });
+  } else if (ciShards && ciShards.measured?.unread && (governed || turnsOn || state.state === 'DISABLED')) {
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'CI time could not be read',
+      text: `GitHub could not be read just now (${ciShards.measured.unread}), so Toolkit adds no shards and checks again at the next refresh`,
+      change: 'To add them anyway, add shards=yes to your reply; shards=never stops the check' }),
+    shards_default: 'not-now', other: 'shards=yes or shards=never in your reply', required: { ready: null } });
   } else if (ciShards && (governed || turnsOn || state.state === 'DISABLED')) {
     const slow = Number.isFinite(ciShards.measured?.minutes) && ciShards.measured.minutes >= SLOW_CI_MINUTES;
     shardsOn = slow;
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: slow ? 'Yes (Toolkit default)' : 'Not now (Toolkit default)',
+    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: slow ? 'Yes (Toolkit default)' : 'Not needed (Toolkit default)',
       text: slow ? `${where}, because the last green CI run took ${SLOW_CI_MINUTES} minutes or more; the split is then refreshed once a day` : `CI is under ${SLOW_CI_MINUTES} minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh`,
       change: slow ? 'To skip them, add shards=not-now or shards=never to your reply' : 'To add them anyway, add shards=yes to your reply; shards=never stops the check' }),
-    shards_default: slow ? 'yes' : 'not-now', estimateShort: estimateShort(ciShards.measured) });
+    shards_default: slow ? 'yes' : 'not-now', estimateShort: estimateShort(ciShards.measured),
+    other: slow ? 'shards=not-now or shards=never in your reply' : 'shards=yes or shards=never in your reply',
+    required: slow ? { ready: false, step: governed ? 'your answer prepares the shard pull request; merge it' : 'the turn-on pull request adds them' } : { ready: true } });
   }
   const governanceRow = specs.find(spec => spec.id === 'governance' && !spec.report_only);
   if (shardsOn && governanceRow) governanceRow.explain_more = [...(governanceRow.explain_more || []), SHARDS_REFRESH];
@@ -217,12 +235,16 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   if (governed && merged) {
     const parents = merged.parents || [];
     const checks = merged.required_checks;
-    specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: BOUND, bound: `evidence store ${merged.store.repository}` }));
+    specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: SET_IN, bound: `evidence store ${merged.store.repository}` }),
+      required: { ready: true }, other: STORE_MOVE });
     if (parents.length) specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: parents.map(parent => `#${parent.issue}`).join(', '), text: BOUND,
       bound: `${parents.length === 1 ? 'parent' : 'parents'} ${parents.map(parent => `#${parent.issue}`).join(', ')}` }));
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: checks.length ? checks.join(', ') : 'none listed', text: BOUND,
       bound: checks.length ? `${checks.length === 1 ? 'required check' : 'required checks'} ${checks.join(', ')}` : 'no required checks' }));
   } else if (governed) {
+    // The store and shards rows stay in the table, unknown, so the top line counts them.
+    specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: 'Not read', text: 'The programme file that holds it could not be read just now' }), required: { ready: null } });
+    if (!specs.some(spec => spec.id === 'ci-shards')) specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not read', text: 'The programme file that holds it could not be read just now' }), required: { ready: null } });
     specs.push(statusRow({ id: 'programme-file', section, title: 'Programme file', current: 'Could not be read',
       text: `This computer could not read the merged .github/toolkit-programme.json just now${mergedRead?.refresh_error ? ` (${mergedRead.refresh_error})` : ''}, so what it sets is not shown. Type toolkit governance again in a moment` }));
   }
@@ -231,17 +253,25 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   // The governance App: the owner runs its setup command; Toolkit never makes the App or saves its key.
   // While governance is on, or turns on with this answer, the result gives that command by default.
   // Its removal steps are in the governance row's explain text where there is one.
-  const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
+  // GitHub that could not be read leaves the App unknown, never missing (presence says unverified).
+  const appUnknown = app && !appSet && (app.variable === 'unverified' || app.secret === 'unverified');
+  const appPart = app && !appSet && !appUnknown && (app.variable === 'found' || app.secret === 'found');
+  const appNone = app && app.variable === 'missing' && app.secret === 'missing';
   if (appSet || appPart) {
-    specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
-      text: !appSet ? 'the governance check shows how to finish or replace it' : decided ? `Say "explain ${GOVERNANCE_REF}" for how to stop using it` : appStop }));
+    specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
+      text: !appSet ? 'the governance check shows how to finish or replace it' : decided ? `Say "explain ${GOVERNANCE_REF}" for how to stop using it` : appStop }),
+    required: appSet ? { ready: true } : { ready: false, step: 'finish it as the governance check shows' } });
+  } else if (governed && (appUnknown || !app)) {
+    specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app ? `GitHub could not be read (${app.reason || 'no answer'})` : 'Not checked',
+      text: 'Toolkit checks it again next time; nothing is set up from this answer' }), required: { ready: null } });
   } else if (state.state === 'DISABLED') {
     // Turning governance back on gives the same one line as a first turn-on; staying off gives none.
     specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
       text: 'Nothing is made while governance is off. If your answer turns it back on, Toolkit then gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub' }), app_setup: true });
   } else {
     specs.push({ ...statusRow({ id: 'governance-app', section, title: 'Governance App', current: app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
-      text: 'After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests' }), app_setup: true });
+      text: 'After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests' }), app_setup: true,
+    required: appNone ? { ready: false, step: 'paste the one line Toolkit gives after your answer' } : { ready: null } });
   }
   // The instruction copies older setups left: removed by default with any answer that keeps governance
   // on (toolkit-governance-cleanup.cjs), in the working tree; the owner commits them and merges one PR.
@@ -260,7 +290,8 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   const outdated = missing !== null && (missing > 0 || stale > 0);
   specs.push({ ...statusRow({ id: 'permission-blocks', section, title: `Toolkit permissions (${appName})`,
     current: missing === null ? 'Not checked' : outdated ? `Outdated: ${[missing ? `${missing} missing` : '', stale ? `${stale} old` : ''].filter(Boolean).join(', ')}` : 'Up to date',
-    text: outdated ? `After your answer, Toolkit gives you one command to run yourself that brings ${appName}'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter` : missing === 0 ? '' : 'They could not be checked here; setup toolkit checks them' }), permissions_update: outdated });
+    text: outdated ? `After your answer, Toolkit gives you one command to run yourself that brings ${appName}'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter` : missing === 0 ? '' : 'They could not be checked here; setup toolkit checks them' }), permissions_update: outdated,
+    other: outdated ? 'Leave: do not run the command' : '', required: missing === null ? { ready: null } : outdated ? { ready: false, step: 'run the one command Toolkit gives after your answer' } : { ready: true } });
   return bank.withPresentationMetadata(specs, BANK_HOST);
 }
 
@@ -277,9 +308,10 @@ function bankReference(specs) { return specs[0]?.presentation.bank_reference || 
 // so the app shows it as typed; it is shown, never run.
 const agentsAfterAnswer = () => `Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Add no code block of your own, and never run a command above yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says. If they only ask to explain a row, such as explain 1.1, run node "${script()}" setup --answers "explain 1.1" with that row: it needs no ticket and writes nothing.`;
 
-// The one reply line under the bank, with an example taken from its own first question.
+// The one reply line under the bank, with an example taken from its first question with a choice to
+// change.
 function replyLine(specs) {
-  const first = specs.find(spec => !spec.report_only);
+  const first = specs.find(spec => !spec.report_only && spec.choices.length > 1) || specs.find(spec => !spec.report_only);
   const example = first ? `${first.presentation.question_ref}=${first.choices[1]?.presentation_ref || 'A'}` : '1.1=B';
   const explain = first ? first.presentation.question_ref : '1.1';
   const overrides = [specs.some(spec => spec.shards_default) ? 'shards=' : '', specs.some(spec => spec.id === 'evidence-store' && !spec.bound) ? 'store=' : ''].filter(Boolean);
@@ -288,23 +320,72 @@ function replyLine(specs) {
   return `Reply all recommended, or only your changes such as ${example}. Rows you leave out stay as they are; each change is a pull request you merge.${extra} Say "explain ${explain}" for the full text of a row.`;
 }
 
-// The bank as the owner reads it, with the one reply line. Every app takes a typed reply, the same way
-// as `setup toolkit`: the whole list at once, answered in one line. The table holds only questions;
-// the rows with nothing to answer follow it in one short list: first one line for what the merged
-// programme file sets, then one line per other row. The longer texts are in explain (explainText).
+// The table's rows with the number each shows: a question keeps its own number (the one an answer
+// names), and the rows Toolkit keeps itself are numbered after the questions, in TABLE_ORDER. Where the
+// answer itself turns governance on, its row has no number: there is nothing to choose there.
+function tableRows(specs) {
+  const rows = TABLE_ORDER.map(id => specs.find(spec => spec.id === id)).filter(Boolean);
+  const section = specs[0]?.presentation.section_index || 1;
+  let next = Math.max(0, ...rows.filter(spec => !spec.report_only).map(spec => spec.presentation.question_index));
+  return rows.map(spec => ({ spec, ref: !spec.report_only ? spec.presentation.question_ref : spec.turns_on ? '-' : `${section}.${next += 1}` }));
+}
+
+// Whether governance is on here (its row reads On), so the required parts carry their marks.
+const isOn = specs => specs.some(spec => spec.id === 'governance' && spec.current === 'On');
+
+// The bank's top line: OFF, not decided, or ON with whether every required part is ready; a part that
+// could not be read is unknown, never counted as a step left.
+function topLine(specs) {
+  const governanceRow = specs.find(spec => spec.id === 'governance');
+  if (!governanceRow || governanceRow.turns_on) return 'not decided: your answer turns it on';
+  if (!isOn(specs)) return 'OFF';
+  const parts = specs.filter(spec => spec.required);
+  const steps = parts.filter(spec => spec.required.ready === false).length;
+  const unknown = parts.filter(spec => spec.required.ready === null).length;
+  const left = steps ? `ON, not ready, ${steps} step${steps === 1 ? '' : 's'} left` : 'ON, ready';
+  return unknown ? `${left}; ${unknown} part${unknown === 1 ? '' : 's'} could not be checked` : left;
+}
+
+const cell = text => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+// The shards row carries the minutes in short; display only, so it is not in the bank reference.
+const currentText = spec => `${spec.current_short || spec.current}${spec.id === 'ci-shards' && spec.estimateShort ? ` (${spec.estimateShort})` : ''}`;
+const MARKS = Object.freeze({ true: 'Ready', false: 'Not ready', null: 'Unknown' });
+
+function tableLine({ spec, ref }, on) {
+  if (!spec.report_only) {
+    const label = bank.choiceLabel(spec, spec.recommended);
+    const effect = spec.recommended === 'keep' || spec.recommended_outcome === label ? '' : `: ${spec.recommended_outcome}`;
+    const others = spec.choices.filter(choice => choice.value !== spec.recommended).map(choice => cell(`${choice.presentation_ref}. ${choice.label}`)).join('<br>') || '-';
+    return `| ${ref} | ${cell(spec.title)} | ${cell(currentText(spec))} | ${cell(`${spec.presentation.recommended_choice_ref}. ${label}${effect}`)} | ${others} |`;
+  }
+  const mark = on && spec.required ? `${MARKS[spec.required.ready]}: ` : '';
+  const recommended = on && spec.required?.ready === false ? `Next step: ${spec.required.step}` : spec.recommended_text || 'Keep';
+  return `| ${ref} | ${cell(spec.title)} | ${cell(`${mark}${currentText(spec)}`)} | ${cell(recommended)} | ${cell(spec.other || '-')} |`;
+}
+
+// The bank as the owner reads it: the top line, one table with the two choices and the parts Toolkit
+// keeps itself (each with its mark and one next step while governance is on), the other rows as short
+// lines under it, and the one reply line. The longer texts are in explain (explainText).
 function renderGovernanceBank(specs) {
   const reference = bankReference(specs);
-  const status = specs.filter(spec => spec.report_only);
-  const bound = status.filter(spec => spec.bound).sort((a, b) => BOUND_ORDER.indexOf(a.id) - BOUND_ORDER.indexOf(b.id));
-  const stale = bound.find(spec => spec.stale)?.stale;
-  // The shards row carries the minutes in short; display only, so it is not in the bank reference.
-  const current = spec => `${spec.current_short || spec.current}${spec.id === 'ci-shards' && spec.estimateShort ? ` (${spec.estimateShort})` : ''}`;
+  const rows = tableRows(specs);
+  const inTable = new Set(rows.map(row => row.spec.id));
+  const rest = specs.filter(spec => spec.report_only && !inTable.has(spec.id));
+  const bound = rest.filter(spec => spec.bound).sort((a, b) => BOUND_ORDER.indexOf(a.id) - BOUND_ORDER.indexOf(b.id));
+  const stale = specs.find(spec => spec.stale)?.stale;
+  const on = isOn(specs);
   return [
-    ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
-    ...bank.renderCompactQuestionTable(specs.filter(spec => !spec.report_only), true),
-    ...(status.length ? ['', 'Nothing to answer here:',
-      ...(bound.length ? [`- Set in ${governance.BINDING_FILE}: ${bound.map(spec => spec.bound).join(', ')}.${stale ? ` GitHub could not be read just now (${stale}), so these are the values this computer last read.` : ''} ${BOUND_CHANGE}`] : []),
-      ...status.filter(spec => !spec.bound).map(spec => `- ${spec.title}: ${current(spec)}.${spec.recommended_text ? ` ${spec.recommended_text}.` : ''}`)] : []),
+    `# ${BANK_TITLE} - ${topLine(specs)}`,
+    '',
+    `Bank reference: ${reference}`,
+    '',
+    '| # | Setting | Current | Recommended | Other choices |',
+    '|---|---|---|---|---|',
+    ...rows.map(row => tableLine(row, on)),
+    ...(rest.length || stale ? ['', 'Also:',
+      ...(bound.length ? [`- Set in ${governance.BINDING_FILE}: ${bound.map(spec => spec.bound).join(', ')}. ${BOUND_CHANGE}`] : []),
+      ...(stale ? [`- GitHub could not be read just now (${stale}), so the values set in ${governance.BINDING_FILE} are the ones this computer last read.`] : []),
+      ...rest.filter(spec => !spec.bound).map(spec => `- ${spec.title}: ${currentText(spec)}.${spec.recommended_text ? ` ${spec.recommended_text}.` : ''}`)] : []),
     // An answer that turns governance on covers the post-merge settings too, so they are named before it.
     ...(specs.some(spec => spec.turns_on) ? ['', AFTER_MERGE] : []),
     ...specs.filter(spec => spec.id === 'governance' && !spec.report_only).flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
@@ -316,11 +397,17 @@ function renderGovernanceBank(specs) {
   ].join('\n');
 }
 
-// The full text of one row, for "explain 1.1", or null when the bank has no such row.
+// The full text of one row, for "explain 1.1", or null when the bank has no such row. A row Toolkit
+// keeps itself is explained by its table number too.
 function explainText(specs, ref) {
   const spec = specs.find(entry => entry.presentation.question_ref === ref);
-  if (!spec) return null;
-  return [bank.renderQuestionRows(specs, ref, { brief: true }).replace(/\n+---$/, ''), ...(spec.explain_more || [])].join('\n\n');
+  if (spec) return [bank.renderQuestionRows(specs, ref, { brief: true }).replace(/\n+---$/, ''), ...(spec.explain_more || [])].join('\n\n');
+  const row = tableRows(specs).find(entry => entry.ref === ref && entry.spec.report_only);
+  if (!row) return null;
+  const kept = row.spec;
+  return [`${ref} ${kept.title}`, `Current: ${currentText(kept)}.`, ...(kept.recommended_text ? [`${kept.recommended_text}.`] : []),
+    ...(kept.required?.ready === false ? [`Next step: ${kept.required.step}.`] : []), ...(kept.other ? [`Other choice: ${kept.other}.`] : []),
+    kept.shards_default ? `Toolkit keeps this part itself: only ${kept.other} changes it.` : 'Toolkit keeps this part itself: no answer changes it.'].join('\n');
 }
 
 // The row number a reply asks to explain ("explain 1.4", with or without the bank reference), or null.
@@ -407,7 +494,10 @@ function parseBankAnswer(text, specs, { requireBankReference = true, plainWords 
   try {
     parsed = bank.parseConciseQuestionBankAnswer(`${extras.prefix}${extras.rest || (extras.noStore || extras.store || extras.shards ? 'all recommended' : '')}`, specs, { requireBankReference, label: 'Governance', leftOut: spec => spec.choices.find(choice => choice.value === 'keep')?.value });
   } catch (error) {
-    if (error.code === 'QUESTION_BANK_UNKNOWN_ROW') throw new Error(`This bank has no row ${error.question_ref}.`);
+    if (error.code === 'QUESTION_BANK_UNKNOWN_ROW') {
+      const row = tableRows(specs).find(entry => entry.ref === error.question_ref && entry.spec.report_only);
+      throw new Error(row ? `Row ${row.ref} ${row.spec.title} takes no answer: ${row.spec.other ? `${row.spec.other}.` : 'Toolkit keeps it itself.'}` : `This bank has no row ${error.question_ref}.`);
+    }
     throw error;
   }
   if (!parsed) throw Object.assign(new Error(`Governance question bank answer was not read.${turnsOn ? ' Reply no store to keep governance off.' : ''}`), { code: 'BANK_ANSWER_UNREAD' });

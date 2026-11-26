@@ -147,7 +147,7 @@ function respondSteady(event, input, options) {
     } else {
       // The catch-up moves the checkout first, so the governance line reads the moved tree.
       const caughtUp = catchUpLine(fresh, options);
-      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh })].filter(Boolean).join('\n');
+      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude' })].filter(Boolean).join('\n');
     }
     return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch (error) {

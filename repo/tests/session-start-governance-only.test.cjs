@@ -123,3 +123,32 @@ test('S-5 no Toolkit script or doc still names the stale check, its stamp or its
     for (const gone of [/stale[- ]check/i, /staleStamp|StaleStamp|startStaleSweep|staleOnlySkip|stale_rows/, /,stale,|,stale\b(?!-)/]) assert.doesNotMatch(text, gone, `${file}: ${gone}`);
   }
 });
+
+// INT-TK421-1360: while this computer's Toolkit permission lines are out of date, a governed
+// repository's session start carries one line for the agent to pass on once; it never stops anything,
+// and an up-to-date, unchecked or failing check adds nothing.
+test('S-3 a governed session start names out-of-date Toolkit permissions in one line, and nothing else stops', () => {
+  const root = tmp();
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: false, root };
+  const line = permissions => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps: { permissions } });
+  const outdated = line(() => ({ checked: true, host: 'claude', app: 'Claude Code', missing: 3, stale: 1 }));
+  assert.match(outdated, /Toolkit permissions: Claude Code's Toolkit permission lines on this computer are out of date \(3 missing, 1 old\)\. In your first reply, tell the user once, in one line, that saying `toolkit permissions` gives the one command that brings them up to date; nothing waits on it\./);
+  assert.equal(outdated.split('Toolkit permissions:').length, 2, 'one line');
+  assert.match(line(() => ({ checked: true, host: 'codex', app: 'Codex', missing: 0, stale: 2 })), /Codex's Toolkit permission lines on this computer are out of date \(2 old\)/);
+  for (const [label, permissions] of [['up to date', () => ({ checked: true, host: 'claude', missing: 0, stale: 0 })], ['not checked', () => ({ checked: false })], ['the check fails', () => { throw new Error('boom'); }]]) {
+    assert.doesNotMatch(line(permissions), /Toolkit permissions:/, label);
+  }
+  // Only a governed repository: off or undecided adds nothing.
+  const off = gate.sessionLine(root, { stateReader: () => ({ ...enabled, state: 'DISABLED' }), programmeDeps: { permissions: () => ({ checked: true, host: 'claude', missing: 3, stale: 0 }) } });
+  assert.doesNotMatch(off, /Toolkit permissions:/);
+});
+
+// The entry point that knows its app names it, and the shared gate passes it to the permissions check
+// (G2 round 1 of PR 1545, L5), rather than guessing from shell markers.
+test('S-4 the session line passes the calling app to the permissions check', () => {
+  const root = tmp();
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: false, root };
+  const seen = [];
+  gate.sessionLine(root, { stateReader: () => enabled, host: 'codex', programmeDeps: { permissions: (folder, host) => { seen.push(host); return { checked: true, missing: 0, stale: 0 }; } } });
+  assert.deepEqual(seen, ['codex']);
+});
