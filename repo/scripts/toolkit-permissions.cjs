@@ -418,6 +418,33 @@ function main(argv = process.argv.slice(2), deps = {}) {
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ PermissionBlocks, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
+// How this computer's Toolkit permission lines for this app compare with what Toolkit would write:
+// { checked, host, missing, stale, update, remove }. Reads local files only, so the governance bank and the
+// session-start line both use it.
+function permissionsState(root, { host = require('./agent-host-markers.cjs').detectAgentHost() === 'codex' ? 'codex' : 'claude' } = {}) {
+  const owner = new PermissionBlocks();
+  const built = owner.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: root });
+  let missing = 0;
+  let stale = 0;
+  for (const block of built.blocks) {
+    if (host === 'codex') {
+      const { ruleKeys } = require('./toolkit-permissions-apply.cjs');
+      let text = null;
+      try { text = nodeFs.readFileSync(block.target, 'utf8'); } catch { text = null; }
+      const have = ruleKeys(text);
+      const want = ruleKeys(block.text);
+      missing += want.filter(key => !have.includes(key)).length;
+      stale += have.filter(key => !want.includes(key)).length;
+    } else if (!nodeFs.existsSync(block.target)) missing += block.allow.length + block.ask.length;
+    else {
+      const report = owner.check(block.target, { blocks: [block] })[0];
+      missing += report.missing.length;
+      stale += report.stale.length + report.stale_ask.length;
+    }
+  }
+  return { checked: true, host, missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
+}
+
+module.exports = Object.freeze({ PermissionBlocks, permissionsState, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

@@ -78,11 +78,17 @@ test('the bank is one typed list of its two questions, answered in one line, and
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, 'a shown bank is not a failure');
   assert.doesNotMatch(shown.out, /```|AskUserQuestion|\{"questions"|question card|tap/i);
-  assert.match(shown.out, /^# Toolkit governance choices - 2 questions across 1 section$/m);
-  assert.match(shown.out, /^\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|$/m);
-  assert.match(shown.out, /^\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|$/m);
-  assert.doesNotMatch(shown.out, /^\| (1\.[3-9]|2\.\d) \|/m, 'no other question');
-  assert.match(shown.out, /^Reply all recommended, or only your changes such as 1\.1=B\. Rows you leave out stay as they are; each change is a pull request you merge\. Add shards= only to change that default\. Say "explain 1\.1" for the full text of a row\.$/m);
+  // The top line says what is left: the permissions are one step, and the App could not be read here (unknown, never missing).
+  assert.match(shown.out, /^# Toolkit governance choices - ON, not ready, 1 step left; 1 part could not be checked$/m);
+  assert.deepEqual(shown.out.split('\n').filter(line => /^\| \d/.test(line)), [
+    '| 1.1 | GitHub governance | On | A. Keep current | B. Turn off |',
+    '| 1.2 | Task auto-merge with merge train | Off | A. Keep current | B. On |',
+    '| 1.3 | Parallel CI shards | Ready: Not applicable | Toolkit can split only Node tests, and no Node test files were found (such as *.test.js using node:test). It looks again at the next refresh | - |',
+    '| 1.4 | Toolkit permissions (Claude Code) | Not ready: Outdated: 2 missing, 1 old | Next step: run the one command Toolkit gives after your answer | Leave: do not run the command |',
+    '| 1.5 | Governance App | Unknown: GitHub could not be read (offline) | Toolkit checks it again next time; nothing is set up from this answer | - |',
+    '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: not by this answer; the controller\'s state move shows its plan first and asks its own confirmation |',
+  ], 'one table: the two questions, then the four parts Toolkit keeps itself');
+  assert.match(shown.out, /^Reply all recommended, or only your changes such as 1\.1=B\. Rows you leave out stay as they are; each change is a pull request you merge\. Say "explain 1\.1" for the full text of a row\.$/m);
   assert.match(shown.out, /Agents: this line is for you alone\. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop\..*never show this bank again after they reply\./);
   agentsLast(shown.out);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
@@ -95,24 +101,20 @@ test('after the table the bank lists what it does by default, then one reply lin
   const ctx = fixture(t);
   const { out } = await run(ctx, ['setup']);
   const tail = out.slice(out.lastIndexOf('|') + 1).trim().split(/\n\s*\n/);
-  assert.equal(tail.length, 3, 'only the rows with nothing to answer, the reply line and the Agents line follow the table');
-  // Merge trains, parallel CI shards, the App, the instruction copies and the permissions are no
-  // questions: each line says what the answer does by default, or that it is bound.
+  assert.equal(tail.length, 3, 'only the rows left out of the table, the reply line and the Agents line follow it');
+  // The parent issue and required checks are left out of the table; the instruction copies are said once here.
   assert.equal(tail[0], [
-    'Nothing to answer here:',
-    '- Set in .github/toolkit-programme.json: evidence store toolkit-test-fixture/store, parent #1, required check validate, merge trains on. To change them, edit that file in a pull request and merge it.',
-    '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
-    '- Governance App: Not checked. After your answer, Toolkit gives you one line to paste into PowerShell (it refuses to run under an agent, so the App\'s private key never passes through one): press Enter when it asks, then click Create and Install on GitHub. Governance works without it, but its jobs on GitHub need it to open pull requests.',
+    'Also:',
+    '- Set in .github/toolkit-programme.json: parent #1, required check validate. To change them, edit that file in a pull request and merge it.',
     '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
-    '- Toolkit permissions (Claude Code): Outdated: 2 missing, 1 old. After your answer, Toolkit gives you one command to run yourself that brings Claude Code\'s Toolkit permission lines up to date; it shows what changes, backs the file up and waits for you to press Enter.',
   ].join('\n'));
   assert.doesNotMatch(out, /More on|Status \(nothing to answer\)|The permissions row covers/);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
   const reference = /Bank reference: (\S+)/.exec(out)[1];
   const explained = await run(ctx, ['setup', '--answers', `${reference}: explain 1.2`]);
   assert.equal(explained.code, 0);
-  assert.match(explained.out, /^### 1\.2 Task auto-merge$/m);
-  assert.match(explained.out, /^\*\*What this controls:\*\* Whether finished task pull requests merge once their review, checks and testing pass\. It applies only while governance is on\.$/m);
+  assert.match(explained.out, /^### 1\.2 Task auto-merge with merge train$/m);
+  assert.match(explained.out, /^\*\*What this controls:\*\* Whether finished task pull requests merge once their review, checks and testing pass, several at a time in one merge train\. It applies only while governance is on\.$/m);
   assert.doesNotMatch(explained.out, /^\| 1\.1 \|/m, 'explain shows one row, never the bank');
   assert.doesNotMatch(explained.out, /\*\*(Verification|Selected):\*\*/, 'explain leaves out what only a filled-in bank needs');
   agentsLast(explained.out);
@@ -135,8 +137,8 @@ test('a read that fails while the bank is built never shows as a bound value', a
   } };
   const { code, out } = await run(ctx, ['setup']);
   assert.equal(code, 0, out);
-  assert.match(out, /^\| 1\.2 \| Task auto-merge \| On \| A\. Keep current \| B\. Off \|$/m);
-  assert.match(out, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parent #1, required check validate, merge trains on\. To change them, edit that file in a pull request and merge it\.$/m);
+  assert.match(out, /^\| 1\.2 \| Task auto-merge with merge train \| On \| A\. Keep current \| B\. Off \|$/m);
+  assert.match(out, /^- Set in \.github\/toolkit-programme\.json: parent #1, required check validate\. To change them, edit that file in a pull request and merge it\.$/m);
   assert.doesNotMatch(out, /Merge trains: Off|merge trains off|Bound in the merged programme file/);
 });
 
@@ -148,9 +150,14 @@ test('a stale read says plainly that GitHub could not be read and why; no read s
     store: { repository: 'toolkit-test-fixture/store' }, required_checks: ['validate', 'gate'], ci_shards: { answer: 'yes' } };
   const state = { state: 'ENABLED', repository: SLUG, root: '/x' };
   const stale = renderGovernanceBank(governanceBankSpecs({ state, merged, train: 'off', mergedRead: { fresh: false, refresh_error: 'read-timed-out' } }));
-  assert.match(stale, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parents #421, #7, required checks validate, gate, merge trains off, parallel CI shards yes \(refreshed once a day: explain 1\.1\)\. GitHub could not be read just now \(read-timed-out\), so these are the values this computer last read\. To change them, edit that file in a pull request and merge it\.$/m);
+  assert.match(stale, /^- Set in \.github\/toolkit-programme\.json: parents #421, #7, required checks validate, gate\. To change them, edit that file in a pull request and merge it\.$/m);
+  assert.match(stale, /^- GitHub could not be read just now \(read-timed-out\), so the values set in \.github\/toolkit-programme\.json are the ones this computer last read\.$/m);
+  assert.match(stale, /^\| 1\.2 \| Task auto-merge with merge train \| Off, merge trains off \|/m);
+  assert.match(stale, /^\| 1\.3 \| Parallel CI shards \| Ready: Yes \| Set in the programme file; [^|]*refreshed once a day \(explain 1\.1\) \| - \|$/m);
   const fresh = renderGovernanceBank(governanceBankSpecs({ state, merged: { ...merged, required_checks: [], ci_shards: { answer: 'never' } }, train: 'on', mergedRead: { fresh: true, refresh_error: null } }));
-  assert.match(fresh, /^- Set in \.github\/toolkit-programme\.json: evidence store toolkit-test-fixture\/store, parents #421, #7, no required checks, merge trains on, parallel CI shards never \(not asked again\)\. To change them, edit that file in a pull request and merge it\.$/m);
+  assert.match(fresh, /^- Set in \.github\/toolkit-programme\.json: parents #421, #7, no required checks\. To change them, edit that file in a pull request and merge it\.$/m);
+  assert.match(fresh, /^\| 1\.3 \| Parallel CI shards \| Ready: Never ask \| Set in the programme file; Toolkit does not ask again \| - \|$/m);
+  assert.doesNotMatch(fresh, /could not be read/);
   const unread = renderGovernanceBank(governanceBankSpecs({ state, merged: null, mergedRead: { fresh: false, refresh_error: 'read-timed-out' } }));
   assert.match(unread, /^- Programme file: Could not be read\. This computer could not read the merged \.github\/toolkit-programme\.json just now \(read-timed-out\), so what it sets is not shown\. Type toolkit governance again in a moment\.$/m);
   assert.doesNotMatch(unread, /Set in|Merge trains|merge trains/, 'no value is shown for a binding that was not read');
@@ -160,12 +167,16 @@ test('with nothing left to do the block is one line for the programme file and o
   const ctx = fixture(t, { quiet: true });
   const { out } = await run(ctx, ['setup']);
   const tail = out.slice(out.lastIndexOf('|') + 1).trim().split(/\n\s*\n/);
+  assert.match(out, /^# Toolkit governance choices - ON, ready$/m);
+  assert.deepEqual(out.split('\n').filter(line => /^\| \d/.test(line)).slice(2), [
+    '| 1.3 | Parallel CI shards | Ready: Not applicable | Toolkit can split only Node tests, and no Node test files were found (such as *.test.js using node:test). It looks again at the next refresh | - |',
+    '| 1.4 | Toolkit permissions (Claude Code) | Ready: Up to date | Keep | - |',
+    '| 1.5 | Governance App | Ready: Set up | Say "explain 1.1" for how to stop using it | - |',
+    '| 1.6 | Evidence store | Ready: toolkit-test-fixture/store | Set in the programme file | Change location: not by this answer; the controller\'s state move shows its plan first and asks its own confirmation |',
+  ]);
   assert.equal(tail[0], [
-    'Nothing to answer here:',
-    '- Set in .github/toolkit-programme.json: evidence store toolkit-test-fixture/store, parent #1, required check validate, merge trains on. To change them, edit that file in a pull request and merge it.',
-    '- Parallel CI shards: Not now (Toolkit default) (CI time unknown). CI is under 10 minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh. To add them anyway, add shards=yes to your reply; shards=never stops the check.',
-    '- Governance App: Set up. Say "explain 1.1" for how to stop using it.',
-    '- Toolkit permissions (Claude Code): Up to date.',
+    'Also:',
+    '- Set in .github/toolkit-programme.json: parent #1, required check validate. To change them, edit that file in a pull request and merge it.',
   ].join('\n'));
   assert.doesNotMatch(out, /TOOLKIT_GOVERNANCE_APP|Secrets and variables/, 'the App removal steps wait for explain');
   const reference = /Bank reference: (\S+)/.exec(out)[1];
@@ -218,7 +229,8 @@ test('an answer that takes the App default gives exactly one PowerShell line for
   const ctx = fixture(t, { quiet: true });
   ctx.cli = { ...QUIET, appReader: args => ({ ok: true, value: { total_count: 0, [/\/actions\/(variables|secrets)\?/.exec(args[0])[1]]: [] } }) };
   const shown = await run(ctx, ['setup']);
-  assert.match(shown.out, /^- Governance App: Not set up\. After your answer, Toolkit gives you one line to paste into PowerShell /m);
+  assert.match(shown.out, /^\| 1\.5 \| Governance App \| Not ready: Not set up \| Next step: paste the one line Toolkit gives after your answer \| - \|$/m);
+  assert.match(shown.out, /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
   const answered = await reply(ctx, /Bank reference: (\S+)/.exec(shown.out)[1], KEEP);
   assert.equal(answered.code, 0, answered.out + answered.err);
   assert.match(answered.out, /^Governance App: paste this one line into PowerShell and press Enter\. It saves the App's Client ID and key on toolkit-test-fixture\/card\. It asks for Enter before it opens GitHub and again before it checks the installation; on GitHub you click Create, then Install\. It runs only outside an agent, so the App's private key never passes through one\.$/m);
@@ -235,8 +247,9 @@ test('a reply that cannot be used gets one line, never the bank, and the owner\'
   for (const [answer, line] of [
     ['yes please', /^Governance question bank answer was not read\. Nothing was written\.$/m],
     ['1.12=A', /^This bank has no row 1\.12\. Nothing was written\.$/m],
-    // A governed repository is asked two questions, so section 1 ends at 1.2.
-    ['1.3=A', /^This bank has no row 1\.3\. Nothing was written\.$/m],
+    // A governed repository is asked two questions; 1.3 is a part Toolkit keeps itself.
+    ['1.3=A', /^Row 1\.3 Parallel CI shards takes no answer: Toolkit keeps it itself\. Nothing was written\.$/m],
+    ['1.6=B', /^Row 1\.6 Evidence store takes no answer: Change location: not by this answer; [^\n]*confirmation\. Nothing was written\.$/m],
     ['explain 1.12', /^This bank has no row 1\.12\.$/m],
   ]) {
     const wrong = await reply(ctx, reference, answer);
@@ -274,7 +287,7 @@ test('a reply after the state changed names only the changed rows, and the owner
   const changed = await reply(ctx, reference, KEEP);
   assert.equal(changed.code, 0, changed.err);
   assert.match(changed.out, /^The governance state changed since that bank was shown, so the answer was not used and nothing was written\.$/m);
-  assert.deepEqual(changed.out.match(/^.* changed: now .*$/gm), ['1.2 Task auto-merge changed: now On, recommended A. Keep current.']);
+  assert.deepEqual(changed.out.match(/^.* changed: now .*$/gm), ['1.2 Task auto-merge with merge train changed: now On, recommended A. Keep current.']);
   noBank(changed.out);
   agentsLast(changed.out);
   const current = JSON.parse((await run(ctx, ['setup', '--json'])).out).bank_reference;
@@ -322,9 +335,9 @@ test('questions are numbered without gaps, status rows have none, and an answer 
   assert.deepEqual(Object.entries(refs(undecided)).filter(([, ref]) => ref), [['task-auto-merge', '1.1']]);
   for (const id of ['governance', 'evidence-store', 'parent-issue', 'required-checks', 'governance-app', 'permission-blocks']) assert.equal(refs(undecided)[id], '', `${id} is a status row`);
   const shown = renderGovernanceBank(undecided);
-  assert.match(shown, /^# Toolkit governance choices - 1 question across 1 section$/m);
-  assert.match(shown, /^- Evidence store: TRANSPORT-card\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply\.$/m);
-  assert.doesNotMatch(shown, /Status \(nothing to answer\)|Already set|\| 1\.2 \|/);
+  assert.match(shown, /^# Toolkit governance choices - not decided: your answer turns it on$/m);
+  assert.match(shown, /^\| 1\.4 \| Evidence store \| TRANSPORT-card \| None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-card when governance turns on, for programme records and evidence\. To use another private repository of yours, add store=<owner\/name> to your reply \| - \|$/m);
+  assert.doesNotMatch(shown, /Status \(nothing to answer\)|Already set/);
   assert.equal(parseBankAnswer('all recommended', undecided, { requireBankReference: false }).governance, 'on');
   assert.equal(parseBankAnswer('1.1=A', undecided, { requireBankReference: false }).governance, 'on', 'any answer to this bank turns governance on');
   assert.deepEqual(parseBankAnswer('no store', undecided, { requireBankReference: false }), { noStore: true });
@@ -336,7 +349,7 @@ test('questions are numbered without gaps, status rows have none, and an answer 
   // Rows left out stay as they are; the defaults the bank showed (clean up the copies, give the App
   // and permissions commands) come with any answer that keeps governance on.
   assert.deepEqual(parseBankAnswer('1.2=B', withCopies, { requireBankReference: false }),
-    { governance: 'keep', taskAutoMerge: 'on', store: null, governanceApp: 'setup', permissionBlocks: 'keep', instructionCopies: 'clean' });
+    { governance: 'keep', taskAutoMerge: 'on', store: null, governanceApp: 'keep', permissionBlocks: 'keep', instructionCopies: 'clean' }, 'the App was not read here: unknown, so no setup line');
   assert.equal(parseBankAnswer('1.1=B', withCopies, { requireBankReference: false }).instructionCopies, 'keep', 'turning off keeps the copies');
   assert.equal(parseBankAnswer('1.1=A', governanceBankSpecs({ state: governed, copies: { files: 2, held: 'a cloud workflow copy is older', step: 'Refresh it first.' } }), { requireBankReference: false }).instructionCopies, undefined, 'held: nothing is cleaned');
   // A reply to a bank whose numbers moved is never applied as it was.
@@ -350,8 +363,8 @@ test('in the owner\'s own terminal a reply that cannot be used gets one line and
   const result = await run(ctx, ['setup'], { interactive: true, answers: ['1.3=A', 'explain 1.2', KEEP] });
   assert.equal(result.code, 0, result.err);
   assert.equal(result.out.split('Bank reference:').length, 2, 'the bank is printed once');
-  assert.match(result.out, /^This bank has no row 1\.3\. Nothing was written\. Reply again with all recommended or only your changes, such as 1\.1=B\.$/m);
-  assert.match(result.out, /^### 1\.2 Task auto-merge$/m);
+  assert.match(result.out, /^Row 1\.3 Parallel CI shards takes no answer: Toolkit keeps it itself\. Nothing was written\. Reply again with all recommended or only your changes, such as 1\.1=B\.$/m);
+  assert.match(result.out, /^### 1\.2 Task auto-merge with merge train$/m);
   assert.match(result.out, /^Nothing changed: every answer keeps things as they are\.$/m);
   const gaveUp = await run(ctx, ['setup'], { interactive: true, answers: Array(10).fill('maybe') });
   assert.equal(gaveUp.code, 1, 'it stops after a few unusable replies, with nothing written');
@@ -411,11 +424,11 @@ test('explain needs no ticket before or after an answer, and an unknown row afte
     noBank(result.out);
     agentsLast(result.out);
   };
-  await explain(`${reference}: explain 1.2`, /^### 1\.2 Task auto-merge$/m);
+  await explain(`${reference}: explain 1.2`, /^### 1\.2 Task auto-merge with merge train$/m);
   assert.deepEqual(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), shown, 'an explain leaves the shown bank as it was');
   const done = await reply(ctx, reference, KEEP);
   assert.match(done.out, /^Nothing changed: every answer keeps things as they are\.$/m);
-  await explain(`${reference}: explain 1.2`, /^### 1\.2 Task auto-merge$/m);
+  await explain(`${reference}: explain 1.2`, /^### 1\.2 Task auto-merge with merge train$/m);
   await explain('explain 1.1', /^### 1\.1 /m);
   await explain(`${reference}: explain 1.9`, /^This bank has no row 1\.9\.$/m);
   const unknown = await reply(ctx, reference, '1.9=A');
@@ -500,7 +513,7 @@ test('explain after a row changed in place names the change, then the row', asyn
   const [first, changed] = result.out.trim().split('\n');
   assert.equal(first, 'The governance state changed since that bank was shown; the numbers still mean the same rows.');
   assert.equal(changed, 'Toolkit permissions (Claude Code) changed: now Up to date, with nothing to answer.');
-  assert.match(result.out, /^### 1\.2 Task auto-merge$/m);
+  assert.match(result.out, /^### 1\.2 Task auto-merge with merge train$/m);
   agentsLast(result.out);
 });
 

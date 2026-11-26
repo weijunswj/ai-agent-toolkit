@@ -115,11 +115,11 @@ test('a fresh repository after the card\'s yes asks only task auto-merge, names 
   assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['task-auto-merge', false], ['governance', true], ['ci-shards', true], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['governance-app', true], ['permission-blocks', true]]);
   assert.deepEqual(questions.filter(spec => !spec.report_only).map(spec => spec.presentation.question_ref), ['1.1'], 'one question: task auto-merge');
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
-  assert.match(table, /^\| 1\.1 \| Task auto-merge \| Off \(needs governance\) \| A\. Keep current/m);
-  assert.doesNotMatch(table, /^\| 1\.2 \||^\| 2\.1 \|/m, 'no second question');
-  assert.match(table, /^- GitHub governance: Not decided\. Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it\.$/m);
+  assert.match(table, /^\| 1\.1 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current/m);
+  assert.doesNotMatch(table, /^\| 2\.1 \|/m, 'one section');
+  assert.match(table, /^\| - \| GitHub governance \| Not decided \| Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it \| - \|$/m);
   // The store is named before the answer: this repository's own TRANSPORT-<name>, to be created.
-  assert.match(table, /^- Evidence store: TRANSPORT-fresh\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on, for programme records and evidence\./m);
+  assert.match(table, /^\| \d\.\d \| Evidence store \| TRANSPORT-fresh \| None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on, for programme records and evidence\./m);
   assert.match(table, /^- Parent issue: None yet\. Toolkit opens one when governance turns on\.$/m);
   assert.match(table, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\..* To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\./m);
   assert.equal(github.calls.length, 0, 'showing the bank makes nothing');
@@ -275,7 +275,7 @@ test('a failed step stops with what was made, and answering again reuses it inst
 
   const retry = fakeGitHub({ repos: github.world.repos });
   const shown = await run(ctx, ['setup'], retry, { interactive: true, answers: [''] });
-  assert.match(shown.out, /^- Evidence store: TRANSPORT-fresh\. Found: your private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh, used for programme records and evidence\./m, 'the store made last time is found, not offered again');
+  assert.match(shown.out, /^\| \d\.\d \| Evidence store \| TRANSPORT-fresh \| Found: your private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh, used for programme records and evidence\./m, 'the store made last time is found, not offered again');
   const done = await run(ctx, ['setup'], retry, { interactive: true, answers: ['all recommended'] });
   assert.equal(done.code, 0, done.err + done.out);
   assert.deepEqual(retry.calls, [['issue', SLUG, 'Programme: fresh']], 'no second store');
@@ -297,7 +297,7 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   const parent = { number: 3, title: 'Programme tracker', state: 'open', labels: [] };
   const github = fakeGitHub({ repos: { [other]: { private: true, dirs: ['archives', 'state'] }, [`${OWNER}/fresh-evidence`]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], github, { interactive: true, answers: [''] });
-  assert.match(shown.out, /^- Evidence store: TRANSPORT-fresh\. None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on/m);
+  assert.match(shown.out, /^\| \d\.\d \| Evidence store \| TRANSPORT-fresh \| None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on/m);
   assert.doesNotMatch(shown.out, /TRANSPORT-elsewhere|fresh-evidence/, 'the other stores are not offered');
   assert.match(shown.out, /^- Parent issue: #3\. Reused when governance turns on\.$/m);
   const made = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'] });
@@ -390,8 +390,8 @@ test('parallel CI shards are a Toolkit default by CI time, not a question: slow 
   const slow = { minutes: 25, workflow: 'CI' };
   const ctx = withTests();
   const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(shown.out, /^- Parallel CI shards: Yes \(Toolkit default\) \(CI about 25 min\)\. The turn-on pull request also adds a first shard list and the shard workflows, because the last green CI run took 10 minutes or more; the split is then refreshed once a day\. To skip them, add shards=not-now or shards=never to your reply\.$/m);
-  assert.doesNotMatch(shown.out, /\| Parallel CI shards \|/, 'never a question');
+  assert.match(shown.out, /^\| \d\.\d \| Parallel CI shards \| Yes \(Toolkit default\) \(CI about 25 min\) \| The turn-on pull request also adds a first shard list and the shard workflows, because the last green CI run took 10 minutes or more; the split is then refreshed once a day\. To skip them, add shards=not-now or shards=never to your reply \| shards=not-now or shards=never in your reply \|$/m);
+  assert.doesNotMatch(shown.out, /^\| \d\.\d \| Parallel CI shards \| [^|]*\| [A-C]\. /m, 'never a question: the row has no choice letters');
   const github = fakeGitHub();
   const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], estimate: slow });
   assert.equal(result.code, 0, result.err + result.out);
@@ -422,7 +422,7 @@ test('parallel CI shards are a Toolkit default by CI time, not a question: slow 
   fs.mkdirSync(path.join(sharded.repo, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(sharded.repo, '.github', 'workflows', 'validate.yml'), 'name: validate\non: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n      - run: npm test -- --shard=${{ matrix.shard }}/3\n');
   const already = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(already.out, /^- Parallel CI shards: Already in your CI \(\.github\/workflows\/validate\.yml\)\.$/m);
+  assert.match(already.out, /^\| \d\.\d \| Parallel CI shards \| (?:(?:Not ready|Ready|Unknown): )?Already in your CI \(\.github\/workflows\/validate\.yml\) \| Keep \| - \|$/m);
   const kept = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: slow });
   assert.equal(kept.code, 0, kept.err + kept.out);
   assert.equal(kept.published[0].binding.ci_shards, undefined);
