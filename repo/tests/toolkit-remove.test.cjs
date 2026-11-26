@@ -255,7 +255,7 @@ test('command line: plan prints the list and the code, apply needs the code, bad
   // No other app has the plugin here, so a one-app plan says the shared parts go too.
   const codexOnly = run(['plan', '--app', 'codex']).out;
   assert.match(codexOnly, /From: Codex only\. Claude Code's own Toolkit files stay; run plan with --app all to remove them too\./);
-  assert.match(codexOnly, /Also removed, because no other app has the Toolkit plugin: the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder\./);
+  assert.match(codexOnly, /Also removed, because no other app has the Toolkit plugin: old scheduled tasks from an earlier Toolkit with their files/);
   assert.doesNotMatch(codexOnly, /Kept, because/);
   const plan = run(['plan', '--app', 'all']);
   assert.equal(plan.code, 0);
@@ -498,10 +498,11 @@ test('removal from Codex only, while Claude Code keeps Toolkit: nothing of Claud
   assert.deepEqual(plan.tasks, [], 'scheduled tasks serve every app, so they stay');
   assert.equal(plan.scheduler, 'kept for another app');
   assert.deepEqual(plan.rules.map(file => file.harness), ['codex'], "only Codex's global rules file");
-  assert.deepEqual(rules.asked, [['codex']]);
+  // Antigravity's file is only read, so the kept line can name it.
+  assert.deepEqual(rules.asked, [['codex'], ['antigravity']]);
   assert.match(text, /From: Codex only\./);
   assert.doesNotMatch(text, /Also removed, because/);
-  assert.match(text, /Kept, because Claude Code still has the Toolkit plugin: the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder\./);
+  assert.match(text, /^Kept, because Claude Code still has the Toolkit plugin: old scheduled tasks from an earlier Toolkit with their files, Antigravity's global rules and the Toolkit folder\.$/m);
   assert.match(text, /- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
   assert.match(text, /Codex helper limit:/);
   assert.doesNotMatch(text, /\.claude\/|claude plugin|Claude Code subagent limit|Toolkit folder \(goes last/);
@@ -687,7 +688,7 @@ test('Claude Code settings setup turned on stay byte for byte, and the n8n Skill
   const text = removal.describePlan(plan).join('\n');
   assert.match(text, /Claude Code settings left as they are:\n- ~\/\.claude\/settings\.json: [^\n]*: kept, set at setup; a Claude Code setting, so it stays as it is; edit settings\.json to change it/);
   for (const id of set) assert.match(text, new RegExp(`\\(${id}\\): kept, set at setup`), id);
-  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on \(they stay as they are[^\n]*other plugins/);
+  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on other than the subagent limit Toolkit set \(they stay as they are[^\n]*other plugins/);
   assert.doesNotMatch(text, /n8n-skills@|plugin enable|preferences you chose/);
   assert.match(text, /Skill folders Toolkit copied:\n- ~\/\.claude\/skills\/n8n-[^\n]+: removed/, 'the copied n8n skills go');
   const result = h.make().apply(plan.code);
@@ -918,4 +919,104 @@ test('remove toolkit names a Task Scheduler error inside the plain line, screene
   assert.deepEqual(run(denied(`denied for ${secret()}`)), { code: 1, err: 'Toolkit removal could not be planned ([removed: looked like a secret]); nothing was removed.' });
   const plain = { markedFolders() { throw new Error('internal detail'); }, list() { return []; } };
   assert.deepEqual(run(plain), { code: 1, err: 'Toolkit removal could not be planned; nothing was removed.' });
+});
+
+// The Claude desktop app's Toolkit copy from the claude.ai account, as the app keeps it under
+// LOCALAPPDATA: an account-plugin folder whose manifest names the plugin and its folder.
+function accountCopy(home, { name = 'ai-agent-toolkit' } = {}) {
+  const local = path.join(home, 'AppData', 'Local');
+  const folder = path.join(local, 'Claude-Data', 'claude_pkg', 'rpm', 'acct', 'org');
+  fs.mkdirSync(path.join(folder, 'plugin_01abc', '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(folder, 'manifest.json'), JSON.stringify({ plugins: [{ name, id: 'plugin_01abc' }] }));
+  fs.writeFileSync(path.join(folder, 'plugin_01abc', '.claude-plugin', 'plugin.json'), '{"version":"3.181.2"}');
+  return { environment: { LOCALAPPDATA: local }, copy: path.join(folder, 'plugin_01abc') };
+}
+
+// Owner test of 25 Nov 2026: the Claude app runs the account copy, which `remove toolkit` never named,
+// so after a yes the app could keep running Toolkit's hooks.
+for (const [app, listed] of [['claude-code', true], ['all', true], ['codex', false]]) {
+  test(`the Claude app's account copy, --app ${app}: ${listed ? 'listed as kept with its own removal steps' : 'not listed'}, and never changed`, t => {
+    const home = s.tempHome(t);
+    const { environment, copy } = accountCopy(home);
+    const before = treeOf(copy);
+    const make = () => new removal.ToolkitRemoval({ home, app, parts: [new parts.ClaudeAccountCopyPart({ environment, home })], plugins: () => ({}) });
+    const plan = make().plan();
+    const items = itemsOf(plan, 'claude_account_copy');
+    assert.deepEqual(items.map(item => item.action), listed ? ['keep'] : []);
+    const text = removal.describePlan(plan).join('\n');
+    if (listed) {
+      assert.match(text, /The Claude app's Toolkit copy from your claude\.ai account:\n- ~\/AppData\/Local\/Claude-Data\/claude_pkg\/rpm\/acct\/org\/plugin_01abc: kept, only claude\.ai can remove it/);
+      assert.match(text, /removes Toolkit from the Claude app on every computer and cloud session signed in to that account/);
+      assert.match(text, /Until then the Claude app keeps running Toolkit's hooks from it/);
+      assert.match(text, /on claude\.ai in a web browser, open Customize > Plugins and remove the ai-agent-toolkit plugin and then its marketplace \(while the marketplace stays, Sync automatically can put the plugin back\), then fully quit and reopen the Claude app/);
+    } else assert.doesNotMatch(text, /claude\.ai/);
+    const result = make().apply(plan.code);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(treeOf(copy), before, 'the account copy is never changed');
+    const after = removal.describeResult(result).join('\n');
+    if (listed) {
+      assert.match(after, /plugin_01abc: kept, only claude\.ai can remove it/);
+      assert.match(after, /The Claude app still runs the Toolkit copy from your claude\.ai account until you remove it there \(steps above\)\./);
+    } else assert.doesNotMatch(after, /claude\.ai/);
+  });
+}
+
+test('the Claude app account copy: no app folder, or no Toolkit in it, lists nothing', t => {
+  const home = s.tempHome(t);
+  assert.deepEqual(new parts.ClaudeAccountCopyPart({ environment: { LOCALAPPDATA: path.join(home, 'AppData', 'Local') }, home }).plan(), []);
+  assert.deepEqual(new parts.ClaudeAccountCopyPart({ environment: {}, home }).plan(), []);
+  const other = accountCopy(home, { name: 'someone-elses-plugin' });
+  assert.deepEqual(new parts.ClaudeAccountCopyPart({ environment: other.environment, home }).plan(), []);
+});
+
+test('the default parts include the Claude app account copy', () => {
+  const keys = parts.defaultParts({ environment: { CLAUDE_CONFIG_DIR: '/x/.claude', CODEX_HOME: '/x/.codex' }, home: '/x' }).map(part => part.key);
+  assert.ok(keys.includes('claude_account_copy'));
+});
+
+// Owner test of 25 Nov 2026: "Kept, because Codex still has Toolkit: the scheduled tasks and their files"
+// on a computer with no scheduled tasks. The scope line names only the shared parts that are there.
+test('a one-app removal names only the shared parts that are there: no scheduled tasks, no line about them', t => {
+  const h = fullHome(t);
+  h.installed.codex = true;
+  const rules = scopedRules();
+  rules.states.antigravity = 'absent';
+  const kept = removal.describePlan(h.make({ app: 'claude-code', scheduler: s.fakeScheduler(), rules: rules.factory }).plan()).join('\n');
+  assert.match(kept, /^Kept, because Codex still has the Toolkit plugin: the Toolkit folder\.$/m);
+  assert.doesNotMatch(kept, /scheduled task|Antigravity/);
+  h.installed.codex = false;
+  const goes = removal.describePlan(h.make({ app: 'claude-code', scheduler: s.fakeScheduler(), rules: rules.factory }).plan()).join('\n');
+  assert.match(goes, /^Also removed, because no other app has the Toolkit plugin: the Toolkit folder\.$/m);
+  assert.doesNotMatch(goes, /scheduled task|Antigravity/);
+});
+
+test('a one-app removal with nothing shared on the computer has no shared line at all', t => {
+  const home = s.tempHome(t);
+  for (const installed of [{ codex: true }, {}]) {
+    const text = removal.describePlan(new removal.ToolkitRemoval({ home, app: 'claude-code', scheduler: s.fakeScheduler(), parts: [], plugins: () => installed }).plan()).join('\n');
+    assert.doesNotMatch(text, /Kept, because|Also removed, because/);
+  }
+});
+
+test('the Not touched line names the subagent limit as the one Claude Code setting that goes', t => {
+  const text = removal.describePlan(fullHome(t).make().plan()).join('\n');
+  assert.match(text, /Not touched: [^\n]*the Claude Code settings setup turned on other than the subagent limit Toolkit set \(they stay as they are/);
+});
+
+test('an update reports folder with no Toolkit report left is not listed again', t => {
+  const h = recordsHome(t);
+  fs.writeFileSync(path.join(h.reportDir, 'my-notes.md'), 'mine\n');
+  const first = h.make().apply(h.make().plan().code);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.deepEqual(fs.readdirSync(h.reportDir), ['my-notes.md']);
+  assert.deepEqual(itemsOf(h.make().plan(), 'update_reports'), [], 'only a folder holding a Toolkit report is listed');
+});
+
+test('an empty update reports folder is still listed and goes, with its parent', t => {
+  const h = recordsHome(t);
+  for (const name of fs.readdirSync(h.reportDir)) fs.rmSync(path.join(h.reportDir, name));
+  const plan = h.make().plan();
+  assert.deepEqual(itemsOf(plan, 'update_reports').map(item => item.action), ['remove']);
+  assert.equal(h.make().apply(plan.code).ok, true);
+  assert.equal(fs.existsSync(path.dirname(h.reportDir)), false);
 });
