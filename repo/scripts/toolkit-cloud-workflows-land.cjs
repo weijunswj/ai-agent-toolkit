@@ -61,13 +61,13 @@ class RefreshLanding {
   #github;
   #registryOptions;
   #proof;
-  #fetch;
+  #fetchBranches;
   #refresh;
 
   // `github(endpoint, { missing })` reads GitHub with the person's own login; `registryOptions` say
   // where this computer's governance reads are (the repository's state, its task auto-merge answer and
   // its merged binding's required checks); `proof(root)` gives a copy proof (toolkit-copies-proof.cjs);
-  // `fetch(root, branches)` fetches origin's branches into their remote-tracking refs.
+  // `fetch` (called with the root and branch names) fetches origin's branches into their remote-tracking refs.
   constructor({ root, registryOptions = {}, github = null, proof = null, fetch = fetchBranches }) {
     this.#root = root;
     this.#registryOptions = registryOptions;
@@ -75,7 +75,7 @@ class RefreshLanding {
     this.#github = github || this.#refresh.ghApi;
     const state = require('./toolkit-governance-state.cjs');
     this.#proof = proof || (target => new (require('./toolkit-copies-proof.cjs').RefreshProof)({ root: target, governance: folder => state.governanceState(folder, registryOptions) }));
-    this.#fetch = fetch;
+    this.#fetchBranches = fetch;
   }
 
   // { route, line, pr?, head?, merge?, notice? }.
@@ -106,7 +106,7 @@ class RefreshLanding {
     if (answer?.auto_merge !== 'after-gates' || answer?.fresh !== true) return done('owner', `Task auto-merge is off for ${repository}, so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
     try { pin = this.#github(`repos/${repository}/actions/variables/TOOLKIT_REF`, { missing: true }); } catch { return done('hold', 'The repository\'s TOOLKIT_REF variable could not be read; try again at a later turn.', facts); }
     if (pin) return done('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its TOOLKIT_REF variable is set), so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
-    if (!this.#fetch(this.#root, [branch, this.#refresh.BRANCH])) return done('hold', `The pull request's head and ${branch} could not be fetched here; try again at a later turn.`, facts);
+    if (!this.#fetchBranches(this.#root, [branch, this.#refresh.BRANCH])) return done('hold', `The pull request's head and ${branch} could not be fetched here; try again at a later turn.`, facts);
     const base = spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`], { cwd: this.#root, encoding: 'utf8', windowsHide: true }).stdout?.trim();
     if (!SHA.test(String(base || ''))) return done('hold', `${branch} could not be read here after the fetch; try again at a later turn.`, facts);
     const proof = this.#proof(this.#root).prove(base, head);

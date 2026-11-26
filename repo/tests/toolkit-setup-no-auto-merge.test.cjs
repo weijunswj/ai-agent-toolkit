@@ -48,7 +48,7 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
         // Repository identity already loads through governance state; its direct import normalises the target identity.
-        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-cloud.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-copies-proof.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-cloud.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         assert.deepEqual([...source.matchAll(/\.request\('([A-Z]+)',\s*([^)]*)\)/g)].map(match => [match[1], match[2]]), [['GET', 'apiPath']]);
         // The Projects cloud reader it loads only parses host text and the head of the session
@@ -70,6 +70,15 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const subcommands = new Set([...scope.matchAll(/\bgit\(cwd, \['([\w-]+)'/g)].map((match) => match[1]));
         assert.deepEqual([...subcommands].sort(), ['cat-file', 'diff', 'merge-base', 'rev-parse', 'show']);
         assert.doesNotMatch(scope, /\bimport\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        // The copy proof it loads for a refresh's standing merge starts only git, with read-only
+        // subcommands, and takes from the refresh module only its snapshot, its render of the changes
+        // and two names: never the code that writes to GitHub.
+        const proof = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-copies-proof.cjs'), 'utf8');
+        assert.deepEqual([...new Set([...proof.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()))].sort(), ["'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-cloud-workflows-refresh.cjs'", "'./toolkit-cloud-workflows.cjs'", "'./toolkit-governance-state.cjs'", "'node:child_process'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual([...proof.matchAll(/(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(([^,]*)/g)].map((match) => match[1].trim()), ["'git'"]);
+        assert.deepEqual([...new Set([...proof.matchAll(/\bgit\([\w.#]+, \['([\w-]+)'/g)].map((match) => match[1]))].sort(), ['cat-file', 'diff', 'log', 'merge-base']);
+        assert.deepEqual([...new Set([...proof.matchAll(/this\.#refresh\.(\w+)/g)].map((match) => match[1]))].sort(), ['BranchSnapshot', 'GUARD_CONFIG', 'TITLE', 'changes']);
+        assert.doesNotMatch(proof, /\bimport\s*\(|\bfetch\s*\(|node:https?\b|node:net\b|ghApi|publish|refreshPr/);
         // The shell-call reader it loads only reads its input.
         const reader = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-shell-call.cjs'), 'utf8');
         assert.deepEqual([...reader.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:os'", "'node:path'"]);
@@ -92,6 +101,18 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.deepEqual(step.split('\n').filter(line => line.includes('${command}')).map(line => line.trim().startsWith('if (merge.route') || line.trim().startsWith('return ')), [true, true], 'the command is only returned as text');
         assert.deepEqual([...source.matchAll(/\bspawnSync\(\s*([^,]+),\s*(\[?[^,\]]*)/g)].map(match => [match[1].trim(), match[2].trim()]), [['\'git\'', 'args'], ['argv[0]', 'argv.slice(1)'], ['\'gh\'', "['api'"]]);
         assert.doesNotMatch(source, /(?<![.\w])(?:spawn|exec|execFile|fork|execSync|execFileSync)\s*\(|\bimport\s*\(|\bfetch\s*\(|node:https?\b|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i);
+        continue;
+      }
+      // The refresh landing check prints the pinned merge command for the controller to run, so the
+      // merge hold checks it; the script never runs a merge. Proof: the command text appears only in
+      // its header and as the one printed template, it starts only git (a fetch and a rev-parse), and
+      // every GitHub read passes no method, so each is a GET.
+      if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-cloud-workflows-land.cjs') {
+        const source = fs.readFileSync(full, 'utf8').replace(/\r\n/g, '\n');
+        const named = source.split('\n').filter(line => /gh\s+pr\s+merge/i.test(line)).map(line => line.trim());
+        assert.deepEqual(named, ['//   land      every condition holds: run `gh pr merge N --merge --match-head-commit <full head>` from', 'const merge = `gh pr merge ${pr.number} --merge --match-head-commit ${head}`;']);
+        assert.deepEqual([...source.matchAll(/\bspawnSync\(\s*([^,]+),\s*\[\s*'([\w-]+)'/g)].map(match => [match[1].trim(), match[2]]), [["'git'", 'fetch'], ["'git'", 'rev-parse']]);
+        assert.doesNotMatch(source, /\bmethod\b|(?<![.\w])(?:spawn|exec|execFile|fork|execSync|execFileSync)\s*\(|\bimport\s*\(|\bfetch\s*\(|node:https?\b|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i);
         continue;
       }
       const text = fs.readFileSync(full, 'utf8');

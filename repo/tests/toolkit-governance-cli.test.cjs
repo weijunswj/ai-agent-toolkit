@@ -146,7 +146,8 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
 // a binding, this computer's read of it as merged on the default branch: only a merged binding decides.
 function enable(ctx, repo) {
   require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: { registryPath: ctx.registryPath, testOnly: true } });
-  if (fs.existsSync(path.join(repo, '.github', 'toolkit-programme.json'))) recordMerged(repo, { registryPath: ctx.registryPath });
+  // The read fetched this checkout's files as origin's default branch head (the copies are checked there).
+  if (fs.existsSync(path.join(repo, '.github', 'toolkit-programme.json'))) recordMerged(repo, { registryPath: ctx.registryPath, commit: require('./support/fetched-default-branch.cjs').fetchedHead(repo).commit });
 }
 
 function treeDigest(dir) {
@@ -358,8 +359,10 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     // An enabled repository's governed block, current, old or edited, is a leftover copy: the
     // installed Toolkit gives its sessions the governed rules, so nothing asks to refresh it.
     conformant: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
-    stale: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
-    edited: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
+    // The other two checkouts share that read but not the commit it fetched, so their copies are not
+    // checked (an info note) until their own read fetches it.
+    stale: [0, 'conformant', 'CLOUD_WORKFLOWS_UNCHECKED,GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
+    edited: [0, 'conformant', 'CLOUD_WORKFLOWS_UNCHECKED,GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
     // Before governance is decided, a governed block is a leftover copy too (an info note).
     unasked: [1, 'drift', 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER'],
     incomplete: [1, 'drift', 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER'],
@@ -417,7 +420,12 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
 
   // An ENABLED repository needs a current plain-text check, unless its settings record why it is off.
   const PROTECTED_RUN = { rulesetReader: PROTECTED };
-  const checkIds = async () => JSON.parse((await run(ctx, conformant, ['check', '--json'], PROTECTED_RUN)).stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge);
+  // Each check follows a read that fetched the checkout's files as origin's default branch head, since
+  // the cloud workflow copies are judged there, never on the working tree.
+  const checkIds = async () => {
+    recordMerged(conformant, { registryPath: ctx.registryPath, commit: require('./support/fetched-default-branch.cjs').fetchedHead(conformant).commit });
+    return JSON.parse((await run(ctx, conformant, ['check', '--json'], PROTECTED_RUN)).stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge);
+  };
   const copy = path.join(conformant, '.github', 'scripts', 'plain-text-check.cjs');
   const settingsFile = path.join(conformant, '.github', 'plain-text.json');
   fs.rmSync(settingsFile);
