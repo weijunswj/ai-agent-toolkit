@@ -1,0 +1,21 @@
+Toolkit permissions: add Toolkit's lines and remove the lines you picked
+
+Computer settings  ~/.claude/settings.json
+  add     programme.cjs gate-session
+  add     auto mode rule for merges Toolkit's merge hold lets through
+  remove  D1 python -I .../scan-old.py
+automation settings  .claude/settings.local.json
+  add     gh pr comment
+  add     gh issue comment
+  remove  R2 gh api *
+  remove  D2 to D8 (7 dead lines)
+3 worktree copies of automation settings
+  remove  the same 8 lines from each
+
+Keeping 14 other lines and every other setting.
+Backup first: one folder for all 5 files.
+
+Done: 5 files written, 6 lines added, 33 removed.
+  Backup: ~/.ai-agent-toolkit/backups/permissions/20261126T101500Z
+  Undo  : copy the files in that folder back; its list.txt says where each goes.
+Restart Claude Code so it reads the new lines.

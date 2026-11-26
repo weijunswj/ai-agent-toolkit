@@ -95,7 +95,7 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   // The App command is the owner's because its setup refuses to run under an agent; the bank says why.
   assert.match(shown, /^\| 1\.3 \| Governance App \| Not checked \| After your answer, Toolkit gives you one line to paste into PowerShell \(it refuses to run under an agent, so the App's private key never passes through one\): press Enter when it asks, then click Create and Install on GitHub\. Governance works without it, but its jobs on GitHub need it to open pull requests \| - \|$/m);
   assert.doesNotMatch(shown, /undefined/);
-  assert.match(shown, /^\| 1\.2 \| Toolkit permissions \(Codex\) \| Up to date \| Keep \| - \|$/m);
+  assert.match(shown, /^\| 1\.2 \| Toolkit permissions \(Codex\) \| Toolkit lines: up to date \| Keep \| - \|$/m);
   // The answer also covers the settings Toolkit adds on its own after the merge, so the bank names them before it.
   assert.ok(shown.includes(after), shown);
   assert.equal(shown.split(after).length, 2, 'named once');
@@ -116,8 +116,20 @@ test('the governance bank uses setup toolkit\'s format, asks only what is left, 
   assert.deepEqual(bank.parseBankAnswer(`${reference}: no store`, undecided), { noStore: true });
   assert.throws(() => bank.parseBankAnswer(`${reference}: no store, 1.1=B`, undecided), /No store keeps governance off, so it goes on its own/);
   const outdated = bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', missing: 2, stale: 4 } });
-  assert.match(bank.renderGovernanceBank(outdated), /^\| 1\.2 \| Toolkit permissions \(Claude Code\) \| Outdated: 2 missing, 4 old \| After your answer, Toolkit gives you one command to run yourself [^|]* \| Leave: do not run the command \|$/m);
+  assert.match(bank.renderGovernanceBank(outdated), /^\| 1\.2 \| Toolkit permissions \(Claude Code\) \| Toolkit lines: 2 missing, 4 old \| After your answer, Toolkit lists every permission line and gives you one command to run yourself [^|]* \| Leave: do not run the command \|$/m);
   assert.equal(bank.parseBankAnswer(`${bank.bankReference(outdated)}: 1.1=A`, outdated).permissionBlocks, 'update');
+  // Other lines (not Toolkit's) are counted on the same row and never change ready or push a command.
+  const row = permissions => bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', ...permissions } }).find(spec => spec.id === 'permission-blocks');
+  const both = row({ missing: 2, stale: 1, other: 45 });
+  assert.equal(both.current, 'Toolkit lines: 2 missing, 1 old. Other lines: 45 to review');
+  assert.match(both.recommended_text, /Other lines stay unless you pick them from the list$/);
+  assert.deepEqual([both.permissions_update, both.required.ready], [true, false]);
+  const others = row({ missing: 0, stale: 0, other: 45 });
+  assert.equal(others.current, 'Toolkit lines: up to date. Other lines: 45 to review');
+  assert.equal(others.recommended_text, 'Say review permissions to see them; nothing changes unless you pick lines');
+  assert.deepEqual([others.permissions_update, others.required.ready], [false, true], 'other lines never block ready or push a command');
+  const clean = row({ missing: 0, stale: 0, other: 0 });
+  assert.deepEqual([clean.current, clean.recommended_text, clean.required.ready], ['Toolkit lines: up to date', '', true]);
   assert.throws(() => bank.parseBankAnswer('AAAA-AAAA-AAAA-AAAA: all recommended', undecided), /Governance question bank reference is stale/);
   assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /^Error: This bank has no row 1\.9\.$/);
   // A repository with no required checks yet: the status row says protection waits.
