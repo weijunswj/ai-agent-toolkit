@@ -21,6 +21,7 @@ const { render } = require('../scripts/toolkit-cloud-workflows-render.cjs');
 const { pinnedCopy } = require('./support/pinned-cloud-copy.cjs');
 const { putCopied } = require('./support/default-cloud-workflows.cjs');
 const plainText = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+const { fetchedHead, fetchedState } = require('./support/fetched-default-branch.cjs');
 const ROOT = path.resolve(__dirname, '../..');
 const UNKNOWN = 'f'.repeat(40);
 const COPIES = [['programme-sweep', '.github/workflows/toolkit-programme-sweep.yml'], ['programme-sweep-gate', '.github/workflows/toolkit-programme-sweep-gate.yml']];
@@ -68,7 +69,9 @@ function governedRepo(t, commit, gateCommit = commit, pinned = true, copied = nu
   if (copied) putCopied(repo, copied);
   return { dir, repo };
 }
-const enabled = root => ({ state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root });
+// Governed, with origin's default branch fetched as the repository's working tree is now.
+const ENABLED = Object.freeze({ state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true });
+const enabled = root => fetchedState(root, ENABLED);
 const deps = (dir, toolkitRoot) => ({ toolkitRoot, attentionDir: path.join(dir, 'attention'), sessionsDir: path.join(dir, 'sessions'), home: dir, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {} });
 
 test('the session line names stale cloud workflow copies and the refresh command only when a refresh moves them forward', t => {
@@ -80,7 +83,7 @@ test('the session line names stale cloud workflow copies and the refresh command
   // Older pin, checkout on main and containing it: the note, the update step and the refresh command.
   const stale = line(older);
   assert.match(stale, STALE);
-  assert.ok(stale.includes(`${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${older.repo} --refresh-pr\` from it; it opens or updates one pull request for the owner to merge`), stale);
+  assert.ok(stale.includes(`${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${older.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when), else the owner merges it`), stale);
   assert.doesNotMatch(stale, /Toolkit checkout behind/);
   // Copies with today's layout are current whichever commit rendered them: no line.
   for (const at of [toolkit.A, toolkit.B]) assert.doesNotMatch(line(governedRepo(t, at, at, false, copied)), /Stale Toolkit|Toolkit checkout behind/);
@@ -136,7 +139,7 @@ test('the session line names every copied file and the vendored plain-text check
   fs.writeFileSync(at('.github/scripts/plain-text-check.cjs'), plainText.vendoredText('#!/usr/bin/env node\n// an older check\n'));
   const files = ['.github/workflows/personal-data-guard.yml', '.github/workflows/personal-data-sweep.yml', '.github/scripts/personal-data-guard.cjs', '.github/personal-data-guard.json', '.github/workflows/dependency-auto-merge.yml', '.github/scripts/plain-text-check.cjs'];
   const text = line();
-  assert.ok(text.includes(`⚠️ Stale Toolkit copies: a refresh would change ${files[0]} (edited by hand), ${files[1]} (missing), ${files[2]} (missing), ${files[3]} (missing), ${files[4]} (older copy), ${files[5]} (older copy). ${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${repo.repo} --refresh-pr\` from it; it opens or updates one pull request for the owner to merge.`), text);
+  assert.ok(text.includes(`⚠️ Stale Toolkit copies: a refresh would change ${files[0]} (edited by hand), ${files[1]} (missing), ${files[2]} (missing), ${files[3]} (missing), ${files[4]} (older copy), ${files[5]} (older copy). ${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${repo.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when), else the owner merges it.`), text);
   // The same files the refresh itself would change, and no others.
   const refresh = require('../scripts/toolkit-cloud-workflows-refresh.cjs');
   assert.deepEqual(refresh.pending({ target: repo.repo, root: toolkit.root, commit: toolkit.B, ciShards: null }).rows.map(row => row.file), files);
@@ -154,6 +157,7 @@ test('both hosts print the stale-copy note at session start', t => {
   fs.rmSync(path.join(repo, '.github', 'scripts', 'personal-data-guard.cjs'));
   const home = path.join(dir, 'home');
   fs.mkdirSync(home, { recursive: true });
+  const state = { ...ENABLED, merged: fetchedHead(repo) };
   const preload = path.join(dir, 'preload.cjs');
   // The repository's governance state is given (a merged binding needs GitHub) and the Toolkit checkout
   // compared is the fixture's; everything after it, the governance check on the copies included, runs
@@ -166,7 +170,7 @@ Module._load = function(request, parent, main) {
   if (name === 'toolkit-local-bridge.cjs') return { run: () => ({ status: 0 }) };
   if (name === 'toolkit-governance-gate.cjs') {
     const gate = load.call(this, request, parent, main);
-    return { ...gate, sessionLine: (cwd, opts = {}) => gate.sessionLine(cwd, { ...opts, stateReader: () => (${enabled.toString()})(cwd), programmeDeps: { ...opts.programmeDeps, toolkitRoot: ${JSON.stringify(toolkit.root)} } }) };
+    return { ...gate, sessionLine: (cwd, opts = {}) => gate.sessionLine(cwd, { ...opts, stateReader: () => ({ ...${JSON.stringify(state)}, root: cwd }), programmeDeps: { ...opts.programmeDeps, toolkitRoot: ${JSON.stringify(toolkit.root)} } }) };
   }
   return load.call(this, request, parent, main);
 };
@@ -205,12 +209,54 @@ test('a cloud session shows the stale-copy line for each ENABLED repository', t 
     for (const [id, file] of COPIES) fs.writeFileSync(path.join(folder, file), pinnedCopy(render(id, execFileSync('git', ['show', `HEAD:${file}`], { cwd: ROOT, encoding: 'utf8' }), toolkit.A), toolkit.A));
     putCopied(folder, { root: toolkit.root, commit: toolkit.B });
   }
-  seed(repos.on, 'enable', { registryOptions });
-  seed(repos.off, 'disable', { registryOptions });
+  seed(repos.on, 'enable', { registryOptions, commit: fetchedHead(repos.on).commit });
+  seed(repos.off, 'disable', { registryOptions, commit: fetchedHead(repos.off).commit });
   const text = gate.cloudSessionText(governed.dir, { registryOptions, refreshBinding: () => {} });
   const on = text.split('\n- ').find(line => line.startsWith('example-owner/governed:'));
   assert.match(on, STALE, text);
   assert.ok(on.includes(`--repo ${repos.on} --refresh-pr`), on);
   assert.doesNotMatch(text.split('\n- ').find(line => line.startsWith('example-owner/off:')), /Stale Toolkit|Toolkit checkout behind/);
   assert.equal(text.match(/Stale Toolkit copies/g).length, 1);
+});
+
+// Red on the parent (owner test, 27 Nov 2026): a checkout two commits behind origin, its copies only on
+// origin's default branch, was told seven copies were missing and to open a refresh pull request this
+// session without asking. The copies are judged on origin's default branch as the session start's
+// binding read fetched it, never on the working tree: behind, on another branch or with local changes,
+// the line follows origin.
+test('a checkout behind origin gets no false missing copies and no refresh step: copies are judged on the fetched default branch', t => {
+  const toolkit = toolkitCheckout(t);
+  toolkit.at(toolkit.B, toolkit.B);
+  const repo = governedRepo(t, toolkit.B, toolkit.B, false, { root: toolkit.root, commit: toolkit.B });
+  // Origin's default branch holds every copy, current; the local checkout is an older commit without them.
+  const origin = fetchedHead(repo.repo);
+  fs.rmSync(path.join(repo.repo, '.github'), { recursive: true, force: true });
+  run(repo.repo, ['add', '-A']);
+  run(repo.repo, ['commit', '--quiet', '--allow-empty', '-m', 'older']);
+  const line = merged => gate.sessionLine(repo.repo, { stateReader: () => ({ ...ENABLED, root: repo.repo, merged }), programmeDeps: deps(repo.dir, toolkit.root) });
+  const behind = line(origin);
+  assert.doesNotMatch(behind, /Stale Toolkit|\(missing\)|--refresh-pr|Toolkit checkout/, behind);
+  // The other way round: the working tree has every copy, origin's default branch lacks the guard script.
+  const guard = path.join(repo.repo, '.github', 'scripts', 'personal-data-guard.cjs');
+  const full = governedRepo(t, toolkit.B, toolkit.B, false, { root: toolkit.root, commit: toolkit.B });
+  fs.cpSync(path.join(full.repo, '.github'), path.join(repo.repo, '.github'), { recursive: true });
+  const kept = fs.readFileSync(guard);
+  fs.rmSync(guard);
+  const lacking = fetchedHead(repo.repo);
+  fs.writeFileSync(guard, kept);
+  const text = line(lacking);
+  assert.ok(text.includes('⚠️ Stale Toolkit copies: a refresh would change .github/scripts/personal-data-guard.cjs (missing).'), text);
+  // No fetched head yet, or one this checkout lacks: nothing is named (the governance check says why).
+  for (const merged of [null, { commit: null, default_branch: 'main' }, { commit: UNKNOWN, default_branch: 'main' }, { commit: origin.commit, default_branch: '../main' }]) {
+    assert.doesNotMatch(line(merged), /Stale Toolkit|Toolkit checkout/, JSON.stringify(merged));
+  }
+  const conformance = require('../scripts/toolkit-governance-conformance.cjs');
+  const unchecked = conformance.cloudWorkflowFindings({ root: repo.repo, merged: { commit: UNKNOWN, default_branch: 'main' } }, toolkit.root, { toolkitRoot: toolkit.root, mergedBinding: () => null });
+  assert.deepEqual(unchecked.map(entry => entry.id), ['CLOUD_WORKFLOWS_UNCHECKED']);
+  assert.match(unchecked[0].message, /main's head fffffff is not in this checkout; run git fetch origin in the checkout./);
+  // The snapshot is read from git objects and removed: nothing is left in the temporary folder.
+  const leftovers = () => fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('toolkit-refresh-snapshot-')).sort();
+  const before = leftovers();
+  line(origin);
+  assert.deepEqual(leftovers(), before);
 });

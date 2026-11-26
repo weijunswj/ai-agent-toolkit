@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { fetchedState } = require('./support/fetched-default-branch.cjs');
 const { spawnSync } = require('node:child_process');
 const { makeGoverned, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
 
@@ -391,7 +392,7 @@ test('installer: the shard workflows are copied only after a merged yes, with th
 test('governance check: copies left after never are drift; a copy at an old workflow name is drift; the gate is suggested as required', t => {
   const repo = listRepo(t, 'shards.yml');
   let merged = { ci_shards: { answer: 'yes' }, required_checks: [] };
-  const findings = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: () => merged });
+  const findings = () => conformance.cloudWorkflowFindings(fetchedState(repo), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: () => merged });
   workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT, ciShards: 'yes' }));
   assert.deepEqual(findings().map(entry => `${entry.id}:${entry.severity}`), ['CI_SHARDS_GATE_NOT_REQUIRED:info']);
   assert.match(findings()[0].message, /"Toolkit test shards" is not a required check here\. Consider making it required .*Toolkit never sets it for you\./);

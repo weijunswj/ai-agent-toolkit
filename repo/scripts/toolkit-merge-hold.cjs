@@ -63,8 +63,11 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
 // call with merge_method "merge" and the head SHA field, and only when the merge-scope check
 // (toolkit-auto-merge-eligible.cjs), run here on that head against this folder's copy of the
-// remote's default branch, finds nothing on the merge-authority list. A head this computer does not
-// have, or a scope it cannot read, needs a typed approval. --auto, --admin, --squash, --rebase,
+// remote's default branch, finds nothing on the merge-authority list, or only CI workflow copies a
+// Toolkit refresh's copy proof shows are Toolkit main's own render (scopeWithProof,
+// toolkit-copies-proof.cjs). A head this computer does not have, or a scope it cannot read, needs a
+// typed approval. Accepted gap: the hold does not read the repository's TOOLKIT_REF pin or its checks;
+// the controller checks both before it merges (`toolkit-cloud-workflows.cjs --land-refresh`). --auto, --admin, --squash, --rebase,
 // --delete-branch, the API endpoint, connector auto-merge and any other repository still need a typed
 // approval. The other gate conditions (review, CI, testing) are the controller's to check before it
 // merges; this hold cannot read them.
@@ -1671,7 +1674,7 @@ function judge(merge, approvals, standing = null, evidence = null) {
     if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
     const scope = standing.scope(merge.sha);
     if (!scope) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but Toolkit cannot read the changes of ${name} at ${merge.sha} on this computer (fetch the pull request's head and the default branch first), so its merge scope is unknown and it waits for the user's typed merge.`) };
-    if (!scope.eligible) return { refusal: deny(`${name} changes the merge rules (${scope.reasons.map(entry => `${entry.path}: ${entry.why}`).join('; ')}), so it waits for the user's typed merge whatever the task auto-merge answer says.`) };
+    if (!scope.eligible) return { refusal: deny(`${name} changes the merge rules (${scope.reasons.map(entry => `${entry.path}: ${entry.why}`).join('; ')})${scope.proof ? ` and is not a proved Toolkit refresh (${scope.proof})` : ''}, so it waits for the user's typed merge whatever the task auto-merge answer says.`) };
     return { standing: true };
   }
   // Connector auto-merge cannot name a head commit, so it is refused; gh can.
@@ -2049,7 +2052,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   const scope = head => {
     const branch = pushTarget(root, 'origin', registryOptions)?.default;
     const base = branch ? mergeScope.commitOf(root, `refs/remotes/origin/${branch}`) : null;
-    return base ? mergeScope.eligibilityOf(root, base, head) : null;
+    return base ? require('./toolkit-copies-proof.cjs').scopeWithProof(root, base, head, { registryOptions }) : null;
   };
   return { eligible: true, reason: null, checks, repository, scope };
 }

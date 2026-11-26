@@ -346,6 +346,26 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   if (!options.toolkitRoot) toolkitRoot = require('./toolkit-cloud-workflows.cjs').sourceRoot({ self: toolkitRoot });
   const workflows = require('./toolkit-cloud-workflows.cjs').installerAt(toolkitRoot);
   if (workflows.isToolkitCheckout(state.root)) return [];
+  // The copies are judged on origin's default branch: its head as this computer's binding read last
+  // fetched it (state.merged), read from the checkout's git objects into a scratch folder with no
+  // network read. Never the working tree: a checkout behind origin, on another branch or with local
+  // changes would otherwise name copies as missing that the repository has, and send a controller to
+  // open a needless refresh pull request. With no fetched head, or one the checkout lacks, nothing is
+  // named.
+  const fetched = state.merged || {};
+  if (!/^[0-9a-f]{40}$/.test(String(fetched.commit || '')) || !/^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/.test(String(fetched.default_branch || ''))) {
+    return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', 'The Toolkit copies could not be checked: origin\'s default branch has not been read on this computer yet; run toolkit-governance.cjs status online, then check again.')];
+  }
+  const refresher = require('./toolkit-cloud-workflows-refresh.cjs');
+  let files;
+  try { files = new refresher.BranchSnapshot(state.root, fetched.commit, fetched.default_branch, { fetch: false }).write(); } catch (error) {
+    return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The Toolkit copies could not be checked: ${error.name === 'RefreshError' ? error.message : 'origin\'s default branch could not be read from this checkout.'}`)];
+  }
+  try { return copyFindings({ state, files, branch: fetched.default_branch, toolkitRoot, workflows, refresher, options }); } finally { fs.rmSync(files, { recursive: true, force: true }); }
+}
+
+// The findings for the default branch's files at `files` (cloudWorkflowFindings's snapshot).
+function copyFindings({ state, files, branch, toolkitRoot, workflows, refresher, options }) {
   let result;
   let merged = null;
   let head = null;
@@ -353,7 +373,7 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     // The check compares with this checkout's own commit; only an install needs it to be on main.
     merged = (options.mergedBinding || governance.mergedBinding)(state.root, options);
     head = options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot);
-    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: head, ciShards: merged?.ci_shards?.answer || null });
+    result = workflows.plan({ repo: files, root: toolkitRoot, commit: head, ciShards: merged?.ci_shards?.answer || null, defaultBranch: branch });
   } catch (error) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
   }
@@ -374,7 +394,7 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   }
   // The vendored plain-text check, compared with the check at the same Toolkit commit as the refresh does
   // (an older one is also PLAIN_TEXT_CHECK_DRIFT above, against this Toolkit copy's own files).
-  const vendored = require('./toolkit-cloud-workflows-refresh.cjs').vendoredCheck({ target: state.root, root: toolkitRoot, commit: head });
+  const vendored = refresher.vendoredCheck({ target: files, root: toolkitRoot, commit: head });
   if (vendored?.state === 'outdated') out.push(Object.freeze({ ...finding('PLAIN_TEXT_CHECK_COPY_OUTDATED', 'info', `${vendored.file} is an older Toolkit copy; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh({ file: vendored.file, state: 'outdated' }) }));
   // A default branch other than main: the sweep cannot run there, so it is not expected.
   for (const row of result.not_copied || []) if (row.id.startsWith('programme-sweep')) out.push(finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The ${row.id} workflow is not expected here: ${row.reason}.`));

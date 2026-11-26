@@ -522,10 +522,11 @@ function result(fields) {
 }
 
 // What the cached default-branch binding says: { status: 'none' | 'unknown' | 'invalid' | 'foreign'
-// | 'enabled' | 'disabled', version, problems, foreign_repository, commit, fetched_at, fresh }.
+// | 'enabled' | 'disabled', version, problems, foreign_repository, commit, default_branch, fetched_at,
+// fresh }. commit and default_branch are origin's default branch head that read fetched.
 function judgeMerged(entry, identity, now) {
   if (!entry) return { status: 'unknown', fresh: false };
-  const base = { commit: entry.commit, fetched_at: entry.fetched_at, fresh: !entry.refresh_error && bindingCache.isFresh(entry, now), unavailable: Boolean(entry.refresh_error), refresh_error: typeof entry.refresh_error === 'string' && entry.refresh_error ? entry.refresh_error : null };
+  const base = { commit: entry.commit, default_branch: entry.default_branch || null, fetched_at: entry.fetched_at, fresh: !entry.refresh_error && bindingCache.isFresh(entry, now), unavailable: Boolean(entry.refresh_error), refresh_error: typeof entry.refresh_error === 'string' && entry.refresh_error ? entry.refresh_error : null };
   if (entry.status === 'absent') return { ...base, status: 'none' };
   if (typeof entry.text !== 'string') return { ...base, status: 'invalid', problems: [entry.problem || 'unreadable'] };
   let parsed;
@@ -573,7 +574,7 @@ class GovernanceState {
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
       return result({ ...fields, state: 'DISABLED', rule: 'R8' });
     }
-    const view = { status: merged.status, min_toolkit: merged.min_toolkit || null, version: merged.version || null, commit: merged.commit || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [], refresh_error: merged.refresh_error || null };
+    const view = { status: merged.status, min_toolkit: merged.min_toolkit || null, version: merged.version || null, commit: merged.commit || null, default_branch: merged.default_branch || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [], refresh_error: merged.refresh_error || null };
     const withMerged = { ...base, merged: view, merged_fresh: view.fresh };
     // The repository's merged binding decides, on every computer (A1, A3).
     if (merged.status === 'invalid') return result({ ...withMerged, state: 'ERROR', rule: 'M0', reason: merged.min_toolkit ? 'toolkit-too-old' : 'merged-binding-invalid' });

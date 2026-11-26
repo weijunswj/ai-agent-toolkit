@@ -238,7 +238,9 @@ test('refresh PR: one pull request with only Toolkit-made files, read back and n
   const pr = github.pulls[0];
   assert.equal(pr.head, BRANCH);
   assert.equal(pr.base, 'main');
-  assert.match(pr.body, /^Owner: please merge this pull request\./);
+  assert.match(pr.body, /^This pull request brings this repository's Toolkit copies up to date\. .*Where this repository's task auto-merge is on, the controller lands it once its checks are green, after `toolkit-cloud-workflows\.cjs --repo <checkout> --land-refresh` proves every file, and tells the owner after; otherwise the owner merges it\./);
+  // The one UAT line the auto-merge check reads, beside the Toolkit commit line it points to.
+  assert.equal(require(path.join(ROOT, 'repo/scripts/toolkit-auto-merge-eligible.cjs')).uatVerdict(pr.body).state, 'NOT_REQUIRED');
   assert.match(pr.body, /`\.github\/workflows\/toolkit-programme-sweep\.yml`: pinned to one Toolkit commit, now follows Toolkit main/);
   assert.match(pr.body, /`\.github\/scripts\/plain-text-check\.cjs`: vendored check updated/);
   assert.match(pr.body, /`\.github\/plain-text-baseline\.json`: plain-text baseline moved to the fingerprint format \(--migrate-baseline\)/);
@@ -488,7 +490,7 @@ test('refresh PR: current copies need no pull request; the command line wires --
   assert.equal(workflows.main(['--repo', stale, '--refresh-pr'], { ...io, root: ROOT, commit: COMMIT, refresh: () => {}, governance: ENABLED, github: fake.api() }), 0);
   assert.match(out.join(''), /^Opened refresh pull request /);
   assert.equal(workflows.main(['--repo', stale, '--refresh-pr', '--check'], { ...io, root: ROOT, commit: COMMIT, refresh: () => {} }), 2);
-  assert.match(err.join(''), /choose --check or --refresh-pr/);
+  assert.match(err.join(''), /choose one of --check, --refresh-pr and --land-refresh/);
   // Run as a command, the script hands the refresh its own finished exports, never a half-loaded copy.
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'refresh-cli-'));
   t.after(() => fs.rmSync(plain, { recursive: true, force: true }));

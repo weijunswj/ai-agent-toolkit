@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { fetchedState } = require('./support/fetched-default-branch.cjs');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
@@ -233,7 +234,7 @@ test('cloud workflows: an older test shards copy is re-rendered at its own commi
 
 test('governance check: the shard copies flow through as drift and as outdated notes, with their own consequence', t => {
   const repo = governedRepo(t);
-  const findings = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES });
+  const findings = () => conformance.cloudWorkflowFindings(fetchedState(repo), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES });
   const ids = () => findings().map(entry => `${entry.id}:${entry.severity}`);
   assert.deepEqual(ids(), Array(WITHOUT_SHARDS.length + 2).fill('CLOUD_WORKFLOW_DRIFT:drift'), 'every default copy is missing');
   assert.match(findings().at(-2).message, /toolkit-test-shards\.yml is missing, so this repository's Toolkit test shards and their gate do not run as the Toolkit wrote them/);
@@ -248,7 +249,7 @@ test('governance check: the shard copies flow through as drift and as outdated n
   assert.deepEqual(ids(), ['CLOUD_WORKFLOW_OUTDATED:info', 'CLOUD_WORKFLOW_DRIFT:drift']);
   // Without a list, nothing is copied and nothing is reported missing.
   const bare = governedRepo(t, null);
-  assert.deepEqual(conformance.cloudWorkflowFindings({ root: bare }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES }).map(entry => entry.message).filter(message => /shard/.test(message)), []);
+  assert.deepEqual(conformance.cloudWorkflowFindings(fetchedState(bare), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES }).map(entry => entry.message).filter(message => /shard/.test(message)), []);
 });
 
 test('governance enable proposal never carries the shard copies: they wait for the owner\'s yes in the merged binding', t => {
@@ -300,7 +301,7 @@ test('L2: on a default branch other than main the sweep and the shard copies are
 test('L3: a shard copy left after the list turned missing, invalid or unsupported is drift, with the reason and the fix', t => {
   const repo = governedRepo(t, list(undefined, { workflow: 'shards.yml' }));
   workflows.apply(workflows.plan({ ciShards: 'yes', repo, root: ROOT, commit: COMMIT }));
-  const drift = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES }).filter(entry => entry.severity === 'drift').map(entry => entry.message);
+  const drift = () => conformance.cloudWorkflowFindings(fetchedState(repo), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES }).filter(entry => entry.severity === 'drift').map(entry => entry.message);
   assert.deepEqual(drift(), []);
   const broken = list([{ id: 'linux-1', files: ['tests/missing.test.js'] }, { id: 'linux-2', rest: true }], { workflow: 'shards.yml' });
   const python = list(undefined, { workflow: 'shards.yml' });
