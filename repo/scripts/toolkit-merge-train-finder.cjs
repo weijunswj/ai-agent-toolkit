@@ -4,7 +4,7 @@
 // to count them by hand. It only reads: it never pushes, merges, comments or writes to GitHub, and
 // writes one manifest file that `toolkit-merge-train.cjs build` takes as it is.
 //
-//   node repo/scripts/toolkit-merge-train.cjs find --out <manifest> [--pr <n,n,...>] [--live <file>] [--json]
+//   node repo/scripts/toolkit-merge-train.cjs find --out <manifest> [--pr <n,n,...>] [--next-train] [--live <file>] [--json]
 //
 // --pr names the pull requests to consider (the owner-approved members): only those are judged,
 // with every check below, and the ready ones are written, oldest first up to the cap; a named one
@@ -34,11 +34,18 @@
 // (toolkit-risk-tier.cjs) gives the changed files, so a verdict can never lower a tier; then the
 // bump level, UAT line, closing lines and any `Pack changes` lines from the body. It never fills
 // `owner_ok`, so a RISKY member keeps the owner's merge card.
-// Trains stack by default: when a train pull request is open (its body holds the merge-train member
-// table), the manifest gets `onto: { pr, branch, head }` for the newest train at the end of a chain
-// (one no other open train is stacked on), and build stacks the members onto that head, so one bump
-// and one owner ask cover them all; one ready pull request then stacks too. With no open train and
-// fewer than two ready, it writes nothing and says to merge the one alone.
+// Trains form a queue (the owner's design): a pull request that becomes ready while anything is landing
+// (main's required checks still running after a merge, or an open train pull request) never waits
+// alone. The last train in the queue is the newest open train at the end of a chain (one no other open
+// train is stacked on). It takes joiners while it waits behind another train, and, at the front of the
+// queue (based on the default branch), for as long as main's required checks are running; the moment
+// they finish it closes to joiners and lands. So the ready pull requests join that train (the manifest
+// gets `join: { pr, branch, head }` and `toolkit-merge-train.cjs join` adds them to it, its CI then
+// runs again), or, when it is closed, start the next train stacked behind it (`onto`, as build reads
+// it). With no open train while main's checks run, even one ready pull request starts a train on main.
+// With no open train and main's checks done, fewer than two ready write nothing: merge the one alone.
+// `--next-train` starts the next train behind the last one instead of joining it: `join` names it for
+// a pull request that conflicted with that train, which is dropped at once and starts the next train.
 //
 // --live reads every GitHub fact from a JSON file instead of `gh api` (REST):
 //   { "default_branch": "main",
@@ -46,7 +53,9 @@
 //     "comments": { "12": [ { "body": "...", "author_association": "OWNER", "created_at": "<ISO>", "html_url": "..." } ] },
 //     "checks": { "<sha>": [ { "name": "validate", "status": "completed", "conclusion": "success", "id": 1 } ] },
 //     "files": { "12": ["path/a.txt"] },
-//     "merge_bases": { "main...<sha>": "<sha>" }, "contents": { "<sha>:<path>": "<text>" } }
+//     "merge_bases": { "main...<sha>": "<sha>" }, "contents": { "<sha>:<path>": "<text>" },
+//     "main_checks": [ { "name": "validate", "status": "in_progress", "conclusion": null, "id": 2 } ] }
+// ("main_checks" are the check runs at the default branch's head; none listed means none running).
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
@@ -56,9 +65,9 @@ const riskTier = require('./toolkit-risk-tier.cjs');
 const gateRoute = require('./toolkit-gate-route.cjs');
 const carry = require('./toolkit-review-carry.cjs');
 const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+const g2 = require('../../skills/github-program-reconciler/scripts/g2-verdict.cjs');
 
-const VERDICT = /^Toolkit-G2: (PASS|FAIL) ([0-9a-f]{40}) tier=(LIGHT|NORMAL|RISKY)[ \t]*$/;
-const WRITERS = Object.freeze(['OWNER', 'MEMBER', 'COLLABORATOR']);
+const { VERDICT } = g2;
 const BUMP = /^Bump: (patch|minor|major|none)[ \t]*$/gm;
 const UAT = /^UAT: (?:NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b[^\r\n]*$/m;
 const LINK = /^(?:Closes|Fixes|Resolves|Refs) #\d+$/;
@@ -85,6 +94,8 @@ class GitHubFacts {
     if (result.error || result.status !== 0) throw new Error(`could not read the checks of ${sha}`);
     return result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line));
   }
+  // The check runs at the default branch's head.
+  mainChecks(branch) { return this.checks(encodeURIComponent(branch)); }
   files(number) { return this.#api(`repos/${this.repository}/pulls/${number}/files?per_page=100`).map(file => file.filename); }
   mergeBase(base, head) {
     const result = spawnSync('gh', ['api', `repos/${this.repository}/compare/${base}...${head}`, '--jq', '.merge_base_commit.sha'], { encoding: 'utf8', windowsHide: true });
@@ -109,22 +120,16 @@ class LiveFacts {
   pulls() { return this.facts.pulls || []; }
   comments(number) { return (this.facts.comments || {})[String(number)] || []; }
   checks(sha) { return (this.facts.checks || {})[sha] || []; }
+  mainChecks() { return this.facts.main_checks || []; }
   files(number) { return (this.facts.files || {})[String(number)] || []; }
   mergeBase(base, head) { return (this.facts.merge_bases || {})[`${base}...${head}`] || base; }
   text(ref, file) { const value = (this.facts.contents || {})[`${ref}:${file}`]; return typeof value === 'string' ? value : null; }
 }
 
-// The newest verdict comment for `head` from an account that can write here, or null.
+// The newest verdict comment for `head` from an account that can write here, or null (g2-verdict.cjs),
+// with a body-only carry floor read from the lines after the route stamp.
 function verdictFor(comments, head) {
-  const found = comments
-    .filter(comment => WRITERS.includes(comment.author_association))
-    .map(comment => ({ comment, lines: String(comment.body || '').split(/\r?\n/) }))
-    .map(({ comment, lines }) => ({ comment, route: lines[1] ?? null, carry: carry.carryFloor(lines.slice(2)), match: VERDICT.exec(lines[0]) }))
-    .filter(entry => entry.match && entry.match[2] === head)
-    // An edited verdict counts from its edit.
-    .sort((a, b) => Date.parse(a.comment.updated_at || a.comment.created_at) - Date.parse(b.comment.updated_at || b.comment.created_at));
-  const last = found[found.length - 1];
-  return last ? { verdict: last.match[1], tier: last.match[3], route: last.route, carry: last.carry, link: last.comment.html_url || `verdict for ${head}` } : null;
+  return g2.verdictFor(comments, head, { carryFloor: carry.carryFloor });
 }
 
 // The required checks that have no successful latest run, by name.
@@ -132,6 +137,16 @@ function missingChecks(runs, required) {
   return required.filter(name => {
     const latest = runs.filter(run => run.name === name).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
     return !latest || latest.status !== 'completed' || latest.conclusion !== 'success';
+  });
+}
+
+// Whether main's CI is still running: a required check (every check when none is required) whose
+// latest run at the default branch's head has not completed.
+function mainRunning(runs, required) {
+  const names = required.length ? required : [...new Set(runs.map(run => run.name))];
+  return names.some(name => {
+    const latest = runs.filter(run => run.name === name).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
+    return Boolean(latest) && latest.status !== 'completed';
   });
 }
 
@@ -301,23 +316,41 @@ function find(cwd, options, maxMembers) {
   for (const number of named ? [...named].sort((a, b) => a - b) : []) {
     if (!pulls.some(pull => pull.number === number)) skipped.push(`#${number}: not an open pull request here`);
   }
-  const members = ready.slice(0, maxMembers);
-  const later = ready.slice(maxMembers).map(member => `#${member.pr}`);
-  if (!members.length || (members.length < 2 && !tip)) {
-    return { ok: true, written: false, ready: members.map(member => `#${member.pr}`), skipped,
-      next: members.length ? [`merge #${members[0].pr} alone: one ready pull request makes no train`] : [] };
+  // The queue: the last train takes joiners while it waits behind another, or, at the front, while
+  // main's checks run; otherwise the ready ones start the next train behind it.
+  const running = mainRunning(facts.mainChecks(branch), required);
+  const open = Boolean(tip) && !options.nextTrain && (tip.base !== branch || running);
+  const aboard = open ? (mergeTrainMembers(pulls.find(pull => pull.number === tip.pr)?.body) || []).length : 0;
+  const room = Math.max(0, maxMembers - aboard);
+  const members = ready.slice(0, open ? room : maxMembers);
+  const later = ready.slice(members.length).map(member => `#${member.pr}`);
+  const state = running ? 'main\'s required checks are running' : 'main\'s required checks are done';
+  if (!members.length || (members.length < 2 && !tip && !running)) {
+    return { ok: true, written: false, ready: members.map(member => `#${member.pr}`), skipped, main_ci: running ? 'running' : 'done',
+      next: members.length ? [`merge #${members[0].pr} alone: one ready pull request makes no train while nothing is landing`]
+        : later.length ? [`train #${tip.pr} is full: ${later.join(', ')} start${later.length === 1 ? 's' : ''} the next train behind it once it lands (find --next-train)`] : [] };
   }
   if (!options.out) throw new Error('--out is required');
+  if (open) {
+    const join = { pr: tip.pr, branch: tip.branch, head: tip.head };
+    fs.writeFileSync(options.out, `${JSON.stringify({ repository, join, members }, null, 2)}\n`);
+    const next = [`join ${members.map(member => `#${member.pr}`).join(', ')} to train #${tip.pr} (${tip.branch} at ${tip.head.slice(0, 12)}; ${tip.base === branch ? `${state}, so it still takes joiners` : 'it waits behind another train'}): fetch it, then node repo/scripts/toolkit-merge-train.cjs join --manifest <train #${tip.pr}'s manifest> --add ${options.out}; push it (no force) and its CI runs again`];
+    if (others.length) next.push(`${others.map(entry => `#${entry.pr}`).join(', ')} ${others.length > 1 ? 'are' : 'is'} also open on a chain of its own: this joins the newest, #${tip.pr}`);
+    if (later.length) next.push(`train #${tip.pr} is full: ${later.join(', ')} start${later.length === 1 ? 's' : ''} the next train behind it (find --next-train)`);
+    return { ok: true, written: true, out: options.out, ready: members.map(member => `#${member.pr}`), skipped, main_ci: running ? 'running' : 'done', join, next };
+  }
   const onto = tip ? { pr: tip.pr, branch: tip.branch, head: tip.head } : undefined;
   fs.writeFileSync(options.out, `${JSON.stringify({ repository, ...(onto ? { onto } : {}), members }, null, 2)}\n`);
   const next = [];
+  if (!onto && members.length === 1) next.push(`#${members[0].pr} starts a train on main: ${state}, so it does not land alone; later ready pull requests join it until they finish`);
   if (onto) {
+    if (!options.nextTrain) next.push(`train #${onto.pr} closed to joiners (${state}) and lands next: this starts the next train behind it`);
     next.push(`stack ${members.map(member => `#${member.pr}`).join(', ')} onto train #${onto.pr} (${onto.branch} at ${onto.head.slice(0, 12)}): fetch it, then build takes onto from this manifest`);
     if (others.length) next.push(`${others.map(entry => `#${entry.pr}`).join(', ')} ${others.length > 1 ? 'are' : 'is'} also open on a chain of its own: this train stacks onto the newest, #${onto.pr}`);
   }
   if (later.length) next.push(`board the next train with ${later.join(', ')}`);
-  return { ok: true, written: true, out: options.out, ready: members.map(member => `#${member.pr}`), skipped,
+  return { ok: true, written: true, out: options.out, ready: members.map(member => `#${member.pr}`), skipped, main_ci: running ? 'running' : 'done',
     ...(onto ? { onto } : {}), next };
 }
 
-module.exports = { VERDICT, find, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };
+module.exports = { VERDICT, GitHubFacts, LiveFacts, find, mainRunning, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };

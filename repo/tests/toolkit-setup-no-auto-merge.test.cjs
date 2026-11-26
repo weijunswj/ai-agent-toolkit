@@ -90,7 +90,7 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.deepEqual(named, ["const command = `gh pr merge ${merge.pr}${merge.repository ? ` --repo ${merge.repository}` : ''} --merge --match-head-commit ${merge.head}`;"]);
         const step = source.slice(source.indexOf('function mergeStep('), source.indexOf('\n}\n', source.indexOf('function mergeStep(')));
         assert.deepEqual(step.split('\n').filter(line => line.includes('${command}')).map(line => line.trim().startsWith('if (merge.route') || line.trim().startsWith('return ')), [true, true], 'the command is only returned as text');
-        assert.deepEqual([...source.matchAll(/\bspawnSync\(\s*([^,]+),\s*(\[?[^,\]]*)/g)].map(match => [match[1].trim(), match[2].trim()]), [['\'git\'', 'args'], ['argv[0]', 'argv.slice(1)'], ['\'gh\'', "['api'"]]);
+        assert.deepEqual([...source.matchAll(/\bspawnSync\(\s*([^,]+),\s*(\[?[^,\]]*)/g)].map(match => [match[1].trim(), match[2].trim()]), [['\'git\'', 'args'], ['argv[0]', 'argv.slice(1)'], ['\'gh\'', "['api'"], ['\'gh\'', "['api'"]], 'git, the bump command, and read-only gh api reads of a pull request and of main\'s check runs');
         assert.doesNotMatch(source, /(?<![.\w])(?:spawn|exec|execFile|fork|execSync|execFileSync)\s*\(|\bimport\s*\(|\bfetch\s*\(|node:https?\b|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i);
         continue;
       }

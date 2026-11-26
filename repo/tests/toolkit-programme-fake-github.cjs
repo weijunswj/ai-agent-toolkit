@@ -449,6 +449,18 @@ class FakeGitHub {
         .map(([file, entry]) => ({ name: file.slice(prefix.length), oid: entry.sha, type: 'blob', object: { text: entry.text, isTruncated: false } }));
       return ok(200, { data: { repository: { snapshot: entries.length ? { entries } : null } } });
     }
+    // The boarding read: the default branch's head and its checks (mainHead, mainContexts), and each
+    // pull request's head, base, draft flag, newest twenty comments and checks.
+    if (/p\d+: pullRequest/.test(body.query) && body.query.includes('comments(last:20)')) {
+      const repository = { defaultBranchRef: { name: 'main', target: { oid: this.mainHead || 'f'.repeat(40), statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: this.mainContexts || [] } } } } };
+      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) {
+        const pr = this.prs.get(Number(match[1]));
+        repository[`p${match[1]}`] = pr ? { number: pr.number, isDraft: pr.isDraft, headRefOid: pr.head, baseRefName: pr.base || 'main',
+          comments: { nodes: this.commentsOf(pr.number).slice(-20).map(comment => ({ body: comment.body, authorAssociation: comment.author_association, createdAt: comment.created_at, updatedAt: comment.updated_at })) },
+          commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] } } : null;
+      }
+      return ok(200, { data: { repository } });
+    }
     if (/p\d+: pullRequest/.test(body.query)) {
       const repository = { defaultBranchRef: { name: 'main' } };
       for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: `pullRequest { title }`, variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;

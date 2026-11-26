@@ -403,13 +403,14 @@ const FINDING_ID = /^[0-9a-f]{12}$/;
 const ATTENTION_KEEP = 200;
 const ATTENTION_LIMIT = 500;
 // Codes whose finding speaks for one PR head; a new head is a new finding.
-const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED', 'OWNER_OK_CLOSE', 'PR_RED_UNOWNED']);
+const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED', 'AGENT_UAT_UNSTARTED', 'OWNER_OK_CLOSE', 'PR_RED_UNOWNED', 'TRAIN_BOARD_DUE']);
 // A row may also carry, for the stale-work net (one lifecycle for every check of work left undone):
 //   net: true          a stale-work net member: one unanswered for NET_CALLOUT_HOURS is called out to the
 //                      controller (netCallout); every work-queue code is a member too;
 //   ack_max_hours: n   the longest acknowledgement it takes (default ACK_DUE_MAX_HOURS);
 //   no_dispose: true   it clears only when its work is done or acknowledged, never by a reasoned dispose,
-//                      since a dispose would let that work hang.
+//                      since a dispose would let that work hang;
+//   callout_now: true  it is called out at once, not after NET_CALLOUT_HOURS: the work is due the same turn.
 const FINDING_CODES = Object.freeze({
   // reconcile source: what the reconciler reports but never changes itself.
   ISSUE_MISSING: { source: 'reconcile', next_action: 'Controller: fix or remove the catalogue entry; the issue cannot be read or is a pull request' },
@@ -471,6 +472,12 @@ const FINDING_CODES = Object.freeze({
   // kind `store` marks one in the evidence store. One of the two per pull request: red wins over age.
   PR_UNOWNED: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 24, next_action: 'Controller: today, land this open pull request (a train, or the owner\'s merge), hand it to the task that acts on it (its `Refs` line, or update --patch), or close it with a closing comment on the owner\'s OK (an evidence-store one needs no OK); else ack with the next step, at most 24 hours ahead' },
   PR_RED_UNOWNED: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 24, next_action: 'Controller: read the failing job attention names under Open PRs (gh pr checks <n>) and put its cause in the ack, then fix it or rerun every job of that run, never `--failed`' },
+  // A bot's pull request (the shard timings refresh, a source-watch notice; not a dependency update,
+  // which its own workflow lands) that no task owns, raised on the first sweep that sees it.
+  BOT_PR_OPEN: { source: 'reconcile', net: true, no_dispose: true, callout_now: true, ack_max_hours: 24, next_action: 'Controller: today, run `node repo/scripts/toolkit-merge-train.cjs find --pr <n>`: when it can land (a scripted carry the auto-merge check accepts), bring it up to date with main (`gh pr update-branch <n>`) and land it once green, with one notice after; else hand it to the task that acts on it (its `Refs` line) today' },
+  // A pull request ready to land (a G2 PASS for its head, required checks green) that no train holds
+  // while a landing is in flight (an open train, or main's required checks running), at that head.
+  TRAIN_BOARD_DUE: { source: 'reconcile', net: true, no_dispose: true, callout_now: true, ack_max_hours: 4, next_action: 'Controller: this turn, run `node repo/scripts/toolkit-merge-train.cjs find --pr <n>` and board it: it joins the last train in the queue (`join`) or starts the next one behind it; it never waits alone for its own bump and CI run' },
   // inventory source: open issues and registered parents.
   NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
   CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', net: true, next_action: 'Controller: reopen the parent, or move or close its open descendants' },
@@ -503,7 +510,7 @@ const NEAREST_WINDOW_DAYS = 7;
 // finding's assignment ID, an unowned pull request's `store`.
 const KIND_CODES = new Set(['CLOSING_COMMENT_MISSING', 'CLOSE_DUE', 'PR_UNOWNED']);
 // The open-pull-request findings, and the age from which an unowned one is raised.
-const OPEN_PR_CODES = new Set(['PR_UNOWNED', 'PR_RED_UNOWNED']);
+const OPEN_PR_CODES = new Set(['PR_UNOWNED', 'PR_RED_UNOWNED', 'BOT_PR_OPEN', 'TRAIN_BOARD_DUE']);
 const PR_UNOWNED_HOURS = 24;
 // How a finding's kind and number read after its code in a line of text. A store pull request has no
 // `#`, so its number never links to a task here.
@@ -922,7 +929,8 @@ function netCallout(findings, now) {
     if (!entry || !NET_CODES.has(entry.code) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
     const overdue = ackOverdue(entry, time);
     const since = overdue ? ackDue(entry) : Date.parse(entry.changed_at);
-    if (!Number.isFinite(since) || (!overdue && (entry.state !== 'new' || time - since < NET_CALLOUT_HOURS * HOUR_MS))) continue;
+    const wait = FINDING_CODES[entry.code]?.callout_now === true ? 0 : NET_CALLOUT_HOURS * HOUR_MS;
+    if (!Number.isFinite(since) || (!overdue && (entry.state !== 'new' || time - since < wait))) continue;
     entries.push({ id: entry.id, ref: !isInt(entry.issue, 1) ? '-' : OPEN_PR_CODES.has(entry.code) ? refText(entry).trim() : `#${entry.issue}`, code: entry.code, state: overdue ? 'overdue' : 'new', hours: Math.max(0, Math.floor((time - since) / HOUR_MS)), since });
   }
   entries.sort((a, b) => a.since - b.since || String(a.id).localeCompare(String(b.id)));
@@ -4814,6 +4822,39 @@ class ProgrammeGraphReader {
     return result;
   }
 
+  // What boarding needs (boardingOf), twenty pull requests to a request: the default branch's head and
+  // its check rollup, and each pull request's head, base, draft flag, newest twenty comments and check
+  // rollup at its head. A refused or partial read throws, so boarding stays unread and holds.
+  boardingFacts(numbers) {
+    const unique = [...new Set(numbers)];
+    if (!unique.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
+    const [owner, name] = this.repository.split('/');
+    const rollup = required => `statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion completedAt checkSuite { app { databaseId } } ${required} } ... on StatusContext { context state ${required} } } } }`;
+    const out = { main: null, pulls: new Map() };
+    const batches = [];
+    for (let start = 0; start < unique.length; start += 20) batches.push(unique.slice(start, start + 20));
+    if (!batches.length) batches.push([]);
+    for (const batch of batches) {
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number isDraft headRefOid baseRefName comments(last:20) { nodes { body authorAssociation createdAt updatedAt } } commits(last:1) { nodes { commit { oid ${rollup(`isRequired(pullRequestNumber:${number})`)} } } } }`).join('\n');
+      const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name target{... on Commit{oid ${rollup('')}}}} ${selection}}}`, variables: { owner, name } });
+      if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
+      const repo = response.json?.data?.repository;
+      if (response.status !== 200 || response.json?.errors?.length || !repo) throw new ProgrammeError('BOARDING_UNREAD', 'The boarding read was refused.');
+      const target = repo.defaultBranchRef?.target;
+      if (!isSha(target?.oid) || !isText(repo.defaultBranchRef?.name)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The default branch head is unreadable.');
+      out.main = { branch: repo.defaultBranchRef.name, head: target.oid, complete: !target.statusCheckRollup?.contexts?.pageInfo?.hasNextPage, contexts: (target.statusCheckRollup?.contexts?.nodes || []).map(rollupContext) };
+      for (const number of batch) {
+        const pr = repo[`p${number}`];
+        if (!pr || pr.number !== number || !isSha(pr.headRefOid)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A batched pull request was not returned.');
+        const commit = pr.commits?.nodes?.[0]?.commit;
+        out.pulls.set(number, { head: pr.headRefOid, base: pr.baseRefName, draft: pr.isDraft === true, rollupOid: commit?.oid || null,
+          complete: !commit?.statusCheckRollup?.contexts?.pageInfo?.hasNextPage, contexts: (commit?.statusCheckRollup?.contexts?.nodes || []).map(rollupContext),
+          comments: (pr.comments?.nodes || []).map(node => ({ body: node.body, author_association: node.authorAssociation, created_at: node.createdAt, updated_at: node.updatedAt })) });
+      }
+    }
+    return out;
+  }
+
   restPullRequest(number) {
     const request = endpoint => {
       const response = this.transport.request('GET', `repos/${this.repository}/${endpoint}`);
@@ -5521,7 +5562,7 @@ function failingJobs(contexts) {
 // check facts of the pull requests no task owns, twenty to a request. A read that fails leaves its
 // part unread with the error's code, which holds or says so, and never reads as none.
 function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
-  const facts = { store: [], store_unread: null, checks: new Map(), checks_unread: null };
+  const facts = { store: [], store_unread: null, checks: new Map(), checks_unread: null, boarding: null, boarding_unread: null };
   const attempt = (read, failed) => {
     try { read(); }
     catch (error) { if (!error.code || error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; failed(error.code); }
@@ -5529,6 +5570,13 @@ function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
   const store = binding.store;
   if (store?.kind === 'github' && store.repository.toLowerCase() !== binding.repository.toLowerCase()) {
     attempt(() => { facts.store = reader.storePullRequests(store.repository); }, code => { facts.store = null; facts.store_unread = code; });
+  }
+  // Boarding: while a landing is in flight, which open pull requests are ready and on no train. Only
+  // where merge trains are on (no task_prs.merge_train key means on), and only when a pull request
+  // could be ready (one open and not a draft).
+  if (binding.task_prs?.merge_train !== 'off' && open.some(pr => !pr.draft)) {
+    attempt(() => { facts.boarding = boardingOf(reader.boardingFacts(open.filter(pr => !pr.draft).map(pr => pr.number)), open, binding.required_checks || []); },
+      code => { facts.boarding = null; facts.boarding_unread = code; });
   }
   const unowned = openPrRows({ open, parent, docs, now }).filter(row => !row.task).map(row => row.number);
   if (unowned.length) {
@@ -5542,15 +5590,48 @@ function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
   return facts;
 }
 
+// What the boarding read shows: { inflight, ready: [{ number, head }] } with inflight the landing in
+// flight ('train #N' for the newest open train, or "main's required checks", which run after a merge),
+// or null with no ready list when nothing is landing. Ready: open, not a draft, on the default branch,
+// not a train, on no open train, its newest `Toolkit-G2:` verdict for its head (from an account that
+// can write here) a PASS, and every required check green at that head. Pure.
+function boardingOf(read, open, required) {
+  const { verdictFor } = require('./g2-verdict.cjs');
+  const trains = open.filter(pr => (pr.train || []).length).sort((a, b) => b.number - a.number);
+  const held = new Set(trains.flatMap(pr => pr.train.map(row => row.pr)));
+  // Main's CI runs while a required check (every check when none is required) has a run not finished;
+  // a check that never ran on main is not running.
+  const names = required.length ? required : [...new Set(read.main.contexts.map(contextName))];
+  const running = names.some(name => {
+    const named = read.main.contexts.filter(context => contextName(context) === name);
+    return named.length > 0 && checkResults(named).includes('pending');
+  });
+  const inflight = trains.length ? `train #${trains[0].number}` : running ? 'main\'s required checks' : null;
+  if (!inflight) return { inflight: null, ready: [] };
+  const ready = [];
+  for (const [number, pr] of read.pulls) {
+    if (pr.draft || pr.base !== read.main.branch || held.has(number) || trains.some(train => train.number === number)) continue;
+    const verdict = verdictFor(pr.comments, pr.head);
+    if (verdict?.verdict !== 'PASS') continue;
+    if (evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: required }).state !== 'GREEN') continue;
+    ready.push({ number, head: pr.head });
+  }
+  return { inflight, ready: ready.sort((a, b) => a.number - b.number) };
+}
+
 // One row per open pull request, with the owner the records name and the finding owed, if any. Pure.
 // Owner, first match: a task in progress that the pull request claims (referencedIssues: its own Refs,
 // Closes and the like, or its PATH block) or that tracks it, a claimed task no document shows yet
 // included; the controller, while the finding below is acknowledged and not past due; else none. A bare
 // mention, a task's free-text next action and a queued task own nothing: each has let a pull request
 // hang. Finding (`code`), only where no task owns it: red at its head, else open PR_UNOWNED_HOURS or
-// more (an unread open time counts as old). Check results not known keep a red finding already open at
-// that head. The evidence store has no tasks and no checks, so its rows go by age alone. No pull request
-// class (bot, train, draft, stacked, dependency) has a rule of its own.
+// more (an unread open time counts as old), and a bot's pull request (BOT_ACCOUNT, not a dependency
+// update) at once (BOT_PR_OPEN). Check results not known keep a red finding already open at that head.
+// The evidence store has no tasks and no checks, so its rows go by age alone.
+// A bot's login (GitHub Apps and Actions), and the dependency bots whose pull requests a governed
+// repository's dependency auto-merge workflow lands by itself.
+const BOT_ACCOUNT = /(?:\[bot\]$|^app\/)/i;
+const DEPENDENCY_BOTS = new Set(['dependabot[bot]', 'app/dependabot', 'renovate[bot]']);
 function openPrRows({ open = [], storeOpen = [], parent, docs, checks = new Map(), now }) {
   const time = Date.parse(now);
   const claims = referencedIssues(open);
@@ -5566,7 +5647,8 @@ function openPrRows({ open = [], storeOpen = [], parent, docs, checks = new Map(
     const red = where === 'repo' && !task && (known ? facts.state === 'RED' : findings.has(idOf('PR_RED_UNOWNED')));
     const opened = Date.parse(pr.created_at || '');
     const old = !Number.isFinite(opened) || time - opened >= PR_UNOWNED_HOURS * HOUR_MS;
-    const code = task ? null : red ? 'PR_RED_UNOWNED' : old ? 'PR_UNOWNED' : null;
+    const bot = where === 'repo' && BOT_ACCOUNT.test(String(pr.author || '')) && !DEPENDENCY_BOTS.has(String(pr.author || '').toLowerCase());
+    const code = task ? null : red ? 'PR_RED_UNOWNED' : bot ? 'BOT_PR_OPEN' : old ? 'PR_UNOWNED' : null;
     const finding = code ? findings.get(idOf(code)) || null : null;
     const acked = finding?.state === 'acknowledged' && !ackOverdue(finding, time);
     return { where, number: pr.number, title: pr.title || '', draft: pr.draft === true, opened_at: pr.created_at || null,
@@ -6427,8 +6509,14 @@ class Reconciler {
     const facts = observed.openPrs;
     const openRead = Boolean(facts) && observed.prGraph.openComplete;
     const storeRead = Boolean(facts) && facts.store !== null;
-    this.openPrHolds = (parent.attention || []).filter(entry => OPEN_PR_CODES.has(entry.code) && !(entry.kind === 'store' ? storeRead : openRead)).map(entry => entry.id);
+    const boardRead = openRead && Boolean(facts?.boarding);
+    this.openPrHolds = (parent.attention || []).filter(entry => OPEN_PR_CODES.has(entry.code) && !(entry.kind === 'store' ? storeRead : entry.code === 'TRAIN_BOARD_DUE' ? boardRead : openRead)).map(entry => entry.id);
     if (!facts) return;
+    if (boardRead) {
+      for (const entry of facts.boarding.ready) {
+        findings.push({ code: 'TRAIN_BOARD_DUE', issue: entry.number, head: entry.head, detail: `ready at ${shortSha(entry.head)} (a G2 PASS for its head, required checks green) while ${facts.boarding.inflight} ${facts.boarding.inflight.startsWith('train') ? 'is open' : 'run'}, and no train holds it` });
+      }
+    }
     const now = this.now();
     for (const row of openPrRows({ open: openRead ? observed.prGraph.openListed : [], storeOpen: facts.store || [], parent, docs, checks: facts.checks, now })) {
       if (!row.code) continue;
@@ -6436,7 +6524,7 @@ class Reconciler {
       findings.push({ code: row.code, issue: row.number, ...(row.where === 'store' ? { kind: 'store' } : {}), ...(row.head ? { head: row.head } : {}),
         detail: row.code === 'PR_RED_UNOWNED'
           ? `red at ${shortSha(row.head)}${row.failing.length ? ` (failing: ${row.failing.join(', ')})` : ''}, and no task in progress owns it`
-          : `open ${row.opened_at ? `since ${row.opened_at}` : 'at an unread time'}, and no task in progress owns it` });
+          : `${row.code === 'BOT_PR_OPEN' ? 'a bot\'s pull request, ' : ''}open ${row.opened_at ? `since ${row.opened_at}` : 'at an unread time'}, and no task in progress owns it` });
     }
   }
 

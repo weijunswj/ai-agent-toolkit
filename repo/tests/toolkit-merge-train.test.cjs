@@ -167,6 +167,8 @@ test('a train with no bump command takes no plain commit at all', t => {
   assert.equal(result.bump, null);
   assert.equal(f.git('show', `${result.head}:VERSION`), '1.0.0');
   assert.equal(train.run(['verify', '--manifest', out, '--head', result.head, '--main', 'main'], f.repo, f.opts).ok, true);
+  // build leaves this checkout where it was; the late commit goes on the train itself.
+  f.git('switch', '--quiet', 'toolkit-train/nb');
   f.write('h.txt', 'late\n');
   f.git('add', '--all');
   f.git('commit', '--quiet', '-m', 'late');
