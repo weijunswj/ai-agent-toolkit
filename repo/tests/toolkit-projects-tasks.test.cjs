@@ -489,11 +489,11 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
-  for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
+  for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--upgrade-plan <read-back file> --memory MEMFILE --daily', '--params-from <file>',
     '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, GUIDEBOOK MISSING', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
     'remove only the ai-agent-toolkit plugin on claude.ai in a web browser', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
-    'a quiet run posts nothing, and the hourly nudge\'s CHECK-IN NOT ARMED and RUN MISSED catch a missing run', 'so a Toolkit release alone never makes them outdated', 'The coordinator swaps each named Toolkit task in place the same turn']) {
+    'a quiet run posts nothing, and the hourly nudge\'s CHECK-IN NOT ARMED and RUN MISSED catch a missing run', 'so a Toolkit release alone never makes them outdated', 'The coordinator swaps each named task in place the same turn, a shell task included, without asking']) {
     assert.ok(text.includes(required), required);
   }
   // The guidebook step compares the library copy with main, refreshes it only as the backstop, and names the Version for SKILL UPDATE.
