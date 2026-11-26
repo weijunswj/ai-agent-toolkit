@@ -109,7 +109,7 @@ const ROWS = Object.freeze([
 // AUTO_MODE_MARK and is not today's is an old Toolkit rule. Evidence store merges are left out: the
 // store command merges on its own.
 const AUTO_MODE_MARK = 'Toolkit: ';
-const AUTO_MODE_ALLOW = Object.freeze([`${AUTO_MODE_MARK}merging a pull request with gh pr merge is allowed when Toolkit's merge hold hook let the command through. That hook runs first and lets a merge through only after the owner typed merge with its number, tapped Toolkit's merge card, or turned task auto-merge on for a pull request with a ready answer.`]);
+const AUTO_MODE_ALLOW = Object.freeze([`${AUTO_MODE_MARK}merging a pull request with the GitHub command line is allowed when Toolkit's merge hold hook let the command through. That hook runs first and lets a merge through only after the owner typed merge with its number, tapped Toolkit's merge card, or turned task auto-merge on for a pull request with a ready answer.`]);
 
 // `--apply` writes the owner's own app settings: only the owner runs it, so every block asks for it.
 const APPLY_WHY = 'Writing the app\'s permission settings is the owner\'s own step, typed in their own terminal; agents never run it.';
