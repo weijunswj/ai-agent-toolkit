@@ -1583,20 +1583,25 @@ function permissionsLine(state, deps = {}, host = null) {
 const SESSION_TEXT_LIMIT = 10000;
 const sizeOf = text => Buffer.byteLength(text, 'utf8');
 
-// Keeps `lines` in order within `limit`. From the end, a line first gives way to its short form
-// ({ full, short }), then lines are left out from the end; render(kept, leftOut) words the text and
-// counts what it left out. A plain string line has no short form.
+// Keeps `lines` in order within `limit`. From the end, a line first gives way to its middle form when
+// it has one ({ full, middle, short }), then, again from the end, to its short form ({ full, short }),
+// then lines are left out from the end; render(kept, leftOut) words the text and counts what it left
+// out. A plain string line has no short form.
 function fitLines(lines, render, limit = SESSION_TEXT_LIMIT) {
-  const forms = lines.map(line => (typeof line === 'string' ? { full: line, short: null } : line));
+  const forms = lines.map(line => (typeof line === 'string' ? { full: line, middle: null, short: null } : { middle: null, ...line }));
   const fits = kept => {
     const text = render(kept, forms.length - kept.length);
     return sizeOf(text) <= limit ? text : null;
   };
-  for (let full = forms.length; full >= 0; full -= 1) {
-    const rest = forms.slice(full);
-    if (rest.some(form => form.short === null)) break;
-    const text = fits([...forms.slice(0, full).map(form => form.full), ...rest.map(form => form.short)]);
-    if (text !== null) return text;
+  // Each step keeps the first `count` lines at one form and the rest at the next shorter one.
+  const steps = [[form => form.full, form => form.middle ?? form.short], ...(forms.some(form => form.middle !== null) ? [[form => form.middle ?? form.full, form => form.short]] : [])];
+  for (const [kept, shorter] of steps) {
+    for (let count = forms.length; count >= 0; count -= 1) {
+      const rest = forms.slice(count);
+      if (rest.some(form => shorter(form) === null)) break;
+      const text = fits([...forms.slice(0, count).map(kept), ...rest.map(shorter)]);
+      if (text !== null) return text;
+    }
   }
   const shortest = forms.map(form => form.short ?? form.full);
   for (let count = forms.length - 1; count > 0; count -= 1) {
@@ -1777,6 +1782,8 @@ function cloudSessionText(cwd, { registryOptions = {}, refreshBinding = null, de
     const text = state.state === 'UNDECIDED' ? CLOUD_UNDECIDED : state.state === 'UNAVAILABLE' ? unavailableText(causeOf(state, own)) : decidedLine(state, own);
     lines.push({
       full: `- ${name}: ${text}${stale.map(line => `\n  ${line}`).join('')}`,
+      // With many repositories the copy list gives way first: one short pointer to the read-only list.
+      middle: stale.length ? `- ${name}: ${text}\n  ⚠️ Toolkit copies here need a refresh (list left out to fit): \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${root} --check\` lists them; then act on it this session, without asking.` : null,
       short: `- ${name}: ${shortState(state, own)}`,
     });
   }
