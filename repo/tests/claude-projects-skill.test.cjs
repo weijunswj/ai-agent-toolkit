@@ -813,7 +813,8 @@ test('Toolkit text says computer or Remote Control session, not laptop', () => {
   // name in the frontend art direction skill, and as one of the owner's own words the owner-line lint
   // reads (never Toolkit's text), matched line by line.
   const allowedFolder = /^skills\/frontend-art-direction\//;
-  const ownerWords = { file: 'repo/scripts/toolkit-owner-lines.cjs', phrase: '(?:this|my|the) (?:device|computer|laptop|desktop|pc|machine)' };
+  // The lint also tells the owner's named kinds of computer apart (COMPUTER_KINDS).
+  const ownerWords = { file: 'repo/scripts/toolkit-owner-lines.cjs', phrases: ['(?:this|my|the) (?:device|computer|laptop|desktop|pc|machine)', '(laptop|desktop|pc)'] };
   const roots = ['skills', 'repo/contracts', 'repo/docs', 'repo/scripts', 'repo/tests/fixtures'];
   const hits = [];
   const walk = (rel) => {
@@ -823,7 +824,7 @@ test('Toolkit text says computer or Remote Control session, not laptop', () => {
       if (/\.(png|jpe?g|gif|ico)$/i.test(entry.name)) continue;
       fs.readFileSync(path.join(repoRoot, child), 'utf8').split(/\r?\n/).forEach((line, index) => {
         // Only the allowed phrase is exempt, so a banned use on the same line still fails.
-        const rest = child === ownerWords.file ? line.replace(ownerWords.phrase, '') : !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
+        const rest = child === ownerWords.file ? ownerWords.phrases.reduce((text, phrase) => text.replace(phrase, ''), line) : !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
         if (/laptop/i.test(rest)) hits.push(`${child}:${index + 1}`);
       });
     }

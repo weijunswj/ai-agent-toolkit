@@ -62,8 +62,8 @@ const PLACES = Object.freeze({
 });
 const PLACE = `(?:${Object.values(PLACES).join('|')})`;
 // "This device", "my computer", "the machine" and "by Remote Control" are the device the controller works
-// from. A laptop, a desktop and a PC are kinds of computer that may be different ones, so a line naming
-// one is the same place as another line only when both name the same kinds (computerKinds).
+// from. The other computer words in PLACES are kinds of computer that may be different ones, so a line
+// naming one is the same place as another line only when both name the same kinds (computerKinds).
 const COMPUTER_KINDS = /\b(laptop|desktop|pc)\b/gi;
 const computerKinds = text => [...new Set((text.match(COMPUTER_KINDS) || []).map(word => word.toLowerCase()))].sort().join(' and ');
 const PLACEMENT = shape(`(?:all )?(?:the )?(?:gates run|gate work runs) (${PLACE})((?:; G[012] ${PLACE})*)(?: \\(([^()]+)\\))?`);
