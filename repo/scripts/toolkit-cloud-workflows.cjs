@@ -276,8 +276,10 @@ function parseArgs(argv) {
 // The plan for one repository: each workflow's path, expected text and current state.
 // `ciShards` is the merged binding's ci_shards answer ('yes', 'not-now', 'never' or null); by default it
 // is read from this computer's copy of the merged binding. `defaultBranch` is given when `repo` is a
-// snapshot of the default branch's files (the refresh pull request's), not a git checkout.
-function plan({ repo, ci = null, root = sourceRoot(), commit = toolkitCommit(root), ciShards = undefined, defaultBranch = null }) {
+// snapshot of the default branch's files (the refresh pull request's), not a git checkout. `overlay` is
+// a folder of files a governance turn-on rendered outside the checkout; a shard list there is read in
+// place of the checkout's.
+function plan({ repo, ci = null, root = sourceRoot(), commit = toolkitCommit(root), ciShards = undefined, defaultBranch = null, overlay = null }) {
   const target = path.resolve(repo);
   if (!defaultBranch && !fs.existsSync(path.join(target, '.git'))) throw new InstallError(`${target} is not a git checkout.`);
   if (isToolkitCheckout(target)) {
@@ -306,7 +308,7 @@ function plan({ repo, ci = null, root = sourceRoot(), commit = toolkitCommit(roo
     ciWorkflow = { file: ci, name };
   }
   const answer = ciShards === undefined ? mergedCiShards(target) : ciShards;
-  const shards = offMain ? { rows: [], renamed: [], notCopied: SHARD_WORKFLOWS.map(row => ({ id: row.id, reason: offMain })) } : shardCopies(target, branch, answer);
+  const shards = offMain ? { rows: [], renamed: [], notCopied: SHARD_WORKFLOWS.map(row => ({ id: row.id, reason: offMain })) } : shardCopies(target, branch, answer, overlay);
   const wanted = [...(offMain ? [] : SWEEPS.map(row => ({ ...row, input: ciWorkflow }))), ...shards.rows];
   const sourceAt = sourceTexts([...new Set([...wanted.map(row => row.source), ...COPIED_SOURCES])], commit, root);
   const rendered = wanted.map(({ id, file, source, input, consequence }) => {
@@ -355,8 +357,9 @@ function mergedCiShards(target) {
 
 // The shard copies for a repository: both rows when its shard list is usable, otherwise none, each
 // named in not_copied with the reason. A Toolkit copy still there from an earlier list is named too.
-function shardCopies(target, branch = 'main', answer = null) {
-  const list = governedShards.listState(target);
+function shardCopies(target, branch = 'main', answer = null, overlay = null) {
+  const rendered = overlay && fs.existsSync(path.join(overlay, ...governedShards.MANIFEST_REL.split('/')));
+  const list = governedShards.listState(target, rendered ? { manifestFrom: overlay } : {});
   const workflow = list.manifest?.workflow || governedShards.DEFAULT_WORKFLOW;
   let reason = null;
   if (answer === 'never') reason = 'the merged binding answers never to parallel CI shards (ci_shards)';

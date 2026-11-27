@@ -615,11 +615,12 @@ function ghSecurityWriter(slug, plan, { spawn = childProcess.spawnSync } = {}) {
 
 // Writes the files in `files` ({ dependabot: true, workflow: true }) only where nothing is at that
 // path yet (a dependabot.yaml counts), or the workflow is Toolkit's own older copy. Returns
-// [{ file, result }].
-function writeSecurityFiles(root, files, { toolkitRoot = ROOT } = {}) {
+// [{ file, result }]. `into` is the folder that receives them (by default `root`, which is only read
+// otherwise), so a governance turn-on can carry them in its pull request without writing the checkout.
+function writeSecurityFiles(root, files, { toolkitRoot = ROOT, into = root } = {}) {
   const results = [];
   const put = (rel, text) => {
-    const file = path.join(root, ...rel.split('/'));
+    const file = path.join(into, ...rel.split('/'));
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, text);
@@ -628,7 +629,14 @@ function writeSecurityFiles(root, files, { toolkitRoot = ROOT } = {}) {
       results.push({ file: rel, result: `failed (${error && error.code ? error.code : 'unexpected error'})` });
     }
   };
-  if (files.dependabot && dependabotFile(root) === null) put(DEPENDABOT_REL, renderDependabotConfig(detectEcosystems(root)));
+  // What `into` already holds counts too: the workflows a turn-on renders there need GitHub Actions updates.
+  const ecosystems = () => {
+    if (into === root) return detectEcosystems(root);
+    const merged = new Map(detectEcosystems(root));
+    for (const [ecosystem, dirs] of detectEcosystems(into)) merged.set(ecosystem, [...new Set([...(merged.get(ecosystem) || []), ...dirs])].sort());
+    return new Map([...merged.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  };
+  if (files.dependabot && dependabotFile(root) === null) put(DEPENDABOT_REL, renderDependabotConfig(ecosystems()));
   if (files.workflow && ['missing', 'outdated'].includes(workflowState(root, toolkitRoot))) put(WORKFLOW_REL, workflowTemplate(toolkitRoot));
   return results;
 }

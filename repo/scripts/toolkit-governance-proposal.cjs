@@ -49,7 +49,9 @@ const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <thi
 // Toolkit checkout and the commit to pin) are only for tests.
 // `source` is the Toolkit git checkout to render from (by default this copy, or the managed checkout
 // from a plugin copy).
-function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null, source: chosen = undefined } = {}) {
+// `overlay` is the folder the turn-on rendered its own files into, outside the checkout (a first shard
+// list among them).
+function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null, source: chosen = undefined, overlay = null } = {}) {
   // From a plugin copy the copies come from the managed checkout, rendered by that checkout's own
   // installer, so the render logic always matches the commit the copies are pinned to. Its rows are read
   // with this copy's own helpers, since that checkout may be another Toolkit version.
@@ -58,7 +60,7 @@ function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null, 
   const workflows = own.installerAt(source);
   if (workflows.isToolkitCheckout(cwd)) return { files: {}, warning: null };
   try {
-    const result = workflows.plan({ repo: cwd, ciShards, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
+    const result = workflows.plan({ repo: cwd, ciShards, ...(root ? { root } : {}), ...(commit ? { commit } : {}), ...(overlay ? { overlay } : {}) });
     const missing = new Set(result.rows.filter(row => row.state === 'missing' && !row.held).map(row => row.file));
     return {
       files: Object.fromEntries(own.writableRows(result.rows).map(row => [row.file, row.expected])), warning: null,
@@ -79,17 +81,19 @@ function bindingV2(binding) {
   return { schema: BINDING_V2, repository, governance: 'enabled', parents: [{ issue, record_prefix, ...(writer_prefix === undefined ? {} : { writer_prefix }) }], ...rest };
 }
 
-// The turn-on file set: the programme file, the CI files the working tree carries (the bank installs the
-// plain-text check and the Dependabot settings there first) and the cloud workflows. Instruction files,
-// product files and backups never join it. A link or folder in a cloud workflow's place is never read:
-// the plan already leaves that workflow out and names it, so it does not stop the turn-on.
-function adoptionFiles(cwd, text, cloud = { files: {} }) {
+// The turn-on file set: the programme file, the CI files (each read from `rendered`, the folder outside
+// the checkout the bank rendered the missing plain-text check, Dependabot settings and shard list into,
+// else from the checkout, which already has it) and the cloud workflows. Instruction files, product
+// files and backups never join it. A link or folder in a cloud workflow's place is never read: the plan
+// already leaves that workflow out and names it, so it does not stop the turn-on.
+function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
   const names = [...PLAIN_TEXT_FILES, '.github/plain-text-baseline.json', ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
-    const file = path.join(cwd, name);
+    const base = rendered && fs.existsSync(path.join(rendered, name)) ? rendered : cwd;
+    const file = path.join(base, name);
     if (!fs.existsSync(file)) continue;
-    let current = cwd;
+    let current = base;
     const linked = name.split('/').some(part => { current = path.join(current, part); return fs.lstatSync(current).isSymbolicLink(); });
     const stat = fs.lstatSync(file);
     if (linked || !stat.isFile() || stat.size > LIMIT) {
@@ -104,7 +108,22 @@ function adoptionFiles(cwd, text, cloud = { files: {} }) {
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
-  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Ask the owner to merge this pull request now, with its external effects and current checks. This answer grants no merge permission.${proposals[0].answer === 'yes' ? ' Before pulling after merge, compare prepared untracked files with the merged copies. Preserve local differences and clear only verified duplicates with permission, so git pull can bring in the tracked files.' : ''}`;
+  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Ask the owner to merge this pull request now, with its external effects and current checks. This answer grants no merge permission.`;
+}
+
+// The checks the turn-on pull request's own workflows run, by job name: Toolkit requires them itself,
+// so the owner never edits required_checks or runs a command for them. A job counts only where the file
+// the pull request carries defines it (read with LF line ends).
+const OWN_CHECKS = Object.freeze([
+  { check: 'plain-text', file: '.github/workflows/plain-text.yml', job: /^jobs:[ \t]*\n(?:[^\n]*\n)*? {2}plain-text:[ \t]*$/m },
+  { check: 'personal-data', file: '.github/workflows/personal-data-guard.yml', job: /^jobs:[ \t]*\n(?:[^\n]*\n)*? {2}personal-data:[ \t]*$/m },
+]);
+// `required` plus the own checks `files` produce that it lacks, sorted; `required` as it is when it has them all.
+function withOwnChecks(required, files) {
+  const kept = Array.isArray(required) ? required : [];
+  const own = OWN_CHECKS.filter(entry => typeof files[entry.file] === 'string' && entry.job.test(files[entry.file].replace(/\r\n/g, '\n'))).map(entry => entry.check);
+  const missing = own.filter(check => !kept.includes(check));
+  return missing.length ? [...kept, ...missing].sort() : required;
 }
 
 class GovernanceProposals {
@@ -262,14 +281,15 @@ class GovernanceProposals {
     if (!proposal || governance.bindingProblems(proposal, identity).length || (request.answer === 'yes' && proposal.governance === 'disabled')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     return { identity, request, repository, binding: proposal, text: `${JSON.stringify(proposal, null, 2)}\n` };
   }
-  // `bank` is true only for the governance question bank's own answer.
-  publish(cwd, run, binding = null, bank = false) {
+  // `bank` is true only for the governance question bank's own answer, and `rendered` is the folder
+  // outside the checkout its turn-on rendered the missing CI files into (null: none).
+  publish(cwd, run, binding = null, bank = false, rendered = null) {
     this.prepare(cwd, run, binding);
     if (!this.#transport) fail('PROPOSAL_TRANSPORT_UNAVAILABLE');
     const checked = this.refresh(cwd);
     if (!checked.ok) fail('PROPOSAL_DISCOVERY_UNAVAILABLE');
     // Refresh can end a receipt when its PR closed or merged. Never reuse the earlier copy.
-    const prepared = this.prepare(cwd, run, binding);
+    let prepared = this.prepare(cwd, run, binding);
     if (checked.canWrite === false) fail('PROPOSAL_WRITE_REQUIRED');
     const matches = checked.proposals.filter(item => item.answer === prepared.request.answer);
     if (checked.proposals.some(item => item.answer !== prepared.request.answer) || matches.length > 1) fail('PROPOSAL_CONFLICT');
@@ -277,8 +297,17 @@ class GovernanceProposals {
     // The bank's own answer also refreshes an open turn-on pull request; any other caller reuses the
     // open one as it is.
     const refresh = Boolean(yes && matches[0] && bank && this.#transport.update);
-    const cloud = yes && (!matches[0] || refresh) ? this.#cloudWorkflows(cwd, { ciShards: prepared.binding.ci_shards?.answer || null }) : { files: {}, warning: null };
-    const files = matches[0] && !refresh ? null : yes ? adoptionFiles(cwd, prepared.text, cloud) : { [cache.BINDING_PATH]: prepared.text };
+    const cloud = yes && (!matches[0] || refresh) ? this.#cloudWorkflows(cwd, { ciShards: prepared.binding.ci_shards?.answer || null, ...(rendered ? { overlay: rendered } : {}) }) : { files: {}, warning: null };
+    const files = matches[0] && !refresh ? null : yes ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text };
+    // A bank turn-on requires the checks its own workflows add, next to any the default branch already
+    // requires, so default-branch protection has them from the merge on.
+    if (bank && yes && files) {
+      const required = withOwnChecks(prepared.binding.required_checks, files);
+      if (required !== prepared.binding.required_checks) {
+        prepared = this.prepare(cwd, run, { ...prepared.binding, required_checks: required });
+        files[cache.BINDING_PATH] = prepared.text;
+      }
+    }
     const proposal = refresh ? this.#transport.update(prepared.repository, matches[0].number, prepared.binding, files)
       : matches[0] || this.#transport.publish(prepared.repository, prepared.binding, files);
     let readback = this.#transport.read(prepared.repository, proposal.number);
@@ -298,7 +327,7 @@ class GovernanceProposals {
     const left = new Set(proposal.left || []), there = new Set([...left, ...(proposal.onBase || [])]);
     const notes = [...new Set([...(cloud.notes || []), ...(proposal.notes || [])])];
     const entryFile = id => require('./toolkit-cloud-workflows.cjs').DEFAULT_CLOUD_WORKFLOWS.find(entry => entry.id === id)?.file;
-    return { proposal: readback, text: proposalText([readback]), files: files ? Object.keys(files).filter(name => !left.has(name)) : null, reused: Boolean(matches[0]), updated: proposal.updated === true, ...(cloud.warning ? { warning: cloud.warning } : {}), ...(notes.length ? { notes } : {}), ...(cloud.added ? { added: cloud.added.filter(id => !there.has(entryFile(id))) } : {}) };
+    return { proposal: readback, text: proposalText([readback]), files: files ? Object.keys(files).filter(name => !left.has(name)) : null, reused: Boolean(matches[0]), updated: proposal.updated === true, ...(bank && yes && files ? { requiredChecks: prepared.binding.required_checks } : {}), ...(cloud.warning ? { warning: cloud.warning } : {}), ...(notes.length ? { notes } : {}), ...(cloud.added ? { added: cloud.added.filter(id => !there.has(entryFile(id))) } : {}) };
   }
 }
 

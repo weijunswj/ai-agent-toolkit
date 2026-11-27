@@ -39,7 +39,8 @@ function fixture(t, { agents = null } = {}) {
 }
 
 // GitHub as discovery reads it and the adoption writer changes it.
-function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
+// `protectedChecks` are the check names a ruleset already requires on the default branch.
+function fakeGitHub({ repos = {}, issues = [], failIssue = false, protectedChecks = [] } = {}) {
   const calls = [];
   const world = { repos: { ...repos }, issues: [...issues], nextIssue: 7 };
   const get = (endpoint) => {
@@ -47,7 +48,7 @@ function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
     if (url === `repos/${SLUG}/issues`) return { ok: true, value: world.issues };
     if (url === 'user/repos') return { ok: true, value: Object.keys(world.repos).map(full => ({ name: full.split('/')[1], owner: { login: OWNER } })) };
     if (url === `repos/${SLUG}`) return { ok: true, value: { default_branch: 'main' } };
-    if (url === `repos/${SLUG}/rules/branches/main`) return { ok: true, value: [] };
+    if (url === `repos/${SLUG}/rules/branches/main`) return { ok: true, value: protectedChecks.length ? [{ type: 'required_status_checks', parameters: { required_status_checks: protectedChecks.map(context => ({ context })) } }] : [] };
     if (url === `repos/${SLUG}/branches/main/protection/required_status_checks`) return { ok: false, reason: 'not-found' };
     if (url === `repos/${SLUG}/rulesets`) return { ok: true, value: [] };
     const store = /^repos\/([^/]+\/[^/]+?)(\/contents\/.*)?$/.exec(url);
@@ -74,18 +75,19 @@ function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
   return { calls, world, discoveryGh: args => get(args[0]), writer };
 }
 
-// What the real installer leaves in the working tree: every turn-on pull request must carry these.
-function writePlainText(root) {
+// What the real installer renders into the turn-on's folder: every turn-on pull request must carry these.
+function writePlainText(into) {
   for (const name of ['.github/plain-text.json', '.github/scripts/plain-text-check.cjs', '.github/workflows/plain-text.yml']) {
-    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
-    fs.writeFileSync(path.join(root, name), `${name}\n`);
+    fs.mkdirSync(path.dirname(path.join(into, name)), { recursive: true });
+    fs.writeFileSync(path.join(into, name), `${name}\n`);
   }
 }
 
 const PROPOSAL = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
 
 // `opened` is what GitHub lists as open governance pull requests when the run starts.
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [], cloudFiles = () => ({ files: {}, warning: null }) } = {}) {
+// `realPlainText` runs the real plain-text installer instead of the fixture's.
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [], cloudFiles = () => ({ files: {}, warning: null }), realPlainText = false } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = opened;
@@ -98,7 +100,8 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
-    discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(root); },
+    discoveryGh: github.discoveryGh, adoptionWriter: github.writer,
+    ...(realPlainText ? {} : { plainTextInstaller: (root, into) => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(into); } }),
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [{ ...proposal, answer: binding.governance === 'disabled' ? 'no' : 'yes' }]; return open[0]; }, read: () => open[0] || proposal },
     cloudWorkflows: (cwd, options) => { cloud.push(options); return cloudFiles(cwd, options); },
     ...(estimate ? { ciEstimator: () => estimate } : {}),
@@ -145,7 +148,7 @@ test('a fresh repository after the card\'s yes asks only task auto-merge, names 
   // The Dependabot settings join the same pull request, so governance never starts with its own security
   // check failing.
   assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/);
-  assert.match(result.out, /Added \.github\/dependabot\.yml to the working tree; it travels in the turn-on pull request/);
+  assert.match(result.out, /Added \.github\/dependabot\.yml to the turn-on pull request; nothing was written to your checkout\./);
   assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the repository\'s own AGENTS.md is not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
@@ -188,6 +191,56 @@ test('the one turn-on pull request carries every default cloud workflow, says wh
   assert.equal(kept.published[0].files['.github/scripts/personal-data-guard.cjs'], undefined);
   assert.equal(typeof kept.published[0].files['.github/workflows/dependency-auto-merge.yml'], 'string');
   assert.equal(noted(clash), false);
+});
+
+// Red on the parent (the 27 Nov owner test): the turn-on wrote the plain-text check and Dependabot
+// settings into the checkout, which the merged pull request then also held, so the session-start
+// catch-up refused to move the default branch; and the binding required no checks, so the owner was
+// asked to edit required_checks and run migrate.
+test('a turn-on leaves the checkout exactly as it was, carries the same 13 files and requires its own checks', async t => {
+  const workflows = require(path.join(scripts, 'toolkit-cloud-workflows.cjs'));
+  const { cloudWorkflowFiles } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
+  const ROOT = path.resolve(scripts, '..', '..');
+  const { SWEEPS, COPIED_FILES } = require('./support/default-cloud-workflows.cjs');
+  const cloudFiles = (cwd, options) => cloudWorkflowFiles(cwd, { ...options, root: ROOT, commit: workflows.toolkitHead(ROOT) });
+  // A link the plain-text check flags, so the starting baseline is made from what the checkout holds.
+  const ctx = fixture(t, { agents: '# Rules\n\nSee https://github.com/example-owner/example-repo/issues/3 for the history.\n' });
+  const status = () => require('node:child_process').execFileSync('git', ['-C', ctx.repo, 'status', '--porcelain', '--untracked-files=all', '--ignored'], { encoding: 'utf8', windowsHide: true });
+  const before = status();
+  assert.equal(before, '?? AGENTS.md\n');
+  const result = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], cloudFiles, realPlainText: true });
+  assert.equal(result.code, 0, result.err + result.out);
+  assert.equal(status(), before, 'nothing was added to or changed in the checkout');
+  assert.equal(result.published.length, 1);
+  const { binding, files } = result.published[0];
+  const expected = ['.github/toolkit-programme.json', '.github/plain-text.json', '.github/plain-text-baseline.json', '.github/scripts/plain-text-check.cjs',
+    '.github/workflows/plain-text.yml', '.github/dependabot.yml', ...SWEEPS.map(row => row.file), ...COPIED_FILES];
+  assert.deepEqual(Object.keys(files).sort(), [...new Set(expected)].sort());
+  assert.equal(Object.keys(files).length, 13);
+  const baseline = JSON.parse(files['.github/plain-text-baseline.json']);
+  assert.deepEqual(baseline.allowed.map(entry => [entry.file, entry.rule]), [['AGENTS.md', 'github-link']], 'the baseline is made from the checkout\'s own text');
+  assert.match(files['.github/scripts/plain-text-check.cjs'], /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED plain-text-check /m);
+  // The checks the pull request's own workflows run are required, with nothing for the owner to add.
+  assert.deepEqual(binding.required_checks, ['personal-data', 'plain-text']);
+  assert.deepEqual(JSON.parse(files['.github/toolkit-programme.json']).required_checks, ['personal-data', 'plain-text']);
+  assert.match(result.out, /^Required checks: personal-data, plain-text\. Toolkit sets them in the programme file, so every pull request passes them before it lands\.$/m);
+  // No owner step to edit required_checks, run migrate or pull, and every owner command in a PowerShell block.
+  const answered = result.out.slice(result.out.indexOf('The plain-text check files travel'));
+  assert.ok(answered.length < result.out.length, 'the answer follows the bank');
+  for (const step of [/required_checks/, /\bmigrate\b/, /(?<![/\w])pull(?:ing)?\b(?! requests?\b)(?!\/)/, /untracked/]) assert.doesNotMatch(answered, step);
+  assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/, 'the rendered workflows count for Dependabot');
+  assert.match(result.out, /^Nothing was written to your checkout, so after the merge the next session here can bring your local default branch up to date on its own\.$/m);
+  const lines = result.out.split('\n');
+  const fences = lines.filter(line => line.startsWith('```'));
+  assert.ok(fences.length >= 2, 'the App line is fenced');
+  assert.deepEqual(fences.filter((line, index) => index % 2 === 0 && line !== '```powershell'), [], 'every block opens as powershell');
+  lines.forEach((line, index) => { if (/^node "/.test(line)) assert.equal(lines[index - 1], '```powershell', `fenced: ${line}`); });
+
+  // Checks the default branch already requires are kept next to Toolkit's own.
+  const kept = fixture(t);
+  const protectedRun = await run(kept, ['setup'], fakeGitHub({ protectedChecks: ['validate'] }), { interactive: true, answers: ['all recommended'], cloudFiles });
+  assert.equal(protectedRun.code, 0, protectedRun.err + protectedRun.out);
+  assert.deepEqual(protectedRun.published[0].binding.required_checks, ['personal-data', 'validate'], 'the fixture installer\'s plain-text workflow defines no job, so only the guard\'s check is added');
 });
 
 test('answering no store makes nothing: no pull request, store or parent issue, and governance stays off', async t => {
@@ -401,7 +454,11 @@ test('parallel CI shards are a Toolkit default by CI time, not a question: slow 
   assert.match(binding.ci_shards.offered_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   const list = JSON.parse(files['.github/toolkit-test-shards.json']);
   assert.equal(list.systems.linux.shards.length, 3, '25 measured minutes: two named shards and the rest');
-  assert.deepEqual(result.cloud.at(-1), { ciShards: 'yes' }, 'the shard copies follow this pull request\'s own answer, not an old read of the merged binding');
+  assert.equal(result.cloud.at(-1).ciShards, 'yes', 'the shard copies follow this pull request\'s own answer, not an old read of the merged binding');
+  // The first shard list is rendered outside the checkout, where the shard copies read it.
+  assert.ok(path.relative(ctx.repo, result.cloud.at(-1).overlay).startsWith('..'), 'the render folder is not in the checkout');
+  assert.equal(fs.existsSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json')), false, 'the shard list is not written to the checkout');
+  assert.equal(fs.existsSync(result.cloud.at(-1).overlay), false, 'the render folder is removed after the answer');
   assert.match(result.out, /a first \.github\/toolkit-test-shards\.json with 3 Linux shards .*travels in the turn-on pull request with the shard workflows/);
   // The override skips them, and never records never in the same one pull request.
   const skipped = await run(withTests(), ['setup'], fakeGitHub(), { interactive: true, answers: ['shards=not-now'], estimate: slow });

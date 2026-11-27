@@ -234,8 +234,7 @@ test('an answer that takes the App default gives exactly one PowerShell line for
   const answered = await reply(ctx, /Bank reference: (\S+)/.exec(shown.out)[1], KEEP);
   assert.equal(answered.code, 0, answered.out + answered.err);
   assert.match(answered.out, /^Governance App: paste this one line into PowerShell and press Enter\. It saves the App's Client ID and key on toolkit-test-fixture\/card\. It asks for Enter before it opens GitHub and again before it checks the installation; on GitHub you click Create, then Install\. It runs only outside an agent, so the App's private key never passes through one\.$/m);
-  const blocks = [...answered.out.matchAll(/^```\n([\s\S]*?)\n```$/gm)].map(match => match[1]);
-  assert.deepEqual(blocks, [`node "${path.join(scripts, 'toolkit-governance-app-setup.cjs')}" --repo toolkit-test-fixture/card --store toolkit-test-fixture/store`]);
+  const blocks = [...answered.out.matchAll(/^```powershell\n([\s\S]*?)\n```$/gm)].map(match => match[1]);  assert.deepEqual(blocks, [`node "${path.join(scripts, 'toolkit-governance-app-setup.cjs')}" --repo toolkit-test-fixture/card --store toolkit-test-fixture/store`]);
   assert.doesNotMatch(answered.out, /with gh signed in|<Client ID>|\.pem/);
 });
 // Keeps both questions as they are.

@@ -17,6 +17,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -97,14 +98,19 @@ class PlainTextInstaller {
     return path.resolve(result.stdout.trim());
   }
 
-  install({ workflow = false } = {}) {
+  // `into` is a folder outside the checkout that receives every file written, at its repository path,
+  // while the checkout is only read (a governance turn-on carries them in its pull request, so the
+  // owner's checkout is left exactly as it was). By default the files are written into the checkout.
+  install({ workflow = false, into = null } = {}) {
     const top = this.locate();
+    const dest = into ? path.resolve(into) : top;
     const existingCopy = vendoredState(readOrNull(path.join(top, VENDORED_PATH)));
     if (existingCopy.state === 'unmanaged') {
       throw new InstallError(`${slash(VENDORED_PATH)} exists and is not a Toolkit copy, so nothing was installed. Move or rename it, then run the installer again.`);
     }
-    const configFile = path.join(top, CONFIG_PATH);
+    let configFile = path.join(top, CONFIG_PATH);
     if (readOrNull(configFile) === null) {
+      configFile = path.join(dest, CONFIG_PATH);
       writeFile(configFile, `${JSON.stringify(STARTING_CONFIG, null, 2)}\n`);
       this.#say(`Settings written: ${slash(CONFIG_PATH)} (reference rules on, no banned terms yet).`);
     } else {
@@ -113,7 +119,7 @@ class PlainTextInstaller {
     let config;
     try { config = check.readConfigFile(configFile); }
     catch (error) { throw new InstallError(`${slash(CONFIG_PATH)} is not usable: ${error.message}. Fix it, then run the installer again.`); }
-    writeFile(path.join(top, VENDORED_PATH), vendoredText());
+    writeFile(path.join(dest, VENDORED_PATH), vendoredText());
     this.#say(`Check copied: ${slash(VENDORED_PATH)} (check v${check.CHECK_VERSION})${existingCopy.state === 'edited' ? '; local edits to the copy were replaced' : ''}.`);
     if (fs.existsSync(path.join(top, config.baseline))) {
       this.#say(`Baseline kept: ${config.baseline}.`);
@@ -122,20 +128,39 @@ class PlainTextInstaller {
       if (unreadable) this.#say(`NOTE: ${unreadable}`);
     } else {
       let result;
-      try { result = check.initBaseline(top, config, { spawn: this.#spawn }); }
+      try { result = dest === top ? check.initBaseline(top, config, { spawn: this.#spawn }) : this.#baselineInto(top, config, dest); }
       catch (error) { throw new InstallError(`the starting baseline could not be written: ${error.message}.`); }
       this.#say(`Baseline written: ${config.baseline} (${result.entries} existing item(s) allowed until rewritten).${check.leftOutNote(result.skipped)}`);
     }
     let workflowWritten = false;
     if (workflow) {
-      const target = path.join(top, WORKFLOW_PATH);
+      const target = path.join(dest, WORKFLOW_PATH);
       const template = fs.readFileSync(WORKFLOW_TEMPLATE, 'utf8');
-      const current = readOrNull(target);
+      const current = readOrNull(path.join(top, WORKFLOW_PATH));
       if (current === null) { writeFile(target, template); workflowWritten = true; this.#say(`CI workflow added: ${slash(WORKFLOW_PATH)}.`); }
       else if (current.replace(/\r\n/g, '\n') === template.replace(/\r\n/g, '\n')) this.#say(`CI workflow already current: ${slash(WORKFLOW_PATH)}.`);
       else this.#say(`CI workflow kept as it is (it differs from the template): ${slash(WORKFLOW_PATH)}.`);
     }
     this.#say(`Next: commit the settings, the baseline${workflowWritten ? ', the check copy and the workflow' : ' and the check copy'} through a pull request.${workflow ? '' : ' Add the CI job with --workflow, or run the copy from an existing workflow.'}`);
+  }
+
+  // The starting baseline of the checkout `top`, written under `dest` only. The files the check reads
+  // are copied into a fresh git folder of their own (so they are listed as in the checkout, by git), the
+  // baseline is made there, and that folder is removed again.
+  #baselineInto(top, config, dest) {
+    const scan = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'plain-text-baseline-')));
+    try {
+      const init = this.#spawn('git', ['init', '--quiet', scan], { encoding: 'utf8', windowsHide: true });
+      if (init.error || init.status !== 0) throw new InstallError('git could not prepare a folder to read the existing text in');
+      for (const rel of check.listScopedFiles(top, config, { spawn: this.#spawn })) {
+        const file = path.join(scan, ...rel.split('/'));
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.copyFileSync(path.join(top, ...rel.split('/')), file);
+      }
+      const result = check.initBaseline(scan, config, { spawn: this.#spawn });
+      writeFile(path.join(dest, config.baseline), fs.readFileSync(path.join(scan, config.baseline), 'utf8'));
+      return result;
+    } finally { fs.rmSync(scan, { recursive: true, force: true }); }
   }
 
   // Drift report; changes nothing.

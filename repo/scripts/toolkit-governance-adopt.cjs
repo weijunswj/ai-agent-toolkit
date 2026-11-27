@@ -14,9 +14,11 @@
 //   2. Parent issue: when discovery found none, it opens one programme parent issue. The controller
 //      still turns it into a programme parent document later; this only gives the binding its issue.
 //   3. The plain-text check (which a governed repository always carries) and the Dependabot settings
-//      are installed into the working tree only where they are missing, as the repository-agent-rules
-//      skill does; their files join the same proposal. The default cloud workflows join it without
-//      touching the working tree (toolkit-governance-proposal.cjs).
+//      are rendered only where the checkout lacks them, as the repository-agent-rules skill installs
+//      them, into a scratch folder outside the checkout (`into`); their files join the same proposal,
+//      read from there. The default cloud workflows join it the same way (toolkit-governance-proposal.cjs).
+//      The owner's checkout is never written, so nothing is left behind that the merged pull request
+//      also holds, and the session-start catch-up can bring the default branch up to date.
 //
 // No instruction file is written or proposed: the installed Toolkit gives every session in an
 // enabled repository the governed rules and the playbooks, so the repository's own AGENTS.md and
@@ -155,26 +157,26 @@ function ensureParent(plan, writer, made) {
   return created.value.number;
 }
 
-// Step 3: the plain-text check, where it is missing. Returns the lines to show.
-function ensurePlainText(root, installer = null) {
+// Step 3: the plain-text check, where the checkout lacks it, rendered into `into`. Returns the lines to show.
+function ensurePlainText(root, into, installer = null) {
   if (fs.existsSync(path.join(root, '.github', 'plain-text.json'))) return [];
   const { PlainTextInstaller } = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
   let said = '';
-  const run = installer || (() => new PlainTextInstaller({ repo: root, out: { write: text => { said += text; return true; } } }).install({ workflow: true }));
-  try { run(); } catch (error) { throw new AdoptError(`The plain-text check could not be added (${error.message}).`); }
+  const run = installer || (() => new PlainTextInstaller({ repo: root, out: { write: text => { said += text; return true; } } }).install({ workflow: true, into }));
+  try { run(into); } catch (error) { throw new AdoptError(`The plain-text check could not be added (${error.message}).`); }
   // Its own "commit these through a pull request" line is left out: the files join this one.
-  return [...said.split('\n').filter(line => line && !line.startsWith('Next:')), 'The plain-text check files were added to the working tree and travel in the turn-on pull request.'];
+  return [...said.split('\n').filter(line => line && !line.startsWith('Next:')), 'The plain-text check files travel in the turn-on pull request; nothing was written to your checkout.'];
 }
 
-// Step 4: a dependabot.yml for every package ecosystem found, where missing. It travels in the turn-on
-// pull request, so governance never starts with its own security check failing. An existing file is
-// never changed.
-function ensureSecurityFiles(root, writer = null) {
+// Step 4: a dependabot.yml for every package ecosystem found, where missing, rendered into `into`. It
+// travels in the turn-on pull request, so governance never starts with its own security check failing.
+// An existing file is never changed.
+function ensureSecurityFiles(root, into, writer = null) {
   const security = require('./toolkit-governance-security.cjs');
-  const results = (writer || (dir => security.writeSecurityFiles(dir, { dependabot: true })))(root);
+  const results = (writer || ((dir, target) => security.writeSecurityFiles(dir, { dependabot: true }, { into: target })))(root, into);
   const failed = results.filter(entry => entry.result !== 'written');
   if (failed.length) throw new AdoptError(`The Dependabot settings could not be added (${failed.map(entry => `${entry.file}: ${entry.result}`).join(', ')}).`);
-  return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the working tree; it travels in the turn-on pull request.`] : [];
+  return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the turn-on pull request; nothing was written to your checkout.`] : [];
 }
 
 // Why the planned store cannot be used, known from the plan alone, or null: a named store that is this
@@ -187,11 +189,12 @@ function storeProblem(plan) {
 // The whole turn-on: { binding, made, lines }. The binding still goes through the one
 // governance pull request, which decides nothing until the owner merges it. The caller refuses a plan
 // with a store problem (storeProblem) first, before anything is written, the shard list included.
-function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
+// `into` is the scratch folder the turn-on renders its files into (never the checkout).
+function adopt({ root, into, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
   const made = [];
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
-  try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; } catch (error) { error.made = made; throw error; }
+  try { lines = [...ensurePlainText(root, into, plainText), ...ensureSecurityFiles(root, into, securityFiles)]; } catch (error) { error.made = made; throw error; }
   const store = ensureStore(plan, writer, made);
   const issue = ensureParent(plan, writer, made);
   const [owner, name] = plan.repository.split('/');
@@ -205,11 +208,11 @@ function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train
 }
 
 // A repository whose programme file was already prepared in the working tree: nothing is made on
-// GitHub, and the plain-text check and Dependabot settings are added where missing, so its
-// turn-on pull request carries exactly what a fresh one does.
+// GitHub, and the plain-text check and Dependabot settings are rendered into `into` where missing, so
+// its turn-on pull request carries exactly what a fresh one does.
 // { binding (the working tree's, or null when unreadable), made: [], lines }.
-function prepared({ root, plainText = null, securityFiles = null }) {
-  const lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)];
+function prepared({ root, into, plainText = null, securityFiles = null }) {
+  const lines = [...ensurePlainText(root, into, plainText), ...ensureSecurityFiles(root, into, securityFiles)];
   let binding = null;
   try { binding = JSON.parse(fs.readFileSync(path.join(root, governance.BINDING_FILE), 'utf8').replace(/^\uFEFF/, '')); } catch { binding = null; }
   return { binding, made: [], lines };

@@ -382,10 +382,12 @@ function shardIds(manifest) {
 }
 
 // Whether `root` has a usable shard list: { state: 'missing' | 'invalid' | 'valid', manifest, errors }.
-function listState(root) {
-  if (!fs.existsSync(path.join(root, ...MANIFEST_REL.split('/')))) return { state: 'missing', manifest: null, errors: [] };
+// `manifestFrom` is a folder holding the shard list at its repository path when it is not in `root` yet
+// (a governance turn-on renders it outside the checkout); the tests it names are still found in `root`.
+function listState(root, { manifestFrom = root } = {}) {
+  if (!fs.existsSync(path.join(manifestFrom, ...MANIFEST_REL.split('/')))) return { state: 'missing', manifest: null, errors: [] };
   let manifest;
-  try { manifest = loadManifest(root); } catch (error) { return { state: 'invalid', manifest: null, errors: [error.message] }; }
+  try { manifest = loadManifest(manifestFrom); } catch (error) { return { state: 'invalid', manifest: null, errors: [error.message] }; }
   const errors = manifestErrors(manifest, discoverAll(root, manifest));
   return { state: errors.length ? 'invalid' : 'valid', manifest, errors };
 }
