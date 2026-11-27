@@ -45,8 +45,6 @@ const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // The script the agent is told to run: the managed checkout's when there is one, else this copy's.
 const script = () => managedScript('toolkit-governance.cjs');
 const BOUND = 'Bound in the merged programme file';
-// How a shard split stays current.
-const SHARDS_REFRESH = '**Parallel CI shards, daily refresh:** once a day Shard Timings measures the tests and, when the shards have drifted, opens one pull request with the new split (this needs the governance App). Nothing changes until it is merged, and the programme flags it after 24 hours with no owner.';
 const SET_IN = 'Set in the programme file';
 // The evidence store's other choice: the controller sets up a new store with the owner. No command moves
 // a store yet, so nothing is promised to move, and no answer moves anything.
@@ -58,9 +56,6 @@ const APP_NAMES_ON_GITHUB = (({ variable, secret }) => `the ${variable} variable
 const APP_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
 
 const STATE_LABEL = Object.freeze({ ENABLED: 'On', DISABLED: 'Off', UNDECIDED: 'Not decided' });
-// CI this slow on its last green run gets Yes recommended for parallel shards: the first shard list
-// names one shard per this many minutes, so below it shards add setup for little time saved.
-const SLOW_CI_MINUTES = require('./toolkit-ci-shards-offer.cjs').MINUTES_PER_SHARD;
 
 // ---- the rows -----------------------------------------------------------------------------------
 
@@ -87,18 +82,15 @@ function statusRow({ id, section, title, current, text = '', change = '', bound 
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
 // merged merge trains switch ('on' or 'off'), `mergedRead` the one read `merged` and `train` come
 // from (toolkit-governance-state.cjs mergedBindingRead: { fresh, refresh_error }, or null; a stale
-// one is said on the bound line), `ciShards` the sharded CI offer ({ measured: the
-// last green run's estimate or null, open, existing: the workflow that already shards or
-// null }) where it is offered, or null, and `app` the governance App's variable and secret on GitHub
+// one is said on the bound line), `app` the governance App's variable and secret on GitHub
 // (toolkit-governance-app.cjs presence; null when not read), and `copies` the instruction copies the
 // cleanup route would remove ({ files, held?, step?, refused? }: `held` is why the pinned sweep copies
 // hold the cleanup and `step` what clears it, `refused` why the programme file stops it; null when not
 // read).
 //
-// These rows are what Toolkit read, as data: the guided questions take the parallel CI shards default
-// from them, the summary its shards state, and the reference that binds a reply to what was shown is
+// These rows are what Toolkit read, as data: the reference that binds a reply to what was shown is
 // built from them. Neither shows them as a table.
-function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null, storeCheck = null }) {
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, app = null, copies = null, storeCheck = null }) {
   // Only a state read from the merged binding has words here; any other (GitHub could not be read)
   // gets the CLI's line to type it again, never a bank.
   if (!Object.hasOwn(STATE_LABEL, String(state.state))) throw new Error(`The governance bank cannot show the state ${state.state}.`);
@@ -146,61 +138,6 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       bank.wizardChoice('on', turnsOn ? 'On' : 'On (needs governance on)', turnsOn ? 'The turn-on pull request sets it on: finished task pull requests merge once their gates pass.' : 'Only together with turning governance on in the same answer; the same pull request sets it.'),
     ],
   }));
-  // Parallel CI shards: no question. A repository whose CI already shards gets nothing; otherwise CI
-  // this slow on its last green run (SLOW_CI_MINUTES or more) gets shards by default and faster or
-  // unknown CI gets none, each overridden with shards=<yes|not-now|never>. The minutes are display
-  // only (estimateShort), so a CI run that finishes between showing the bank and answering it changes
-  // the bank reference only when it crosses the threshold.
-  const answered = merged?.ci_shards?.answer;
-  let shardsOn = false;
-  const pending = ciShards?.open?.[0];
-  const where = turnsOn ? 'The turn-on pull request also adds a first shard list and the shard workflows'
-    : governed ? 'Your answer also prepares one binding pull request with a first shard list; it applies only after you merge it'
-      : 'If your answer turns governance on, its pull request also adds a first shard list and the shard workflows';
-  // Each shards row says whether this required part is ready (`required`), and the one step left when not.
-  if (governed && (answered === 'yes' || answered === 'never')) {
-    shardsOn = answered === 'yes';
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
-      text: answered === 'yes' ? `${SET_IN}; the next rules refresh copies the shard workflows while the shard list is usable, and the split is refreshed once a day (explain ${GOVERNANCE_REF})` : `${SET_IN}; Toolkit does not ask again`,
-      bound: answered === 'yes' ? 'parallel CI shards yes' : 'parallel CI shards never' }), required: { ready: true } });
-  } else if (pending) {
-    // An answer already waits in its own pull request: that one is merged or closed, never a second.
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Pull request #${pending.number} open`,
-      text: `Your answer waits in ${pending.url}: merge it, or close it to answer again. Toolkit prepares no second one` }), required: { ready: false, step: `merge pull request #${pending.number} (${pending.url})` } });
-  } else if (ciShards && ciShards.existing) {
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: `Already in your CI (${ciShards.existing})` }), required: { ready: true } });
-  } else if (ciShards && ciShards.usable && !ciShards.usable.ok && (governed || turnsOn || state.state === 'DISABLED')) {
-    // No test list Toolkit can split (such as a Python suite): not applicable, with why; no shards= override.
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not applicable',
-      text: `Toolkit can split only Node tests, and ${ciShards.usable.reason}. It looks again at the next refresh` }), required: { ready: true } });
-  } else if (governed && ciShards && ciShards.closed && Number.isInteger(ciShards.closed.number)) {
-    // A split the owner closed without merging (INT-TK421-1360): asked once, here; the answer to this
-    // bank is remembered on this computer (closed_split), so a later bank says so and asks nothing. No
-    // reply reopens it unless it says shards=yes.
-    const { number, url, answered } = ciShards.closed;
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered ? `Off: pull request #${number} was closed` : `Pull request #${number} closed without merging`,
-      text: answered ? `You closed ${url} without merging it and answered once; Toolkit does not ask again and adds no shards unless you say so`
-        : `You closed ${url} without merging it, so Toolkit asks once: shards=yes opens a new one, shards=never stops the offer, and any other reply keeps them off; your answer is remembered and this is not asked again`,
-      change: 'To add them, add shards=yes to your reply; shards=never stops the offer' }),
-    shards_default: 'not-now', other: 'shards=yes or shards=never in your reply', ...(answered ? {} : { closed_split: number }),
-    required: answered ? { ready: true } : { ready: false, step: 'answer once: shards=yes opens a new pull request, shards=never stops the offer, anything else keeps them off' } });
-  } else if (ciShards && ciShards.measured?.unread && (governed || turnsOn || state.state === 'DISABLED')) {
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'CI time could not be read',
-      text: `GitHub could not be read just now (${ciShards.measured.unread}), so Toolkit adds no shards and checks again at the next refresh`,
-      change: 'To add them anyway, add shards=yes to your reply; shards=never stops the check' }),
-    shards_default: 'not-now', other: 'shards=yes or shards=never in your reply', required: { ready: null } });
-  } else if (ciShards && (governed || turnsOn || state.state === 'DISABLED')) {
-    const slow = Number.isFinite(ciShards.measured?.minutes) && ciShards.measured.minutes >= SLOW_CI_MINUTES;
-    shardsOn = slow;
-    specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: slow ? 'Yes (Toolkit default)' : 'Not needed (Toolkit default)',
-      text: slow ? `${where}, because the last green CI run took ${SLOW_CI_MINUTES} minutes or more; the split is then refreshed once a day` : `CI is under ${SLOW_CI_MINUTES} minutes or its time is unknown, so Toolkit adds no shards and checks again at the next refresh`,
-      change: slow ? 'To skip them, add shards=not-now or shards=never to your reply' : 'To add them anyway, add shards=yes to your reply; shards=never stops the check' }),
-    shards_default: slow ? 'yes' : 'not-now', estimateShort: estimateShort(ciShards.measured),
-    other: slow ? 'shards=not-now or shards=never in your reply' : 'shards=yes or shards=never in your reply',
-    required: slow ? { ready: false, step: governed ? 'your answer prepares the shard pull request; merge it' : 'the turn-on pull request adds them' } : { ready: true } });
-  }
-  const governanceRow = specs.find(spec => spec.id === 'governance' && !spec.report_only);
-  if (shardsOn && governanceRow) governanceRow.explain_more = [...(governanceRow.explain_more || []), SHARDS_REFRESH];
   if (adoption && adoption.blocked) {
     // The search's own reason is for the logs, not the owner: an answer makes nothing until it works.
     specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Not checked yet', text: 'GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing. Type toolkit governance again in a moment' }));
@@ -232,9 +169,8 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: checks.length ? checks.join(', ') : 'none listed', text: BOUND,
       bound: checks.length ? `${checks.length === 1 ? 'required check' : 'required checks'} ${checks.join(', ')}` : 'no required checks' }));
   } else if (governed) {
-    // The store and shards rows stay in the table, unknown, so the top line counts them.
+    // The store row stays in the table, unknown, so the top line counts it.
     specs.push({ ...statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: 'Not read', text: 'The programme file that holds it could not be read just now' }), required: { ready: null } });
-    if (!specs.some(spec => spec.id === 'ci-shards')) specs.push({ ...statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: 'Not read', text: 'The programme file that holds it could not be read just now' }), required: { ready: null } });
     specs.push(statusRow({ id: 'programme-file', section, title: 'Programme file', current: 'Could not be read',
       text: `This computer could not read the merged .github/toolkit-programme.json just now${mergedRead?.refresh_error ? ` (${mergedRead.refresh_error})` : ''}, so what it sets is not shown. Type toolkit governance again in a moment` }));
   }
@@ -289,11 +225,6 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
         : other ? 'Say review permissions to see them; nothing changes unless you pick lines' : '' }), permissions_update: outdated,
     other: outdated ? 'Leave: do not run the command' : '', required: missing === null ? { ready: null } : outdated ? { ready: false, step: 'run the one command Toolkit gives after your answer' } : { ready: true } });
   return bank.withPresentationMetadata(specs, BANK_HOST);
-}
-
-// The minutes in a few words, shown beside the shards row; display only.
-function estimateShort(measured) {
-  return Number.isFinite(measured?.minutes) ? `CI about ${Math.max(1, Math.round(measured.minutes))} min` : 'CI time unknown';
 }
 
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }

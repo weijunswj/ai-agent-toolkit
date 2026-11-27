@@ -26,7 +26,6 @@ const DOES = Object.freeze({
   security: 'Flags and updates vulnerable dependencies',
   workflows: 'Keep records in step from GitHub, with no computer on',
   guards: 'Check every pull request and push',
-  shards: 'Split long test runs across runners',
   permissions: "Agents run Toolkit's own commands without asking each time",
   app: 'Lets the cloud workflows act on GitHub',
   copies: 'Old Toolkit instruction copies an earlier setup left',
@@ -183,7 +182,7 @@ function finishRows(finish, drift) {
 //   repository, defaultBranch, store { repository, state } (state from the store check, or null),
 //   parents [issue numbers], task { auto_merge, merge_train }, requiredChecks [names],
 //   finish (the finish record's on/unavailable/held, or null), drift (settings drift ids, or null),
-//   files (Set of .github paths at the merged commit, or null), shards (the shards row text, or null),
+//   files (Set of .github paths at the merged commit, or null),
 //   permissions ({ checked, app, wanted, missing, stale, other, update }), app ({ variable, secret }
 //   presence, or null), appCommand (the App setup line), copies ({ files } or null), stale (why the
 //   merged programme file read is not fresh, or null).
@@ -211,7 +210,6 @@ function summaryRows(facts) {
   rows.push(['Cloud workflows', workflows.state || 'None', DOES.workflows]);
   const guards = presenceRow(GUARD_FILES, facts.files);
   rows.push(['Guards', guards.state || 'None', DOES.guards]);
-  if (facts.shards) rows.push(['Parallel CI shards', facts.shards, DOES.shards]);
   const permissions = facts.permissions || {};
   const appName = permissions.app || 'this app';
   if (permissions.checked) {
@@ -268,9 +266,9 @@ function renderSummary(facts, { held = false } = {}) {
 }
 
 // A change the owner asked for in words after the summary: { governance: 'off' } | { taskAutoMerge }
-// | { changeStore: true } | { cleanCopies: true } | { shards } | { update: 'yes' | 'no' }, or a
-// GuidedAnswerError. `copies`, `shards` and `update` say whether the summary offers those changes.
-function parseChange(text, { copies = false, shards = false, update = false } = {}) {
+// | { changeStore: true } | { cleanCopies: true } | { update: 'yes' | 'no' }, or a GuidedAnswerError.
+// `copies` and `update` say whether the summary offers the cleanup and the programme file update.
+function parseChange(text, { copies = false, update = false } = {}) {
   const { GuidedAnswerError } = require('./toolkit-governance-guided.cjs');
   const lower = String(text || '').trim().replace(/[.!]+$/, '').toLowerCase().replace(/\s+/g, ' ');
   if (/^(?:turn (?:it )?off governance|turn governance off|governance off)$/.test(lower)) return { governance: 'off' };
@@ -278,8 +276,6 @@ function parseChange(text, { copies = false, shards = false, update = false } = 
   if (merge) return { taskAutoMerge: ['on', 'yes'].includes(merge[1]) ? 'on' : 'off' };
   if (/^change (?:the )?store$/.test(lower)) return { changeStore: true };
   if (copies && /^clean ?up (?:the )?(?:instruction )?copies$/.test(lower)) return { cleanCopies: true };
-  const split = /^shards ?= ?(yes|not-now|never)$/.exec(lower);
-  if (shards && split) return { shards: split[1] };
   if (update && /^(?:(?:1 ?)?a(?:\W+yes)?|yes|(?:update|bring) (?:the )?programme file(?: up to date)?)$/.test(lower)) return { update: 'yes' };
   if (update && /^(?:(?:1 ?)?b(?:\W+no)?|no)$/.test(lower)) return { update: 'no' };
   throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${update ? ', or answer question 1 with A or B' : ''}.`);

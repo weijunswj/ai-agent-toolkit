@@ -181,28 +181,31 @@ test('cloud sweep copies with the Toolkit marker are listed; an edited one says 
   assert.match(text, /toolkit-programme-sweep-gate\.yml: a Toolkit cloud sweep copy, edited by hand since\./);
 });
 
-test('the test shards and Shard Timings copies are found by their marker, the test shards copy at any workflow name', t => {
+test('the retired test shards and Shard Timings copies are found by their marker, at any name for test shards, and listed with governance on too', t => {
   const cloud = require('../scripts/toolkit-cloud-workflows.cjs');
   const commit = 'c'.repeat(40);
   const copy = id => {
     const body = '# A copy\nname: X\non: push\njobs: {}\n';
     return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${cloud.bodyHash(body)}\n${body}`;
   };
-  const w = world(t, {
-    widget: { state: 'DISABLED', files: {
-      '.github/workflows/shards.yml': copy('test-shards'),
-      '.github/workflows/toolkit-shard-timings.yml': copy('shard-timings'),
-      // A Shard Timings marker at another name, and a marker for no known copy, are not Toolkit copies.
-      '.github/workflows/timings.yml': copy('shard-timings'),
-      '.github/workflows/other.yml': copy('something-else'),
-      '.github/workflows/ci.yml': 'name: CI\n',
-    } },
-  });
-  const widget = w.of(w.scan(), 'widget');
-  assert.deepEqual(widget.files.map(item => [item.file, item.copy]), [['.github/workflows/toolkit-shard-timings.yml', 'shard-timings'], ['.github/workflows/shards.yml', 'test-shards']]);
-  const text = leftovers.describe({ folder: w.folder, readable: true, repositories: [widget] }).join('\n');
-  assert.match(text, /shards\.yml: a Toolkit test shards workflow copy\. Governance is off/);
-  assert.match(text, /toolkit-shard-timings\.yml: a Toolkit Shard Timings copy\. Governance is off/);
+  const files = {
+    '.github/workflows/shards.yml': copy('test-shards'),
+    '.github/workflows/toolkit-shard-timings.yml': copy('shard-timings'),
+    // A Shard Timings marker at another name, and a marker for no known copy, are not Toolkit copies.
+    '.github/workflows/timings.yml': copy('shard-timings'),
+    '.github/workflows/other.yml': copy('something-else'),
+    '.github/workflows/ci.yml': 'name: CI\n',
+  };
+  // Toolkit no longer makes them, so they are leftovers whether governance is on or off.
+  for (const state of ['DISABLED', 'ENABLED']) {
+    const w = world(t, { widget: { state, files } });
+    const widget = w.of(w.scan(), 'widget');
+    assert.deepEqual(widget.files.map(item => [item.file, item.copy]), [['.github/workflows/toolkit-shard-timings.yml', 'shard-timings'], ['.github/workflows/shards.yml', 'test-shards']], state);
+    assert.deepEqual(widget.kept.filter(item => /shard/.test(item.file)), [], `${state}: never kept as in use`);
+    const text = leftovers.describe({ folder: w.folder, readable: true, repositories: [widget] }).join('\n');
+    assert.match(text, /shards\.yml: a Toolkit test shards workflow copy\. Toolkit no longer sets up CI shards, so removing it is suggested; where governance is on, the rules refresh pull request removes it\./, state);
+    assert.match(text, /toolkit-shard-timings\.yml: a Toolkit Shard Timings copy\. Toolkit no longer sets up CI shards/, state);
+  }
 });
 
 test('broken markers, an old shim block, a programme file that is not "off", and a check without the marker', t => {

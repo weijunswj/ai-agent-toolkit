@@ -10,7 +10,7 @@
 // Usage: node ci-checkup.cjs [--repo <dir>] [--base <ref>] [--runs <n>] [--no-github] [--json]
 //   --repo       repository folder (default: current folder)
 //   --base       only report items touching paths changed since this ref (for change planning)
-//   --runs       how many recent green default-branch runs to read job times from (default 5)
+//   --runs       how many recent green default-branch runs of each workflow to read job times from (default 5)
 //   --no-github  skip the GitHub run listing; speed rows say "not checked"
 //   --json       machine-readable report
 // Tests may pass `jobTimes` (a Map of "workflow / job" to seconds), `runJobs` (a Map of workflow
@@ -21,7 +21,7 @@
 // Settings: <repo>/.github/ci-checkup.json (optional), schema ci-checkup/v1:
 //   { "schema": "ci-checkup/v1",
 //     "status_doc": "docs/ci-cd/CURRENT_CICD_STATUS.md",
-//     "budgets": { "job_seconds": 600, "unsharded_test_job_seconds": 300 },
+//     "budgets": { "job_seconds": 600, "unsharded_test_job_seconds": 600 },
 //     "concurrent_jobs": 20,
 //     "ignore": [ { "check": "scripts.untested", "path": "tools/once.sh", "reason": "..." } ] }
 // Every ignore entry needs a reason; a path ending in "/" covers the whole folder.
@@ -38,7 +38,25 @@ const DEFAULT_STATUS_DOC = 'docs/ci-cd/CURRENT_CICD_STATUS.md';
 const TOOLKIT_SHARDS_REL = 'repo/contracts/ci/test-shards.json';
 const TOOLKIT_SHARDS_SCHEMA = 'toolkit-test-shards/v1';
 // Starting values, not measurements: a repository sets its own in the settings file.
-const DEFAULTS = Object.freeze({ job_seconds: null, unsharded_test_job_seconds: 300, runs: 5 });
+const DEFAULTS = Object.freeze({ job_seconds: null, unsharded_test_job_seconds: 600, runs: 5 });
+// Shard findings: at most this many suggested shards, and matrix legs are lopsided when the
+// slowest takes at least this ratio of the fastest and at least this many seconds longer.
+const MAX_SHARDS = 8;
+const LOPSIDED_RATIO = 1.5;
+const LOPSIDED_SECONDS = 120;
+// A matrix key that names a split of one suite (legs are only compared across such a key).
+const SPLIT_KEY = /^(shards?|groups?|chunks?|parts?|index|indices|splits?|slices?|buckets?|partitions?|ci[-_]?node[-_]?index)$/i;
+const SHARD_PLAYBOOK = 'fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI';
+// Test file names counted for a shard finding (display only), by the common pattern each matches.
+const TEST_PATTERNS = Object.freeze([
+  ['test_*.py', /^test_[^/]*\.py$/],
+  ['*_test.py', /_test\.py$/],
+  ['*_test.go', /_test\.go$/],
+  ['*.test.*', /\.test\.[A-Za-z0-9]+$/],
+  ['*.spec.*', /\.spec\.[A-Za-z0-9]+$/],
+  ['*Test.java', /Test\.java$/],
+  ['*_spec.rb', /_spec\.rb$/],
+]);
 // GitHub-hosted runners run at most 20 jobs at once per account on the Free plan (Pro 40, Team 60,
 // Enterprise 500); `concurrent_jobs` in the settings file sets the account's own cap.
 const DEFAULT_CONCURRENT_JOBS = 20;
@@ -78,7 +96,9 @@ const CHECKS = Object.freeze({
   'scripts.untested': 'a script no test names or imports',
   'speed.budget': 'no declared time budget, or a budget not checked in CI',
   'speed.durations': 'test files with no measured time',
-  'speed.jobs': 'a CI job over its budget, or a long test job with no sharding or matrix',
+  'speed.jobs': 'a CI job over its budget',
+  'speed.shards': 'a test job with no matrix whose measured time is at or over the unsharded limit, so shards would pay',
+  'speed.shards-lopsided': 'matrix legs of one job whose measured times are far apart, so the split needs rebalancing',
   'speed.edits': 'a title, body or label edit that reruns heavy jobs',
   'speed.concurrency': 'a concurrency setting that lets stale runs hold job slots or cancels useful runs',
   'speed.slots': 'one run that starts more than half of the account\'s concurrent jobs',
@@ -319,6 +339,25 @@ function windowsRunner(lines, keys, end, indent) {
 
 // The top-level entries of a YAML flow value (`[a, b]` or `{a: x, b: {c: [d]}}`), each with its key
 // (or the bare item) and its own value text, cut at the matching bracket; a plain scalar is one entry.
+// The axes of a job's `strategy.matrix`: { key, values } with values a list of plain strings, or
+// null when they are not literal (an expression, a map or an include-only matrix).
+function matrixAxes(lines, keys, indent) {
+  const strategy = keys.find((entry) => entry.key === 'strategy');
+  if (!strategy) return [];
+  const strategyKeys = mapKeys(lines, strategy.line + 1, blockEnd(lines, strategy.line, indent), indent + 2);
+  const matrix = strategyKeys.find((entry) => entry.key === 'matrix');
+  if (!matrix || matrix.value.trim()) return [];
+  const end = blockEnd(lines, matrix.line, indent + 2);
+  const axisIndent = (lines.slice(matrix.line + 1, end).find((line) => line.trim() && !line.trimStart().startsWith('#')) || '').length - (lines.slice(matrix.line + 1, end).find((line) => line.trim() && !line.trimStart().startsWith('#')) || '').trimStart().length;
+  const plain = (value) => (/^[\w.+-]+$/.test(value) ? value : null);
+  return mapKeys(lines, matrix.line + 1, end, axisIndent).filter((axis) => !['include', 'exclude'].includes(axis.key)).map((axis) => {
+    const inline = axis.value.replace(/\s+#.*$/, '').trim();
+    let raw;
+    if (inline) raw = /^\[.*\]$/.test(inline) ? inline.slice(1, -1).split(',').map((value) => unquote(value.trim())).filter(Boolean) : null;
+    else raw = lines.slice(axis.line + 1, blockEnd(lines, axis.line, axisIndent)).filter((line) => line.trim() && !line.trimStart().startsWith('#')).map((line) => (/^\s*-\s+/.test(line) ? unquote(line.replace(/^\s*-\s+/, '').replace(/\s+#.*$/, '')) : null));
+    return { key: axis.key, values: raw && raw.length && raw.every((value) => value && plain(value)) ? raw : null };
+  });
+}
 function flowEntries(text) {
   const t = text.replace(/\s+#.*$/, '').trim();
   if (!/^[[{]/.test(t)) return t ? [{ key: unquote(t), value: '' }] : [];
@@ -431,6 +470,7 @@ function parseWorkflow(rel, text) {
       concurrency: concurrencyOf(keyText(lines, keys.find((entry) => entry.key === 'concurrency'), jobIndent + 2)),
       continueOnError: keys.some((entry) => entry.key === 'continue-on-error' && !/^false$/i.test(unquote(entry.value))),
       matrix: /\bmatrix:/.test(body),
+      axes: matrixAxes(lines, keys, jobIndent + 2),
       uses: (keys.find((entry) => entry.key === 'uses') || {}).value,
       dir: defaultsDir(lines, job.line + 1, end, jobIndent + 2) || workflow.dir,
       shell: defaultsShell(lines, job.line + 1, end, jobIndent + 2) || workflow.shell,
@@ -871,29 +911,67 @@ function githubRepo(root, tools) {
   return tools.githubRepo;
 }
 
-// Recent green default-branch runs: each job's longest time, and the most jobs one run of each
-// workflow started (skipped jobs take no slot).
-function recentRuns(root, runs, tools) {
-  const repo = githubRepo(root, tools);
-  if (!repo) return null;
-  const list = ghJson(tools, ['run', 'list', '-R', repo.slug, '--branch', repo.branch, '--status', 'success', '--limit', String(runs), '--json', 'databaseId,workflowName']);
-  if (!list) return null;
+// Recent green default-branch runs of each workflow file, read with `readGh` (gh arguments to
+// parsed JSON, or null): their job times (jobStats). Listed per workflow, so frequent scheduled
+// runs never crowd out the CI runs; a workflow GitHub does not know yet (a new file) has no runs.
+// Null when no listing could be read at all, so a gh failure says "not checked", never "no runs";
+// `unread` names each workflow file whose listing could not be read, so its gap is never silent.
+function recentRuns(repo, runs, workflows, readGh) {
+  const listed = workflows.map((workflow) => readGh(['run', 'list', '-R', repo.slug, '--workflow', path.posix.basename(workflow.rel), '--branch', repo.branch, '--status', 'success', '--limit', String(runs), '--json', 'databaseId,workflowName']));
+  if (listed.length && listed.every((list) => !Array.isArray(list))) return null;
+  const stats = jobStats(listed.flatMap((list) => list || []).map((entry) => ({ workflowName: entry.workflowName, jobs: (readGh(['run', 'view', String(entry.databaseId), '-R', repo.slug, '--json', 'jobs']) || {}).jobs })));
+  return { ...stats, unread: workflows.filter((workflow, i) => !Array.isArray(listed[i])).map((workflow) => workflow.rel) };
+}
+
+// From runs of { workflowName, jobs }: each "workflow / job" key's longest time and median time,
+// and the most jobs one run of each workflow started (skipped jobs take no slot).
+function jobStats(runs) {
   const times = new Map();
+  const samples = new Map();
   const runJobs = new Map();
-  for (const entry of list) {
-    const view = ghJson(tools, ['run', 'view', String(entry.databaseId), '-R', repo.slug, '--json', 'jobs']);
+  for (const entry of runs) {
     let started = 0;
-    for (const job of (view && view.jobs) || []) {
+    for (const job of entry.jobs || []) {
       if (!job.startedAt || !job.completedAt) continue;
       if (job.conclusion !== 'skipped') started++;
       const seconds = (Date.parse(job.completedAt) - Date.parse(job.startedAt)) / 1000;
       const key = `${entry.workflowName} / ${job.name}`;
       times.set(key, Math.max(times.get(key) || 0, seconds));
+      samples.set(key, [...(samples.get(key) || []), seconds]);
     }
     runJobs.set(entry.workflowName, Math.max(runJobs.get(entry.workflowName) || 0, started));
   }
-  return { times, runJobs };
+  const median = (values) => { const sorted = [...values].sort((a, b) => a - b); const mid = sorted.length >> 1; return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
+  return { times, medians: new Map([...samples].map(([key, values]) => [key, median(values)])), runJobs };
 }
+
+// Tracked test files only (`git ls-files --cached`), so untracked and ignored folders such as
+// `.claude/` or `.tmp/` never count; null outside a git work tree. It never walks folders.
+function trackedTests(root, tools) {
+  const listed = git(tools, root, ['ls-files', '-z', '--cached']);
+  if (!listed.ok) return null;
+  const files = listed.out.split('\0').filter(Boolean).map(norm)
+    .filter((rel) => !rel.split('/').some((part) => SKIP_DIRS.has(part)) && !NOT_OWN_CODE.test(rel));
+  const byPattern = [];
+  const all = [];
+  for (const rel of files) {
+    const hit = TEST_PATTERNS.find(([, re]) => re.test(path.posix.basename(rel)));
+    if (!hit) continue;
+    all.push(rel);
+    const row = byPattern.find((entry) => entry.pattern === hit[0]);
+    if (row) row.count++; else byPattern.push({ pattern: hit[0], count: 1 });
+  }
+  return { count: all.length, byPattern, samples: all.slice(0, 3) };
+}
+
+function testCountText(tracked) {
+  if (!tracked) return 'tracked test files not counted (not a git checkout)';
+  if (!tracked.count) return 'no tracked test files with a common test name';
+  const patterns = tracked.byPattern.length > 1 ? `: ${tracked.byPattern.map((entry) => `${entry.count} ${entry.pattern}`).join(', ')}` : '';
+  return `${tracked.count} tracked test files${patterns}, such as ${tracked.samples.join(', ')}`;
+}
+
+function minutes(seconds) { return seconds >= 120 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds)} s`; }
 
 // Whether a title or body edit reruns heavy jobs. A job is light on an edit when its `if` reads
 // github.event.action, or when it reads an output of a job it needs (a route job that reads the event
@@ -994,11 +1072,17 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
     items.push(item('CHECK', 'speed.budget', SETTINGS_REL, 'no CI job-time budget is declared', `measure the job times, then set budgets.job_seconds in ${SETTINGS_REL}`));
   }
   items.push(...checkDelivery(workflows));
-  const measured = options.jobTimes ? { times: options.jobTimes, runJobs: options.runJobs || new Map() } : (options.github ? recentRuns(root, options.runs, options.tools) : null);
+  let measured = null;
+  if (options.jobTimes) measured = { times: options.jobTimes, medians: options.jobTimes, runJobs: options.runJobs || new Map() };
+  else if (options.github) {
+    const repo = githubRepo(root, options.tools);
+    if (repo) measured = recentRuns(repo, options.runs, workflows, (args) => ghJson(options.tools, args));
+  }
   if (!measured) {
     items.push(item('CHECK', 'speed.jobs', '', 'job times not checked (no GitHub access)', 'run again with a working gh login to compare job times with budgets'));
     return items;
   }
+  if (measured.unread && measured.unread.length) items.push(item('CHECK', 'speed.jobs', '', `job times not read for ${measured.unread.join(', ')} (gh could not list their runs; a workflow GitHub does not know yet looks the same), so their speed rows are missing`, 'run again with a working gh login; a new workflow is measured once it has run on the default branch'));
   const times = measured.times;
   // A run that takes more than half the account's job slots makes the next pull request queue,
   // and queue time, not run time, is usually most of the wait.
@@ -1014,14 +1098,50 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   // Long test jobs come from the measured times, whatever command they run; a job counts as a test
   // job when its name, a step name or a command says tests, a suite, a regression or a runner.
   const testJob = (job) => [job.id, job.name, ...job.steps.flatMap((s) => [s.name, s.run])].some((text) => text && (/\btests?\b|regression|suite|\bspec\b|unittest|run[-_]tests/i.test(text) || Object.values(RUNNERS).some((re) => re.test(text))));
+  // A measured key is "<workflow> / <job>", or "<workflow> / <caller job> / <called job>" for a job
+  // a reusable workflow runs; with no job of the full name, the caller job in this workflow answers.
+  const jobOf = (name) => {
+    const [workflowName, ...rest] = name.split(' / ');
+    const bare = (jobName) => jobName.replace(/\s+\(.*\)$/, '');
+    const find = (workflow, jobName) => workflow.jobs.find((j) => j.id === bare(jobName) || j.name === bare(jobName));
+    return workflows.filter((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName)
+      .map((workflow) => ({ workflow, job: find(workflow, rest.join(' / ')) || (rest.length > 1 ? find(workflow, rest[0]) : undefined) }))
+      .filter((hit) => hit.job);
+  };
+  // A long test job with no matrix: shards would pay. One shard per budget of time, at most
+  // MAX_SHARDS; the tracked test count is shown only, it never decides the finding.
+  let tracked;
+  const target = budgets.unsharded_test_job_seconds;
   for (const [name, seconds] of times) {
-    if (seconds <= budgets.unsharded_test_job_seconds) continue;
-    const [workflowName, jobName] = name.split(' / ');
-    const plain = (jobName || '').replace(/\s+\(.*\)$/, '');
-    for (const workflow of workflows.filter((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName)) {
-      const job = workflow.jobs.find((j) => j.id === plain || j.name === plain);
-      if (job && !job.matrix && testJob(job)) items.push(item('CHECK', 'speed.jobs', workflow.rel, `job ${jobName} took up to ${Math.round(seconds)} s with no sharding or matrix`, 'measure its slowest files, make them fast, then shard it from one manifest (fast-tests-and-sharding playbook)'));
+    if (seconds < target) continue;
+    for (const { workflow, job } of jobOf(name)) {
+      if (job.matrix || !testJob(job)) continue;
+      if (tracked === undefined) tracked = trackedTests(root, options.tools);
+      const shards = Math.min(MAX_SHARDS, Math.max(2, Math.ceil(seconds / target)));
+      items.push(item('GAP', 'speed.shards', workflow.rel, `${name} took up to ${minutes(seconds)} with no sharding; about ${shards} shards would bring it near ${minutes(seconds / shards)} (${testCountText(tracked)})`, `arrange shards for this job in this repository's own CI (${SHARD_PLAYBOOK}), or record why not with an ignore entry and a reason`));
     }
+  }
+  // Lopsided shards: legs of one matrix job that differ only in a split axis (a key such as shard,
+  // group, chunk, part or index, or whole-number values), compared by their median time, so legs
+  // for different runner images, systems or versions are never compared.
+  const groups = new Map();
+  for (const [name, seconds] of measured.medians) {
+    const suffix = name.match(/^(.*) \((.*)\)$/);
+    if (!suffix) continue;
+    for (const { workflow, job } of jobOf(name)) {
+      const split = job.axes.filter((axis) => SPLIT_KEY.test(axis.key) || (axis.values && axis.values.every((value) => /^\d+$/.test(value))));
+      if (!split.length) continue;
+      const isSplitValue = (value) => split.some((axis) => (axis.values ? axis.values.includes(value) : /\d/.test(value)));
+      const key = `${workflow.rel}\n${suffix[1]} (${suffix[2].split(', ').map((value) => (isSplitValue(value) ? '#' : value)).join(', ')})`;
+      groups.set(key, [...(groups.get(key) || []), { name, seconds, workflow }]);
+    }
+  }
+  for (const legs of groups.values()) {
+    if (legs.length < 2) continue;
+    const slow = legs.reduce((a, b) => (b.seconds > a.seconds ? b : a));
+    const fast = legs.reduce((a, b) => (b.seconds < a.seconds ? b : a));
+    if (slow.seconds < fast.seconds * LOPSIDED_RATIO || slow.seconds - fast.seconds < LOPSIDED_SECONDS) continue;
+    items.push(item('GAP', 'speed.shards-lopsided', slow.workflow.rel, `${slow.name} took ${minutes(slow.seconds)} and ${fast.name} ${minutes(fast.seconds)} (median of recent green runs), so the shards are lopsided`, `rebalance the split from fresh per-file times (${SHARD_PLAYBOOK})`));
   }
   return items;
 }
@@ -1270,4 +1390,4 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = Object.freeze({ CHECKS, SETTINGS_REL, checkHygiene, checkup, formatReport, main, packageInvocations, parseWorkflow, requiredCheckNames, resolveExecutable });
+module.exports = Object.freeze({ CHECKS, SETTINGS_REL, checkHygiene, checkup, formatReport, jobStats, main, packageInvocations, parseWorkflow, recentRuns, requiredCheckNames, resolveExecutable });

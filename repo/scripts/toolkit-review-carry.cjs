@@ -29,14 +29,12 @@
 const { findBlocks } = require('./toolkit-managed-block.cjs');
 const riskTier = require('./toolkit-risk-tier.cjs');
 const shards = require('./ci-test-shards.cjs');
-const governedShards = require('./governed-test-shards.cjs');
 const instructionSync = require('./sync-agent-instruction-shims.cjs');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
 const { detectPrText } = require('../../skills/secure-ci-cd/scripts/personal-data-guard.cjs');
 
 const CARRY = /^Carry: body-only uat=(NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)[ \t]*$/;
 const SHARD_BRANCH = 'toolkit/shard-timings-';
-const SHARD_MANIFESTS = Object.freeze([shards.MANIFEST_REL, governedShards.MANIFEST_REL]);
 const OUTPUTS = Object.freeze(new Map([...instructionSync.PROJECTED_OUTPUTS, ...docContractSync.PROJECTED_OUTPUTS].map(entry => [entry.path, entry.blocks])));
 const { WORDING_EFFORT } = require('./toolkit-gate-route.cjs');
 // Where CI proves the generated text: the Validate workflow running each sync's `--check`.
@@ -85,7 +83,7 @@ function shardRefreshProblem(pull, files, read, base) {
   if (!String(pull.head && pull.head.ref).startsWith(SHARD_BRANCH)) return `not on a ${SHARD_BRANCH}* branch`;
   const own = pull.base && pull.base.repo && pull.head && pull.head.repo && pull.head.repo.full_name === pull.base.repo.full_name;
   if (!own) return 'its branch is not in this repository';
-  if (files.length !== 1 || !SHARD_MANIFESTS.includes(files[0])) return `it changes more than the shard manifest (${files.join(', ')})`;
+  if (files.length !== 1 || files[0] !== shards.MANIFEST_REL) return `it changes more than the shard manifest (${files.join(', ')})`;
   const before = read(base, files[0]);
   const after = read(pull.head.sha, files[0]);
   if (before === null || after === null) return 'the shard manifest is missing at the merge base or the head';

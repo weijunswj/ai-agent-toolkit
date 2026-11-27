@@ -12,12 +12,12 @@
     {
       "id": "R1",
       "side": "repository",
-      "part": "Rendered workflow copies: the programme sweep and its gate, and the test shards and Shard Timings copies where parallel CI shards are answered yes",
+      "part": "Rendered workflow copies: the programme sweep and its gate",
       "follows": "run-time",
-      "how": "Each copy checks out Toolkit main (or the TOOLKIT_REF pin) at run time; a layout change, an action pin, the CI workflow the gate follows or the shard ids reach it through the refresh pull request.",
-      "workflows": ["programme-sweep", "programme-sweep-gate", "test-shards", "shard-timings"],
-      "files": [".github/workflows/toolkit-programme-sweep.yml", ".github/workflows/toolkit-programme-sweep-gate.yml", ".github/workflows/toolkit-test-shards.yml", ".github/workflows/toolkit-shard-timings.yml"],
-      "findings": ["CLOUD_WORKFLOW_OUTDATED", "CLOUD_WORKFLOW_DRIFT", "CLOUD_WORKFLOWS_UNCHECKED", "CLOUD_WORKFLOW_LEFT_OVER", "CI_SHARDS_GATE_NOT_REQUIRED", "CLOUD_SWEEP_FOREIGN_STORE", "CLOUD_SWEEP_PUBLIC_STATE"]
+      "how": "Each copy checks out Toolkit main (or the TOOLKIT_REF pin) at run time; a layout change, an action pin or the CI workflow the gate follows reaches it through the refresh pull request.",
+      "workflows": ["programme-sweep", "programme-sweep-gate"],
+      "files": [".github/workflows/toolkit-programme-sweep.yml", ".github/workflows/toolkit-programme-sweep-gate.yml"],
+      "findings": ["CLOUD_WORKFLOW_OUTDATED", "CLOUD_WORKFLOW_DRIFT", "CLOUD_WORKFLOWS_UNCHECKED", "CLOUD_WORKFLOW_LEFT_OVER", "CLOUD_SWEEP_FOREIGN_STORE", "CLOUD_SWEEP_PUBLIC_STATE"]
     },
     {
       "id": "R2",
@@ -102,12 +102,12 @@
     {
       "id": "R10",
       "side": "repository",
-      "part": "Shard list and timings (.github/toolkit-test-shards.json)",
-      "follows": "auto",
-      "how": "A weekly bot pull request refreshes the timings where shards apply.",
+      "part": "Retired Toolkit files: the test shards and Shard Timings copies and the shard list (.github/toolkit-test-shards.json) of the retired parallel CI shards offer",
+      "follows": "refresh",
+      "how": "Toolkit no longer makes them; the refresh pull request removes any still here. A removal never passes the copy proof, so the owner merges that pull request.",
       "workflows": [],
-      "files": [".github/toolkit-test-shards.json"],
-      "findings": []
+      "files": [".github/workflows/toolkit-test-shards.yml", ".github/workflows/toolkit-shard-timings.yml", ".github/toolkit-test-shards.json"],
+      "findings": ["CLOUD_WORKFLOW_RETIRED"]
     },
     {
       "id": "C1",

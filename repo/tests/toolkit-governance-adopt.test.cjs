@@ -87,7 +87,7 @@ const PROPOSAL = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `http
 
 // `opened` is what GitHub lists as open governance pull requests when the run starts.
 // `realPlainText` runs the real plain-text installer instead of the fixture's.
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [], cloudFiles = () => ({ files: {}, warning: null }), realPlainText = false } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, opened = [], cloudFiles = () => ({ files: {}, warning: null }), realPlainText = false } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = opened;
@@ -104,7 +104,6 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     ...(realPlainText ? {} : { plainTextInstaller: (root, into) => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(into); } }),
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [{ ...proposal, answer: binding.governance === 'disabled' ? 'no' : 'yes' }]; return open[0]; }, read: () => open[0] || proposal },
     cloudWorkflows: (cwd, options) => { cloud.push(options); return cloudFiles(cwd, options); },
-    ...(estimate ? { ciEstimator: () => estimate } : {}),
   });
   const code = await cli.main(argv);
   return { code, out, err, published, plainText, cloud };
@@ -372,13 +371,6 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   assert.deepEqual(itself.calls, [], 'no parent issue, store or file');
   assert.equal(self.published.length, 0);
   assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'plain-text.json')), false, 'no local write either');
-  // Nor the shard list, which joins the answer by default where CI is slow.
-  fs.mkdirSync(path.join(selfCtx.repo, 'test'), { recursive: true });
-  for (let index = 1; index <= 4; index += 1) fs.writeFileSync(path.join(selfCtx.repo, 'test', `case${index}.test.js`), "require('node:test')('ok', () => {});\n");
-  const slow = await run(selfCtx, ['setup'], itself, { interactive: true, answers: [`store=${SLUG}`], estimate: { minutes: 25, workflow: 'CI' } });
-  assert.equal(slow.code, 2);
-  assert.match(slow.out, /is this repository itself/);
-  assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'toolkit-test-shards.json')), false);
   // A malformed name is refused as unreadable, nothing written.
   const bad = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['store=not a repo', ''] });
   assert.match(bad.out, /This part of the answer was not read: "store=not a repo"/);
@@ -414,47 +406,28 @@ test('a working tree with a programme file that turns governance on is a prepare
   assert.equal(adopt.adoptionPrepared(ctx.repo), false);
 });
 
-test('parallel CI shards are a Toolkit default by CI time, never a question: slow CI gets them, fast CI and CI that already shards get none', async t => {
-  const PASS = "const test = require('node:test');\ntest('ok', () => {});\n";
-  const withTests = () => {
-    const ctx = fixture(t);
-    for (let index = 1; index <= 4; index += 1) {
-      fs.mkdirSync(path.join(ctx.repo, 'test'), { recursive: true });
-      fs.writeFileSync(path.join(ctx.repo, 'test', `case${index}.test.js`), PASS);
-    }
-    return ctx;
-  };
-  const slow = { minutes: 25, workflow: 'CI' };
-  const ctx = withTests();
-  const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.doesNotMatch(shown.out, /shards/i, 'never a question');
-  const github = fakeGitHub();
-  const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], estimate: slow });
+// The parallel CI shards offer is retired (INT-TK421-1391): a turn-on carries no shard list (not even
+// one an older Toolkit left in the checkout), records no ci_shards and copies no shard workflow, and a
+// reply that still says shards= is not read as an answer, so nothing is published.
+test('a turn-on carries no shard list, no ci_shards and no shard workflow, and a shards= reply publishes nothing', async t => {
+  const ctx = fixture(t);
+  fs.mkdirSync(path.join(ctx.repo, 'test'), { recursive: true });
+  for (let index = 1; index <= 4; index += 1) fs.writeFileSync(path.join(ctx.repo, 'test', `case${index}.test.js`), "require('node:test')('ok', () => {});\n");
+  fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json'), `${JSON.stringify({ schema: 'toolkit-test-shards/v2', systems: {} }, null, 2)}\n`);
+  const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''] });
+  assert.doesNotMatch(shown.out, /shard/i, 'the questions say nothing about shards');
+  const result = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'] });
   assert.equal(result.code, 0, result.err + result.out);
-  assert.equal(result.published.length, 1, 'still one turn-on pull request');
+  assert.equal(result.published.length, 1, 'one turn-on pull request');
   const { binding, files } = result.published[0];
-  assert.equal(binding.ci_shards.answer, 'yes');
-  assert.match(binding.ci_shards.offered_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-  const list = JSON.parse(files['.github/toolkit-test-shards.json']);
-  assert.equal(list.systems.linux.shards.length, 3, '25 measured minutes: two named shards and the rest');
-  assert.equal(result.cloud.at(-1).ciShards, 'yes', 'the shard copies follow this pull request\'s own answer, not an old read of the merged binding');
-  assert.ok(path.relative(ctx.repo, result.cloud.at(-1).overlay).startsWith('..'), 'the render folder is not in the checkout');
-  assert.equal(fs.existsSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json')), false, 'the shard list is not written to the checkout');
-  assert.equal(fs.existsSync(result.cloud.at(-1).overlay), false, 'the render folder is removed after the answer');
-  assert.match(result.out, /a first \.github\/toolkit-test-shards\.json with 3 Linux shards .*travels in the turn-on pull request with the shard workflows/);
-  // Fast or unknown CI keeps none.
-  const fast = await run(withTests(), ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: { minutes: 4, workflow: 'CI' } });
-  assert.equal(fast.code, 0, fast.err + fast.out);
-  assert.equal(fast.published[0].binding.ci_shards, undefined);
-  assert.equal(fast.published[0].files['.github/toolkit-test-shards.json'], undefined);
-  // CI that already runs its tests in parallel: nothing written, even when slow.
-  const sharded = withTests();
-  fs.mkdirSync(path.join(sharded.repo, '.github', 'workflows'), { recursive: true });
-  fs.writeFileSync(path.join(sharded.repo, '.github', 'workflows', 'validate.yml'), 'name: validate\non: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n      - run: npm test -- --shard=${{ matrix.shard }}/3\n');
-  const kept = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: slow });
-  assert.equal(kept.code, 0, kept.err + kept.out);
-  assert.equal(kept.published[0].binding.ci_shards, undefined);
-  assert.equal(kept.published[0].files['.github/toolkit-test-shards.json'], undefined);
+  assert.equal(binding.ci_shards, undefined);
+  assert.deepEqual(Object.keys(files).filter(name => /shard/i.test(name)), [], 'no shard list or shard workflow travels');
+  assert.doesNotMatch(result.out, /shard/i);
+  for (const answer of ['shards=yes', 'all recommended, shards=never']) {
+    const refused = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: [answer, ''] });
+    assert.match(refused.out, /Nothing was written\./, answer);
+    assert.equal(refused.published.length, 0, answer);
+  }
 });
 
 test('the setup reads the open governance pull requests again: one closed outside Toolkit no longer holds the turn-on, and an open one is named', async t => {

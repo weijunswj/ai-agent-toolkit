@@ -140,7 +140,7 @@ Do not claim CI passed unless checked. Do not do reviews from metadata alone.
 
 ## Match: Test Speed, Runner Or Shards
 
-Triggers: slow tests or CI, long or background commands, `repo/scripts/run-tests.cjs`, the shard manifest `repo/contracts/ci/test-shards.json`, test jobs in `.github/workflows/validate.yml`, or test time budgets.
+Triggers: slow tests or CI, long or background commands, `repo/scripts/run-tests.cjs`, the shard manifest `repo/contracts/ci/test-shards.json`, test jobs in `.github/workflows/validate.yml`, test time budgets, or a `speed.shards` or `speed.shards-lopsided` finding.
 
 Read: `skills/toolkit-playbooks/fast-tests-and-sharding.md` and the Test Shards section of `repo/docs/VALIDATION-STRATEGY.md`.
 

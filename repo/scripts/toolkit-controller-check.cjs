@@ -199,6 +199,7 @@ function checkProgramme(run, checkout) {
   return { state: 'attention', lines: [byCode ? `${first} (${byCode})` : first, ...items], command: require('./toolkit-user-state.cjs').programmeCommand('attention') };
 }
 
+const SHARD_CODES = new Set(['speed.shards', 'speed.shards-lopsided']);
 function checkCi(run, checkout) {
   const result = run(SCRIPTS.ci, ['--repo', checkout, '--json']);
   let report = null;
@@ -208,7 +209,9 @@ function checkCi(run, checkout) {
   const checks = report.items.filter(item => item.level === 'CHECK').length;
   const summary = `${gaps.length} GAP, ${checks} CHECK (CHECK needs judgement: ci-checkup.cjs lists them)`;
   if (!gaps.length) return { state: 'ok', lines: [summary] };
-  return { state: 'attention', lines: [summary, ...gaps.map(item => `${item.check || 'gap'} ${item.path || ''}: ${item.message || ''}`.replace(/\s+/g, ' ').trim())], command: 'ci-checkup.cjs' };
+  // A shard finding is the controller's own work, so its line carries the check-up's next action.
+  const line = item => `${item.check || 'gap'} ${item.path || ''}: ${item.message || ''}${SHARD_CODES.has(item.check) && item.fix ? `; next: ${item.fix}` : ''}`.replace(/\s+/g, ' ').trim();
+  return { state: 'attention', lines: [summary, ...gaps.map(line)], command: 'ci-checkup.cjs' };
 }
 
 function checkFooter(run, repo, since) {

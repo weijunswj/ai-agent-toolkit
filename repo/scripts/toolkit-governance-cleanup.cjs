@@ -20,9 +20,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const blocks = require('./toolkit-managed-block.cjs');
 const { LeftoverScan, withoutCuratedHeader } = require('./toolkit-leftover-files.cjs');
-const { oldSweepCopies } = require('./toolkit-ci-shards-offer.cjs');
 
 // The floor a cleaned repository needs: the first release whose installed Toolkit gives sessions the
 // governed rules whole (with the session-start truncation fix), turns governance on without writing
@@ -39,6 +39,30 @@ const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <
 // cleaned file as invalid and the sweep stops updating the programme board. A commit this Toolkit copy
 // cannot read is not checked, so it holds the cleanup too. Returns { tooOld, unchecked }.
 const STATE_SCRIPT = 'skills/github-program-reconciler/scripts/programme-state.cjs';
+const SWEEP_IDS = Object.freeze(['programme-sweep', 'programme-sweep-gate']);
+
+// The Toolkit copies of the sweep in `root` still pinned to one commit (from before layouts) that may
+// not read a binding key: { tooOld, unchecked }. `reads(commit, git)` says whether the Toolkit at that
+// commit does (tooOld when not). A copy whose commit this Toolkit copy cannot read (not a git checkout,
+// or the commit is not in it) is unchecked; the caller holds for both, and says which is which.
+function oldSweepCopies(root, toolkitRoot, reads) {
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  const git = args => spawnSync('git', args, { cwd: toolkitRoot, windowsHide: true, shell: false, encoding: 'utf8' });
+  const tooOld = [], unchecked = [];
+  for (const copy of workflows.markedCopies(root).filter(entry => SWEEP_IDS.includes(entry.id))) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(root, ...copy.file.split('/')), 'utf8'); } catch { text = ''; }
+    const marker = workflows.MARKER.exec(text.replace(/\r\n/g, '\n'));
+    // A copy with a layout runs Toolkit main, which reads every binding key this Toolkit knows.
+    if (marker?.[4]) continue;
+    const commit = marker?.[2];
+    const known = commit && git(['cat-file', '-e', `${commit}^{commit}`]).status === 0;
+    if (!known) unchecked.push(copy.file);
+    else if (!reads(commit, git)) tooOld.push(copy.file);
+  }
+  return { tooOld, unchecked };
+}
+
 function sweepCopiesWithoutMinToolkit(root) {
   const toolkitRoot = require('./toolkit-cloud-workflows.cjs').sourceRoot();
   return oldSweepCopies(root, toolkitRoot, (commit, git) => {

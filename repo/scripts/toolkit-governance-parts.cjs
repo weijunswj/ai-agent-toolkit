@@ -5,8 +5,7 @@
 // line for the agent to pass on, so the owner hears about it without asking.
 //
 // - Governance App: missing (GitHub lists neither its variable nor its secret) or partly set up. The
-//   governance jobs on GitHub (the cloud Programme Sweep and the Shard Timings pull request) do
-//   nothing without it.
+//   governance jobs on GitHub (such as the cloud Programme Sweep) do nothing without it.
 // - Evidence store: the store the merged programme file names cannot be found, is not private, or
 //   cannot be written with this computer's GitHub sign-in. Programme state lives there, so every
 //   programme write refuses until it is usable; the line says so.
@@ -210,9 +209,9 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     const app = entry && cleanApp(entry.app);
     const slug = state.repository || 'this repository';
     if (app && !unknown(app) && app.variable === 'missing' && app.secret === 'missing') {
-      partLine(`Toolkit governance: the Governance App is not set up on ${slug} (GitHub lists neither its variable nor its secret), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing; everything else, this computer's own refresh included, still works. In your first reply, tell the user once, in one line, that saying \`refresh governance\` gives the one line that sets it up; nothing waits on it.`);
+      partLine(`Toolkit governance: the Governance App is not set up on ${slug} (GitHub lists neither its variable nor its secret), so the governance jobs on GitHub (such as the cloud sweep) do nothing; everything else, this computer's own refresh included, still works. In your first reply, tell the user once, in one line, that saying \`refresh governance\` gives the one line that sets it up; nothing waits on it.`);
     } else if (app && !unknown(app) && (app.variable === 'missing' || app.secret === 'missing')) {
-      partLine(`Toolkit governance: the Governance App is only partly set up on ${slug} (variable ${app.variable}, secret ${app.secret}), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing. In your first reply, tell the user once, in one line, that saying \`refresh governance\` shows how to finish it; nothing waits on it.`);
+      partLine(`Toolkit governance: the Governance App is only partly set up on ${slug} (variable ${app.variable}, secret ${app.secret}), so the governance jobs on GitHub (such as the cloud sweep) do nothing. In your first reply, tell the user once, in one line, that saying \`refresh governance\` shows how to finish it; nothing waits on it.`);
     }
     const kept = entry && entry.store && entry.store.repository === store ? entry.store : null;
     const why = STORE_WHY[kept?.state];
