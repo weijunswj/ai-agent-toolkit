@@ -35,7 +35,7 @@ A generated weekly refresh PR is a candidate. Its review route is the scripted c
 
 ## Arrange Shards In This Repository's CI
 
-The `secure-ci-cd` CI check-up only measures and flags: `speed.shards` names a test job with no matrix that took 10 minutes or more (the `unsharded_test_job_seconds` budget), with a suggested shard count and the tracked test files; `speed.shards-lopsided` names matrix legs of one split far apart. The repository's controller arranges the shards in the repository's own CI, for any stack:
+The `secure-ci-cd` CI check-up only measures and flags: `speed.shards` names a test job with no matrix that took 10 minutes or more (the `unsharded_test_job_seconds` budget), with a suggested shard count and the tracked test files; `speed.shards-lopsided` names matrix legs of one split far apart. Toolkit runs it once a day per repository on the owner's computer and says a new finding once, at the next session start or turn end. The repository's controller arranges the shards in the repository's own CI, for any stack:
 
 1. **Decide:** start from the finding. If sharding cannot pay (setup takes most of the job, or one file is most of the time), add an ignore entry with the reason to `.github/ci-checkup.json` and stop.
 2. **Measure:** time each test file once on CI with the stack's own runner (for example `pytest --durations=0`, `python -m unittest` timed per file, `node --test` reporter output or `go test -json`) and keep the times in a small JSON file in the repository.

@@ -75,8 +75,22 @@ function sessionLines(input, dependencies) {
     if (!(input && typeof input.cwd === 'string' && input.cwd)) return [caughtUp].filter(Boolean);
     let governance = null;
     try { governance = gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input), host: 'codex', localCopy: caughtUp }); } catch (error) { return [caughtUp, unavailableLine(input, error)].filter(Boolean); }
-    return [governance || caughtUp].filter(Boolean);
+    return [governance || caughtUp, slowCiLine(input, dependencies)].filter(Boolean);
   } catch (error) { return [unavailableLine(input, error)].filter(Boolean); }
+}
+
+// The daily slow-CI line (toolkit-slow-ci.cjs), given once per new result, or null. Codex shows no
+// hook message at turn end, so session start is the one place a Codex chat gets it. Never in a
+// session a Toolkit launcher started.
+function slowCiLine(input, dependencies) {
+  try {
+    const environment = dependencies.environment || process.env;
+    const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
+    if (LAUNCHER_MARKERS.some(name => String(environment[name] || '').trim())) return null;
+    const slowCi = require('./toolkit-slow-ci.cjs');
+    const record = dependencies.slowCi || new slowCi.SlowCiRecord({ environment });
+    return slowCi.sessionStartLine(record.note(input.cwd));
+  } catch { return null; }
 }
 
 function unavailableLine(input, error) {

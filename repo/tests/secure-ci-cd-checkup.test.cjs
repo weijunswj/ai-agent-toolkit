@@ -389,6 +389,7 @@ test('speed.shards: a 48-minute unsharded test job is a GAP with a shard count, 
   const dir = shardRepo(t);
   const items = hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) }).items, 'speed.shards');
   assert.deepEqual(items.map((e) => [e.level, e.path, e.message]), [['GAP', '.github/workflows/ci.yml', 'CI / Validate app took up to 48 min with no sharding; about 5 shards would bring it near 10 min (3 tracked test files, such as tests/test_a.py, tests/test_b.py, tests/test_c.py)']]);
+  assert.deepEqual(items[0].facts, { job: 'CI / Validate app', seconds: 2880, shards: 5, tests: 3 }, 'the facts a daily slow-CI record keeps');
   assert.equal(items[0].fix, 'arrange shards for this job in this repository\'s own CI (fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI), or record why not with an ignore entry and a reason');
   assert.doesNotMatch(JSON.stringify(items), /\.claude|test_new|fixtures/, 'no ignored, untracked or fixture file is counted');
   assert.deepEqual(hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) }).items, 'speed.jobs'), [], 'the old judgement row is gone');
@@ -470,6 +471,7 @@ test('speed.shards-lopsided: legs of one matrix job far apart are a GAP; close l
   const lopsided = (times) => hits(checkup.checkup(dir, { github: false, jobTimes: new Map(times) }).items, 'speed.shards-lopsided');
   const found = lopsided([['CI / Tests (linux-1)', 900], ['CI / Tests (linux-2)', 300]]);
   assert.deepEqual(found.map((e) => [e.level, e.path, e.message]), [['GAP', '.github/workflows/ci.yml', 'CI / Tests (linux-1) took 15 min and CI / Tests (linux-2) 5 min (median of recent green runs), so the shards are lopsided']]);
+  assert.deepEqual(found[0].facts, { slow: 'CI / Tests (linux-1)', slow_seconds: 900, fast: 'CI / Tests (linux-2)', fast_seconds: 300 });
   assert.equal(found[0].fix, 'rebalance the split from fresh per-file times (fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI)');
   assert.deepEqual(lopsided([['CI / Tests (linux-1)', 400], ['CI / Tests (linux-2)', 300]]), [], 'under 1.5 times');
   assert.deepEqual(lopsided([['CI / Tests (linux-1)', 300], ['CI / Tests (linux-2)', 200]]), [], '1.5 times but under 2 minutes apart');
@@ -501,6 +503,9 @@ ${axes}
   assert.deepEqual(lopsided("        python-version: ['3.9', '3.12']", [['CI / Tests (3.9)', 900], ['CI / Tests (3.12)', 360]]), [], 'versions');
   assert.deepEqual(lopsided('        group:\n          - a\n          - b', [['CI / Tests (a)', 900], ['CI / Tests (b)', 360]]), ['CI / Tests (a)'], 'a split key, whatever its values');
   assert.deepEqual(lopsided('        index: [1, 2, 3]', [['CI / Tests (1)', 900], ['CI / Tests (2)', 360], ['CI / Tests (3)', 400]]), ['CI / Tests (1)'], 'whole-number legs');
+  assert.deepEqual(lopsided('        leg: [0, 1]', [['CI / Tests (0)', 900], ['CI / Tests (1)', 360]]), ['CI / Tests (0)'], 'shard indexes from 0');
+  assert.deepEqual(lopsided('        node: [18, 20, 22]', [['CI / Tests (18)', 900], ['CI / Tests (20)', 360], ['CI / Tests (22)', 400]]), [], 'whole-number versions are not shard indexes');
+  assert.deepEqual(lopsided('        python: [2, 3]', [['CI / Tests (2)', 900], ['CI / Tests (3)', 360]]), [], 'whole numbers that do not start at 0 or 1');
   const both = '        os: [macos-13, macos-14]\n        shard: [1, 2]';
   assert.deepEqual(lopsided(both, [['CI / Tests (macos-13, 1)', 900], ['CI / Tests (macos-13, 2)', 360], ['CI / Tests (macos-14, 1)', 300], ['CI / Tests (macos-14, 2)', 300]]), ['CI / Tests (macos-13, 1)'], 'shards are compared within one image only');
 });

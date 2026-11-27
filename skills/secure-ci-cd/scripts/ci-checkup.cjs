@@ -722,7 +722,13 @@ function reachAnalysis(root, fileList, workflows) {
 // ---------------------------------------------------------------------------------------------
 // Checks.
 
-function item(level, check, rel, message, fix) { return { level, check, path: rel || '', message, fix: fix || '' }; }
+function item(level, check, rel, message, fix, facts) { return { level, check, path: rel || '', message, fix: fix || '', ...(facts ? { facts } : {}) }; }
+// Values that read as shard indexes: two or more whole numbers that count up by one from 0 or 1.
+function shardIndexes(values) {
+  if (!values || values.length < 2 || !values.every((value) => /^\d+$/.test(value))) return false;
+  const numbers = values.map(Number).sort((a, b) => a - b);
+  return numbers[0] <= 1 && numbers.every((number, i) => number === numbers[0] + i);
+}
 
 function isTestFile(rel) { return TEST_NAME.test(path.posix.basename(rel)) && CODE_EXT.test(rel); }
 function testDirOf(rel) {
@@ -1118,18 +1124,19 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
       if (job.matrix || !testJob(job)) continue;
       if (tracked === undefined) tracked = trackedTests(root, options.tools);
       const shards = Math.min(MAX_SHARDS, Math.max(2, Math.ceil(seconds / target)));
-      items.push(item('GAP', 'speed.shards', workflow.rel, `${name} took up to ${minutes(seconds)} with no sharding; about ${shards} shards would bring it near ${minutes(seconds / shards)} (${testCountText(tracked)})`, `arrange shards for this job in this repository's own CI (${SHARD_PLAYBOOK}), or record why not with an ignore entry and a reason`));
+      items.push(item('GAP', 'speed.shards', workflow.rel, `${name} took up to ${minutes(seconds)} with no sharding; about ${shards} shards would bring it near ${minutes(seconds / shards)} (${testCountText(tracked)})`, `arrange shards for this job in this repository's own CI (${SHARD_PLAYBOOK}), or record why not with an ignore entry and a reason`, { job: name, seconds: Math.round(seconds), shards, tests: tracked ? tracked.count : null }));
     }
   }
   // Lopsided shards: legs of one matrix job that differ only in a split axis (a key such as shard,
-  // group, chunk, part or index, or whole-number values), compared by their median time, so legs
-  // for different runner images, systems or versions are never compared.
+  // group, chunk, part or index, or shard indexes: whole numbers counting up from 0 or 1, never other
+  // whole numbers such as Node 18, 20, 22), compared by their median time, so legs for different
+  // runner images, systems or versions are never compared.
   const groups = new Map();
   for (const [name, seconds] of measured.medians) {
     const suffix = name.match(/^(.*) \((.*)\)$/);
     if (!suffix) continue;
     for (const { workflow, job } of jobOf(name)) {
-      const split = job.axes.filter((axis) => SPLIT_KEY.test(axis.key) || (axis.values && axis.values.every((value) => /^\d+$/.test(value))));
+      const split = job.axes.filter((axis) => SPLIT_KEY.test(axis.key) || shardIndexes(axis.values));
       if (!split.length) continue;
       const isSplitValue = (value) => split.some((axis) => (axis.values ? axis.values.includes(value) : /\d/.test(value)));
       const key = `${workflow.rel}\n${suffix[1]} (${suffix[2].split(', ').map((value) => (isSplitValue(value) ? '#' : value)).join(', ')})`;
@@ -1141,7 +1148,7 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
     const slow = legs.reduce((a, b) => (b.seconds > a.seconds ? b : a));
     const fast = legs.reduce((a, b) => (b.seconds < a.seconds ? b : a));
     if (slow.seconds < fast.seconds * LOPSIDED_RATIO || slow.seconds - fast.seconds < LOPSIDED_SECONDS) continue;
-    items.push(item('GAP', 'speed.shards-lopsided', slow.workflow.rel, `${slow.name} took ${minutes(slow.seconds)} and ${fast.name} ${minutes(fast.seconds)} (median of recent green runs), so the shards are lopsided`, `rebalance the split from fresh per-file times (${SHARD_PLAYBOOK})`));
+    items.push(item('GAP', 'speed.shards-lopsided', slow.workflow.rel, `${slow.name} took ${minutes(slow.seconds)} and ${fast.name} ${minutes(fast.seconds)} (median of recent green runs), so the shards are lopsided`, `rebalance the split from fresh per-file times (${SHARD_PLAYBOOK})`, { slow: slow.name, slow_seconds: Math.round(slow.seconds), fast: fast.name, fast_seconds: Math.round(fast.seconds) }));
   }
   return items;
 }
