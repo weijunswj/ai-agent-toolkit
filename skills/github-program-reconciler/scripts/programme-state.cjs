@@ -1073,6 +1073,7 @@ function validateChild(doc) {
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
     if (isObject(doc.private) && doc.private.keep_open !== undefined) validateKeepOpen(errors, doc.private.keep_open);
     if (isObject(doc.private) && doc.private.pr_heads !== undefined) validatePrHeads(errors, doc.private.pr_heads);
+    if (isObject(doc.private) && doc.private.done_when !== undefined) validateDoneWhen(errors, doc.private.done_when);
     if (isObject(doc.private) && doc.private.agent_uat !== undefined) validateAgentUat(errors, doc.private.agent_uat);
     if (isObject(doc.private) && doc.private.gate_sessions !== undefined) validateGateSessions(errors, doc.private.gate_sessions);
     check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
@@ -1089,6 +1090,29 @@ function validatePrHeads(errors, heads) {
   check(errors, Array.isArray(heads) && heads.length <= PR_HEADS_LIMIT && new Set(heads.map(entry => entry?.head)).size === heads.length
     && heads.every(entry => isObject(entry) && Object.keys(entry).length === 2 && isInt(entry.pr, 1) && isSha(entry.head)),
   `private.pr_heads must list at most ${PR_HEADS_LIMIT} different heads, each as a PR number and its full head SHA`);
+}
+
+// The task page's DONE WHEN checkbox rows as last counted (noteDoneWhen): ticked, and all of them.
+// The graph's Progress count reads it, so a row draws the same for the same state whether or not
+// this pass read the page. Like pr_heads it lives in the child's private part, so older Toolkit
+// readers still load the document.
+function validateDoneWhen(errors, count) {
+  check(errors, isObject(count) && Object.keys(count).length === 2 && isInt(count.total, 1) && isInt(count.ticked) && count.ticked <= count.total,
+    'private.done_when must hold ticked and total, whole numbers with 0 <= ticked <= total and total at least 1');
+}
+
+// Counts the DONE WHEN rows on a task page this pass read (rowTicks) into private.done_when, or
+// removes the count when the page has none. A page the pass did not read completely keeps the
+// stored count.
+function noteDoneWhen(child, issue) {
+  if (!issue || issue.is_pull_request || issue.complete === false || typeof issue.body !== 'string') return child;
+  const { ticked, total } = childRows().rowTicks(issue.body).done_when;
+  if (total) child.private = { ...child.private, done_when: { ticked, total } };
+  else if (child.private?.done_when) {
+    child.private = { ...child.private };
+    delete child.private.done_when;
+  }
+  return child;
 }
 
 // The agent's UAT on an owed UAT (agent UAT first): STARTED (running; the evidence says where), then
@@ -2659,12 +2683,24 @@ function graphRowCells(line) {
   return cells;
 }
 
-// `issues` maps an issue number to what GitHub shows for it (title, close time).
+// A task's DONE WHEN progress, `Progress: <ticked>/<all>`, from the count its state keeps
+// (private.done_when, noteDoneWhen), or null when its page had no DONE WHEN checkbox row. Read from
+// state alone, a row draws the same for the same state, whichever pages a pass read.
+function progressText(child) {
+  const count = child?.private?.done_when;
+  return count ? `Progress: ${count.ticked}/${count.total}` : null;
+}
+
+// `issues` maps an issue number to what GitHub shows for it (title, close time). The Waiting on
+// cell starts with the task's DONE WHEN progress when its page has DONE WHEN rows.
 function renderParentBlockBody(parent, children, issues = new Map(), comments = new Map()) {
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const issue = issues.get(outcome.issue);
-    return `|${taskName(outcome, issue)}|#${outcome.issue}|${statusCell(outcome, child)}|${waitingCell(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
+    const waiting = waitingCell(outcome, child);
+    const progress = progressText(child);
+    const cell = !progress ? waiting : waiting === '-' ? progress : `${progress}, ${waiting}`;
+    return `|${taskName(outcome, issue)}|#${outcome.issue}|${statusCell(outcome, child)}|${cell}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
   });
   return [
     revisionLine(parent, children),
@@ -6654,6 +6690,7 @@ class Reconciler {
     }
     const seen = observed.prGraph?.discovery.get(outcome.issue);
     child = notePrHeads(child, seen?.complete ? seen.heads : []);
+    child = noteDoneWhen(child, issue);
     const journals = observed.journals?.get(outcome.issue) || null;
     if (!journals) return { doc: child, checks, journals, findings: [], holds: [] };
     const folded = foldJournals(child, journals);
@@ -7901,7 +7938,7 @@ class Reconciler {
         // completion time taken from the issue and the journals read in this pass belong to it: the
         // gate is re-folded from those journals on the document read at apply time, so an
         // assignment issued since planning is never overwritten.
-        const fields = effect.kind === 'create_state' ? ['pr', ...(effect.record ? ['candidate'] : []), ...(desired.private?.pr_heads ? ['private'] : []), ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
+        const fields = effect.kind === 'create_state' ? ['pr', ...(effect.record ? ['candidate'] : []), ...(desired.private?.pr_heads || desired.private?.done_when ? ['private'] : []), ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           onConflict: checkFreshState,
@@ -7911,8 +7948,14 @@ class Reconciler {
             const copy = plan.effects.find(entry => entry.kind === 'copy_child_lifecycle' && entry.target.issue === effect.target.issue);
             if (copy) doc = copyLifecycle(doc, copy);
             for (const key of fields) {
-              // Of `private`, the sweep writes only the PR heads; the rest stays as the controller left it.
-              if (key === 'private') { if (desired.private?.pr_heads) doc.private = { ...doc.private, pr_heads: clone(desired.private.pr_heads) }; continue; }
+              // Of `private`, the sweep writes only the PR heads and the DONE WHEN count; the rest stays
+              // as the controller left it.
+              if (key === 'private') {
+                if (desired.private?.pr_heads) doc.private = { ...doc.private, pr_heads: clone(desired.private.pr_heads) };
+                if (desired.private?.done_when) doc.private = { ...doc.private, done_when: clone(desired.private.done_when) };
+                else if (doc.private?.done_when) { doc.private = { ...doc.private }; delete doc.private.done_when; }
+                continue;
+              }
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
             }

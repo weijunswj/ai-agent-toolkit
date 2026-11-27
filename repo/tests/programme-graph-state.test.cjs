@@ -1230,3 +1230,54 @@ test('self-record S10: while nothing is bound to the recorded head, a push moves
   assert.ok(again.apply(planned).holds.some(e=>e.target==='#2'));
   assert.equal(k.child(2).candidate.head,PICKED);
 });
+
+// DONE WHEN progress (INT-TK421-1395): each graph row's Waiting on cell starts with `Progress:
+// <ticked>/<all>` counted on the task page's DONE WHEN checkbox rows; no rows, no prefix.
+const doneWhen = (ticked, all, extra = '') => `Goal.\n\n## DONE WHEN\n\n${Array.from({length:all},(_,i)=>`- [${i < ticked ? 'x' : ' '}] Row ${i + 1}`).join('\n')}\n${extra}`;
+const waitingOf = (f, n) => owedOn(f, n).waiting;
+test('DONE WHEN progress: 3 of 5 ticked reads Progress: 3/5, none ticked 0/5, no rows no prefix',()=>{
+  const f=fixture([2,3,4]);
+  f.github.issues.get(2).body=doneWhen(3,5);
+  f.github.issues.get(3).body=doneWhen(0,5);
+  // ROWS rows, rows in a fence and rows under another heading are not DONE WHEN rows.
+  f.github.issues.get(4).body='Goal.\n\n## ROWS\n\n- [x] Polish row\n\n## DONE WHEN\n\n```\n- [x] Example only\n```\n\n## Notes\n\n- [ ] Not a criterion\n';
+  f.run();
+  assert.deepEqual([2,3,4].map(n=>waitingOf(f,n)),['Progress: 3/5','Progress: 0/5','-']);
+  // The count is kept in state, and only a well-formed one is accepted.
+  assert.deepEqual([2,3,4].map(n=>f.child(n).private.done_when),[{ticked:3,total:5},{ticked:0,total:5},undefined]);
+  for (const bad of [{ticked:6,total:5},{ticked:0,total:0},{ticked:1},{ticked:1,total:2,extra:1},{ticked:-1,total:2}]) {
+    assert.ok(state.validateChild({...f.child(2),private:{...f.child(2).private,done_when:bad}}).some(error=>error.startsWith('private.done_when')),JSON.stringify(bad));
+  }
+  // Ticking a row shows on the next pass.
+  f.github.issues.get(3).body=doneWhen(1,5); f.run();
+  assert.equal(waitingOf(f,3),'Progress: 1/5');
+});
+
+test('DONE WHEN progress leads the rest of the Waiting on cell, which is unchanged',()=>{
+  const f=fixture(); pr(f,22,{head:UAT_HEAD,body:'Refs #2'});
+  f.github.issues.get(2).body=doneWhen(1,2);
+  owing(f, doc=>({pr:{...doc.pr,number:22},gate:{...doc.gate,role:'G2',state:'ACTIVE'}}));
+  f.run();
+  assert.equal(waitingOf(f,2),'Progress: 1/2, G2, then Agent: UAT on PR #22');
+});
+
+test('DONE WHEN progress: a finished task shows its count too',()=>{
+  const f=fixture([2,3]);
+  f.github.issues.get(3).body=doneWhen(5,5);
+  f.close(3); f.run();
+  assert.equal(statusOf(f,3).split(' · ')[0],'COMPLETED');
+  assert.equal(waitingOf(f,3),'Progress: 5/5');
+});
+
+test('DONE WHEN progress: a single-issue pass keeps the count the graph shows for tasks it did not read',()=>{
+  const f=fixture([2,3]);
+  f.github.issues.get(2).body=doneWhen(1,4);
+  f.github.issues.get(3).body=doneWhen(2,3);
+  f.run();
+  f.github.issues.get(2).body=doneWhen(2,4);
+  f.github.issues.get(3).body=doneWhen(3,3);
+  f.pass().run({apply:true,issue:2});
+  assert.deepEqual([waitingOf(f,2),waitingOf(f,3)],['Progress: 2/4','Progress: 2/3']);
+  f.run();
+  assert.equal(waitingOf(f,3),'Progress: 3/3');
+});

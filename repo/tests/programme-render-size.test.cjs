@@ -32,6 +32,18 @@ test('72-row programme with four PRs per task and 106 waiting findings fits with
   assert.deepEqual({ commits: f.github.commits, writes: f.github.mutations() }, before, 'unchanged scale fixture makes no writes');
 });
 
+test('DONE WHEN progress on every row keeps the 72-row graph, its rows and the parent page within budget', () => {
+  const f = renderScaleFixture(state, { doneWhen: true });
+  const graph = state.renderParentBlockBody(f.parent, f.children, f.issues);
+  const rows = graph.split('\n').filter(line => /^\|[^|\n]*\|#\d+\|/.test(line));
+  assert.equal(rows.filter(line => /^\|[^|]*\|#\d+\|[^|]*\|Progress: 11\/12/.test(line)).length, 72, 'every row carries its count');
+  for (const row of rows) assert.ok(row.length < 120, `a row stays short (${row.length}): ${row}`);
+  assert.ok(state.renderBlock(graph, '3.56.0').length < 19000);
+  const current = state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now);
+  assert.ok(f.reconciler.projectBody(421, f.handWritten, graph, [], '3.56.0', null, current).body.length < 57000);
+  assert.ok(!f.reconciler.plan().holds.some(h => h.code === 'BODY_TOO_LARGE'));
+});
+
 test('parent rows stay short and name no PR however many a task has; its task page lists every one', () => {
   const f = renderScaleFixture(state);
   const render = () => state.renderParentBlockBody(f.parent, f.children, f.issues);
