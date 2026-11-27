@@ -135,7 +135,13 @@ function summaryRows(facts) {
   if (!appSet && !appUnread && facts.appCommand) {
     steps.push({ part: 'Governance App', text: `Lets the cloud workflows act on GitHub. Run it in PowerShell, press Enter when it asks, then click Create and Install on GitHub.`, command: facts.appCommand });
   }
-  if (facts.copies && facts.copies.files > 0) rows.push(['Toolkit instruction copies', `${facts.copies.files} ${facts.copies.files === 1 ? 'file' : 'files'} left; say clean up copies`, DOES.copies]);
+  // The copies older setups left: cleaned on the owner's word, or held or stopped with the reason.
+  const copies = facts.copies;
+  if (copies && copies.files > 0) {
+    const left = `${copies.files} ${copies.files === 1 ? 'file' : 'files'} left`;
+    rows.push(['Toolkit instruction copies', copies.held ? `${left}, cleanup held. Not removed yet: ${copies.held}. ${copies.step}`
+      : copies.refused ? `${left}, cleanup cannot run. Not removed yet: ${copies.refused}` : `${left}; say clean up copies`, DOES.copies]);
+  }
   return { rows, steps };
 }
 

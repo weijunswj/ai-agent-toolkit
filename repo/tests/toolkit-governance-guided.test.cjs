@@ -39,7 +39,7 @@ test('the three questions come in one message, each part explained first, then t
   // The three explanations, as labelled bullets, before any question.
   const explained = lines.filter(line => line.startsWith('- **'));
   assert.deepEqual(explained.map(line => /^- \*\*([^:]+):\*\*/.exec(line)[1]), ['GitHub governance', 'Evidence store', 'Task auto-merge with merge train']);
-  assert.match(explained[1], new RegExp(`Suggested: ${STORE}, folder \`state/${SLUG}/\`\\. Toolkit creates it if it does not exist yet\\.`));
+  assert.match(explained[1], new RegExp(`Suggested: ${STORE}, path \`state/${SLUG}/\`\\. Toolkit creates it if it does not exist yet\\.`));
   const firstQuestion = lines.findIndex(line => /^\*\*1\. Question: /.test(line));
   assert.ok(firstQuestion > lines.indexOf(explained.at(-1)), 'the questions come after every explanation');
   // Questions last: numbered and bold, choices lettered and nested under each, the recommended one marked.

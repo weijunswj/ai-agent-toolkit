@@ -38,16 +38,16 @@ test('the governance guide runs setup, then offers the next step without answeri
     const context = commands.phraseContext(phrase);
     assert.ok(/'setup'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
     assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
-    assert.match(context, /works like setup toolkit's: the user replies `all recommended` or only their changes, such as `1\.2=B`/);
+    assert.match(context, /The user answers in their own words or with the letters, such as `1A 2A 3A`; how the questions show \(text, a card or the end-of-turn box\) is the app's choice\./);
     assert.match(context, /one-use ticket/);
     // The bank's Agents line is for the agent alone; every app shows the owner the typed bank. A guide
     // that said "show its output in full" put the Agents line on the owner's screen.
     assert.match(context, /do what its paragraph that starts with `Agents` says\. That paragraph is for you alone: never show the user any of it\./);
-    assert.match(context, /Show them the rest of the output once, as printed, as plain text and never in a code block/);
-    assert.doesNotMatch(context, /question card|card input/, 'the bank is never put on a card');
+    assert.match(context, /Show them the rest of the output once, as printed, never in a code block of your own/);
+    assert.doesNotMatch(context, /AskUserQuestion|card input|wait/, 'no card is forced and no wait step');
     assert.doesNotMatch(context, /in full and as printed|every permission block/, 'never asks for the whole output, Agents paragraph included');
     assert.doesNotMatch(context, /--set|own terminal|toolkit governance enable/, 'no terminal hop and no switch flag');
-    assert.match(context, /Never answer the bank for the user\.$/);
+    assert.match(context, /Never answer for the user\.$/);
     for (const other of ['status', 'check', 'discover', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
   }
   // The gate's answer phrases stay the gate's.
@@ -150,7 +150,7 @@ test('the list is one two-column table per group, in group order, with every com
 test('the toolkit-setup skill gets the line for any typed command from the script', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
   assert.match(skill.match(/^description: .*$/m)[0], /`setup toolkit`, `refresh toolkit`, [^\n]*`toolkit cmd`, `toolkit governance`, refresh governance and toolkit permissions/);
-  assert.match(skill, /If the whole message looks like a typed Toolkit command \(such as `toolkit cmd`, `toolkit governance` or `refresh governance`\), run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says\. For `toolkit governance` that is the governance question bank, never a status or check summary\./);
+  assert.match(skill, /If the whole message looks like a typed Toolkit command \(such as `toolkit cmd`, `toolkit governance` or `refresh governance`\), run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says\. For `toolkit governance` that is the guided governance setup \(its summary table where governance is on\), never a status or check summary\./);
   assert.doesNotMatch(skill, /hook line|as if the hook/, 'the skill waits for no hook');
   for (const phrase of commands.PHRASES) {
     const run = spawnSync(process.execPath, [SCRIPT, ` ${phrase.toUpperCase()}. `], { encoding: 'utf8' });
@@ -187,8 +187,8 @@ test('Claude Code prompt hook: a typed command adds no note, on a computer or in
 
 test('Claude Code prompt hook: a refusal, the governance question and other governance context are returned unchanged', () => {
   assert.deepEqual(prompt({ action: 'block', reason: 'refused' }, 'toolkit cmd'), { decision: 'block', reason: 'refused' });
-  const shown = prompt({ action: 'pass', context: 'governance question', notice: 'pick one' }, 'toolkit cmd');
+  const shown = prompt({ action: 'pass', context: 'governance question' }, 'toolkit cmd');
   assert.equal(shown.hookSpecificOutput.additionalContext, 'governance question');
-  assert.equal(shown.systemMessage, 'pick one');
+  assert.equal(shown.systemMessage, undefined, 'no card notice: how a question shows is the app\'s choice');
   assert.equal(prompt({ action: 'pass', context: 'a reply ticket' }, 'toolkit cmd').hookSpecificOutput.additionalContext, 'a reply ticket');
 });

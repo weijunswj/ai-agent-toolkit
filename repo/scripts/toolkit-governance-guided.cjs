@@ -63,7 +63,7 @@ function guidedQuestions({ state, store = null, agreed = false, publicRepo = fal
     });
   }
   if (!disabled && store) {
-    const where = `${store.repository}, folder \`${store.path}\``;
+    const where = `${store.repository}, path \`${store.path}\``;
     questions.push({
       key: 'store', title: 'Evidence store',
       explain: `A separate private repository where Toolkit keeps programme records, plans and reviews, so they never sit in your code. Suggested: ${where}. ${store.exists ? 'It already exists.' : 'Toolkit creates it if it does not exist yet.'} Without a store governance cannot keep its records, so it stays off.${publicRepo ? ' This repository is public: its programme file names the store (the name only, never its contents) and the parent issue is public; the store stays private.' : ''}`,
