@@ -450,13 +450,33 @@ function pruneStamps(folder, nowMs) {
   } catch { /* nothing to prune */ }
 }
 
-// The owed check, with the permissions line added to whatever it says.
+// ---- slow-CI line ---------------------------------------------------------------------------------
+
+// The daily slow-CI line (toolkit-slow-ci.cjs) for the owner at turn end, in any local chat in a
+// repository with a github.com origin, governed or not: given once per new result, whichever comes
+// first, this or a session start; never a block. It reads this computer's record only and may start
+// the day's check in the background. Cloud sessions and sessions a Toolkit launcher started get none,
+// and any failure drops the line.
+function slowCiNote(input, deps = {}) {
+  try {
+    const env = deps.env || process.env;
+    if (!input || typeof input !== 'object' || (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop')) return null;
+    if (env.CLAUDE_CODE_REMOTE === 'true' || typeof input.cwd !== 'string' || !input.cwd) return null;
+    const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
+    if (LAUNCHER_MARKERS.some(name => String(env[name] || '').trim())) return null;
+    const slowCi = require('./toolkit-slow-ci.cjs');
+    const record = deps.slowCi || new slowCi.SlowCiRecord({ environment: env });
+    return slowCi.turnEndLine(record.note(input.cwd));
+  } catch { return null; }
+}
+
+// The owed check, with the permissions and slow-CI lines added to whatever it says.
 function check(input, deps = {}) {
   const result = owedCheck(input, deps);
-  const line = permissionsNote(input, deps);
-  if (!line) return result;
+  const lines = [permissionsNote(input, deps), slowCiNote(input, deps)].filter(Boolean);
+  if (!lines.length) return result;
   const output = { ...(result.output || {}) };
-  output.systemMessage = [output.systemMessage, line].filter(Boolean).join('\n');
+  output.systemMessage = [output.systemMessage, ...lines].filter(Boolean).join('\n');
   return { ...result, output };
 }
 

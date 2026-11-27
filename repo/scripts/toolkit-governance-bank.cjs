@@ -233,7 +233,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${left}, cleanup cannot run`, text: `Not removed yet: ${copies.refused}` }));
   } else if (governed && copies && copies.files > 0) {
     specs.push({ ...statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: `${left} (Toolkit default: clean up)`,
-      text: 'Older setups copied the governed rules, playbooks and shims here; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them' }), copies_clean: true });
+      text: 'Older setups copied the governed rules, playbooks and shims here, and sometimes CI shard workflows Toolkit has since retired; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them' }), copies_clean: true });
   }
   const appName = APP_NAMES[permissions.host] || 'this app';
   const missing = permissions.checked ? permissions.missing : null;

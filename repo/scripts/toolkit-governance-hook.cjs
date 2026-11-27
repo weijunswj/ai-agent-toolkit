@@ -69,6 +69,24 @@ function withAskingLine(output, environment) {
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
+// The slow-CI line for this computer's session start, not yet marked shown: { text, markShown }, or
+// null. Never in a session a Toolkit launcher started (nobody reads its first reply), and never when
+// the record cannot be read. Called for a computer's session start only, never for a cloud session's.
+function slowCiLine(input, options) {
+  try {
+    const environment = options.environment || process.env;
+    const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
+    if (LAUNCHER_MARKERS.some(name => String(environment[name] || '').trim()) || typeof input.cwd !== 'string' || !input.cwd) return null;
+    const slowCi = require('./toolkit-slow-ci.cjs');
+    const record = options.slowCi || new slowCi.SlowCiRecord({ registryOptions: options.registryOptions || {}, environment });
+    const pending = record.peek(input.cwd);
+    if (!pending) return null;
+    // A result with no finding is saved as shown with no line.
+    if (!pending.note) { pending.markShown(); return null; }
+    return { text: slowCi.sessionStartLine(pending.note), markShown: pending.markShown };
+  } catch { return null; }
+}
+
 // Appends `export TOOLKIT_HOST_SESSION=<id>` to the file Claude Code runs before each shell command of
 // this session (the last line wins after /clear). Optional: any failure is ignored.
 function exportHostSession(input, environment, gate) {
@@ -175,8 +193,12 @@ function respondSteady(event, input, options) {
       // Its line leads the governance text, or joins the held block when the setup is not complete.
       const caughtUp = catchUpLine(fresh, options);
       const beside = asksHere(options.environment || process.env) ? `\n\n${ASKING_LINE}` : '';
-      const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(beside, 'utf8');
-      text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude', limit, localCopy: caughtUp });
+      // The daily slow-CI line (toolkit-slow-ci.cjs) goes after the governance text, with room kept
+      // for it; it counts as shown only once that text is built, so a failure there never loses it.
+      const slow = slowCiLine(input, options);
+      const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(beside, 'utf8') - (slow ? Buffer.byteLength(`\n\n${slow.text}`, 'utf8') : 0);
+      const governance = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude', limit, localCopy: caughtUp });
+      text = [governance, slow && slow.markShown() ? slow.text : null].filter(Boolean).join('\n\n');
     }
     return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch (error) {
