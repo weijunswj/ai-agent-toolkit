@@ -2,7 +2,8 @@
 
 // The shared hostile-input set (support/hostile-inputs.cjs): every family has cases, each case
 // holds exactly the code points it names and its source holds none raw, variants yields every
-// line-break and byte-order-mark form, timing tells quadratic work from linear, and
+// line-break and byte-order-mark form, timing tells quadratic work from linear (also on a machine
+// that stalls long samples), and
 // expectDefaultDeny reports accepted cases and stale exceptions.
 
 const assert = require('node:assert/strict');
@@ -122,42 +123,94 @@ test('H-04: timing fails on quadratic work and passes on linear work', () => {
       startSize: 2, maxSize: 128, minMs: 8, ...options,
       clock: () => { reads += 1; return ticks; },
     });
-    assert.equal(reads, samples.length * 2, 'one start and finish per sample');
-    return { result, samples, built };
+    return { result, samples, built, reads };
   };
-  for (const [cost, ok, times, ratio, largeRuns] of [
-    [size => size, true, [8, 32], 4, 1],
+  // Calibration times each run alone; then each pair times four smaller runs as one sample (one
+  // start and one finish) and one larger run, at least two pairs.
+  for (const [cost, ok, times, ratio, pairs] of [
+    [size => size, true, [8, 32], 4, 2],
     [size => size * size, false, [64, 1024], 16, 3],
   ]) {
-    const { result, samples, built } = measure(cost);
+    const { result, samples, built, reads } = measure(cost);
     assert.equal(result.ok, ok, result.message);
     assert.equal(result.ratio, ratio);
     assert.equal(result.size, 8, 'calibration stops at minMs');
     assert.deepEqual(result.times, times);
     assert.match(result.message, /limit 10x/);
     assert.deepEqual(built, [2, 2, 8, 32]);
-    assert.deepEqual(samples, [2, 2, 2, 2, 8, 8, 8, ...Array(largeRuns).fill(32)]);
+    assert.deepEqual(samples, [2, 2, 2, 2, 8, 8, 8, ...Array(pairs).fill([8, 8, 8, 8, 32]).flat()]);
+    assert.equal(reads, 2 * (7 + 2 * pairs), 'one start and finish per sample');
   }
   const capped = measure(size => size, { minMs: 10000 });
   assert.equal(capped.result.size, 32, 'calibration stops before the larger input would exceed maxSize');
   assert.deepEqual(capped.built, [2, 2, 8, 32, 128]);
-  assert.deepEqual(capped.samples, [2, 2, 2, 2, 8, 8, 8, 32, 32, 32, 128]);
+  assert.deepEqual(capped.samples, [2, 2, 2, 2, 8, 8, 8, 32, 32, 32, ...Array(2).fill([32, 32, 32, 32, 128]).flat()]);
   const tooFast = measure(() => 0);
   assert.equal(tooFast.result.ok, true, 'below minMs remains a pass');
   assert.deepEqual(tooFast.result.times, [0, 0]);
-  assert.equal(tooFast.samples.length, 11, 'zero-duration work still has bounded sampling');
+  assert.equal(tooFast.samples.length, 20, 'zero-duration work still has bounded sampling');
   const boundary = measure(size => size === 32 ? 80 : size);
   assert.equal(boundary.result.ratio, 10);
   assert.equal(boundary.result.ok, true, 'the unchanged ratio threshold is inclusive');
   const above = measure(size => size === 32 ? 81 : size);
   assert.equal(above.result.ok, false, above.result.message);
-  assert.equal(above.samples.length, 10, 'over-limit larger runs use all three samples');
+  assert.equal(above.samples.length, 22, 'over-limit larger runs use all three pairs');
   for (const shape of hostile.cases(['large-input'])) {
     const text = shape.build(1000);
     assert.ok(text.length >= 1000, shape.id);
     const keys = text.split('\n').filter(Boolean).map(line => line.split(':')[0]);
     assert.equal(new Set(keys).size, keys.length, `${shape.id} repeats no key`);
   }
+});
+
+// Red on the old timing (main CI, 26 and 27 Nov 2026: a linear closure scan read 11.5x and 10.7x on
+// a busy Linux runner): work moves the clock by its cost, and every 16 ticks of work the machine also
+// stalls for 40, as a busy runner preempts long samples. A lone 8-tick smaller run can fall between
+// stalls, so it read 8 against the larger run's 112 (14x). Timed as four runs in one sample, the
+// smaller size meets the same stalls as the larger one: linear work passes, quadratic still fails.
+test('H-06: a stall a short sample could dodge slows both samples alike, and quadratic work still fails', () => {
+  const stalled = cost => {
+    let work = 0;
+    let ticks = 0n;
+    return hostile.timing(text => {
+      const before = Math.floor(work / 16);
+      work += cost(text.length);
+      ticks += BigInt(cost(text.length) + (Math.floor(work / 16) - before) * 40) * 1000000n;
+    }, size => 'a'.repeat(size), { startSize: 2, maxSize: 128, minMs: 8, clock: () => ticks });
+  };
+  const linear = stalled(size => size);
+  assert.equal(linear.ok, true, linear.message);
+  assert.deepEqual(linear.times, [28, 112]);
+  const quadratic = stalled(size => size * size);
+  assert.equal(quadratic.ok, false, quadratic.message);
+  assert.equal(quadratic.ratio, 16);
+});
+
+// Red on a timing that stops after the first pair within the limit (the review of this change found
+// a slowed first smaller sample let quadratic work pass at 256 pause positions): one pause of 200
+// ticks, added to the first run that starts at or after tick `at`, scanned over the whole timeline,
+// never turns quadratic work into a pass.
+test('H-07: one pause anywhere in the timeline never passes quadratic work', () => {
+  const run = (cost, at) => {
+    let ticks = 0;
+    let paused = at === null;
+    return hostile.timing(text => {
+      if (!paused && ticks >= at) { ticks += 200; paused = true; }
+      ticks += cost(text.length);
+    }, size => 'a'.repeat(size), { startSize: 2, maxSize: 128, minMs: 8, clock: () => BigInt(ticks) * 1000000n });
+  };
+  const quadratic = size => size * size;
+  assert.equal(run(quadratic, null).ok, false, 'quadratic work fails with no pause');
+  assert.equal(run(size => size, null).ok, true, 'linear work passes with no pause');
+  let total = 0;
+  hostile.timing(text => { total += quadratic(text.length); }, size => 'a'.repeat(size), { startSize: 2, maxSize: 128, minMs: 8, clock: () => BigInt(total) * 1000000n });
+  const passes = [];
+  for (let at = 0; at <= total; at += 1) {
+    const result = run(quadratic, at);
+    if (result.ok) passes.push({ at, ratio: result.ratio, times: result.times });
+  }
+  assert.ok(total > 1000, `the scan covers the whole timeline (${total} ticks)`);
+  assert.deepEqual(passes, [], 'a single pause turned quadratic work into a pass');
 });
 
 test('H-05: expectDefaultDeny reports accepted cases and stale or unknown exceptions', () => {
