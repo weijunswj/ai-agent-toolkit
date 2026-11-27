@@ -81,6 +81,8 @@ const ANSWER_USED = 'Your earlier answer was already used, and this reply change
 const CHANGE_ANOTHER = 'To change something, say turn off governance, task auto-merge on, task auto-merge off or change store.';
 // The reference the agent puts in front of the owner's answer, read off before the answer is parsed.
 const REFERENCE_PREFIX = /^\s*[0-9A-Za-z-]{16,19}\s*:\s*/;
+// A plain word that answers only the first time: yes, no or later on its own.
+const PLAIN_WORD = /^\s*(?:yes|y|no|later|not now)\s*[.!]*\s*$/i;
 const ALIASES = Object.freeze({ decline: 'disable' });
 const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|publish|security> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
@@ -633,8 +635,12 @@ class ToolkitGovernanceCli {
       // stands now is shown in its place, open for the owner's next reply.
       return again(['What Toolkit showed has changed since, so the answer was not used and nothing was written. Here it is as it stands now:', '', view.text], view.kind === 'summary' ? CHANGE_ANOTHER : REPLY_AGAIN);
     }
+    const answer = answers.replace(REFERENCE_PREFIX, '');
+    // After an answer was used, a plain yes, no or later meant for something else is never read as a
+    // second one (a stray yes after "later" once made the store, parent issue and pull request).
+    if (entry.used === true && view.kind === 'guided' && PLAIN_WORD.test(answer)) return again([ANSWER_USED], REPLY_AGAIN);
     let chosen;
-    try { chosen = view.parse(answers.replace(REFERENCE_PREFIX, '')); }
+    try { chosen = view.parse(answer); }
     catch (error) {
       if (!(error instanceof GuidedAnswerError)) throw error;
       // After a used answer, a reply that is not one (a bare ok) is not a lost answer.
