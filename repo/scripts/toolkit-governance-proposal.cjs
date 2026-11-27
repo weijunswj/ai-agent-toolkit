@@ -102,9 +102,12 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
   if (missingFiles(all).length) fail('PROPOSAL_ADOPTION_INCOMPLETE');
   return all;
 }
+// Checks still running are waited for, never asked about: an agent that found a governance pull
+// request's checks running asked its own merge question instead of running the merge (28 November 2026).
+const CHECKS_RUNNING = 'If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than Toolkit\'s merge card.';
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
-  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Show the owner its external effects and current checks, then run its merge in the same turn: Toolkit's merge hold asks the owner, so ask no merge question of your own first. This answer grants no merge permission.`;
+  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Show the owner its external effects and current checks, then run its merge in the same turn: Toolkit's merge hold asks the owner, so ask no merge question of your own first. ${CHECKS_RUNNING} This answer grants no merge permission.`;
 }
 
 // The checks the turn-on pull request's own workflows run, by job name: Toolkit requires them itself,
@@ -198,7 +201,7 @@ class GovernanceProposals {
     const run = sessionId && EPOCH.test(epoch) ? key(`${sessionId}:${epoch}`) : null;
     const request = value.requests.find(item => item.run === run && ['yes', 'no'].includes(item.answer) && this.#now() - new Date(item.at) >= 0 && this.#now() - new Date(item.at) <= cache.FRESH_MS);
     if (!request) return null;
-    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the setup questions again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and run its merge in the same turn: Toolkit's merge hold asks the owner.`} Governance stays as merged on the default branch.` };
+    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the setup questions again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and run its merge in the same turn: Toolkit's merge hold asks the owner. ${CHECKS_RUNNING}`} Governance stays as merged on the default branch.` };
   }
   // A failed query is unknown, never "there are no proposals". Closed unmerged PRs end requests.
   // One PR-state read per minute across chats. Claim before I/O, so even a killed hook is throttled.

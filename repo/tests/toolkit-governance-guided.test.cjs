@@ -171,6 +171,7 @@ async function run(ctx, argv, github) {
     stdout: { write: text => { out += text; return true; } }, stderr: { write: text => { err += text; return true; } },
     cwd: ctx.repo, interactive: false, registryOptions: ctx.registryOptions, ask: async () => '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
+    copiesReader: version => ({ copies: [{ id: 'managed-checkout', label: 'managed checkout', state: 'delivered', detail: version }] }),
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: SESSION },
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer,
     plainTextInstaller: (root, into) => {
@@ -226,8 +227,15 @@ test('the owner\'s answer sets everything up at once: store, parent issue, one s
   assert.match(done.out, /^Next: once its checks pass, approve merging https:\/\/github\.com\/toolkit-test-fixture\/fresh\/pull\/4 when Toolkit asks\. Toolkit then finishes the setup and gives you two commands to run\.$/m);
   // The owner's commands come after the merge, in the summary, never here.
   assert.doesNotMatch(done.out, /```powershell|toolkit-governance-app-setup|toolkit-permissions/);
+  // The turn-on summary states the copies Toolkit read and what it could not, and never hands the owner a
+  // check of every computer and cloud copy (owner UAT, 28 November 2026).
+  assert.ok(done.out.includes(`Toolkit copies on this computer: managed checkout ${readToolkitVersion()}. Toolkit cannot read the copies on other computers or in cloud sessions.`));
+  assert.doesNotMatch(done.out, /every computer and cloud copy|Merge only after/);
   const agents = done.out.trim().split(/\n\s*\n/).at(-1);
-  assert.match(agents, /^Agents: this line is for you alone\. .*wait for the checks of pull request #4 \(gh pr checks 4 --watch --interval 30\)\. When they pass, merge it with gh pr merge 4 --merge and do what Toolkit's merge hold says: the owner approves the merge there, never you\. After it has merged, run node "[^"]+toolkit-governance\.cjs" finish, then node "[^"]+toolkit-governance\.cjs" setup/);
+  // Checks still running are waited for in one background wait, never asked about (owner UAT, 28 November
+  // 2026: the agent asked "Approve merging #2?" while the checks ran); only a failure or refusal is told.
+  assert.match(agents, /^Agents: this line is for you alone\. .*wait for the checks of pull request #4 in one wait, in the background where your app has one \(gh pr checks 4 --watch --interval 30\), and ask the owner nothing meanwhile\. When they pass, merge it with gh pr merge 4 --merge and do what Toolkit's merge hold says: the owner approves the merge there, never you\. After it has merged, run node "[^"]+toolkit-governance\.cjs" finish, then node "[^"]+toolkit-governance\.cjs" setup/);
+  assert.match(agents, /Only if a check fails, the merge is refused for a reason other than Toolkit's merge card, or the owner does not approve, tell them in one line and stop\./);
   // Task auto-merge off: both switches off.
   const other = fixture(t);
   const second = fakeGitHub();

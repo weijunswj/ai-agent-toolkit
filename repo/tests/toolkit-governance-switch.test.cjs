@@ -22,7 +22,18 @@ const SESSION = 'session-owner-1';
 
 const SLUG = 'toolkit-test-fixture/switch';
 const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;
-const VERSION_LINE = `Merge only after every computer and cloud copy working on this repository runs Toolkit ${VERSION} or later; older copies show governance ERROR until they update.`;
+// The switch states its effect on older copies and never hands the owner a check of every computer and
+// cloud copy (owner UAT, 28 November 2026): beside it, the terminal names the copies read on this computer.
+const VERSION_LINE = `Toolkit copies older than Toolkit ${VERSION} read this switch as invalid and show governance ERROR for this repository until they update.`;
+const OWNER_CHECK = /every computer and cloud copy|Merge only after/;
+// The release identity check's answer for this computer, as the CLI's copies reader returns it.
+const COPIES = { copies: [
+  { id: 'managed-checkout', label: 'managed checkout', state: 'delivered', detail: VERSION },
+  { id: 'claude-account-copy', label: 'claude.ai account copy', state: 'not-delivered', detail: `3.1.0, needs ${VERSION}` },
+  { id: 'cloud-synced-plugin', label: 'cloud synced plugin copy', state: 'unknown', detail: 'plugin.json has no version' },
+  { id: 'projects-guidebook', label: 'Projects guidebook', state: 'absent', detail: '' },
+] };
+const COPIES_LINE = `Toolkit copies on this computer: managed checkout ${VERSION}; claude.ai account copy 3.1.0 (older than ${VERSION}); cloud synced plugin copy (could not be read: plugin.json has no version). Toolkit cannot read the copies on other computers or in cloud sessions.`;
 
 function bindingText(extra = {}) {
   return `${JSON.stringify({
@@ -63,6 +74,7 @@ async function run(ctx, argv, { interactive = false, answers = [], switchTranspo
     cwd: ctx.repo, interactive, registryOptions: ctx.registryOptions,
     ask: async question => { asked.push(question); return answers.shift() ?? ''; },
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
+    copiesReader: version => { assert.equal(version, VERSION, 'the copies are read against this release'); return COPIES; },
     permissionsChecker: () => ({ checked: true, host: 'claude', missing, stale: 0, update: 'node fixture-apply.cjs --apply', remove: 'node fixture-apply.cjs --remove' }), environment,
     ...(switchTransport ? { switchTransport } : {}),
     ...(appReader ? { appReader } : {}),
@@ -159,6 +171,8 @@ test('a change in words with the owner\'s ticket prepares one binding pull reque
   delete proposal.task_prs;
   assert.deepEqual(proposal, JSON.parse(ctx.mergedText), 'nothing else changes, and no reader-only field leaks in');
   assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with this release');
+  assert.ok(result.out.includes(COPIES_LINE), 'the copies read on this computer, and what could not be read, are stated');
+  assert.doesNotMatch(result.out, OWNER_CHECK, 'the owner is not handed a check of every copy');
   assert.match(result.out, /Prepared https:\/\/github\.com\/toolkit-test-fixture\/switch\/pull\/12: it sets task auto-merge on with merge trains and changes nothing else\. It applies only after you merge it/);
   assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).auto_merge, 'off', 'preparing grants nothing');
 
@@ -298,12 +312,24 @@ test('turning governance on carries the switch in the same enable proposal, for 
     assert.deepEqual(JSON.parse(text).task_prs, { auto_merge: 'after-gates', merge_train: 'on' }, `version ${version}`);
     assert.equal(JSON.parse(text).schema, 'toolkit.programme-binding.v2');
     assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with the proposal');
+    assert.ok(result.out.includes(COPIES_LINE), 'the turn-on summary states the copies it read');
+    assert.doesNotMatch(result.out, OWNER_CHECK, 'the turn-on summary hands the owner no check of every copy');
     assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).answered, false, 'a pending proposal grants nothing');
   }
   assert.equal(switchNote({ governance: 'enabled' }), '', 'an enable proposal without the switch says nothing about it');
   const note = switchNote({ governance: 'enabled', task_prs: { auto_merge: 'after-gates' } });
   assert.match(note, /sets this repository's switches: `task_prs\.auto_merge` to `after-gates`/);
   assert.ok(note.includes(VERSION_LINE), 'the enable pull request warns about older copies');
+  assert.ok(!note.includes('Toolkit copies on this computer'), 'a pull request body carries no one computer\'s copies');
+  assert.doesNotMatch(note, OWNER_CHECK);
+});
+
+test('the copies line names what was read on this computer and what could not be read', () => {
+  assert.equal(governance.toolkitCopiesLine(COPIES, VERSION), COPIES_LINE);
+  const beyond = 'Toolkit cannot read the copies on other computers or in cloud sessions.';
+  assert.equal(governance.toolkitCopiesLine({ copies: [{ label: 'managed checkout', state: 'absent', detail: '' }] }, VERSION), `Toolkit found no copy of itself to read on this computer. ${beyond}`);
+  assert.equal(governance.toolkitCopiesLine(null, VERSION), `Toolkit could not read its copies on this computer. ${beyond}`);
+  assert.equal(governance.toolkitCopiesLine(COPIES, null), `Toolkit could not read its copies on this computer. ${beyond}`, 'without its own release nothing is compared');
 });
 
 test('the summary turns governance off without the terminal, and a chat answer needs the owner\'s ticket', async t => {
@@ -390,6 +416,7 @@ test('the switch transport refuses a moved default branch and opens a pull reque
   assert.ok(!pr.input.body.includes(MARKER), 'never read as a governance decision');
   assert.match(pr.input.body, /changes only `task_prs\.auto_merge`.*It applies only after the owner merges it/s);
   assert.ok(pr.input.body.includes(VERSION_LINE), 'the switch pull request warns about older copies');
+  assert.doesNotMatch(pr.input.body, OWNER_CHECK, 'the switch pull request hands the owner no check of every copy');
 });
 
 test('the programme file update refuses a moved default branch or a second open update, and opens one pull request that is not a governance proposal', () => {

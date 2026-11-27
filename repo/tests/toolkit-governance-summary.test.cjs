@@ -259,6 +259,11 @@ test('the summary after a GitHub Free finish says what is on and what GitHub Fre
   // Missing workflow files are named.
   const missing = new Set([...files].filter(file => !file.endsWith('plain-text.yml')));
   assert.ok(tableOf(summary.renderSummary({ ...facts, files: missing })).includes('| Guards | On: personal data guard. Missing: plain-text check | Check every pull request and push |'));
+  // One command to run is "it", never "them" (owner UAT, 28 November 2026).
+  const one = summary.renderSummary({ ...facts, app: { variable: 'missing', secret: 'missing' } });
+  assert.equal([...one.matchAll(/^```powershell$/gm)].length, 1);
+  assert.match(one, /^Say done when you have run it\.$/m);
+  assert.doesNotMatch(one, /run them/);
 });
 
 // The cloud workflow and guard rows read the merged commit's files with git from its PATH location (the

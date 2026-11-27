@@ -11,17 +11,27 @@ const { ASKING_LINE, respond } = require('../scripts/toolkit-governance-hook.cjs
 test('the asking line keeps the context in the closing message and leaves the question\'s form to the app', () => {
   assert.match(ASKING_LINE, /1\. Put the full context, options and your pick in your closing message and end the turn\./);
   assert.match(ASKING_LINE, /2\. Leave how the question shows \(a card, the end-of-turn box or plain text\) to the app\./);
-  // No step steers a card: no wait to start, no next-turn card, no card shape.
-  assert.doesNotMatch(ASKING_LINE, /background|automatic turn|next turn|question card|open the card|open a card|card holds/);
+  // No step steers a card: no wait to start, no next-turn card, no card shape. (Item 3's wait is for a
+  // merge's checks, not for a question card.)
+  const general = ASKING_LINE.slice(0, ASKING_LINE.indexOf('3. A merge is the exception'));
+  assert.doesNotMatch(general, /background|automatic turn|next turn|question card|open the card|open a card|card holds/);
+  assert.doesNotMatch(ASKING_LINE, /automatic turn|next turn|question card|open the card|open a card|card holds/);
 });
 
 // 27 Nov 2026: an agent read item 1 as covering merges, asked "Merge PR 453 now? Next turn I'll show
 // Toolkit's merge card", and the owner approved twice. A merge is the exception: the summary and the
 // merge come in the same turn, and Toolkit's merge card is the only ask.
 test('a merge is the exception: summary and merge in the same turn, and the merge card is the only ask', () => {
-  assert.match(ASKING_LINE, /3\. A merge is the exception: post its summary and run the merge in the same turn; Toolkit's merge card, in its exact text, is the only ask, never a merge question of your own first\.$/);
+  assert.match(ASKING_LINE, /3\. A merge is the exception: post its summary and run the merge in the same turn; Toolkit's merge card, in its exact text, is the only ask, never a merge question of your own first\. /);
   // Item 1 still reads as the rule for every other question, and the exception follows it.
   assert.ok(ASKING_LINE.indexOf('1. Put the full context') < ASKING_LINE.indexOf('3. A merge is the exception'));
+});
+
+// 28 Nov 2026 owner UAT: the turn-on pull request's checks were still running, so the agent ended with its
+// own "Approve merging #2?" (the checks passed 30 seconds later). Running checks are waited for in one
+// background wait and the merge then runs; only a failed check or another refusal is a reason to ask.
+test('a merge whose checks are still running waits for them in the background, then runs the merge', () => {
+  assert.match(ASKING_LINE, /never a merge question of your own first\. If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than the card\.$/);
 });
 
 test('the desktop session start carries the line, and other entry points get no asking line', () => {

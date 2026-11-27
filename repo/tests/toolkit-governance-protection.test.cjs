@@ -48,8 +48,12 @@ function repo(t, workflows = { 'ci.yml': AGGREGATE }, remote = 'https://github.c
   if (remote) childProcess.execFileSync('git', ['-C', root, 'remote', 'add', 'origin', remote], { windowsHide: true });
   fs.mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
   for (const [name, text] of Object.entries(workflows)) fs.writeFileSync(path.join(root, '.github', 'workflows', name), text);
+  // The workflows are read at the merged default-branch commit, so the fixture commits them.
+  childProcess.execFileSync('git', ['-C', root, 'add', '--all'], { windowsHide: true });
+  childProcess.execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'base'], { windowsHide: true });
   return root;
 }
+const headOf = root => childProcess.execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true }).trim();
 
 function github({ checks = [{ context: 'validate', integration_id: 15368 }], methods = ['merge'], classic = null, settings = { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true }, own = null, strict = true } = {}) {
   const rules = [];
@@ -59,7 +63,7 @@ function github({ checks = [{ context: 'validate', integration_id: 15368 }], met
 }
 
 function check(root, reader = github(), extra = {}) {
-  return protection.defaultBranchProtection(root, { requiredChecks: ['validate'], reader, ...extra });
+  return protection.defaultBranchProtection(root, { requiredChecks: ['validate'], reader, commit: headOf(root), ...extra });
 }
 
 function statuses(result) {
@@ -721,4 +725,40 @@ test('P-12: P6 drifts unless a required status checks rule or classic protection
   const another = () => { const read = github({ strict: false })(); read.rules.push({ type: 'required_status_checks', ruleset_id: 8, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }); return read; };
   assert.equal(check(root, another).checks.P6.status, 'ok', 'any active ruleset can require it');
   assert.equal(protection.protectionRulesetBody(['validate']).rules.find(rule => rule.type === 'required_status_checks').parameters.strict_required_status_checks_policy, true, 'the ruleset Toolkit writes requires it');
+});
+
+// Owner UAT, 28 November 2026: right after the turn-on merge, the finish said the required checks
+// plain-text and personal-data had no producing job. Both workflows were on the merged default branch,
+// but the turn-on leaves the checkout as it was, and P3 read the working tree. P3 and P4 now read the
+// merged commit the binding came from; Toolkit's own copied workflows (their jobs have no `name:`, so
+// GitHub reports them under their keys) produce both checks there.
+test('P-17: the workflows are read at the merged default-branch commit, not the checkout behind it', (t) => {
+  const root = repo(t, { 'ci.yml': AGGREGATE });
+  const before = headOf(root);
+  const templates = path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'templates', 'github-actions');
+  for (const name of ['plain-text.yml', 'personal-data-guard.yml']) fs.copyFileSync(path.join(templates, name), path.join(root, '.github', 'workflows', name));
+  childProcess.execFileSync('git', ['-C', root, 'add', '--all'], { windowsHide: true });
+  childProcess.execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'turn on'], { windowsHide: true });
+  const merged = headOf(root);
+  // The checkout stays where it was before the merge, as after a turn-on merged on GitHub.
+  childProcess.execFileSync('git', ['-C', root, 'checkout', '--quiet', before], { windowsHide: true });
+  assert.equal(fs.existsSync(path.join(root, '.github', 'workflows', 'plain-text.yml')), false, 'the checkout is behind the merge');
+  const own = github({ checks: [{ context: 'plain-text', integration_id: 15368 }, { context: 'personal-data', integration_id: 15368 }] });
+  const result = protection.defaultBranchProtection(root, { requiredChecks: ['plain-text', 'personal-data'], reader: own, commit: merged });
+  assert.equal(result.checks.P3.status, 'ok', JSON.stringify(result.checks.P3));
+  assert.deepEqual(result.checks.P3.missing, []);
+  // Before the merge the default branch had neither job: drift, named.
+  const earlier = protection.defaultBranchProtection(root, { requiredChecks: ['plain-text'], reader: own, commit: before });
+  assert.deepEqual(earlier.checks.P3.missing, ['plain-text']);
+  // A commit that cannot be read here, or none, is not known: unverified, never drift and never the checkout.
+  for (const commit of ['f'.repeat(40), null]) {
+    const unread = protection.defaultBranchProtection(root, { requiredChecks: ['plain-text'], reader: own, commit });
+    assert.equal(unread.checks.P3.status, 'unverified', String(commit));
+    assert.match(unread.checks.P3.details.join(' '), /the default branch's workflows.* could not be read/);
+  }
+  // git runs as the binding reader runs it, and only reads.
+  const calls = [];
+  protection.defaultBranchProtection(root, { requiredChecks: ['plain-text'], reader: own, commit: merged, runGit: (args, options) => { calls.push([args, options.cwd]); return { status: 0, stdout: Buffer.from('') }; } });
+  assert.deepEqual(calls, [[['-c', 'core.quotePath=false', 'ls-tree', '-l', '-z', merged, '--', '.github/workflows/'], root]]);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-governance-protection.cjs'), 'utf8'), /require\('\.\/toolkit-governance-binding\.cjs'\)\.defaultRunGit/, 'the default runner is the binding reader\'s');
 });
