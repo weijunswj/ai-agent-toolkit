@@ -339,7 +339,7 @@ class ToolkitGovernanceCli {
     const protectionOptions = this.#protectionReader ? { reader: this.#protectionReader } : {};
     const requiredChecks = governance.bindingRequiredChecks(state.root, this.#registryOptions);
     const read = () => security.dependencySecurity(state.root, {
-      protectionResult: requiredChecks ? protection.defaultBranchProtection(state.root, { requiredChecks, ...protectionOptions }) : null,
+      protectionResult: requiredChecks ? protection.defaultBranchProtection(state.root, { requiredChecks, commit: state.merged?.commit, ...protectionOptions }) : null,
       ...(this.#securityReader ? { reader: this.#securityReader } : {}),
     });
     const before = read();

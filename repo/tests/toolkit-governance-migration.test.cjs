@@ -77,16 +77,18 @@ const CONFORMANT_PROTECTION = { ok: true, default_branch: 'main', repository: { 
 // A governed repository whose merged binding requires `validate` (and keeps programme state on the state
 // branch when `state`), with one workflow job that produces `validate` on every pull request.
 function governedRepo(options, registryOptions, { state }) {
-  const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  const { recordMerged, commitFixture } = require('./toolkit-governed-fixture-support.cjs');
   const root = path.join(options.stateDirectory, 'repo');
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.git', 'config'), '[remote "origin"]\n url = https://github.com/example-owner/example-repo.git\n');
+  fs.mkdirSync(root, { recursive: true });
+  // A real repository: its workflows are read at the merged commit.
+  require('node:child_process').execFileSync('git', ['init', '--quiet', root], { windowsHide: true });
+  require('node:child_process').execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/example-owner/example-repo.git'], { windowsHide: true });
   fs.mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\njobs:\n  validate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n');
   const binding = { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-' }],
     store: { kind: 'github', repository: 'example-owner/evidence-store', branch: 'main', path: 'state/' }, required_checks: ['validate'],
     ...(state ? { state: { kind: 'branch', branch: ruleset.STATE_BRANCH, path: 'state/' } } : {}) };
-  recordMerged(root, { registryPath: registryOptions.registryPath, text: JSON.stringify(binding) });
+  recordMerged(root, { registryPath: registryOptions.registryPath, text: JSON.stringify(binding), commit: commitFixture(root) });
   return root;
 }
 

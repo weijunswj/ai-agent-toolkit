@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+const { recordMerged, commitFixture } = require('./toolkit-governed-fixture-support.cjs');
 
 const scripts = path.resolve(__dirname, '..', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
@@ -37,7 +37,7 @@ function governedRepo(t, { merged = true, requiredChecks = ['validate'], workflo
     store: { kind: 'github', repository: 'example-owner/example-store', branch: 'main', path: 'state/' }, required_checks: requiredChecks,
   }));
   const registryOptions = { registryPath: path.join(root, 'state', 'repository-governance.v1.json'), testOnly: true };
-  if (merged) recordMerged(repo, { registryPath: registryOptions.registryPath });
+  if (merged) recordMerged(repo, { registryPath: registryOptions.registryPath, commit: commitFixture(repo) });
   return { repo, registryOptions };
 }
 
@@ -200,7 +200,7 @@ test('a run that finds the turn-on not merged yet notes when it ended, so it is 
   const file = path.join(path.dirname(ctx.registryOptions.registryPath), finishing.BASENAME);
   fs.writeFileSync(file, JSON.stringify({ schema: finishing.SCHEMA, repositories: { [id]: { ...finishing.entryFor(ctx.registryOptions, id), started_at: hourAgo.toISOString() } } }));
   assert.equal(await cli(ctx, [], created).run(), 0);
-  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath });
+  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath, commit: commitFixture(ctx.repo) });
   const lines = finishing.sessionLines(governance.governanceState(ctx.repo, ctx.registryOptions), ctx.registryOptions, { startFinish: () => {} });
   assert.doesNotMatch(lines.join(' '), /stopped without a result/);
   assert.match(lines.join(' '), /finishing its setup in the background/);
@@ -259,7 +259,7 @@ test('dependency auto-merge waiting on protection held for a by-hand fix is held
   fs.writeFileSync(path.join(ctx.repo, '.github', 'workflows', 'ci.yml'), 'name: CI\non:\n  pull_request:\n    types: [opened]\njobs:\n  validate:\n    name: validate\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n');
   const bindingFile = path.join(ctx.repo, '.github', 'toolkit-programme.json');
   fs.writeFileSync(bindingFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(bindingFile, 'utf8')), dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } }));
-  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath });
+  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath, commit: commitFixture(ctx.repo) });
   const state = governance.governanceState(ctx.repo, ctx.registryOptions);
   finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
   const protectedRead = () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, classic: null, toolkit_ruleset: null,
@@ -306,7 +306,7 @@ test('dependency auto-merge is held behind protection only when its policy and a
   fs.writeFileSync(path.join(ctx.repo, '.github', 'workflows', 'ci.yml'), 'name: CI\non:\n  pull_request:\n    types: [opened]\njobs:\n  validate:\n    name: validate\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n');
   const bindingFile = path.join(ctx.repo, '.github', 'toolkit-programme.json');
   fs.writeFileSync(bindingFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(bindingFile, 'utf8')), dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } }));
-  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath });
+  recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath, commit: commitFixture(ctx.repo) });
   const state = governance.governanceState(ctx.repo, ctx.registryOptions);
   const protectedRead = () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, classic: null, toolkit_ruleset: null,
     rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } }, { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }] });
