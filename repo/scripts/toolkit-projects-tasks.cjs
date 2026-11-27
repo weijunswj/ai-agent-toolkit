@@ -30,6 +30,12 @@
 //   --additions-from <kind> <prompt-file>   the project additions a Toolkit task's old prompt holds
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
+//   --rebind <memory-file> [--checkout <Toolkit clone>] [--date <YYYY-MM-DD>]
+//                                       the BINDING line against main's CONTROLLER.md in the clone (this
+//                                       script's own by default): BINDING CURRENT, or BINDING STALE with
+//                                       the new BINDING line and the CHANGED / CHANGED BY lines (exit 1
+//                                       whenever a BINDING line is printed to write), or BINDING UNKNOWN
+//                                       with its reason (exit 2); it reads git and writes nothing
 //   --upgrade-plan <read-back-file> --memory <memory-file> [--additions-saved <file>] [--daily]
 //                                       the upgrade plan for every task read back (JSON): a takeover's,
 //                                       or with --daily the daily check-in's, which asks no unpause
@@ -448,9 +454,11 @@ function validEntry(entry) {
   return Boolean(match) && (match.groups.reason === undefined || isReason(match.groups.reason));
 }
 
+// Only LF and CRLF end a line: a lone CR or a Unicode line break stays inside its line and fails it.
+const memoryLines = text => String(text).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, ''));
+
 function checkMemory(text) {
-  // Only LF and CRLF end a line: a lone CR or a Unicode line break stays inside its line and fails it.
-  const lines = String(text).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, ''));
+  const lines = memoryLines(text);
   const faults = [];
   const binding = lines.filter(line => /^[-*\s]*BINDING:/.test(line));
   if (!binding.length) faults.push('MEMORY FORMAT: BINDING missing');
@@ -464,6 +472,109 @@ function checkMemory(text) {
     if (!entries.length || /[\r\u0085\u2028\u2029]/.test(tasks[0]) || entries.some(entry => !validEntry(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
   }
   return faults.length ? { lines: faults, exitCode: 1 } : { lines: ['current'], exitCode: 0 };
+}
+
+// ---- The binding the daily check-in keeps current ----
+//
+// The BINDING line names the CONTROLLER.md the coordinator is bound to. The daily check-in runs
+// --rebind in its fresh Toolkit clone: main's blob against the bound one and, when they differ or only
+// the commit moved, the exact line to write instead and what changed, so the coordinator rebinds the
+// same turn instead of handing it on. It reads git only; the coordinator writes memory. The line is
+// copied into the new one, so it is read default-deny: one line, printable ASCII, the current format.
+const CONTROLLER_REL = 'repo/CONTROLLER.md';
+const BINDING_PARTS = /^([-* ]*)BINDING: (\S+) (\S+) commit ([0-9a-f]{40}) CONTROLLER\.md blob ([0-9a-f]{40}) toolkit (\S+) skill (\S+) bound (\S+) *$/;
+const PRINTABLE = /^[\x20-\x7e]*$/;
+const MAX_CHANGED_BY = 10;
+
+function defaultGit(cwd, args, input) {
+  const result = require('node:child_process').spawnSync('git', ['-C', cwd, ...args], { input, encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  return { ok: !result.error && result.status === 0, out: String(result.stdout || '') };
+}
+
+function readBinding(text) {
+  const found = memoryLines(text).filter(line => /^[-*\s]*BINDING:/.test(line));
+  if (!found.length) return { reason: 'no BINDING line in memory' };
+  if (found.length > 1) return { reason: 'more than one BINDING line in memory' };
+  const match = PRINTABLE.test(found[0]) && BINDING_LINE.test(found[0]) ? BINDING_PARTS.exec(found[0]) : null;
+  if (!match) return { reason: 'the BINDING line is not in the current format (no full commit and blob to compare)' };
+  const [, prefix, repo, branch, commit, blob, , skill, bound] = match;
+  return { binding: { prefix, repo, branch, commit, blob, skill, bound } };
+}
+
+// Each changed section of CONTROLLER.md (the nearest heading at or above each change in main's text),
+// in file order, with the lines added and removed under it.
+function changedSections(diff, text) {
+  const lines = text.split('\n');
+  const headingAt = number => {
+    for (let index = Math.min(Math.max(number, 1), lines.length) - 1; index >= 0; index -= 1) if (/^#{1,6} \S/.test(lines[index])) return lines[index].trim();
+    return '(top)';
+  };
+  const sections = new Map();
+  let current = null;
+  for (const line of diff.split('\n')) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunk) {
+      const heading = headingAt(Number(hunk[1]));
+      current = sections.get(heading) || { added: 0, removed: 0 };
+      sections.set(heading, current);
+    } else if (current && line.startsWith('+') && !line.startsWith('+++')) current.added += 1;
+    else if (current && line.startsWith('-') && !line.startsWith('---')) current.removed += 1;
+  }
+  return [...sections].map(([heading, count]) => `CHANGED: ${heading} (+${count.added} -${count.removed})`);
+}
+
+class BindingCheck {
+  #git;
+
+  constructor({ git = defaultGit } = {}) {
+    this.#git = git;
+  }
+
+  check(memoryText, { checkout, date }) {
+    const unknown = reason => ({ lines: [`BINDING UNKNOWN: ${reason}`], exitCode: 2 });
+    const { binding, reason } = readBinding(memoryText);
+    if (!binding) return unknown(reason);
+    // Few git runs: each costs a process start, slow on Windows.
+    const git = (args, input) => this.#git(checkout, args, input);
+    const heads = git(['rev-parse', '--show-toplevel', 'HEAD^{commit}', `HEAD:${CONTROLLER_REL}`]);
+    const [top, commit, blob] = heads.ok ? heads.out.split('\n').map(part => part.trim()) : [];
+    let isTop = false;
+    try { isTop = Boolean(top) && fs.realpathSync.native(top) === fs.realpathSync.native(checkout); } catch { isTop = false; }
+    if (!isTop || !/^[0-9a-f]{40}$/.test(commit) || !/^[0-9a-f]{40}$/.test(blob)) return unknown(`cannot read ${CONTROLLER_REL} at HEAD of the Toolkit clone`);
+    const plugin = git(['show', 'HEAD:.claude-plugin/plugin.json']);
+    let version = null;
+    try { version = plugin.ok ? JSON.parse(plugin.out).version : null; } catch { version = null; }
+    if (!VERSION.test(String(version))) return unknown('cannot read the Toolkit version at HEAD of the Toolkit clone');
+    const main = { commit, blob };
+    const line = bound => `${binding.prefix}BINDING: ${binding.repo} ${binding.branch} commit ${main.commit} CONTROLLER.md blob ${main.blob} toolkit ${version} skill ${binding.skill} bound ${bound}`;
+    const short = sha => sha.slice(0, 7);
+    if (main.blob === binding.blob) {
+      if (main.commit === binding.commit) return { lines: [`BINDING CURRENT ${short(main.blob)}`], exitCode: 0 };
+      return { lines: [`BINDING CURRENT ${short(main.blob)}, commit moved to ${short(main.commit)}`, line(binding.bound)], exitCode: 1 };
+    }
+    const lines = [`BINDING STALE: bound ${short(binding.blob)}, main ${short(main.blob)} at ${short(main.commit)}`, line(date)];
+    // A shallow clone may lack the bound blob or commit: one batch read says which it has.
+    const types = git(['cat-file', '--batch-check=%(objecttype)'], `${binding.blob}\n${binding.commit}\n`);
+    const [blobType, commitType] = types.ok ? types.out.split('\n').map(part => part.trim()) : [];
+    if (blobType !== 'blob') {
+      lines.push(`CHANGES UNREAD: the bound blob ${short(binding.blob)} is not in this clone: run git fetch --unshallow in it once, then --rebind again`);
+      return { lines, exitCode: 1 };
+    }
+    const diff = git(['diff', '--no-color', '--no-ext-diff', '-U0', binding.blob, main.blob]);
+    const text = git(['cat-file', 'blob', main.blob]);
+    if (!diff.ok || !text.ok) lines.push(`CHANGES UNREAD: git could not compare the two CONTROLLER.md blobs: read ${CONTROLLER_REL} in the clone`);
+    else lines.push(...changedSections(diff.out, text.out.replace(/\r\n/g, '\n')));
+    if (commitType === 'commit') {
+      const log = git(['log', '--format=%H %s', `${binding.commit}..${main.commit}`, '--', CONTROLLER_REL]);
+      const commits = log.ok ? log.out.split('\n').filter(Boolean) : [];
+      for (const entry of commits.slice(0, MAX_CHANGED_BY)) {
+        const title = entry.slice(41).replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
+        lines.push(`CHANGED BY: ${short(entry)} ${title}`);
+      }
+      if (commits.length > MAX_CHANGED_BY) lines.push(`CHANGED BY: ${commits.length - MAX_CHANGED_BY} more (git log ${short(binding.commit)}..HEAD -- ${CONTROLLER_REL})`);
+    }
+    return { lines, exitCode: 1 };
+  }
 }
 
 // ---- The upgrade at a takeover and at each daily check-in ----
@@ -640,6 +751,13 @@ function parseArgs(args) {
     if (unpaused.some(id => !TASK_ID.test(id))) throw new TaskInputError('TASK_ARGUMENTS', '--unpaused takes task ids, comma separated');
     return { mode: 'upgrade-verify', plan: positional[0], file: positional[1], unpaused };
   }
+  if (mode === '--rebind') {
+    const positional = take(['--checkout', '--date']);
+    if (positional.length !== 1) throw new TaskInputError('TASK_ARGUMENTS');
+    const date = options['--date'] === undefined ? new Date().toISOString().slice(0, 10) : options['--date'];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new TaskInputError('TASK_ARGUMENTS');
+    return { mode: 'rebind', file: positional[0], checkout: path.resolve(options['--checkout'] || path.resolve(__dirname, '../..')), date };
+  }
   if (mode === '--params-from' || mode === '--check-memory') {
     const positional = take([]);
     if (positional.length !== 1) throw new TaskInputError('TASK_ARGUMENTS');
@@ -728,6 +846,10 @@ function main(args = process.argv.slice(2)) {
       let raw;
       try { raw = JSON.parse(fence.json); } catch { throw new TaskInputError('TASK_PARAMS'); }
       output = `${JSON.stringify(raw, null, 2)}\n`;
+    } else if (options.mode === 'rebind') {
+      const result = new BindingCheck().check(read(options.file), { checkout: options.checkout, date: options.date });
+      output = `${result.lines.join('\n')}\n`;
+      exitCode = result.exitCode;
     } else {
       const result = checkMemory(read(options.file));
       output = `${result.lines.join('\n')}\n`;
@@ -742,4 +864,4 @@ function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = Object.freeze({ ProjectsTasks, TaskUpgradePlanner, READ_BACK_SCHEMA, PLAN_SCHEMA, KINDS, LEGACY_RAISE, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });
+module.exports = Object.freeze({ ProjectsTasks, TaskUpgradePlanner, READ_BACK_SCHEMA, PLAN_SCHEMA, KINDS, LEGACY_RAISE, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, BindingCheck, parseArgs, fill });

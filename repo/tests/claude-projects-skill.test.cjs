@@ -586,7 +586,8 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   assert.match(text, /Binding: save BINDING and GATE ROUTE from the exact bound Controller\/stack/);
   assert.doesNotMatch(text, /Record the commit SHA and the skill Version in memory|Re-check its revision before each launch/);
   // Both periodic runs carry the check.
-  assert.match(text, /^  - `BINDING STALE` or `BINDING UNKNOWN`: rebind \(\*\*Binding\*\*\)\. When current, the report says `\*\*Binding:\*\* current` with the short blob, adding the newer short commit when only the commit moved\.$/m);
+  // The check-in's rebind is the coordinator's own step, from the line --rebind printed, never handed on.
+  assert.match(text, /^  - `BINDING STALE` or `BINDING UNKNOWN`: rebind \(\*\*Binding\*\*\) the same turn yourself: rewrite the BINDING line in memory as the `BINDING:` line step 5 printed, read it back, [^\n]* When current, the report says `\*\*Binding:\*\* current` with the short blob, adding the newer short commit when only the commit moved \(step 5 printed that line too: write it quietly\)\.$/m);
   // The binding check runs once a day; the hourly nudge leaves it out.
   assert.match(text, /\*\*Binding check\*\* \(each daily check-in, read-only; the hourly nudge leaves it out\)/);
   assert.doesNotMatch(text, /^  1\. the \*\*Binding check\*\*/m);
