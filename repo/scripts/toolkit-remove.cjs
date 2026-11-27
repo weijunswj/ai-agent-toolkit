@@ -428,9 +428,19 @@ function describePlan(plan, { full = false } = {}) {
   if (removed.length) lines.push('**Removed**', ...removed, '');
   if (kept.length) lines.push('**Kept**', ...kept, '');
   lines.push('**Never touched**', NEVER_TOUCHED);
+  lines.push(...ownerCommands(plan));
   if (!plan.nothing) lines.push('', 'Nothing changes until you say yes.');
   lines.push('', AGENT_LINE, ...agentPlanSteps(plan, { folded }));
   return lines;
+}
+
+// The owner's own commands the parts list (an item's `command`), each once, after the lists and in its
+// own PowerShell block, so a list line never carries a command.
+function ownerCommands(plan) {
+  const commands = [...new Set((plan.parts || []).flatMap(part => part.items.map(item => item.command).filter(Boolean)))];
+  if (!commands.length) return [];
+  return ['', `**Your command${commands.length > 1 ? 's' : ''} first:** run ${commands.length > 1 ? 'each' : 'it'} in your own PowerShell, outside any agent. It shows Toolkit's permission lines, backs up the settings and waits for your Enter, then takes out only Toolkit's lines.`,
+    ...commands.flatMap(command => ['', '```powershell', command, '```'])];
 }
 
 // The plugin uninstall lines for each app that still has the Toolkit plugin, and the app screen to

@@ -419,13 +419,42 @@ function whereOf(model, item) {
   return places.join(', ');
 }
 
+// The kind of program a command line starts, in plain words for the chat list.
+const PROGRAMS = Object.freeze([
+  [/^(?:python[0-9.]*|pythonw|py)$/i, 'Runs a Python script'],
+  [/^(?:node|nodejs|bun|deno)$/i, 'Runs a JavaScript script'],
+  [/^(?:npm|npx|pnpm|yarn)$/i, 'Runs an npm command'],
+  [/^(?:bash|sh|zsh)$/i, 'Runs a shell script'],
+  [/^(?:pwsh|powershell)$/i, 'Runs a PowerShell script'],
+  [/^(?:cat|type|less|more|head|tail|get-content|gc)$/i, 'Reads a file'],
+  [/^(?:ls|dir|get-childitem|gci)$/i, 'Lists files'],
+  [/^(?:grep|rg|select-string|sls)$/i, 'Searches files'],
+  [/^git$/i, 'Runs a Git command'],
+  [/^gh$/i, 'Runs a GitHub command'],
+  [/^(?:curl|wget|invoke-webrequest|invoke-restmethod|iwr|irm)$/i, 'Calls a web address'],
+  [/^docker$/i, 'Runs a Docker command'],
+]);
+
+// A Bash or PowerShell line in plain words for the chat list: the kind of program it runs, never the
+// command's own arguments, script names or paths (the raw line shows only on show all).
+function shellWords(line) {
+  const shell = SHELL.exec(mask(line));
+  const words = shell[2].trim().split(/\s+/);
+  let index = 0;
+  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index += 1;
+  const program = base(String(words[index] || '').replace(/^["']|["']$/g, '')).replace(/\.(?:exe|cmd|bat|ps1)$/i, '');
+  const any = /\s*:?\*\s*$/.test(shell[2]);
+  const named = PROGRAMS.find(([pattern]) => pattern.test(program));
+  const text = !program || program === '*' ? 'Any command' : named ? named[1] : /^[A-Za-z][A-Za-z0-9_-]{0,30}$/.test(program) ? `Runs the ${program} command` : 'Runs a command';
+  return `${text}${any && program !== '*' ? ', any arguments' : ''}${shell[1] === 'PowerShell' ? ' (PowerShell)' : ''}`;
+}
+
+// One chat list item in plain words: no code marks and no command text (show all adds the raw line).
 function itemWords(item) {
-  const words = chatWords(plainWords(item.line));
+  const words = SHELL.test(item.line) ? shellWords(item.line) : chatWords(plainWords(item.line));
   // The Dead group's heading already says the line points at something gone.
   if (item.cls === 'dead') return words.replace(/, any arguments$/, '');
-  const shell = SHELL.exec(item.line);
-  const command = shell ? chatWords(shortRaw(item.line)).split(/\s+/).filter(word => /[A-Za-z0-9]/.test(word)).slice(0, 3).join(' ') : '';
-  const text = item.cls === 'risky' ? `${item.reason}${command ? ` (${command})` : ''}` : words;
+  const text = item.cls === 'risky' ? item.reason : words;
   return `${item.list === 'ask' ? 'Asks first: ' : ''}${text}`;
 }
 

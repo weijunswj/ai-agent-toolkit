@@ -8,9 +8,10 @@
 //   label, unit   the bold label its lines carry on the owner's screen, and what its items are called
 //                 when a long list is folded into a count. An item's own `label` wins.
 //   plan(context) read-only; [{ what, action: 'remove' | 'keep' | 'held' | 'save', detail?, label?, text?,
-//                 short?, backup? }]. `text` replaces what and detail on the screen, and `short` replaces
+//                 short?, backup?, command? }]. `text` replaces what and detail on the screen, and `short` replaces
 //                 `text` on every screen after the first plan (the full lists and the closing lines);
-//                 `backup: true` marks an
+//                 `command` is an owner command the plan screen gives once, after the lists, in its
+//                 own PowerShell block, never inside a list line; `backup: true` marks an
 //                 item whose removal saves a backup first. context.savesBackup says whether an earlier
 //                 step of this removal saves one. The plan code covers this list, so a list that
 //                 changes after the owner saw it removes nothing.
@@ -559,8 +560,11 @@ class PermissionLinesPart {
     let found;
     try { found = this.#preview(); } catch (error) { return [{ what: 'Permission settings', action: 'held', detail: `could not be read (${String(error && error.message ? error.message : error).slice(0, 300)}); the Toolkit folder stays until they can`, app: 'shared' }]; }
     const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+    // The command itself is never in the list line: the plan screen gives it once, below the lists, in
+    // a PowerShell block (`command`).
     return found.map(item => ({ what: `${display(this.#home, item.target)}: ${plural(item.toolkit, item.host === 'codex' ? 'Toolkit rule' : 'Toolkit line')}`, action: 'keep', app: item.host === 'codex' ? 'codex' : 'claude-code',
-      detail: `not removed by this list. Run this in your own PowerShell first; it shows the lines, backs up and waits for your Enter, then takes out only Toolkit's${item.other ? ` and keeps your ${plural(item.other, 'other line')}` : ''}: node "${this.#script()}" --remove --host ${item.host}` }));
+      detail: `removed by your own command below the plan, not by this list; it takes out only Toolkit's${item.other ? ` and keeps your ${plural(item.other, 'other line')}` : ''}`,
+      command: `node "${this.#script()}" --remove --host ${item.host}` }));
   }
   apply() { return []; }
 }
@@ -670,7 +674,7 @@ class ToolkitFolderPart {
     if (installed.length) return [...(fresh ? [gathered] : []), { what: display(this.#home, this.#root), result: 'kept', reason: `the ${installed.join(' and ')} plugin is still installed and reads its records there` }];
     let left;
     try { left = this.#linesLeft(); } catch { left = null; }
-    if (left === null || left.length) return [...(fresh ? [gathered] : []), { what: display(this.#home, this.#root), result: 'kept', reason: left === null ? 'the permission settings could not be read, so Toolkit\'s permission lines may still point at it' : 'Toolkit\'s permission lines are still in your settings; run the toolkit permissions --remove command listed above first, then say remove toolkit again' }];
+    if (left === null || left.length) return [...(fresh ? [gathered] : []), { what: display(this.#home, this.#root), result: 'kept', reason: left === null ? 'the permission settings could not be read, so Toolkit\'s permission lines may still point at it' : 'Toolkit\'s permission lines are still in your settings; run the toolkit permissions --remove command given below the plan first, then say remove toolkit again' }];
     // A process whose folder is inside what goes could not remove it on Windows.
     const cwd = process.cwd();
     const inside = path.relative(this.#root, cwd);

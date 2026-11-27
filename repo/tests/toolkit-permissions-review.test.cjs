@@ -62,7 +62,7 @@ test('the chat list is in the house format: one heading, groups by colour, short
   assert.match(text, /```powershell\nnode "\/opt\/toolkit\/repo\/scripts\/toolkit-permissions\.cjs" --apply --host claude --repo-root "\/work\/automation"\n```$/);
   const list = text.slice(0, text.indexOf('```'));
   assert.doesNotMatch(list, /`/, 'no code marks in the list');
-  assert.match(list, /\n- \*\*R2\*\* Any GitHub call, merges and deletes included \(gh api\) · automation\n/);
+  assert.match(list, /\n- \*\*R2\*\* Any GitHub call, merges and deletes included · automation\n/);
   assert.match(list, /\n- \*\*D6 to D8:\*\* 3 more, all automation\. Say show all to list them\.\n/);
   assert.match(list, /\*\*Reply\*\* keep all, or name what goes, such as remove D1-D8\. Nothing changes until you press Enter in your own terminal\./);
   const all = (await run(fix, ['--review', '--repo-root', fix.root, '--all'])).out;
