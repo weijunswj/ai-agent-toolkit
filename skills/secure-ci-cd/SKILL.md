@@ -98,7 +98,7 @@ Commits, pushes to a non-default branch and opening or updating its pull request
 
 ## CI Check-Up
 
-- [`scripts/ci-checkup.cjs`](scripts/ci-checkup.cjs) is a read-only, zero-dependency check that compares what a repository contains (packages, test files, scripts, Dockerfiles) with what its CI runs, plus job times, workflow hygiene and the CI status document. It lists `GAP` and `CHECK` items; the agent judges each and fixes the real ones. It never edits anything or fails a build.
+- [`scripts/ci-checkup.cjs`](scripts/ci-checkup.cjs) is a read-only, zero-dependency check that compares what a repository contains (packages, test files, scripts, Dockerfiles) with what its CI runs, plus job times, workflow hygiene and the CI status document. It lists `GAP` and `CHECK` items; the agent judges each and fixes the real ones. It never edits anything or fails a build. Its `speed.shards` and `speed.shards-lopsided` findings are the cue to arrange or rebalance shards in the repository's own CI (fast-tests-and-sharding playbook).
 - Follow [`templates/cicd/ci-checkup.md`](templates/cicd/ci-checkup.md): run it at each release plan in a repository that opts in to shared rules, while planning a change that touches CI or adds a package, language or test folder (with `--base`), in final readiness audits, and on request.
 
 ## AI-Facing Surfaces

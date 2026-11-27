@@ -335,9 +335,142 @@ test('speed: a long job with no matrix is raised from measured times, whatever c
   });
   try {
     const times = new Map([['CI / full-regression', 1491], ['CI / other', 900]]);
-    const items = hits(checkup.checkup(dir, { github: false, jobTimes: times }).items, 'speed.jobs');
-    assert.deepEqual(items.map((e) => e.message), ['job full-regression took up to 1491 s with no sharding or matrix']);
+    const items = hits(checkup.checkup(dir, { github: false, jobTimes: times }).items, 'speed.shards');
+    assert.deepEqual(items.map((e) => e.message), ['CI / full-regression took up to 25 min with no sharding; about 3 shards would bring it near 8 min (tracked test files not counted (not a git checkout))']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Shard findings: measured job times say when shards would pay or legs are lopsided; the test
+// count beside them comes from tracked files only.
+const SHARD_JOB = `name: CI
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: Validate app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@${SHA} # v4
+      - name: Run Python tests
+        run: python -m unittest discover -s tests
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [linux-1, linux-2]
+    steps:
+      - run: node --test
+`;
+
+function shardRepo(t, extra = {}) {
+  const dir = fixture({
+    '.github/workflows/ci.yml': SHARD_JOB,
+    '.gitignore': '.claude/\n',
+    'tests/test_a.py': '', 'tests/test_b.py': '', 'tests/test_c.py': '',
+    'tests/fixtures/run/tests/test_copy.py': '',
+    ...extra,
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => assert.equal(spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).status, 0);
+  git('init', '-q');
+  git('add', '.');
+  git('commit', '-q', '-m', 'base');
+  // Scratch an agent left behind: an ignored worktree copy and an untracked new test.
+  fs.mkdirSync(path.join(dir, '.claude', 'worktrees', 'x', '.tmp'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'worktrees', 'x', '.tmp', 'a.test.cjs'), '');
+  fs.writeFileSync(path.join(dir, 'tests', 'test_new.py'), '');
+  return dir;
+}
+
+test('speed.shards: a 48-minute unsharded test job is a GAP with a shard count, tracked tests only and the playbook', (t) => {
+  const dir = shardRepo(t);
+  const items = hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) }).items, 'speed.shards');
+  assert.deepEqual(items.map((e) => [e.level, e.path, e.message]), [['GAP', '.github/workflows/ci.yml', 'CI / Validate app took up to 48 min with no sharding; about 5 shards would bring it near 10 min (3 tracked test files, such as tests/test_a.py, tests/test_b.py, tests/test_c.py)']]);
+  assert.equal(items[0].fix, 'arrange shards for this job in this repository\'s own CI (fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI), or record why not with an ignore entry and a reason');
+  assert.doesNotMatch(JSON.stringify(items), /\.claude|test_new|fixtures/, 'no ignored, untracked or fixture file is counted');
+  assert.deepEqual(hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) }).items, 'speed.jobs'), [], 'the old judgement row is gone');
+});
+
+test('speed.shards: under ten minutes is quiet; a lower budget in the settings raises it; at most 8 shards', (t) => {
+  const dir = shardRepo(t);
+  const shards = (seconds) => hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', seconds]]) }).items, 'speed.shards');
+  assert.deepEqual(shards(400), []);
+  assert.deepEqual(hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 400]]) }).items, 'speed.jobs'), [], 'no judgement row under the limit either');
+  assert.equal(shards(600).length, 1, 'ten minutes or more');
+  assert.match(shards(36000)[0].message, /about 8 shards would bring it near 75 min/);
+  fs.writeFileSync(path.join(dir, '.github', 'ci-checkup.json'), JSON.stringify({ schema: 'ci-checkup/v1', budgets: { unsharded_test_job_seconds: 300 } }));
+  assert.deepEqual(shards(400).map((e) => [e.level, e.message.split(';')[1]]), [['GAP', ' about 2 shards would bring it near 3 min (3 tracked test files, such as tests/test_a.py, tests/test_b.py, tests/test_c.py)']]);
+});
+
+test('speed.shards: an ignore entry with a reason silences it; one without a reason is refused', (t) => {
+  const dir = shardRepo(t);
+  const settings = (ignore) => fs.writeFileSync(path.join(dir, '.github', 'ci-checkup.json'), JSON.stringify({ schema: 'ci-checkup/v1', ignore: [ignore] }));
+  settings({ check: 'speed.shards', path: '.github/workflows/ci.yml', reason: 'setup takes most of this job, so shards cannot pay' });
+  const result = checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) });
+  assert.deepEqual(hits(result.items, 'speed.shards'), []);
+  assert.equal(result.ignored, 1);
+  settings({ check: 'speed.shards', path: '.github/workflows/ci.yml' });
+  const refused = spawnSync(process.execPath, [SCRIPT, '--repo', dir, '--no-github'], { encoding: 'utf8' });
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /ci-checkup\.json refused/);
+});
+
+test('speed.shards: outside a git checkout the count says so and no folder is walked', () => {
+  const dir = fixture({ '.github/workflows/ci.yml': SHARD_JOB, 'tests/test_a.py': '', '.claude/worktrees/x/.tmp/a.test.cjs': '' });
+  try {
+    const [found] = hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) }).items, 'speed.shards');
+    assert.match(found.message, /\(tracked test files not counted \(not a git checkout\)\)$/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('speed: job times keep each leg\'s longest and median time over recent runs', () => {
+  const leg = (name, minutes) => ({ name, conclusion: 'success', startedAt: '2026-11-27T00:00:00Z', completedAt: new Date(Date.parse('2026-11-27T00:00:00Z') + minutes * 60000).toISOString() });
+  const runs = [5, 5, 15].map((slow) => ({ workflowName: 'CI', jobs: [leg('Tests (linux-1)', slow), leg('Tests (linux-2)', 5), { name: 'skipped', conclusion: 'skipped' }] }));
+  const stats = checkup.jobStats(runs);
+  assert.equal(stats.times.get('CI / Tests (linux-1)'), 900, 'longest');
+  assert.equal(stats.medians.get('CI / Tests (linux-1)'), 300, 'one slow run does not make a leg lopsided');
+  assert.equal(stats.medians.get('CI / Tests (linux-2)'), 300);
+  assert.equal(stats.runJobs.get('CI'), 2);
+});
+
+test('speed: recent runs are listed per workflow, so frequent scheduled runs never crowd out CI', () => {
+  const at = (minutes) => new Date(Date.parse('2026-11-27T00:00:00Z') + minutes * 60000).toISOString();
+  const job = (name, minutes) => ({ name, conclusion: 'success', startedAt: at(0), completedAt: at(minutes) });
+  // A sweep ran 40 times since the last CI run; only a per-workflow listing still reaches CI.
+  const runsOf = { 'sweep.yml': Array.from({ length: 40 }, (_, i) => ({ databaseId: 1000 + i, workflowName: 'Sweep' })), 'ci.yml': [{ databaseId: 1, workflowName: 'CI' }, { databaseId: 2, workflowName: 'CI' }] };
+  const calls = [];
+  const readGh = (args) => {
+    calls.push(args.join(' '));
+    if (args[1] === 'list') return runsOf[args[args.indexOf('--workflow') + 1]].slice(0, Number(args[args.indexOf('--limit') + 1]));
+    const id = Number(args[2]);
+    return { jobs: id < 1000 ? [job('Validate app', id === 1 ? 48 : 46)] : [job('sweep', 1)] };
+  };
+  const workflows = ['.github/workflows/sweep.yml', '.github/workflows/ci.yml'].map((rel) => ({ rel }));
+  const stats = checkup.recentRuns({ slug: 'acme/app', branch: 'main' }, 5, workflows, readGh);
+  assert.equal(stats.times.get('CI / Validate app'), 2880);
+  assert.equal(stats.times.get('Sweep / sweep'), 60);
+  assert.deepEqual(calls.filter((call) => call.startsWith('run list')), [
+    'run list -R acme/app --workflow sweep.yml --branch main --status success --limit 5 --json databaseId,workflowName',
+    'run list -R acme/app --workflow ci.yml --branch main --status success --limit 5 --json databaseId,workflowName',
+  ]);
+  assert.equal(calls.filter((call) => call.startsWith('run view')).length, 7, '5 sweep runs and 2 CI runs');
+  assert.equal(checkup.recentRuns({ slug: 'acme/app', branch: 'main' }, 5, workflows, () => null), null, 'no listing read at all is "not checked", never "no runs"');
+  const known = (args) => (args.includes('ci.yml') ? [] : null);
+  assert.deepEqual([...checkup.recentRuns({ slug: 'acme/app', branch: 'main' }, 5, workflows, known).times], [], 'a workflow GitHub does not know yet has no runs');
+});
+
+test('speed.shards-lopsided: legs of one matrix job far apart are a GAP; close legs and other systems are quiet', (t) => {
+  const dir = shardRepo(t);
+  const lopsided = (times) => hits(checkup.checkup(dir, { github: false, jobTimes: new Map(times) }).items, 'speed.shards-lopsided');
+  const found = lopsided([['CI / Tests (linux-1)', 900], ['CI / Tests (linux-2)', 300]]);
+  assert.deepEqual(found.map((e) => [e.level, e.path, e.message]), [['GAP', '.github/workflows/ci.yml', 'CI / Tests (linux-1) took 15 min and CI / Tests (linux-2) 5 min (median of recent green runs), so the shards are lopsided']]);
+  assert.equal(found[0].fix, 'rebalance the split from fresh per-file times (fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI)');
+  assert.deepEqual(lopsided([['CI / Tests (linux-1)', 400], ['CI / Tests (linux-2)', 300]]), [], 'under 1.5 times');
+  assert.deepEqual(lopsided([['CI / Tests (linux-1)', 300], ['CI / Tests (linux-2)', 200]]), [], '1.5 times but under 2 minutes apart');
+  assert.deepEqual(lopsided([['CI / Tests (ubuntu-latest)', 900], ['CI / Tests (windows-latest)', 300]]), [], 'legs for different systems are not shards of one split');
 });
 
 // Fixes from the gate review: programs outside the repository, unknown required checks, started
@@ -521,7 +654,7 @@ test('speed and parts: a long non-test job is not raised, and a dev container Do
   });
   try {
     const items = checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / analyze', 1800]]) }).items;
-    assert.deepEqual(hits(items, 'speed.jobs'), []);
+    assert.deepEqual(hits(items, 'speed.shards'), []);
     assert.deepEqual(hits(items, 'parts.docker'), []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

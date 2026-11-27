@@ -229,3 +229,20 @@ test('owner-lines lints the owner\'s lines on any host, with the settings and, o
   const none = run(['--host', 'chat']);
   assert.ok(none.calls.every(call => call.script !== SCRIPTS.ownerLines), 'no file, no lint');
 });
+
+test('a shard finding from the CI check-up is ATTENTION on the ci row with the playbook as its next action', () => {
+  const ciCheckup = require('../../skills/secure-ci-cd/scripts/ci-checkup.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-check-shards-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.github', 'workflows', 'ci.yml'), 'name: CI\non:\n  pull_request:\njobs:\n  validate:\n    name: Validate app\n    runs-on: ubuntu-latest\n    steps:\n      - run: python -m unittest discover -s tests\n');
+    // The real check-up's report, as the ci child prints it, from measured job times.
+    const report = ciCheckup.checkup(dir, { github: false, jobTimes: new Map([['CI / Validate app', 2880]]) });
+    const results = { [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify(report) } };
+    const ci = controllerCheck(parseArgs(ALL), world({ results }).deps).checks.find(check => check.name === 'ci');
+    assert.equal(ci.state, 'attention');
+    const line = ci.lines.find(text => text.startsWith('speed.shards '));
+    assert.match(line, /^speed\.shards \.github\/workflows\/ci\.yml: CI \/ Validate app took up to 48 min with no sharding; about 5 shards would bring it near 10 min/);
+    assert.match(line, /; next: arrange shards for this job in this repository's own CI \(fast-tests-and-sharding playbook, section Arrange Shards In This Repository's CI\)/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
