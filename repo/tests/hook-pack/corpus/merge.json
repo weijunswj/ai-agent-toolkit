@@ -3303,6 +3303,8 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
       "expect": {"decision":"allow"},
       "status": "pass"
-    }
+    },
+    {"id":"MERGE.auto-not-ready-held","source":"owner test 27 Nov 2026, second new chat (INT-TK421-1386, 1387): after the setup merged, the session start called the missing Governance App \"no action needed\" and governance kept acting: standing task auto-merge must wait while a part is gone","kind":"state","hosts":["claude","codex"],"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"fixture":{"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","min_toolkit":"3.199.0","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"governance_parts":{"app":"missing","store":"usable"},"owner_session":true},"expect":{"decision":"deny"},"status":"pass"},
+    {"id":"MERGE.auto-ready-older-binding","source":"owner test 27 Nov 2026, second new chat (INT-TK421-1386, 1387): after the setup merged, the session start called the missing Governance App \"no action needed\" and governance kept acting; control: the same merge with a programme file older than the hold still lands on the standing answer","kind":"benign","hosts":["claude","codex"],"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"fixture":{"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","min_toolkit":"3.137.0","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"governance_parts":{"app":"missing","store":"usable"},"owner_session":true},"expect":{"decision":"allow"},"status":"pass"}
   ]
 }

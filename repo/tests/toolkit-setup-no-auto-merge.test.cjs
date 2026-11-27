@@ -48,7 +48,11 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
         // Repository identity already loads through governance state; its direct import normalises the target identity.
-        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-copies-proof.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-cloud.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-copies-proof.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-ready.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-cloud.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        // The readiness hold it reads for standing task auto-merge only reads local files: it runs no
+        // process and no GitHub request of its own.
+        const ready = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-governance-ready.cjs'), 'utf8');
+        assert.doesNotMatch(ready, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b|\.request\(/);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         assert.deepEqual([...source.matchAll(/\.request\('([A-Z]+)',\s*([^)]*)\)/g)].map(match => [match[1], match[2]]), [['GET', 'apiPath']]);
         // The Projects cloud reader it loads only parses host text and the head of the session
@@ -62,9 +66,10 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.deepEqual([...head.matchAll(/fs\.openSync\(([^)]*)\)/g)].map((match) => match[1]), ["file, 'r'"]);
         assert.doesNotMatch(head, /\bimport\s*\(|child_process|\bfetch\s*\(|node:https?\b|node:net\b/);
         // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
-        // Node's own modules. Its one file read is the pull request body its CLI is handed; it writes nothing.
+        // Node's own modules, plus the readiness hold its full check reads (checked above). Its one file
+        // read is the pull request body its CLI is handed; it writes nothing.
         const scope = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
-        assert.deepEqual([...scope.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:fs'", "'node:path'", "'node:child_process'"]);
+        assert.deepEqual([...scope.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:fs'", "'node:path'", "'node:child_process'", "'./toolkit-governance-ready.cjs'"]);
         assert.deepEqual([...new Set([...scope.matchAll(/\bfs\.(\w+)/g)].map((match) => match[1]))], ['readFileSync']);
         assert.deepEqual([...scope.matchAll(/(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(([^,]*)/g)].map((match) => match[1].trim()), ["'git'"]);
         const subcommands = new Set([...scope.matchAll(/\bgit\(cwd, \['([\w-]+)'/g)].map((match) => match[1]));

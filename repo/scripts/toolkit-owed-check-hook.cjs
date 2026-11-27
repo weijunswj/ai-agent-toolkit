@@ -417,9 +417,24 @@ function permissionsNote(input, deps = {}) {
     pruneStamps(path.dirname(stamp), deps.nowMs ?? Date.now());
     const found = (deps.permissions || (where => require('./toolkit-permissions.cjs').permissionsState(where, { host: 'claude' })))(root);
     if (!found || found.checked !== true || !(found.missing > 0 || found.stale > 0)) return null;
+    // Never set up here, where the readiness hold applies (toolkit-governance-ready.cjs): governance waits.
+    if (permissionsHold(root, found, deps)) {
+      return `Toolkit permissions: ${found.app || 'Claude Code'}'s Toolkit permission lines are not set up on this computer, so governance here is held until they are: programme records, gate records and task auto-merge wait. Say toolkit permissions for the one command that sets them up.`;
+    }
     const what = [found.missing > 0 ? `${found.missing} missing` : '', found.stale > 0 ? `${found.stale} old` : ''].filter(Boolean).join(', ');
     return `Toolkit permissions: ${found.app || 'Claude Code'}'s Toolkit permission lines on this computer are out of date (${what}). Say toolkit permissions for the one command that brings them up to date; nothing waits on it.`;
   } catch { return null; }
+}
+
+// Whether this computer's permissions are the part that holds governance at `root`: never set up, and
+// the readiness hold applies there. Any failure reads as no hold.
+function permissionsHold(root, found, deps = {}) {
+  try {
+    const ready = require('./toolkit-governance-ready.cjs');
+    const state = (deps.governanceState || (where => require('./toolkit-governance-state.cjs').governanceState(where)))(root);
+    const result = ready.readiness(state, {}, { permissions: () => found, environment: deps.env || process.env });
+    return result.applies && result.missing.some(item => item.part === 'permissions');
+  } catch { return false; }
 }
 
 // Stamps of chats older than a month are removed when a new chat writes its own, so they never pile up;

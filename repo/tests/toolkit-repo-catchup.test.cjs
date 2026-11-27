@@ -89,7 +89,8 @@ function run(f, read = f.read(), extra = {}) {
 }
 
 const head = repo => git(repo, ['rev-parse', 'HEAD']);
-const NOT_MOVED = /^Toolkit: local main is (\d+) commits? behind origin\/main and was not moved: (.+)\.$/;
+// The reason, then its one step as a sentence of its own.
+const NOT_MOVED = /^Toolkit: local main is (\d+) commits? behind origin\/main and was not moved: (.+?)\. (?:With the user's yes, |The agent |The next session start )[^]*\.$/;
 
 test('1: a clean default branch that is behind is fast-forwarded to the fetched commit', t => {
   const f = fixture(t);
@@ -293,7 +294,7 @@ test('16: a move that changes a file with a filter attribute (Git LFS) is not ma
     const before = head(f.clone);
     const { line } = run(f);
     assert.equal(head(f.clone), before, label);
-    assert.match(line, /was not moved: files the move changes use a filter such as Git LFS\.$/, label);
+    assert.match(line, /was not moved: files the move changes use a filter such as Git LFS\. With the user's yes, the agent pulls it by hand\.$/, label);
   }
 });
 
@@ -493,12 +494,13 @@ test('21: every git call the catch-up made used only the allowed verbs, and neve
   assert.ok(verbs.has('cat-file'), 'the rows include a leftover comparison');
 });
 
-test('22: the Codex session start puts the catch-up line before the governance line, and a throwing catch-up drops only its line', () => {
+test('22: the Codex session start hands the catch-up line to the governance text, which leads with it, and a throwing catch-up drops only its line', () => {
   const read = { refreshed: true, root: '/r', default_branch: 'main', commit: 'b'.repeat(40) };
   const seen = [];
+  // As the real governance text does outside a held block: the catch-up line first, on its own line.
   const gate = {
     startSession(input, options) { seen.push(options.host); options.onRefresh(read); return 'mark'; },
-    sessionLine: () => 'Toolkit governance: off here.',
+    sessionLine: (_cwd, given) => [given.localCopy, 'Toolkit governance: off here.'].filter(Boolean).join('\n'),
     sessionIdOf: input => input.session_id,
   };
   const bridge = { run: () => ({ status: 0 }) };
@@ -510,7 +512,7 @@ test('22: the Codex session start puts the catch-up line before the governance l
     return lines;
   };
   const passed = [];
-  assert.deepEqual(output({ catchUp: { catchUp: fresh => { passed.push(fresh); return 'Toolkit: brought local main up to date.'; } } }), ['Toolkit: brought local main up to date.', 'Toolkit governance: off here.']);
+  assert.deepEqual(output({ catchUp: { catchUp: fresh => { passed.push(fresh); return 'Toolkit: brought local main up to date.'; } } }), ['Toolkit: brought local main up to date.\nToolkit governance: off here.']);
   assert.deepEqual(passed, [read], 'the catch-up gets this start\'s fresh read');
   assert.deepEqual(seen, ['codex']);
   assert.deepEqual(output({ catchUp: { catchUp() { throw new Error('boom'); } } }), ['Toolkit governance: off here.']);

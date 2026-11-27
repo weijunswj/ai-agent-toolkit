@@ -2049,6 +2049,9 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   // a cloud thread, which approves through the Projects card, or with no native session context).
   const typedBlock = cloud || !checks.nativeSessionContext ? null : sessionBlock(checks);
   if (reason) return { eligible: false, reason, checks, typedBlock };
+  // Standing task auto-merge waits while a part of the governance setup is gone
+  // (toolkit-governance-ready.cjs); the user's typed line or card still merges. Unknown never holds.
+  if (setupHeld(root, registryOptions, environment, host)) return { eligible: false, reason: 'governance-not-ready', checks, typedBlock };
   // One scope per repository, base and head for the whole hook call (`scopeProofs`, which the hook
   // shares between its pre-pass and final pass), so a refresh's copy proof runs once; the proof stops
   // short of the call's deadline, leaving time for the closure reads after it.
@@ -2063,6 +2066,17 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   return { eligible: true, reason: null, checks, repository, scope };
 }
 
+// Whether standing task auto-merge waits for the governance setup of the repository at `root`. A copy
+// without the readiness module, or a read that fails, holds nothing.
+function setupHeld(root, registryOptions, environment, host) {
+  try {
+    const ready = require('./toolkit-governance-ready.cjs');
+    const state = governance.governanceState(root, registryOptions);
+    const app = host === 'codex' ? { host: 'codex' } : host ? { host: 'claude' } : {};
+    return ready.holdFor('task-auto-merge', ready.readiness(state, registryOptions, { environment: environment || process.env, ...app })) === 'refuse';
+  } catch { return false; }
+}
+
 // The part of a hook call's deadline a copy proof leaves for the reads after it (the pull request and
 // issue closure reads of the final pass).
 const PROOF_RESERVE_MS = 2500;
@@ -2074,6 +2088,7 @@ function standingReason(reason) {
     'no-native-session-context': "this terminal has no native session context; run the check in the session with Toolkit's hook",
     'no-repository': 'this folder has no usable GitHub repository',
     'unknown-host': 'this app is not one Toolkit knows, so it never merges on a standing answer',
+    'governance-not-ready': "this repository's governance setup is not complete (its Governance App, its evidence store or this computer's Toolkit permissions are missing), so standing task auto-merge waits until it is; toolkit governance names each missing part and its one step",
     'auto-merge-off': "this repository's merged governance binding does not set task_prs.auto_merge to after-gates (refresh governance shows or changes it), or, in a Claude Projects thread, the project line `- Task auto-merge: Off` (or unclear or unread project instructions) forces it Off",
     'binding-not-fresh': 'the enabled merged governance binding is missing, invalid or not fresh',
     'no-session-mark': 'this session has no readable session-start mark',

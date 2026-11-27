@@ -306,7 +306,16 @@ class MergedSweepBindingReader {
   }
 }
 
-function requireGitHubGovernance(repoRoot, online = null) {
+// The commands that write programme state from a computer while setup is not complete
+// (toolkit-governance-ready.cjs): every controller write, a computer's refresh, a run order that is
+// not a dry run, an executor's bind and the handover file. Reads, dry runs and the local checkpoint
+// (which queues instead) are not held.
+function heldUntilReady(args) {
+  if (!args) return false;
+  return isWrite(args) || ['refresh', 'bind', 'handover'].includes(args.command) || (args.command === 'run-order' && !args['dry-run']);
+}
+
+function requireGitHubGovernance(repoRoot, online = null, { args = null, readiness = null } = {}) {
   let governance;
   try { governance = require('../../../repo/scripts/toolkit-governance-state.cjs'); } catch {
     throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
@@ -319,6 +328,17 @@ function requireGitHubGovernance(repoRoot, online = null) {
   const current = online ? new governance.GovernanceState({ mergedReader }).evaluate(repoRoot) : governance.governanceState(repoRoot);
   if (current.state === 'ENABLED' && current.programme_records_bind) {
     const merged = online ? online.binding : governance.mergedBinding(repoRoot);
+    // A computer's write waits while a part of the setup is gone (the cloud sweep runs only with the
+    // App and the store, and has no computer parts). Unknown parts never hold.
+    if (merged && !online && heldUntilReady(args)) {
+      let held = null;
+      try {
+        const ready = require('../../../repo/scripts/toolkit-governance-ready.cjs');
+        const result = readiness ? readiness(current) : ready.readiness(current);
+        if (ready.holdFor('programme-write', result) === 'refuse') held = ready.heldLine(result, `programme ${args.command}`);
+      } catch { held = null; }
+      if (held) throw new ProgrammeError('GOVERNANCE_NOT_READY', held, { governance: current.state });
+    }
     if (merged) return merged;
   }
   if (readStop?.code) throw readStop;
@@ -346,7 +366,7 @@ function openContext(args, deps = {}) {
   const base = deps.transport || (cloud ? cloudTransport(environment) : new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }));
   if (cloud && typeof base.verify === 'function') base.verify();
   const online = cloud ? new MergedSweepBindingReader({ transport: base, repository: state.originSlug(originUrl), checkedOut: environment.GITHUB_SHA }) : null;
-  const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot, online);
+  const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot, online, { args, readiness: deps.readiness || null });
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
   if (cloud && binding.state) throw new ProgrammeError('CLOUD_PUBLIC_STATE', 'This repository keeps its state on a public branch; the cloud sweep does not run it yet.');
   if (cloud && environment.STORE_REPOSITORY && environment.STORE_REPOSITORY.toLowerCase() !== binding.store.repository.toLowerCase()) {
