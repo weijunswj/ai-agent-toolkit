@@ -269,13 +269,26 @@ test('the global rules carry the one question shape, and no shipped instruction 
   // The root-cause principle once read "make it in the shared source that copies, prompts and later runs
   // inherit", which parses two ways beside "upstream" meaning third-party code.
   assert.match(readText(globalPath), /make it at the shared source every copy, prompt and later run inherits;/);
-  const files = shippedInstructionFiles();
+  // The Projects skill and its tasks are shipped instructions too: a daily check-in line still said "asks
+  // the owner by card" after the skill itself stopped.
+  const projects = [];
+  const walkProjects = dir => {
+    for (const entry of fs.readdirSync(path.join(repoRoot, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walkProjects(rel); else if (entry.name.endsWith('.md')) projects.push(rel);
+    }
+  };
+  walkProjects('repo/contracts/claude-projects');
+  const files = [...shippedInstructionFiles(), ...projects];
   assert.ok(files.includes('skills/toolkit-setup/SKILL.md') && files.includes('repo/docs/agent-playbooks/controller-takeover.md'));
+  assert.ok(files.includes('repo/contracts/claude-projects/web-controller-projects/tasks/daily-check-in.md'));
+  // The one row that names Toolkit's own merge card, which stays the merge hold's approval route.
+  const mergeCard = (rel, line) => rel.endsWith('web-controller-projects/reference/base-overrides.md') && /merge card/.test(line);
   const found = [];
   for (const rel of files) {
     readText(rel).split('\n').forEach((line, index) => {
       // Lines that only describe a card (where an owner's answer is kept, the merge card) are not steering.
-      if (/native question method|question UI|cards? first|card last|(?:open|use|show) (?:a|the) (?:question|decision) card|as a (?:question|decision) card|by card\b/i.test(line)) found.push(`${rel}:${index + 1}`);
+      if (/native question method|question UI|cards? first|card last|(?:open|use|show) (?:a|the) (?:question|decision) card|as a (?:question|decision) card|by card\b/i.test(line) && !mergeCard(rel, line)) found.push(`${rel}:${index + 1}`);
     });
   }
   assert.deepEqual(found, [], 'no shipped instruction tells the agent to use a question card or a native question method');

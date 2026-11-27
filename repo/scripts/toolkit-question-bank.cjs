@@ -625,10 +625,10 @@ const KEPT_REASONS = Object.freeze({
   unsupported: 'This Claude Code version does not have this setting, so setup writes nothing.',
 });
 // The one approval question, saying how many settings a yes would set; it reads clearly on its own.
-// With none left setup asks no question, so there is none to word. `pending` is the rows a yes would set.
+// With none left setup asks no question, so there is none to word.
 function approvalQuestion(pending) {
-  const one = pending.length === 1;
-  return `Apply Toolkit's default${one ? '' : 's'} to the ${pending.length} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
+  const one = pending === 1;
+  return `Apply Toolkit's default${one ? '' : 's'} to the ${pending} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
 }
 
 // definition: a resolvedQuestion definition plus defaultState, defaultChoice (the value a yes applies while the
@@ -687,12 +687,11 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
     return `${spec.presentation.recommended_choice_ref}. ${label}${effect}${spec.applies_default ? ' (Toolkit default)' : ''}`;
   };
   const others = (spec) => (spec.selected ? [] : spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`));
-  const waiting = pendingDefaults(specs);
-  const pending = waiting.length;
+  const pending = pendingDefaults(specs).length;
   const rows = answerable(specs);
   const flagged = rows.filter((spec) => spec.selected).length;
   const title = flagged === rows.length ? 'no questions: your setup flags answer every setting'
-    : pending ? `1 question: ${approvalQuestion(waiting)}` : nothingToAsk(specs).title;
+    : pending ? `1 question: ${approvalQuestion(pending)}` : nothingToAsk(specs).title;
   const summary = flagged === rows.length ? 'Your setup flags answer every setting, so setup asks nothing and applies them as shown.'
     : [...(pending ? [`Setup applies the Toolkit default to ${pending} setting${pending === 1 ? '' : 's'} not set yet and keeps every other setting as it is.`, ...unsetNotes(specs)]
       : [nothingToAsk(specs).sentence, markdown ? NOTHING_PENDING_CHANGE : NOTHING_PENDING_CHANGE_TERMINAL]),
@@ -726,7 +725,7 @@ function renderStrongDefaultBank(specs, { markdown = true } = {}) {
 // where nothing is prompted.
 const NOTHING_PENDING_CHANGE = 'To change one, reply with its number and choice, for example 3.5=B (on and off work too).';
 const NOTHING_PENDING_CHANGE_TERMINAL = 'To change one, run setup again with its flag (--help lists them), or say setup toolkit in a chat and reply there.';
-// The reply line under the bank: the approval question for the same pending settings, then the reply grammar.
+// The reply line under the bank: the approval question for the same count of pending settings, then the reply grammar.
 const strongDefaultReply = (pending) => `${approvalQuestion(pending)} Reply yes to apply the Setup applies column, or no to change nothing. To change a setting, add its number and choice, for example 3.5=B (on and off work too); a setting you do not list keeps its current value unless you also say yes.`;
 
 const YES_WORDS = new Set(['yes', 'y', 'all-recommended']);

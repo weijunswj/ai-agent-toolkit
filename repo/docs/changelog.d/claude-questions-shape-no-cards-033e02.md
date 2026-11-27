@@ -7,4 +7,4 @@
 
 ### Removed
 
-- Claude Code setup no longer has a row for the Claude desktop app's "Archive sessions when their PR closes" setting, and the `--claude-app-setting` option is gone. Toolkit never asks about or recommends that setting: with it on, the app archives the chat that opened a pull request once it merges, which would close a controller chat that binds merge-train pull requests. Archiving finished sessions stays the controller's job. The setup question for the Claude Code settings now counts only the four Claude Code settings.
+- Claude Code setup no longer has a row for the Claude desktop app's "Archive sessions when their PR closes" setting, and the `--claude-app-setting` option is gone. Toolkit never asks about or recommends that setting: with it on, the app archives the chat that opened a pull request once it merges, which would close a controller chat that binds merge-train pull requests. Archiving finished sessions stays the controller's job. `--claude-settings` now answers the four Claude Code settings only.

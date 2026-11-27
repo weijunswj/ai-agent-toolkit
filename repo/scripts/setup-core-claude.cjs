@@ -21,12 +21,7 @@ const { strongDefaultRow, STRONG_DEFAULT_STATES } = require('./toolkit-question-
 
 // The setup-choice key of one managed Claude Code setting row, for example claudeSettingAgentsMd.
 const claudeSettingKey = (id) => `claudeSetting${id.replace(/(^|-)([a-z])/g, (match, dash, letter) => letter.toUpperCase())}`;
-
-// Every Claude row a setup flag can answer: the settings file's. Setup has no row for a Claude desktop app
-// setting: Toolkit never asks about or recommends the app's archive-on-PR-close setting (owner decision,
-// 23 November 2026), since it would archive the controller chat that binds a merge train's PR.
-const CLAUDE_SETTING_IDS = Object.freeze(CLAUDE_SETTINGS.map((spec) => spec.id));
-const CLAUDE_SETTING_KEYS = Object.freeze(CLAUDE_SETTING_IDS.map(claudeSettingKey));
+const CLAUDE_SETTING_KEYS = Object.freeze(CLAUDE_SETTINGS.map((spec) => claudeSettingKey(spec.id)));
 
 function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets, expectedToolkitVersion, nodeScriptArgs, readJsonFile, resolvedQuestion, runNativePluginJsonPhase, scriptRootForReadOnlyProbe, setupGlobalRules, unknown, wizardChoice }) {
   function inspectClaudeNativePluginStatePreApproval(args) {
@@ -407,4 +402,4 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
   return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
 }
 
-module.exports = { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_IDS, CLAUDE_SETTING_KEYS };
+module.exports = { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS };

@@ -254,7 +254,7 @@ Anything you do not list takes its recommendation.
 
 # Claude Code setup questions
 
-Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose in setup is remembered, so setup never turns it back on by default; an off you set only in the app itself looks the same as one never chosen, so the question says so for that row. `refresh toolkit` asks only when a row has no value yet.
+Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.
 
 ## Toolkit setup - 1 question: Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay.
 

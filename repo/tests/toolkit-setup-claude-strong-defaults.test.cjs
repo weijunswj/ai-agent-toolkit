@@ -323,8 +323,8 @@ test('setup has no row, flag or text for the desktop app\'s archive-on-PR-close 
   assert.deepEqual(claudeRows.map((spec) => spec.id), ids.map((id) => `claude-setting-${id}`));
   assert.throws(() => core.parseArgs(['--execute', '--host', 'claude-code', '--claude-app-setting', 'auto_archive_on_pr_close=off']));
   assert.throws(() => core.parseArgs(['--execute', '--host', 'claude-code', '--claude-setting', 'auto-archive-on-pr-close=enable']), /Unsupported --claude-setting name/);
-  for (const file of ['skills/toolkit-setup/SKILL.md', 'repo/docs/HOW-TO-USE.md', 'repo/docs/SETUP-QUESTIONS.generated.md']) {
-    assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8'), /auto_archive_on_pr_close|auto-archive-on-pr-close|archive sessions when their PR closes|--claude-app-setting/i, file);
+  for (const file of ['skills/toolkit-setup/SKILL.md', 'repo/docs/HOW-TO-USE.md', 'repo/docs/SETUP-QUESTIONS.generated.md', 'repo/scripts/setup-toolkit-core.cjs', 'repo/scripts/toolkit-question-bank.cjs']) {
+    assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8'), /auto_archive_on_pr_close|auto-archive-on-pr-close|archive sessions when their PR closes|archive row|--claude-app-setting/i, file);
   }
 });
 

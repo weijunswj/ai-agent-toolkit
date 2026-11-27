@@ -694,7 +694,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh below the owner; never edit that older post.']) assert.ok(body.includes(phrase), phrase);
   // Questions: the global rules carry the shape (numbered, lettered nested choices, (my pick), a blank line
   // between); the skill keeps only the Projects extras (INT-TK421-1390).
-  assert.ok(text.includes("- **Questions.** Owner questions take the global rules' question shape, below the ELI5 line. Projects adds: each is written `1. **Question: <the ask>?**` with the link to its card or thread; its problem, fix and skip lines sit under it, above its choices;"));
+  assert.ok(text.includes("- **Questions.** Owner questions take the question shape in the global rules' Communication section (`repo/contracts/agent-rules/global-rules.md` on `main`, read with `CONTROLLER.md`), below the ELI5 line. Projects adds: each is written `1. **Question: <the ask>?**` with the link to its card or thread; its problem, fix and skip lines sit under it, above its choices;"));
   assert.ok(read('repo/contracts/agent-rules/global-rules.md').includes('its choices lettered (A., B.) and nested under it, best first, each with a short plain reason, the recommended one marked (my pick). A blank line between questions.'));
   assert.doesNotMatch(text, /<Choice>|flatten its choices into plain bullets|with no spacer line/);
   // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
@@ -1226,4 +1226,19 @@ test('the daily check-in runs the upgrade plan over every task and counts only a
   const shell = rows.find(row => row.id === 'shell-tasks');
   assert.deepEqual([shell.check, shell.resync], ['TASKS OUTDATED', 'auto']);
   assert.equal(rows.find(row => row.id === 'project-tasks').resync, 'report', 'a task not on the shell stays advice only');
+});
+
+// The question shape lives once, in the global rules (INT-TK421-1390). The Projects skill points at it, so
+// every route a Projects coordinator reads its law by names that file, or the pointer leads nowhere.
+test('the Projects coordinator reads the global rules that hold the question shape', () => {
+  const GLOBAL = 'repo/contracts/agent-rules/global-rules.md';
+  const skill = read(SKILL_REL);
+  const precedence = skill.split('## Order of precedence\n')[1].split('\n\n')[0];
+  assert.ok(precedence.includes(`with the global rules (\`${GLOBAL}\`, home of the question shape) read from the same commit`), precedence);
+  assert.ok(skill.includes(`and read \`${GLOBAL}\` at the same commit (re-read it whenever you re-read \`CONTROLLER.md\`)`));
+  assert.ok(skill.includes(`Owner questions take the question shape in the global rules' Communication section (\`${GLOBAL}\` on \`main\`, read with \`CONTROLLER.md\`)`));
+  const lawOrder = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md').split('\n').find(line => line.startsWith('- Law order:'));
+  assert.ok(lawOrder.includes(`with \`${GLOBAL}\` read at that commit`), lawOrder);
+  assert.ok(require('../scripts/toolkit-projects-guidebook.cjs').BASE_PATHS.includes(GLOBAL), 'the guidebook BASE binds its blob');
+  assert.match(read(GLOBAL).split('## Communication\n\n')[1], /^Questions go last\. Each is a numbered, fully bold question, its choices lettered \(A\., B\.\) and nested under it/);
 });

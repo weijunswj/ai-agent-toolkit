@@ -25,7 +25,7 @@ const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { HOST_LABELS, detectAgentHost } = require('./agent-host-markers.cjs');
 const { legacyTaskAnswersPresent } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
-const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_IDS, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
+const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
 const updateMarker = require('./toolkit-update-marker.cjs');
 const {
@@ -322,7 +322,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       const pair = (arg === '--claude-setting' ? next() : arg.slice('--claude-setting='.length)).toLowerCase();
       const [id, choice, ...rest] = pair.split('=');
       if (rest.length) throw new Error(`Unsupported --claude-setting value: ${pair}`);
-      if (!CLAUDE_SETTING_IDS.includes(id)) throw new Error(`Unsupported --claude-setting name: ${id}`);
+      if (!CLAUDE_SETTINGS.some((spec) => spec.id === id)) throw new Error(`Unsupported --claude-setting name: ${id}`);
       if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-setting choice: ${choice}`);
       claudeSettingOne[id] = choice;
     } else if (arg === '--antigravity-skills' || arg.startsWith('--antigravity-skills=')) {
@@ -333,9 +333,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
-  for (const id of CLAUDE_SETTING_IDS) {
-    const choice = claudeSettingOne[id] || claudeSettingsAll;
-    if (choice) args.setupChoices[claudeSettingKey(id)] = choice;
+  for (const spec of CLAUDE_SETTINGS) {
+    const choice = claudeSettingOne[spec.id] || claudeSettingsAll;
+    if (choice) args.setupChoices[claudeSettingKey(spec.id)] = choice;
   }
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
   if (args.refresh) assertRefreshArgs(args);
@@ -640,8 +640,8 @@ function printHelp() {
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
     '  --claude-settings enable|disable|keep',
-    '                               Claude Code only; answer all four Claude setting rows (hide AI credit, let other sessions wake this one, switch models without asking on a flag, read AGENTS.md) at once with Turn on (enable), Turn off (disable) or Keep current (keep); Turn off removes the line whoever added it, except the model-switch row, which writes false',
-    `  --claude-setting <name>=enable|disable|keep   answer one of those rows, overriding --claude-settings; names: ${CLAUDE_SETTING_IDS.join(', ')}`,
+    '                               Claude Code only; answer all four Claude Code user setting rows (hide AI credit, let other sessions wake this one, switch models without asking on a flag, read AGENTS.md) at once with Turn on (enable), Turn off (disable) or Keep current (keep); Turn off removes the line whoever added it, except the model-switch row, which writes false',
+    `  --claude-setting <name>=enable|disable|keep   answer one of those rows, overriding --claude-settings; names: ${CLAUDE_SETTINGS.map((spec) => spec.id).join(', ')}`,
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
@@ -2332,8 +2332,8 @@ const isStrongDefaultBank = (specs) => specs.some((spec) => spec.strong_default)
 function renderStrongDefaultSetupBank(specs, markdown) {
   // With every setting answered by a flag, or none left to set, there is no question, so the reply line
   // is left out (the bank's own summary says how to change one row).
-  const pending = pendingDefaults(specs);
-  const reply = answerable(specs).every((spec) => spec.selected) || !pending.length ? [] : [strongDefaultReply(pending), ''];
+  const pending = pendingDefaults(specs).length;
+  const reply = answerable(specs).every((spec) => spec.selected) || !pending ? [] : [strongDefaultReply(pending), ''];
   return [QUESTION_BANK_BEGIN, ...renderStrongDefaultBank(specs, { markdown }), '', EXPLAIN_HINT, '', ...reply, QUESTION_BANK_COMPLETE, ''].join('\n');
 }
 
@@ -2437,12 +2437,12 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
     '',
     '# Claude Code setup questions',
     '',
-    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose in setup is remembered, so setup never turns it back on by default; an off you set only in the app itself looks the same as one never chosen, so the question says so for that row. `refresh toolkit` asks only when a row has no value yet.',
+    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose is remembered, so setup never turns it back on by default. `refresh toolkit` asks only when a row has no value yet.',
     '',
     // The bank as a run with no setup flags shows it; the planned specs below carry the plan's selections.
     ...renderStrongDefaultBank(claudeSpecs.map((spec) => ({ ...spec, selected: '' })), { markdown: true }).map((line) => line.replace(/^(#+) /, '$1# ')),
     '',
-    strongDefaultReply(pendingDefaults(claudeSpecs.map((spec) => ({ ...spec, selected: '' })))),
+    strongDefaultReply(pendingDefaults(claudeSpecs.map((spec) => ({ ...spec, selected: '' }))).length),
     '',
     '## Claude Code rows in full',
     '',
@@ -2880,8 +2880,8 @@ function printConfirmedChoices(args, current, confirmedSpecs, heading) {
   }
 }
 
-// The terminal prompt: the same approval question as the bank, for the same pending settings.
-const strongDefaultPrompt = (specs) => `${approvalQuestion(pendingDefaults(specs))} Enter yes, no, or changes such as 3.5=off: `;
+// The terminal prompt: the same approval question as the bank, for the same count of pending settings.
+const strongDefaultPrompt = (specs) => `${approvalQuestion(pendingDefaults(specs).length)} Enter yes, no, or changes such as 3.5=off: `;
 
 async function promptForStrongDefaultAnswer(specs, rl, fixed) {
   for (;;) {
@@ -4278,7 +4278,6 @@ module.exports = {
   applyHostDelegationControl,
   applyClaudeSubagentDepth,
   applyClaudeUserSettings,
-  SetupOwnerOffRecord,
   parseArgs,
   setupQuestionSpecs,
   documentationFixtureState,
