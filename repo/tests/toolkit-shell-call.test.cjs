@@ -137,10 +137,10 @@ test('AT12: shipped matchers cover nested shell calls but not the outer code cel
   for (const tool of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) assert.ok(matchers.some(m => m.test(tool)), tool);
   for (const tool of ['exec', 'code_mode_exec', 'wait', 'write_stdin']) assert.equal(matchers.some(m => m.test(tool)), false, tool);
 });
-// Closure scans are linear. On a busy machine a short sample can fit inside one scheduler slice while
-// the larger one is preempted, which can read past the 10x limit. Longer samples reduce this but do not
-// remove it on an oversubscribed machine. Start at 16K, grow until the smaller sample takes 15ms, and
-// keep the best of five; the closing-reference timing in toolkit-issue-closure.test.cjs uses the same shape.
+// Closure scans are linear. timing() times the smaller size as four runs in one sample, in turn with
+// the larger size, so a busy machine that preempts long samples slows both alike. Start at 16K, grow
+// until the smaller run takes 15ms, and keep the best of up to five pairs; the closing-reference timing in
+// toolkit-issue-closure.test.cjs uses the same shape.
 // On a fast runner the growth reaches a 256K sample, so the larger sample is 1M characters: exactly
 // the reader's input bound (SCAN_BOUND). scanInput never builds past the size it is asked for, so no
 // timed input crosses the bound; the bound refusal itself is proven by its own test below.

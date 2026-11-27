@@ -254,9 +254,19 @@ test('a checkout behind origin gets no false missing copies and no refresh step:
   const unchecked = conformance.cloudWorkflowFindings({ root: repo.repo, merged: { commit: UNKNOWN, default_branch: 'main' } }, toolkit.root, { toolkitRoot: toolkit.root, mergedBinding: () => null });
   assert.deepEqual(unchecked.map(entry => entry.id), ['CLOUD_WORKFLOWS_UNCHECKED']);
   assert.match(unchecked[0].message, /main's head fffffff is not in this checkout; run git fetch origin in the checkout./);
-  // The snapshot is read from git objects and removed: nothing is left in the temporary folder.
-  const leftovers = () => fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('toolkit-refresh-snapshot-')).sort();
-  const before = leftovers();
-  line(origin);
-  assert.deepEqual(leftovers(), before);
+  // The snapshot is read from git objects and removed: nothing is left in the temporary folder. The
+  // call runs with a temporary folder of its own: other test files running at the same time make and
+  // remove their own snapshots in the shared one, which made a before-and-after listing of it flaky.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-stale-pins-snapshots-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const made = [];
+  const saved = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP, mkdtempSync: fs.mkdtempSync };
+  fs.mkdtempSync = (prefix, ...rest) => { const folder = saved.mkdtempSync(prefix, ...rest); made.push(folder); return folder; };
+  Object.assign(process.env, { TMPDIR: scratch, TEMP: scratch, TMP: scratch });
+  try { line(origin); } finally {
+    fs.mkdtempSync = saved.mkdtempSync;
+    for (const name of ['TMPDIR', 'TEMP', 'TMP']) if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name];
+  }
+  assert.deepEqual(made.map(folder => path.relative(scratch, folder).replace(/[^-]+$/, '')), ['toolkit-refresh-snapshot-'], 'the line read one snapshot, in its own temporary folder');
+  assert.deepEqual(fs.readdirSync(scratch), []);
 });
