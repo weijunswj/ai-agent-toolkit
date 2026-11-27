@@ -96,7 +96,7 @@ test('SB-3 the GitHub Free line is said once, and the first sweep counts once a 
   assert.ok(firstSweep.readOwed(f.repo, { registryOptions: f.registryOptions, sweep: new firstSweep.FirstInstallSweep({ gh: fakeSweepGitHub() }) }));
   const third = start(f, { reads });
   assert.equal(count(third, COUNTS), 1);
-  assert.match(third, new RegExp(`- First personal data sweep: ${COUNTS.replace(/[()]/g, '\\$&')}; the list \\(places and rule names only\\) is at https://github\\.com/${SLUG}/actions/runs/77`));
+  assert.equal(count(third, `\n- First personal data sweep: ${COUNTS}; the list (places and rule names only) is at https://github.com/${SLUG}/actions/runs/77`), 1);
   assert.equal(count(start(f, { reads }), COUNTS), 0, 'said once');
 });
 
