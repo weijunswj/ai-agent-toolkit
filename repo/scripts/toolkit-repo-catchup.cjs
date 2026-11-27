@@ -13,7 +13,11 @@
 //     ~/.ai-agent-toolkit, or the running plugin root);
 //   - HEAD is the default branch, its upstream is origin/<default>, and it is strictly behind;
 //   - no merge, rebase, cherry-pick, revert or bisect is in progress, and `git status` is empty
-//     (untracked files count; ignored ones do not);
+//     (untracked files count; ignored ones do not), apart from untracked files that the move adds
+//     with exactly the same bytes (leftovers of a setup whose pull request now holds them, such as an
+//     older governance turn-on wrote into the checkout). Those are removed just before the move, which
+//     writes them back as tracked files, and are put back as they were if the move fails. Any other
+//     change, or an untracked file that differs or that the move does not add, keeps the checkout;
 //   - the repository has no post-merge, post-checkout or reference-transaction hook, and no file the
 //     move changes has a filter attribute (Git LFS), so the move runs no repository code.
 // The move is `git merge --ff-only` with an empty hooks folder, run from git's PATH location with no
@@ -39,7 +43,13 @@ const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const BRANCH = /^[A-Za-z0-9._\/-]{1,200}$/;
 // The git commands this module may run (the first word after any -c pairs or global flags). A test
 // pins it: never reset, checkout, switch, stash, rebase, pull, push, update-ref, branch, clean or force.
-const ALLOWED_VERBS = Object.freeze(['symbolic-ref', 'rev-parse', 'merge-base', 'rev-list', 'config', 'status', 'diff', 'check-attr', 'merge']);
+const ALLOWED_VERBS = Object.freeze(['symbolic-ref', 'rev-parse', 'merge-base', 'rev-list', 'config', 'status', 'diff', 'check-attr', 'cat-file', 'merge']);
+// The most untracked leftovers, and the largest one, the catch-up compares with the incoming commit.
+// More or larger keeps the checkout where it is, as any other uncommitted change does.
+const LEFTOVER_LIMIT = 256;
+const LEFTOVER_BYTES = 4 * 1024 * 1024;
+// Regular file modes in a commit; a link or submodule the move adds is never matched to a file.
+const FILE_MODES = Object.freeze(['100644', '100755']);
 const MOVE_HOOKS = Object.freeze(['post-merge', 'post-checkout', 'reference-transaction']);
 const IN_PROGRESS = Object.freeze(['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG']);
 // Variables that would point git at another repository, worktree or index than the session's own.
@@ -64,9 +74,67 @@ function behindLine(branch, behind, reason) {
   return `Toolkit: local ${branch} is ${commits(behind)} behind origin/${branch} and was not moved: ${REASONS[reason](branch)}.`;
 }
 
-function movedLine(branch, from, to, behind, instructions) {
-  const line = `Toolkit: brought local ${branch} up to date with origin/${branch} (${short(from)} to ${short(to)}, ${commits(behind)}).`;
+function movedLine(branch, from, to, behind, instructions, cleared = []) {
+  const files = cleared.length ? ` Untracked copies of ${cleared.length === 1 ? 'a file' : `${cleared.length} files`} it adds, identical to the merged ones, were replaced by the tracked files: ${cleared.map(entry => entry.file).join(', ')}.` : '';
+  const line = `Toolkit: brought local ${branch} up to date with origin/${branch} (${short(from)} to ${short(to)}, ${commits(behind)}).${files}`;
   return instructions ? `${line} AGENTS.md or CLAUDE.md changed; read them again before acting.` : line;
+}
+
+// The untracked files in `status` (porcelain -z with every untracked file listed) when each one is a
+// regular file the move adds with exactly the same bytes: [{ file, bytes, mode }]. null when anything
+// else is changed, or any untracked file differs, is not added by the move, or cannot be read.
+function identicalLeftovers(git, root, target) {
+  const status = git(['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=all', '--ignore-submodules=none'], { maxBuffer: LIST_BUFFER });
+  if (status.status !== 0) return null;
+  const entries = nulList(status.stdout);
+  if (entries.length === 0 || entries.length > LEFTOVER_LIMIT || entries.some(entry => !entry.startsWith('?? '))) return null;
+  const files = entries.map(entry => entry.slice(3));
+  // What the move adds: ":<old mode> <new mode> <old id> <new id> <status>" then the path.
+  const raw = git(['diff', '--raw', '-z', '--no-renames', '--no-abbrev', 'HEAD', target], { maxBuffer: LIST_BUFFER });
+  if (raw.status !== 0) return null;
+  const fields = raw.stdout.toString('utf8').split('\0');
+  const added = new Map();
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const [, mode, , id, change] = fields[index].replace(/^:/, '').split(' ');
+    if (change === 'A' && FILE_MODES.includes(mode) && SHA.test(id)) added.set(fields[index + 1], id);
+  }
+  const found = [];
+  for (const file of files) {
+    const id = added.get(file);
+    if (!id) return null;
+    let stat;
+    try { stat = fs.lstatSync(path.join(root, ...file.split('/'))); } catch { return null; }
+    if (!stat.isFile() || stat.size > LEFTOVER_BYTES) return null;
+    found.push({ file, id, mode: stat.mode, size: stat.size });
+  }
+  // The incoming blobs, read whole in one call: "<id> blob <size>\n<bytes>\n" each.
+  const blobs = git(['cat-file', '--batch'], { input: `${found.map(entry => entry.id).join('\n')}\n`, maxBuffer: LIST_BUFFER });
+  if (blobs.status !== 0) return null;
+  const out = blobs.stdout;
+  let offset = 0;
+  for (const entry of found) {
+    const end = out.indexOf(0x0a, offset);
+    if (end < 0) return null;
+    const [id, type, size] = out.subarray(offset, end).toString('utf8').split(' ');
+    if (id !== entry.id || type !== 'blob' || Number(size) !== entry.size) return null;
+    let bytes;
+    try { bytes = fs.readFileSync(path.join(root, ...entry.file.split('/'))); } catch { return null; }
+    if (!bytes.equals(out.subarray(end + 1, end + 1 + entry.size))) return null;
+    entry.bytes = bytes;
+    offset = end + 1 + entry.size + 1;
+  }
+  return found.map(({ file, bytes, mode }) => ({ file, bytes, mode }));
+}
+
+// Puts removed leftovers back exactly as they were (a move that failed after they were removed).
+function restore(root, cleared) {
+  for (const entry of cleared) {
+    try {
+      const file = path.join(root, ...entry.file.split('/'));
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, entry.bytes, { mode: entry.mode });
+    } catch { /* reported by the not-moved line; the merged commit holds the same bytes */ }
+  }
 }
 
 function samePath(a, b) {
@@ -174,7 +242,8 @@ function catchUp(read, { runGit = defaultRunGit, environment = process.env, cont
     if (IN_PROGRESS.some(name => fs.existsSync(path.join(text(gitDir), name)))) return behindLine(branch, behind, 'operation');
     const status = git(['--no-optional-locks', 'status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none']);
     if (status.status !== 0) return behindLine(branch, behind, 'busy');
-    if (text(status) !== '') return behindLine(branch, behind, 'dirty');
+    const leftovers = text(status) === '' ? [] : identicalLeftovers(git, root, target);
+    if (!leftovers) return behindLine(branch, behind, 'dirty');
     if (git(['merge-base', '--is-ancestor', 'HEAD', target]).status !== 0) return behindLine(branch, behind, 'diverged');
     const hooksPath = git(['rev-parse', '--git-path', 'hooks']);
     if (hooksPath.status !== 0) return behindLine(branch, behind, 'busy');
@@ -186,16 +255,27 @@ function catchUp(read, { runGit = defaultRunGit, environment = process.env, cont
     if (before === null || after === null) return behindLine(branch, behind, 'unreadable');
     if (before || after) return behindLine(branch, behind, 'filters');
 
-    // The move: fast-forward only, with an empty hooks folder, never stopped by Toolkit.
+    // The move: fast-forward only, with an empty hooks folder, never stopped by Toolkit. Identical
+    // leftovers are removed first (git refuses to overwrite untracked files) and put back if it fails.
     let hooksDir = null;
+    const cleared = [];
     try {
       hooksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-catchup-hooks-'));
+      for (const entry of leftovers) {
+        const file = path.join(root, ...entry.file.split('/'));
+        // Read again just before it goes, so a file changed since the comparison is never removed.
+        let same = false;
+        try { same = fs.lstatSync(file).isFile() && fs.readFileSync(file).equals(entry.bytes); } catch { same = false; }
+        if (!same) { restore(root, cleared); return behindLine(branch, behind, 'dirty'); }
+        try { fs.rmSync(file); cleared.push(entry); }
+        catch { restore(root, cleared); return behindLine(branch, behind, 'busy'); }
+      }
       const moved = git(['-c', `core.hooksPath=${hooksDir}`, 'merge', '--ff-only', '--no-stat', '--quiet', target], { unbounded: true });
-      if (moved.status !== 0) return behindLine(branch, behind, 'busy');
+      if (moved.status !== 0) { restore(root, cleared); return behindLine(branch, behind, 'busy'); }
     } finally { if (hooksDir) { try { fs.rmSync(hooksDir, { recursive: true, force: true }); } catch { /* temp folder */ } } }
     const now = git(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
     if (now.status !== 0 || text(now) !== target) return behindLine(branch, behind, 'busy');
-    return movedLine(branch, from, target, behind, instructionsChanged(root, files));
+    return movedLine(branch, from, target, behind, instructionsChanged(root, files), cleared);
   } catch { return null; }
 }
 
