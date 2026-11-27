@@ -13,9 +13,10 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const helperPath = path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh');
 const branchName = 'source-watch/review-active-third-party-updates';
 const reportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
-const bashPath = process.platform === 'win32'
-  ? ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'].find((candidate) => fs.existsSync(candidate)) || 'bash'
-  : 'bash';
+// On Windows, Git Bash's launcher (bin\bash.exe), which puts Git's tool folders on PATH; the bare
+// usr\bin\bash.exe would not.
+const gitBashLauncher = 'C:\\Program Files\\Git\\bin\\bash.exe';
+const bashPath = process.platform === 'win32' && fs.existsSync(gitBashLauncher) ? gitBashLauncher : 'bash';
 
 function git(cwd, args, options = {}) {
   return execFileSync('git', args, {

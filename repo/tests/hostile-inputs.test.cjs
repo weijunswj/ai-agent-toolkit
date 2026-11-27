@@ -126,9 +126,9 @@ test('H-04: timing fails on quadratic work and passes on linear work', () => {
     return { result, samples, built, reads };
   };
   // Calibration times each run alone; then each pair times four smaller runs as one sample (one
-  // start and one finish) and one larger run.
+  // start and one finish) and one larger run, at least two pairs.
   for (const [cost, ok, times, ratio, pairs] of [
-    [size => size, true, [8, 32], 4, 1],
+    [size => size, true, [8, 32], 4, 2],
     [size => size * size, false, [64, 1024], 16, 3],
   ]) {
     const { result, samples, built, reads } = measure(cost);
@@ -144,11 +144,11 @@ test('H-04: timing fails on quadratic work and passes on linear work', () => {
   const capped = measure(size => size, { minMs: 10000 });
   assert.equal(capped.result.size, 32, 'calibration stops before the larger input would exceed maxSize');
   assert.deepEqual(capped.built, [2, 2, 8, 32, 128]);
-  assert.deepEqual(capped.samples, [2, 2, 2, 2, 8, 8, 8, 32, 32, 32, 32, 32, 32, 32, 128]);
+  assert.deepEqual(capped.samples, [2, 2, 2, 2, 8, 8, 8, 32, 32, 32, ...Array(2).fill([32, 32, 32, 32, 128]).flat()]);
   const tooFast = measure(() => 0);
   assert.equal(tooFast.result.ok, true, 'below minMs remains a pass');
   assert.deepEqual(tooFast.result.times, [0, 0]);
-  assert.equal(tooFast.samples.length, 15, 'zero-duration work still has bounded sampling');
+  assert.equal(tooFast.samples.length, 20, 'zero-duration work still has bounded sampling');
   const boundary = measure(size => size === 32 ? 80 : size);
   assert.equal(boundary.result.ratio, 10);
   assert.equal(boundary.result.ok, true, 'the unchanged ratio threshold is inclusive');
@@ -184,6 +184,33 @@ test('H-06: a stall a short sample could dodge slows both samples alike, and qua
   const quadratic = stalled(size => size * size);
   assert.equal(quadratic.ok, false, quadratic.message);
   assert.equal(quadratic.ratio, 16);
+});
+
+// Red on a timing that stops after the first pair within the limit (the review of this change found
+// a slowed first smaller sample let quadratic work pass at 256 pause positions): one pause of 200
+// ticks, added to the first run that starts at or after tick `at`, scanned over the whole timeline,
+// never turns quadratic work into a pass.
+test('H-07: one pause anywhere in the timeline never passes quadratic work', () => {
+  const run = (cost, at) => {
+    let ticks = 0;
+    let paused = at === null;
+    return hostile.timing(text => {
+      if (!paused && ticks >= at) { ticks += 200; paused = true; }
+      ticks += cost(text.length);
+    }, size => 'a'.repeat(size), { startSize: 2, maxSize: 128, minMs: 8, clock: () => BigInt(ticks) * 1000000n });
+  };
+  const quadratic = size => size * size;
+  assert.equal(run(quadratic, null).ok, false, 'quadratic work fails with no pause');
+  assert.equal(run(size => size, null).ok, true, 'linear work passes with no pause');
+  let total = 0;
+  hostile.timing(text => { total += quadratic(text.length); }, size => 'a'.repeat(size), { startSize: 2, maxSize: 128, minMs: 8, clock: () => BigInt(total) * 1000000n });
+  const passes = [];
+  for (let at = 0; at <= total; at += 1) {
+    const result = run(quadratic, at);
+    if (result.ok) passes.push({ at, ratio: result.ratio, times: result.times });
+  }
+  assert.ok(total > 1000, `the scan covers the whole timeline (${total} ticks)`);
+  assert.deepEqual(passes, [], 'a single pause turned quadratic work into a pass');
 });
 
 test('H-05: expectDefaultDeny reports accepted cases and stale or unknown exceptions', () => {

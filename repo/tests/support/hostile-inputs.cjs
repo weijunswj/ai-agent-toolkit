@@ -237,7 +237,9 @@ function indent(text, spaces) {
 // sample (its time per run is what counts), then one larger run. Linear work makes both samples
 // about the same length, so a busy machine that preempts long samples slows both alike; a short
 // smaller sample alone could dodge the preemption the larger one cannot, and read as growth.
-// Pairs stop once the larger run is within the limit, so a linear reader is timed once there.
+// Each size keeps its best sample over at least two pairs, so one pause of the machine, which
+// slows at most one sample, can neither fail linear work nor pass quadratic work. After two pairs
+// they stop once the larger run is within the limit, so a linear reader is timed twice there.
 // clock returns monotonic bigint nanoseconds (real time by default).
 // Returns { ok, ratio, size, times, message }.
 function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 20, maxRatio = 10, runs = 3, clock = () => process.hrtime.bigint() } = {}) {
@@ -268,7 +270,7 @@ function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 20, ma
     small = Math.min(small, sample(input, 4));
     large = Math.min(large, sample(larger, 1));
     pairs += 1;
-  } while (pairs < runs && large > Math.max(small, 0.5) * maxRatio);
+  } while (pairs < runs && (pairs < 2 || large > Math.max(small, 0.5) * maxRatio));
   const ratio = large / Math.max(small, 0.5);
   const ok = large < minMs || ratio <= maxRatio;
   return { ok, ratio, size, times: [small, large], message: `size ${size} took ${small.toFixed(1)} ms, size ${size * 4} took ${large.toFixed(1)} ms (growth ${ratio.toFixed(1)}x, limit ${maxRatio}x)` };
