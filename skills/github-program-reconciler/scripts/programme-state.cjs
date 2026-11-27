@@ -4822,8 +4822,8 @@ class ProgrammeGraphReader {
     return result;
   }
 
-  // What boarding needs (boardingOf), twenty pull requests to a request: the default branch's head and
-  // its check rollup, and each pull request's head, base, draft flag, newest twenty comments and check
+  // What boarding needs (boardingOf), twenty pull requests to a request: the default branch's head, when
+  // it was committed and its check rollup, and each pull request's head, base, draft flag, newest twenty comments and check
   // rollup at its head. A refused or partial read throws, so boarding stays unread and holds.
   boardingFacts(numbers) {
     const unique = [...new Set(numbers)];
@@ -4836,13 +4836,13 @@ class ProgrammeGraphReader {
     if (!batches.length) batches.push([]);
     for (const batch of batches) {
       const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number isDraft headRefOid baseRefName comments(last:20) { nodes { body authorAssociation createdAt updatedAt } } commits(last:1) { nodes { commit { oid ${rollup(`isRequired(pullRequestNumber:${number})`)} } } } }`).join('\n');
-      const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name target{... on Commit{oid ${rollup('')}}}} ${selection}}}`, variables: { owner, name } });
+      const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name target{... on Commit{oid committedDate ${rollup('')}}}} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
       if (response.status !== 200 || response.json?.errors?.length || !repo) throw new ProgrammeError('BOARDING_UNREAD', 'The boarding read was refused.');
       const target = repo.defaultBranchRef?.target;
-      if (!isSha(target?.oid) || !isText(repo.defaultBranchRef?.name)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The default branch head is unreadable.');
-      out.main = { branch: repo.defaultBranchRef.name, head: target.oid, complete: !target.statusCheckRollup?.contexts?.pageInfo?.hasNextPage, contexts: (target.statusCheckRollup?.contexts?.nodes || []).map(rollupContext) };
+      if (!isSha(target?.oid) || !isText(repo.defaultBranchRef?.name) || !Number.isFinite(Date.parse(String(target.committedDate || '')))) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The default branch head is unreadable.');
+      out.main = { branch: repo.defaultBranchRef.name, head: target.oid, committed_at: target.committedDate, complete: !target.statusCheckRollup?.contexts?.pageInfo?.hasNextPage, contexts: (target.statusCheckRollup?.contexts?.nodes || []).map(rollupContext) };
       for (const number of batch) {
         const pr = repo[`p${number}`];
         if (!pr || pr.number !== number || !isSha(pr.headRefOid)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A batched pull request was not returned.');
@@ -5575,7 +5575,7 @@ function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
   // where merge trains are on (no task_prs.merge_train key means on), and only when a pull request
   // could be ready (one open and not a draft).
   if (binding.task_prs?.merge_train !== 'off' && open.some(pr => !pr.draft)) {
-    attempt(() => { facts.boarding = boardingOf(reader.boardingFacts(open.filter(pr => !pr.draft).map(pr => pr.number)), open, binding.required_checks || []); },
+    attempt(() => { facts.boarding = boardingOf(reader.boardingFacts(open.filter(pr => !pr.draft).map(pr => pr.number)), open, binding.required_checks || [], now); },
       code => { facts.boarding = null; facts.boarding_unread = code; });
   }
   const unowned = openPrRows({ open, parent, docs, now }).filter(row => !row.task).map(row => row.number);
@@ -5595,16 +5595,20 @@ function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
 // or null with no ready list when nothing is landing. Ready: open, not a draft, on the default branch,
 // not a train, on no open train, its newest `Toolkit-G2:` verdict for its head (from an account that
 // can write here) a PASS, and every required check green at that head. Pure.
-function boardingOf(read, open, required) {
+function boardingOf(read, open, required, now) {
   const { verdictFor } = require('./g2-verdict.cjs');
+  const { mainCheckMayStart } = require('../../../repo/scripts/toolkit-merge-train-finder.cjs');
   const trains = open.filter(pr => (pr.train || []).length).sort((a, b) => b.number - a.number);
   const held = new Set(trains.flatMap(pr => pr.train.map(row => row.pr)));
-  // Main's CI runs while a required check (every check when none is required) has a run not finished;
-  // a check that never ran on main is not running.
+  // Main's CI runs while a required check (every check when none is required) has a run not finished,
+  // or has no run at main's head yet while that head is new (the merge train finder's mainCheckMayStart:
+  // GitHub makes a push's check runs a little after it lands); after that, a check with no run on main
+  // is not running.
   const names = required.length ? required : [...new Set(read.main.contexts.map(contextName))];
+  const mayStart = mainCheckMayStart(read.main.committed_at, Date.parse(now));
   const running = names.some(name => {
     const named = read.main.contexts.filter(context => contextName(context) === name);
-    return named.length > 0 && checkResults(named).includes('pending');
+    return named.length > 0 ? checkResults(named).includes('pending') : mayStart;
   });
   const inflight = trains.length ? `train #${trains[0].number}` : running ? 'main\'s required checks' : null;
   if (!inflight) return { inflight: null, ready: [] };

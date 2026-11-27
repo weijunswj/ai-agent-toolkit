@@ -77,6 +77,22 @@ test('main\'s required checks running count as a landing in flight; nothing in f
   assert.deepEqual(fx.open('TRAIN_BOARD_DUE'), []);
 });
 
+// G2 Low: right after a merge GitHub has not made main's check runs yet, so a required check with no run
+// at a new main head counts as running (a landing in flight); once the head is ten minutes old, a check
+// with no run there (one that runs on pull requests only) does not hold a landing open.
+test('a required check with no run yet at a new main head is a landing in flight, until the head is ten minutes old', () => {
+  const fx = fixture();
+  fx.pr(8, { head: sha('8') }); fx.pass_(8, sha('8'));
+  fx.github.mainContexts = [];
+  fx.github.mainCommittedAt = iso(START - 60000);
+  fx.pass();
+  assert.deepEqual(fx.open('TRAIN_BOARD_DUE'), [8]);
+  fx.now = START + 10 * 60000;
+  fx.github.clock = fx.now;
+  fx.pass();
+  assert.deepEqual(fx.open('TRAIN_BOARD_DUE'), [], 'eleven minutes on, a check that never ran on main holds nothing');
+});
+
 test('a bot\'s pull request is named on the first sweep that sees it; a dependency update is left to its own workflow', () => {
   const fx = fixture();
   fx.pr(20, { head: sha('2'), author: 'example-governance[bot]', branch: 'toolkit/shard-timings-1' });

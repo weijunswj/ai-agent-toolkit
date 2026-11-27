@@ -1,0 +1,7 @@
+### Fixed
+
+- A proved Toolkit refresh in a repository owned by an organization now waits for the owner's typed merge when the organization's `TOOLKIT_REF` variable is shared with that repository: the copies' `vars.TOOLKIT_REF` reads it too, and `--land-refresh` used to check only the repository's own variable. A refresh whose owner cannot be read, or whose shared organization variables cannot be read in full, holds for a later turn.
+- The gate rules now say a proved refresh lands by `--land-refresh`, so they no longer read as if every refresh waits for a typed merge.
+- Right after a merge, GitHub has not made main's check runs yet. A required check with no run at main's head now counts as running for ten minutes after that head was committed, in the merge train's `find` and `land` and in the programme sweep's boarding check, so a lone ready pull request no longer merges alone and the front train no longer lands before main's CI has started. After ten minutes a check that never ran on main (one that runs on pull requests only) holds nothing, as before.
+- `catchup` and `eject` take the train's branch (`--branch toolkit-train/<name>`) and work in a temporary worktree of their own, like `build` and `join`, so running them from the primary checkout no longer leaves it on the train branch; they refuse while that branch is checked out anywhere and move it forward only once the result holds.
+- The `--rebind` "N more" hint now prints `git log --no-merges`, so running it lists the same changes the count names.

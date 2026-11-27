@@ -55,8 +55,11 @@
 //     "checks": { "<sha>": [ { "name": "validate", "status": "completed", "conclusion": "success", "id": 1 } ] },
 //     "files": { "12": ["path/a.txt"] },
 //     "merge_bases": { "main...<sha>": "<sha>" }, "contents": { "<sha>:<path>": "<text>" },
-//     "main_checks": [ { "name": "validate", "status": "in_progress", "conclusion": null, "id": 2 } ] }
-// ("main_checks" are the check runs at the default branch's head; none listed means none running).
+//     "main_checks": [ { "name": "validate", "status": "in_progress", "conclusion": null, "id": 2 } ],
+//     "main_committed_at": "<ISO>" }
+// ("main_checks" are the check runs at the default branch's head and "main_committed_at" when that head
+// was committed: a required check with none listed counts as running for ten minutes after it, and with
+// no time given the head is old, so none listed means none running).
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
@@ -97,6 +100,13 @@ class GitHubFacts {
   }
   // The check runs at the default branch's head.
   mainChecks(branch) { return this.checks(encodeURIComponent(branch)); }
+  // When the default branch's head was committed (an ISO time).
+  mainCommittedAt(branch) {
+    const result = spawnSync('gh', ['api', `repos/${this.repository}/commits/${encodeURIComponent(branch)}`, '--jq', '.commit.committer.date'], { encoding: 'utf8', windowsHide: true });
+    const at = String(result.stdout || '').trim();
+    if (result.error || result.status !== 0 || !Number.isFinite(Date.parse(at))) throw new Error(`could not read when ${branch}'s head was committed`);
+    return at;
+  }
   files(number) { return this.#api(`repos/${this.repository}/pulls/${number}/files?per_page=100`).map(file => file.filename); }
   mergeBase(base, head) {
     const result = spawnSync('gh', ['api', `repos/${this.repository}/compare/${base}...${head}`, '--jq', '.merge_base_commit.sha'], { encoding: 'utf8', windowsHide: true });
@@ -122,6 +132,7 @@ class LiveFacts {
   comments(number) { return (this.facts.comments || {})[String(number)] || []; }
   checks(sha) { return (this.facts.checks || {})[sha] || []; }
   mainChecks() { return this.facts.main_checks || []; }
+  mainCommittedAt() { return this.facts.main_committed_at || null; }
   files(number) { return (this.facts.files || {})[String(number)] || []; }
   mergeBase(base, head) { return (this.facts.merge_bases || {})[`${base}...${head}`] || base; }
   text(ref, file) { const value = (this.facts.contents || {})[`${ref}:${file}`]; return typeof value === 'string' ? value : null; }
@@ -141,13 +152,28 @@ function missingChecks(runs, required) {
   });
 }
 
+// GitHub makes a push's check runs a little after the commit lands, so right after a merge a required
+// check can have no run at main's head yet. For this long after main's head was committed such a check
+// counts as running; after it, a required check with no run there (one that runs on pull requests only)
+// is not running. A head with no readable commit time is past the window.
+const MAIN_CHECKS_GRACE_MS = 10 * 60 * 1000;
+
+// Whether a required check with no run at main's head may still start: main's head was committed
+// (`committedAt`, an ISO time) less than MAIN_CHECKS_GRACE_MS before `now`.
+function mainCheckMayStart(committedAt, now = Date.now()) {
+  const at = Date.parse(String(committedAt || ''));
+  return Number.isFinite(at) && now - at < MAIN_CHECKS_GRACE_MS;
+}
+
 // Whether main's CI is still running: a required check (every check when none is required) whose
-// latest run at the default branch's head has not completed.
-function mainRunning(runs, required) {
+// latest run at the default branch's head has not completed, or that has no run there yet while main's
+// head is new (mainCheckMayStart).
+function mainRunning(runs, required, { committedAt = null, now = Date.now() } = {}) {
   const names = required.length ? required : [...new Set(runs.map(run => run.name))];
+  const mayStart = mainCheckMayStart(committedAt, now);
   return names.some(name => {
     const latest = runs.filter(run => run.name === name).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
-    return Boolean(latest) && latest.status !== 'completed';
+    return latest ? latest.status !== 'completed' : mayStart;
   });
 }
 
@@ -319,7 +345,7 @@ function find(cwd, options, maxMembers) {
   }
   // The queue: the last train takes joiners while it waits behind another, or, at the front, while
   // main's checks run; otherwise the ready ones start the next train behind it.
-  const running = mainRunning(facts.mainChecks(branch), required);
+  const running = mainRunning(facts.mainChecks(branch), required, { committedAt: facts.mainCommittedAt(branch) });
   const open = Boolean(tip) && !options.nextTrain && (tip.base !== branch || running);
   const aboard = open ? (mergeTrainMembers(pulls.find(pull => pull.number === tip.pr)?.body) || []).length : 0;
   const room = Math.max(0, maxMembers - aboard);
@@ -354,4 +380,4 @@ function find(cwd, options, maxMembers) {
     ...(onto ? { onto } : {}), next };
 }
 
-module.exports = { VERDICT, GitHubFacts, LiveFacts, find, mainRunning, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };
+module.exports = { VERDICT, GitHubFacts, LiveFacts, MAIN_CHECKS_GRACE_MS, find, mainCheckMayStart, mainRunning, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };
