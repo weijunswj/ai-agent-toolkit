@@ -155,13 +155,16 @@ test('the line never pushes a session start past the host limit: the governance 
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const desktop = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' };
-  let limit = null;
+  let limit = null, copy = null;
+  // The catch-up line goes to the governance text, which places it (first, or in its held block) within
+  // the limit it is given.
   const start = length => claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { environment: desktop, repoCatchUp: { catchUp: () => 'Caught up.' },
-    gate: { SESSION_TEXT_LIMIT: gate.SESSION_TEXT_LIMIT, startSession() {}, sessionIdOf: gate.sessionIdOf, sessionLine(_cwd, given) { limit = given.limit; return 'x'.repeat(Math.min(length, 20000)); } } }).hookSpecificOutput.additionalContext;
+    gate: { SESSION_TEXT_LIMIT: gate.SESSION_TEXT_LIMIT, startSession() {}, sessionIdOf: gate.sessionIdOf, sessionLine(_cwd, given) { limit = given.limit; copy = given.localCopy; return 'x'.repeat(Math.min(length, 20000)); } } }).hookSpecificOutput.additionalContext;
   const fits = start(100);
   const line = fits.split('\n\n').at(-1);
   assert.match(line, /^Asking the owner/);
-  assert.equal(limit, gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`Caught up.\n\n\n${line}`), 'the governance text is told what is left');
+  assert.equal(copy, 'Caught up.');
+  assert.equal(limit, gate.SESSION_TEXT_LIMIT - Buffer.byteLength(`\n\n${line}`), 'the governance text is told what is left');
   assert.ok(Buffer.byteLength(start(limit)) <= gate.SESSION_TEXT_LIMIT);
   assert.equal(start(limit).endsWith(line), true, 'a governance text of exactly that size still has the line');
   assert.equal(start(limit + 1).includes('Asking the owner'), false, 'one that does not fit keeps the governance text whole instead');

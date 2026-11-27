@@ -101,7 +101,8 @@
 // none when there is no overlap, else a delta review of the shared files.
 // Trains run only where governance is ENABLED and the merged binding's merge train switch
 // (`task_prs.merge_train`, no key meaning on) is on: find, build, catchup and land refuse otherwise, so
-// each ready pull request merges alone. verify, body, split and eject still check or unwind a train.
+// each ready pull request merges alone. They refuse too while the governance setup is not complete
+// (toolkit-governance-ready.cjs). verify, body, split and eject still check or unwind a train.
 // land refuses a stacked train, refuses while main's required checks are still running at main's head
 // (the train takes joiners until they finish, then lands; --live's "main_checks" lists those runs, none
 // meaning none running), re-runs verify, requires main to be inside the train (else main moved: rebuild), every
@@ -1132,7 +1133,18 @@ function landRoute(cwd, manifest, main, options) {
 // Refuses a command that starts, grows or lands a train unless merge trains are on here.
 function requireTrains(cwd, options) {
   const state = governance.mergeTrain(cwd, options.registryOptions || {});
-  if (state.on) return;
+  if (state.on) {
+    // While a part of the governance setup is gone (toolkit-governance-ready.cjs), trains wait; the
+    // owner's own merge of each pull request does not. Unknown parts never hold.
+    let held = null;
+    try {
+      const ready = require('./toolkit-governance-ready.cjs');
+      const { result } = ready.readinessAt(cwd, options.registryOptions || {});
+      if (ready.holdFor('merge-train', result) === 'refuse') held = ready.heldLine(result, 'this merge train');
+    } catch { held = null; }
+    if (held) throw new TrainError(`${held} Merge each ready pull request alone with the owner's merge.`, 1);
+    return;
+  }
   // Off by the merged binding (governance off or undecided, or the switch off): each PR merges alone.
   // Anything else (a stale or missing read, an unreadable repository) may only need a fresh read.
   const decided = ['repository-off'].includes(state.reason) || ['DISABLED', 'UNDECIDED'].includes(governance.governanceState(cwd, options.registryOptions || {}).state);

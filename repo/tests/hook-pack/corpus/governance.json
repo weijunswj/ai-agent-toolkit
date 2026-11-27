@@ -4536,6 +4536,8 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
       "expect": {"decision":"allow"},
       "status": "pass"
-    }
+    },
+    {"id":"GOV.not-ready-held-block","source":"owner test 27 Nov 2026, second new chat (INT-TK421-1386, 1387): after the setup merged, the session start called the missing Governance App \"no action needed\" and governance kept acting","kind":"benign","hosts":["claude","codex"],"event":"SessionStart","payload":{"source":"startup"},"fixture":{"repo":{"governance":"enabled","min_toolkit":"3.199.0"},"governance_parts":{"app":"missing","store":"usable"}},"expect":{"decision":"allow","context_contains":["Toolkit governance: held until setup is complete.","- Governance App: Not set up on toolkit-test-fixture/hook-pack-fixture"],"context_excludes":["nothing waits on it","no action needed"]},"status":"pass"},
+    {"id":"GOV.not-ready-older-binding-warns","source":"owner test 27 Nov 2026, second new chat (INT-TK421-1386, 1387): after the setup merged, the session start called the missing Governance App \"no action needed\" and governance kept acting; control: a programme file older than the hold keeps its warning only","kind":"benign","hosts":["claude","codex"],"event":"SessionStart","payload":{"source":"startup"},"fixture":{"repo":{"governance":"enabled","min_toolkit":"3.137.0"},"governance_parts":{"app":"missing","store":"usable"}},"expect":{"decision":"allow","context_contains":["the Governance App is not set up on toolkit-test-fixture/hook-pack-fixture"],"context_excludes":["held until setup is complete"]},"status":"pass"}
   ]
 }

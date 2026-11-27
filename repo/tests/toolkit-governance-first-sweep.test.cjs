@@ -69,22 +69,23 @@ test('a sweep already on GitHub is read, never started again', () => {
 
 test('a run still going when the wait ends, or that can no longer be read, is one line with its link, and never a second start', () => {
   const going = { ...DONE, status: 'in_progress', conclusion: null };
-  const line = url => `First personal data sweep: started, and its list (places and rule names only) will be at ${url}; on a public repository anyone can read it. It changes and posts nothing.`;
+  // Its result is owed to a later session (toolkit-governance-finish.cjs), by run id when one was seen.
+  const line = url => `First personal data sweep: started, and its list (places and rule names only) will be at ${url}; a later session here shows its counts. On a public repository anyone can read it. It changes and posts nothing.`;
   const fake = fakeGitHub({ onStart: world => { world.runs = [going]; } });
   const { result, waits } = run(fake);
-  assert.deepEqual(result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/runs/901`) });
+  assert.deepEqual(result, { end: 'report', owed: { run: 901 }, text: line(`https://github.com/${SLUG}/actions/runs/901`) });
   assert.ok(waits.reduce((sum, ms) => sum + ms, 0) >= WAIT_MS);
   assert.ok(WAIT_MS < finishing.FINISH_GAP_MS, 'the finish\'s lock outlasts the wait');
   fake.world.runs = [DONE];
   assert.match(run(fake).result.text, /4 found/);
   assert.equal(fake.world.starts.length, 1, 'one start in all');
   // Started, but GitHub shows no run yet, or stops answering: the link is the workflow's own page.
-  assert.deepEqual(run(fakeGitHub()).result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/workflows/personal-data-sweep.yml`) });
+  assert.deepEqual(run(fakeGitHub()).result, { end: 'report', owed: { run: null }, text: line(`https://github.com/${SLUG}/actions/workflows/personal-data-sweep.yml`) });
   const lost = fakeGitHub();
   const refuse = {};
   const gh = lost.gh;
   lost.gh = (args, input) => (refuse.on && args.some(arg => arg.includes('/runs?')) ? { ok: false, reason: 'gh-request-failed' } : gh(args, input));
-  assert.deepEqual(run(lost, () => { refuse.on = true; }).result, { end: 'report', text: line(`https://github.com/${SLUG}/actions/workflows/personal-data-sweep.yml`) });
+  assert.deepEqual(run(lost, () => { refuse.on = true; }).result, { end: 'report', owed: { run: null }, text: line(`https://github.com/${SLUG}/actions/workflows/personal-data-sweep.yml`) });
   assert.equal(lost.world.starts.length, 1);
 });
 

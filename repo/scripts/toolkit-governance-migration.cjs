@@ -150,19 +150,21 @@ class GovernanceMaintenance {
     else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
     else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
     this.#securityEnd(rows[0], securities, { on, held, retry, because });
-    if (sweep) this.#sweepEnd(slug, { held, reports });
+    const owed = sweep ? this.#sweepEnd(slug, { held, reports }) : null;
     // Security files written into this working tree still need a pull request; the result says so.
     const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, reports, files };
+    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, reports, files, ...(owed ? { sweep_owed: owed } : {}) };
   }
 
   // Where the first-install sweep ended: its report line or an owner step, never a reason to run the
-  // finish again.
+  // finish again. A run still going returns { run } (its id, or null when not seen yet): its result is
+  // owed to a later session (toolkit-governance-finish.cjs).
   #sweepEnd(slug, { held, reports }) {
     let end;
     try { end = this.#firstSweep ? this.#firstSweep.run(slug) : null; } catch { end = null; }
     if (end?.end === 'report') reports.push(end.text);
     else held.push({ name: 'the first personal data sweep', step: end?.step || `it was not started from here; ${BY_HAND}.` });
+    return end?.end === 'report' && end.owed ? { run: Number.isSafeInteger(end.owed.run) ? end.owed.run : null } : null;
   }
 
   // Where the security settings ended. A read or write GitHub did not confirm is retried, and so is a

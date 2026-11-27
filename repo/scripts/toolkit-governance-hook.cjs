@@ -172,10 +172,11 @@ function respondSteady(event, input, options) {
       text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else {
       // The catch-up moves the checkout first, so the governance line reads the moved tree.
+      // Its line leads the governance text, or joins the held block when the setup is not complete.
       const caughtUp = catchUpLine(fresh, options);
-      const beside = [caughtUp ? `${caughtUp}\n` : '', asksHere(options.environment || process.env) ? `\n\n${ASKING_LINE}` : ''].join('');
+      const beside = asksHere(options.environment || process.env) ? `\n\n${ASKING_LINE}` : '';
       const limit = gate.SESSION_TEXT_LIMIT - Buffer.byteLength(beside, 'utf8');
-      text = [caughtUp, gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude', limit })].filter(Boolean).join('\n');
+      text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input), refresh: fresh, host: 'claude', limit, localCopy: caughtUp });
     }
     return text ?{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch (error) {

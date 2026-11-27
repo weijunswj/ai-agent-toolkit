@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.201.0
+
+### Added
+
+- The Projects daily check-in rebinds itself when `repo/CONTROLLER.md` changes. `toolkit-projects-tasks.cjs --rebind <memory file>` compares main's CONTROLLER.md in the check-in's fresh Toolkit clone with the BINDING memory line and prints the exact new BINDING line, each changed section with its added and removed lines, and the commits that changed it (merge commits left out). The coordinator rewrites the line's commit, blob, toolkit version and date the same turn, keeping the skill Version a `SKILL UPDATE` may have recorded that turn, and reports what changed; `BINDING UNKNOWN` still reports its reason. `--check-memory` and `--rebind` read the BINDING line alike: a tab, no-break space or zero-width space in it is named (`MEMORY FORMAT: BINDING has a character outside printable ASCII`) so the line gets rewritten.
+
+### Changed
+
+- The daily check-in routes its findings: its own Projects steps (the rebind, guidebook, block, Toolkit memory lines, tasks, nudge and run relay) stay with the Projects coordinator, another controller of the repository gets only GitHub-side controller work in its own lane, and the owner only their own steps.
+
+### Removed
+
+- The controller check no longer runs the decision-trace audit, so the daily check-in no longer raises `TRACE GAPS` or "unlinked decision comments". Decision records are comments on their issue, listed by `programme.cjs trace`; the audit stays a standalone tool for pages an older Toolkit wrote. A stored prompt or older guidebook copy that still passes `--skip traces` keeps working.
+
+## 3.200.0 (governance held until setup is complete)
+
+### Added
+
+- **Governance held until setup is complete:** in a governed repository whose merged programme file asks for this Toolkit or later, a missing Governance App, an evidence store that cannot be used, or Toolkit permissions never set up on this computer now hold governance: programme record writes refuse with the missing parts and their one step, gate checkpoints queue and replay once setup is complete, and standing task auto-merge and merge trains wait. Evidence store saves, programme reads, the owner's own merges, setup and ordinary work keep running. A part that could not be read never holds, later drift (such as a new Toolkit permission line) keeps its own reminder without holding, and older governed repositories keep warnings only.
+- **One held block at session start:** while held, every session start leads with one block the agent passes on in full: what is held, each missing part with its one step, a local default branch that could not catch up (with its reason and step), and, once each, the setup's GitHub Free line and the first personal data sweep's result. A sweep still running when the setup finished is read again in the background and its counts are shown once at a later start.
+
+### Changed
+
+- **Catch-up line:** a local default branch that is behind and could not move now names its one step as well as its reason.
+- **Turn-end permissions line:** where permissions are the part that holds governance, it says governance waits on them instead of saying nothing waits.
+
 ## 3.199.0
 
 ### Fixed

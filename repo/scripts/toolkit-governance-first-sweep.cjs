@@ -85,12 +85,33 @@ class FirstInstallSweep {
     return this.#ended(slug, run);
   }
 
+  // The result of a run that was still going when the finish ended (owed): the same end as run() gives
+  // for a finished run, or null while it is still going or GitHub cannot be read. `runId` null reads
+  // the newest sweep run on the default branch. It starts nothing.
+  result(slug, runId = null) {
+    if (!SLUG.test(String(slug))) return null;
+    let run = null;
+    if (Number.isSafeInteger(runId)) {
+      const read = this.#gh([`repos/${slug}/actions/runs/${runId}`]);
+      if (!read.ok || !Number.isSafeInteger(read.value?.id)) return null;
+      run = read.value;
+    } else {
+      const repository = this.#gh([`repos/${slug}`]);
+      const branch = repository.ok ? repository.value?.default_branch : null;
+      if (typeof branch !== 'string' || !branch) return null;
+      const newest = this.#newest(slug, branch);
+      if (!newest.ok || !newest.run) return null;
+      run = newest.run;
+    }
+    return run.status === 'completed' && run.conclusion !== 'cancelled' ? this.#ended(slug, run) : null;
+  }
+
   #held(why) { return { end: 'held', step: `${why}; ${BY_HAND}.` }; }
 
-  // Started, with no result read yet.
+  // Started, with no result read yet: a later session reads it (owed).
   #going(slug, run) {
     const url = run ? `https://github.com/${slug}/actions/runs/${run.id}` : `https://github.com/${slug}/actions/workflows/${WORKFLOW}`;
-    return { end: 'report', text: `First personal data sweep: started, and its list (places and rule names only) will be at ${url}; on a public repository anyone can read it. It changes and posts nothing.` };
+    return { end: 'report', owed: { run: run ? run.id : null }, text: `First personal data sweep: started, and its list (places and rule names only) will be at ${url}; a later session here shows its counts. On a public repository anyone can read it. It changes and posts nothing.` };
   }
 
   #ended(slug, run) {
@@ -111,4 +132,27 @@ class FirstInstallSweep {
   }
 }
 
-module.exports = Object.freeze({ BY_HAND, FirstInstallSweep, WAIT_MS, WORKFLOW });
+// The background read of an owed first sweep (toolkit-governance-finish.cjs sessionLines starts it as
+// `node toolkit-governance-first-sweep.cjs owed` in the repository): reads the run once and saves its
+// line for the next session start; a run still going saves nothing, so a later start reads it again.
+function readOwed(root, { registryOptions = {}, sweep = new FirstInstallSweep() } = {}) {
+  const state = require('./toolkit-governance-state.cjs').governanceState(root, registryOptions);
+  if (state.state !== 'ENABLED' || !state.repository_id || !state.repository) return null;
+  const finishing = require('./toolkit-governance-finish.cjs');
+  const entry = finishing.entryFor(registryOptions, state.repository_id);
+  if (!entry || entry.status !== 'sweep-owed' || !entry.sweep_owed) return null;
+  const end = sweep.result(state.repository, entry.sweep_owed.run ?? null);
+  if (!end) return null;
+  return finishing.recordSweep(registryOptions, state.repository_id, end.end === 'report' ? end.text : `First personal data sweep: ${end.step}`);
+}
+
+function main(argv = process.argv.slice(2)) {
+  if (argv.length !== 1 || argv[0] !== 'owed') return 2;
+  try { readOwed(process.cwd()); } catch { /* the next session start tries again */ }
+  return 0;
+}
+
+// Exports first, so a require cycle through the finish module always sees them.
+module.exports = Object.freeze({ BY_HAND, FirstInstallSweep, WAIT_MS, WORKFLOW, readOwed });
+
+if (require.main === module) process.exitCode = main();
