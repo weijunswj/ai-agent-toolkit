@@ -3896,8 +3896,8 @@
       "status": "pass"
     },
     {
-      "id": "ASK.desktop-card-wake",
-      "source": "owner test 27 Nov 2026: a three-choice question got no card, because nothing gave the chat the next turn the asking line promised",
+      "id": "ASK.desktop-form-left-to-app",
+      "source": "owner decision 27 Nov 2026 (INT-TK421-1389): how a question shows (card, end-of-turn box or text) is the app's choice; the asking line steers no card",
       "hosts": [
         "claude"
       ],
@@ -3916,10 +3916,11 @@
       "expect": {
         "decision": "allow",
         "context_contains": [
-          "right before you end the turn with the closing message, start one short background wait (a background command of about 30 seconds), then on the automatic turn it brings open the card first, with no text before it."
+          "2. Leave how the question shows (a card, the end-of-turn box or plain text) to the app."
         ],
         "context_excludes": [
-          "on your next turn"
+          "background wait",
+          "question card"
         ]
       },
       "status": "pass"

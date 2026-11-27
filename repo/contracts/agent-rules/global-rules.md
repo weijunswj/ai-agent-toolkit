@@ -140,4 +140,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Ask each action-blocking question (choose, approve, confirm, give a path, continue) with the harness's native question method, a question-only card clear alone, best option marked. Failing that, ask in one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Questions go last. Each is a numbered, fully bold question, its choices lettered (A., B.) and nested under it, best first, each with a short plain reason, the recommended one marked (my pick). A blank line between questions. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.

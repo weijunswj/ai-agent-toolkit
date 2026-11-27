@@ -46,15 +46,14 @@ function readInput(text) {
 const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in the session context that opens its transcript forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
 
 // How to ask the owner in the Claude desktop app. The failure it prevents: the app shows only a turn's
-// closing message in full and cuts text written earlier in the turn to one line, so a card opened in the
-// same turn as its context reaches the owner without it (25 November 2026, twice). And nothing gives a
-// chat its next turn on its own, so a card promised "on your next turn" never came (27 November 2026):
-// the line has the agent start one short background wait before it ends the turn, whose automatic turn
-// opens the card. Wording confirmed by the owner. It is a note to the agent: no card is refused. The terminal and the IDE extensions show a
-// turn's text as it is written, so only the desktop app's own entry points get it; the host names the
-// entry point in CLAUDE_CODE_ENTRYPOINT. Cloud sessions and SSH sessions are left out until they are
-// checked live (an accepted gap).
-const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. A simple question may use the app\'s end-of-turn box in that turn. 3. A merge or three or more choices uses the question card on the next turn, which nothing else starts: right before you end the turn with the closing message, start one short background wait (a background command of about 30 seconds), then on the automatic turn it brings open the card first, with no text before it. 4. A card holds only the question and its choices, clear alone, with your recommended option marked. 5. Never write the context and open a card in the same turn: the app cuts it short. Toolkit\'s exact merge card keeps its own text.';
+// closing message in full and cuts text written earlier in the turn to one line, so a question whose
+// context came earlier in the turn reaches the owner without it (25 November 2026, twice). How the
+// question then shows (a card, the end-of-turn box or plain text) is the app's own choice (owner decision,
+// 27 November 2026): Toolkit no longer steers it. It is a note to the agent: nothing is refused. The
+// terminal and the IDE extensions show a turn's text as it is written, so only the desktop app's own entry
+// points get it; the host names the entry point in CLAUDE_CODE_ENTRYPOINT. Cloud sessions and SSH sessions
+// are left out until they are checked live (an accepted gap).
+const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. Leave how the question shows (a card, the end-of-turn box or plain text) to the app. Toolkit\'s exact merge card keeps its own text.';
 const DESKTOP_APP = /^claude-desktop(?:-3p)?$/;
 const asksHere = environment => DESKTOP_APP.test(String(environment.CLAUDE_CODE_ENTRYPOINT || ''));
 // The host's limit on one hook's session-start text (gate.SESSION_TEXT_LIMIT), spelled out because the

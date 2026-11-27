@@ -75,7 +75,7 @@ test('Projects briefs keep review rounds short', () => {
 
 test('a blocking finding needs proof; unproven Medium is Low, unproven High goes to the owner', () => {
   assert.match(GATE, /both block only with proof: a failing test or a supported-path trace with the reason \(missing proof: name what is absent\)/);
-  assert.match(GATE, /An unproven Medium becomes Low; an unproven High goes to the owner's card and does not block alone/);
+  assert.match(GATE, /An unproven Medium becomes Low; an unproven High goes to the owner and does not block alone/);
   assert.doesNotMatch(GATE, /unproven High[^.;]*(becomes Low|is dropped|joins the follow-up)/);
   assert.match(DELIVERY, /the failing test or trace proving it \(an unproven Medium is a follow-up; an unproven High goes to the owner\)/);
   assert.match(CONTROLLER, /Plausible supported-path violations or critical missing proof block/);
@@ -106,5 +106,5 @@ test('round cap: two G2 rounds, then only a proved High or a shipping-floor defe
   const cap = read('repo/contracts/agent-rules/gate-rules.md').match(/\*\*Round cap:\*\*[^\n]*/)[0];
   assert.doesNotMatch(cap, /High[^.;:]*(follow-up|never blocks|Later|Now)/);
   assert.doesNotMatch(cap, /floor[^.;]*(follow-up|Later|Now)/);
-  assert.match(GATE, /An unproven Medium becomes Low; an unproven High goes to the owner's card and does not block alone/);
+  assert.match(GATE, /An unproven Medium becomes Low; an unproven High goes to the owner and does not block alone/);
 });

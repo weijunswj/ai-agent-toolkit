@@ -57,9 +57,9 @@ A matching active `standing` entry is the fresh approval the approval rule above
 - **Just this once:** anything new, wide or one-off.
 - **Hard stops:** never offered (see the list above).
 
-### The card
+### The ask
 
-Ask with the harness's native question method and make the ask clear on its own: the lines below in plain English, then the question and its options (just this once, from now on, no), the recommended one marked. In Claude Projects follow the Projects skill: these lines, then one decision card.
+Make the ask clear on its own: the lines below in plain English, then the question and its options (just this once, from now on, no), the recommended one marked, in the global rules' question shape. In Claude Projects follow the Projects skill: these lines, then one question.
 
 - **Stopped on:** the step in plain words.
 - **Why it stopped:** one line, for example "your computer's safety check blocks changing scripts it didn't write".
