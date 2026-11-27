@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.199.0
+
+### Fixed
+
+- The `remove toolkit` plan no longer puts the permissions command inside a list line. Its Kept line says the lines are removed by your own command below the plan, and the command comes once, after the lists, in its own PowerShell block.
+- `review permissions` shows each of your own lines in plain words only, such as "Runs a Python script" or "Any GitHub call, merges and deletes included", never the command itself; the raw line, with any key hidden, comes only when you say show all.
+- In the Claude desktop app, a question with three or more choices now gets its card: the asking line has the agent start one short background wait (about 30 seconds) right before it ends the turn with the context, then open the card first, with no text, on the automatic turn the wait brings.
+- Turning governance on no longer leaves files in your checkout. The plain-text check, its baseline, the Dependabot settings and a first shard list are rendered in a scratch folder outside the checkout and travel only in the one setup pull request, so after the merge the session-start catch-up can bring the default branch up to date.
+- The session-start catch-up now also moves a default branch whose only changes are untracked files the move adds with exactly the same bytes (as an older turn-on left them). It removes them just before the move, puts them back if the move fails and names them in its line; a file that differs, or one the move does not add, still keeps the checkout where it is.
+- The session-start stale-copy line judges a governed repository's Toolkit copies on origin's default branch as the session start's binding read fetched it, never on the working tree, so a checkout that is behind no longer reports copies as missing or asks for a needless refresh pull request. The governance check reads the copies the same way.
+- The refresh and the stale-copy check see a shard list's test files by name, so a usable shard list no longer reads as finding no test file.
+
+### Changed
+
+- The setup pull request's programme file requires the checks its own workflows add (`plain-text`, and `personal-data` where it adds the personal data guard) next to any the default branch already requires. The turn-on no longer asks you to edit `required_checks`, run `migrate` or compare files before pulling.
+- Owner commands in the governance bank's answer (the permissions command and the Governance App line) come in `powershell` blocks.
+- `toolkit-merge-train.cjs build` makes the train in a temporary worktree of its own, so the checkout it is run from stays on its own branch; it refuses a branch checked out in any worktree, that checkout included.
+- Update Toolkit on every computer that runs the sweep: an older Toolkit holds on a parent document carrying the new finding codes (`attention[n].code is not a known finding code`) until it is updated.
+
+### Added
+
+- A proved Toolkit refresh pull request in a governed repository lands on its own: where the repository's task auto-merge switch is On, `toolkit-cloud-workflows.cjs --repo <checkout> --land-refresh` checks that every changed file is byte for byte Toolkit main's own render at the Toolkit commit the refresh names, that the repository's TOOLKIT_REF does not pin it and that its required checks are green, then names the exact pinned merge command and the notice to post after. The merge hold runs the same copy proof before it lets that merge through with no typed approval. Anything else in a refresh pull request still waits for the owner's typed merge.
+- Refresh pull requests carry a `UAT: NOT_REQUIRED` line and say who lands them.
+- Merge trains form a queue: while main's required checks run after a merge, or a train is open, a pull request that becomes ready joins the last open train (`toolkit-merge-train.cjs join`, which reverts the train's bump, merges the joiner and bumps once again without rewriting the branch), or starts the next train behind it once that train has closed. A joiner that conflicts is dropped; once the train lands, its builder resolves the conflict on top of main, a delta review checks it, and it boards the next train. `land` waits while main's required checks run.
+- The programme sweep raises `TRAIN_BOARD_DUE` for a ready pull request no train holds while a landing is in flight, and `BOT_PR_OPEN` for a bot's pull request on the first sweep that sees it; both are called out at the controller's next turn end, not after four hours.
+
 ## 3.198.0 (remove toolkit shows a plain plan and leaves a clean folder)
 
 ### Changed
