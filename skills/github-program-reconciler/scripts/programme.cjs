@@ -53,6 +53,10 @@
 //                                                      line above that line, or remove link lines nothing
 //                                                      uses, after saving a copy of the page; the next
 //                                                      complete sweep moves the marked notes
+//   done-when-rows [--issue <n>] --apply                turn the plain or numbered DONE WHEN rows of the
+//                                                      open task pages (or the one named) into unticked
+//                                                      checkboxes; without --apply, a dry run anyone may
+//                                                      make, listing those pages and the ones with no rows
 //
 // A controller that cannot run commands itself hands a session a holder order: the exact writes
 // above (never claim, takeover, init-parent or migrate-state), for the parent at its current epoch,
@@ -93,7 +97,7 @@ const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = r
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'takeover', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session'];
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive', 'gate-session', 'done-when-rows'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled', '--closed', '--replace', '--queue']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--surface', '--owner-stop', '--session-copy', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove', '--host', '--host-session']);
@@ -195,6 +199,10 @@ function parseArgs(argv) {
     needs(!args.apply || /^[0-9a-f]{64}$/.test(String(args['plan-digest'] || '')), 'migrate-state --apply needs --plan-digest <the plan digest its dry run printed>.');
     needs(args.apply || args['plan-digest'] === undefined, '--plan-digest goes with migrate-state --apply.');
   }
+  if (command === 'done-when-rows') {
+    const extra = Object.keys(args).filter(key => !['command', 'issue', 'apply', 'json', 'repo-root', 'session', 'controller', 'prefix'].includes(key));
+    needs(!extra.length, `done-when-rows takes only --issue, --apply, --json, --repo-root and, with --apply, --session and --controller (got --${extra[0]}).`);
+  }
   if (args.finding !== undefined) needs(/^[0-9a-f]{12}$/.test(args.finding), '--finding takes the 12-character finding id that programme.cjs attention lists.');
   return args;
 }
@@ -202,7 +210,7 @@ function parseArgs(argv) {
 // Commands that write programme state or GitHub. Each one is the controller's. `refresh` also writes,
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
-  if (['reconcile', 'init-parent', 'migrate-state', 'takeover'].includes(args.command)) return Boolean(args.apply);
+  if (['reconcile', 'init-parent', 'migrate-state', 'takeover', 'done-when-rows'].includes(args.command)) return Boolean(args.apply);
   return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive', 'gate-session'].includes(args.command);
 }
 
@@ -548,6 +556,25 @@ function cloudLayoutFindings(context, deps = {}) {
     const found = refresh.pending({ target: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), workflows });
     return found.rows.length || found.unmanaged ? ['CLOUD_LAYOUT_STALE'] : [];
   } catch { return null; }
+}
+
+// The backfill's plan, and with apply its writes, as one result. The caller decides who may apply.
+function runDoneWhenBackfill(context, { issue = null, apply = false } = {}) {
+  const { DoneWhenBackfill, planLines } = require('./programme-done-when-backfill.cjs');
+  const backfill = new DoneWhenBackfill({ transport: context.transport, repository: context.repository, parents: state.registeredParents(context.binding), store: context.store });
+  const plan = backfill.plan({ issue });
+  const result = { mode: apply ? 'apply' : 'dry-run', read: plan.read, pages: plan.pages.map(page => ({ issue: page.issue, title: page.title, rows: page.rows })),
+    missing: plan.missing, lines: planLines(plan) };
+  if (!apply) return { ...result, next_action: plan.pages.length ? 'The parent holder runs it again with --apply --controller --session <id>; the pages with no rows get DONE_WHEN_ROWS_MISSING for their controller.' : 'Nothing to convert.' };
+  return { ...result, ...backfill.apply(plan) };
+}
+
+// The backfill on the owner's own answer in the governance summary: the governed checkout at root,
+// opened as any programme command opens it, and an apply is held like any programme write while
+// setup is not complete. No parent holder is needed, because the owner's answer decides; the page
+// checks are the same.
+function ownerDoneWhenBackfill(root, { apply = false } = {}, deps = {}) {
+  return runDoneWhenBackfill(openContext({ command: 'done-when-rows', 'repo-root': root, ...(apply ? { apply: true } : {}) }, deps), { apply });
 }
 
 function readParent(context) {
@@ -1014,6 +1041,13 @@ const commands = {
     const after = reader.issue(args.issue);
     if (!after || after.body !== next) throw new ProgrammeError('BODY_READBACK_MISMATCH', `#${args.issue} did not read back as written. The page as it was is saved at ${copy.path} in the private store.`);
     return { outcome: 'DONE', issue: args.issue, copy: copy.path, next_action: 'The next complete sweep moves the marked notes.' };
+  },
+
+  // The DONE WHEN backfill (programme-done-when-backfill.cjs): a dry run anyone may make, listing the
+  // pages it would convert and the ones with no rows to convert; --apply is the parent holder's write.
+  'done-when-rows'(args, context) {
+    if (args.apply) requireParentHolder(context, readParent(context));
+    return runDoneWhenBackfill(context, { issue: args.issue || null, apply: Boolean(args.apply) });
   },
 
   ack(args, context, deps = {}) { return answer(args, context, deps, 'acknowledged'); },
@@ -1678,7 +1712,7 @@ function finish(args, deps, out, opened = null) {
   else if (args.command === 'takeover' && !args.json) out.write(takeoverRun.formatTakeover(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
   if (pass) return result.holds.length ? 1 : 0;
-  return 0;
+  return args.command === 'done-when-rows' && result.outcome === 'PARTIAL' ? 1 : 0;
 }
 
 if (require.main === module) {
@@ -1689,4 +1723,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ cloudLayoutFindings, parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, MergedSweepBindingReader });
+module.exports = Object.freeze({ ownerDoneWhenBackfill, cloudLayoutFindings, parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, MergedSweepBindingReader });

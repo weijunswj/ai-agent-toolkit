@@ -466,6 +466,7 @@ const FINDING_CODES = Object.freeze({
   CHILD_NO_NEAREST: { source: 'reconcile', net: true, next_action: 'Controller: this task opened in the last 7 days with no `Nearest child:` line. Check it duplicates no open task: add the line naming the closest open task and why it does not fit, put a duplicate in your next ask to the owner to fold, or dispose with the reason it is a new area' },
   POLISH_CAP: { source: 'reconcile', net: true, no_dispose: true, next_action: 'Controller: the polish task is full (8 rows) or over its cap (more rows, or more than one polish task open): ship it as one PR and open a fresh one, or move rows out until it is under the cap and only one polish task is open' },
   ROWS_UNTICKED: { source: 'reconcile', net: true, next_action: 'Controller: a PR on this task merged, but none of its DONE WHEN or ROWS checkbox rows is ticked: tick each row a merged PR delivered, so the done-when read counts them' },
+  DONE_WHEN_ROWS_MISSING: { source: 'reconcile', net: true, no_dispose: true, next_action: 'Controller: this open task page has no DONE WHEN checkbox rows, so the programme graph shows no Progress count for it. Plain or numbered rows: convert them with the done-when-rows command, --issue <n> --apply (dry run first, without --apply). No DONE WHEN, or no list rows: write the rows the task must meet as `- [ ]` checkboxes under a `## DONE WHEN` heading. It resolves once the page has one' },
   // One per finished gate assignment (kind = its assignment ID) whose host session is still open.
   CLOSE_DUE: { source: 'reconcile', net: true, no_dispose: true, ack_max_hours: 72, next_action: 'Controller: check the gate\'s report is in the evidence store, archive its session with its host\'s archive action (HOST-CONTRACT 10; never your own session), then run gate-session --issue <n> --assignment <id> --closed; or acknowledge it with why it stays open' },
   // An open pull request no task in progress owns (openPrRows); the issue slot holds its number, and
@@ -6505,7 +6506,9 @@ class Reconciler {
   //   CHILD_NO_NEAREST an open task opened in the last NEAREST_WINDOW_DAYS with no `Nearest child:` line;
   //   POLISH_CAP       an open task titled `Polish...` with POLISH_CAP rows or more, or any open one while
   //                    two or more are open;
-  //   ROWS_UNTICKED    an open task with a merged PR and DONE WHEN or ROWS checkbox rows, none ticked.
+  //   ROWS_UNTICKED    an open task with a merged PR and DONE WHEN or ROWS checkbox rows, none ticked;
+  //   DONE_WHEN_ROWS_MISSING an open task with no checkbox row under DONE WHEN (rowTicks), so the graph
+  //                    shows no Progress count: no DONE WHEN, plain or numbered rows, or none at all.
   // A task the pass did not read is left as it stands (the attention fold holds its findings).
   diffStaleNet(parent, docs, observed, only, findings) {
     const rows = childRows();
@@ -6538,6 +6541,12 @@ class Reconciler {
       const ticks = rows.rowTicks(body);
       if (merged.length && !ticks.ticked && ticks.unticked) {
         findings.push({ code: 'ROWS_UNTICKED', issue: outcome.issue, detail: `PR ${merged.map(number => `#${number}`).join(', ')} merged, but none of its ${ticks.unticked} DONE WHEN or ROWS checkbox row(s) is ticked` });
+      }
+      if (!ticks.done_when.total) {
+        const read = rows.doneWhenRows(body);
+        findings.push({ code: 'DONE_WHEN_ROWS_MISSING', issue: outcome.issue, detail: !read.heading ? 'the page has no DONE WHEN section'
+          : read.plain.length ? `its DONE WHEN has ${read.plain.length} plain or numbered list row(s) and no checkbox row; done-when-rows --apply converts them`
+            : 'its DONE WHEN has no list rows' });
       }
     }
   }

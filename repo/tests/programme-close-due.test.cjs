@@ -46,7 +46,7 @@ function fixture(tasks, prs = []) {
     store: { kind: 'github', repository: 'acme/state-store', branch: 'main', path: `state/${repository}/` }, required_checks: ['validate'],
   });
   github.addIssue(421, { body: '## CURRENT\n' });
-  for (const task of tasks) github.addIssue(task.issue, { parent: 421, body: 'Nearest child: none, a new area\n', state: task.state || 'open' });
+  for (const task of tasks) github.addIssue(task.issue, { parent: 421, body: 'Nearest child: none, a new area\n\n## DONE WHEN\n\n- [ ] The task is done.\n', state: task.state || 'open' });
   for (const pr of prs) github.addPr(pr.number, { head: pr.head, state: pr.state, merged: pr.state === 'MERGED', body: `Refs #${pr.issue}` });
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => new Date(github.clock).toISOString(), toolkitVersion: '3.9.0' });
   store.write('parent', 421, state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes: catalogue }), controller, {}), { sha: null, previous: null });

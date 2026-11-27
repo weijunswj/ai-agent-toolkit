@@ -3,7 +3,7 @@ const { FakeGitHub } = require('../toolkit-programme-fake-github.cjs');
 const NOW = '2026-11-09T00:00:00.000Z';
 const writer = { session: 'fixture-controller', prefix: 'TEST-' };
 
-function pageFixture(state, { count = 0, hand = '# Programme\n\nUnmarked notes.\n', groups = ['RETIRED', 'COMPLETED', 'OPTIONAL', 'QUEUED', 'NOW'], width = 100 } = {}) {
+function pageFixture(state, { count = 0, hand = '# Programme\n\nUnmarked notes.\n', groups = ['RETIRED', 'COMPLETED', 'OPTIONAL', 'QUEUED', 'NOW'], width = 100, taskPage = '' } = {}) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 12, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
@@ -16,7 +16,7 @@ function pageFixture(state, { count = 0, hand = '# Programme\n\nUnmarked notes.\
   const children = new Map(), issues = new Map();
   for (const [i, outcome] of outcomes.entries()) {
     const group = groups[i % groups.length];
-    const issue = github.addIssue(outcome.issue, { parent: 12, state: ['COMPLETED', 'RETIRED'].includes(group) ? 'closed' : 'open' });
+    const issue = github.addIssue(outcome.issue, { parent: 12, body: taskPage, state: ['COMPLETED', 'RETIRED'].includes(group) ? 'closed' : 'open' });
     if (issue.state === 'closed') issue.state_reason = group === 'COMPLETED' ? 'completed' : 'not_planned';
     const child = state.newChild({ repository: github.repository, outcome });
     if (group === 'NOW') { child.lifecycle = 'ACTIVE'; child.gate = { role: 'G1', state: 'ACTIVE', session_id: null, route: null, returns: [] }; }

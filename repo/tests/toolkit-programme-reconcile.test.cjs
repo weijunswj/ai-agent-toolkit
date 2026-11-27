@@ -34,7 +34,7 @@ function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGU
   };
   github.addIssue(parentIssue, { body: '## CURRENT\nHand-written controller prose.\n' });
   (issues || (() => {
-    for (const outcome of outcomes) github.addIssue(outcome.issue, { body: `Body of ${outcome.issue}`, state: ['COMPLETED', 'RETIRED'].includes(outcome.class) ? 'closed' : 'open' });
+    for (const outcome of outcomes) github.addIssue(outcome.issue, { body: `Body of ${outcome.issue}\n\n## DONE WHEN\n\n- [ ] The task is done.\n`, state: ['COMPLETED', 'RETIRED'].includes(outcome.class) ? 'closed' : 'open' });
     github.addIssue(424, { body: 'not catalogued' });
     github.link(parentIssue, 424);
     github.link(parentIssue, 470);
@@ -1366,7 +1366,7 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   assert.match(parentBlock, new RegExp(`423:${doc.revision}\\b`));
   assert.match(childBlock, new RegExp(`child=423@${doc.revision} -->`));
   assert.match(childBlock, /^\|[^|]*\|#540\|OPEN\b[^|]*\|-\|$/m, 'the open PR leads the PR GRAPH; GitHub shows its head');
-  assert.match(parentBlock, /^\|Issue 423\|#423\|NOW · IN PROGRESS\|-\|-\|$/m, 'an open PR means the work is in progress');
+  assert.match(parentBlock, /^\|Issue 423\|#423\|NOW · IN PROGRESS\|Progress: 0\/1\|-\|$/m, 'an open PR means the work is in progress');
 });
 
 test('a body edited between read and write is held, then completed on the next pass with the edit kept', () => {
@@ -1487,7 +1487,7 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   ];
   const { github, reconciler } = setup({
     repository: 'other/tool', parentIssue: 7, outcomes,
-    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent }); },
+    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent, body: '## DONE WHEN\n\n- [ ] The task is done.\n' }); },
   });
   const dry = reconciler().run();
   assert.ok(codes(dry).includes('NATIVE_ORDER_DRIFT #7'));

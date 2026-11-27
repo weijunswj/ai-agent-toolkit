@@ -17,16 +17,20 @@ const budget = (clock, ms) => state.RefreshBudget ? new state.RefreshBudget({ no
 const openStop = f => f.store.read('parent', 421).doc.attention?.find(entry => entry.code === 'PASS_STOPPED');
 const parentWrites = calls => calls.filter(call => call.method === 'PATCH' && call.path.endsWith('/issues/421') && call.body.body);
 
+// A task page with its DONE WHEN checkbox row, for the tests that count attention entries: a bare
+// page raises DONE_WHEN_ROWS_MISSING (programme-done-when-rows.test.cjs).
+const TASK_PAGE = '# TASK\n\n## DONE WHEN\n\n- [ ] The task is done.\n';
+
 // Sixty-seven settled tasks, then seventeen native additions placed before them. The next pass
 // adopts 17 tasks, makes 17 order moves and writes 18 bodies. Setup writes are outside the counts.
-function fixture({ count = 67, added = 17 } = {}) {
+function fixture({ count = 67, added = 17, page = '' } = {}) {
   const repository = 'example.test/app';
   const github = new FakeGitHub({ repository, store: 'example.test/store' });
   const binding = { schema: state.SCHEMA.binding, repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(421, { body: '# Programme\n\n## CURRENT\nHand-written notes.\n' });
   const outcomes = Array.from({ length: count }, (_, i) => ({ issue: 500 + i, class: 'COMMITTED', parent: 421, order: i + 1 }));
-  for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421 });
+  for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421, body: page });
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => NOW, toolkitVersion: '3.56.1' });
   const parent = state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes }), writer, {});
   store.write('parent', 421, parent, { sha: null, previous: null });
@@ -34,7 +38,7 @@ function fixture({ count = 67, added = 17 } = {}) {
     reader: new state.ProgrammeGraphReader({ transport: github, repository }), mutator: new state.GitHubMutator({ transport: github, repository }),
     toolkitVersion: '3.56.1', now: () => NOW, pass });
   assert.deepEqual(make().run({ apply: true }).holds, []);
-  for (let i = 0; i < added; i++) github.addIssue(800 + i, { parent: 421 });
+  for (let i = 0; i < added; i++) github.addIssue(800 + i, { parent: 421, body: page });
   const subs = github.issues.get(421).subs;
   github.issues.get(421).subs = [...subs.slice(count), ...subs.slice(0, count)];
   const before = { commits: github.commits, calls: github.calls.length, mutations: github.mutations() };
@@ -265,7 +269,7 @@ for (const row of [
   { prior: 'acknowledged', cause: 'time_limit' },
   { prior: 'resolved', cause: 'interrupted' },
 ]) test(`N1: ${row.prior}, then ${row.cause}, reports a new stop`, () => {
-  const f = fixture({ count: 2, added: 0 });
+  const f = fixture({ count: 2, added: 0, page: TASK_PAGE });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-reopen-'));
   const lockFile = path.join(dir, 'pass.lock');
   const attentionDir = path.join(dir, 'attention');
@@ -290,7 +294,7 @@ for (const row of [
       const { cause, ...note } = expected;
       fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
     } else {
-      for (const number of [500, 501]) f.github.issues.get(number).body = '';
+      for (const number of [500, 501]) f.github.issues.get(number).body = TASK_PAGE;
       f.github.intercept(call => {
         if (call.method === 'PATCH' && call.path.endsWith('/issues/500')) elapsed = 480001;
       });
@@ -336,7 +340,7 @@ for (const scoped of [false, true]) for (const row of [
   { failure: 'lost_reply', answer: 'acknowledged' },
   { failure: 'crash_after_commit', answer: 'disposed' },
 ]) test(`N2: ${row.failure}, ${row.answer}, ${scoped ? 'issue-scoped' : 'full'} recovery frees the next kill`, () => {
-  const f = fixture({ count: 1, added: 0 });
+  const f = fixture({ count: 1, added: 0, page: TASK_PAGE });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-saved-stop-'));
   const lockFile = path.join(dir, 'pass.lock');
   const oldTime = '2026-11-04T00:00:00.123Z';
@@ -403,7 +407,7 @@ for (const scoped of [false, true]) for (const row of [
     assert.equal(fs.existsSync(`${lockFile}.progress`), false, 'the next full refresh has no predecessor debt');
 
     // A later real pass dies in its own task-page phase. Its note must replace the predecessor.
-    f.github.issues.get(500).body = '';
+    f.github.issues.get(500).body = TASK_PAGE;
     const killedAt = '2026-11-08T01:00:00.456Z';
     let killed = false;
     f.github.intercept(call => {
@@ -466,7 +470,7 @@ for (const savedState of ['new', 'acknowledged', 'disposed', 'resolved'])
   });
 
 for (const prior of ['acknowledged', 'disposed', 'resolved']) test(`N3: a days-old ${prior} stop reopens with full CURRENT details`, () => {
-  const f = fixture({ count: 1, added: 0 });
+  const f = fixture({ count: 1, added: 0, page: TASK_PAGE });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-new-stop-'));
   const lockFile = path.join(dir, 'pass.lock');
   const oldTime = '2026-11-04T00:00:00.000Z';
@@ -737,8 +741,8 @@ for (const omit of [false, true]) {
 const APP = 'repos/example.test/app';
 const readCache = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-read-cache.cjs'));
 
-function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true } = {}) {
-  const fx = pageFixture(state, { count, groups, width: 5 });
+function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true, taskPage = '' } = {}) {
+  const fx = pageFixture(state, { count, groups, width: 5, taskPage });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-reads-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = cached ? path.join(dir, 'pass.lock') : null;
@@ -910,7 +914,7 @@ test('reads: a child with a pending intent, or with no usable copy, is never reu
 
 test('reads: the parent comments come from a bookmark that must account for every comment', t => {
   // Two queued optional tasks with nothing in flight.
-  const f = readFixture(t, { count: 2, groups: ['OPTIONAL'] });
+  const f = readFixture(t, { count: 2, groups: ['OPTIONAL'], taskPage: TASK_PAGE });
   for (let i = 0; i < 245; i++) f.github.addComment(12, { body: `Discussion ${i}` });
   // The fake clock gives each comment its own second; leave a gap wider than the bookmark overlap.
   f.github.clock += 3600000;
