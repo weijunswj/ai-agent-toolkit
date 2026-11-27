@@ -103,7 +103,7 @@ When the repository has no GitHub remote, leave the refreshed files uncommitted 
 
 **Should I continue in this same session best-effort after reading the updated instructions, or will you start a new agent session?**
 
-Keep the reset message bolded exactly as shown. Ask its last line with the harness's native question method (continue here best-effort, or start a new session) and leave that line out of the message; where none works, keep it. Do not continue implementation work until the user answers. If the user chooses to continue in the same session, read the updated instruction files first, say that same-session continuation is best-effort and not equivalent to a fresh startup load, then continue only if the task remains safe and clearly scoped.
+Keep the reset message bolded exactly as shown, except its last line: ask that once, as the reply's question in the global rules' question shape (continue here best-effort, or start a new session). Do not continue implementation work until the user answers. If the user chooses to continue in the same session, read the updated instruction files first, say that same-session continuation is best-effort and not equivalent to a fresh startup load, then continue only if the task remains safe and clearly scoped.
 
 ## Boundaries
 

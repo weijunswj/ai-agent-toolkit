@@ -34,7 +34,8 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
   for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Gate pack']) assert.ok(takeover.includes(`**${name}:**`), name);
   assert.ok(!takeover.includes('**Task pack:**'), 'Toolkit applies no computer tasks, so there is no Task pack');
   assert.doesNotMatch(takeover, /\bR\d+\b/);
-  for (const phrase of ['Text first, card last', 'put every host question card below its explanation']) assert.ok(read(SKILL_REL).includes(phrase));
+  // How a question shows (card or text) is the harness's choice (INT-TK421-1389): the skill steers no card.
+  assert.doesNotMatch(read(SKILL_REL), /Text first, card last|question card|decision card|ask the owner by card/);
 });
 
 test('Projects P2 fills the gate route, and no step waits on a device for scheduled tasks', () => {
@@ -656,12 +657,13 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
   // The post layout and the merge summary.
   assert.ok(text.includes('**Post layout.** A running post has five parts, in order: a **Now:** line'));
-  // The owner's calls: Waiting on you sits just above the ELI5 line, and owner questions come last, below it (the card rule).
+  // The owner's calls: Waiting on you sits just above the ELI5 line, and owner questions come last, below it.
   assert.ok(text.includes('**Waiting on you (n):** just above the ELI5 line, one numbered line per non-question item'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line; and any owner questions (**Questions**) last, with nothing after them.'));
-  assert.ok(text.includes('- **Text first, card last.** Explain before asking; put every host question card below its explanation, and written questions below the ELI5 line.'));
   assert.ok(body.includes('`**Waiting on you (n):**` next, one numbered item per ask actionable now,'));
-  assert.ok(body.includes('one `**ELI5:**` line; questions last, each `1. **Question: <ask>?**` with its link and choices lettered (a., b.) under it'));
+  assert.ok(body.includes('one `**ELI5:**` line; questions last in the global question shape, each `1. **Question: <ask>?**` with its link;'));
+  // The question layout lives once, in the global rules (INT-TK421-1390); the project block keeps only its extras.
+  assert.doesNotMatch(body, /choices lettered|my pick/);
   assert.doesNotMatch(text + body, /second last|as the very last line with nothing after it|numbered item under \*\*Waiting on you\*\*/);
   // Waiting on you holds only what the owner can act on now; work not ready for them stays off it.
   assert.ok(text.includes('the owner can act on now (work still being built or reviewed stays off it until ready;'));
@@ -691,20 +693,19 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(text, /the answer to it is appended to the running post|\(only Update lines take a spacer line\)/);
   for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
     'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh below the owner; never edit that older post.']) assert.ok(body.includes(phrase), phrase);
-  // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
-  assert.ok(text.includes('Each owner question is one numbered item below the ELI5 line, written `1. **Question: <the ask>?**`'));
-  assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
-  assert.doesNotMatch(text, /`    - \*\*<Choice>|flatten its choices into plain bullets/);
-  assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
+  // Questions: the global rules carry the shape (numbered, lettered nested choices, (my pick), a blank line
+  // between); the skill keeps only the Projects extras (INT-TK421-1390).
+  assert.ok(text.includes("- **Questions.** Owner questions take the question shape in the global rules' Communication section (`repo/contracts/agent-rules/global-rules.md` on `main`, read with `CONTROLLER.md`), below the ELI5 line. Projects adds: each is written `1. **Question: <the ask>?**` with the link to its card or thread; its problem, fix and skip lines sit under it, above its choices;"));
+  assert.ok(read('repo/contracts/agent-rules/global-rules.md').includes('its choices lettered (A., B.) and nested under it, best first, each with a short plain reason, the recommended one marked (my pick). A blank line between questions.'));
+  assert.doesNotMatch(text, /<Choice>|flatten its choices into plain bullets|with no spacer line/);
   // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
   assert.ok(text.includes('**Problem, fix, skip first.** Every plan, G0 plan, decision ask and explanation, from you and from every thread, opens with three lines'));
   for (const label of ['**The problem:**', '**The fix:**', '**If we skip it:**']) assert.ok(text.includes(`  - \`${label}\``), label);
   assert.ok(text.includes('In a running post the **Now:** line stays first: put them under it, or under the question they belong to.'));
   assert.ok(text.includes('Every brief tells the thread to do the same, and a G0 brief to open its plan with them.'));
-  assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
-  assert.ok(text.includes('for every approval or choice the coordinator acts on itself, its problem, fix and skip lines above it'));
+  assert.ok(text.includes('Ask every approval or choice the coordinator acts on itself as a question with a recommendation, its problem, fix and skip lines above it'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'the skill names the &nbsp; spacer only to forbid it');
-  assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never write its choices as bullets.'));
+  assert.ok(text.includes('choices need no link of their own; each is asked once, and a fresh post carries an open one forward as it stands. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('An edit keeps every earlier Update line word for word and adds at least one new one.'));
   // The merge-summary rule binds without a hook.
@@ -1117,7 +1118,7 @@ test('local Toolkit is the Projects base: every hook has a cloud row and every o
   const dir = 'repo/contracts/claude-projects/web-controller-projects';
   const skill = read(`${dir}/SKILL.md`);
   assert.match(skill, /## Base rule\n- \*\*Local Toolkit is the base\.\*\* The global, gate and governed rules and `CONTROLLER\.md` apply as written/);
-  assert.match(skill, /differs from them only by a row in `reference\/base-overrides\.md` with the owner's decision\. Any other difference is a clash: ask the owner by card\./);
+  assert.match(skill, /differs from them only by a row in `reference\/base-overrides\.md` with the owner's decision\. Any other difference is a clash: ask the owner\./);
   // Every hook script the plugin manifest runs has a row saying how its rule is covered in the cloud.
   const manifest = read('.claude-plugin/hooks/hooks.json');
   const scripts = [...new Set([...manifest.matchAll(/repo\/scripts\/([a-z0-9-]+\.cjs)/g)].map(match => match[1]))];
@@ -1226,4 +1227,19 @@ test('the daily check-in runs the upgrade plan over every task and counts only a
   const shell = rows.find(row => row.id === 'shell-tasks');
   assert.deepEqual([shell.check, shell.resync], ['TASKS OUTDATED', 'auto']);
   assert.equal(rows.find(row => row.id === 'project-tasks').resync, 'report', 'a task not on the shell stays advice only');
+});
+
+// The question shape lives once, in the global rules (INT-TK421-1390). The Projects skill points at it, so
+// every route a Projects coordinator reads its law by names that file, or the pointer leads nowhere.
+test('the Projects coordinator reads the global rules that hold the question shape', () => {
+  const GLOBAL = 'repo/contracts/agent-rules/global-rules.md';
+  const skill = read(SKILL_REL);
+  const precedence = skill.split('## Order of precedence\n')[1].split('\n\n')[0];
+  assert.ok(precedence.includes(`with the global rules (\`${GLOBAL}\`, home of the question shape) read from the same commit`), precedence);
+  assert.ok(skill.includes(`and read \`${GLOBAL}\` at the same commit (re-read it whenever you re-read \`CONTROLLER.md\`)`));
+  assert.ok(skill.includes(`Owner questions take the question shape in the global rules' Communication section (\`${GLOBAL}\` on \`main\`, read with \`CONTROLLER.md\`)`));
+  const lawOrder = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md').split('\n').find(line => line.startsWith('- Law order:'));
+  assert.ok(lawOrder.includes(`with \`${GLOBAL}\` read at that commit`), lawOrder);
+  assert.ok(require('../scripts/toolkit-projects-guidebook.cjs').BASE_PATHS.includes(GLOBAL), 'the guidebook BASE binds its blob');
+  assert.match(read(GLOBAL).split('## Communication\n\n')[1], /^Questions go last\. Each is a numbered, fully bold question, its choices lettered \(A\., B\.\) and nested under it/);
 });

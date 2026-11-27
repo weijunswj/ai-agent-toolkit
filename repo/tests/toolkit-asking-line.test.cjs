@@ -1,26 +1,22 @@
 'use strict';
 
-// Red on the parent (the 27 Nov owner test): the desktop asking line said a three-choice question uses
-// the card "on your next turn", but nothing gives a chat its next turn, so the agent ended the turn with
-// the context and no card ever came. The line now has the agent start one short background wait right
-// before it ends the turn, then open the card first, with no text, on the automatic turn the wait brings.
+// The desktop asking line once had the agent open a question card on a later turn, started by a
+// background wait; the 27 Nov 2026 retest showed agents skipping it, and the owner decided how a question
+// shows (card, end-of-turn box or text) is the app's choice (INT-TK421-1389). The line keeps only what
+// avoids lost context: the context, options and pick go in the closing message.
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { ASKING_LINE, respond } = require('../scripts/toolkit-governance-hook.cjs');
 
-test('the asking line starts a background wait before the turn ends and opens the card first on the automatic turn', () => {
-  const [, step] = /\b3\. (.*?) 4\. /.exec(ASKING_LINE) || [];
-  assert.ok(step, ASKING_LINE);
-  assert.match(step, /three or more choices uses the question card/);
-  assert.match(step, /right before you end the turn with the closing message, start one short background wait \(a background command of about 30 seconds\)/);
-  assert.match(step, /on the automatic turn it brings open the card first, with no text before it\./);
-  assert.doesNotMatch(ASKING_LINE, /on your next turn/, 'no promise of a turn that nothing starts');
-  // The rest of the line stands: context in the closing message, never context and card in one turn.
+test('the asking line keeps the context in the closing message and leaves the question\'s form to the app', () => {
   assert.match(ASKING_LINE, /1\. Put the full context, options and your pick in your closing message and end the turn\./);
-  assert.match(ASKING_LINE, /5\. Never write the context and open a card in the same turn: the app cuts it short\./);
+  assert.match(ASKING_LINE, /2\. Leave how the question shows \(a card, the end-of-turn box or plain text\) to the app\./);
+  assert.match(ASKING_LINE, /Toolkit's exact merge card keeps its own text\.$/);
+  // No step steers a card: no wait to start, no next-turn card, no card shape.
+  assert.doesNotMatch(ASKING_LINE, /background|automatic turn|next turn|question card|open the card|open a card|card holds/);
 });
 
-test('the desktop session start carries the wait step, and other entry points get no asking line', () => {
+test('the desktop session start carries the line, and other entry points get no asking line', () => {
   const start = environment => respond('SessionStart', { cwd: require('node:os').tmpdir(), session_id: 's1', source: 'startup' }, {
     environment, refreshBinding: () => {},
     gate: { SESSION_TEXT_LIMIT: 10000, startSession() {}, sessionIdOf: input => input.session_id, sessionLine: () => '' },
