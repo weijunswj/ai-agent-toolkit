@@ -29,6 +29,7 @@ const DOES = Object.freeze({
   permissions: "Agents run Toolkit's own commands without asking each time",
   app: 'Lets the cloud workflows act on GitHub',
   copies: 'Old Toolkit instruction copies an earlier setup left',
+  'done-when': "Checkbox rows under each open task's DONE WHEN, so the programme graph shows its Progress count",
 });
 
 // The cloud workflows and guards a governed repository carries, by the file that shows each one.
@@ -185,7 +186,8 @@ function finishRows(finish, drift) {
 //   files (Set of .github paths at the merged commit, or null),
 //   permissions ({ checked, app, wanted, missing, stale, other, update }), app ({ variable, secret }
 //   presence, or null), appCommand (the App setup line), copies ({ files } or null), stale (why the
-//   merged programme file read is not fresh, or null).
+//   merged programme file read is not fresh, or null), doneWhen (the DONE WHEN backfill's dry run:
+//   { pages, missing } issue numbers, { unread: true }, or null for no row).
 function summaryRows(facts) {
   const rows = [];
   const steps = [];
@@ -235,6 +237,15 @@ function summaryRows(facts) {
     rows.push(['Toolkit instruction copies', copies.held ? `${left}, cleanup held. Not removed yet: ${copies.held}. ${copies.step}`
       : copies.refused ? `${left}, cleanup cannot run. Not removed yet: ${copies.refused}` : `${left}; say clean up copies`, DOES.copies]);
   }
+  // The DONE WHEN backfill's dry run (toolkit-governance-done-when.cjs): converted on the owner's word.
+  const doneWhen = facts.doneWhen;
+  if (doneWhen) {
+    const issues = numbers => numbers.map(number => `#${number}`).join(', ');
+    const pages = doneWhen.pages || [], missing = doneWhen.missing || [];
+    rows.push(['Task DONE WHEN rows', doneWhen.unread ? 'Not read: the task pages could not be read just now'
+      : [pages.length ? `${pages.length} ${pages.length === 1 ? 'page has' : 'pages have'} plain rows (${issues(pages)}); say convert done-when rows` : 'No plain rows to convert',
+        ...(missing.length ? [`${missing.length} without rows for the controller to write (${issues(missing)})`] : [])].join('; '), DOES['done-when']]);
+  }
   return { rows, steps };
 }
 
@@ -266,9 +277,10 @@ function renderSummary(facts, { held = false } = {}) {
 }
 
 // A change the owner asked for in words after the summary: { governance: 'off' } | { taskAutoMerge }
-// | { changeStore: true } | { cleanCopies: true } | { update: 'yes' | 'no' }, or a GuidedAnswerError.
-// `copies` and `update` say whether the summary offers the cleanup and the programme file update.
-function parseChange(text, { copies = false, update = false } = {}) {
+// | { changeStore: true } | { cleanCopies: true } | { convertRows: true } | { update: 'yes' | 'no' }, or a
+// GuidedAnswerError. `copies`, `rows` and `update` say whether the summary offers the cleanup, the DONE
+// WHEN backfill and the programme file update.
+function parseChange(text, { copies = false, rows = false, update = false } = {}) {
   const { GuidedAnswerError } = require('./toolkit-governance-guided.cjs');
   const lower = String(text || '').trim().replace(/[.!]+$/, '').toLowerCase().replace(/\s+/g, ' ');
   if (/^(?:turn (?:it )?off governance|turn governance off|governance off)$/.test(lower)) return { governance: 'off' };
@@ -276,6 +288,7 @@ function parseChange(text, { copies = false, update = false } = {}) {
   if (merge) return { taskAutoMerge: ['on', 'yes'].includes(merge[1]) ? 'on' : 'off' };
   if (/^change (?:the )?store$/.test(lower)) return { changeStore: true };
   if (copies && /^clean ?up (?:the )?(?:instruction )?copies$/.test(lower)) return { cleanCopies: true };
+  if (rows && /^convert (?:the )?done[ -]?when rows$/.test(lower)) return { convertRows: true };
   if (update && /^(?:(?:1 ?)?a(?:\W+yes)?|yes|(?:update|bring) (?:the )?programme file(?: up to date)?)$/.test(lower)) return { update: 'yes' };
   if (update && /^(?:(?:1 ?)?b(?:\W+no)?|no)$/.test(lower)) return { update: 'no' };
   throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${update ? ', or answer question 1 with A or B' : ''}.`);

@@ -34,6 +34,7 @@ const adopt = require('./toolkit-governance-adopt.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 const finishing = require('./toolkit-governance-finish.cjs');
 const { FirstInstallSweep } = require('./toolkit-governance-first-sweep.cjs');
+const { DoneWhenBackfillStep } = require('./toolkit-governance-done-when.cjs');
 const { managedToolkitFile } = require('./toolkit-user-state.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -129,7 +130,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #copiesReader;
+  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #copiesReader; #doneWhen;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -139,9 +140,10 @@ class ToolkitGovernanceCli {
   // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
-  // ticket is bound to) are for tests too, as are `firstSweep` (the finish's first-install sweep) and
-  // `copiesReader` (version => the release identity check's read of this computer's Toolkit copies).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, copiesReader = null } = {}) {
+  // ticket is bound to) are for tests too, as are `firstSweep` (the finish's first-install sweep),
+  // `copiesReader` (version => the release identity check's read of this computer's Toolkit copies) and
+  // `doneWhenBackfill` ((root, { apply }) => the DONE WHEN backfill's result, toolkit-governance-done-when.cjs).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, copiesReader = null, doneWhenBackfill = null } = {}) {
     const pulls = proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: pulls });
     // The turn-on pull request's outcome, read before a post-merge finish (offline and in tests: unread).
@@ -174,6 +176,8 @@ class ToolkitGovernanceCli {
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
     this.#plainTextInstaller = plainTextInstaller;
+    this.#doneWhen = new DoneWhenBackfillStep({ registryOptions, backfill: doneWhenBackfill || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null
+      : (root, options) => require('../../skills/github-program-reconciler/scripts/programme.cjs').ownerDoneWhenBackfill(root, options)) });
     this.#queueReader = queueReader || (root => require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').queueSummary(root));
     // The Toolkit copies on this computer against a release (toolkit-release-identity.cjs); read only.
     this.#copiesReader = copiesReader || (version => new (require('./toolkit-release-identity.cjs').ReleaseIdentityCheck)({ environment: this.#environment }).check({ minVersion: version }));
@@ -551,6 +555,7 @@ class ToolkitGovernanceCli {
     // The App row reads its variable and secret wherever governance is on or can be turned on (again) here.
     const app = state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
     const copies = state.state === 'ENABLED' && state.root ? this.#cleanup(state.root, false) : null;
+    const doneWhen = state.state === 'ENABLED' ? this.#doneWhen.facts(state) : null;
     // The store, read as the App is; where GitHub could not answer, its last background check. Both
     // reads GitHub answered are saved (toolkit-governance-parts.cjs), so a part the owner fixed and sees
     // here as ready no longer gets its session-start line.
@@ -558,7 +563,7 @@ class ToolkitGovernanceCli {
     const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, app, copies: copiesRow(copies), storeCheck });
     // What the owner sees: the guided questions where governance is not on, the summary where it is,
     // or one line where neither can be shown yet.
-    const view = this.#view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies });
+    const view = this.#view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies, doneWhen });
     // The programme file update offered is part of what was shown: a yes to one offer never applies to another.
     const shownReference = governanceBank.bankReference(specs);
     const reference = view.update?.offer
@@ -636,14 +641,14 @@ class ToolkitGovernanceCli {
 
   // The guided questions, the summary, or one line: { kind, text, agents, parse } or { kind: 'line',
   // lines, code }.
-  #view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies }) {
+  #view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies, doneWhen = null }) {
     if (state.state === 'ENABLED') {
-      const facts = this.#summaryFacts({ state, specs, merged, read, switches, permissions, app, storeCheck, copies });
+      const facts = { ...this.#summaryFacts({ state, specs, merged, read, switches, permissions, app, storeCheck, copies }), doneWhen };
       let held = false;
       try { const result = require('./toolkit-governance-ready.cjs').readiness(state, this.#registryOptions); held = result.applies && !result.ready; } catch { held = false; }
       const cleanable = Boolean(copies && copies.ok && copiesRow(copies)?.files > 0);
       const update = Boolean(facts.update?.offer && !facts.update.open);
-      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), update: facts.update, parse: reply => summary.parseChange(reply, { copies: cleanable, update }) };
+      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), update: facts.update, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
@@ -841,6 +846,11 @@ class ToolkitGovernanceCli {
     if (chosen.changeStore) {
       this.#print(false, {}, ['A new evidence store is set up with the controller: say change store in your controller chat, and it sets up the new store with you. Nothing changed here.']);
       return 0;
+    }
+    if (chosen.convertRows) {
+      const converted = this.#doneWhen.apply(state);
+      this.#print(false, {}, converted.lines);
+      return converted.ok ? 0 : 1;
     }
     if (chosen.cleanCopies) {
       const cleaned = this.#cleanup(state.root, true);

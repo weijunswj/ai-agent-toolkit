@@ -37,7 +37,9 @@ function fixture(numbers = [2], pinned = []) {
   return {github,binding,store,pass, run:() => pass().run({apply:true}), child:n => store.read('child',n).doc,
     parent:() => store.read('parent',1).doc, time:ms => { now = ms; }, close:(n, reason='completed') => Object.assign(github.issues.get(n), {state:'closed',state_reason:reason,closed_at:new Date(epoch).toISOString()})};
 }
-const openCodes = f => (f.parent().attention || []).filter(e => ['new','acknowledged'].includes(e.state)).map(e => e.code).sort();
+// The bare fixture pages have no DONE WHEN rows; DONE_WHEN_ROWS_MISSING has its own tests
+// (programme-done-when-rows.test.cjs), so these lists leave it out.
+const openCodes = f => (f.parent().attention || []).filter(e => ['new','acknowledged'].includes(e.state) && e.code !== 'DONE_WHEN_ROWS_MISSING').map(e => e.code).sort();
 const writes = f => f.github.calls.filter(c => c.method !== 'GET' && c.path !== 'graphql').length;
 const pr = (f,n,options={}) => f.github.addPr(n, {head:SHA, ...options});
 
@@ -80,7 +82,7 @@ test('fix1 H2: 520 historic unlinked merges seed without findings; a later merge
 });
 
 test('fix1 M1: reconcile apply holds all three acknowledged refresh-owned findings',()=>{
-  const f=fixture([2,3]); f.run(); f.close(2);
+  const f=fixture([2,3]); f.github.issues.get(3).body='## DONE WHEN\n\n- [ ] The task is done.\n'; f.run(); f.close(2);
   f.store.mutate('child',3,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'RETIRED'})});
   pr(f,20,{createdAt:new Date(epoch).toISOString()}); f.run();
   const codes=['CLOSED_WITHOUT_ACCEPTANCE','CHILD_STATE_CONFLICT','PR_WITHOUT_TASK'];

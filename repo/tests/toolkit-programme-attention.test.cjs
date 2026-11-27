@@ -39,7 +39,7 @@ function fixture({ catalogue = [{ issue: 423, class: 'COMMITTED', parent: 421, o
   (issues || (gh => {
     gh.addIssue(421, { body: '## CURRENT\n' });
     gh.addIssue(600, { body: 'Second programme' });
-    for (const outcome of catalogue) gh.addIssue(outcome.issue, { body: `Body of ${outcome.issue}`, parent: 421 });
+    for (const outcome of catalogue) gh.addIssue(outcome.issue, { body: `Body of ${outcome.issue}\n\n## DONE WHEN\n\n- [ ] The task is done.\n`, parent: 421 });
   }))(github);
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => new Date(github.clock).toISOString(), toolkitVersion: '3.9.0' });
   store.write('parent', 421, state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes: catalogue }), controller, {}), { sha: null, previous: null });
@@ -180,7 +180,7 @@ test('E1: classes for nested children, catalogued outcomes, closed parents and o
 
 test('E1: a catalogued outcome under another registered parent is never moved; under an unregistered one it is', () => {
   const fx = fixture({ catalogue: [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }, { issue: 424, class: 'COMMITTED', parent: 421, order: 2 }] });
-  fx.github.addIssue(424, { parent: 600 });
+  fx.github.addIssue(424, { parent: 600, body: 'Body of 424\n\n## DONE WHEN\n\n- [ ] The task is done.\n' });
   fx.github.addIssue(425);
   fx.github.link(425, 423);
   const report = fx.run(['reconcile']).result;

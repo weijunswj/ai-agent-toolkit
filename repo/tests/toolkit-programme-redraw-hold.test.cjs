@@ -19,7 +19,7 @@ function fixture(t) {
     parents: [{ issue: 12, record_prefix: writer.prefix }],
     store: { kind: 'github', repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' }, required_checks: ['validate'] });
   github.addIssue(12, { body: '## CURRENT\n' });
-  github.addIssue(13, { parent: 12 });
+  github.addIssue(13, { parent: 12, body: '## DONE WHEN\n\n- [ ] The task is done.\n' });
   const now = () => new Date(github.clock).toISOString();
   const store = new state.StateStore({ transport: github, store: binding.store, now, toolkitVersion: '3.9.0' });
   store.write('parent', 12, state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 12,
