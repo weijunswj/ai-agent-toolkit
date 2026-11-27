@@ -19,6 +19,8 @@
 const STORE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 const SLUG_IN_TEXT = /[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}/;
 const LETTERS = 'ABC';
+// The ticketed command carries at most 400 characters of answer (toolkit-governance-bank.cjs BANK_COMMAND).
+const MAX_ANSWER = 400;
 
 class GuidedAnswerError extends Error {
   constructor(message, code = 'GUIDED_ANSWER_UNREAD') {
@@ -31,9 +33,10 @@ class GuidedAnswerError extends Error {
 // The questions for one repository. `state` is the governance state (UNDECIDED or DISABLED), `store`
 // { repository, path, exists } where Toolkit knows it (null where the store comes from a programme file
 // prepared in the working tree), `agreed` whether the owner already said yes in this run.
+// `publicRepo` says the repository is public, so the store question names what that shows.
 // Returns [{ key, title, question, explain, choices: [{ value, label, reason }], recommended }], numbered
 // in order of display.
-function guidedQuestions({ state, store = null, agreed = false }) {
+function guidedQuestions({ state, store = null, agreed = false, publicRepo = false }) {
   const slug = state.repository || 'this repository';
   const disabled = state.state === 'DISABLED';
   const questions = [];
@@ -63,7 +66,7 @@ function guidedQuestions({ state, store = null, agreed = false }) {
     const where = `${store.repository}, folder \`${store.path}\``;
     questions.push({
       key: 'store', title: 'Evidence store',
-      explain: `A separate private repository where Toolkit keeps programme records, plans and reviews, so they never sit in your code. Suggested: ${where}. ${store.exists ? 'It already exists.' : 'Toolkit creates it if it does not exist yet.'} Without a store governance cannot keep its records, so it stays off.`,
+      explain: `A separate private repository where Toolkit keeps programme records, plans and reviews, so they never sit in your code. Suggested: ${where}. ${store.exists ? 'It already exists.' : 'Toolkit creates it if it does not exist yet.'} Without a store governance cannot keep its records, so it stays off.${publicRepo ? ' This repository is public: its programme file names the store (the name only, never its contents) and the parent issue is public; the store stays private.' : ''}`,
       question: `Keep records in ${store.repository}?`,
       choices: [
         { value: 'use', label: 'Use it', reason: store.exists ? 'Your private repository, already there.' : 'Private repository; Toolkit creates it.' },
@@ -128,6 +131,8 @@ function parseGuidedAnswer(text, questions, { state }) {
   let all = false;
   const body = String(text || '').trim().replace(/[.!]+$/, '');
   if (!body) throw new GuidedAnswerError('The answer is empty.');
+  // An answer is a few words: anything far longer is not one, and is never scanned.
+  if (body.length > MAX_ANSWER) throw new GuidedAnswerError('The answer is too long to be read as one.');
   for (const raw of body.split(/[,;\n]+|\s+and\s+/i)) {
     const part = raw.trim().replace(/[.!]+$/, '');
     if (!part) continue;

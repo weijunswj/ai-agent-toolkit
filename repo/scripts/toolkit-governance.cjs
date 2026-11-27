@@ -669,7 +669,7 @@ class ToolkitGovernanceCli {
     const [owner, name] = String(state.repository || '/').split('/');
     const store = adoption ? { repository: adoption.store.repository, path: `state/${owner}/${name}/`, exists: Boolean(adoption.found_store) } : null;
     const agreed = state.state === 'UNDECIDED' && this.#agreed(state);
-    const questions = guided.guidedQuestions({ state, store, agreed });
+    const questions = guided.guidedQuestions({ state, store, agreed, publicRepo: adoption?.visibility === 'public' });
     return { kind: 'guided', text: guided.renderGuided(questions, { state, agreed }), agents: governanceBank.agentsGuided(), parse: reply => guided.parseGuidedAnswer(reply, questions, { state }) };
   }
 
@@ -862,7 +862,8 @@ class ToolkitGovernanceCli {
     }
     if (chosen.taskAutoMerge) {
       const want = chosen.taskAutoMerge === 'on' ? 'after-gates' : 'off';
-      if (task && task.value === want) {
+      // No key in the programme file is Off.
+      if (task && (task.value === 'after-gates' ? 'after-gates' : 'off') === want) {
         this.#print(false, {}, [`Task auto-merge is already ${chosen.taskAutoMerge}. Nothing changed.`]);
         return 0;
       }
