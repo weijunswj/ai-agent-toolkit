@@ -87,7 +87,8 @@ test('publication discovers, writes once and reads back; another chat sees the p
   let open = [], writes = 0;
   const f = fixture(t, { list: () => open, publish() { writes++; open = [proposal()]; return open[0]; }, read: () => open[0] });
   const request = f.owner.request(f.cwd, 'no', run);
-  assert.match(f.owner.publish(f.cwd, request.run).text, /merge this pull request now/);
+  // The agent runs the merge in the same turn so the merge hold is the only ask, never a question of its own first.
+  assert.match(f.owner.publish(f.cwd, request.run).text, /run its merge in the same turn: Toolkit's merge hold asks the owner, so ask no merge question of your own first\./);
   f.owner.publish(f.cwd, request.run);
   assert.equal(writes, 1);
   assert.equal(f.owner.pending(f.cwd, { ...run, sessionId: 'new-chat' }).kind, 'published');
@@ -479,7 +480,7 @@ for (const closed of ['merged', 'unmerged']) test(`next prompt after ${closed} c
   const result = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Continue the work' });
   assert.equal(refreshes, 1);
   assert.equal(reads, initialReads + 1, 'prompt reads only the known PR state');
-  assert.ok(!JSON.stringify(result).includes('merge this pull request now'));
+  assert.ok(!JSON.stringify(result).includes('run its merge in the same turn'));
   assert.equal(result.action, 'pass', 'nothing is held either way');
   assert.equal(String(result.context).includes('no governance decision yet, so it counts as off'), closed === 'unmerged', 'closed without merging: undecided again, and the agent is told so');
   assert.equal(f.owner.pending(f.cwd, run), null);
@@ -505,12 +506,12 @@ for (const { state, delayMs } of [{ state: 'open', delayMs: 0 }, { state: 'close
   const result = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'merge 1' });
   assert.ok(performance.now() - started < 5000, 'prompt remains well inside the host ten-second limit');
   assert.equal(result.action, 'pass');
-  if (state === 'closed') assert.doesNotMatch(JSON.stringify(result), /couldn't check|merge this pull request now/);
-  else assert.match(result.context, delayMs ? /couldn't check/ : /merge this pull request now/);
+  if (state === 'closed') assert.doesNotMatch(JSON.stringify(result), /couldn't check|run its merge in the same turn/);
+  else assert.match(result.context, delayMs ? /couldn't check/ : /run its merge in the same turn/);
   assert.equal(refreshes, state === 'closed' ? 1 : 0);
   const second = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'other', prompt: 'Continue' });
   assert.equal(second.action, 'pass');
-  if (state === 'closed') assert.doesNotMatch(JSON.stringify(second), /couldn't check|merge this pull request now/);
+  if (state === 'closed') assert.doesNotMatch(JSON.stringify(second), /couldn't check|run its merge in the same turn/);
   assert.equal(refreshes, state === 'closed' ? 1 : 0, 'closure refreshes the branch exactly once');
   const calls = github.read().calls;
   assert.equal(calls.length, 1);

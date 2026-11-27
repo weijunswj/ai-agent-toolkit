@@ -376,7 +376,7 @@ function refreshPr({ repo, ci = null, root, commit, workflows = require('./toolk
     if (ready.note) return { code: 0, line: ready.note };
     const result = publish({ ...ready, github, workflows });
     const verb = { opened: 'Opened', updated: 'Updated', unchanged: 'Unchanged' }[result.outcome];
-    return { code: 0, line: `${verb} refresh pull request ${result.url} (${ready.files.length} file${ready.files.length === 1 ? '' : 's'}: ${ready.files.map(entry => entry.file).join(', ')}). Where task auto-merge is on it lands once its checks are green (--land-refresh); otherwise ask the owner to merge it.`, result };
+    return { code: 0, line: `${verb} refresh pull request ${result.url} (${ready.files.length} file${ready.files.length === 1 ? '' : 's'}: ${ready.files.map(entry => entry.file).join(', ')}). Where task auto-merge is on it lands once its checks are green (--land-refresh); otherwise run its merge, and the merge hold asks the owner.`, result };
   } catch (error) {
     if (error instanceof RefreshError || error?.name === 'InstallError') return { code: 2, line: `No refresh pull request: ${error.message}` };
     throw error;

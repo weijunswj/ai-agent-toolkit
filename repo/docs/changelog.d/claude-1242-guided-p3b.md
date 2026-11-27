@@ -6,4 +6,6 @@ Title: programme file update and governance review fixes
 
 ### Changed
 
+- In the Claude desktop app, a merge is no longer asked twice: the asking line now says the agent posts the merge summary and runs the merge in the same turn, so Toolkit's merge card is the only question, never a "merge now?" of the agent's own first.
+
 - The permissions review names a command line that joins several commands (`&&`, `||`, `;` or a pipe) as running several commands, and reads a quoted program path by its file name.
