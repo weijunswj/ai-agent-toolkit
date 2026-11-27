@@ -69,6 +69,7 @@ const PROGRAMME_ASK = Object.freeze({
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
   'migrate-state': 'Moving the state documents asks for the owner in that run.',
   'mark-archive': 'It edits a page\'s hand-written text; agents run it through a holder order, which the cloud sweep applies.',
+  'done-when-rows': 'With --apply it edits the DONE WHEN rows of many task pages at once; the controller runs it after reading its dry run.',
 });
 // Whether the repository's programme file turns governance on, read as the sweep reads it.
 const PROGRAMME_STATE = path.join(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs');
